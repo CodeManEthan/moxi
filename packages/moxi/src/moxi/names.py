@@ -3,12 +3,18 @@
 A Moxi module has one name, lower-case ASCII letters and digits (`cache`, `comms`).
 Everything else a module is called is spelled from that name here:
 
-    distribution("cache")   moxi-cache      the package on PyPI
-    import_name("cache")    moxi_cache      the Python package
-    repo("cache")           moxihq/cache    the module's own repository, for its issues
-    env_prefix("cache")     MOXI_CACHE_     the prefix of every variable it reads
+    distribution("cache")   moxi-cache          the package on PyPI
+    import_name("cache")    moxi_cache          the Python package
+    repo("cache")           CodeManEthan/moxi   the repository that holds it and its issues
+    env_prefix("cache")     MOXI_CACHE_         the prefix of every variable it reads
 
-The core itself is `moxi` in all four places and is not a module.
+Every module lives in the one repository, so `repo` spells the same for each. The core
+itself is `moxi` as a distribution, an import package and a prefix, lives in that same
+repository, and is not a module.
+
+Every skill Moxi ships, each subfolder `is_skill_folder` counts in a module's `SKILLS`
+folder, is named `moxi-<name>` (`is_skill_name`), and its `SKILL.md` `name:` is that
+folder name. The prefix keeps a shipped skill from taking the name of a user's own.
 """
 
 from __future__ import annotations
@@ -17,15 +23,21 @@ import re
 
 #: The harness.
 HARNESS = "moxi"
-#: The GitHub organisation that holds the public repository and the modules' issues.
-ORG = "moxihq"
+#: The GitHub account that owns the public repository, which holds every module and its
+#: issues.
+OWNER = "CodeManEthan"
+#: The same account under its earlier name, kept so code that reads `ORG` still works.
+#: The owner is a user account, not an organisation: use `OWNER`.
+ORG = OWNER
 #: The directory namespace under the data, state, cache, config and runtime roots,
 #: shared by every module, each under its own subdirectory.
 NAMESPACE = "moxi"
 
-#: The umbrella's own verbs (`moxi install`, `moxi check`, ...), with the ones this
+#: The umbrella's own verbs (`moxi install`, `moxi config`, ...), with the ones this
 #: version keeps for commands still to come. A module named by one could never be
-#: reached as `moxi <module>`, so no module may take one.
+#: reached as `moxi <module>`, so no module may take one. `check` only says where the
+#: contract check went, and stays reserved so no module takes the name a contributor
+#: still types.
 VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", "version",
                    "doctor", "uninstall", "run", "paths"})
 
@@ -36,6 +48,12 @@ VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", 
 RESERVED = frozenset({"moxi", "set", "unset", "runtime", "installs"})
 
 _NAME = re.compile(r"[a-z0-9]+")
+
+#: The prefix of every skill Moxi ships, so none takes the name of a skill the user has.
+SKILL_PREFIX = f"{HARNESS}-"
+#: The longest skill name, the cap the Agent Skills format sets on a skill's `name`.
+SKILL_NAME_MAX = 64
+_SKILL = re.compile(re.escape(SKILL_PREFIX) + r"[a-z0-9]+(-[a-z0-9]+)*")
 
 
 def is_module_name(name: object) -> bool:
@@ -56,6 +74,30 @@ def check_module_name(name: object) -> str:
     return name  # type: ignore[return-value]
 
 
+def is_skill_folder(name: str) -> bool:
+    """True when a subfolder named `name` of a module's `SKILLS` folder is a skill: any
+    name but one that starts with `.` and `__pycache__`."""
+    return not name.startswith(".") and name != "__pycache__"
+
+
+def is_skill_name(name: object) -> bool:
+    """True when `name` is spelled as the name of a skill Moxi ships: `moxi-`, then words
+    of lower-case ASCII letters and digits joined by single hyphens, 64 characters at
+    most."""
+    return (isinstance(name, str) and len(name) <= SKILL_NAME_MAX
+            and _SKILL.fullmatch(name) is not None)
+
+
+def check_skill_name(name: object) -> str:
+    """Return `name` when it is spelled as a skill name, else raise `ValueError`."""
+    if not is_skill_name(name):
+        raise ValueError(f"{name!r} is not a Moxi skill name: a skill Moxi ships is named "
+                         f"{SKILL_PREFIX}<name>, lower-case ASCII letters and digits in "
+                         f"words joined by single hyphens, {SKILL_NAME_MAX} characters at "
+                         "most")
+    return name  # type: ignore[return-value]
+
+
 def distribution(name: str) -> str:
     """The distribution name of module `name`: `moxi-<name>`."""
     return f"{HARNESS}-{check_module_name(name)}"
@@ -67,10 +109,10 @@ def import_name(name: str) -> str:
 
 
 def repo(name: str) -> str:
-    """The module's own repository, which holds its issues: `moxihq/<name>`.
-
-    The code of every module lives in the one repository, `moxihq/moxi`."""
-    return f"{ORG}/{check_module_name(name)}"
+    """The repository that holds module `name`, its code and its issues: the one Moxi
+    repository, `CodeManEthan/moxi`, the same for every module."""
+    check_module_name(name)
+    return f"{OWNER}/{HARNESS}"
 
 
 def env_prefix(name: str) -> str:
@@ -78,6 +120,7 @@ def env_prefix(name: str) -> str:
     return f"{HARNESS.upper()}_{check_module_name(name).upper()}_"
 
 
-__all__ = ["HARNESS", "ORG", "NAMESPACE", "VERBS", "RESERVED", "is_module_name",
-           "is_reserved", "check_module_name", "distribution", "import_name", "repo",
-           "env_prefix"]
+__all__ = ["HARNESS", "OWNER", "ORG", "NAMESPACE", "VERBS", "RESERVED", "SKILL_PREFIX",
+           "SKILL_NAME_MAX", "is_module_name", "is_reserved", "check_module_name",
+           "is_skill_folder", "is_skill_name", "check_skill_name", "distribution",
+           "import_name", "repo", "env_prefix"]

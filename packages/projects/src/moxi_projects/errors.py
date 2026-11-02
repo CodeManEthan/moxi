@@ -11,6 +11,8 @@ Each is a `moxi_projects.api.ProjectsError`, carrying `reason`, `fix` and `exit_
 - `MintFailed` (exit 1): `add --create` could not make the root: the directory could not
   be made, or `git init` failed or timed out. No row was written; `left` is the directory
   left behind, or None.
+- `MoveFailed` (exit 1): `promote` could not move the inbox one-off's folder to its new
+  place. Nothing was moved and no row was written.
 
 The read API's `NotFound` (3), `Unreadable` (1), `TooNew` (3) and `Busy` (75) are raised
 by the acts too.
@@ -55,5 +57,12 @@ class MintFailed(ProjectsError):
         super().__init__(reason, fix)
 
 
+class MoveFailed(ProjectsError):
+    """`promote` could not move the one-off's folder. Nothing was moved and no row was
+    written."""
+
+    exit_code = 1
+
+
 __all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Refused", "Broken",
-           "Usage", "MintFailed"]
+           "Usage", "MintFailed", "MoveFailed"]

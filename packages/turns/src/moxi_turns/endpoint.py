@@ -19,7 +19,12 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
 - checks a session command's consent and its idle snapshot;
 - asks the session's stop handler at each Stop, bounded by its wait;
 - asks the registered listeners at `ready` and `prompt` and passes back what they
-  answer, and tells them of `turn` and `gone`.
+  answer, and tells them of `turn`, `gone` and `usage`;
+- asks the `after-tool` rows after a tool call (`after_tool`) and keeps each row's floor
+  (`floors`), which it reads at each `ready` and after each call of the row's listener,
+  and hands the harness each time one changes (`Harness.floors_changed`, when the
+  adapter has it). Every listener event carries the session's launch directory, `cwd`,
+  which a shell `cd` does not move (`SessionEvent`).
 
 turns decides nothing about content or timing: it delivers what it is handed, when it is
 handed it, under the preconditions the caller names.
@@ -292,10 +297,18 @@ class Endpoint:
         #: How long a Stop waits for the stop handler's answer.
         self.stop_wait_s = max(0, int(settings[turns_config.STOP_WAIT])) / 1000
         self.listen_wait_s = max(0, int(settings["listen.wait_ms"])) / 1000
+        #: The bound on one tool call's after-tool rows together, and on a floor read.
+        self.after_tool_wait_s = max(0, int(settings["after_tool.wait_ms"])) / 1000
         #: The bound on an unsettled delivery or command (`PENDING_TTL_S`).
         self.pending_ttl_s = PENDING_TTL_S
         self.registry = registry if registry is not None \
             else turns_listeners.load(env=self.env)
+        rows = turns_listeners.after_rows(self.registry)
+        #: Each after-tool row's floor, by row id.
+        self.floors = turns_listeners.Floors(rows, self.after_tool_wait_s,
+                                             send=self._floors_changed)
+        self._after_tool = turns_listeners.AfterTool(rows, self.after_tool_wait_s,
+                                                     after=self.floors.after_call)
         self.nonce = secrets.token_hex(6)
         self.version = package_version()
         self.started_at = time.time()
@@ -492,8 +505,8 @@ class Endpoint:
                 for slot in holder.asks.values():
                     slot[0].set()
             self._cond.notify_all()
-        turns_listeners.ask(self.registry, self._event("gone", reason=reason),
-                            self.listen_wait_s, wait=True)
+        self._ask(self._event("gone", reason=reason), wait=True)
+        self._after_tool.close()
         closed = self._close_server()
         self._remove_files()
         if closed:
@@ -599,13 +612,69 @@ class Endpoint:
                 self._emit(Ready(source, self.ledger.session_id, time.time()))
                 self._command_ready(source)
             event = self._event("ready", source=source)
-        return turns_listeners.ask(self.registry, event, self.listen_wait_s)
+        # The floors are read beside the listeners' asks, and any change is handed over
+        # before this returns, so it reaches the harness before the ready's context.
+        refresh = None
+        if self.floors.any:
+            refresh = threading.Thread(target=self.floors.refresh, args=(event,),
+                                       name="turns-floors", daemon=True)
+            refresh.start()
+        context = self._ask(event)
+        if refresh is not None:
+            refresh.join(self.after_tool_wait_s + 1.0)
+        return context
 
-    def prompt(self) -> str | None:
-        """A prompt entered (UserPromptSubmit). Returns the listeners' added context."""
+    def prompt(self, text: str | None = None, origin: str | None = None) -> str | None:
+        """A prompt entered (UserPromptSubmit), with its text and its origin's kind where
+        the harness gives them. Returns the listeners' added context."""
         if self._gone is not None:
             return None
-        return turns_listeners.ask(self.registry, self._event("prompt"), self.listen_wait_s)
+        return self._ask(self._event("prompt", text=text, origin=origin))
+
+    def after_tool(self, tool: str, *, tool_use_id: str | None = None,
+                   agent_id: str | None = None, is_error: bool | None = None,
+                   point: str = "after", rows: list[str] | None = None,
+                   record_path: str | None = None) -> str | None:
+        """A tool call ran (`point` `after`), or is about to where the harness has no
+        after-tool point (`pre`). Asks the after-tool rows `rows` names (every one when
+        None), bounded together by `after_tool.wait_ms`; returns their texts joined, which
+        the model reads after the tool. Floors are the harness's to apply: this asks
+        what it is given. `record_path` is the file the call's agent writes its records
+        to, when the harness knows it per call; else the harness's `record_path`."""
+        if self._gone is not None or not self._after_tool.rows:
+            return None
+        if record_path is None:
+            record_path = getattr(self.harness, "record_path", None)
+        event = self._event(turns_listeners.AFTER_TOOL, agent_id=agent_id or None,
+                            tool=tool, tool_use_id=tool_use_id, is_error=is_error,
+                            point=point, record_path=record_path)
+        return self._after_tool.ask(event, rows)
+
+    def usage(self, reading: dict[str, Any]) -> None:
+        """A usage reading from the harness, as given: the `usage` rows are told, with the
+        time it arrived, and not waited for."""
+        if self._gone is not None:
+            return
+        self._ask(self._event("usage", usage=reading, received_at=time.time()))
+
+    def codex_limits(self, payload: dict[str, Any], *, kind: str,
+                     received_at: float | None = None) -> None:
+        """A Codex rate-limits reading, as given: `read` (the host asked) or `updated`
+        (Codex pushed it). The `codex_limits` rows are told, and not waited for."""
+        if self._gone is not None:
+            return
+        self._ask(self._event("codex_limits", payload=payload, kind=kind,
+                              received_at=time.time() if received_at is None
+                              else received_at))
+
+    def _ask(self, event: SessionEvent, *, wait: bool = False) -> str | None:
+        return turns_listeners.ask(self.registry, event, self.listen_wait_s, wait=wait,
+                                   after=self.floors.after_call)
+
+    def _floors_changed(self, values: dict[str, int]) -> None:
+        tell = getattr(self.harness, "floors_changed", None)
+        if tell is not None:
+            tell(values)
 
     def turn_started(self, turn_id: str | None, delivery_id: str | None = None, *,
                      held: bool = False, command: str | None = None) -> None:
@@ -1105,11 +1174,20 @@ class Endpoint:
                               "ref", None, ref)
         return newest.id, self.wait(newest.id, until, timeout)
 
+    def session_ids(self) -> tuple[str, ...]:
+        """The ids this endpoint's session has had, the current one first, copied under
+        the lock: a command grant bound to any of them is this session's."""
+        with self._lock:
+            current = self.ledger.session_id
+            return ((current,) if current else ()) + tuple(self.ledger.earlier)
+
     def command(self, name: str, *, if_turn_number: int | None = None,
                 timeout: float | None = COMMAND_WAIT_S,
                 stop_shells: bool = False) -> Ran | Failed | Refused:
         """Run `/clear`, `/exit` or a compaction: consented, one in flight, one accepted
         per 60 s, from an idle snapshot with no open turn, no live subagent and no draft.
+        Consent is turns' `commands.allow` or the launch's grant, a bound grant only while
+        it names an id this session has had (`session_ids`).
         `stop_shells` (with `clear` or `compact`, on an adapter that offers `stop-shells`)
         stops the session's background shells once the command has taken effect, as one
         step with it: one consent, one slot, one count toward the rate, and the shells
@@ -1123,7 +1201,8 @@ class Endpoint:
         if reason is None and stop_shells:
             reason = "unsupported" if name == "exit" else self._unable("stop-shells")
         if reason is None:
-            allow = turns_config.allowed(self._config.use("commands.allow"), self.env)
+            allow = turns_config.allowed(self._config.use("commands.allow"), self.env,
+                                         self.session_ids())
             if name not in allow:
                 reason = "not-allowed"
         if reason is None:
@@ -1473,9 +1552,7 @@ class Endpoint:
                 self._settle(d, ended=ended)
         self._emit(TurnEnded(turn.turn_id, turn.session_id, turn.turn_number, outcome,
                              self._turn_deliveries(turn), turn.command))
-        turns_listeners.ask(self.registry,
-                            self._event("turn", turn_id=turn.turn_id, outcome=outcome),
-                            self.listen_wait_s)
+        self._ask(self._event("turn", turn_id=turn.turn_id, outcome=outcome))
 
     def _turn_started(self, turn: Turn) -> TurnStarted:
         return TurnStarted(turn.turn_id, turn.session_id, turn.turn_number,
@@ -1517,7 +1594,8 @@ class Endpoint:
 
     def _event(self, name: str, **extra):
         return SessionEvent(event=name, harness=self.harness.name,
-                            session_id=self.ledger.session_id, env=self.env, **extra)
+                            session_id=self.ledger.session_id, env=self.env,
+                            cwd=getattr(self.harness, "cwd", None) or None, **extra)
 
     def _rewrite_hello(self) -> None:
         if self._server is None or self._gone is not None:

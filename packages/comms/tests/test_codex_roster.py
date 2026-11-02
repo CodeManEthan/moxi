@@ -155,15 +155,21 @@ def test_launch_options_hold_model_sandbox_network_roots_and_agents_switch():
     }
 
 
-def test_network_off_is_honoured_but_said_out_loud(caplog):
+def test_network_off_is_honoured_and_left_to_the_launch_to_explain(caplog):
+    """The roster can't tell whether a launch carries comms' tools, so the cost of a row
+    with the network off is said by the launch (`codex_wrapper.reach_note`)."""
     roster_file("""
         [agents."planner@proj-a"]
         cwd = "/work"
         network_access = false
+        [agents."other@proj-a"]
+        cwd = "/work"
     """)
-    row = codex_roster.load().require("planner@proj-a")
-    assert row.network_access is False
-    assert "cannot run `moxi comms reply`" in caplog.text
+    with caplog.at_level("WARNING"):
+        roster = codex_roster.load()
+    assert roster.require("planner@proj-a").network_access is False
+    assert roster.require("other@proj-a").network_access is None, "unnamed: the launch's"
+    assert caplog.text == ""
 
 
 def test_declared_directors_reach_the_session_stamp():

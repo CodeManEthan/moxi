@@ -12,6 +12,8 @@ from moxi.config import Schema
 from moxi_cache import api, claude, clock, module
 from moxi_sessions import api as sessions_api
 
+from conftest import claude_config
+
 SRC = Path(api.__file__).parent
 
 
@@ -20,7 +22,8 @@ def test_the_announcement_offers_interface_1():
     assert module.API == "moxi_cache.api"
     assert module.CLI == "moxi_cache.cli:main"
     assert module.SETTINGS == "settings.toml"
-    assert module.OPTIONAL == {} and module.GATED == {} and module.INTERNAL_ENV == {}
+    assert module.GATED == {} and module.INTERNAL_ENV == {}
+    assert set(module.OPTIONAL) == {"ui"}
 
 
 def test_load_finds_the_module_and_its_api():
@@ -33,7 +36,8 @@ def test_load_finds_the_module_and_its_api():
 
 
 def test_interface_1_holds_its_names():
-    assert {"read", "KINDS", "CODES", "MISSING", "open_store", "projects_root"} <= set(
+    assert {"read", "KINDS", "CODES", "MISSING", "open_store", "projects_root",
+            "clock_records"} <= set(
         api.__all__)
     assert api.KINDS == ("warm", "cold", "fresh", "no-cache", "unknown")
     assert repr(api.MISSING) == "MISSING"
@@ -59,7 +63,7 @@ def test_projects_root_is_sessions_rule_re_exported(tmp_path):
     env = {"HOME": "/home/someone", "CLAUDE_CONFIG_DIR": "~/elsewhere"}
     assert api.projects_root(env) == "/home/someone/elsewhere/projects"
     assert api.projects_root(env) == str(sessions_api.projects_root(env))
-    assert api.projects_root(None) == str(tmp_path / "claude-config" / "projects")
+    assert api.projects_root(None) == str(claude_config() / "projects")
 
 
 def test_an_unknown_harness_reads_no_cache():

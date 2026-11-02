@@ -1,5 +1,5 @@
-"""turns' two contracts: the module contract, as `moxi check` runs it, and the socket
-protocol, `contracts/socket-protocol.md`.
+"""turns' two contracts: the module contract, as `moxi-dev contract` runs it, and the
+socket protocol, `contracts/socket-protocol.md`.
 
 The socket protocol's table is the data below: each value's fields, each notification's
 params, each error code, each capability per harness, each method. The tests hold the
@@ -21,7 +21,7 @@ import pytest
 
 from fake_harness import FakeHarness
 from moxi import ipc
-from moxi.contract import check
+from moxi_dev.contract import check
 from moxi_turns import results as R
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,6 +117,11 @@ CAPABILITIES = {
     "compact": (True, True, True),
     "agents": (True, True, True),
     "stop-shells": (True, True, False),
+    "guards": (True, True, False),
+    "after-tool": (True, True, False),
+    "usage": (True, True, False),
+    "mcp-token": (False, True, False),
+    "environ": (True, True, True),
 }
 
 #: Each method, the capability it needs (None: always there), and its result's keys
@@ -133,6 +138,9 @@ METHODS = {
     "watch": (None, {"facts"}),
     "stops.handle": ("stop-handler", set()),
     "stops.answer": (None, {"taken"}),
+    "environ": ("environ", {"values"}),
+    "usage.codex_limits": ("usage", {"payload", "received_at"}),
+    "mcp.reload": ("mcp-token", {"reloaded", "servers"}),
 }
 
 #: The fields of the `session` answer that may be absent.
@@ -225,6 +233,16 @@ def test_the_table_and_the_values_agree():
     assert (R.ERROR_GONE, R.ERROR_CAPABILITY, R.ERROR_STOP_HANDLER_TAKEN) == (1001, 1002, 1003)
     assert tuple(CAPABILITIES) == R.CAPABILITIES
     assert {need for need, _ in METHODS.values() if need} <= set(R.CAPABILITIES)
+
+
+def test_each_adapter_offers_its_column_of_the_capability_table():
+    from moxi_turns.claude_endpoint import ClaudeHarness
+    from moxi_turns.codex import CodexHarness
+    from moxi_turns.opencode import OpenCodeHarness
+
+    for column, adapter in enumerate((ClaudeHarness, CodexHarness, OpenCodeHarness)):
+        offered = {name for name, cells in CAPABILITIES.items() if cells[column]}
+        assert set(adapter.can) == offered, adapter.__name__
 
 
 def test_the_table_and_the_document_agree():
@@ -407,6 +425,14 @@ INVALID_PARAMS = [
     ("command", {"name": "exit", "stop_shells": False}),
     ("command", {"name": "clear", "if_turn_number": "0"}),
     ("command", {"name": "clear", "timeout_ms": -1}),
+    ("environ", {}),
+    ("environ", {"names": "HOME"}),
+    ("environ", {"names": ["HOME", 5]}),
+    ("environ", {"names": ["1HOME"]}),
+    ("environ", {"names": ["A-B"]}),
+    ("environ", {"names": [""]}),
+    ("environ", {"names": [f"V{n}" for n in range(65)]}),
+    ("usage.codex_limits", {"cached": "yes"}),
 ]
 
 #: Methods turns does not have, among them version 1's old ops.
@@ -423,6 +449,9 @@ CAPABILITY_ROWS = [
     ("command", {"name": "compact"}, "compact"),
     ("command", {"name": "clear", "stop_shells": True}, "stop-shells"),
     ("command", {"name": "compact", "stop_shells": True}, "stop-shells"),
+    ("environ", {"names": ["HOME"]}, "environ"),
+    ("usage.codex_limits", {}, "usage"),
+    ("mcp.reload", {}, "mcp-token"),
 ]
 
 
@@ -485,6 +514,23 @@ def test_the_result_shapes_of_the_reads(connect):
     first = watch.call("watch", {}, timeout=5)
     assert set(first) == METHODS["watch"][1]
     assert isinstance(R.from_wire(first["facts"]), R.Facts)
+
+
+@_POSIX
+def test_environ_answers_the_names_asked_from_the_endpoints_environment(
+        connect, make_endpoint):
+    ep, _ = make_endpoint(FakeHarness(can=R.CAPABILITIES),
+                          env={"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "PATH": "/bin"})
+    client, _ = connect(ep=ep)
+    answer = client.call("environ", {"names": ["MOXI_T_SET", "MOXI_T_EMPTY", "MOXI_T_NO"]},
+                         timeout=5)
+    assert set(answer) == METHODS["environ"][1]
+    assert answer["values"] == {"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "MOXI_T_NO": None}
+    assert client.call("environ", {"names": []}, timeout=5) == {"values": {}}
+    names = [f"MOXI_T_{n}" for n in range(R.ENVIRON_MAX_NAMES)]
+    assert client.call("environ", {"names": names}, timeout=5)["values"] == \
+        dict.fromkeys(names)
+    assert R.ENVIRON_MAX_NAMES == 64
 
 
 @_POSIX

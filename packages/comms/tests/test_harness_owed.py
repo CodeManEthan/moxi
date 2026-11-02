@@ -65,6 +65,17 @@ def test_an_owing_stop_with_no_work_is_held_by_turns_holder(rig, codex):
     assert codex.blocked and debt.pending
 
 
+def test_a_codex_session_taught_tools_only_is_reminded_without_a_command(rig, codex):
+    from moxi_comms import context
+
+    codex.layer_form = context.TOOLS_ONLY
+    msg = codex_owes(rig, codex)
+    debt = codex.reply_ledger.debts[msg.id]
+    answer = codex.fake.stop(stop_hook_active=False, task_types=(), crons=0)
+    assert answer == owed.reminder_text([debt], rig.clock(), context.TOOLS_ONLY)
+    assert "the reply tool" in answer and "moxi comms" not in answer
+
+
 def test_the_next_stop_counts_the_reminder_and_the_turn_end_reports_unanswered(
         rig, codex, frames):
     msg = codex_owes(rig, codex)

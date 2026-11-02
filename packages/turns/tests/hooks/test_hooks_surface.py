@@ -33,7 +33,7 @@ def test_the_surface_is_nine_names_in_three_modules():
 
 def _public(module):
     """Public names a consumer could reach. `annotations` is the `__future__` flag every
-    module carries so its annotations stay strings (L3) — a compiler switch, not a name
+    module carries so its annotations stay strings (law 3) — a compiler switch, not a name
     anybody calls."""
     return {
         k for k, v in vars(module).items()

@@ -1,3 +1,3 @@
-# sessions' tests run inside the Moxi test kit's fence: the harness homes, the
-# environment and every write are kept inside each test's own tmp.
+# Every test of this package runs inside Moxi's test fence: an environment of its own,
+# no write outside its tmp and no connect off this machine. See moxi_dev.testing.
 pytest_plugins = ["moxi_dev.testing"]

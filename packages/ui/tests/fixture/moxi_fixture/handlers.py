@@ -7,7 +7,13 @@ a page server. A test controls the server through files there too:
   at its start;
 - `acts`: one line per act the server ran;
 - `hold`: while it exists, a read of `/api/wait` doesn't answer (for up to 20 s), so a
-  test can keep a request open; each such read first appends its pid to `waiting`.
+  test can keep a request open; each such read first appends its pid to `waiting`;
+- `keys`: one line per run of the confirmed act, the `Idempotency-Key` it got; `jobs` the
+  job ids its status route knows.
+
+The confirmed act's `mode` picks its answer: none adds `by` (1 unless given) and is
+accepted, `refuse` is a 422, `conflict` a 409, `fail` a 500, and `die` ends the page
+server before it answers.
 """
 
 import json
@@ -16,7 +22,7 @@ import threading
 import time
 
 from moxi.paths import Layout
-from moxi_loopback.api import Topics
+from moxi_loopback.api import Accepted, Conflict, Refused, Topics
 
 STATE = Layout("fixture").state_dir()
 
@@ -65,6 +71,41 @@ def add(call):
         _write(values)
     _publish(values)
     return {"count": values["count"]}
+
+
+def _append(name: str, line: str) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / name, "a", encoding="utf-8") as out:
+        out.write(f"{line}\n")
+
+
+def confirm(call):
+    _append("keys", call.key)
+    mode = call.body.get("mode")
+    if mode == "refuse":
+        raise Refused("the fixture refuses this act")
+    if mode == "conflict":
+        raise Conflict("the fixture is busy with another act")
+    if mode == "fail":
+        raise RuntimeError("the fixture's act failed")
+    if mode == "die":
+        os._exit(1)
+    with _lock:
+        values = _read()
+        values["count"] += call.body.get("by", 1)
+        _write(values)
+    _publish(values)
+    job = f"j{len((STATE / 'keys').read_text().splitlines())}"
+    _append("jobs", job)
+    return Accepted(f"/api/job?job={job}")
+
+
+def job(call):
+    try:
+        known = (STATE / "jobs").read_text().splitlines()
+    except FileNotFoundError:
+        known = []
+    return {"job": call.query["job"], "state": "done" if call.query["job"] in known else "unknown"}
 
 
 def wait(call):

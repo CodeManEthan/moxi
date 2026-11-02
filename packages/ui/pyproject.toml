@@ -16,12 +16,12 @@ moxi-ui-serve = "moxi_ui.serve:main"
 # The browser half of `moxi_ui.testing`, the pytest plugin a module's own tests use; the
 # plugin loads without it, and only its fixtures need it.
 [project.optional-dependencies]
-testing = ["pytest>=8", "playwright>=1.50,<2"]
+testing = ["pytest>=8", "playwright>=1.56,<2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/moxi/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
@@ -46,9 +46,11 @@ packages = ["src/moxi_ui"]
 # A source distribution holds these paths and nothing else.
 only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_ui", "tests", "web"]
 
-# A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
-# tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also
-# needs MOXI_TEST_LIVE=1).
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path;
+# `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not browser and not slow and not build and not live'"

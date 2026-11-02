@@ -37,7 +37,7 @@ def test_the_shipped_catalogue_lists_the_four_ported_modules():
 
 
 def test_the_refresh_url_is_the_shipped_file_on_the_public_main_branch():
-    assert catalogue.URL == ("https://raw.githubusercontent.com/moxihq/moxi/main/"
+    assert catalogue.URL == ("https://raw.githubusercontent.com/CodeManEthan/moxi/main/"
                              "packages/moxi/src/moxi/catalogue.toml")
 
 

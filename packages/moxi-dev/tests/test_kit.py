@@ -1,5 +1,5 @@
 """The kit's helpers: served, wait_for, param ids, the fsync seam, the SQLite writer,
-the markers, and the contract re-export."""
+the markers, and the contract module's public names."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import sqlite3
 import time
 from pathlib import Path
 
-import moxi.contract
 import pytest
 
 import moxi_dev.contract
@@ -226,9 +225,14 @@ def test_a_package_deselects_the_tiers():
 
 # --- moxi_dev.contract -----------------------------------------------------------------
 
-def test_the_contract_re_exports_the_check_and_nothing_more():
+def test_the_contract_offers_the_check_and_nothing_more():
     assert sorted(moxi_dev.contract.__all__) == ["CheckError", "Finding", "check"]
-    for name in moxi_dev.contract.__all__:
-        assert getattr(moxi_dev.contract, name) is getattr(moxi.contract, name), name
-    from moxi_dev.contract import Finding, check
-    assert check is moxi.contract.check and Finding is moxi.contract.Finding
+    from moxi_dev.contract import CheckError, Finding, check
+    assert callable(check) and issubclass(CheckError, Exception)
+    assert str(Finding("src/a.py", 3, "1", "imports x")) == "src/a.py:3: check 1: imports x"
+
+
+def test_the_core_no_longer_holds_the_check():
+    import importlib.util
+
+    assert importlib.util.find_spec("moxi.contract") is None

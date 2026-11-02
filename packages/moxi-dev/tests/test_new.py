@@ -100,9 +100,9 @@ def test_the_pyproject_declares_the_module(workspace):
     assert project["dependencies"] == ["moxi>=0.1,<0.2"]
     assert "scripts" not in project  # only the core declares the moxi script
     assert project["entry-points"] == {"moxi.modules": {"sample": "moxi_sample.module"}}
-    assert project["urls"] == {"Homepage": "https://github.com/moxihq/moxi",
-                               "Repository": "https://github.com/moxihq/moxi",
-                               "Issues": "https://github.com/moxihq/moxi/issues"}
+    assert project["urls"] == {"Homepage": "https://github.com/CodeManEthan/moxi",
+                               "Repository": "https://github.com/CodeManEthan/moxi",
+                               "Issues": "https://github.com/CodeManEthan/moxi/issues"}
     assert data["dependency-groups"] == {"dev": ["pytest", "moxi-dev"]}
     assert "tool" not in data or "uv" not in data["tool"]       # the root resolves
     options = data["tool"]["pytest"]["ini_options"]
@@ -228,7 +228,7 @@ def unchanged(root) -> bool:
 
 
 @pytest.mark.parametrize("module, says", [
-    ("check", "one of the core's own verbs"),
+    ("config", "one of the core's own verbs"),
     ("installs", "a name the core keeps for itself"),
     ("Bad-Name", "not a Moxi module name"),
     ("other", "the workspace already has moxi-other"),

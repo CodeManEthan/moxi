@@ -8,10 +8,15 @@ license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 
+[project.optional-dependencies]
+# The browser UI shell: with it, cache's panel and its chip show there. Loopback, which
+# cache's page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
+
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/cache/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # Only the core declares the `moxi` script; this is the watcher's own entry point.
 [project.scripts]
@@ -22,7 +27,9 @@ moxi-cache-watch = "moxi_cache.watch:main"
 cache = "moxi_cache.module"
 
 [dependency-groups]
-dev = ["pytest"]
+# moxi-ui's pytest plugin runs cache's pages in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -34,7 +41,13 @@ packages = ["src/moxi_cache"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these public paths, and the
 # pyproject.toml and .gitignore hatchling adds itself.
-only-include = ["LICENSE", "README.md", "src/moxi_cache", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_cache", "tests", "web"]
 
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path;
+# `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

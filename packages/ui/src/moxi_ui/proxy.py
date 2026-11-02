@@ -8,8 +8,9 @@ request goes on it, the token included.
   is sent, so a path the module's export doesn't list never starts a server. The query
   string goes with it unchanged.
 - **Headers.** Upstream gets only the browser's `Accept`, `Accept-Language`,
-  `Content-Type`, `Content-Length`, `If-None-Match` and `Last-Event-ID`, plus the server's
-  token and the Host it admits (`127.0.0.1:<port>` on TCP, `localhost` on a Unix socket).
+  `Content-Type`, `Content-Length`, `If-None-Match`, `Last-Event-ID` and
+  `Idempotency-Key`, plus the server's token and the Host it admits (`127.0.0.1:<port>`
+  on TCP, `localhost` on a Unix socket).
   Downstream gets the module's headers less the hop-by-hop ones and `Set-Cookie`, with any
   header of loopback's fixed set that is missing added.
 - **Connections.** A read reuses a kept-alive connection from the server's pool (at most

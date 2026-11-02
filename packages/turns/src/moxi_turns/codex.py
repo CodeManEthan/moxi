@@ -43,6 +43,30 @@ own, which the host reports with ``command`` ``compact``. Its ``PostCompact`` ho
 then terminates the terminals it lists at that moment, lists them again, and reports
 what it stopped (``command_ran``), all within ``SHELL_STOP_S``.
 
+Guards and after-tool. The host loads the guards that are on at its attach and at each
+``ready`` (a ``GuardRunner`` for ``codex``), and registers ``PreToolUse`` for the launch
+only when some guard covers Codex, with a matcher built from their Codex patterns
+(``codex_hooks``). At each ``PreToolUse`` ping it matches the call against its table
+(``guards.run.decide``): a data-only guard refuses at once, judge guards are judged in this
+process, and the answer goes back in Codex's hook output form. The command also carries
+the cover rule of the guards that declared ``on_error = "deny"``, so a ping the host can't
+answer refuses a call one of them covers (``codex_hooks``). The call's ``cwd`` is the
+hook input's when absolute, else the launch directory. ``PostToolUse`` is registered only
+when an installed listener row names ``after-tool``. The main loop's calls reach a row
+only while its floor lets them: the main thread's context is
+``tokenUsage.last.totalTokens`` of its last ``thread/tokenUsage/updated``, and a row is
+skipped only while that reading is below the row's floor; with no reading yet no row is
+skipped. A subagent's call always reaches every row. ``record_path`` is the thread's
+rollout (``thread.path`` in the load answer, else the hook's ``transcript_path``) on the
+main loop, and the subagent's own ``transcript_path`` in a subagent.
+
+Limits and MCP servers. After each accepted load the host reads the account's rate limits
+(``account/rateLimits/read``) once, and Codex pushes ``account/rateLimits/updated`` with
+token counts; each reading goes to the ``codex_limits`` rows unparsed, and
+``usage.codex_limits`` reads one on request. At each ``ready`` (the load's, and a
+compaction's two) and on ``mcp.reload`` the host settles the MCP servers its thread
+config names, reloading them once when one reads ``failed`` (``codex_mcp``).
+
 The ending form: once a Stop is answered unblocked, Codex may complete the turn
 at any moment, and a steer it takes in that gap can be written into the turn and never
 answered. So the turn is marked ending: it stays open, but no ``turn/steer`` for it goes
@@ -69,10 +93,14 @@ from moxi.paths import script
 
 from . import client as turns_client
 from . import codex_hooks
+from .codex_appserver import LIMITS_READ, LIMITS_READ_S, LIMITS_UPDATED
+from .codex_mcp import STARTUP_STATUS, McpSettle, rendered
 from . import codex_protocol as proto
 from . import protocol
 from .doctor import MODULE
 from .endpoint import Endpoint
+from .guards import MAX_WAIT_KEY, MAX_WAIT_MS, ON_KEY, Prompt, ToolCall
+from .guards.run import GuardRunner, decide
 from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
 from .results import (SHELL_UNLISTED, Agent, Agents, Failed, LeftShell, Refused, Shells,
                       StopFacts)
@@ -182,15 +210,21 @@ class _Compaction:
 class CodexHarness(Harness):
     name = "codex"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
-                     "agents", "stop-shells"})
+                     "agents", "stop-shells", "guards", "after-tool", "usage",
+                     "mcp-token", "environ"})
     mod_version = None
+
+    @staticmethod
+    def tool_points() -> dict[str, bool]:
+        """Codex's `PreToolUse` and `PostToolUse` command hooks."""
+        return {"pre": True, "after": True}
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None,
                  window: bool = True, options=None, verify=None,
                  binary: str = BINARY, ping=None, client_factory=None,
                  app_server_factory=None, window_factory=None,
                  verify_wait: float = VERIFY_WAIT, backoff_factory=None,
-                 resume: str | None = None):
+                 resume: str | None = None, guards: GuardRunner | None = None):
         if options is not None and not isinstance(options, Mapping):
             raise TypeError("options must be a mapping")
         if resume is not None and (not isinstance(resume, str) or not resume.strip()):
@@ -218,6 +252,23 @@ class CodexHarness(Harness):
         self._app_server_factory = app_server_factory
         self._window_factory = window_factory
         self._backoff_factory = backoff_factory or _backoff_delays
+        #: The guard runner; made at `attach` with the endpoint's environment when None.
+        self.guards = guards
+        #: `guards.max_wait_ms` at the launch, once read: the `PreToolUse` ping waits this
+        #: long (and a margin), so a later `ready` never raises a guard's bound past it.
+        self._guard_wait_ms: int | None = None
+        #: The thread's rollout, from the load answer; None until a load names one.
+        self.record_path: str | None = None
+        #: The main thread's last token reading, `(thread id, tokens)`.
+        self._usage: tuple[str, int] | None = None
+        #: The current main turn's prompts, `(turn id, prompts)`, for guards that want them.
+        self._prompts: tuple[str | None, tuple[Prompt, ...]] = (None, ())
+        #: The last rate-limits reading the host saw, `(payload, received_at, kind)`.
+        self._limits: tuple[dict, float, str] | None = None
+        #: The settle of the MCP servers the thread config names, at each ready and on
+        #: `mcp.reload`.
+        self.mcp = McpSettle(rendered(self.options), self._app_call,
+                             lambda: self.session_id)
 
         self.pid = os.getpid()
         #: The thread: None until a fresh thread is started; a resume names it from
@@ -278,9 +329,21 @@ class CodexHarness(Harness):
         ping = self.ping
         if ping is None:
             ping = [str(script("moxi-turns-ping"))]
+        if self.guards is None:
+            self.guards = GuardRunner(self.name, env=endpoint.env,
+                                      settings=self._guard_settings)
+        self.guards.reload()
+        if self._guard_wait_ms is None:
+            # turns' config did not read (or a runner was handed in): the default bound.
+            self._guard_wait_ms = MAX_WAIT_MS
+        pre_matcher = codex_hooks.matcher(
+            p for e in self.guards.entries for p in e.calls)
         flags, self.hook_keys = codex_hooks.session_flags(
             list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
             listen_wait_s=endpoint.listen_wait_s,
+            pre_matcher=pre_matcher, guard_wait_s=self._guard_wait_ms / 1000,
+            refuse=codex_hooks.refuse_table(self.guards.entries),
+            after_tool=bool(endpoint.floors.rows), after_wait_s=endpoint.after_tool_wait_s,
         )
 
         from .codex_appserver import AppServer, listen_argv
@@ -291,6 +354,105 @@ class CodexHarness(Harness):
             self.app_socket, env=self.env, cwd=self.cwd, argv=argv,
         )
         self.hook_server = codex_hooks.HookServer(self, hook_socket)
+
+    def _guard_settings(self) -> tuple[list[str], int]:
+        """`guards.on` and `guards.max_wait_ms` now, the wait held to the launch's value,
+        since the ping's wait is fixed for the launch. Raises `ConfigError`."""
+        from . import config as turns_config
+
+        settings = turns_config.load(self.endpoint.env)
+        wait = int(settings[MAX_WAIT_KEY])
+        if self._guard_wait_ms is None:
+            self._guard_wait_ms = wait
+        return list(settings[ON_KEY]), min(wait, self._guard_wait_ms)
+
+    def guards_ready(self) -> list[str]:
+        """A `ready`: read the guards again. Returns the start-context lines for guards
+        on the list that did not load, each said once."""
+        if self.guards is None:
+            return []
+        self.guards.reload()
+        return self.guards.take_notes()
+
+    def prompt_seen(self, turn_id, text: str | None) -> None:
+        """A main-loop prompt: the current main turn's prompts, for guards that want
+        them. A prompt in another turn starts the list again."""
+        if not isinstance(text, str):
+            return
+        turn_id = turn_id if isinstance(turn_id, str) else None
+        with self._lock:
+            held, prompts = self._prompts
+            if turn_id is None or turn_id != held:
+                prompts = ()
+            self._prompts = (turn_id, (*prompts, Prompt(None, text)))
+
+    def context_tokens(self) -> int | None:
+        """The main thread's context, in tokens, from its last token reading; None
+        before the first, or when the reading is of an earlier thread."""
+        with self._lock:
+            usage, main = self._usage, self.session_id
+        if usage is None or usage[0] != main:
+            return None
+        return usage[1]
+
+    def _record_path(self, frame: dict) -> str | None:
+        hooked = frame.get("transcript_path")
+        hooked = hooked if isinstance(hooked, str) and hooked else None
+        if frame.get("agent_id"):
+            # A subagent writes its own rollout, which its hook names.
+            return hooked
+        return self.record_path or hooked
+
+    def _call_cwd(self, frame: dict) -> str:
+        """The directory a call runs in: the hook input's `cwd` when it is absolute,
+        else the launch directory."""
+        cwd = frame.get("cwd")
+        return cwd if isinstance(cwd, str) and os.path.isabs(cwd) else self.cwd
+
+    def pre_tool(self, frame: dict) -> dict:
+        """A `PreToolUse` ping: match the call, run the judges, answer `deny`, or the
+        lines for the model as `context`."""
+        tool = frame.get("tool_name")
+        if self.guards is None or not isinstance(tool, str) or not tool:
+            return {}
+        agent_id = _text(frame.get("agent_id"))
+        given = frame.get("tool_input")
+        given = dict(given) if isinstance(given, dict) else {}
+        decision = decide(self.guards.entries, tool, agent_id, given)
+        if decision.deny is not None:
+            return {"deny": decision.deny}
+        if not decision.ask:
+            return {}
+        with self._lock:
+            prompts = self._prompts[1]
+        call = ToolCall(self.name, self.session_id, agent_id, tool,
+                        _text(frame.get("tool_use_id")), given, self._call_cwd(frame),
+                        self._record_path(frame), self.endpoint.env, prompts)
+        answer = self.guards.ask(call, decision.ask)
+        if answer.deny is not None:
+            return {"deny": answer.deny}
+        lines = [*answer.lines, *answer.broken]
+        return {"context": "\n".join(lines)} if lines else {}
+
+    def post_tool(self, frame: dict) -> dict:
+        """A `PostToolUse` ping: ask the after-tool rows the floors let through and
+        answer their text as `context`."""
+        tool = frame.get("tool_name")
+        if not isinstance(tool, str) or not tool:
+            return {}
+        agent_id = _text(frame.get("agent_id"))
+        rows = None
+        if agent_id is None:
+            context = self.context_tokens()
+            if context is not None:
+                rows = [rid for rid, floor in self.endpoint.floors.values().items()
+                        if context >= floor]
+                if not rows:
+                    return {}
+        text = self.endpoint.after_tool(
+            tool, tool_use_id=_text(frame.get("tool_use_id")), agent_id=agent_id,
+            point="after", rows=rows, record_path=self._record_path(frame))
+        return {"context": text} if text else {}
 
     def start(self) -> None:
         self.hook_server.start()
@@ -459,6 +621,7 @@ class CodexHarness(Harness):
                     log.warning("thread/start reports different settings: %s", warning)
 
                 thread = result.get("thread") or {}
+                path = thread.get("path")
                 # A fresh thread has spawned nothing yet; a resumed one may have, before
                 # this connection or this host saw its items.
                 collab, whole, unreadable = ({}, True, False) if starting \
@@ -476,6 +639,8 @@ class CodexHarness(Harness):
                     self.ws = ws
                     self.generation = generation
                     self.session_id = thread_id
+                    if isinstance(path, str) and path:
+                        self.record_path = path
                     self.thread_active = active
                     self.active_turn_id = turn_id
                     if not starting:
@@ -507,6 +672,7 @@ class CodexHarness(Harness):
                 # refused priming turn fails the load and raises none.
                 self.endpoint.identify(thread_id, ready="startup" if starting else "resume")
                 self._accepted.set()
+                self._loaded(ws)
                 if old_turn and old_turn != turn_id:
                     if turn_id:
                         # The load shows another running turn. Reporting it ends the old
@@ -1094,6 +1260,15 @@ class CodexHarness(Harness):
             self._completed(params)
         elif method in ("item/started", "item/completed"):
             self._track_collab(params)
+        elif method == "thread/tokenUsage/updated":
+            self._token_usage(params)
+        elif method == LIMITS_UPDATED:
+            if isinstance(params, dict):
+                self._limits_seen(params, "updated")
+        elif method == STARTUP_STATUS:
+            if isinstance(params, dict) and params.get("threadId") in (None,
+                                                                      self.session_id):
+                self.mcp.notified(params)
         elif method == "thread/status/changed":
             active = (params.get("status") or {}).get("type") == "active"
             with self._lock:
@@ -1114,6 +1289,93 @@ class CodexHarness(Harness):
                     timer.start()
         elif rid is not None:
             log.warning("unanswered app-server request %s; approvals are disabled", method)
+
+    def _loaded(self, ws) -> None:
+        """An accepted load, which raised its `ready`: read the account's rate limits
+        once, and settle the MCP servers, each on a thread of its own, so the load waits
+        for neither."""
+        threading.Thread(target=self._read_limits_at_load, args=(ws,), daemon=True,
+                         name="turns-codex-limits").start()
+        self.mcp.ready()
+
+    def mcp_ready(self) -> None:
+        """A `ready` a hook raised (a compaction's `PostCompact`, and its `SessionStart`
+        at the next turn): settle the MCP servers, or join the settle that runs."""
+        self.mcp.ready()
+
+    def mcp_reload(self) -> dict:
+        """`mcp.reload`: settle the MCP servers and answer `{reloaded, servers}`."""
+        return self.mcp.reload()
+
+    def _app_call(self, method: str, params, timeout: float):
+        """One request on the current app-server connection."""
+        with self._lock:
+            ws = self.ws
+        if ws is None:
+            raise proto.AppServerOffline("the Codex app-server is not connected")
+        return ws.call(method, params, timeout=timeout)
+
+    def _read_limits_at_load(self, ws) -> None:
+        try:
+            payload = ws.call(LIMITS_READ, None, timeout=LIMITS_READ_S)
+        except Exception as exc:  # noqa: BLE001 - a reading is information; none is logged
+            log.info("the Codex rate limits could not be read after the load: %s", exc)
+            return
+        if isinstance(payload, dict):
+            self._limits_seen(payload, "read")
+
+    def _limits_seen(self, payload: dict, kind: str, *, tell: bool = True) -> float:
+        """Keep a rate-limits reading as the last one seen, and hand it to the
+        `codex_limits` rows unparsed (unless `tell` is false). Returns its time."""
+        at = time.time()
+        with self._lock:
+            self._limits = (payload, at, kind)
+        if tell:
+            self.endpoint.codex_limits(payload, kind=kind, received_at=at)
+        return at
+
+    def codex_limits(self, *, cached: bool = False) -> dict:
+        """`usage.codex_limits`: `{payload, received_at}` from `account/rateLimits/read`
+        now, or `{payload: null, received_at: null, reason}` when it could not be read.
+        With `cached`, the last reading the host saw (`{payload, received_at, kind}`, each
+        null before the first) and no request. A reading asked for here is kept as the
+        last one seen but not handed to the rows, which are told of the load's reading
+        and of Codex's pushes."""
+        if cached:
+            with self._lock:
+                last = self._limits
+            payload, at, kind = last if last is not None else (None, None, None)
+            return {"payload": payload, "received_at": at, "kind": kind}
+        with self._lock:
+            ws = self.ws
+        try:
+            if ws is None:
+                raise proto.AppServerOffline("the Codex app-server is not connected")
+            payload = ws.call(LIMITS_READ, None, timeout=LIMITS_READ_S)
+            if not isinstance(payload, dict):
+                raise proto.AppServerOffline(f"{LIMITS_READ} answered {payload!r}")
+        except Exception as exc:  # noqa: BLE001 - the caller reads the reason
+            reason = self._failure_reason(exc)
+            log.info("the Codex rate limits could not be read: %s", reason)
+            return {"payload": None, "received_at": None, "reason": reason}
+        return {"payload": payload,
+                "received_at": self._limits_seen(payload, "read", tell=False)}
+
+    def _token_usage(self, params) -> None:
+        """Keep the main thread's last context reading, `tokenUsage.last.totalTokens`;
+        another thread's (a subagent's) is not the main loop's context."""
+        if not isinstance(params, dict):
+            return
+        usage = params.get("tokenUsage")
+        last = usage.get("last") if isinstance(usage, dict) else None
+        total = last.get("totalTokens") if isinstance(last, dict) else None
+        if isinstance(total, bool) or not isinstance(total, int):
+            return
+        thread = params.get("threadId")
+        with self._lock:
+            if not isinstance(thread, str) or thread != self.session_id:
+                return
+            self._usage = (thread, total)
 
     def _completed(self, params: dict) -> None:
         """A turn's end, by Codex's word: held while a steer recorded by the endpoint
@@ -1263,6 +1525,7 @@ class CodexHarness(Harness):
         self._stop.set()
         with self._lock:
             self._cancel_grace()
+        self.mcp.close()
         with self._connect_lock:
             generation = self.generation
             if generation is not None:
@@ -1276,11 +1539,18 @@ class CodexHarness(Harness):
                 self.hook_server.stop()
             if self.app_server is not None:
                 self.app_server.stop()
+            if self.guards is not None:
+                self.guards.close()
             with contextlib.suppress(OSError):
                 self.endpoint.dir.rmdir()
         if (self._supervisor is not None
                 and self._supervisor is not threading.current_thread()):
             self._supervisor.join(timeout=2.0)
+
+
+def _text(value) -> str | None:
+    """`value` when it is a non-empty string, else None."""
+    return value if isinstance(value, str) and value else None
 
 
 def _apply_collab(record: dict, item, main: str | None) -> None:

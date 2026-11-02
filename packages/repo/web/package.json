@@ -1,0 +1,13 @@
+{
+  "name": "moxi-repo-web",
+  "private": true,
+  "description": "The repo module's web sources: its git hooks page, read-only.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

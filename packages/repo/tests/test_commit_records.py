@@ -457,3 +457,65 @@ def test_specs_lists_saved_and_unsaved_specs_with_their_last_result(demo, capsys
     assert cli.main(["specs", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == [dict(listed, project=None)]
     assert AUTHOR == tuple(by_name["demo/snap"]["spec"]["author"])
+
+
+def test_specs_gives_each_saved_specs_last_commit_and_last_pushed_commit(demo, clock):
+    repo = demo.repo()
+    make_remote(demo, repo)
+    moxi_repo.save_spec(spec(repo, push="origin"))
+    write(repo, "notes/a.md")
+    assert moxi_repo.commit_saved(repo, "demo/snap").pushed == ("main",)
+    tip = git(repo, "rev-parse", "HEAD").stdout.strip()
+    write(repo, "loose/b.md")
+    moxi_repo.commit(spec(repo, name="demo/loose", paths=("loose",), author=("x", "x@y.z")))
+    [listed] = api.specs(repo)
+    by_name = {x["name"]: x for x in listed["specs"]}
+    snap = by_name["demo/snap"]
+    assert snap["last_commit"]["sha"] == tip
+    assert abs(snap["last_commit"]["time"] - time.time()) < 120
+    assert snap["pushed"] == {"main": tip} and snap["push"] == {}
+    # A clean pass after it keeps both: the last commit is the author's, not the pass's.
+    clock[0] += 400
+    assert moxi_repo.commit_saved(repo, "demo/snap").status == "clean"
+    [again] = api.specs(repo)
+    snap = {x["name"]: x for x in again["specs"]}["demo/snap"]
+    assert snap["last"]["sha"] is None and snap["last_commit"]["sha"] == tip
+    # That pass pushed main's tip, the loose spec's commit: `pushed` is the branch's.
+    assert snap["pushed"] == {"main": git(repo, "rev-parse", "HEAD").stdout.strip()} != {
+        "main": tip}
+    # A spec that isn't saved names no author to look for.
+    loose = by_name["demo/loose"]
+    assert loose["last"]["status"] == "committed" and loose["last_commit"] is None
+
+
+def test_specs_without_the_sweep_writes_nothing(demo, clock):
+    repo = demo.repo()
+    failed_push(demo, repo, clock)
+    key = push_key(repo)
+    # With its state file gone and the spec not saved, the sweep would clear the record.
+    (cgd(repo) / "moxi-repo" / "state.json").unlink()
+    ledger = _records.ledger_path().read_bytes()
+    assert api.specs(repo, sweep=False) == [{"root": str(repo), "common_dir": str(cgd(repo)),
+                                             "specs": []}]
+    assert is_open(key) == OPEN and _records.ledger_path().read_bytes() == ledger
+    api.specs(repo)
+    assert is_open(key) == set()
+
+
+def test_status_lists_each_open_record_of_the_repo_with_its_text_and_fix(demo, clock):
+    repo = demo.repo()
+    other = demo.repo("beta-code")
+    failed_push(demo, repo, clock)
+    failed_push(demo, other, clock)
+    [listed] = api.status(repo)
+    [record] = listed["records"]
+    assert record["key"] == push_key(repo)
+    assert (record["kind"], record["spec"], record["branch"], record["piece"]) == (
+        "push", "demo/snap", "main", None)
+    assert record["text"] == text(push_key(repo)) and "remote says no" in record["text"]
+    assert record["fix"] == doctor_records()[push_key(repo)]["fix"]
+    assert record["at"] == doctor_records()[push_key(repo)]["at"]
+    # `moxi doctor --clear` takes the record and leaves the ledger key: no record is open.
+    doctor.clear("repo", push_key(repo))
+    assert api.status(repo)[0]["records"] == []
+    assert [r["key"] for r in api.status(other)[0]["records"]] == [push_key(other)]

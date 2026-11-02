@@ -1,0 +1,77 @@
+# The notes module's config schema. The file it governs is CONFIG/notes/config.toml;
+# `moxi config notes` shows every key and `moxi config notes init` writes the file.
+# Every key is read at its use, so an edit takes effect at the next read.
+
+[root]
+type = "path"
+default = "~/notes"
+doc = "The folder that holds your notes. A git repo for snapshots. ~ is your home on every OS."
+read = "use"
+
+[prefix]
+type = "string"
+default = ""
+doc = "A subfolder under the root that holds the computed folders, topics and inbox, such as your user name. Empty puts them at the root."
+read = "use"
+
+[exclude]
+type = "list"
+items = "str"
+default = []
+doc = "Folders whose sessions get no notes directory. Each an absolute path, or one starting with ~."
+read = "use"
+
+[action]
+type = "enum"
+values = ["leave-out", "redact"]
+default = "leave-out"
+doc = "What a commit does with a file that holds a secret: leave the file out, or commit a redacted copy."
+read = "use"
+
+[max_mb]
+type = "int"
+default = 10
+doc = "Largest file, in MiB, a snapshot takes and a git hook gate reads."
+read = "use"
+
+[types]
+type = "string"
+default = "doc-types.toml"
+doc = "The document types file, relative to the root."
+read = "use"
+
+[snapshot.auto]
+type = "bool"
+default = true
+doc = "Snapshot when an agent session's turn ends or the session ends."
+read = "use"
+
+[snapshot.interval]
+type = "int"
+default = 15
+doc = "At most one snapshot commit per this many minutes."
+read = "use"
+
+[snapshot.push]
+type = "string"
+default = ""
+doc = "The remote to push to after a snapshot; empty means no push."
+read = "use"
+
+[snapshot.author_name]
+type = "string"
+default = "moxi notes"
+doc = "The name on snapshot commits."
+read = "use"
+
+[snapshot.author_email]
+type = "string"
+default = ""
+doc = "The email on snapshot commits; empty means notes+<device>@moxi.invalid, one per machine."
+read = "use"
+
+[snapshot.timer]
+type = "bool"
+default = false
+doc = "Commit a snapshot on a timer, outside agent sessions, as well."
+read = "use"

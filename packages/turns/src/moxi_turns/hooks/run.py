@@ -58,7 +58,7 @@ _ARMED = 0
 _NO_MARKER = "cap needs a marker"
 
 #: `setitimer` accepts a non-positive interval and DISARMS on it, so a bound of zero or
-#: less is a wall that silently is not one. L5 says the bound is off when `seconds` is
+#: less is a wall that silently is not one. Law 5 says the bound is off when `seconds` is
 #: not passed; passing it and getting nothing is the one outcome the law does not admit,
 #: so it is a caller error, reported like any other arming failure.
 _BAD_SECONDS = "seconds must be > 0"
@@ -107,7 +107,7 @@ def _shielded(fn, *args):
 
     `emit` writes and then flushes. A wall delivered between those two leaves the line in
     the buffer, where the interpreter flushes it at exit, so the hook would report a
-    deadline AND the harness would still get the payload, which is the one outcome L5
+    deadline AND the harness would still get the payload, which is the one outcome law 5
     forbids ("nothing is written to stdout"). The window is one in-memory write and one
     flush; a bound lifted across it costs less than a payload the hook declared dead.
 
@@ -127,7 +127,7 @@ def _shielded(fn, *args):
 def _disarm(seconds, prev_timer, prev_handler):
     """Take the kit's deadline down and put back whatever was underneath it.
 
-    The restore needs no clock, which matters because L3 allows three imports and `time`
+    The restore needs no clock, which matters because law 3 allows three imports and `time`
     is not one of them: what the inner timer has left, read as it is cancelled, is what
     the outer timer did not spend.
     """
@@ -179,7 +179,7 @@ def guard(body, *args, on_error=None, seconds=None, default=None, where=_BODY):
             raise
         _absorb(on_error, exc, _DEADLINE)
         return default
-    except BaseException as exc:  # noqa: BLE001 -- L7 is the whole point of this function
+    except BaseException as exc:  # noqa: BLE001 -- law 7 is the whole point of this function
         if armed:
             _absorb(on_error, exc, where)
         else:
@@ -244,7 +244,7 @@ def _once(event, body, stream, out, cap, marker, render, on_error, on_emitted):
 
     None of these guards arms anything, so none of them absorbs the wall: a `_Deadline`
     from any step rises through here to `run`'s outer guard, which armed it, reports it
-    once, and ends the hook with nothing written. That is what makes L5's "the body is
+    once, and ends the hook with nothing written. That is what makes law 5's "the body is
     abandoned, nothing is written to stdout" true when the wall fires during the read or
     the render rather than only during the body.
     """

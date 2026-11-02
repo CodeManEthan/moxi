@@ -21,7 +21,11 @@ classifiers = [
 # delivery, its Stop hold and its context all go through it).
 # keyring is the credential chain's keychain step (the macOS Keychain, Windows Credential
 # Manager, the Secret Service): required, since Windows is a target and has no other.
-dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9"]
+# mcp is the SDK comms' tools are served with, from the daemon alone, and uvicorn the
+# HTTP server the daemon starts it on: required, since the tools are how a session's
+# model sends; `[mcp] enabled = false` turns them off.
+dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9",
+                "mcp>=2.3,<3", "uvicorn>=0.54,<1"]
 
 [project.optional-dependencies]
 # `moxi-comms-codex` launches each Codex session through turns' Codex host, whose
@@ -30,11 +34,14 @@ codex = ["moxi-turns[codex]>=0.2,<0.3"]
 # The cold-send hold reads each agent's prompt cache through the cache module, an
 # optional Moxi module comms reaches only through moxi.modules.load("cache").
 cache = ["moxi-cache>=0.1,<0.2"]
+# The browser UI shell: with it, comms' panel and its roster of agents show there.
+# Loopback, which comms' page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/comms/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # Only the core declares the `moxi` script. The module's own commands run as
 # `moxi comms <verb>`; there is no bare `comms` script. The internal entry points below
@@ -61,6 +68,11 @@ comms = "moxi_comms.reserved"
 [project.entry-points."moxi.turns.listeners"]
 comms = "moxi_comms.listeners"
 
+# comms' MCP server in a launch: turns asks it what a launch adds, and it answers the
+# server only when comms' wrapper stamped the session's token and the server's URL.
+[project.entry-points."moxi.turns.additions"]
+comms = "moxi_comms.mcp.additions:additions"
+
 # The adapter kinds a binding may register as. comms declares its own here, as any module
 # declares one (see moxi_comms/kinds.py).
 [project.entry-points."moxi.comms.kinds"]
@@ -71,8 +83,12 @@ opencode = "moxi_comms.kinds:OPENCODE"
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,
 # and exercises the cache seam, so the dev environment carries `websockets` (the one
-# dependency of turns' `codex` extra) and `moxi-cache` beside pytest.
-dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2"]
+# dependency of turns' `codex` extra) and `moxi-cache` beside pytest. moxi-ui's pytest
+# plugin runs comms' pages in a real shell, and its testing extra brings the browser; the
+# browser tests import Playwright themselves, so it is named too. moxi-dev brings
+# pytest-xdist. The endpoint's tests drive it with the MCP SDK's own client, over httpx2.
+dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2", "moxi-dev",
+       "moxi-ui[testing]", "playwright>=1.56,<2", "httpx2>=2.16,<3"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -85,8 +101,14 @@ packages = ["src/moxi_comms"]
 [tool.hatch.build.targets.sdist]
 # Only the published paths go into a source distribution, whatever branch it is built
 # from (hatchling adds pyproject.toml and .gitignore itself).
-only-include = ["CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "README.md", "docs", "scripts",
-                "src/moxi_comms", "tests"]
+only-include = ["CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "README.md", "conftest.py",
+                "docs", "scripts", "src/moxi_comms", "tests", "web"]
 
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path;
+# `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

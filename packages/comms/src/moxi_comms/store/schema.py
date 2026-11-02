@@ -1,7 +1,8 @@
 """comms.db's schema: the steps `moxi.store.migrate` walks, one per `user_version`.
 
-Version 1 is the whole store, and version 2 renames the operator's `author_kind`. Each
-table names what it holds; the rules about who writes which table live in
+Version 1 is the whole store, version 2 renames the operator's `author_kind`, and version
+3 adds `mcp_tokens`, the hashes of the per-session tokens comms' tools take. Each table
+names what it holds; the rules about who writes which table live in
 `store/__init__.py`.
 
 Times are the record's own spelling, `%Y-%m-%dT%H:%M:%SZ` in UTC, which sorts as it
@@ -38,6 +39,8 @@ IDENTITY_STATUSES = ("active", "retired")
 RESERVED_STATES = ("active", "conflict", "unowned")
 DROP_REASONS = ("expired", "withdrawn", "reserved")
 ROOM_KINDS = ("names",)
+#: Why a per-session tool token was revoked (`mcp/tokens.py`).
+REVOKED_WHY = ("session-ended", "name-lost", "superseded", "port-taken", "uninstall")
 
 
 def _among(column: str, values) -> str:
@@ -181,14 +184,38 @@ V2 = """
 UPDATE messages SET author_kind = 'operator' WHERE author_kind = 'user';
 """
 
-#: The steps, oldest first; the store's `user_version` counts those run.
-STEPS = (V1, V2)
+#: Version 3: the per-session tokens of comms' tools, one row per token, keyed by the
+#: token's SHA-256 hex. The token itself is never stored. `claim_key` is the claim of the
+#: adapter that registered it, `identity` the qualified name that claim binds, and
+#: `binding_id` the `bindings` row of its live binding, NULL between bindings. A row is
+#: never deleted: a revoked one keeps `revoked_at` and `revoked_why`, so its token is
+#: refused for good. Only the daemon writes it.
+V3 = f"""
+CREATE TABLE mcp_tokens (
+    token_hash     TEXT PRIMARY KEY,
+    claim_key      TEXT NOT NULL,
+    identity       TEXT NOT NULL,
+    adapter        TEXT NOT NULL,
+    binding_id     INTEGER,
+    created_at     TEXT NOT NULL,
+    revoked_at     TEXT,
+    revoked_why    TEXT {_among("revoked_why", REVOKED_WHY).replace(
+        "CHECK (", "CHECK (revoked_why IS NULL OR ")},
+    CHECK ((revoked_at IS NULL) = (revoked_why IS NULL))
+);
+CREATE INDEX mcp_tokens_claim ON mcp_tokens(claim_key) WHERE revoked_at IS NULL;
+CREATE INDEX mcp_tokens_binding ON mcp_tokens(binding_id) WHERE binding_id IS NOT NULL;
+"""
 
-#: The tables version 1 makes, in the order above.
+#: The steps, oldest first; the store's `user_version` counts those run.
+STEPS = (V1, V2, V3)
+
+#: The tables the steps make, in the order above.
 TABLES = ("meta", "rooms", "messages", "queue", "digests", "cursors", "bindings",
-          "identities", "operators", "reserved", "dropped", "principals", "denied")
+          "identities", "operators", "reserved", "dropped", "principals", "denied",
+          "mcp_tokens")
 
 __all__ = ["ID_BASE", "META_NEXT_ID", "META_MIGRATED_FROM", "META_AUTHOR_STAMPS",
            "META_QUEUE_MIGRATED", "QUEUE_STATES", "BINDING_KINDS",
            "IDENTITY_KINDS", "IDENTITY_STATUSES", "RESERVED_STATES", "DROP_REASONS",
-           "ROOM_KINDS", "STEPS", "TABLES", "V1", "V2"]
+           "ROOM_KINDS", "REVOKED_WHY", "STEPS", "TABLES", "V1", "V2", "V3"]

@@ -1,6 +1,6 @@
 """The public name on every surface, the package's declarations and the announcement.
 
-The module's name is `release.MODULE`; the harness and the org are the core's
+The module's name is `release.MODULE`; the harness and the owner are the core's
 (`moxi.names`). `pyproject.toml` cannot import either, so these tests hold it to them.
 """
 
@@ -36,8 +36,8 @@ def test_every_name_is_built_from_moxi_names():
     assert release.DISTRIBUTION == names.distribution("comms") == "moxi-comms"
     assert release.DISPLAY_NAME == "Moxi comms"
     assert release.UNIT == "moxi-comms-daemon.service"
-    assert release.REPO_URL == f"https://github.com/{names.ORG}/{names.HARNESS}" == \
-        "https://github.com/moxihq/moxi"
+    assert release.REPO_URL == f"https://github.com/{names.OWNER}/{names.HARNESS}" == \
+        "https://github.com/CodeManEthan/moxi"
 
 
 def _code_strings(path: Path) -> list[str]:
@@ -56,12 +56,13 @@ def _code_strings(path: Path) -> list[str]:
             and id(node) not in docstrings]
 
 
-def test_no_module_spells_the_org_or_the_repository():
-    """The org and the repository URL come from `moxi.names` through `release`, which
+def test_no_module_spells_the_owner_or_the_repository():
+    """The owner and the repository URL come from `moxi.names` through `release`, which
     alone builds the URL."""
     spelled = sorted(str(path.relative_to(SOURCE)) for path in SOURCE.rglob("*.py")
-                     if path != SOURCE / "release.py" and any(names.ORG in text or "github.com" in text
-                            for text in _code_strings(path)))
+                     if path != SOURCE / "release.py"
+                     and any(names.OWNER in text or "github.com" in text
+                             for text in _code_strings(path)))
     assert spelled == []
 
 
@@ -69,10 +70,11 @@ def test_pyproject_spells_it_the_same():
     project = PYPROJECT["project"]
     assert project["name"] == release.DISTRIBUTION
     assert project["entry-points"]["moxi.modules"] == {"comms": "moxi_comms.module"}
-    # The code lives in the one Moxi repository; issues stay at the module's own tracker.
+    # The code and the issues live in the one Moxi repository.
     urls = project["urls"]
     assert urls["Homepage"] == urls["Repository"] == release.REPO_URL
-    assert urls["Issues"] == f"https://github.com/{names.repo('comms')}/issues"
+    assert urls["Issues"] == f"https://github.com/{names.repo('comms')}/issues" == \
+        f"{release.REPO_URL}/issues"
 
 
 def test_the_public_identity_is_one_everywhere():
@@ -86,10 +88,12 @@ def test_the_public_identity_is_one_everywhere():
 # ------------------------------------------------------------------ the package
 
 def test_the_package_requires_the_core_and_turns_and_codex_is_an_extra():
-    """turns is required: it is the one way into a harness session."""
+    """turns is required: it is the one way into a harness session. The MCP SDK is too:
+    comms' tools are how a session's model sends, served on uvicorn."""
     project = PYPROJECT["project"]
     assert project["dependencies"] == ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3",
-                                       "keyring>=25", "psutil>=5.9"]
+                                       "keyring>=25", "psutil>=5.9", "mcp>=2.3,<3",
+                                       "uvicorn>=0.54,<1"]
     assert [d.split(">")[0] for d in project["optional-dependencies"]["codex"]] == \
         ["moxi-turns[codex]"]
     dev = PYPROJECT["dependency-groups"]["dev"]
@@ -133,6 +137,7 @@ def test_internal_env_is_the_wrapper_wiring_the_secrets_step_and_the_test_seam()
         "MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
         "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_SOCKET", "MOXI_COMMS_CLAIM_SOCKET",
         "MOXI_COMMS_PROJECT", "MOXI_COMMS_OPERATOR", "MOXI_COMMS_SECRET_",
-        "MOXI_COMMS_MOCK_BACKEND",
+        "MOXI_COMMS_MOCK_BACKEND", "MOXI_COMMS_MCP_TOKEN", "MOXI_COMMS_MCP_URL",
+        "MOXI_COMMS_SHELL_REACH",
     }
     assert all(why.strip() for why in module.INTERNAL_ENV.values())

@@ -1,0 +1,146 @@
+# The launcher's config schema: every key a user may set in CONFIG/launcher/config.toml.
+# `moxi config launcher` shows every key; `moxi config set launcher KEY VALUE` sets one.
+# Seats and project presets are not here: they live in CONFIG/launcher/presets.toml.
+
+[ready.wait_s]
+type = "int"
+default = 60
+doc = "How long a launch waits for the started session to be ready before its first turn, in seconds."
+read = "use"
+
+[first.wait_s]
+type = "int"
+default = 120
+doc = "How long a launch waits for its first turn to start once delivered, in seconds."
+read = "use"
+
+[startup.wait_s]
+type = "int"
+default = 20
+doc = "How long a slot launch watches for startup screens to answer, in seconds."
+read = "use"
+needs = "slots"
+
+[startup.trust_dialog]
+type = "bool"
+default = false
+doc = "Answer Claude Code's folder-trust screen in a slot launch, when it shows."
+read = "use"
+needs = "slots"
+
+[startup.dev_channels_dialog]
+type = "bool"
+default = false
+doc = "Answer Claude Code's development-channels screen in a slot launch, when it shows."
+read = "use"
+needs = "slots"
+
+[runs.keep_days]
+type = "int"
+default = 30
+doc = "How many days a launch's run files (its prompt file and headless log) are kept."
+read = "use"
+
+[relaunch.wait_s]
+type = "int"
+default = 900
+doc = "How long a self relaunch waits for its session to be quiet before it gives up, in seconds."
+read = "use"
+
+[relaunch.person_s]
+type = "int"
+default = 120
+doc = "How recently a person's use of the pane, or a turn no delivery opened, holds an act, in seconds."
+read = "use"
+
+[relaunch.dialog_s]
+type = "int"
+default = 60
+doc = "How long a relaunch or exit waits at Claude Code's exit dialog, in seconds."
+read = "use"
+needs = "slots"
+
+[relaunch.name_wait_s]
+type = "int"
+default = 15
+doc = "How long a relaunch waits for the old session's comms name to be let go, in seconds."
+read = "use"
+needs = "comms"
+
+[relaunch.follow_s]
+type = "int"
+default = 300
+doc = "How long a director's relaunch call follows its run before it returns, in seconds."
+read = "use"
+
+[relaunch.fallback]
+type = "string"
+default = ""
+doc = "A comms identity told of a failed relaunch when the launch has no director to tell, or when the notice to its directors is refused or fails (not while comms is offline)."
+read = "use"
+needs = "comms"
+
+[relaunch.pass_env]
+type = "list"
+default = []
+items = "str"
+doc = "Variable names, such as a sign-in token or API key, that a self relaunch, a repair or a resume carries from the environment of the process running it into the new session. A launch never records a credential, so this is how one comes back."
+read = "use"
+
+[relaunch.director_pass_env]
+type = "list"
+default = []
+items = "str"
+doc = "Variable names a director's relaunch carries from the director's environment into the new session; empty, nothing of the director's comes in."
+read = "use"
+
+[relaunch.notice_retry_s]
+type = "int"
+default = 30
+doc = "How long a relaunch notice refused for its sender's place is tried again, in seconds."
+read = "use"
+needs = "comms"
+
+[recycle.limit_wait_s]
+type = "int"
+default = 1800
+doc = "How long a compact at the context limit waits for the session to be idle, in seconds."
+read = "use"
+
+[keep_warm.subagent_cap]
+type = "int"
+default = 3
+doc = "How many keep-warm nudges in a row a session waiting on subagents gets."
+read = "use"
+
+[keep_warm.director_cap]
+type = "int"
+default = 10
+doc = "How many keep-warm nudges in a row a director with open holds gets."
+read = "use"
+
+[keep_warm.subagent_texts]
+type = "list"
+default = ["Keep-warm check: say in one line what each running subagent is doing.", "Keep-warm decision: for each running subagent, stop it, split its work or let it run.", "Last keep-warm nudge: after this the cache goes cold; leave the session ready for that."]
+items = "str"
+doc = "The keep-warm nudges for a session waiting on subagents, in order; the subagents are named after each."
+read = "use"
+
+[keep_warm.director_texts]
+type = "list"
+default = ["Keep-warm: reply warm unless you are mid-work.", "Keep-warm: check each open hold by name, and release those whose work is done."]
+items = "str"
+doc = "The keep-warm nudges for a director: the first, then the second for every later one."
+read = "use"
+
+[page.launch_wait_s]
+type = "int"
+default = 600
+doc = "How long a launch made from the page may take, and how long a preview stays good for launching, in seconds."
+read = "use"
+
+[records.keep_days]
+type = "int"
+default = 90
+doc = "How many days ended runs, their events and exits, and released holds are kept."
+read = "use"

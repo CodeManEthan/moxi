@@ -10,9 +10,11 @@
     moxi config set ...          changes one of them (`moxi config unset` removes one)
     moxi paths <module> [--json] where a module keeps its files
     moxi doctor [<module>...]    checks every module, its units, stores and records
-    moxi check [PATH]            the module contract check
     moxi help [<verb>|<module>]  help
     moxi version                 versions
+
+`moxi check` ran the module contract check, which is moxi-dev's now; the verb stays
+reserved and says where it went.
 
 The verbs are reserved: no module may take one as its name. A module owns only what
 follows its name: `moxi comms send ...` calls the `CLI` target comms' announcement names
@@ -53,7 +55,6 @@ commands:
   doctor [<module>...] [--json] [--costs]
                                      check the modules, their settings, units and stores
   doctor --clear <module> <key>      remove a record a program left for the doctor
-  check [--staged] [PATH]            check a module repo against the module contract
   help [<command>|<module>]          this help, or a command's or a module's
   version                            the versions of moxi and its modules
 """
@@ -1056,12 +1057,22 @@ def _toml_value(value) -> str:
     raise TypeError(f"cannot write {value!r} as TOML")
 
 
-# -- moxi check, help, version --------------------------------------------------------------
+# -- moxi check, install, help, version -----------------------------------------------------
+
+#: What `moxi check` says: the contract check moved to the contributors' package.
+CHECK_MOVED = """\
+the module contract check moved out of moxi, to the contributors' package moxi-dev:
+  moxi-dev check                        every check a change needs, from a checkout
+                                        of the Moxi repository
+  moxi-dev contract [--staged] [PATH]   the contract check alone, over one module's
+                                        directory
+"""
+
 
 def _check(argv: list[str]) -> int:
-    from . import contract
-
-    return contract.main(argv)
+    asked = bool(argv) and argv[0] in ("-h", "--help")
+    (sys.stdout if asked else sys.stderr).write(f"moxi check: {CHECK_MOVED}")
+    return 0 if asked else 2
 
 
 # -- moxi paths ---------------------------------------------------------------------------

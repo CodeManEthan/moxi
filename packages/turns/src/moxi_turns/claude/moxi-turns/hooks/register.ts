@@ -1,20 +1,29 @@
 // moxi-turns, the runner: turns' Claude Code adapter in the session.
 //
-// It spawns the session's endpoint (`endpoint.json` beside this plugin names the command),
-// reports the session's main-loop turns to it, puts in what it hands over (a submit, a
-// steer, a /clear, /exit or /compact), and asks it at SessionStart, UserPromptSubmit and
-// Stop. The runner reads no setting: its bounds are the constants below, and the
-// endpoint's first line carries `stop_wait_ms` and `listen_wait_ms`.
+// It spawns the session's endpoint, reports the session's main-loop turns to it, puts in
+// what it hands over (a submit, a steer, a /clear, /exit or /compact), and asks it at
+// SessionStart, UserPromptSubmit and Stop. The runner reads no setting: its bounds are the
+// constants below, and the endpoint's first line carries `stop_wait_ms` and
+// `listen_wait_ms`.
+//
+// The endpoint command: `MOXI_TURNS_ENDPOINT` in the session's environment, which a launch
+// through turns' launch additions sets; else the one `endpoint.json` beside this plugin
+// names, which turns' setup writes for a user-scope install. A variable that is set but
+// not an absolute path is no endpoint, and the file is not read then. A read of the
+// variable that throws counts as unset, so the file is read.
 //
 // The internal leg (not the socket contract; it changes only with the package). The
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
 //
 // Endpoint to runner: one JSON object per line on the child's stdout, by `op`:
-//   hello    {op, leg: 2, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
-//            stop_after_clear}
+//   hello    {op, leg: 3, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
+//            stop_after_clear, guards, after_tool_wait_ms, floors}
 //            the first line. Before it the runner sends nothing, and it sends nothing to an
 //            endpoint whose leg it does not speak. `stop_after_clear` false: after a clear
 //            the runner stops no shell (each listed one is left, `not-stopped-after-clear`).
+//            `guards` is the guard table (below); `floors` the after-tool rows (below).
+//   guards   {op, table}   the guard table again, at each ready; it replaces the one held
+//   floors   {op, rows}    every after-tool row's floor, at each change; replaces the map
 //   failed   {op, leg, error}   the endpoint could not start: its only line
 //   submit   {op, delivery, kind, text, nonce}
 //            opens the submit's window and calls $.prompt.submit with the line
@@ -44,12 +53,19 @@
 //                             shells?}  with stop_shells a `ran` carries
 //                             shells: {stopped: [id], left: [{id, why}], complete}
 //   /ask/context {event: ready|prompt, source, session_id}  -> {context: string | null}
+//                a ready adds `transcript_path` (the hook input's); a prompt adds `text` (the
+//                hook input's `prompt`) and `origin` (below)
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
 //   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
 //   /agents      {ask, entries}                            -> {}  each entry as the engine
 //                gives it, {id, type, description, status, parentId?, teammateId?}; the
 //                endpoint maps the states (entries null: unreadable)
+//   /ask/guard   {call: {tool, tool_use_id, input, agentId, cwd?, prompts?}, guards: [id]}
+//                -> {deny?, lines, broken}   a call judge entries cover (the guards, below)
+//   /ask/after-tool {call: {tool, tool_use_id, agentId, is_error}, rows: [id]}
+//                -> {context: string | null}   after a call ran (after-tool, below)
+//   /report/usage {usage}                                   -> {}  outside the queue (below)
 //   /hook-times  {samples: [{event, ms}]}                   -> {}  at most once a minute
 //   The gate asks on the same socket: /gate/entry {nonce, draft, agents} and
 //   /gate/command {request, agents, draft} -> {verdict: pass} | {verdict: drop, reason,
@@ -122,6 +138,85 @@
 // The non-interactive rule: `$.session.surfaces()` empty means headless, read in
 // whichever of session.start and classic.SessionStart runs first; the first read decides.
 // A headless run spawns no endpoint and every hook returns at once.
+//
+// The guards: the runner matches every tool call against the table the endpoint sent, in
+// its own process, and only a call a judge entry covers leaves it. An entry is
+//   {id, calls: [pattern], who: any|main|agents, match: {field: regex} | null,
+//    match_flags: ""|"i", judge, deny, wants: ["prompts"]?, on_error: allow|deny,
+//    deadline_ms}
+// An entry covers a call when a pattern matches the whole tool name (`*` any run of
+// characters, every other character only itself), `who` takes the loop (an absent or empty
+// `agentId` is the main loop), and every `match` regex finds its input field, which must be
+// a string. The regexes compile with no flags but `i`, never `u`. The engines differ on a
+// few points no shared case can hold: JavaScript's `.` also stops at `\r`, U+2028 and
+// U+2029, its `\s` takes Unicode spaces, and its `$` does not match before a final newline.
+// For each call, in table order:
+//   1. nothing covers it: `next(e)` at once, with no trip;
+//   2. a data-only entry (no judge) covers it: refused with its `deny`, and `next` is
+//      never called;
+//   3. else one POST /ask/guard naming the covering judge entries, bounded by the largest
+//      of their `deadline_ms` plus 1 s. The call carries `cwd`, the directory it runs in:
+//      `$.session.cwd()` read inside this hook, so a subagent's call carries the
+//      subagent's own. It is read only here, inside the bound; a read that rejects or
+//      gives no string sends the ask with no `cwd`, and the endpoint judges against the
+//      launch directory. A `deny` in the answer refuses; else the tool runs and `lines`,
+//      then `broken`, go into the result's `context`, which the model reads after the
+//      tool's result.
+//   A trip that fails or misses its bound breaks each entry it named: the call is refused
+//   with "turns could not check this call with guard <id> (<why>)" when one of them
+//   declared `on_error` deny, else it runs with one line per entry, "[turns] guard <id>
+//   could not check this call (<why>); it ran unchecked.". An entry whose `match` does not
+//   compile here breaks each call its patterns and `who` take, the same way.
+// The trip is timed as the hook-time event `guard`, and the tool.call event's own time
+// leaves it out. The runner's own tool calls (its TaskStop) are never matched. The hook's
+// catch makes no trip, since it gets 1 s: it refuses "turns could not check this call"
+// when `next` was not called and a covering entry declared `on_error` deny, else it
+// passes the call on.
+//
+// The prompt list: the prompts of the main turn now running, sent on an ask only when a
+// named entry `wants` prompts. A prompt counts in a main turn only when the runner can tie
+// it to that turn; one it can't tie counts in no turn, so a list comes out short, never
+// long, and a guard reading it fails closed. The `prompt.submit` hook records each prompt
+// (not one with `isMeta`) as its origin's kind, its text and its `turnId`, in a waiting set,
+// then calls `next(e)`:
+//   1. a prompt whose `turnId` is the running main turn's also joins that turn's list;
+//   2. when `next(e)` resolves with the prompt entered, one with a `turnId` takes the text
+//      that entered (a hook beneath may have rewritten it) and keeps waiting, since typed
+//      during a turn's last model step it opens the next turn; one without leaves the
+//      waiting set, since any turn it opened started inside its `next(e)`. A drop or a
+//      rejection takes the prompt out of the waiting set and the list;
+//   3. at each main `turn.start` the list becomes the waiting prompt whose text equals the
+//      turn's (two such: the one whose `next(e)` is still in flight, then the latest);
+//      else the latest waiting prompt without a `turnId`, all of which are in flight; else
+//      nothing. While one of the runner's own submits is in flight, only a text match ties,
+//      since the turn may be the runner's own, whose prompt this hook never sees. Then the
+//      waiting set is emptied;
+//   4. a subagent's or teammate's turn touches none of it.
+// The list is never cleared at a turn's end; the next main `turn.start` replaces it.
+//
+// After-tool: `floors` maps each after-tool row (a listener row naming `after-tool`) to
+// its floor in tokens; an empty map means no row, and the runner never asks. Once a call's
+// `next(e)` resolved with a result or an error (not a deny, and never for the runner's own
+// calls), the runner asks /ask/after-tool naming the rows the floors let through, bounded
+// by `after_tool_wait_ms` plus 1 s: on the main loop (no `agentId`) a row is skipped while
+// the context's tokens, from the last `session.measure` or turn-end reading since the last
+// SessionStart, are below its floor; an agent's call, or a context not known, skips none.
+// With every row skipped no trip is made. The answer's `context` goes into the result's
+// `context` after the guards' lines. The trip is timed as the hook-time event `after-tool`
+// and left out of the tool.call event's own time.
+//
+// Usage: on each `session.measure` whose `changed` names `context` or `rateLimits`, and
+// at each main-loop `turn.complete` from `$.session.usage()`, the runner posts the
+// reading, as Claude gave it less any `breakdown`, on /report/usage, outside the report
+// queue, and does not wait for the answer. A measure carries no `startedAt`; the
+// turn-end reading does. The context's `tokens` in either is what the floors are read
+// against.
+//
+// The prompt's origin: the /ask/context prompt ask (classic.UserPromptSubmit, which runs
+// inside a prompt's `next(e)`) carries the origin of the prompt the `prompt.submit` hook
+// has in flight: the one whose text equals the hook input's, else the only one in flight.
+// While one of the runner's own submits is in flight only a text match counts; none:
+// null.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -139,8 +234,14 @@ const QUEUE_MAX = 1000
 const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const GATE_DROP = /^moxi-turns-gate: .*\(([a-z-]+)\)$/
 const NONCE_LINE = 'moxi-turns-window: '
-const LEG = 2
+const LEG = 3
 const PLUGIN = 'moxi-turns'
+/** A guard's bound when its entry names none. */
+const GUARD_DEADLINE_MS = 500
+/** The catch's refusal: it decides at once and names no guard. */
+const CANNOT_CHECK = 'turns could not check this call'
+/** The keys of a `tool.call` envelope that are no argument of the tool. */
+const NOT_INPUT = new Set(['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent'])
 const SHELL_STOP_MS = 10_000
 const STOPPABLE = new Set(['shell', 'monitor'])
 const UNLISTED = 'unlisted'
@@ -150,14 +251,40 @@ const NOT_STOPPED_AFTER_CLEAR = 'not-stopped-after-clear'
 /** What TaskStop says of a task that has already ended. */
 const ENDED = /not running|no longer running|already (?:stopped|completed|finished|exited|ended|killed)|has (?:already )?(?:completed|finished|exited|ended)/i
 const HOOK_TIMES_MS = 60_000
+/** `after_tool.wait_ms`'s default, when the hello names none. */
+const AFTER_TOOL_WAIT_MS = 300
 const HOOK_TIMES_MAX = 1000
 
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 
-type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean }
+type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean; afterToolWaitMs: number }
 type Json = Record<string, unknown>
 type Report = { kind: string; fields: Json; seq: number; landed: Promise<void>; land: () => void }
+/** One entry of the guard table, ready to match. */
+export type Guard = {
+  id: string
+  /** The tool-name patterns, each anchored at both ends. */
+  calls: RegExp[]
+  who: 'any' | 'main' | 'agents'
+  /** Each input field and the regex that must find it. */
+  match: [string, RegExp][]
+  judge: boolean
+  deny: string
+  wantsPrompts: boolean
+  onError: 'allow' | 'deny'
+  deadlineMs: number
+  /** Why the entry can't be matched here (a `match` regex that does not compile), or null. */
+  bad: string | null
+}
+/** A prompt the `prompt.submit` hook saw. */
+type Seen = {
+  origin: string | null
+  text: string
+  turnId: string | null
+  /** Its `next(e)` has not settled. */
+  inFlight: boolean
+}
 type Win = {
   delivery: string
   /** The submit settled and its settle was reported (or the endpoint ended). */
@@ -191,6 +318,18 @@ const inflight = new Map<string, string | undefined>()
 const stopping = new Set<string>()
 /** The runner's own commands now running, each until its stop has read the mark. */
 let ownCommands = 0
+/** The guard table the endpoint sent last, in its order. */
+let guards: Guard[] = []
+/** The prompts waiting for a main turn, in the order seen. */
+let waiting: Seen[] = []
+/** The prompts of the main turn now running (or of the last one, until the next starts). */
+let turnPrompts: Seen[] = []
+/** The runner's own `$.prompt.submit` calls not yet settled. */
+let ownSubmits = 0
+/** Each after-tool row's floor in tokens, by row id; empty: no row. */
+let floors: Record<string, number> = {}
+/** The main loop's context in tokens, from the last reading since the last SessionStart. */
+let contextTokens: number | null = null
 
 const log = ($: Dollar, text: string): void => {
   try {
@@ -391,20 +530,33 @@ async function openWindow($: Dollar, delivery: string, text: string, nonce: stri
   win = w
   arm($, w, IDLE_FAIL_MS)
   let submitted: ReturnType<Dollar['prompt']['submit']>
+  // Counted in flight until the call settles, whatever the window does: a bound or the
+  // endpoint's end closes the window while the call still runs.
+  let counted = true
+  const uncount = (): void => {
+    if (counted) {
+      counted = false
+      ownSubmits -= 1
+    }
+  }
+  ownSubmits += 1
   try {
     submitted = $.prompt.submit({ text: `${NONCE_LINE}${nonce}\n${text}` })
   } catch (err) {
+    uncount()
     settle($, w, 'fail', `rejected: ${String(err)}`)
     return
   }
   submitted.then(
     r => {
+      uncount()
       if (w.closed) return
       if (w.bounded) log($, `submit ${delivery} settled after its bound`)
       if (typeof r.drop === 'string') settle($, w, 'drop', dropReason(r.drop))
       else settle($, w, 'resolve', null)
     },
     err => {
+      uncount()
       if (!w.closed) settle($, w, 'fail', `rejected: ${String(err)}`)
     },
   )
@@ -632,13 +784,23 @@ async function onLine($: Dollar, line: string): Promise<void> {
     let land: () => void = () => {}
     const landed = new Promise<void>(resolve => { land = resolve })
     queue.unshift({ kind: 'session', fields: { session_id: sessionId, mod_version: MOD_VERSION }, seq: 0, landed, land })
-    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false }
+    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false, afterToolWaitMs: num(m.after_tool_wait_ms, AFTER_TOOL_WAIT_MS) }
+    if (m.guards !== undefined) takeTable($, m.guards)
+    if (m.floors !== undefined) takeFloors($, m.floors)
     helloSeen()
     void pump($)
     void writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
     return
   }
   if (hello === undefined) return
+  if (op === 'guards') {
+    takeTable($, m.table)
+    return
+  }
+  if (op === 'floors') {
+    takeFloors($, m.rows)
+    return
+  }
   const delivery = str(m.delivery)
   const nonce = str(m.nonce)
   if (op === 'submit' && delivery !== undefined) {
@@ -678,6 +840,23 @@ function endpointEnded($: Dollar, why: string): void {
 }
 
 async function readArgv($: Dollar): Promise<string[] | undefined> {
+  // The launch's own name for the endpoint wins. Set but not absolute is no endpoint: the
+  // file beside the plugin may name another environment's command. A `$.env.get` that
+  // throws says nothing about whether the variable is set; it counts as unset, and the
+  // file is read.
+  let named: string | undefined
+  try {
+    named = await $.env.get('MOXI_TURNS_ENDPOINT')
+  } catch {
+    named = undefined
+  }
+  if (named !== undefined) {
+    if (!named.startsWith('/')) {
+      log($, `no endpoint: MOXI_TURNS_ENDPOINT is ${JSON.stringify(named)}, not an absolute command`)
+      return undefined
+    }
+    return [named]
+  }
   let doc: unknown
   try {
     doc = JSON.parse(await $.fs.read(`${$.plugin.root}/endpoint.json`))
@@ -745,6 +924,299 @@ async function isHeadless($: Dollar): Promise<boolean> {
 const withContext = <R extends { additionalContext?: string[] }>(r: R, context: unknown): R =>
   typeof context === 'string' && context !== '' ? { ...r, additionalContext: [...(r.additionalContext ?? []), context] } : r
 
+// -- the guards ----------------------------------------------------------------------------
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
+
+/** A tool-name pattern as a regex over the whole name: `*` any run, the rest literal. */
+export function globRegex(pattern: string): RegExp {
+  return new RegExp(`^${pattern.split('*').map(escapeRe).join('.*')}$`)
+}
+
+/** The break line of a guard that let its call through unchecked. */
+export const breakLine = (id: string, why: string): string => `[turns] guard ${id} could not check this call (${why}); it ran unchecked.`
+/** The refusal of a call whose broken guard declared `on_error` deny. */
+export const breakDeny = (id: string, why: string): string => `turns could not check this call with guard ${id} (${why})`
+
+/** One table entry as the leg gives it, ready to match; null when it is not one. */
+export function parseGuard(v: unknown): Guard | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null
+  const d = v as Json
+  const id = str(d.id)
+  if (id === undefined || id === '' || !Array.isArray(d.calls) || !d.calls.every(p => typeof p === 'string')) return null
+  if (d.who !== 'any' && d.who !== 'main' && d.who !== 'agents') return null
+  const match: [string, RegExp][] = []
+  let bad: string | null = null
+  if (d.match !== null && d.match !== undefined) {
+    if (typeof d.match !== 'object' || Array.isArray(d.match)) return null
+    const flags = d.match_flags === 'i' ? 'i' : ''
+    for (const [field, source] of Object.entries(d.match as Json)) {
+      if (typeof source !== 'string') return null
+      try {
+        match.push([field, new RegExp(source, flags)])
+      } catch (err) {
+        bad ??= `its match on ${field} does not compile here: ${String(err)}`
+      }
+    }
+  }
+  return {
+    id,
+    calls: (d.calls as string[]).map(globRegex),
+    who: d.who,
+    match,
+    judge: d.judge === true,
+    deny: str(d.deny) ?? '',
+    wantsPrompts: Array.isArray(d.wants) && d.wants.includes('prompts'),
+    onError: d.on_error === 'deny' ? 'deny' : 'allow',
+    deadlineMs: num(d.deadline_ms, GUARD_DEADLINE_MS),
+    bad,
+  }
+}
+
+/** The table a `guards` field or line holds; entries that are not entries are left out. */
+export function parseTable(v: unknown): Guard[] | null {
+  if (!Array.isArray(v)) return null
+  const out: Guard[] = []
+  for (const item of v) {
+    const g = parseGuard(item)
+    if (g !== null) out.push(g)
+  }
+  return out
+}
+
+function takeTable($: Dollar, v: unknown): void {
+  const table = parseTable(v)
+  if (table === null) {
+    log($, 'the endpoint sent a guard table that is not a list; the last one stays')
+    return
+  }
+  if (Array.isArray(v) && table.length !== v.length) log($, `${v.length - table.length} guard entries were not entries and are left out`)
+  for (const g of table) if (g.bad !== null) log($, `guard ${g.id}: ${g.bad}`)
+  guards = table
+}
+
+/** What the table says of one call. */
+export type Decision = {
+  /** The entries that cover it, in table order. */
+  covering: Guard[]
+  /** The first covering data-only entry: it refuses with no trip. */
+  deny: Guard | null
+  /** The covering judge entries, asked on /ask/guard when no data-only entry refuses. */
+  ask: Guard[]
+  /** Entries whose patterns and `who` take the call but whose `match` can't run here. */
+  broken: Guard[]
+}
+
+const isMain = (agentId: unknown): boolean => agentId === undefined || agentId === null || agentId === ''
+
+export function decide(table: readonly Guard[], tool: string, agentId: unknown, input: Json): Decision {
+  const d: Decision = { covering: [], deny: null, ask: [], broken: [] }
+  const main = isMain(agentId)
+  for (const g of table) {
+    if (!g.calls.some(r => r.test(tool))) continue
+    if ((g.who === 'main' && !main) || (g.who === 'agents' && main)) continue
+    if (g.bad !== null) {
+      d.broken.push(g)
+      continue
+    }
+    if (!g.match.every(([field, re]) => typeof input[field] === 'string' && re.test(input[field] as string))) continue
+    d.covering.push(g)
+    if (!g.judge) d.deny ??= g
+    else d.ask.push(g)
+  }
+  return d
+}
+
+/** A call's input: its envelope less the keys that are no argument of the tool. */
+function inputOf(e: Json): Json {
+  const out: Json = {}
+  for (const [k, v] of Object.entries(e)) if (!NOT_INPUT.has(k)) out[k] = v
+  return out
+}
+
+/** Would the catch refuse this call? Only when a covering (or broken) entry declared
+ *  `on_error` deny; a table it can't read refuses when any entry did. */
+export function catchRefuses(table: readonly Guard[], e: Json): boolean {
+  try {
+    const d = decide(table, String(e.tool), e.agentId, inputOf(e))
+    return [...d.covering, ...d.broken].some(g => g.onError === 'deny')
+  } catch {
+    return table.some(g => g.onError === 'deny')
+  }
+}
+
+type Trip = { answer: Json } | { why: string }
+
+/** The directory the hook's call runs in, or undefined when the read fails. */
+async function callCwd($: Dollar): Promise<string | undefined> {
+  try {
+    const cwd: unknown = await $.session.cwd()
+    return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** One /ask/guard trip, bounded by `boundMs` on the plugin's own timer. The call's `cwd` is
+ *  read first, inside the bound; it is left out when the read fails. */
+async function guardTrip($: Dollar, body: { call: Json; guards: string[] }, boundMs: number): Promise<Trip> {
+  if (hello === undefined || ended) return { why: "turns' endpoint is not running" }
+  const sock = hello.sock
+  const sent = callCwd($).then(cwd => {
+    if (cwd !== undefined) body.call.cwd = cwd
+    return post($, sock, '/ask/guard', body)
+  }).then(
+    (answer): Trip => ({ answer }),
+    (err): Trip => ({ why: `the trip failed: ${String(err)}` }),
+  )
+  const late = after<Trip>($, boundMs).then((): Trip => ({ why: `no answer within ${boundMs} ms` }))
+  return Promise.race([sent, late])
+}
+
+const texts = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : [])
+
+/** What the guards say before the tool runs: a refusal, or the lines for after it. */
+async function judge($: Dollar, w: Watch, e: Json, d: Decision): Promise<{ deny: string } | { lines: string[] }> {
+  if (d.deny !== null) return { deny: d.deny.deny !== '' ? d.deny.deny : `guard ${d.deny.id} refused this call` }
+  const late: string[] = []
+  for (const g of d.broken) {
+    const why = g.bad ?? 'its match does not compile here'
+    if (g.onError === 'deny') return { deny: breakDeny(g.id, why) }
+    late.push(breakLine(g.id, why))
+  }
+  if (d.ask.length === 0) return { lines: late }
+  const boundMs = Math.max(...d.ask.map(g => g.deadlineMs)) + MARGIN_MS
+  const call: Json = { tool: e.tool, tool_use_id: e.tool_use_id, input: inputOf(e), agentId: isMain(e.agentId) ? null : e.agentId }
+  if (d.ask.some(g => g.wantsPrompts)) call.prompts = turnPrompts.map(p => ({ origin: p.origin, text: p.text }))
+  const t0 = performance.now()
+  const trip = await guardTrip($, { call, guards: d.ask.map(g => g.id) }, boundMs)
+  const ms = performance.now() - t0
+  w.away += ms
+  sample($, 'guard', ms)
+  if ('why' in trip) {
+    const denies = d.ask.find(g => g.onError === 'deny')
+    if (denies !== undefined) return { deny: breakDeny(denies.id, trip.why) }
+    return { lines: [...d.ask.map(g => breakLine(g.id, trip.why)), ...late] }
+  }
+  const deny = trip.answer.deny
+  if (typeof deny === 'string' && deny !== '') return { deny }
+  return { lines: [...texts(trip.answer.lines), ...texts(trip.answer.broken), ...late] }
+}
+
+/** The tool's result with `lines` added to what the model reads after it; a refusal as is. */
+function withLines<R extends { deny?: unknown; context?: readonly string[] }>(r: R, lines: string[]): R {
+  if (lines.length === 0 || r === null || typeof r !== 'object' || r.deny !== undefined) return r
+  return { ...r, context: [...(r.context ?? []), ...lines] }
+}
+
+// -- after-tool and usage ------------------------------------------------------------------
+
+/** The floors a `floors` field or line holds: each row id with a whole number of tokens. */
+export function parseFloors(v: unknown): Record<string, number> | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null
+  const out: Record<string, number> = {}
+  for (const [id, n] of Object.entries(v as Json)) if (typeof n === 'number' && Number.isFinite(n)) out[id] = Math.max(0, n)
+  return out
+}
+
+function takeFloors($: Dollar, v: unknown): void {
+  const parsed = parseFloors(v)
+  if (parsed === null) {
+    log($, 'the endpoint sent floors that are not a map; the last ones stay')
+    return
+  }
+  floors = parsed
+}
+
+/** The after-tool rows a call reaches: every row for an agent's call or an unknown
+ *  context; on the main loop, the rows whose floor the context has reached. */
+export function afterRows(table: Readonly<Record<string, number>>, agentId: unknown, tokens: number | null): string[] {
+  const ids = Object.keys(table)
+  if (!isMain(agentId) || tokens === null) return ids
+  return ids.filter(id => tokens >= (table[id] ?? 0))
+}
+
+/** The after-tool rows' text for a call that ran, or none. Never throws. */
+async function afterTool($: Dollar, w: Watch, e: Json, r: unknown): Promise<string[]> {
+  try {
+    if (hello === undefined || ended || r === null || typeof r !== 'object' || (r as Json).deny !== undefined) return []
+    const rows = afterRows(floors, e.agentId, contextTokens)
+    if (rows.length === 0) return []
+    const call = { tool: e.tool, tool_use_id: e.tool_use_id, agentId: isMain(e.agentId) ? null : e.agentId, is_error: (r as Json).isError === true }
+    const t0 = performance.now()
+    const answer = await ask($, '/ask/after-tool', { call, rows }, hello.afterToolWaitMs + MARGIN_MS)
+    const ms = performance.now() - t0
+    w.away += ms
+    sample($, 'after-tool', ms)
+    const text = answer?.context
+    return typeof text === 'string' && text !== '' ? [text] : []
+  } catch (err) {
+    log($, `after-tool: ${String(err)}`)
+    return []
+  }
+}
+
+/** A usage reading as Claude gave it, less the context's `breakdown`. */
+export function usageOf(reading: Json): Json {
+  const out: Json = { ...reading }
+  delete out.changed
+  const context = out.context
+  if (context !== null && typeof context === 'object' && !Array.isArray(context)) {
+    const c = { ...(context as Json) }
+    delete c.breakdown
+    out.context = c
+  }
+  return out
+}
+
+/** Keeps the context's tokens from a reading; absent tokens leave what was known. */
+function noteContext(reading: Json): void {
+  const tokens = (reading.context as Json | undefined)?.tokens
+  if (typeof tokens === 'number' && Number.isFinite(tokens)) contextTokens = tokens
+}
+
+/** Posts a reading on /report/usage, not waited for. */
+function postUsage($: Dollar, reading: Json): void {
+  if (hello === undefined || ended) return
+  void ask($, '/report/usage', { usage: usageOf(reading) }, REPORT_WAIT_MS)
+}
+
+// -- the prompt list -----------------------------------------------------------------------
+
+/** A prompt leaves the waiting set (once its turn has started, or it entered none). */
+function unwait(p: Seen): void {
+  const i = waiting.indexOf(p)
+  if (i >= 0) waiting.splice(i, 1)
+}
+
+/** A prompt that entered no turn leaves the waiting set and the list. */
+function forget(p: Seen): void {
+  unwait(p)
+  const i = turnPrompts.indexOf(p)
+  if (i >= 0) turnPrompts.splice(i, 1)
+}
+
+/** The origin of the prompt whose classic.UserPromptSubmit runs now, inside its
+ *  `prompt.submit` hook's `next(e)`: the prompt in flight with the same text, else the
+ *  only one in flight; while one of the runner's own submits is in flight, a text match
+ *  only. Null when none ties. */
+export function originOf(text: unknown): string | null {
+  const live = waiting.filter(p => p.inFlight)
+  const chosen = live.filter(p => p.text === text).at(-1) ?? (ownSubmits === 0 && live.length === 1 ? live[0] : undefined)
+  return chosen?.origin ?? null
+}
+
+/** A main turn starts: its list is the one waiting prompt the runner can tie to it. */
+function openList(text: string): void {
+  const same = waiting.filter(p => p.text === text)
+  // Two with the same text: the one still in flight (the turn may be starting inside its
+  // `next(e)`), then the latest.
+  let chosen = [...same].reverse().find(p => p.inFlight) ?? same.at(-1)
+  if (chosen === undefined && ownSubmits === 0) chosen = waiting.filter(p => p.turnId === null).at(-1)
+  turnPrompts = chosen === undefined ? [] : [chosen]
+  waiting = []
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const hook = watch()
@@ -767,7 +1239,9 @@ export const register: Register = on => {
       // A /clear empties $.state (and a resume or compaction may): the mod.sock path is
       // written again at every SessionStart, for the gate.
       await writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
-      const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
+      // A new session's context is not known until its first reading.
+      contextTokens = null
+      const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id, transcript_path: e.transcript_path || null }, hello.listenWaitMs + MARGIN_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {
       timeHook($, 'classic.SessionStart', hook)
@@ -781,7 +1255,7 @@ export const register: Register = on => {
       const w = win
       // turns' own entry hook: the bound is raised by this ask's bound while it runs.
       if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
-      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt) }, hello.listenWaitMs + MARGIN_MS)
       if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {
@@ -793,7 +1267,8 @@ export const register: Register = on => {
     const hook = watch()
     try {
       // Only the main loop opens a turn: a subagent's or teammate's start (`agentId`)
-      // leaves the open turn as it is.
+      // leaves the open turn and its prompts as they are.
+      if (e.agentId === undefined && headless !== true) openList(e.text)
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = e.turnId
       stopTimer(win)
@@ -812,6 +1287,14 @@ export const register: Register = on => {
       turnOpen = null
       await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
       if (win !== null) arm($, win, IDLE_FAIL_MS)
+      // A reading at every turn's end, whatever the measures said (the plain call is free).
+      try {
+        const reading = (await $.session.usage()) as unknown as Json
+        noteContext(reading)
+        postUsage($, reading)
+      } catch (err) {
+        log($, `the turn's usage was not read: ${String(err)}`)
+      }
       return behind(hook, performance.now(), await next(e))
     } finally {
       timeHook($, 'turn.complete', hook)
@@ -849,9 +1332,38 @@ export const register: Register = on => {
     }
   })
 
-  // Every loop's tool calls pass here: each one in flight marks the list. The call goes on
-  // unchanged, and the hook's time leaves out the tool's own run (`next`). The runner's
-  // own TaskStop calls mark nothing.
+  // Every prompt but the runner's own passes here (a plugin's hooks never see its own
+  // submits): the prompt list's steps 1 and 2.
+  on('prompt.submit', async ($, e, next) => {
+    const hook = watch()
+    try {
+      if (headless === true || e.isMeta === true) return behind(hook, performance.now(), await next(e))
+      const kind = (e.origin as { kind?: unknown } | undefined)?.kind
+      const p: Seen = { origin: typeof kind === 'string' ? kind : null, text: e.text, turnId: e.turnId ?? null, inFlight: true }
+      waiting.push(p)
+      if (p.turnId !== null && p.turnId === turnOpen) turnPrompts.push(p)
+      let entered = false
+      try {
+        const since = performance.now()
+        const r = behind(hook, since, await next(e))
+        if (r.drop === undefined && typeof r.text === 'string') {
+          entered = true
+          if (p.turnId !== null) p.text = r.text
+          else unwait(p)
+        }
+        return r
+      } finally {
+        p.inFlight = false
+        if (!entered) forget(p)
+      }
+    } finally {
+      timeHook($, 'prompt.submit', hook)
+    }
+  })
+
+  // Every loop's tool calls pass here: each one in flight marks the list, and the guards
+  // judge it. The hook's time leaves out the tool's own run (`next`) and the guard trip.
+  // The runner's own calls (its TaskStop) are never judged and mark nothing.
   on('tool.call', async ($, e, next) => {
     const hook = watch()
     const id = e.tool_use_id
@@ -860,16 +1372,46 @@ export const register: Register = on => {
       inflight.set(id, e.agentId)
       tasksMarked = true
     }
-    const since = performance.now()
     try {
-      return await next(e)
+      const d = own || headless === true || guards.length === 0 ? null : decide(guards, e.tool, e.agentId, inputOf(e as Json))
+      let lines: string[] = []
+      if (d !== null && (d.covering.length > 0 || d.broken.length > 0)) {
+        const verdict = await judge($, hook, e as Json, d)
+        if ('deny' in verdict) return { deny: verdict.deny }
+        lines = verdict.lines
+      }
+      const r = behind(hook, performance.now(), await next(e))
+      if (own || headless === true) return r
+      return withLines(r, [...lines, ...(await afterTool($, hook, e as Json, r))])
     } finally {
-      hook.away += performance.now() - since
       if (!own) {
         inflight.delete(id)
         tasksMarked = true
       }
       timeHook($, 'tool.call', hook)
+    }
+  }).catch(($, e, next) => {
+    // A grace of 1 s: decide at once, with no trip.
+    if (next.called) return next(e)
+    const own = next.origin.plugin === PLUGIN || (e.tool === 'TaskStop' && stopping.has(String((e as Json).task_id)))
+    if (!own && catchRefuses(guards, e as Json)) return { deny: CANNOT_CHECK }
+    if (!own) tasksMarked = true
+    return next(e)
+  })
+
+  // The engine's measure of the session: the context's tokens for the floors, and the
+  // reading for the endpoint when the context or a rate limit moved.
+  on('session.measure', async ($, e, next) => {
+    const hook = watch()
+    try {
+      if (headless !== true) {
+        const reading = e as unknown as Json
+        noteContext(reading)
+        if (e.changed.includes('context') || e.changed.includes('rateLimits')) postUsage($, reading)
+      }
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'session.measure', hook)
     }
   })
 

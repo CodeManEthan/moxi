@@ -412,7 +412,7 @@ Newline-delimited JSON-RPC 2.0 at `RUNTIME/comms/daemon.sock` (0600, in a 0700
 directory; Moxi's short socket path for it when that one is too long). Each adapter's
 claim socket speaks the same wire. Every connection opens with `rpc.hello`: the client
 offers a range of comms wire versions, and the daemon answers the highest common one and
-its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`), or refuses with
+its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`), or refuses with
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the
@@ -441,7 +441,7 @@ credential, and `content`, line zero and body; answers `message_id`), `delete` (
 `token`, `message_id`; answers `withdrawn` and `delivered`, each a list of names), and
 the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 `explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
-`max_id` and `last_digest`. A send's credential is the live binding's token for a bound
+`max_id`, `last_digest` and `mcp_endpoint`. A send's credential is the live binding's token for a bound
 identity, the operator's credential for `operator`, or a reserved name's token for a
 reserved name.
 
@@ -449,7 +449,8 @@ An adapter's methods, on the connection that holds its binding: `bind` (answers 
 identity, a fresh binding token and `high`, the catch-up boundary), `open_digest`,
 `turn_ended` (answers the name's cursor), and the notifications `injected` (the digest's
 id and its text, capped at 64 kB), `ready` (with `source`), `look`, `activity` and
-`unanswered`. One from a connection that holds no binding is refused `not-bound`. The
+`unanswered`, and `mcp_token` (below). One from a connection that holds no binding is
+refused `not-bound`. The
 daemon pushes `deliver` (a payload), `replay_complete` (after a bind's catch-up) and
 `notice`. It keeps at most 64 rows per binding pushed and not yet in a digest, so a long
 catch-up never fills the connection; a client that stops reading for 5 s is dropped,
@@ -480,6 +481,46 @@ as `fresh` only on that evidence. A bound name whose adapter reports `endpoint: 
 reads `waiting` to a sender (`session` answers `endpoint` and `endpoint_for`, `agents`
 `endpoint` and `endpoint_since`).
 
+An adapter whose session carries a token for comms' tools names its claim key on `bind`
+(`claim`, the key of its claim file) and, after every successful `bind`, registers the
+token's SHA-256 hex with `mcp_token` (`hash`; answers `served`, whether the daemon serves
+the tools now), when the hello listed `mcp`. The daemon keeps only the hash, mapped to
+that claim and the bound identity. The same claim's hash after a reconnect or a daemon
+restart binds the row again; a new hash from the same claim revokes the old one. Another
+claim's hash, or this claim's for another name, is refused `mcp-token-taken`, a revoked
+one `mcp-token-revoked`, and a reserved name `name-reserved`. A token is revoked only on
+positive evidence: its session ended (its claim file gone, or every root process it
+names gone or reused), its name bound under another claim, a newer token from its
+claim, the tools' port held by another process, or comms' uninstall. A release, and the
+boot fence, only clear the row's binding.
+
+`mcp_endpoint` (no params) answers whether the daemon serves comms' tools: `{served,
+url, why, held, detail, unit, revoked}`, with `url` the address it serves them on
+(`http://127.0.0.1:<port>/mcp`), `why` the reason when it doesn't (`disabled`,
+`supervised`, `port-taken`, `bind-failed`, `failed`), `held` whether the supervisor holds
+the port it serves on (a socket unit's, which the daemon inherited), and `detail` the
+plain line behind the answer, for the doctor; `unit` is the state comms' socket unit read
+after a failed bind (the core's socket row: `active`, `inactive`, `missing` and the
+rest), null when it serves or no read was asked for; `revoked` lists `{identity, why}` for each
+live binding whose claim holds no active tool token and whose newest one was revoked, so
+the session runs on without comms' tools until it is relaunched. The daemon serves on the supervisor's socket
+when it was handed one, on whatever port that is, else binds `[mcp] port` itself. When the
+bind fails, the daemon first reads comms' own socket unit: when it reads active, this
+daemon runs outside it, and the answer is `supervised`, with nothing connected to and
+nothing revoked (the read gives the unit's state, not its port). Otherwise, when a
+listener answers on the port and the unit read showed comms' unit not holding it, or the
+listener is another user's, the daemon serves nothing and revokes every live tool token
+`port-taken`, since sessions may have sent their tokens to that process. A listener with
+neither shown answers `bind-failed` with a detail saying so; when nothing answers the
+daemon tries again every half second for five seconds, then answers `bind-failed`. Neither
+revokes anything. The daemon
+settles its endpoint before it answers any method, so an answered `bind` means the
+endpoint is up when the daemon serves it at all, and a launch reads this instead of
+trying the port. The endpoint speaks MCP over HTTP in stateless JSON mode and takes a
+session's token as its bearer: a token with no active row is answered 401 before any tool
+runs, a foreign `Host` 421, a foreign `Origin` 403, and a `GET` 405. When it fails after
+it started, the daemon exits nonzero for its supervisor to start it again.
+
 A Codex or OpenCode adapter's reports carry `session_id` (the thread or session id),
 `cache_source` (the Codex sessions root its host reports, or the path `opencode db path`
 gives) and `turned`; `bind` also carries `new_session`. A Codex or OpenCode launch starts
@@ -496,7 +537,7 @@ Errors use comms' codes, outside JSON-RPC's reserved range: refusals 1101-1149
 (`name-held` 1101, `name-reserved` 1102, `name-retired` 1103, `name-unknown` 1104,
 `not-mailable` 1105, `credential` 1106, `too-long` 1107, `not-sender` 1108,
 `already-delivered` 1109, `unknown-message` 1110, `unknown-adapter` 1111, `not-bound`
-1112) and try-again 1150-1199 (`stopping` 1150, `failed` 1151, `busy` 1152, past 256
+1112, `mcp-token-taken` 1113, `mcp-token-revoked` 1114) and try-again 1150-1199 (`stopping` 1150, `failed` 1151, `busy` 1152, past 256
 connections, and `store-busy` 1153). A try-again code means the daemon committed nothing
 for the request. An error's `data` carries `reason`, the text a verb prints, and what the
 refusal names. A verb exits 3 on a refusal and 75 on a try-again; a read that timed out
@@ -614,7 +655,7 @@ seconds>}}`, read from the queue, and `pending: {}`, always empty.
 
 | path | written by | what |
 |---|---|---|
-| `STATE/comms/comms.db` | the daemon; provisioning and the reserved-names listener their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, reserved names and dropped mail (0600, WAL) |
+| `STATE/comms/comms.db` | the daemon; provisioning and the reserved-names listener their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, reserved names, dropped mail and the hashes of the tools' tokens (0600, WAL) |
 | `DATA/comms/cards/<identity>` | each identity | the card `moxi comms whois` reads |
 | `STATE/comms/tokens/` | provisioning, the reserved-names listener | the credential chain's token store (0600) |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |

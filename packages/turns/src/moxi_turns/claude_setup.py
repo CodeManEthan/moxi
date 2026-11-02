@@ -1,9 +1,13 @@
-"""turns' Claude plugin on disk: `SETUP`, the plugin folders for one launch, and its
-doctor rows.
+"""turns' Claude plugin on disk: `SETUP`, the plugin folders and endpoint for one launch,
+and its doctor rows.
 
 The plugin ships inside the package as a folder marketplace, `moxi_turns/claude/`,
 holding `.claude-plugin/marketplace.json` and two plugins: the runner (`moxi-turns`)
 and the gate (`moxi-turns-gate`).
+
+The runner finds the endpoint command it spawns in this order: `MOXI_TURNS_ENDPOINT` in
+its session's environment, else `endpoint.json` beside it. A variable that is set but not
+an absolute path is no endpoint; the runner does not fall back to the file then.
 
 `SETUP` has two steps:
 
@@ -15,10 +19,14 @@ and the gate (`moxi-turns-gate`).
 2. `claude plugin marketplace add <folder>`, then install both plugins at user scope,
    skipping each one already done.
 
-Every load of the plugin needs step 1; only a user-scope install needs step 2. A launch
-that loads the plugins for itself gets them from `moxi_turns.launch_additions("claude",
-...)`, which calls `claude_plugin_dirs()` here: step 1 for the environment it runs in,
-then both plugin folders for `--plugin-dir`.
+Only a user-scope install needs either step: it has no launch to name its endpoint, so
+it reads the file. A launch that loads the plugins for itself gets them from
+`moxi_turns.launch_additions("claude", ...)`, which names both folders for `--plugin-dir`
+(`claude_plugin_dirs()`) and the endpoint command in `MOXI_TURNS_ENDPOINT`
+(`launch_endpoint()`). A launch writes nothing into the package, so launches in parallel
+share no write and a read-only install still launches. SETUP is the one writer of
+`endpoint.json`, and it writes through a temp file of its own each time, so two setups at
+once don't fail each other.
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 log = logging.getLogger("moxi.turns.claude")
@@ -37,8 +46,10 @@ log = logging.getLogger("moxi.turns.claude")
 MARKETPLACE = "moxi-turns"
 RUNNER = "moxi-turns"
 GATE = "moxi-turns-gate"
-#: The file the runner reads through `${CLAUDE_PLUGIN_ROOT}`.
+#: The file a user-scope install's runner reads through `${CLAUDE_PLUGIN_ROOT}`.
 ENDPOINT_FILE = "endpoint.json"
+#: The variable a launch names the endpoint command in; the runner reads it first.
+ENDPOINT_ENV = "MOXI_TURNS_ENDPOINT"
 #: The endpoint's console script.
 ENDPOINT_SCRIPT = "moxi-turns-endpoint"
 #: The Claude Code versions the live probes of the plugins passed on.
@@ -97,7 +108,10 @@ def endpoint_command(env: dict[str, str] | None = None) -> Path:
 
 
 def write_endpoint_file(root: Path | None = None, env: dict[str, str] | None = None) -> Path:
-    """SETUP's first step: write `endpoint.json` beside the runner. Returns its path."""
+    """SETUP's first step: write `endpoint.json` beside the runner. Returns its path.
+
+    It writes a temp file of its own in the same folder, then moves it into place, so two
+    writes at once each land whole and neither fails the other."""
     command = endpoint_command(env)
     target = plugin_dir(RUNNER, root) / ENDPOINT_FILE
     if not target.parent.is_dir():
@@ -106,11 +120,20 @@ def write_endpoint_file(root: Path | None = None, env: dict[str, str] | None = N
 
     data = json.dumps({"command": str(command), "environment": sys.prefix,
                        "version": package_version()}, indent=1) + "\n"
-    tmp = target.with_name(f".{ENDPOINT_FILE}.tmp")
     try:
-        tmp.write_text(data, encoding="utf-8")
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{ENDPOINT_FILE}.")
+    except OSError as exc:
+        raise SetupError(f"cannot write {target}: {exc}") from None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(data)
+        os.chmod(tmp, 0o644)
         os.replace(tmp, target)
     except OSError as exc:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         raise SetupError(f"cannot write {target}: {exc}") from None
     return target
 
@@ -125,20 +148,35 @@ def read_endpoint_file(root: Path | None = None) -> dict | None:
 
 def claude_plugin_dirs() -> tuple[Path, Path]:
     """The runner's and the gate's folders, for a per-launch `--plugin-dir` each. Internal:
-    a launch reaches it through `launch_additions`.
+    a launch reaches it through `launch_additions`. It writes nothing.
 
-    First writes `endpoint.json` for the environment this runs in (SETUP's first step),
-    so a per-launch load gets both plugins and an endpoint with no user-scope install.
-    Raises `moxi_turns.TurnsError` when it cannot be written.
+    Raises `moxi_turns.TurnsError` when the runner's folder is missing.
     """
     from .client import TurnsError
 
     root = claude_root()
+    runner = plugin_dir(RUNNER, root)
+    if not runner.is_dir():
+        raise TurnsError(f"the Claude plugin cannot be loaded: the runner plugin's folder "
+                         f"{runner} does not exist")
+    return runner, plugin_dir(GATE, root)
+
+
+def launch_endpoint() -> str:
+    """The endpoint command one launch names in `MOXI_TURNS_ENDPOINT`: the command
+    `endpoint_command()` gives with turns' config read from this process's own
+    environment, as SETUP reads it. Internal: a launch reaches it through
+    `launch_additions`. It writes nothing.
+
+    Raises `moxi_turns.TurnsError` when the config cannot be read, `claude.endpoint` is
+    not absolute, or this environment has no endpoint script.
+    """
+    from .client import TurnsError
+
     try:
-        write_endpoint_file(root)
+        return str(endpoint_command())
     except SetupError as exc:
-        raise TurnsError(f"the Claude plugin cannot be set up: {exc}") from None
-    return plugin_dir(RUNNER, root), plugin_dir(GATE, root)
+        raise TurnsError(f"the Claude plugin has no endpoint command: {exc}") from None
 
 
 # -- SETUP -------------------------------------------------------------------------------
@@ -233,7 +271,11 @@ def setup() -> int:
 def rows() -> list:
     """`check()`'s Claude rows: each plugin's presence and version, whether
     `endpoint.json` names the command the config and the environment give now, and the
-    Claude Code version against the ones the probes passed."""
+    Claude Code version against the ones the probes passed.
+
+    A missing or stale `endpoint.json` fails when the runner is installed at user scope,
+    since every such session then runs without turns and nothing but SETUP rewrites the
+    file; otherwise it warns, since only a user-scope install reads it."""
     from moxi.doctor import Row
 
     from .doctor import MODULE
@@ -259,19 +301,44 @@ def rows() -> list:
         out.append(Row(MODULE, "claude endpoint.json", "fail",
                        f"no endpoint command: {exc}"))
     if want is not None:
-        if written is None:
-            out.append(Row(MODULE, "claude endpoint.json", "fail",
-                           "missing: a plugin installed at user scope spawns no endpoint "
-                           "until it is written, as `moxi install turns` or a launch "
-                           "through launch_additions does", "moxi install turns"))
-        elif written.get("command") != want:
-            out.append(Row(MODULE, "claude endpoint.json", "fail",
-                           f"names {written.get('command')!r}, but the config and this "
-                           f"environment give {want!r}", "moxi install turns"))
-        else:
+        if written is not None and written.get("command") == want:
             out.append(Row(MODULE, "claude endpoint.json", "ok", f"names {want}"))
+        else:
+            problem = ("missing" if written is None else
+                       f"names {written.get('command')!r}, but the config and this "
+                       f"environment give {want!r}")
+            out.append(_endpoint_file_row(Row, MODULE, problem))
     out.append(_version_row(Row, MODULE))
     return out
+
+
+def _user_scope_runner() -> bool | None:
+    """Whether the runner is installed at user scope, as SETUP reads it; None when
+    `claude` is not on PATH or the call fails."""
+    claude = _claude()
+    if claude is None:
+        return None
+    try:
+        listed = _json_list(claude, "list")
+    except (SetupError, OSError, subprocess.TimeoutExpired):
+        return None
+    return any(isinstance(p, dict) and p.get("scope") == "user"
+               and p.get("id") == f"{RUNNER}@{MARKETPLACE}" for p in listed)
+
+
+def _endpoint_file_row(Row, module, problem: str):
+    installed = _user_scope_runner()
+    if installed:
+        return Row(module, "claude endpoint.json", "fail",
+                   f"{problem}: {RUNNER}@{MARKETPLACE} is installed at user scope, so "
+                   "every session it loads in runs without turns until the file is "
+                   "rewritten", "moxi install turns")
+    why = ("no user-scope install of the runner reads it" if installed is False else
+           "only a user-scope install of the runner reads it, and `claude plugin list` "
+           "could not say whether there is one")
+    return Row(module, "claude endpoint.json", "warn",
+               f"{problem}; {why}. A launch through launch_additions names its endpoint "
+               f"in {ENDPOINT_ENV} and needs no file", "moxi install turns")
 
 
 def _version_row(Row, module):
@@ -293,4 +360,5 @@ def _version_row(Row, module):
 __all__ = ["MARKETPLACE", "RUNNER", "GATE", "ENDPOINT_FILE", "ENDPOINT_SCRIPT",
            "PASSED_VERSIONS", "SetupError", "claude_root", "plugin_dir", "endpoint_command",
            "write_endpoint_file", "read_endpoint_file", "claude_plugin_dirs",
+           "launch_endpoint", "ENDPOINT_ENV",
            "install_plugins", "setup", "rows"]

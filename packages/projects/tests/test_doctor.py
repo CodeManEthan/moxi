@@ -220,7 +220,7 @@ KINDS = {"topic": ("doc", lambda f: None, "zip")}
     assert row.state == "fail" and "'topic'" in row.detail and "moxi uninstall notes" in row.fix
 
 
-def test_notes_roots_kept_without_notes_are_counted(golden_copy, store_path):
+def test_notes_roots_kept_without_notes_are_counted(golden_copy, store_path, site):
     _sql(store_path, "UPDATE projects SET notes_root = '/srv/n' WHERE key IN ('alpha', "
                      "'gamma')")
     row = one(by_name(), "notes root")

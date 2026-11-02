@@ -1,5 +1,6 @@
 """The performance targets, timed over builder-made files. A `slow` test: a plain pytest
-run leaves them out; `pytest -m slow` runs them.
+run leaves them out; `pytest -m slow` runs them. Each is also `timed`, so `moxi-dev check`
+runs them alone, after its parallel pass.
 
 Each target is a median over several runs, and each test prints what it measured, so
 `pytest -m slow -s` shows the numbers.
@@ -25,7 +26,7 @@ from moxi_sessions.source import Source
 from moxi_sessions.testing import ClaudeTranscript, OpenCodeDb
 from moxi_sessions.testing.claude import usage
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.timed]
 
 MB = 1_000_000
 

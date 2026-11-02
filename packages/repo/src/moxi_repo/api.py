@@ -6,6 +6,12 @@ modules.
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
+This module is the one other modules import from repo, so it also hands out the
+committer's and the git hook pieces' names: the package's exports (`git`, `Spec`,
+`commit_saved`, `HookContext`, `Outcome` and the rest), `SpecError` and `PATHSPEC_VARS`.
+Each is the same object as in its home module and is loaded only when first asked for, so
+importing this module loads nothing it didn't load before.
+
 A repo is named by a path inside any of its work trees; repo keeps an index of the repos it
 has written to (the `repos` store), which `refresh` and listings walk. An indexed repo is
 keyed by its common git dir, and its `root` is its main work tree; it is gone only when its
@@ -21,6 +27,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+from moxi_repo import EXPORTS as _PACKAGE_EXPORTS
 from moxi_repo import _records, gitconf, pieces, shim
 from moxi_repo.gitconf import Repo, State
 from moxi_repo.run import (EVENTS, enabled, fail_policy, last, order_of, settings_of)
@@ -881,10 +888,12 @@ def teardown() -> Teardown:
 
 # -- committer specs ----------------------------------------------------------------------
 
-def specs(path: str | os.PathLike | None = None) -> list[dict]:
+def specs(path: str | os.PathLike | None = None, *, sweep: bool = True) -> list[dict]:
     """Each indexed repo, or the one at `path`, with its saved specs and the specs that ran
     there without being saved, each with its last result (`moxi repo specs --json`). Runs
-    the record sweep for each repo first."""
+    the record sweep for each repo first, unless `sweep` is false: then nothing is
+    written. A saved spec's `last_commit` is its author's newest commit, `{"sha",
+    "time"}`, or None; a spec not saved names no author, so its `last_commit` is None."""
     from moxi_repo import committer
 
     if path is not None:
@@ -893,13 +902,19 @@ def specs(path: str | os.PathLike | None = None) -> list[dict]:
         repos = [repo for _, _, repo, _ in indexed_repos() if repo is not None]
     out = []
     for repo in repos:
-        _sweep(repo)
+        if sweep:
+            _sweep(repo)
         try:
             listed = committer.listing(repo.root)
         except committer.SpecError as exc:
             raise Failure(str(exc)) from None
         if path is None and not listed:
             continue
+        for item in listed:
+            author = (item.get("spec") or {}).get("author")
+            found = committer.last_commit(repo.root, tuple(author)) if author else None
+            item["last_commit"] = (None if found is None
+                                   else {"sha": found[0], "time": found[1]})
         out.append({"root": str(repo.root), "common_dir": str(repo.common_dir),
                     "specs": listed})
     return out
@@ -933,7 +948,8 @@ def forget_spec(path: str | os.PathLike, name: str) -> Report:
 def status(path: str | os.PathLike | None = None) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
-    enabled, fail policy, order, settings and whether a doctor record of it is open."""
+    enabled, fail policy, order, settings and whether a doctor record of it is open, and
+    its `records` each doctor record repo has open for it (`_records.open_of`)."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -947,6 +963,7 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
             root = index[key].get("root") or key
             out.append({"root": root, "common_dir": index[key].get("common_dir"),
                         "indexed": True, "pieces": [], "events": {},
+                        "records": _records.open_of(index[key].get("common_dir") or key),
                         "problems": [Problem(why,
                                              f"moxi repo git-hooks remove {_arg(root)}",
                                              state="warn")]})
@@ -1074,7 +1091,7 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
             "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
             "git_version": gitconf.version_text(version), "mode": mode,
             "mode_set": state.mode_set, "pieces": listed, "events": events,
-            "problems": problems}
+            "records": _records.open_of(repo.common_dir), "problems": problems}
 
 
 def _runnable(path: Path) -> bool:
@@ -1103,8 +1120,30 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
+#: Each name this module hands out for another module -> the module it comes from. Four
+#: are not package exports: `SpecError`, which `save_spec` raises; `saved_spec`, the spec a
+#: name last saved; `last_commit_time`, when an author last committed; and `PATHSPEC_VARS`,
+#: the environment variables that change how git reads a pathspec.
+REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
+             "saved_spec": "moxi_repo.committer", "last_commit_time": "moxi_repo.committer",
+             "PATHSPEC_VARS": "moxi_repo.gitrun"}
+
+
+def __getattr__(name):
+    module = REEXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module 'moxi_repo.api' has no attribute {name!r}")
+    from importlib import import_module
+
+    return getattr(import_module(module), name)
+
+
+def __dir__():
+    return sorted({*globals(), *REEXPORTS})
+
+
 __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
            "available", "add", "remove", "enable", "disable", "refresh", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
-           "chain_holders", "teardown", "Teardown"]
+           "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]

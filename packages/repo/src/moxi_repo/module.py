@@ -8,7 +8,7 @@ INTERFACES = frozenset({1})
 API = "moxi_repo.api"
 CLI = "moxi_repo.cli:main"
 SUMMARY = "Git hooks run as declared pieces, and the one shared committer."
-OPTIONAL = {}
+OPTIONAL = {"ui": "The git hooks page in the browser UI shell."}
 GATED = {}
 INTERNAL_ENV = {
     "MOXI_REPO_COMMITTER": "set by the committer on its own commits, so a git hook piece "
@@ -25,6 +25,13 @@ SETUP = "moxi_repo.install:setup"
 TEARDOWN = "moxi_repo.install:teardown"
 DOCTOR = "moxi_repo.checks:rows"
 SEGMENT = None
+#: repo's page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_repo.page:PAGE"
+#: What repo offers the browser UI shell: its panel, which reads and runs nothing.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Git hooks", "contract": 1, "place": "page",
+             "doc": "Each repo's git hook pieces, committer specs and open records"},
+}
 STORES = {
     "repos": {"root": "state", "path": "repos.json", "kind": "file", "private": True,
               "retention": "keep", "rebuildable": False, "lazy": True},

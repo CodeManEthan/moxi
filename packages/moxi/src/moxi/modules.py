@@ -150,6 +150,10 @@ _DAEMON_KEYS = frozenset({"command", "args", "doc", "stop", "upgrade", "memory_h
                           "memory_swap_max", "platforms", "switch", "socket"})
 _TIMER_KEYS = frozenset({"command", "args", "doc", "every", "at", "days", "switch",
                          "platforms"})
+#: A daemon's `socket` keys, and what may start such a daemon: its sockets at the first
+#: connection (the default), or a login as for any daemon, with the sockets still held.
+_SOCKET_KEYS = frozenset({"setting", "addresses", "start"})
+_SOCKET_STARTS = ("connection", "login")
 #: Keys a run-time declaration (from `UNITS_FROM`) may carry beside the others.
 _RUNTIME_KEYS = frozenset({"argv", "cwd", "enabled"})
 _STORE_KEYS = frozenset({"root", "path", "kind", "private", "retention", "rebuildable",
@@ -1030,14 +1034,16 @@ def _daemon(where: str, entry: Mapping) -> None:
                        "an optional K, M or G")
     if "socket" in entry:
         socket = get("socket")
-        if (not isinstance(socket, Mapping) or set(socket) != {"setting", "addresses"}
+        if (not isinstance(socket, Mapping)
+                or not {"setting", "addresses"} <= set(socket) <= _SOCKET_KEYS
                 or not isinstance(socket["setting"], str)
                 or not _KEY.fullmatch(socket["setting"])
                 or not _str_list(socket["addresses"]) or not socket["addresses"]
-                or not all(_ip(a) for a in socket["addresses"])):
-            raise _Bad(f"has {where} socket = {socket!r}; it must be a table of exactly "
-                       "setting (a settings key) and addresses (a non-empty list of IP "
-                       "addresses)")
+                or not all(_ip(a) for a in socket["addresses"])
+                or socket.get("start", "connection") not in _SOCKET_STARTS):
+            raise _Bad(f"has {where} socket = {socket!r}; it must be a table of setting (a "
+                       "settings key), addresses (a non-empty list of IP addresses) and "
+                       "optionally start ('connection', the default, or 'login')")
         # One socket is written per address, so the same address twice (in any spelling
         # of it) would be two sockets on one address.
         seen: dict[object, str] = {}

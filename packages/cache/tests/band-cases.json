@@ -1,0 +1,441 @@
+{
+  "about": "The chip's band rule, one case per branch: each record read at `now` shows a band (warm, near, cold), a kind's word (fresh, no-cache, unknown) or \"no reading\", and `dim` says whether the band shows dimmed. cache's segment test and the chip's browser test both run these cases. To run them at another time, add (that time - now) to each record's last_request, read_at and seen_at.",
+  "now": 1800000000.0,
+  "cases": [
+    {
+      "name": "a fresh kind has no band; the chip shows its word",
+      "record": {
+        "v": 1,
+        "session": "band-01",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "fresh",
+        "last_request": null,
+        "ttl": null,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": "no-request",
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "fresh",
+      "dim": false
+    },
+    {
+      "name": "a no-cache kind has no band",
+      "record": {
+        "v": 1,
+        "session": "band-02",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "no-cache",
+        "last_request": null,
+        "ttl": null,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": "unknown-harness",
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "no-cache",
+      "dim": false
+    },
+    {
+      "name": "an unknown kind has no band",
+      "record": {
+        "v": 1,
+        "session": "band-03",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "unknown",
+        "last_request": null,
+        "ttl": null,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": "no-record",
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "unknown",
+      "dim": false
+    },
+    {
+      "name": "a record without warn_before has no reading",
+      "record": {
+        "v": 1,
+        "session": "band-04",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a record without stale_after has no reading",
+      "record": {
+        "v": 1,
+        "session": "band-05",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a null warn_before is no reading, as the page sends a missing one",
+      "record": {
+        "v": 1,
+        "session": "band-06",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": null,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a null last_request has no reading",
+      "record": {
+        "v": 1,
+        "session": "band-07",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": null,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a null ttl has no reading",
+      "record": {
+        "v": 1,
+        "session": "band-08",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "cold",
+        "last_request": 1799999940.0,
+        "ttl": null,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a last_request after now counts as age 0",
+      "record": {
+        "v": 1,
+        "session": "band-09",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1800000030.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "warm",
+      "dim": false
+    },
+    {
+      "name": "a last_request after now is age 0, so warn_before past ttl is near",
+      "record": {
+        "v": 1,
+        "session": "band-22",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1800000030.0,
+        "ttl": 300,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "near",
+      "dim": false
+    },
+    {
+      "name": "warm up to ttl - warn_before",
+      "record": {
+        "v": 1,
+        "session": "band-10",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799997301.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "warm",
+      "dim": false
+    },
+    {
+      "name": "near from ttl - warn_before",
+      "record": {
+        "v": 1,
+        "session": "band-11",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799997300.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "near",
+      "dim": false
+    },
+    {
+      "name": "near up to ttl",
+      "record": {
+        "v": 1,
+        "session": "band-12",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799996401.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "near",
+      "dim": false
+    },
+    {
+      "name": "cold from ttl",
+      "record": {
+        "v": 1,
+        "session": "band-13",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799996400.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "cold",
+      "dim": false
+    },
+    {
+      "name": "a warm record past its ttl is cold",
+      "record": {
+        "v": 1,
+        "session": "band-14",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799996000.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "cold",
+      "dim": false
+    },
+    {
+      "name": "the band counts from the age, whatever the kind",
+      "record": {
+        "v": 1,
+        "session": "band-15",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "cold",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "warm",
+      "dim": false
+    },
+    {
+      "name": "warn_before past ttl is near from the start",
+      "record": {
+        "v": 1,
+        "session": "band-16",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1800000000.0,
+        "ttl": 300,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "near",
+      "dim": false
+    },
+    {
+      "name": "seen exactly stale_after ago is bright",
+      "record": {
+        "v": 1,
+        "session": "band-17",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999970.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "warm",
+      "dim": false
+    },
+    {
+      "name": "seen past stale_after is dim",
+      "record": {
+        "v": 1,
+        "session": "band-18",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999969.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "warm",
+      "dim": true
+    },
+    {
+      "name": "a cold band dims too",
+      "record": {
+        "v": 1,
+        "session": "band-19",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1799996000.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999880.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "cold",
+      "dim": true
+    },
+    {
+      "name": "a kind with no band shows its word, never dim",
+      "record": {
+        "v": 1,
+        "session": "band-20",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "fresh",
+        "last_request": null,
+        "ttl": null,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999400.0,
+        "code": "no-request",
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "fresh",
+      "dim": false
+    },
+    {
+      "name": "no reading is never dim",
+      "record": {
+        "v": 1,
+        "session": "band-21",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": null,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999400.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a kind outside the five has no reading",
+      "record": {
+        "v": 1,
+        "session": "band-23",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "later",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    }
+  ]
+}

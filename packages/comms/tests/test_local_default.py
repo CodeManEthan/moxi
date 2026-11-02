@@ -301,9 +301,11 @@ def _clean_env(tmp_path, **extra) -> dict:
 
 
 def _run_daemon(env, sock: Path, *, expect_socket=True):
+    from conftest import RESERVED_NONE_PATCH
+
     proc = subprocess.Popen(
-        [sys.executable, "-c", "import sys; from moxi_comms.daemon import main; "
-                               "sys.exit(main([]))"],
+        [sys.executable, "-c", RESERVED_NONE_PATCH + "import sys; "
+                               "from moxi_comms.daemon import main; sys.exit(main([]))"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         deadline = time.monotonic() + 20
@@ -362,9 +364,11 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
 # --------------------------------------------------------------- moxi comms doctor
 
 def doctor(env):
+    """`moxi comms doctor` against a socket path where no daemon answers (inside the
+    fence's tmp, where a connect is allowed)."""
     out = io.StringIO()
     ctx = cli.Context(record=object(), env=env, out=out,
-                      socket_path=Path("/nonexistent/comms.sock"))
+                      socket_path=Path(env["MOXI_COMMS_RUNTIME_DIR"]) / "absent.sock")
     code = cli.main(["doctor"], ctx=ctx)
     return code, {line[:10].strip(): line[12:] for line in out.getvalue().splitlines()
                   if line[:1] != " "}

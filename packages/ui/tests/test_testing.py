@@ -10,6 +10,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -95,6 +96,29 @@ def test_a_fixture_that_fails_its_start_is_a_502_naming_exit_3(ui_shells, fixtur
     assert shell.wait_server("fixture", "failed")["failed_in_row"] == 1
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="reads a page server's environment from /proc")
+def test_a_shells_env_reaches_its_page_servers(ui_shells, fixture_site):
+    shell = ui_shells(site=[fixture_site], env={"GIT_CONFIG_NOSYSTEM": "1"})
+    assert shell.env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert shell.session().get("/m/fixture/api/summary")[0] == 200
+    pid = shell.wait_server("fixture", "running")["pid"]
+    environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    assert b"GIT_CONFIG_NOSYSTEM=1" in environ
+    assert f"HOME={shell.home}".encode() in environ
+
+
+def test_a_shells_env_cant_move_it_out_of_its_home(tmp_path):
+    from moxi_ui.testing.shell import TestShell, shell_env
+
+    assert shell_env(tmp_path, extra={"PATH": "/opt/bin"})["PATH"] == "/opt/bin"
+    for key in ("HOME", "MOXI_HOME", "XDG_STATE_HOME", "TMPDIR", "PYTHONPATH"):
+        with pytest.raises(ValueError, match=key):
+            TestShell(tmp_path, env={key: str(tmp_path / "elsewhere")})
+    with pytest.raises(ValueError, match="strings"):
+        TestShell(tmp_path, env={"GIT_CONFIG_NOSYSTEM": 1})
+
+
 def test_a_left_out_module_is_not_in_the_snapshot(ui_shells, fixture_site):
     shell = ui_shells(site=[fixture_site], leave_out=["cache"])
     status, view = shell.session().get("/m/ui/api/modules")
@@ -119,6 +143,64 @@ def test_the_fixture_components_keep_the_contract_and_fit_a_phone(ui_page, ui_co
     ui_width_check(ui_page)
     ui_width_check(ui_page, module="fixture")
     ui_width_check(ui_page, module="ui", route="settings")
+
+
+def _pushed(page, held, without=()):
+    """Wait until the last push stream `page` asked for holds `held` and none of
+    `without`: the stream reopens a moment after a panel's components subscribe."""
+    def last():
+        urls = [r.url for r in page.requests() if "/m/ui/api/push?" in r.url]
+        return urls[-1] if urls else ""
+    wait_for(lambda: all(t in last() for t in held) and not any(t in last() for t in without),
+             10, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
+
+
+@pytest.mark.browser
+def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_adds(
+        ui_page, ui_component_check):
+    # The push channel is one stream for the page, reopened with every topic the page
+    # holds whenever a component subscribes. `elsewhere` stands for another module with a
+    # component on the page: its topics are no topic of the fixture's. The settings panel
+    # holds no fixture topic, so placing the fixture's block reopens the stream.
+    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    ui_page.evaluate("""async () => {
+      const {subscribe} = await import("/m/ui/client.js");
+      subscribe("elsewhere", "held", () => {});
+    }""")
+    _pushed(ui_page, ["elsewhere.held"], without=["fixture.count"])
+    check = ui_component_check(ui_page, "fixture", "block")
+    assert any("elsewhere.held" in url and "fixture.count" in url for url in check.requests)
+    # A foreign topic that comes with the placement is still the component's, and refused.
+    _pushed(ui_page, ["elsewhere.held"], without=["fixture.count"])
+    ui_page.evaluate("""async () => {
+      const {subscribe} = await import("/m/ui/client.js");
+      new MutationObserver((changes, observer) => {
+        if (changes.some((c) => [...c.addedNodes].some((n) => n.dataset?.moxiCheck))) {
+          observer.disconnect();
+          subscribe("elsewhere", "fresh", () => {});
+        }
+      }).observe(document.getElementById("moxi-panel"), {childList: true});
+    }""")
+    with pytest.raises(AssertionError, match=r"outside /m/fixture/: .*elsewhere\.fresh") as err:
+        ui_component_check(ui_page, "fixture", "block")
+    assert "could be read" not in str(err.value)
+
+
+@pytest.mark.browser
+def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
+        ui_page, ui_component_check, monkeypatch):
+    # Without a page's recent requests (Playwright before 1.56), a topic the page held
+    # before the placement counts against the component, and the failure says why.
+    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    ui_page.evaluate("""async () => {
+      const {subscribe} = await import("/m/ui/client.js");
+      subscribe("elsewhere", "held", () => {});
+    }""")
+    _pushed(ui_page, ["elsewhere.held"], without=["fixture.count"])
+    monkeypatch.delattr(type(ui_page), "requests")
+    with pytest.raises(AssertionError, match=r"elsewhere\.held.*no earlier push request of "
+                                             r"the page could be read"):
+        ui_component_check(ui_page, "fixture", "block")
 
 
 @pytest.mark.browser

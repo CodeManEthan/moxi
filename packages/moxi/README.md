@@ -12,13 +12,17 @@ module is off and quiet.
 
 ## Modules
 
-| module | what it does | requires | optional | issues |
-|---|---|---|---|---|
-| `moxi` | The core: names, paths, one config file per module, module discovery, the module contract check, and the `moxi` command | nothing (standard library only) | | [moxihq/moxi/issues](https://github.com/moxihq/moxi/issues) |
-| sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | | [moxihq/sessions/issues](https://github.com/moxihq/sessions/issues) |
-| turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host | [moxihq/turns/issues](https://github.com/moxihq/turns/issues) |
-| cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | | [moxihq/cache/issues](https://github.com/moxihq/cache/issues) |
-| comms | Messages between agent sessions on one machine, delivered into the recipient's session at the end of its current turn | `moxi`, turns | `cache`: hold a send while the recipient's cache is cold; `codex`: Codex sessions | [moxihq/comms/issues](https://github.com/moxihq/comms/issues) |
+| module | what it does | requires | optional |
+|---|---|---|---|
+| `moxi` | The core: names, paths, one config file per module, module discovery, and the `moxi` command | nothing (standard library only) | |
+| sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | |
+| turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host |
+| cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | |
+| comms | Messages between agent sessions on one machine, delivered into the recipient's session at the end of its current turn | `moxi`, turns | `cache`: hold a send while the recipient's cache is cold; `codex`: Codex sessions |
+
+Every module's code is a folder under `packages/` in one repository,
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), and its issues go to that
+repository's tracker: [CodeManEthan/moxi/issues](https://github.com/CodeManEthan/moxi/issues).
 
 ## The `moxi` command
 
@@ -34,7 +38,6 @@ commands:
 - `moxi config <module>` shows a module's settings and its config file; `moxi config set
   <module> <key> <value>` changes one, keeping the file's comments, and `moxi config unset`
   removes one. `moxi config moxi` is the core's own.
-- `moxi check` checks a module's package against the module contract.
 
 ## Install
 
@@ -68,21 +71,21 @@ distribution the module needs that the environment lacks, in dependency order: `
 PyPI and the install fails. For comms:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
+uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
 moxi install comms --none \
-  --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/moxi#subdirectory=packages/comms'
+  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
+  --from 'moxi-comms @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/comms'
 ```
 
 comms with its `cache` extra needs cache and sessions too:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
+uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
 moxi install comms --with cache \
-  --from 'moxi-sessions @ git+https://github.com/moxihq/moxi#subdirectory=packages/sessions' \
-  --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns' \
-  --from 'moxi-cache @ git+https://github.com/moxihq/moxi#subdirectory=packages/cache' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/moxi#subdirectory=packages/comms'
+  --from 'moxi-sessions @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/sessions' \
+  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
+  --from 'moxi-cache @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/cache' \
+  --from 'moxi-comms @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/comms'
 ```
 
 ## Troubleshooting

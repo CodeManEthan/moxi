@@ -83,7 +83,7 @@ def test_add_without_a_root_and_no_default_is_exit_2(capsys):
     (("add", "web", "--root", "/srv/web", "--notes-root", "/srv/notes"), 3),
     (("add", "web", "--root", "/srv/web", "--lead", "two words"), 3),
 ])
-def test_add_refusals_are_exit_3_and_print_the_fix(capsys, argv, code):
+def test_add_refusals_are_exit_3_and_print_the_fix(capsys, argv, code, site):
     got, out, err = run(capsys, *argv)
     assert got == code and out == ""
     assert "fix:" in err
@@ -150,7 +150,7 @@ def test_set_of_an_unknown_key_is_exit_3(capsys, golden_copy):
     assert code == 3 and "moxi projects add nosuch" in err
 
 
-def test_set_refuses_a_notes_root_without_notes_and_clears_one(capsys, golden_copy):
+def test_set_refuses_a_notes_root_without_notes_and_clears_one(capsys, golden_copy, site):
     code, _out, err = run(capsys, "set", "gamma", "--notes-root", "/srv/n")
     assert code == 3 and "moxi install notes" in err
     assert run_json(capsys, "set", "gamma", "--no-notes-root")["notes_root"] is None

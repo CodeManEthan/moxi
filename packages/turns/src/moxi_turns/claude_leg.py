@@ -18,17 +18,37 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 2, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+    {"op": "hello", "leg": 3, "mod_sock": "<absolute path>", "stop_wait_ms": n,
      "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
-     "stop_after_clear": bool}
+     "stop_after_clear": bool, "guards": [<entry>, ...], "after_tool_wait_ms": n,
+     "floors": {"<row id>": n, ...}}
 
 `stop_after_clear` says whether the runner stops a `clear`'s shells through `TaskStop`
 after the clear (`STOP_AFTER_CLEAR`); false, it stops none after a clear and reports
 every listed one left, why `not-stopped-after-clear`.
 
+`guards` is the guard table for Claude, which the runner matches every tool call against
+in its own process (`moxi_turns.guards.run` states the rule). Each entry:
+
+    {"id": "<module>.<name>", "calls": ["<pattern>", ...], "who": "any" | "main" | "agents",
+     "match": {"<input field>": "<regex>"} | null, "match_flags": "" | "i",
+     "judge": bool, "deny": "<text>", "wants": ["prompts"]?, "on_error": "allow" | "deny",
+     "deadline_ms": n}
+
+`deadline_ms` is already clamped to `guards.max_wait_ms`. A covering entry with no judge
+refuses with its `deny` and no trip; covering judge entries are asked on `/ask/guard`.
+
+`floors` names every after-tool row (a listener row naming `after-tool`) by its id, with
+its floor in tokens (0 for a row with no floor, or before its first read). An empty map
+means no row: the runner never asks `/ask/after-tool`. After a tool call the runner asks
+the rows the floors let through: on the main loop (no `agentId`), a row whose floor is
+above the context's tokens from the last `session.measure` is skipped; an agent's call,
+or a context not known yet (none since the last SessionStart), skips none.
+`after_tool_wait_ms` is `after_tool.wait_ms`, the bound the endpoint keeps on the rows.
+
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 2, "error": "<words>"}
+    {"op": "failed", "leg": 3, "error": "<words>"}
 
 Then, in any order:
 
@@ -54,6 +74,13 @@ Then, in any order:
         Read `$.agent.list()` and `$.prompt.read()` and answer on `/live`.
     {"op": "agents", "ask": n}
         Read `$.agent.list()` and answer on `/agents`, each entry as the engine gives it.
+    {"op": "guards", "table": [<entry>, ...]}
+        The guard table again, read at a `ready` (start, resume, clear, compaction); it
+        replaces the one the runner holds. Sent before the `ready`'s `/ask/context` answer.
+    {"op": "floors", "rows": {"<row id>": n, ...}}
+        Every after-tool row's floor, sent each time one changes: at a `ready` (before
+        its `/ask/context` answer) or after a call of the row's listener. It replaces the
+        map the runner holds.
 
 Requests (runner and gate to endpoint, `POST` on `mod.sock`)
 ------------------------------------------------------------
@@ -108,9 +135,26 @@ read: the list is then not complete, which counts as busy. Answer `{"ok": true}`
 open (`block`), null lets it end. The endpoint answers within `stop_handler.wait_ms`.
 
 `/ask/context` — `{event: "ready" | "prompt", source, session_id}` at
-`classic.SessionStart` (`ready`) and `classic.UserPromptSubmit` (`prompt`). Answer
-`{"ok": true, "context": "<text>" | null}`, the event's `additionalContext`. The endpoint
-answers within `listen.wait_ms`.
+`classic.SessionStart` (`ready`) and `classic.UserPromptSubmit` (`prompt`). A `ready` also
+carries `transcript_path`, the file Claude writes the session's records to (the hook
+input's); a `prompt` carries `text`, the prompt as the hook got it, and `origin`, its
+origin's kind as the runner's `prompt.submit` hook recorded it, or null when the runner
+can't tie the two. Answer `{"ok": true, "context": "<text>" | null}`, the event's
+`additionalContext`. The endpoint answers within `listen.wait_ms`.
+
+`/ask/after-tool` — `{call: {tool, tool_use_id, agentId, is_error}, rows: [id, ...]}` after
+a tool call ran (`next(e)` resolved with a result or an error, not a deny), naming the
+rows the floors let through. The endpoint asks those rows, bounded together by
+`after_tool.wait_ms` from the ask's arrival; an id it doesn't know is skipped. Answer
+`{"ok": true, "context": "<text>" | null}`: the rows' texts joined, which go into the
+result's `context` after any guard lines. The runner bounds the trip by
+`after_tool_wait_ms` plus its margin.
+
+`/report/usage` — `{usage}`, a usage reading as Claude gave it, unparsed: the figures of a
+`session.measure` whose `changed` names `context` or `rateLimits`, and at each main-loop
+`turn.complete` what `$.session.usage()` answers, never a `breakdown`. Outside the report
+queue; the endpoint tells the `usage` rows with the time it arrived. Answer
+`{"ok": true}`.
 
 `/gate/entry` — `{nonce, draft, agents}` from the gate, for every runner prompt as it
 enters. `nonce` is the window nonce the gate read off the prompt's first
@@ -122,6 +166,24 @@ sends it. Answer `{"ok": true, "verdict": "pass"}` (the gate takes the nonce lin
 calls `next`) or `{"ok": true, "verdict": "drop", "reason": r, "text": "<one line for the
 person>"}`; the gate drops a `drop` with `text` and never calls `next`. A nonce that names
 no open window reads `late`, and the endpoint logs the late entry.
+
+`/ask/guard` — `{call: {tool, tool_use_id, input, agentId, cwd?, prompts?}, guards: [id,
+...]}` for a tool call that judge entries of the table cover: `input` is the call's envelope
+less `tool`, `tool_use_id` and `agentId` (absent or null on the main loop); `cwd`, the
+directory the call runs in, `$.session.cwd()` read in the call's hook (a subagent's own in
+a subagent, and meant to follow the Bash tool's `cd`s), absent when that read failed, and
+the endpoint judges against the launch directory when `cwd` is absent or not absolute;
+`prompts`, the current main turn's prompts `[{origin, text}]`, when an asked entry `wants`
+them. The endpoint judges each named entry within its own `deadline_ms` from the ask's arrival, so
+the answer comes within the largest of them; the runner bounds the trip by that plus its
+margin. An id not on the endpoint's table (it changed at a `ready`) is skipped. Answer
+`{"ok": true, "deny"?: "<reason>", "lines": ["<text>", ...], "broken": ["<text>", ...]}`:
+`deny` refuses the call; else `lines` (the judges' allow lines) and `broken` (one line
+per guard that broke and let the call through) go after the tool's result, in that order.
+A trip that fails or overruns breaks every entry it asked: the runner refuses with
+"turns could not check this call with guard <id> (<why>)" when one declared `on_error`
+`deny`, else adds the line "[turns] guard <id> could not check this call (<why>); it ran
+unchecked." per entry.
 
 `/hook-times` — `{samples: [{event, ms}]}` from the runner or the gate, each at most
 once a minute: how long each of its hook handlers took, entry to return less the time in
@@ -149,7 +211,7 @@ from . import hooktimes
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 2
+LEG = 3
 
 #: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
 #: find a task through `TaskStop` once `/clear` has run; until a live session shows it
@@ -162,7 +224,7 @@ NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 #: The endpoint's line ops.
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
-LINE_AGENTS = "agents"
+LINE_AGENTS, LINE_GUARDS, LINE_FLOORS = "agents", "guards", "floors"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
@@ -170,11 +232,14 @@ PATH_LIVE = "/live"
 PATH_AGENTS = "/agents"
 PATH_STOP = "/ask/stop"
 PATH_CONTEXT = "/ask/context"
+PATH_GUARD = "/ask/guard"
+PATH_AFTER_TOOL = "/ask/after-tool"
+PATH_USAGE = "/report/usage"
 PATH_GATE_ENTRY = "/gate/entry"
 PATH_GATE_COMMAND = "/gate/command"
 PATH_HOOK_TIMES = "/hook-times"
-PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT,
-         PATH_GATE_ENTRY, PATH_GATE_COMMAND, PATH_HOOK_TIMES)
+PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT, PATH_GUARD,
+         PATH_AFTER_TOOL, PATH_USAGE, PATH_GATE_ENTRY, PATH_GATE_COMMAND, PATH_HOOK_TIMES)
 
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
@@ -344,8 +409,9 @@ def _handler_for(handle):
 
 
 __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "LINE_AGENTS", "PATH_REPORT", "PATH_LIVE", "PATH_AGENTS",
-           "PATH_STOP", "PATH_CONTEXT",
+           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "PATH_REPORT",
+           "PATH_LIVE", "PATH_AGENTS", "PATH_STOP", "PATH_CONTEXT", "PATH_GUARD",
+           "PATH_AFTER_TOOL", "PATH_USAGE",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
            "R_APPEND_FAILED",

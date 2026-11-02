@@ -60,6 +60,9 @@ def launch(rig, tmp_path):
     yield build
     for adapter in made:
         adapter.stop()
+        # The session ends with its adapter, as Codex's does: a hand-in still waited on
+        # reads lost, and its wait thread ends inside the test.
+        adapter.fake.gone("the test ended")
 
 
 def send(rig, text, *, to=IDENTITY,  name="main", scope="proj-a"):

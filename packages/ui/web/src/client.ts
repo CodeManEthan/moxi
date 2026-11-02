@@ -7,10 +7,13 @@
 //
 // A component reaches data only through `api` and `subscribe`, for its own module, and
 // links to another module only through `navigate` or `place`, and only while
-// `installed` says that module is there.
+// `installed` says that module is there. It runs a confirmed act only through `confirm`.
 //
-// It also defines `<moxi-ui-form>`, the one form renderer, so every page can use it.
+// It also defines `<moxi-ui-form>`, the one form renderer, and `<moxi-ui-confirm>`, the
+// confirm sheet, so every page can use them.
 
+import { defineConfirm } from "./confirm.ts";
+import { isConfirmed, mintKey, outcomeOf, SIGNED_OUT } from "./confirm-model.ts";
 import { defineForm } from "./form.ts";
 import { fetchOpener, TabPush } from "./push.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
@@ -53,6 +56,18 @@ export interface ApiResult {
   status: number;
   data: any;
 }
+
+/**
+ * What `confirm` resolves with. `accepted` carries the status path the module gave,
+ * relative to its own page (`/api/status?job=...`); `refused` the answer's status and a
+ * line of text; `unknown` a line of text. `cancelled` means the sheet was closed and
+ * nothing was sent.
+ */
+export type ConfirmOutcome =
+  | { outcome: "accepted"; status: string }
+  | { outcome: "refused"; code: number; text: string }
+  | { outcome: "unknown"; text: string }
+  | { outcome: "cancelled" };
 
 /** The theme modes: `system` follows the browser's colour scheme. */
 export type ThemeMode = "system" | "light" | "dark";
@@ -189,6 +204,8 @@ interface ModuleRow {
   name: string;
   state: string;
   page: boolean;
+  /** The paths of its confirmed acts, from its page's export. */
+  confirmed?: string[];
   components: ComponentInfo[];
   refused: Array<{ name: string; reason: string }>;
 }
@@ -255,17 +272,25 @@ export function components(module: string): ComponentInfo[] {
   }));
 }
 
+function confirmedAct(module: string, target: string): boolean {
+  return isConfirmed(row(module)?.confirmed ?? [], module, target);
+}
+
 /**
  * A request to `module`'s page, `path` relative to `/m/<module>/` (`"api/items?x=1"`).
  * With `body` it is a POST of that object as JSON; without, a GET. It sends the session
  * key, never retries, and never throws for an answer: a refusal is its status, and a
  * network failure is status 0. It throws a TypeError for a path that leaves
- * `/m/<module>/` or a body that is not an object.
+ * `/m/<module>/`, a body that is not an object, or a confirmed act's path, which only
+ * `confirm` sends, after the user confirms it.
  */
 export async function api(module: string, path: string, body?: object): Promise<ApiResult> {
   const target = apiTarget(module, path, location.origin);
   if (body !== undefined && (typeof body !== "object" || body === null)) {
     throw new TypeError("api body is an object, sent as JSON");
+  }
+  if (confirmedAct(module, target)) {
+    throw new TypeError(`api path ${JSON.stringify(path)} is a confirmed act of ${module}: send it with confirm`);
   }
   const value = key();
   if (!value) {
@@ -279,6 +304,10 @@ export async function api(module: string, path: string, body?: object): Promise<
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
+  return await fetched(target, init);
+}
+
+async function fetched(target: string, init: RequestInit): Promise<ApiResult> {
   let answer: Response;
   let text: string;
   try {
@@ -298,6 +327,50 @@ export async function api(module: string, path: string, body?: object): Promise<
     }
   }
   return { status: answer.status, data };
+}
+
+/**
+ * Runs `module`'s confirmed act at `path` (relative to `/m/<module>/`) with `body`, once
+ * the user confirms it. It shows `<moxi-ui-confirm>`, a sheet with the module's title,
+ * the component's `sheet` lines and the body. On Confirm it mints a key from 32 random
+ * bytes, posts the body once with it as `Idempotency-Key`, and resolves with the
+ * outcome: `{outcome: "accepted", status}` with the module's status path (relative to
+ * its page), `{outcome: "refused", code, text}` when the act was not done, or
+ * `{outcome: "unknown", text}` when the module may have acted. Cancel resolves
+ * `{outcome: "cancelled"}` and sends nothing. It never retries and never throws for an
+ * answer. It throws a TypeError for a path that leaves `/m/<module>/` or is not one of
+ * the module's confirmed acts, a body that is not an object, or lines that are not
+ * strings.
+ */
+export async function confirm(module: string, path: string, body: object,
+                              sheet: readonly string[] = []): Promise<ConfirmOutcome> {
+  const target = apiTarget(module, path, location.origin);
+  if (typeof body !== "object" || body === null) throw new TypeError("confirm's body is an object, sent as JSON");
+  if (!Array.isArray(sheet) || !sheet.every((line) => typeof line === "string")) {
+    throw new TypeError("confirm's sheet is a list of lines");
+  }
+  if (!confirmedAct(module, target)) {
+    throw new TypeError(`confirm path ${JSON.stringify(path)} is not a confirmed act of ${module}`);
+  }
+  // The bytes are fixed now: what the sheet shows is what is sent, once.
+  const data = JSON.stringify(body);
+  const title = components(module).find((item) => item.name === "page")?.title ?? module;
+  const element = document.createElement("moxi-ui-confirm");
+  document.body.append(element);
+  return await element.ask({ title, lines: [...sheet], body }, async () => {
+    const value = key();
+    if (!value) {
+      markSignedOut();
+      return { outcome: "refused", code: 403, text: SIGNED_OUT };
+    }
+    const headers: Record<string, string> = {
+      "X-Moxi-Key": value, Accept: "application/json", "Content-Type": "application/json",
+      "Idempotency-Key": mintKey(),
+    };
+    const answer = await fetched(target, { method: "POST", headers, body: data,
+                                           credentials: "same-origin", cache: "no-store" });
+    return outcomeOf(answer.status, answer.data);
+  });
 }
 
 /**
@@ -372,6 +445,7 @@ export function setTheme(mode: ThemeMode): void {
 // --- start ------------------------------------------------------------------------------
 
 defineForm(installed);
+defineConfirm();
 push.start();
 addEventListener("storage", (event) => {
   // A sign-in in another tab of this browser stores a new key.

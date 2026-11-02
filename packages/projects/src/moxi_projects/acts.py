@@ -20,10 +20,19 @@ make. If making the directory or `git init` fails, no row is written (exit 1) an
 message names the directory left, the topmost one the mint made, and the commands that
 finish by hand. If the row write then fails, the directory stays as made and the message
 names the `moxi projects add` that adds its row.
+
+`promote` turns one of notes' inbox one-offs into a project. It reaches notes only through
+`moxi.modules`, and writes the row through `add`'s own steps, putting its move between
+them: every check `add` makes and the defaults; for a kind other than a topic with
+`create=True`, the mint of the root; the move of the one-off's folder to the row's notes
+folder; then the row. A topic's notes folder is its root, so the move makes it; a topic
+is never minted. A refusal comes before anything is made or moved. If the row write
+fails, the folder is moved back and a minted root stays, as `add` leaves it.
 """
 
 from __future__ import annotations
 
+import errno
 import os
 import shlex
 import shutil
@@ -33,8 +42,8 @@ from . import api, store
 from . import contributions as _contributions
 from .api import DEFAULT_KIND, Project
 from .contributions import Contributions, Planned
-from .errors import MintFailed, ProjectsError, Refused, Usage
-from .rules import same_root
+from .errors import Broken, MintFailed, MoveFailed, ProjectsError, Refused, Usage
+from .rules import check_root, same_root
 
 #: How long `git init` may run, in seconds.
 GIT_TIMEOUT = 30
@@ -241,6 +250,196 @@ def _amend(exc: ProjectsError, reason: str, fix: str | None) -> None:
     exc.args = (f"{reason}; {fix}" if fix else reason,)
 
 
+# --- promote ------------------------------------------------------------------------------
+
+#: The kind `promote` gives a one-off unless told another.
+TOPIC = "topic"
+
+
+def promote(slug: str, key: str, *, kind: str = TOPIC, root: str | None = None,
+            create: bool = False, contributions: Contributions | None = None) -> Added:
+    """Make notes' inbox one-off `slug` project `key`, and move its folder to the
+    project's notes folder.
+
+    A topic (the default kind) takes `key` and `kind` alone: its root and notes folder
+    are the defaults notes gives, its folder under the notes' topics folder, and the move
+    makes that folder. `root` and `create` are refused for a topic. Any other kind needs
+    `root`, which must already be absolute; its row's notes folder is the one notes
+    computes for `root`, passed as the user's own value so no default replaces it, and
+    `create` mints `root` as `add` does.
+
+    Every refusal comes before anything is made or moved: notes not installed (or not
+    loading), each refusal `add` makes with the code `add` gives it, a bad slug or no such
+    one-off, a notes folder that already exists (promote never merges two folders), a
+    root notes gives no notes folder, and a `git` mint inside the notes root. A move that
+    fails (across file systems, say) is `MoveFailed`, nothing moved. If the row write
+    then fails, the folder is moved back and the write's error raised, saying so.
+    `contributions` stands in for the installed contributions.
+    """
+    notes = _notes()
+    topic = kind == TOPIC
+    again = f"`moxi projects promote {_quote(slug)} {_quote(key)}`"
+    if topic and root is not None:
+        raise Refused("a topic's root is its folder under the notes' topics folder, which "
+                      "promote makes by moving the one-off there; drop --root",
+                      f"{again}, or pass --kind with --root for a project with code")
+    if topic and create:
+        raise Refused("promote makes a topic's folder by moving the one-off there; drop "
+                      "--create", again)
+    if not topic and root is None:
+        raise Usage(f"promoting to kind {kind!r} needs the project's root",
+                    f"pass --root DIR: `moxi projects promote {_quote(slug)} {_quote(key)} "
+                    f"--kind {_quote(kind)} --root DIR`")
+    source = str(_ask(notes, f"where the one-off {slug!r} is", notes.inbox_dir, slug))
+    if not os.path.isdir(source) or os.path.islink(source):
+        raise Refused(f"no inbox one-off is named {slug!r} ({source} is not a folder)",
+                      "`moxi notes inbox list` shows them")
+    notes_root = None
+    if not topic:
+        root = check_root(root)
+        found = _ask(notes, f"the notes folder for {root}", notes.notes_root_for, root)
+        notes_root = None if found is None else str(found)
+    planned = _contributions.plan_add(key, kind=kind, root=root, notes_root=notes_root,
+                                      contributions=contributions, notes=True)
+    root = planned.row["root"]
+    if create and planned.kind.kind.mint == "git":
+        top = str(_ask(notes, "where the notes root is", notes.root))
+        if _inside(root, top):
+            raise Refused(f"--create runs `git init` in {root}, inside the notes root "
+                          f"{top}, and a repository there keeps its files out of the "
+                          "notes' snapshots", "pick a root outside the notes root")
+    if not topic and notes_root is None:
+        raise Refused(f"notes gives no notes folder for the root {root}, so the one-off "
+                      "has nowhere to go", "pick a root under your home and outside the "
+                                           "notes root, or promote it as a topic")
+    target = planned.row["notes_root"]
+    if target is None:
+        raise Broken("notes", f"notes gave kind {kind!r} no notes folder for {key!r}",
+                     _contributions._fix("notes"))
+    git = _check_mint(planned) if create else None
+    _check_free(planned)
+    if os.path.lexists(target):
+        raise Refused(f"{target} exists already, and promote never merges two folders",
+                      f"move {_quote(target)} aside, or pick another "
+                      + ("key" if topic else "root"))
+    by_hand = _add_command(planned, notes_root)
+    command = _promote_command(slug, planned)
+    made = _mint(planned, git, command) if create else None
+    made_words = _made_words(planned, made) if create else None
+    left = f"; {made_words}, and is left as it is" if made_words else ""
+    parent = os.path.dirname(target)
+    top_made = _missing_top(parent)
+    try:
+        os.makedirs(parent, exist_ok=True)
+        os.rename(source, target)
+    except OSError as exc:
+        _unmake(top_made, parent)
+        why = ("they are on different file systems, and promote moves a folder, never "
+               "copies one" if exc.errno == errno.EXDEV else exc.strerror or str(exc))
+        raise MoveFailed(f"{source} could not be moved to {target} ({why}); nothing was "
+                         f"moved and no project was added{left}",
+                         f"move it yourself, then run `{by_hand}`") from exc
+    try:
+        project = store.write(planned.insert)
+    except BaseException as exc:
+        back = _move_back(target, source, top_made, parent)
+        if isinstance(exc, ProjectsError):
+            then = f"{exc.fix}; then " if exc.fix else ""
+            if back:
+                _amend(exc, f"{exc.reason}; the one-off is moved back to {source}{left}",
+                       f"{then}promote it again: `{command}`")
+            else:
+                _amend(exc, f"{exc.reason}; the one-off is at {target} and could not be "
+                            f"moved back to {source}{left}",
+                       f"{then}`{by_hand}` adds its row, or move {_quote(target)} back to "
+                       f"{_quote(source)} by hand")
+        raise
+    said = [made_words] if made_words else []
+    if not topic and not create:
+        note = root_note(project.root)
+        if note:
+            said.append(note)
+    said.append(f"moved {source} to {target}")
+    return Added(project, said)
+
+
+def _notes():
+    """notes' API, reached through the core: `Refused` while notes is not installed,
+    `Broken` while it won't load."""
+    import moxi.modules
+
+    found = (moxi.modules.load("notes", interface=1)
+             if moxi.modules.available("notes") else None)
+    if found is None or found.state == "absent":
+        raise Refused("promote moves one of notes' inbox one-offs, and notes is not "
+                      "installed", "run `moxi install notes`, then promote again")
+    if not found.ok:
+        raise Broken("notes", f"promote needs notes' API, and notes won't load "
+                              f"({found.reason})", _contributions._fix("notes"))
+    return found.api
+
+
+def _ask(notes, what: str, call, *args):
+    """`call(*args)` on notes' API. A refusal of notes' own is `Refused`; anything else
+    it raises is `Broken`, naming notes."""
+    try:
+        return call(*args)
+    except notes.Refused as exc:
+        raise Refused(exc.reason, exc.fix) from exc
+    except Exception as exc:  # noqa: BLE001 - whatever notes raises is named as notes'
+        raise Broken("notes", f"notes could not say {what} "
+                              f"({_contributions._describe(exc)})",
+                     getattr(exc, "fix", None) or _contributions._fix("notes")) from exc
+
+
+def _inside(path: str, top: str) -> bool:
+    """Whether `path` is `top` or under it, as spelled or with links resolved."""
+    def spelled(p: str) -> str:
+        return os.path.normcase(os.path.normpath(p))
+
+    for inner in (spelled(path), spelled(os.path.realpath(path))):
+        for outer in (spelled(top), spelled(os.path.realpath(top))):
+            if inner == outer or inner.startswith(outer.rstrip(os.sep) + os.sep):
+                return True
+    return False
+
+
+def _unmake(top: str | None, deepest: str) -> None:
+    """Take away the empty folders a move made, from `deepest` up to `top`; None means
+    it made none. A folder that can't go stops it."""
+    if top is None:
+        return
+    here = deepest
+    while True:
+        try:
+            os.rmdir(here)
+        except OSError:
+            return
+        if here == top:
+            return
+        here = os.path.dirname(here)
+
+
+def _move_back(target: str, source: str, top: str | None, parent: str) -> bool:
+    """Move the one-off back after a failed write; whether it went."""
+    try:
+        os.rename(target, source)
+    except OSError:
+        return False
+    _unmake(top, parent)
+    return True
+
+
+def _promote_command(slug: str, planned: Planned) -> str:
+    """The `moxi projects promote` that tries again, with no `--create`: a root a mint
+    made is there by then."""
+    row = planned.row
+    parts = ["moxi projects promote", _quote(slug), _quote(row["key"])]
+    if row["kind"] != TOPIC:
+        parts += ["--kind", _quote(row["kind"]), "--root", _quote(row["root"])]
+    return " ".join(parts)
+
+
 # --- set, remove and the agents ------------------------------------------------------------
 
 _FIELDS = ("root", "kind", "lead", "notes_root")
@@ -291,5 +490,5 @@ def remove_agent(key: str, name: str) -> Project:
     return store.write(lambda conn: store.remove_agent(conn, key, name))
 
 
-__all__ = ["GIT_TIMEOUT", "Added", "root_note", "add", "set_fields", "remove", "add_agent",
-           "remove_agent"]
+__all__ = ["GIT_TIMEOUT", "TOPIC", "Added", "root_note", "add", "promote", "set_fields",
+           "remove", "add_agent", "remove_agent"]

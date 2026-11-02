@@ -9,14 +9,24 @@ resolved now, no specifier, and copies no variable of this shell.
 
 A daemon with a `socket` gets one socket unit per address, `<stem>.socket` for the first
 address and `<stem>-<k>.socket` for the k-th after it, so one address that can't be bound
-fails only its own unit. Its service names them all in `Sockets=` and has no install
-section: the socket units are what is enabled, they start with `sockets.target`, and they
-start the service at the first connection, never a login. Such a service reads `static`,
-so it is never enabled or disabled; it is started and stopped. `moxi install` starts it
-all the same: a new or changed daemon's service is started after its sockets, so the
-first `status` after an install shows it `active` even before any connection, and a
-socket set that changes under a running service stops it and starts it again. An
-`upgrade = "keep"` daemon whose socket set is unchanged is left as it is.
+fails only its own unit. Its service names them all in `Sockets=`. Under `start =
+"connection"` (the default) the service has no install section: the socket units are
+what is enabled, they start with `sockets.target`, and they start the service at the
+first connection, never a login. Such a service reads `static`, so it is never enabled or
+disabled; it is started and stopped. Under `start = "login"` the service keeps its
+install section, `WantedBy=default.target`, so a login starts it, and it is enabled and
+disabled as any daemon's service is, after its socket units; `Sockets=` gives it a
+`Wants=` and an `After=` on each unit it names, so a login that starts it starts its
+sockets first. The socket units are the same text under both. Wherever this backend asks
+whether a service is static, the answer is whether its text has an install section, never
+whether the daemon declares `socket`.
+
+`moxi install` starts a socket daemon's service all the same: a new or changed daemon's
+service is started after its sockets, so the first `status` after an install shows it
+`active` even before any connection, and a socket set that changes under a running
+service stops it and starts it again. An `upgrade = "keep"` daemon whose socket set is
+unchanged is left as it is (only enabled, under `start = "login"`, so its login link is
+made or kept).
 
 Every supervisor call goes through the systemd fence (`systemctl --user`, always), so the
 verbs here are the fence's closed set. A wrap of a foreign timer is the one file this
@@ -36,8 +46,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from ._backend import (
-    ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, socket_name, socket_place,
-    socket_state)
+    ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, enabled_by_socket,
+    socket_name, socket_place, socket_state)
 from ._fence import Fence, Ran
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
@@ -145,7 +155,13 @@ def _installs(path: Path) -> bool:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    return any(line.strip() == "[Install]" for line in text.splitlines())
+    return _text_installs(text)
+
+
+def _text_installs(text: str | None) -> bool:
+    """True when a unit's text has an install section. A service without one reads
+    `static`: it has nothing to enable, so it is only started and stopped."""
+    return any(line.strip() == "[Install]" for line in (text or "").splitlines())
 
 
 def _user() -> str | None:
@@ -263,9 +279,9 @@ class SystemdBackend:
                 service.append(f"MemoryHigh={spec.memory_high}")
             if spec.memory_swap_max:
                 service.append(f"MemorySwapMax={spec.memory_swap_max}")
-            if not sockets:
-                # A daemon with sockets has no install section: they start it, a login
-                # doesn't.
+            if not sockets or spec.socket.start == "login":
+                # Under "connection" a daemon with sockets has no install section: they
+                # start it, a login doesn't.
                 service += ["", "[Install]", "WantedBy=default.target"]
             out = [Rendered("daemon", ((root / f"{stem}.service", _text(service)),))]
             if sockets:
@@ -370,13 +386,18 @@ class SystemdBackend:
         running unchanged daemons whose entry says `upgrade = "restart"` restarted. After
         the first new daemon, the lingering advice when lingering is off.
 
-        A daemon with a socket: its service has no install section, so it is started,
-        restarted and stopped, never enabled or disabled; a service that had one before
-        it gained a socket is disabled with the removes, so its old login link goes. Its
-        socket units are started before its service, and none while it runs, which
-        systemd refuses (`SocketStarts` holds the rule): a new or changed daemon's
-        service is started after its sockets even when it was idle, and an `upgrade =
-        "keep"` daemon whose socket set is unchanged is left as it is."""
+        A daemon with a socket: its socket units are started before its service, and none
+        while it runs, which systemd refuses (`SocketStarts` holds the rule): a new or
+        changed daemon's service is started after its sockets even when it was idle, and
+        an `upgrade = "keep"` daemon whose socket set is unchanged is left as it is. A
+        service with no install section (`start = "connection"`) is started, restarted
+        and stopped, never enabled or disabled; one with an install section (`start =
+        "login"`) is enabled in the step that starts it.
+
+        The login link follows the new service text: a daemon whose old service text had
+        an install section and whose new one has none is disabled (without `--now`) with
+        the removes, so its old link goes; that is never so from `"login"` to
+        `"login"`."""
         fence = io.fence
         removes = sorted((c for c in changes if c.action == "remove"),
                          key=lambda c: c.kind != "socket")
@@ -386,11 +407,11 @@ class SystemdBackend:
         dropped = {id(change): self._drop(io, change) for change in writes
                    if change.dropped}
         for change in writes:
-            if _socketed(change):
-                self._unlink_login(io, change)
+            self._unlink_login(io, change)
         # Read before the files are written: how each socket unit stands to its file, and
         # which socket daemons' services run.
-        starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed)
+        starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed,
+                              installs=_text_installs)
         starts.read(fence)
         for change in gone:
             io.delete(change)
@@ -473,10 +494,12 @@ class SystemdBackend:
         return tuple(out)
 
     def _unlink_login(self, io: ApplyIO, change: UnitChange) -> None:
-        """A daemon's service that had an install section and now has sockets: `disable`
-        it (without `--now`; the socket steps stop and start it), so a login link the old
-        text made goes and a login no longer starts it."""
-        if change.paths and _installs(change.paths[0]):
+        """A changed daemon's service whose old text has an install section and whose new
+        text has none (it gains a socket under `start = "connection"`, or switches to
+        it): `disable` it without `--now`, so the login link the old text made goes and a
+        login no longer starts it. Whether it stops is the start rule's to decide."""
+        if (change.kind == "daemon" and change.action == "change" and change.paths
+                and _installs(change.paths[0]) and not _text_installs(change.text)):
             self._run(io, change, "disable", self._id(change))
 
     def _start(self, io: ApplyIO, change: UnitChange) -> bool:
@@ -579,8 +602,10 @@ class SystemdBackend:
 
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         """A daemon with socket units has them acted on first, in unit order, for every
-        act but `restart`, which restarts the service alone. Its service has no install
-        section, so `enable` and `disable` give it `start` and `stop`."""
+        act but `restart`, which restarts the service alone. A marked service with no
+        install section (a socket daemon under `start = "connection"`) gets `start` and
+        `stop` for `enable` and `disable`; one with an install section `enable --now` and
+        `disable --now`."""
         lines: list[str] = []
         ok = True
 
@@ -608,8 +633,7 @@ class SystemdBackend:
                 run(act, *service)
         else:
             sockets, service = self._socket_of(unit), unit.ids[0]
-            static = bool(sockets) or (unit.marked and bool(unit.paths)
-                                       and not _installs(unit.paths[0]))
+            static = unit.marked and self._static(unit)
             if act == "restart":
                 run("restart", service)
             else:
@@ -646,7 +670,10 @@ class SystemdBackend:
 
         A timer's state is its `.timer`'s, so it reads `active` while armed whatever its
         runs did; its service's `Result` and `ExecMainStatus` go in `last`. When the first
-        `show` fails, every unit is `unknown` with the failure in `detail`."""
+        `show` fails, every unit is `unknown` with the failure in `detail`. A marked
+        daemon whose service text has no install section reads `static`, so its `enabled`
+        is its socket's from the same read; one with an install section keeps its
+        service's own `UnitFileState`."""
         ids = list(dict.fromkeys(i for u in units for i in u.ids))
         if not ids:
             return []
@@ -676,7 +703,11 @@ class SystemdBackend:
                       if unit.kind == "timer" and not unit.marked and len(unit.ids) > 1
                       and unit.ids[1] in later and state.state != "unknown" else state
                       for unit, state in zip(units, states)]
-        return states
+        return enabled_by_socket(units, states, self._static)
+
+    def _static(self, unit: UnitRef) -> bool:
+        """Whether a marked daemon's service has no install section."""
+        return not _installs(unit.paths[0] if unit.paths else self.root / unit.ids[0])
 
     def _state(self, unit: UnitRef, shown: Mapping, ran: Ran) -> UnitState:
         if unit.kind == "socket" and ran.ok:
@@ -933,12 +964,25 @@ class SocketStarts:
 
     A unit the set drops was disabled and stopped with the removes, so it is never
     started here. A flip of `enabled` to false disables each unit now and stops the
-    service."""
+    service.
+
+    A service whose text has an install section (`start = "login"`) is also enabled, so
+    its login link follows its text whatever the rule decides about running it: where
+    the rule says `start` of the service it gets `enable --now`, where it says `restart`
+    alone `enable` then `restart`, and a changed daemon the rule leaves as it is gets
+    `enable` alone with the "rewritten" line. A flip of `enabled` to false is `disable
+    --now` of it, after its units. That holds for `restart=True`'s unchanged daemon too:
+    its `enable` does nothing to an enabled unit, and makes the link again if someone
+    took it away.
+
+    `installs(text)` says whether a service's text has an install section, in the
+    backend's own text."""
 
     def __init__(self, backend, writes: Sequence[UnitChange], keeps: Sequence[UnitChange],
-                 *, restart: bool, socketed):
+                 *, restart: bool, socketed, installs):
         self._backend = backend
         self._restart = restart
+        self._installs = installs
         #: (module, name) -> [daemon change or None, socket change or None]
         self._daemons: dict[tuple[str, str], list] = {}
         for change in writes:
@@ -974,6 +1018,19 @@ class SocketStarts:
 
     def _service(self, key: tuple[str, str]) -> str:
         return f"{self._backend._stem(*key)}.service"
+
+    def _login(self, key) -> bool:
+        """Whether the daemon's service text has an install section, so a login starts
+        it and the rule enables it: its new text when it is written, else the file's."""
+        daemon, _ = self._daemons[key]
+        if daemon is not None:
+            return self._installs(daemon.text)
+        try:
+            text = (self._backend.root / self._service(key)).read_text(
+                encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        return self._installs(text)
 
     def _enabled(self, key) -> bool:
         daemon, sockets = self._daemons[key]
@@ -1033,15 +1090,20 @@ class SocketStarts:
         daemon, sockets = self._daemons[key]
         owner = daemon or sockets
         service = self._service(key)
+        login = self._login(key)
         if not self._enabled(key):
             if sockets is not None and sockets.action == "change" and sockets.enabled_before:
                 for path in sockets.paths:
                     self._run(io, sockets, "disable", "--now", path.name)
             if daemon is not None and daemon.action == "change" and daemon.enabled_before:
-                self._run(io, daemon, "stop", service)
+                self._run(io, daemon, *(("disable", "--now") if login else ("stop",)),
+                          service)
             return
         if not self._acted(key):
             if daemon is not None and daemon.action == "change":
+                # Its login link is made or kept even though nothing starts it now.
+                if login and not self._run(io, daemon, "enable", service):
+                    return
                 io.say(daemon, f"{service} rewritten; the new code runs from its next start")
             return
         found = "down" if self._new(key) else (
@@ -1051,7 +1113,8 @@ class SocketStarts:
                 and found == "down":
             return  # `restart=True` restarts only a service that runs
         if found == "running" and sockets is None:
-            self._run(io, owner, "restart", service)
+            if not login or self._run(io, owner, "enable", service):
+                self._run(io, owner, "restart", service)
             return
         if found != "down":
             ran = io.fence.run("stop", service)
@@ -1073,7 +1136,8 @@ class SocketStarts:
         for path in self._units(key):
             if self._news.get(path, "same") == "same":
                 self._run(io, owner, "start", path.name)
-        if self._run(io, owner, "start", service) and daemon is not None \
+        last = ("enable", "--now") if login else ("start",)
+        if self._run(io, owner, *last, service) and daemon is not None \
                 and _keeps(daemon) and sockets is not None and found != "down":
             io.say(daemon, f"{service} rewritten and restarted, since its socket changed")
 
@@ -1090,10 +1154,15 @@ class SocketStarts:
             steps.append(f"`systemctl --user restart {' '.join(fresh)}`")
         if same:
             steps.append(f"`systemctl --user start {' '.join(same)}`")
-        steps.append(f"`systemctl --user start {service}`")
-        return (f"the unit files are written, and `moxi install {key[0]}` again finds "
+        login = self._login(key)
+        steps.append(f"`systemctl --user {'enable --now' if login else 'start'} {service}`")
+        line = (f"the unit files are written, and `moxi install {key[0]}` again finds "
                 f"them up to date; fix the cause, then run {', '.join(steps[:-1])} and "
                 f"{steps[-1]}")
+        if login:
+            line += (f"; {service} was not enabled, so the login link its text asks for "
+                     "is not made until that `enable` runs")
+        return line
 
     def _units(self, key) -> tuple[Path, ...]:
         """The daemon's socket units: its written set's, or, when the set is unchanged
@@ -1116,7 +1185,7 @@ class SocketStarts:
 
 def _socketed(change: UnitChange) -> bool:
     """Whether a written daemon's new text is a service with sockets (`Sockets=`), which
-    has no install section."""
+    the start rule takes, whatever its `start`."""
     return change.kind == "daemon" and any(
         line.startswith("Sockets=") for line in (change.text or "").splitlines())
 

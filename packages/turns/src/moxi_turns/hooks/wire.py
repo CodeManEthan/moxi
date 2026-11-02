@@ -16,7 +16,7 @@ import sys
 
 # `from __future__ import annotations` above is load-bearing, not habit: it makes the
 # `TextIO` annotation below a string, so `typing` is never imported at runtime and the
-# kit's import list stays the three names L3 allows: json, sys, signal.
+# kit's import list stays the three names law 3 allows: json, sys, signal.
 
 __all__ = ["envelope", "field", "plain", "read_event"]
 
@@ -69,7 +69,7 @@ def _report(on_error, exc: BaseException, where: str) -> None:
 
     Absorbs `BaseException`, not merely `Exception`: a logger that raises `SystemExit`
     or takes a `KeyboardInterrupt` mid-write must not put a raise in a caller's `main`
-    (a broken logger cannot break exit 0; L7, `run` returns 0 on every path). A logger
+    (a broken logger cannot break exit 0; law 7, `run` returns 0 on every path). A logger
     that writes to a database under lock contention, with many sessions starting at
     once, spends real time inside that write, so a Ctrl-C landing there is the ordinary
     case and not an exotic one.

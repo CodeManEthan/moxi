@@ -1,13 +1,18 @@
-"""The module contract check, rule by rule, over small repos written for each test."""
+"""The module contract check, rule by rule, over small repos written for each test.
+
+The import rules import-linter and deptry check are proved in test_lint.py; here, the
+names an import takes, which those tools cannot see.
+"""
 
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from moxi import contract
-from moxi.contract import CheckError, check
+from moxi_dev import contract
+from moxi_dev.contract import CheckError, check
 
 ANNOUNCEMENT = {
     "INTERFACES": "frozenset({1})",
@@ -124,19 +129,7 @@ def test_a_file_that_does_not_parse_is_a_finding(repo):
     assert any("does not parse" in m for m in repo.findings("read"))
 
 
-# --- check 1 ---------------------------------------------------------------------------------
-
-def test_another_modules_internals_are_refused(repo):
-    repo.src("core.py", "import moxi_beta.engine\nfrom moxi_beta import api\n")
-    assert repo.findings("1") == [
-        "src/moxi_alpha/core.py:1: imports moxi_beta.engine, which is not moxi-beta's API "
-        "module (moxi_beta.api); import the API module"]
-
-
-def test_a_sibling_name_beside_the_api_is_refused(repo):
-    repo.src("core.py", "from moxi_beta import api, engine\n")
-    assert len(repo.findings("1")) == 1
-
+# --- check 1: the names an import takes ------------------------------------------------------
 
 def test_a_private_name_from_an_api_is_refused(repo):
     repo.src("core.py", "from moxi_beta.api import _secret\n")
@@ -145,66 +138,57 @@ def test_a_private_name_from_an_api_is_refused(repo):
 
 def test_the_core_modules_another_module_may_import(repo):
     shared = ("names", "paths", "config", "modules", "cli", "files", "store", "proc", "log",
-              "exit", "aio", "ipc", "units", "doctor", "place", "contract")
+              "exit", "aio", "ipc", "units", "doctor", "place")
     assert contract.CORE_MODULES == frozenset(shared)
-    repo.src("core.py", "".join(f"import moxi.{m}\n" for m in shared)
-             + "from moxi import files, doctor\nfrom moxi.doctor import Row\n")
+    repo.src("core.py", f"from moxi import {', '.join(shared)}\nfrom moxi.doctor import Row\n")
     assert repo.findings("1") == []
     own = ("install", "uninstall", "run", "catalogue", "strays", "home")
-    repo.src("core.py", "".join(f"import moxi.{m}\n" for m in own)
-             + "import moxi._settle\nimport moxi._win\nimport moxi._vendor\n")
+    repo.src("core.py", f"from moxi import {', '.join(own)}\n")
     found = repo.findings("1")
-    assert len(found) == len(own) + 3, found
+    assert len(found) == len(own), found
 
 
-def test_internals_in_tests_are_refused_too(repo):
-    repo.write("tests/test_core.py", "import moxi_beta.module\n")
+def test_a_private_name_in_tests_is_refused_too(repo):
+    repo.write("tests/test_core.py", "from moxi_beta.api import _secret\n")
     assert repo.findings("1")[0].startswith("tests/test_core.py:1:")
 
 
-def test_a_module_without_an_api_cannot_be_imported(repo):
-    repo.write("../beta/src/moxi_beta/module.py", announcement())
-    assert "its announcement declares none" in repo.findings("1")[0]
+def test_a_private_module_of_a_required_module_is_refused(repo):
+    repo.src("core.py", "import moxi_beta._wire\n")
+    assert repo.findings("1") == [
+        "src/moxi_alpha/core.py:1: imports moxi_beta._wire: a name starting with _ is not "
+        "part of an API"]
 
 
-def test_an_optional_module_is_reached_only_through_load(repo):
-    repo.write("pyproject.toml", pyproject(extras={"beta": ["moxi-beta>=0.1"]}))
-    repo.src("module.py", announcement(OPTIONAL="{'beta': 'Beta things.'}"))
-    found = repo.findings("1")
-    assert len(found) == 1 and "moxi.modules.load('beta')" in found[0]
-
-
-def test_a_required_module_an_extra_also_names_stays_importable(repo):
-    repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
-                                           extras={"codex": ["moxi-beta[codex]>=0.1"]}))
-    repo.src("module.py", announcement(OPTIONAL="{'codex': 'The Codex host.'}"))
-    assert repo.findings() == []
-
-
-def test_an_unreadable_announcement_of_a_dependency_is_a_finding(repo, tmp_path):
-    (tmp_path / "beta" / "pyproject.toml").unlink()
-    assert "cannot read to learn its API module" in repo.findings("1")[0]
+def test_a_name_from_an_undeclared_package_is_left_to_the_lint(repo):
+    repo.src("core.py", "from moxi_gamma.api import _secret\nfrom other import _x\n")
+    assert repo.findings("1") == []
 
 
 @pytest.mark.parametrize("line", [
     "from moxi.paths import _expanduser",
     "import moxi._private",
     "from moxi import _thing",
-    "import moxi.secret",
     "from moxi import secret",
-    "import moxi.names.deeper",
 ])
-def test_core_imports_outside_the_table_are_refused(repo, line):
+def test_core_names_outside_the_table_are_refused(repo, line):
     repo.src("core.py", line + "\n")
     assert len(repo.findings("1")) == 1
 
 
 @pytest.mark.parametrize("line", ["import moxi", "from moxi import names, paths, config",
-                                  "import moxi.modules", "from moxi.contract import check",
-                                  "import moxi.cli", "from moxi.cli import main"])
-def test_core_imports_in_the_table_pass(repo, line):
+                                  "import moxi.modules", "from moxi.config import Schema",
+                                  "import moxi.cli", "from moxi.cli import main",
+                                  "from moxi import *"])
+def test_core_names_in_the_table_pass(repo, line):
     repo.src("core.py", line + "\n")
     assert repo.findings("1") == []
+
+
+def test_the_contract_is_no_longer_a_core_module(repo):
+    repo.src("core.py", "from moxi import contract\n")
+    assert "imports moxi.contract, which is not one of the core's modules" in (
+        repo.findings("1")[0])
 
 
 def core_repo(root: Path) -> Repo:
@@ -216,13 +200,6 @@ def core_repo(root: Path) -> Repo:
     return r
 
 
-def test_the_core_imports_no_module(tmp_path):
-    r = core_repo(tmp_path / "moxi")
-    r.write("pyproject.toml", pyproject("moxi", deps=("moxi-beta",), entry_points={}))
-    r.src("names.py", "import moxi_beta.api\n")
-    assert "the core imports no module's package" in r.findings("1")[0]
-
-
 def test_the_core_reaches_its_own_internals(tmp_path):
     r = core_repo(tmp_path / "moxi")
     r.src("config.py", "from .paths import _expanduser\nfrom moxi.paths import _root\n")
@@ -230,63 +207,34 @@ def test_the_core_reaches_its_own_internals(tmp_path):
     assert r.findings() == []
 
 
-# --- check 2 ---------------------------------------------------------------------------------
-
-def test_an_undeclared_import_is_refused(repo):
-    repo.src("core.py", "def f():\n    import requests\n")
-    assert repo.findings("2") == [
-        "src/moxi_alpha/core.py:2: imports requests, which no distribution the repo declares "
-        "provides; declare it in dependencies or an extra, or map the import name to its "
-        "distribution in [tool.moxi.imports]"]
-
-
-def test_a_declared_distribution_counts_whether_or_not_it_is_installed(repo):
-    repo.write("pyproject.toml", pyproject(
-        deps=("moxi>=0.1", "moxi-beta", "no-such-dist-anywhere>=1"),
-        extras={"fast": ["another_missing.dist"]}))
-    repo.src("module.py", announcement(OPTIONAL="{'fast': 'Faster.'}"))
-    repo.src("core.py", "import no_such_dist_anywhere\ndef f():\n"
-                        "    import another_missing_dist\n")
-    assert repo.findings() == []
+def test_the_contributors_package_is_no_module(tmp_path):
+    """A package's tests import moxi_dev like any declared package, and moxi-dev itself
+    is held to neither check 1 nor check 7."""
+    r = core_repo(tmp_path / "moxi")
+    r.write("pyproject.toml", pyproject("moxi", deps=(), entry_points={},
+                                        groups={"dev": ["pytest", "moxi-dev"]}))
+    r.write("tests/test_contract.py", "from moxi_dev.contract import check\n"
+                                      "from moxi_dev import _anything\n")
+    assert r.findings() == []
+    dev = Repo(tmp_path / "moxi-dev", "dev")
+    dev.write("pyproject.toml", pyproject("moxi-dev", entry_points={},
+                                          scripts={"moxi-dev": "moxi_dev.cli:main"}))
+    dev.src("__init__.py")
+    dev.src("cli.py", "from moxi import _private\nimport moxi_beta._x\n"
+                      "def main(argv=None):\n    return 0\n")
+    assert dev.findings() == []
 
 
-def test_the_imports_table_maps_an_import_to_its_distribution(repo):
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "PyYAML>=6"),
-                                           tool='[tool.moxi.imports]\nyaml = "pyyaml"\n'))
-    repo.src("core.py", "import yaml\n")
-    assert repo.findings() == []
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "PyYAML>=6")))
-    assert len(repo.findings("2")) == 1
-
-
-def test_a_moxi_import_maps_by_its_spelling(repo):
-    repo.write("pyproject.toml", pyproject(deps=("moxi-beta",)))
-    repo.src("core.py", "from moxi import names\n")
-    assert "imports moxi," in repo.findings("2")[0]
-
-
-def test_tests_may_import_a_dependency_group(repo):
-    repo.write("tests/test_core.py", "import pytest\nimport hypothesis\n")
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"),
-                                           groups={"dev": ["pytest", "hypothesis>=6"]}))
-    assert repo.findings() == []
-
-
-def test_src_may_not_import_a_dependency_group(repo):
-    repo.src("core.py", "import pytest\n")
-    assert len(repo.findings("2")) == 1
-
-
-def test_tests_import_their_own_helpers(repo):
-    repo.write("tests/helpers.py", "")
-    repo.write("tests/fakes/__init__.py", "")
-    repo.write("tests/test_core.py", "import helpers\nfrom fakes import x\nimport conftest\n")
-    assert repo.findings() == []
-
-
-def test_relative_and_future_imports_pass(repo):
-    repo.src("core.py", "from __future__ import annotations\nfrom . import module\n")
-    assert repo.findings() == []
+def test_the_contributors_package_reads_its_own_variables(tmp_path):
+    dev = Repo(tmp_path / "moxi-dev", "dev")
+    dev.write("pyproject.toml", pyproject("moxi-dev", entry_points={}, scripts={}))
+    dev.src("__init__.py", """\
+        import os
+        LIVE = os.environ.get("MOXI_TEST_LIVE")
+        OTHER = os.environ.get("MOXI_DEV_MODE")
+        """)
+    found = dev.findings("5")
+    assert len(found) == 1 and "reads MOXI_DEV_MODE" in found[0]
 
 
 # --- check 3 ---------------------------------------------------------------------------------
@@ -482,8 +430,8 @@ def test_a_distribution_not_spelled_moxi_name(repo):
 
 
 def test_a_module_named_by_a_core_verb(tmp_path):
-    r = Repo(tmp_path / "check", "check")
-    r.write("pyproject.toml", pyproject("moxi-check"))
+    r = Repo(tmp_path / "config", "config")
+    r.write("pyproject.toml", pyproject("moxi-config"))
     r.src("__init__.py")
     r.src("module.py", announcement())
     assert "one of the umbrella's own verbs" in r.findings("7")[0]
@@ -576,6 +524,7 @@ def test_every_new_name_that_keeps_the_contract_passes(repo):
         SESSION_ENV="{'MOXI_ALPHA_NAME': 'stamped'}",
         INTERNAL_ENV="{'MOXI_ALPHA_NAME': 'stamped'}",
         QUESTIONS="{'sweep.enabled': 'Sweep each morning?'}"))
+    repo.src("skills/moxi-alpha-sweep/SKILL.md", "---\nname: moxi-alpha-sweep\n---\n")
     assert repo.findings("7") == []
 
 
@@ -640,6 +589,278 @@ def test_the_core_is_held_to_its_own_names(tmp_path):
     assert "does not declare the console script moxi" in r.findings("7")[0]
 
 
+# --- the skills ------------------------------------------------------------------------------
+
+SKILL_RULE = ("is not a Moxi skill name: a skill Moxi ships is named moxi-<name>, lower-case "
+              "ASCII letters and digits in words joined by single hyphens, 64 characters at "
+              "most")
+
+
+def skill(repo, name, text=None, *, folder="skills"):
+    body = f"---\nname: {name}\ndescription: A skill.\n---\n\n# {name}\n" if text is None \
+        else text
+    return repo.src(f"{folder}/{name}/SKILL.md", body)
+
+
+@pytest.fixture
+def skilled(repo):
+    """alpha declaring `SKILLS = 'skills'`, with one skill that keeps the rule."""
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    skill(repo, "moxi-handoff")
+    return repo
+
+
+def test_a_skill_named_moxi_name_with_its_name_line_passes(skilled):
+    assert skilled.findings() == []
+    skill(skilled, "moxi-handoff", "---\nname: 'moxi-handoff'\n---\n")
+    assert skilled.findings() == []
+    skill(skilled, "moxi-handoff", '---\nname:   "moxi-handoff"  \ndescription: x\n---\n')
+    assert skilled.findings() == []
+
+
+def test_dot_folders_pycache_and_plain_files_in_skills_are_not_skills(skilled):
+    skilled.src("skills/__pycache__/x.pyc", "")
+    skilled.src("skills/.x/notes.txt", "")
+    skilled.src("skills/README.md", "the skills\n")
+    skilled.src("skills/moxi-handoff/scripts/run.sh", "")
+    assert skilled.findings() == []
+
+
+def test_a_skill_whose_folder_is_not_a_skill_name_fails_naming_it(skilled):
+    skill(skilled, "handoff")
+    assert skilled.findings("7") == [
+        f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
+
+
+def test_a_skill_with_no_skill_md_or_another_name_fails_naming_it(skilled):
+    skill(skilled, "moxi-handoff", "---\nname: handoff\n---\n")
+    assert skilled.findings("7") == [
+        "src/moxi_alpha/skills/moxi-handoff/SKILL.md:2: names the skill 'handoff'; its "
+        "name: is the folder's name, moxi-handoff"]
+    (skilled.root / "src/moxi_alpha/skills/moxi-handoff/SKILL.md").unlink()
+    skilled.src("skills/moxi-handoff/notes.md", "")
+    assert skilled.findings("7") == [
+        "src/moxi_alpha/skills/moxi-handoff:0: is a skill folder with no SKILL.md"]
+
+
+def test_a_skills_folder_declared_and_missing_or_a_file_fails(repo):
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: SKILLS names 'skills', and src/moxi_alpha/skills does "
+        "not exist"]
+    repo.src("skills", "not a folder\n")
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: SKILLS names 'skills', and src/moxi_alpha/skills is a "
+        "file, not a folder"]
+
+
+def test_no_skills_declared_reads_no_skills_folder(repo):
+    skill(repo, "handoff")
+    assert repo.findings() == []
+
+
+def test_a_skills_path_in_parts_resolves_beside_the_announcement(repo):
+    repo.src("module.py", announcement(SKILLS="'./data/skills/'"))
+    skill(repo, "moxi-handoff", folder="data/skills")
+    assert repo.findings() == []
+    skill(repo, "bad", folder="data/skills")
+    assert [f.split(":")[0] for f in repo.findings("7")] == ["src/moxi_alpha/data/skills/bad"]
+
+
+def test_a_skills_path_with_a_backslash_fails(repo):
+    # importlib.resources reads data\skills as one name on POSIX, so the install would
+    # look for a folder that isn't there.
+    repo.src("module.py", announcement(SKILLS="'./data\\\\skills/'"))
+    skill(repo, "moxi-handoff", folder="data/skills")
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: SKILLS names './data\\\\skills/', which has a "
+        "backslash; write the path with /, which resolves the same on every platform"]
+
+
+def test_the_skills_folder_is_in_the_package_that_holds_the_announcement(repo):
+    """As `importlib.resources` reads it: beside an announcement module, in the package it
+    is part of, and inside an announcement that is a package itself."""
+    repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
+                                           entry_points={"alpha": "moxi_alpha.ann.module"}))
+    repo.src("ann/__init__.py")
+    repo.src("ann/module.py", announcement(SKILLS="'skills'"))
+    skill(repo, "moxi-handoff")                  # src/moxi_alpha/skills: not the one read
+    assert repo.findings("7") == [
+        "src/moxi_alpha/ann/module.py:0: SKILLS names 'skills', and "
+        "src/moxi_alpha/ann/skills does not exist"]
+    skill(repo, "moxi-handoff", folder="ann/skills")
+    assert repo.findings() == []
+    repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
+                                           entry_points={"alpha": "moxi_alpha.ann"}))
+    repo.src("ann/__init__.py", announcement(SKILLS="'skills'"))
+    assert repo.findings() == []
+    skill(repo, "handoff", folder="ann/skills")
+    assert [f.split(":")[0] for f in repo.findings("7")] == [
+        "src/moxi_alpha/ann/skills/handoff"]
+
+
+@pytest.mark.parametrize("text", [
+    "﻿---\nname: moxi-handoff\n---\n",
+    "---\r\nname: moxi-handoff\r\ndescription: x\r\n---\r\n# body\r\n",
+    "﻿---\r\nname: moxi-handoff\r\n---\r\n",
+    "---  \nmetadata:\n  name: other\nname: moxi-handoff\n---\nname: after\n",
+    "---\nname:moxi-handoff\n---",
+])
+def test_the_name_line_is_read_from_the_frontmatter_alone(skilled, text):
+    skill(skilled, "moxi-handoff", text)
+    assert skilled.findings() == []
+
+
+@pytest.mark.parametrize("text, line, problem", [
+    ("# no frontmatter\nname: moxi-handoff\n", 1, "does not open with a --- line"),
+    ("\n---\nname: moxi-handoff\n---\n", 1, "does not open with a --- line"),
+    ("---\nname: moxi-handoff\n", 1, "opens its frontmatter with --- and never closes it"),
+    ("---\ndescription: x\n---\nname: moxi-handoff\n", 1,
+     "has no name: line in its frontmatter"),
+    ("---\n  name: moxi-handoff\n---\n", 1, "has no name: line in its frontmatter"),
+    ("---\nname: moxi-handoff\nname: moxi-handoff\n---\n", 3,
+     "has 2 name: lines in its frontmatter (lines 2, 3)"),
+])
+def test_a_skill_md_the_name_cannot_be_read_from_fails(skilled, text, line, problem):
+    skill(skilled, "moxi-handoff", text)
+    assert skilled.findings("7") == [
+        f"src/moxi_alpha/skills/moxi-handoff/SKILL.md:{line}: {problem}, so it can't name "
+        "the skill moxi-handoff"]
+
+
+@pytest.mark.parametrize("value", ["'moxi-handoff\"", "moxi-handoff # the skill",
+                                   "\"'moxi-handoff'\"", "''", "Moxi-Handoff"])
+def test_a_name_written_otherwise_is_not_the_folder_name(skilled, value):
+    skill(skilled, "moxi-handoff", f"---\nname: {value}\n---\n")
+    found = skilled.findings("7")
+    assert len(found) == 1 and "its name: is the folder's name, moxi-handoff" in found[0]
+
+
+def test_a_skill_md_not_utf8_fails(skilled):
+    path = skilled.root / "src/moxi_alpha/skills/moxi-handoff/SKILL.md"
+    path.write_bytes(b"---\nname: moxi-\xff\n---\n")
+    assert skilled.findings("7") == [
+        "src/moxi_alpha/skills/moxi-handoff/SKILL.md:0: is not UTF-8, so it can't name the "
+        "skill moxi-handoff"]
+
+
+def test_staged_reads_the_skills_from_the_index(skilled):
+    skilled.git("init", "-q")
+    skilled.git("add", ".")
+    assert skilled.findings(staged=True) == []
+    # Folders the index has no file under are not skills there; on disk they are.
+    (skilled.root / "src/moxi_alpha/skills/handoff").mkdir()
+    (skilled.root / "src/moxi_alpha/skills/moxi-empty").mkdir()
+    assert skilled.findings(staged=True) == []
+    assert [f.split(":")[0] for f in skilled.findings("7")] == [
+        "src/moxi_alpha/skills/handoff", "src/moxi_alpha/skills/handoff",
+        "src/moxi_alpha/skills/moxi-empty"]
+    # A staged SKILL.md naming another skill fails staged, though the disk is fixed.
+    skill(skilled, "moxi-handoff", "---\nname: handoff\n---\n")
+    skilled.git("add", ".")
+    skill(skilled, "moxi-handoff")
+    (skilled.root / "src/moxi_alpha/skills/handoff").rmdir()
+    (skilled.root / "src/moxi_alpha/skills/moxi-empty").rmdir()
+    assert skilled.findings() == []
+    found = skilled.findings("7", staged=True)
+    assert len(found) == 1 and "names the skill 'handoff'" in found[0]
+    # A plain file staged in SKILLS is no skill; a misnamed skill staged is.
+    skill(skilled, "moxi-handoff")
+    skilled.src("skills/README.md", "the skills\n")
+    skill(skilled, "handoff")
+    skilled.git("add", ".")
+    assert skilled.findings("7", staged=True) == [
+        f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
+
+
+def test_staged_a_skills_folder_missing_or_a_file_in_the_index_fails(repo):
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    repo.git("init", "-q")
+    repo.git("add", ".")
+    assert "src/moxi_alpha/skills does not exist" in repo.findings("7", staged=True)[0]
+    repo.src("skills", "not a folder\n")
+    repo.git("add", ".")
+    assert "is a file, not a folder" in repo.findings("7", staged=True)[0]
+
+def link(repo, rel, target):
+    """A symlink at src/<pkg>/<rel> whose target is `target`, as written."""
+    path = repo.root / f"src/{repo.pkg}/{rel}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(target)
+    return path
+
+
+def staged_and_disk(repo):
+    repo.git("init", "-q")
+    repo.git("add", ".")
+    return repo.findings("7", staged=True), repo.findings("7")
+
+
+def test_a_symlinked_skill_folder_is_counted_staged_as_on_disk(skilled):
+    # A misnamed link to a skill whose name: is its own folder's.
+    skill(skilled, "moxi-link", folder="extra")
+    link(skilled, "skills/badlink", "../extra/moxi-link")
+    staged, disk = staged_and_disk(skilled)
+    assert staged == disk == [
+        f"src/moxi_alpha/skills/badlink:0: is a skill folder, and 'badlink' {SKILL_RULE}",
+        "src/moxi_alpha/skills/badlink/SKILL.md:2: names the skill 'moxi-link'; its name: "
+        "is the folder's name, badlink"]
+
+
+def test_a_well_named_symlinked_skill_passes_staged_and_on_disk(skilled):
+    skill(skilled, "moxi-linked", folder="extra")
+    link(skilled, "skills/moxi-linked", "../extra/moxi-linked")
+    assert staged_and_disk(skilled) == ([], [])
+
+
+def test_a_symlinked_skill_md_is_read_staged_and_on_disk(skilled):
+    skilled.src("docs/handoff.md", "---\nname: handoff\n---\n")
+    (skilled.root / "src/moxi_alpha/skills/moxi-handoff/SKILL.md").unlink()
+    link(skilled, "skills/moxi-handoff/SKILL.md", "../../docs/handoff.md")
+    staged, disk = staged_and_disk(skilled)
+    assert staged == disk == [
+        "src/moxi_alpha/skills/moxi-handoff/SKILL.md:2: names the skill 'handoff'; its "
+        "name: is the folder's name, moxi-handoff"]
+    skilled.src("docs/handoff.md", "---\nname: moxi-handoff\n---\n")
+    skilled.git("add", ".")
+    assert skilled.findings(staged=True) == skilled.findings() == []
+
+
+def test_a_symlinked_skills_folder_is_read_staged_and_on_disk(repo):
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    skill(repo, "moxi-handoff", folder="data/skills")
+    skill(repo, "handoff", folder="data/skills")
+    link(repo, "skills", "data/skills")
+    staged, disk = staged_and_disk(repo)
+    assert staged == disk == [
+        f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
+
+
+def test_a_symlink_the_index_cannot_follow_fails_staged(skilled):
+    skilled.git("init", "-q")
+    # The target is on disk but not staged, so the commit wouldn't carry it.
+    skill(skilled, "moxi-gone", folder="extra")
+    link(skilled, "skills/moxi-gone", "../extra/moxi-gone")
+    skilled.git("add", "src/moxi_alpha/skills", "src/moxi_alpha/module.py", "pyproject.toml")
+    assert skilled.findings() == []
+    assert skilled.findings("7", staged=True) == [
+        "src/moxi_alpha/skills/moxi-gone:0: is a symlink whose target, ../extra/moxi-gone, "
+        "isn't committed"]
+    (skilled.root / "src/moxi_alpha/skills/moxi-gone").unlink()
+    link(skilled, "skills/moxi-out", "../../../../elsewhere")
+    link(skilled, "skills/moxi-loop", "moxi-loop")
+    skilled.git("add", "-A", "src/moxi_alpha/skills")
+    assert skilled.findings("7", staged=True) == [
+        "src/moxi_alpha/skills/moxi-loop:0: is a symlink in a loop",
+        "src/moxi_alpha/skills/moxi-out:0: is a symlink to ../../../../elsewhere, outside "
+        "the package, so the commit doesn't carry what it points at"]
+    # A dangling SKILLS folder is named the same way.
+    (skilled.root / "src/moxi_alpha/skills").rename(skilled.root / "src/moxi_alpha/held")
+    link(skilled, "skills", "gone")
+    skilled.git("add", "-A", "src/moxi_alpha")
+    assert skilled.findings("7", staged=True) == [
+        "src/moxi_alpha/skills:0: is a symlink whose target, gone, isn't committed"]
+
 # --- the status line segment -----------------------------------------------------------------
 
 def test_a_segment_shows_and_triggers_nothing(repo):
@@ -671,20 +892,20 @@ def test_a_segment_may_not_reach_turns(repo):
 def test_staged_reads_the_index_not_the_working_tree(repo):
     repo.git("init", "-q")
     repo.git("add", ".")
-    repo.src("core.py", "import requests\n")
+    repo.src("core.py", "from moxi import _thing\n")
     assert repo.findings(staged=True) == []
-    assert len(repo.findings("2")) == 1
+    assert len(repo.findings("1")) == 1
     repo.git("add", ".")
     repo.src("core.py", "")
-    assert len(repo.findings("2", staged=True)) == 1
+    assert len(repo.findings("1", staged=True)) == 1
     assert repo.findings() == []
 
 
 def test_staged_sees_a_file_deleted_from_the_index(repo):
-    repo.src("bad.py", "import requests\n")
+    repo.src("bad.py", "from moxi import _thing\n")
     repo.git("init", "-q")
     repo.git("add", ".")
-    assert len(repo.findings("2", staged=True)) == 1
+    assert len(repo.findings("1", staged=True)) == 1
     repo.git("rm", "-q", "--cached", "src/moxi_alpha/bad.py")
     assert repo.findings(staged=True) == []
 
@@ -705,38 +926,60 @@ def test_staged_outside_git_is_an_error(repo):
 def test_whole_tree_in_git_skips_ignored_files(repo):
     repo.git("init", "-q")
     repo.write(".gitignore", "scratch/\n")
-    repo.write("scratch/probe.py", "import requests\n")
-    repo.write("notes.py", "import requests\n")
-    found = repo.findings("2")
-    assert found == ["notes.py:1: imports requests, which no distribution the repo declares "
-                     "provides; declare it in dependencies or an extra, or map the import "
-                     "name to its distribution in [tool.moxi.imports]"]
+    repo.write("scratch/probe.py", "def (:\n")
+    repo.write("notes.py", "def (:\n")
+    found = repo.findings("read")
+    assert [f.split(":")[0] for f in found] == ["notes.py"]
 
 
 def test_whole_tree_outside_git_skips_environments(repo):
-    repo.write(".venv/lib/x.py", "import requests\n")
-    repo.write("build/lib/x.py", "import requests\n")
+    repo.write(".venv/lib/x.py", "def (:\n")
+    repo.write("build/lib/x.py", "def (:\n")
     assert repo.findings() == []
 
 
-# --- main ------------------------------------------------------------------------------------
+# --- the command -----------------------------------------------------------------------------
 
 def test_main_exits_0_1_and_2(repo, capsys):
     assert contract.main([str(repo.root)]) == 0
     assert capsys.readouterr().out == ""
-    repo.src("core.py", "import requests\n")
+    repo.src("core.py", "from moxi import _thing\n")
     assert contract.main([str(repo.root)]) == 1
     out = capsys.readouterr()
-    assert out.out.startswith("src/moxi_alpha/core.py:1: check 2: imports requests")
-    assert "1 finding in" in out.err
+    assert out.out.startswith("src/moxi_alpha/core.py:1: check 1: ")
+    assert "moxi-dev contract: 1 finding in" in out.err
     assert contract.main(["--staged", str(repo.root)]) == 2
     assert "not inside a git work tree" in capsys.readouterr().err
 
 
+def test_main_with_staged_judges_the_index(repo, capsys, monkeypatch):
+    repo.git("init", "-q")
+    repo.git("add", ".")
+    repo.src("core.py", "from moxi import _thing\n")
+    monkeypatch.chdir(repo.root)
+    assert contract.main(["--staged"]) == 0
+    assert contract.main([]) == 1
+    repo.git("add", ".")
+    repo.src("core.py", "")
+    capsys.readouterr()
+    assert contract.main(["--staged"]) == 1
+    assert capsys.readouterr().out.startswith("src/moxi_alpha/core.py:1: check 1: ")
+
+
 def test_main_names_its_prog(capsys):
     with pytest.raises(SystemExit):
-        contract.main(["--help"], prog="moxi check")
-    assert capsys.readouterr().out.startswith("usage: moxi check [-h] [--staged] [PATH]")
+        contract.main(["--help"])
+    assert capsys.readouterr().out.startswith(
+        "usage: moxi-dev contract [-h] [--staged] [PATH]")
+
+
+def test_the_module_runs_as_a_script(repo):
+    repo.src("core.py", "from moxi import _thing\n")
+    proc = subprocess.run([sys.executable, "-m", "moxi_dev.contract", str(repo.root)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 1, proc.stderr
+    assert proc.stdout.startswith("src/moxi_alpha/core.py:1: check 1: ")
+    assert "python -m moxi_dev.contract: 1 finding in" in proc.stderr
 
 
 # --- check 8 ---------------------------------------------------------------------------------
@@ -830,4 +1073,13 @@ def test_tests_are_not_write_sites(repo):
 def test_the_core_has_no_write_site_list(tmp_path):
     r = core_repo(tmp_path / "moxi")
     r.src("files.py", "import os\ndef atomic_write(a, b):\n    os.replace(a, b)\n")
+    assert r.findings("8") == []
+
+
+def test_moxi_dev_has_no_write_site_list(tmp_path):
+    r = Repo(tmp_path / "moxi-dev", "dev")
+    r.pkg = "moxi_dev"
+    r.write("pyproject.toml", pyproject("moxi-dev", entry_points={}, scripts={}))
+    r.src("__init__.py")
+    r.src("new.py", "from pathlib import Path\ndef render(p):\n    Path(p).write_text('x')\n")
     assert r.findings("8") == []

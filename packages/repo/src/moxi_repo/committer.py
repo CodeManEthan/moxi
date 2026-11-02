@@ -711,10 +711,19 @@ def _last_commit(p: _Pass, author: tuple[str, str]) -> float | None:
 def last_commit_time(top, author: tuple[str, str]) -> float | None:
     """The commit time of `author`'s newest commit on any ref of the repo at `top`, or
     None when there is none."""
+    found = last_commit(top, author)
+    return None if found is None else found[1]
+
+
+def last_commit(top, author: tuple[str, str]) -> tuple[str, float] | None:
+    """The hash and commit time of `author`'s newest commit on any ref of the repo at
+    `top`, or None when there is none."""
     who = f"^{_bre(author[0])} <{_bre(author[1])}>$"
-    done = git(top, "log", "--all", "-1", "--basic-regexp", f"--author={who}", "--format=%ct")
+    done = git(top, "log", "--all", "-1", "--basic-regexp", f"--author={who}",
+               "--format=%H %ct")
+    sha, _, when = done.stdout.strip().partition(" ")
     try:
-        return float(done.stdout.strip()) if done.returncode == 0 else None
+        return (sha, float(when)) if done.returncode == 0 and sha else None
     except ValueError:
         return None
 
@@ -1345,7 +1354,8 @@ def _clear_gone(cgd: Path) -> list:
 
 def listing(root) -> list[dict]:
     """The repo's saved specs and the specs that ran without being saved, each with its
-    last result, as `moxi repo specs --json` prints them."""
+    last result, as `moxi repo specs --json` prints them. `push` holds each branch whose
+    last push failed, and `pushed` each branch's last pushed commit."""
     where = _where(root)
     saved = _config_specs(where.cgd)
     state = read_state(where.cgd)["specs"]
@@ -1357,7 +1367,8 @@ def listing(root) -> list[dict]:
         item: dict = {"name": name, "saved": name in saved, "spec": None, "problem": None,
                       "last": entry.get("last"), "refused_since": entry.get("refused_since"),
                       "refused_passes": entry.get("refused_passes"),
-                      "push": entry.get("push") or {}, "left": entry.get("left") or {},
+                      "push": entry.get("push") or {},
+                      "pushed": entry.get("pushed_sha") or {}, "left": entry.get("left") or {},
                       "records": sorted(k for k, v in keys.items() if v.get("cgd") == want
                                         and (v.get("subject") or {}).get("spec") == name
                                         and v.get("kind") in ("commit", "push"))}

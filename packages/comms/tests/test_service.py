@@ -28,8 +28,9 @@ exit {code}
 
 @pytest.fixture
 def box(tmp_path, monkeypatch):
-    """A temp HOME, a fake systemctl, and the rig's standalone roots."""
-    home = tmp_path / "home"
+    """A temp HOME of the box's own (the fence's is `tmp_path / "home"`), a fake
+    systemctl, and the rig's standalone roots."""
+    home = tmp_path / "box-home"
     home.mkdir()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -209,8 +210,9 @@ def test_the_writer_and_the_old_verb_name_the_same_unit():
 
     from moxi_comms import module
 
-    assert module.DAEMONS == {"daemon": {"command": "moxi-comms-daemon",
-                                         "doc": "the delivery daemon"}}
+    assert module.DAEMONS == {"daemon": {
+        "command": "moxi-comms-daemon", "doc": "the delivery daemon",
+        "socket": {"setting": "mcp.port", "addresses": ["127.0.0.1"], "start": "login"}}}
     decl = units.declarations("comms")
     assert decl.rejected == {} and decl.timers == {}
     [(name, entry)] = decl.daemons.items()

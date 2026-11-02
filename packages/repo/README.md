@@ -28,7 +28,8 @@ moxi repo git-hooks list                         # every repo repo has written t
 
 - `moxi repo git-hooks [list] [PATH] [--projects] [--json]` lists each repo repo has
   written to, or the one at PATH: git's version and the mode, each event's pieces in
-  order (id, fail policy, enabled, settings), the existing git hook, and problems.
+  order (id, fail policy, enabled, settings), the existing git hook, and problems. Its
+  JSON also gives the doctor records repo has open for each repo.
 - `moxi repo git-hooks available [--json]` lists the pieces installed modules declare: id,
   event, fail policy, the settings each takes, and one line about it.
 - `moxi repo git-hooks add PATH [PIECE...] [--mode auto|config|shim] [--set KEY=VALUE]...`
@@ -320,7 +321,8 @@ that text the commit's subject, and a callable `message` can't be saved.
   every spec saved in that repo, and prints each pass's line. It exits 1 on an error or a
   failed push, 3 when a pass was refused, 75 when `--wait` ran out on a busy lock, else 0.
 - `moxi repo specs [PATH] [--json]` lists saved specs, and specs that ran without being
-  saved, each with its last result.
+  saved, each with its last result. Its JSON also gives a saved spec's last commit (its
+  author's newest) and each branch's last pushed commit.
 - `moxi repo specs remove PATH NAME` forgets a spec: its saved section, its state and its
   doctor records.
 
@@ -447,6 +449,15 @@ removing began, it stops there: that repo and the rest stay indexed with their r
 and the last line names the repos already cleaned. With `--purge` the uninstall also asks
 whether to remove repo's index and its ledger of records.
 
+## The git hooks page
+
+With the `ui` extra, the browser UI shell shows a git hooks page: for each indexed repo,
+its problems, each git event with its pieces in the order they run, the existing git hook
+and the chain line's state, each committer spec's last pass, last commit and pushes, and
+the doctor records repo has open. The page reads what `moxi repo git-hooks list --json`
+and `moxi repo specs --json` print, and changes nothing: each action is a `moxi repo`
+command to copy and run in a terminal.
+
 ## Install
 
 Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/). On macOS
@@ -462,18 +473,20 @@ Before the modules are on PyPI, install the core from git and give `moxi install
 source for repo:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
+uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
 moxi install repo \
-  --from 'moxi-repo @ git+https://github.com/moxihq/moxi#subdirectory=packages/repo'
+  --from 'moxi-repo @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/repo'
 ```
 
-The front door's README, at [moxihq/moxi](https://github.com/moxihq/moxi), covers the
-`moxi` command and the other modules.
+The front door's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
+the other modules.
 
 ## Dependencies
 
 `moxi`, Moxi's core. The projects module is optional and reached only when installed.
-repo has no optional extras.
+The `ui` extra (`moxi-ui`, the browser UI shell) adds the git hooks page; see
+[The git hooks page](#the-git-hooks-page).
 
 ## License
 

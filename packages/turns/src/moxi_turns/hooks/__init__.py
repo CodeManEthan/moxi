@@ -97,22 +97,22 @@ What this package is not:
 
 The ten laws, each with a live gauge in turns' `tests/hooks/test_hooks_law.py`:
 
-    L1  Stateless: every cap, marker, timeout and field spelling arrives as an argument.
-    L2  Env-free: no module reads the environment or computes a default path.
-    L3  Standard library only: the package imports `json`, `sys` and `signal` and its
+    1.  Stateless: every cap, marker, timeout and field spelling arrives as an argument.
+    2.  Env-free: no module reads the environment or computes a default path.
+    3.  Standard library only: the package imports `json`, `sys` and `signal` and its
         own three modules, and nothing of Moxi's, the core and the rest of turns
         included.
-    L4  Nothing imported eagerly: importing the package binds no submodule.
-    L5  A hard per-hook time bound, when `seconds` is passed: the body is abandoned and
+    4.  Nothing imported eagerly: importing the package binds no submodule.
+    5.  A hard per-hook time bound, when `seconds` is passed: the body is abandoned and
         nothing is written to stdout.
-    L6  A size cap that admits its own cuts.
-    L7  The hook path cannot raise, and the kit never selects an exit code.
-    L8  Compose, then emit, once.
-    L9  stdout carries the payload or nothing; the kit writes no diagnostic itself.
-    L10 No module's words: the kit authors no string a reader sees.
+    6.  A size cap that admits its own cuts.
+    7.  The hook path cannot raise, and the kit never selects an exit code.
+    8.  Compose, then emit, once.
+    9.  stdout carries the payload or nothing; the kit writes no diagnostic itself.
+    10. No module's words: the kit authors no string a reader sees.
 
 Nothing is bound here at import. The submodules are reached through a module-level
-`__getattr__` (L4): with three stdlib imports the saving today is nil, and the law's
+`__getattr__` (law 4): with three stdlib imports the saving today is nil, and the law's
 purpose is the second clause. It is the tripwire that makes any future eager import a
 visible change to this file rather than a line added to a module somebody already
 imports.
@@ -128,7 +128,7 @@ __all__ = ["run", "text", "wire"]
 
 
 def __getattr__(name):
-    """Bind a submodule on first touch, and nothing before that (L4).
+    """Bind a submodule on first touch, and nothing before that (law 4).
 
     `__import__` rather than a `from . import …` statement: inside a package's own
     `__getattr__`, the from-form asks the package for the attribute it is in the middle

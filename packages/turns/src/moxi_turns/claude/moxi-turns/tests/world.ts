@@ -8,7 +8,7 @@ import type { On } from 'claude-code'
 export const ROOT_ARGV = ['/opt/env/bin/moxi-turns-endpoint']
 export const SOCK = '/run/user/1000/moxi/turns/claude-n1/mod.sock'
 
-type Answer = Record<string, unknown> | 'hang' | 'fail'
+type Answer = Record<string, unknown> | 'hang' | 'fail' | ((body: Record<string, unknown>) => Promise<Record<string, unknown>>)
 
 /** A row the engine appends at the door `command`: a slash command's or a `!` command's. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,8 +21,17 @@ export function commandRow($: any, text: string) {
   })
 }
 
-export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; gate?: boolean; spinMs?: number } = {}) {
+export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; env?: Record<string, string>; envFails?: boolean; gate?: boolean; spinMs?: number } = {}) {
   const clock = mock.clock(on, { now: 1_000 })
+  // The session's environment: only what the test names, never the one the tests run in.
+  // With `envFails`, every `$.env.get` throws instead.
+  if (options.envFails) {
+    on('env.get', async () => {
+      throw new Error('the environment cannot be read')
+    })
+  } else {
+    mock.env(on, options.env ?? {})
+  }
   const w = {
     clock,
     surfaces: options.surfaces ?? ['terminal'],
@@ -33,9 +42,11 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     box: '',
     gate: options.gate ?? true,
     spawned: [] as string[][],
+    /** Every path the runner read with `$.fs.read`, in order. */
+    reads: [] as string[],
     /** Every request the endpoint got, in order: path and body. */
     got: [] as { path: string; body: Record<string, unknown> }[],
-    /** The endpoint's answer per path; a default `{}`. */
+    /** The endpoint's answer per path, or a function of the request's body; a default `{}`. */
     answers: {} as Record<string, Answer>,
     submits: [] as string[],
     /** How the engine settles each prompt.submit: set before the line arrives. */
@@ -61,12 +72,30 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     order: [] as string[],
     wake: () => {},
     childDone: false,
+    /** What `$.session.usage()` answers; a throw when null. */
+    usage: { startedAt: 500, context: { tokens: 1200, window: 200_000, percent: 1 }, rateLimits: [] } as Record<string, unknown> | null,
+    /** When set, a prompt's `next(e)` calls it beneath, as the engine runs the prompt's
+     *  classic.UserPromptSubmit there: a test passes its own `$.classic` call. */
+    classicInSubmit: undefined as undefined | ((text: string) => Promise<unknown>),
+    /** A hook beneath rewrites the prompt before its UserPromptSubmit, when set. */
+    rewrite: undefined as undefined | ((text: string) => string),
+    /** What `$.session.cwd()` answers: a directory, a value that is no string, a throw
+     *  when `fail`, or never when `hang`. A test sets it per call, as each loop's hook reads its own. */
+    cwd: '/work' as unknown,
+    /** How many times the runner read `$.session.cwd()`. */
+    cwdReads: 0,
   }
   const endpointJson = options.endpointJson === undefined ? JSON.stringify({ argv: ROOT_ARGV }) : options.endpointJson
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('session.surfaces', async () => ({ value: w.surfaces as never }))
   on('session.id', async () => ({ value: w.sessionId }))
+  on('session.cwd', async () => {
+    w.cwdReads += 1
+    if (w.cwd === 'fail') throw new Error('the directory cannot be read')
+    if (w.cwd === 'hang') await new Promise(() => {})
+    return { value: w.cwd as never }
+  })
   on('turn.start', async ($, e) => {
     // The work behind a hook (another plugin's, the engine's): real time, which a hook's
     // own timing leaves out.
@@ -79,6 +108,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
   on('classic.UserPromptSubmit', async () => ({}))
   on('classic.Stop', async () => ({}))
   on('fs.read', async ($, e) => {
+    w.reads.push(e.path)
     if (e.path.endsWith('/endpoint.json') && endpointJson !== null) return { value: endpointJson }
     throw new Error(`ENOENT: ${e.path}`)
   })
@@ -92,7 +122,13 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     w.stateWrites.push({ key: (e as { key: string }).key, value: (e as { value: unknown }).value })
     return next(e)
   })
+  on('session.usage', async () => {
+    if (w.usage === null) throw new Error('no usage')
+    return { value: w.usage as never }
+  })
+  on('session.measure', async ($, e) => ({ changed: e.changed }))
   on('prompt.submit', async ($, e) => {
+    if (w.classicInSubmit) await w.classicInSubmit(w.rewrite ? w.rewrite(e.text) : e.text)
     w.submits.push(e.text)
     if (w.settle) return (await w.settle(e.text)) as never
     return { text: e.text, origin: e.origin }
@@ -126,15 +162,19 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     while (performance.now() - t0 < (options.spinMs ?? 0)) { /* spin */ }
     const key = String((e as Record<string, unknown>).command ?? e.tool)
     if (key in w.holds || key.startsWith('hold:')) await new Promise<void>(resolve => { w.holds[key] = resolve })
+    // A call refused beneath the runner, or one whose tool reported an error.
+    if (key.startsWith('deny:')) return { deny: 'refused beneath' } as never
+    if (key.startsWith('error:')) return { isError: true, result: 'boom', text: 'boom' } as never
     return { result: {}, text: 'ok' } as never
   })
   on('http.fetch', async ($, e) => {
     const path = new URL(e.url).pathname
     const body = JSON.parse(String(e.init?.body ?? '{}')) as Record<string, unknown>
     w.got.push({ path, body })
-    const a = w.answers[path] ?? {}
-    if (a === 'fail') throw new Error('ECONNREFUSED')
-    if (a === 'hang') await new Promise(() => {})
+    const given = w.answers[path] ?? {}
+    if (given === 'fail') throw new Error('ECONNREFUSED')
+    if (given === 'hang') await new Promise(() => {})
+    const a = typeof given === 'function' ? await given(body) : given
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(a) } }
   })
   on('process.spawn', async function* ($, e) {
@@ -154,7 +194,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
       await clock.settle()
     },
     async hello(extra: Record<string, unknown> = {}) {
-      await this.line({ op: 'hello', leg: 2, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
+      await this.line({ op: 'hello', leg: 3, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
     },
     async end() {
       w.childDone = true

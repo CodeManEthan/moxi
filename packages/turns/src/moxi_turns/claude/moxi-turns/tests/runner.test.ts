@@ -3,8 +3,8 @@
 // ask, and the session commands.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { ROOT_ARGV, SOCK, commandRow, world } from './world.ts'
-import type { World } from './world.ts'
+import { ROOT_ARGV, SOCK, commandRow, world } from './world'
+import type { World } from './world'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
@@ -52,6 +52,48 @@ describe('the non-interactive rule', () => {
     const w = world(on, { endpointJson: JSON.stringify({ argv: ['moxi-turns-endpoint'] }) })
     await start($)
     expect(w.spawned).toEqual([])
+  })
+
+  test('MOXI_TURNS_ENDPOINT set and absolute is the command, and endpoint.json is never read', async ($: E, on) => {
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: '/opt/launch/bin/moxi-turns-endpoint' } })
+    await start($)
+    expect(w.spawned).toEqual([['/opt/launch/bin/moxi-turns-endpoint']])
+    expect(w.reads.filter(p => p.endsWith('/endpoint.json'))).toEqual([])
+  })
+
+  test('MOXI_TURNS_ENDPOINT alone, with no endpoint.json, is enough', async ($: E, on) => {
+    const w = world(on, { endpointJson: null, env: { MOXI_TURNS_ENDPOINT: '/opt/launch/bin/moxi-turns-endpoint' } })
+    await start($)
+    expect(w.spawned).toEqual([['/opt/launch/bin/moxi-turns-endpoint']])
+  })
+
+  test('MOXI_TURNS_ENDPOINT set but not absolute spawns nothing, even with a good endpoint.json', async ($: E, on) => {
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: 'moxi-turns-endpoint' } })
+    await start($)
+    await $.classic.SessionStart({ source: 'startup' })
+    expect(w.spawned).toEqual([])
+    expect(w.reads.filter(p => p.endsWith('/endpoint.json'))).toEqual([])
+    expect(w.clock.now()).toBe(1_000)
+  })
+
+  test('MOXI_TURNS_ENDPOINT set but empty spawns nothing', async ($: E, on) => {
+    const w = world(on, { env: { MOXI_TURNS_ENDPOINT: '' } })
+    await start($)
+    expect(w.spawned).toEqual([])
+  })
+
+  test('MOXI_TURNS_ENDPOINT unset falls back to endpoint.json', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    expect(w.reads.filter(p => p.endsWith('/endpoint.json')).length).toBe(1)
+  })
+
+  test('an env read that throws counts as unset, and endpoint.json is read', async ($: E, on) => {
+    const w = world(on, { envFails: true })
+    await start($)
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    expect(w.reads.filter(p => p.endsWith('/endpoint.json')).length).toBe(1)
   })
 })
 
@@ -132,12 +174,12 @@ describe('the context asks', () => {
     const w = world(on)
     await start($)
     w.answers['/ask/context'] = { context: 'ROSTER' }
-    const r = $.classic.SessionStart({ source: 'startup' })
+    const r = $.classic.SessionStart({ source: 'startup', transcript_path: '/home/u/.claude/projects/p/S-1.jsonl' })
     await w.clock.advance(100)
     await w.hello()
     const out = await r
     expect(out.additionalContext).toEqual(['ROSTER'])
-    expect(w.got.find(g => g.path === '/ask/context')?.body).toEqual({ event: 'ready', source: 'startup', session_id: expect.any(String) })
+    expect(w.got.find(g => g.path === '/ask/context')?.body).toEqual({ event: 'ready', source: 'startup', session_id: expect.any(String), transcript_path: '/home/u/.claude/projects/p/S-1.jsonl' })
   })
 
   test('SessionStart gives up on the first line after 2 s', async ($: E, on) => {
@@ -457,7 +499,8 @@ describe('compact and the shell stop', () => {
   const subagentStop = ($: E, tasks: unknown[], agent = 'a1') =>
     $.classic.SubagentStop({ stop_hook_active: false, agent_id: agent, agent_type: 'general', agent_transcript_path: '', last_assistant_message: '', background_tasks: tasks })
   const done = (w: World) => w.reports().filter(r => r.kind === 'command.done')
-  const shellsOf = (w: World) => done(w).at(-1)?.shells
+  type Shells = { stopped: string[], left: unknown[], complete: boolean }
+  const shellsOf = (w: World) => done(w).at(-1)?.shells as Shells | undefined
   const UNLISTED = { id: null, why: 'unlisted' }
   async function command(w: World, name: string, stopShells = true, request = 'r1') {
     await w.line({ op: 'command', request, name, stop_shells: stopShells })

@@ -1,0 +1,13 @@
+{
+  "name": "moxi-launcher-web",
+  "private": true,
+  "description": "The launcher module's web sources: its panel, the launched sessions' state and one session's state.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

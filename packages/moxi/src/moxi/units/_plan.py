@@ -241,7 +241,8 @@ class _Planner:
             six = tuple(a for a in addresses if _is_ipv6(a))
             if six and not self.ipv6():
                 left_out = six
-        return Socket(setting, addresses, port, left_out)
+        return Socket(setting, addresses, port, left_out,
+                      declared.get("start", "connection"))
 
     def _compare(self, name: str, group, entry: Mapping, stamp: str | None,
                  written: UnitRef | None = None) -> UnitChange:
