@@ -466,3 +466,42 @@ def test_check_of_one_target(alpha, tailscale, yes):
     got = acts.check("alpha", "gateway")
     assert [s.target for s in got] == ["alpha/gateway"]
     assert acts.check("alpha", "nosuch") == []
+
+
+def test_two_concurrent_adds_of_one_port_one_wins_and_the_other_is_refused(alpha, tailscale):
+    import threading
+
+    import moxi.modules
+
+    alpha.module("beta", {"beta.page": "PAGE"},
+                 values='PAGE = {"reach": "own-devices", "port_setting": "other.port"}\n')
+    moxi.modules.reset()
+    planned = threading.Barrier(2, timeout=10)
+
+    def ask(lines):
+        locks.none_held()
+        planned.wait()  # both have planned, with no lock, before either goes on
+        return True
+
+    out: dict[str, object] = {}
+
+    def run(target):
+        try:
+            out[target] = acts.add(target, port=9500, ask=ask)
+        except Refused as exc:
+            out[target] = exc
+
+    workers = [threading.Thread(target=run, args=(t,)) for t in ("alpha/gateway", "beta/page")]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join(30)
+    won = [t for t, got in out.items() if isinstance(got, acts.Outcome)]
+    lost = [t for t, got in out.items() if isinstance(got, Refused)]
+    assert len(won) == 1 and len(lost) == 1
+    assert out[won[0]].address.port == 9500
+    assert out[lost[0]].exit_code == 3
+    assert out[lost[0]].reason == f"port 9500 is held by {won[0]}"
+    assert list(record.read().entries) == won
+    assert len(tailscale.changes()) == 1
+    assert states() == {won[0]: "ok"}

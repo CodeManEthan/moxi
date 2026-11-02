@@ -99,7 +99,7 @@ def test_a_crash_after_the_applying_commit_undone_by_remove(foreign, tailscale, 
     assert ts.parts(tailscale.serve, 8461) == foreign and len(tailscale.changes()) == before
 
 
-@pytest.mark.parametrize("step", ["replace-copy", "replace-applying"])
+@pytest.mark.parametrize("step", ["replace-copy", "replace-applying", "replace-removed"])
 def test_a_hand_edit_after_a_crash_is_held_with_both_untouched(foreign, tailscale, yes,
                                                                monkeypatch, step):
     crash_at(monkeypatch, step)
@@ -110,7 +110,7 @@ def test_a_hand_edit_after_a_crash_is_held_with_both_untouched(foreign, tailscal
     live, kept = tailscale.serve, copies()
     got = acts.repair(ask=yes)
     assert tailscale.serve == live and copies() == kept and kept[0]["pending"]
-    if step == "replace-applying":
+    if step != "replace-copy":
         assert got.code == 3
         entry = record.read().entries["alpha/gateway"]
         assert entry.state == State.APPLYING and "no longer holds" in entry.detail
