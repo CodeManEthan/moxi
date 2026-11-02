@@ -14,18 +14,21 @@ CLI = "moxi_loadout.cli:main"
 SUMMARY = 'Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode.'
 OPTIONAL = {
     "projects": "Name a project section by its project key, not only by its path.",
+    "repo": "A commit to your loadout folder reinstalls it.",
 }
 GATED = {}
 #: loadout reads no variable of its own. CLAUDE_CONFIG_DIR and CODEX_HOME are the
 #: harnesses' own, read where the harness homes are found.
 INTERNAL_ENV = {}
-#: The machine settings: the loadout folder, backups kept, each harness's project folders.
+#: The machine settings: the loadout folder, whether a commit to it reinstalls it (with
+#: repo), backups kept, each harness's project folders.
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then the project folders.
 CONFIG_CHECK = "moxi_loadout.settings:check_text"
 #: On every install and upgrade: the example manifest into an empty folder, the opencode
-#: harness row, every module's own skill placements taken over, and the global mode asked
-#: when the manifest has none (only at a terminal). It places nothing.
+#: harness row, every module's own skill placements taken over, the global mode asked
+#: when the manifest has none (only at a terminal), and, with repo, the git hook pieces
+#: registered in the folder's work tree. It places nothing.
 SETUP = "moxi_loadout.setup:setup"
 #: At `moxi uninstall loadout`, before anything is removed: everything loadout placed or
 #: wrote taken out (harness entries, the global part, placements, ignore files, the
@@ -34,7 +37,8 @@ SETUP = "moxi_loadout.setup:setup"
 TEARDOWN = "moxi_loadout.teardown:teardown"
 SEGMENT = None
 #: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
-#: global file, hook programs, the projects link, Codex's switches, modules gone.
+#: global file, hook programs, the projects link, the git hook link to repo, Codex's
+#: switches, modules gone.
 DOCTOR = "moxi_loadout.doctor:rows"
 #: The loadout folder is the user's data, often a git clone (0755), so it is not private
 #: and never rebuilt. The ledger records what loadout placed and wrote. Generated agent

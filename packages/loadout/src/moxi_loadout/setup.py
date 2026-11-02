@@ -1,6 +1,6 @@
 """loadout's `SETUP`, which `moxi install loadout` runs on every install and upgrade.
 
-`setup()` does four things, in order, and places nothing:
+`setup()` does five things, in order, and places nothing:
 
 1. **The example.** When the loadout folder is missing or empty, it writes the example
    manifest the package ships (every item commented out) as `loadout.toml`, with empty
@@ -19,6 +19,10 @@
    manifest; with nobody there it writes nothing, so the mode reads `off`, and prints
    the line that sets one. A manifest that carries a mode, a clone's included, is never
    asked about.
+5. **The git hook pieces.** With repo installed and the folder in a git work tree, it
+   registers the two pieces there while `reinstall_on_commit` is on, or removes them
+   while it is off (`moxi_loadout.repo_link`). A failure is a line, and setup still
+   returns 0 for it: the doctor's row names what is missing.
 
 It runs under the install's claim on the core lock and never takes `install.lock`. Every
 manifest write holds loadout's manifest lock, so no lock file lands in the folder.
@@ -69,9 +73,10 @@ def setup(*, say: Callable[[str], object] = print,
 
     failed: list[str] = []
     try:
-        folder = settings.read().source
+        machine = settings.read()
     except ConfigError as exc:
         return f"loadout: its settings don't read: {exc}"
+    folder = machine.source
     try:
         if write_example(folder):
             say(f"loadout: wrote an example manifest, every item commented out: "
@@ -94,6 +99,10 @@ def setup(*, say: Callable[[str], object] = print,
             ask_mode(folder, say=say, ask=ask)
         except (ManifestError, LockTimeout) as exc:
             failed.append(f"loadout: the global mode wasn't written: {_one_line(exc)}")
+    from moxi_loadout import repo_link
+
+    repo_link.sync(folder, machine.reinstall_on_commit, say=lambda line: say(
+        f"loadout: {line}"))
     return "\n".join(failed) if failed else 0
 
 
