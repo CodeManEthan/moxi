@@ -173,11 +173,13 @@ def test_a_trailing_dot_and_case_never_make_a_second_host(alpha, tailscale, yes)
     assert states() == {"alpha/gateway": "ok"}
 
 
-def test_cloudflare_options_parse_but_are_refused_until_that_provider_is_built(alpha, yes):
+def test_cloudflare_is_refused_until_it_is_set_up_and_its_options_are_checked(alpha, yes):
     with pytest.raises(Refused) as caught:
         acts.add("alpha/gateway", provider_name="cloudflare", hostname="a.example.com",
                  ask=yes)
-    assert "Cloudflare provider" in caught.value.reason
+    assert "Cloudflare is not ready" in caught.value.reason
+    assert "tunnel id" in caught.value.reason and "credentials" in caught.value.reason
+    assert yes.asked == [] and record.read().entries == {}
     with pytest.raises(UsageError):
         acts.add("alpha/gateway", provider_name="cloudflare", replace_=True, ask=yes)
     with pytest.raises(UsageError):

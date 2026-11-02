@@ -79,9 +79,10 @@ def test_a_provider_failure_exits_1_with_its_stderr(alpha, tailscale, capsys):
     (["add", "alpha/gateway", "--provider", "cloudflare", "--replace", "--yes"], 2),
     (["add", "alpha/gateway", "--port", "70000"], 2),
     (["frobnicate"], 2),
-    # The Cloudflare provider is not built yet; this case changes when it is.
+    # Cloudflare with no tunnel id or credentials set is refused before anything changes.
     (["add", "alpha/gateway", "--provider", "cloudflare", "--hostname", "a.example.com",
       "--yes"], 3),
+    (["add", "alpha/gateway", "--provider", "cloudflare", "--yes"], 2),
     (["add", "nosuch", "--yes"], 3),
     (["remove", "alpha/gateway", "--yes"], 3),
 ])

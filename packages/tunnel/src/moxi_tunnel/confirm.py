@@ -39,6 +39,18 @@ def funnel_line(host: str) -> str:
             "are not published.")
 
 
+def cloudflare_line(hostname: str) -> str:
+    return (f"Cloudflare ends TLS and sees every request in plain text. {hostname} is in "
+            "public DNS. Turn off Rocket Loader, email obfuscation and auto-minify for "
+            "this zone; Moxi can't check those.")
+
+
+OWN_DEVICES_LINE = ("This target asked for your own devices only, and over Cloudflare it is "
+                    "on the internet.")
+
+SWITCH_LINE = REPAIR_LINE
+
+
 def replace_line(port: int, copy: Mapping, where: str) -> str:
     shown = json.dumps(copy.get("parts", {}), indent=2, sort_keys=True)
     return (f"The foreign entry on port {port}, below, is removed, and Moxi will not bring "
@@ -58,8 +70,13 @@ def add_lines(*, provider: str, host: str, url: str, module: str, reach: str,
         lines.append(internet_line(url, module))
     if provider == "tailscale" and reach == "public":
         lines.append(funnel_line(host))
+    if provider == "cloudflare":
+        lines.append(cloudflare_line(host))
+        if reach == "own-devices":
+            lines.append(OWN_DEVICES_LINE)
     return lines, ct
 
 
-__all__ = ["ct_line", "PAIR_LINE", "REPAIR_LINE", "internet_line", "funnel_line",
-           "replace_line", "add_lines"]
+__all__ = ["ct_line", "PAIR_LINE", "REPAIR_LINE", "SWITCH_LINE", "internet_line",
+           "funnel_line", "cloudflare_line", "OWN_DEVICES_LINE", "replace_line",
+           "add_lines"]

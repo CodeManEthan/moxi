@@ -13,8 +13,7 @@ A provider gives a recorded entry its live config. Each one answers:
 - `live_state(entry)`: how the live config stands against the entry, for `check`:
   `renamed`, `missing`, `changed`, or None when it matches.
 
-Tailscale is the default for both reaches. The Cloudflare provider is not in this version
-yet: `get("cloudflare")` refuses (exit 3).
+Tailscale is the default for both reaches; Cloudflare is the other one.
 """
 
 from __future__ import annotations
@@ -60,8 +59,15 @@ def _tailscale(**kw) -> Provider:
     return Tailscale(**kw)
 
 
+def _cloudflare(**kw) -> Provider:
+    from .cloudflare import Cloudflare
+
+    return Cloudflare(**kw)
+
+
 #: Each provider by name: a callable that makes one for one act or check.
-FACTORIES: dict[str, Callable[..., Provider]] = {"tailscale": _tailscale}
+FACTORIES: dict[str, Callable[..., Provider]] = {"tailscale": _tailscale,
+                                                 "cloudflare": _cloudflare}
 
 
 def get(name: str, **kw) -> Provider:
@@ -69,9 +75,6 @@ def get(name: str, **kw) -> Provider:
     provider this version doesn't have."""
     factory = FACTORIES.get(name)
     if factory is None:
-        if name == "cloudflare":
-            raise Refused("the Cloudflare provider is not in this version of moxi-tunnel",
-                          "use the Tailscale provider (the default), or upgrade moxi-tunnel")
         raise Refused(f"no provider {name!r}", "use tailscale or cloudflare")
     return factory(**kw)
 

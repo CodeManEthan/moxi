@@ -25,6 +25,15 @@ def entry(**kw) -> Entry:
     return Entry(**{**base, **kw})
 
 
+@pytest.fixture(autouse=True)
+def no_cloudflare_step(monkeypatch):
+    """The record's own tests leave out the Cloudflare step a change of the Cloudflare set
+    runs; test_cloudflare_step.py tests it."""
+    from moxi_tunnel import cloudflare
+
+    monkeypatch.setattr(cloudflare, "step", lambda rec=None: rec)
+
+
 def commit(*args, core=False, **kw):
     with locks.held(core=core, timeout=5):
         return record.commit(*args, **kw)

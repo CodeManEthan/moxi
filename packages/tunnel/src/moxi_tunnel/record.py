@@ -384,6 +384,10 @@ def commit(entries: Mapping[str, Entry | None] | None = None, *,
     `generation` a caller passes is ignored. `warned` adds hosts to `warned_ct`, and
     `cloudflared_started`, when given, replaces that digest; neither changes a generation.
 
+    When the Cloudflare set changed, the Cloudflare step runs once the write is done
+    (`moxi_tunnel.cloudflare.step`), and its `StepFailed` is raised with the record as
+    written.
+
     Refuses (`Refused`, exit 3, nothing written) a record of another format or one that
     isn't a record, a change to or drop of an entry a newer tunnel wrote, and a change of
     the Cloudflare set while this thread holds no core lock through `locks.core`. Raises
@@ -411,14 +415,20 @@ def commit(entries: Mapping[str, Entry | None] | None = None, *,
         return (json.dumps(after_raw, indent=2, ensure_ascii=False) + "\n").encode()
 
     files.update(record_path(), change)
-    _after_commit(seen["before"], seen["after"])
-    return seen["after"]
+    return _after_commit(seen["before"], seen["after"])
 
 
-def _after_commit(before: Record, after: Record) -> None:
+def _after_commit(before: Record, after: Record) -> Record:
     """What runs once a commit's write is done and its file lock let go: the Cloudflare
-    step, when the Cloudflare set changed. Never inside `files.update`, whose lock is not
-    re-entrant and which the step's own record write takes again."""
+    step, when the Cloudflare set changed, and the record as it is after. Never inside
+    `files.update`, whose lock is not re-entrant and which the step's own record write
+    takes again. The step's `StepFailed` goes to the caller, the record already written
+    and held in its `record`."""
+    if before.cloudflare_set() == after.cloudflare_set():
+        return after
+    from . import cloudflare
+
+    return cloudflare.step(after)
 
 
 def _new_record() -> dict:

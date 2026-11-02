@@ -130,6 +130,52 @@ CONNECTOR = {"reach": "public", "port_setting": "other.port"}
 """
 
 
+@pytest.fixture(autouse=True)
+def units(monkeypatch):
+    """A fake `moxi.units` in place of the one tunnel's Cloudflare step calls, and of the
+    unit apply `moxi.config.set` runs after a write of the daemon switch: no test reaches
+    a supervisor."""
+    import moxi.config
+    from fake_units import FakeUnits
+
+    from moxi_tunnel import cloudflare
+
+    fake = FakeUnits()
+    monkeypatch.setattr(cloudflare, "units", fake)
+    monkeypatch.setattr(moxi.config, "apply_units", fake.apply_switch)
+    return fake
+
+
+#: The Cloudflare tunnel id the fixture sets.
+TUNNEL_ID = "6ff42ae2-765d-4adf-8112-31c55c1551ef"
+
+
+@pytest.fixture
+def cf(tmp_path, monkeypatch, config_file):
+    """Cloudflare set up: a tunnel id, a credentials file the user owns (mode 0000, so
+    opening it would fail) at a path holding `#`, `: ` and a backslash, and a fake
+    `cloudflared` on PATH. Returns the credentials path."""
+    import os
+    import stat
+
+    creds = tmp_path / "cred dir" / "a #b: c\\d.json"
+    creds.parent.mkdir()
+    creds.write_text("{}")
+    creds.chmod(0)
+    bindir = tmp_path / "cfbin"
+    bindir.mkdir()
+    binary = bindir / "cloudflared"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(stat.S_IRWXU)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    config_file("tunnel", f"""
+        [cloudflare]
+        tunnel_id = "{TUNNEL_ID}"
+        credentials = '{creds}'
+        """)
+    return creds
+
+
 @pytest.fixture
 def tailscale(tmp_path, monkeypatch):
     """A fake `tailscale` first on PATH, logged in with HTTPS and Funnel allowed."""

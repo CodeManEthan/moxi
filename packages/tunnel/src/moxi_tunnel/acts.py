@@ -36,8 +36,10 @@ from typing import NoReturn
 
 from moxi import exit as codes
 
-from . import api, changes, confirm as warn, declare, locks, ports, provider, record
+from . import api, changes, cloudflare as cf_, confirm as warn, declare, locks, ports
+from . import provider, record
 from . import tailscale as ts_
+from .cloudflare import StepFailed
 from .errors import ApplyError, Busy, Refused, TunnelError, UsageError
 from .record import NEWER, Entry, Record, State, normal_host
 
@@ -223,7 +225,13 @@ class _Act:
         self.last: Record | None = None
 
     def commit(self, entries: Mapping[str, Entry | None], **kw) -> Record:
-        self.last = record.commit(entries, **kw)
+        try:
+            self.last = record.commit(entries, **kw)
+        except StepFailed as exc:
+            # The record was written; the Cloudflare step after it failed.
+            if exc.record is not None:
+                self.last = exc.record
+            raise
         return self.last
 
     def current(self, key: str) -> Entry | None:
@@ -339,17 +347,17 @@ def add(text: str, *, provider_name: str | None = None, port: int | None = None,
                           "undoes it")
         name = provider_name or (old.provider if old else provider.DEFAULT)
         prov = provider.get(name)
-        if old is not None and old.provider != name:
-            provider.get(old.provider)
-            raise Refused(f"{key} is on {old.provider}; switching it to {name} needs the "
-                          "Cloudflare provider, which this version doesn't have",
-                          "upgrade moxi-tunnel")
         loop = declare.loopback_port(target)
         others = {k: p for k, p in _ports_now(rec, decls).items() if k != key}
         same = declare.same_port(loop, others, exclude=key)
         if same:
             raise Refused(f"{key}'s loopback port {loop} is also {same[0]}'s",
                           f"moxi config set {target.module} {target.port_setting} <port>")
+        if old is not None and old.provider != name:
+            return _plan_switch(rec, key, target, old, prov, loop, port=port,
+                                hostname=hostname)
+        if name == "cloudflare":
+            return _plan_cloudflare(rec, key, target, old, prov, loop, hostname)
         problems = prov.ready(target.reach)
         if problems:
             _refuse_problems(problems, "Tailscale")
@@ -388,15 +396,19 @@ def add(text: str, *, provider_name: str | None = None, port: int | None = None,
             lines.append(warn.replace_line(choice.port, copy, str(record.displaced_dir())))
         signature = ("add", key, json.dumps(entry.to_json(), sort_keys=True),
                      json.dumps(copy, sort_keys=True), tuple(lines))
-        return _Plan(lines, signature, core=name == "cloudflare",
+        return _Plan(lines, signature, core=False,
                      data=dict(rec=rec, key=key, entry=entry, ct=ct, copy=copy, ts=prov,
-                               serve=serve))
+                               serve=serve, kind="tailscale"))
 
     return _run(plan, _do_add, ask)
 
 
 def _do_add(plan: _Plan, act: _Act) -> Outcome:
     d = plan.data
+    if d["kind"] == "cloudflare":
+        return _do_add_cloudflare(plan, act)
+    if d["kind"] == "switch":
+        return _do_switch(plan, act)
     key, ts, copy = d["key"], d["ts"], d["copy"]
     entry = replace(d["entry"], applied_at=record.stamp())
     old = d["rec"].entries.get(key)
@@ -456,6 +468,226 @@ def _do_add(plan: _Plan, act: _Act) -> Outcome:
     return Outcome(address, [f"{key}: {address.url} ({address.exposure})", *notes])
 
 
+# -- Cloudflare adds and provider switches -------------------------------------------------
+
+def _plan_cloudflare(rec: Record, key: str, target: declare.Target, old: Entry | None,
+                     prov: provider.Provider, loop: int, hostname: str | None) -> _Plan:
+    if old is not None:
+        same = hostname is None or cf_.check_hostname(hostname) == normal_host(old.host)
+        if not same:
+            raise Refused(f"{key} is already on {old.host}",
+                          f"moxi tunnel remove {key}, then add it with --hostname {hostname}")
+        if old.state == State.ON and old.target == loop and prov.live_state(old) is None:
+            return _Plan(done=Outcome(api.from_entry(rec, key),
+                                      [f"{key} is already on: "
+                                       f"{api.url(old.host, old.port)}"]))
+        raise Refused(f"{key} is recorded but not ok as it is",
+                      f"moxi tunnel repair, or moxi tunnel remove {key}")
+    entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, from_=None)
+    url = api.url(entry.host, entry.port)
+    lines = [f"{key}: Cloudflare {url} to {ts_.upstream(loop)} ({entry.exposure})"]
+    more, _ = warn.add_lines(provider="cloudflare", host=entry.host, url=url,
+                             module=target.module, reach=target.reach,
+                             exposure=entry.exposure, warned=rec.warned_ct)
+    lines += more
+    signature = ("add", key, json.dumps(entry.to_json(), sort_keys=True), tuple(lines))
+    return _Plan(lines, signature, core=True,
+                 data=dict(rec=rec, key=key, entry=entry, kind="cloudflare"))
+
+
+def _cloudflare_entry(rec: Record, key: str, target: declare.Target, prov: provider.Provider,
+                      loop: int, hostname: str | None, *, from_: dict | None) -> Entry:
+    """The entry an act puts onto Cloudflare, once its hostname and the provider's
+    prerequisites pass."""
+    if hostname is None:
+        raise UsageError("--provider cloudflare needs --hostname H, a hostname you routed "
+                         "to your tunnel")
+    host = cf_.check_hostname(hostname)
+    holder = ports.hostname_holder(host, rec, exclude=key)
+    if holder:
+        raise Refused(f"{host} is already {holder}'s",
+                      f"use another hostname, or moxi tunnel remove {holder}")
+    problems = prov.ready(target.reach)
+    if problems:
+        _refuse_problems(problems, "Cloudflare")
+    return Entry(reach=target.reach, provider="cloudflare", host=host, port=cf_.PORT,
+                 target=loop, state=State.APPLYING, from_=from_)
+
+
+def _from(old: Entry) -> dict:
+    """What a provider switch keeps of the old address while it is under way."""
+    return {"provider": old.provider, "host": old.host, "port": old.port,
+            "target": old.target}
+
+
+def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
+                 prov: provider.Provider, loop: int, *, port: int | None,
+                 hostname: str | None) -> _Plan:
+    """A provider switch: a remove and an add under one confirmation, the entry rewritten
+    in place with `from` holding the old address until it ends."""
+    if old.state != State.ON:
+        raise Refused(f"{key} is {old.state}, so it can't switch provider now",
+                      f"moxi tunnel repair, or moxi tunnel remove {key}")
+    data = dict(rec=rec, key=key, old=old, kind="switch")
+    lines: list[str] = []
+    if prov.name == "cloudflare":
+        ts = provider.get("tailscale")
+        serve = ts.serve_config()
+        gone = not _hostport_present(serve, old)
+        if not gone and not ts_.matches(serve, old):
+            raise Refused(f"{key}'s live config on port {old.port} no longer matches what "
+                          f"Moxi applied: {ts_.describe(ts_.parts(serve, old.port))}",
+                          f"remove it by hand with {_hand_off(old)}, then moxi tunnel "
+                          f"remove {key} --forget")
+        entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, from_=_from(old))
+        data.update(ts=ts, serve=serve, gone=gone)
+    else:
+        problems = prov.ready(target.reach)
+        if problems:
+            _refuse_problems(problems, "Tailscale")
+        host = prov.host()
+        serve = prov.serve_config()
+        moxi = ports.moxi_ports(rec, exclude=key)
+        foreign = {p: ts_.describe(ts_.parts(serve, p)) for p in ts_.tcp_ports(serve)
+                   if p not in moxi}
+        funnel = prov.funnel_ports() if target.reach == "public" else None
+        choice = ports.choose(target.reach, target=loop, port=port, moxi=moxi,
+                              foreign=foreign, funnel_ports=funnel)
+        entry = Entry(reach=target.reach, provider="tailscale", host=host, port=choice.port,
+                      target=loop, state=State.APPLYING, from_=_from(old))
+        lines += choice.lines
+        data.update(ts=prov, serve=serve, gone=True)
+    url = api.url(entry.host, entry.port)
+    lines.insert(0, f"{key}: switch {api.url(old.host, old.port)} ({old.provider}) to {url} "
+                    f"({entry.provider}, {entry.exposure})")
+    more, ct = warn.add_lines(provider=entry.provider, host=entry.host, url=url,
+                              module=target.module, reach=target.reach,
+                              exposure=entry.exposure, warned=rec.warned_ct)
+    lines += [*more, warn.SWITCH_LINE]
+    data.update(entry=entry, ct=ct)
+    signature = ("switch", key, json.dumps(entry.to_json(), sort_keys=True), tuple(lines))
+    return _Plan(lines, signature, core=True, data=data)
+
+
+def _restore(act: _Act, key: str, old: Entry | None) -> str | None:
+    """Commit `old` back for `key`, a rollback, with a new generation. A Cloudflare entry
+    goes back `applying` and is committed `on` only once the step has started the unit on a
+    file that holds its rule; when a unit act fails it stays `applying` with the core's
+    text in `detail`, which is returned."""
+    if old is not None and old.provider == "cloudflare" and old.state == State.ON:
+        going = replace(old, state=State.APPLYING)
+        try:
+            act.commit({key: going})
+        except StepFailed as exc:
+            act.commit({key: replace(going, detail=exc.reason)})
+            return exc.reason
+        act.commit({key: old})
+        return None
+    try:
+        act.commit({key: old})
+    except StepFailed as exc:
+        return exc.reason
+    return None
+
+
+def _rollback(act: _Act, key: str, old: Entry | None, exc: BaseException, *, kind: str,
+              provider_name: str, port: int | None) -> NoReturn:
+    """Go back to `before`'s entry for `key` and exit 1 with the failure's text."""
+    more = _restore(act, key, old)
+    record.event("rollback", key, provider=provider_name, port=port, act=kind)
+    text = _reason(exc)
+    if more:
+        text += f"; going back, the cloudflared unit did not follow either: {more}"
+    fix = exc.fix if isinstance(exc, TunnelError) else None
+    raise ApplyError(text, fix or ("moxi tunnel repair" if more else None)) from exc
+
+
+def _do_add_cloudflare(plan: _Plan, act: _Act) -> Outcome:
+    d = plan.data
+    key = d["key"]
+    old = d["rec"].entries.get(key)
+    entry = replace(d["entry"], applied_at=record.stamp())
+    try:
+        act.commit({key: entry})
+        _step("cloudflare-applying")
+        cf_.Cloudflare().apply(entry)
+    except Exception as exc:  # noqa: BLE001 - every failure goes back whole
+        _rollback(act, key, old, exc, kind="add", provider_name="cloudflare",
+                  port=entry.port)
+    after = act.commit({key: replace(entry, state=State.ON, detail=None)})
+    record.event("add", key, provider="cloudflare", port=entry.port, new_host=entry.host)
+    address = api.from_entry(after, key)
+    return Outcome(address, [f"{key}: {address.url} ({address.exposure})"])
+
+
+def _do_switch(plan: _Plan, act: _Act) -> Outcome:
+    d = plan.data
+    key, old, ts = d["key"], d["old"], d["ts"]
+    entry = replace(d["entry"], applied_at=record.stamp())
+    to_cloudflare = entry.provider == "cloudflare"
+    ts_port = old.port if to_cloudflare else entry.port
+    unit = None
+    try:
+        act.commit({key: entry}, warned=[entry.host] if d["ct"] else [])
+    except StepFailed as exc:
+        # Onto Cloudflare, the unit must be up before the entry can be on: go back. Off
+        # Cloudflare, the rule has left the file and the switch follows the record; only
+        # the unit did not, which the act reports.
+        if to_cloudflare or exc.file:
+            _rollback(act, key, old, exc, kind="switch", provider_name=entry.provider,
+                      port=ts_port)
+        unit = exc.reason
+    _step("switch-applying")
+    try:
+        if to_cloudflare:
+            cf_.Cloudflare().apply(entry)
+            if not d["gone"]:
+                ts.remove(old)
+            _step("switch-removed")
+            now = ts.serve_config(fresh=True)
+            if _hostport_present(now, old):
+                raise ApplyError(f"after the removal, port {old.port} still holds "
+                                 f"{ts_.describe(ts_.parts(now, old.port))}")
+        else:
+            ts.apply(entry)
+            _step("switch-applied")
+            now = ts.serve_config(fresh=True)
+            if not ts_.matches(now, entry):
+                raise ApplyError(f"after the apply, port {entry.port} does not hold what "
+                                 f"Moxi applied: {ts_.describe(ts_.parts(now, entry.port))}")
+    except Exception as exc:  # noqa: BLE001 - every failure goes back or is kept
+        _fail_switch(act, ts, exc, key=key, port=ts_port, before_serve=d["serve"], old=old)
+    after = act.commit({key: replace(entry, state=State.ON, from_=None, detail=None)})
+    record.event("switch", key, provider=entry.provider, port=entry.port,
+                 old_host=old.host, new_host=entry.host, old_provider=old.provider,
+                 new_provider=entry.provider)
+    address = api.from_entry(after, key)
+    notes = [f"{key}: {address.url} ({address.exposure}), switched from {old.provider}"]
+    if unit:
+        notes.append(f"the cloudflared unit did not follow: {unit} (fix: moxi tunnel "
+                     "repair)")
+        return Outcome(address, notes, codes.ERROR)
+    return Outcome(address, notes)
+
+
+def _fail_switch(act: _Act, ts: ts_.Tailscale, exc: BaseException, *, key: str, port: int,
+                 before_serve: Mapping, old: Entry) -> NoReturn:
+    """A switch that failed after its first commit: go back whole when Tailscale's side is
+    as `before` had it, else leave the entry `applying` for `repair` to finish from
+    `from`."""
+    try:
+        now = ts.serve_config(fresh=True)
+    except TunnelError:
+        now = None
+    if now is not None and ts_.parts(now, port) == ts_.parts(before_serve, port):
+        _rollback(act, key, old, exc, kind="switch", provider_name=old.provider, port=port)
+    stderr = _reason(exc)
+    cur = act.current(key)
+    if cur is not None:
+        act.commit({key: replace(cur, detail=stderr)})
+    raise ApplyError(stderr, "moxi tunnel repair") from exc
+
+
 # -- remove -------------------------------------------------------------------------------
 
 def remove(text: str, *, ask: Confirm, forget: bool = False) -> Outcome:
@@ -487,6 +719,10 @@ def remove(text: str, *, ask: Confirm, forget: bool = False) -> Outcome:
                 lines.append(f"Remove it by hand later with: {_hand_off(old)}")
             return _Plan(lines, ("forget", key, tuple(lines)), core,
                          data=dict(data, kind="forget"))
+        if old.provider == "cloudflare":
+            lines = [f"{key}: remove {url}", "Paired devices lose this address."]
+            return _Plan(lines, ("remove", key, tuple(lines)), core,
+                         data=dict(data, kind="remove-cloudflare"))
         prov = provider.get(old.provider)
         serve = prov.serve_config()
         gone = not _hostport_present(serve, old)
@@ -517,12 +753,19 @@ def _do_remove(plan: _Plan, act: _Act) -> Outcome:
         record.event("remove", key, provider=old.provider, port=old.port, undo=got)
         return Outcome(None, [f"{key}: the replace is undone ({got})"])
     if kind == "forget":
-        act.commit({key: None})
+        unit = _drop(act, key, old, kind="forget")
         record.event("forget", key, provider=old.provider, port=old.port, old_host=old.host)
-        notes = [f"{key}: forgotten; {url} stays live"]
         if old.provider == "tailscale":
-            notes.append(f"remove it by hand with: {_hand_off(old)}")
-        return Outcome(None, notes)
+            notes = [f"{key}: forgotten; {url} stays live",
+                     f"remove it by hand with: {_hand_off(old)}"]
+        else:
+            notes = [f"{key}: forgotten; its rule has left cloudflared.yml. The tunnel and "
+                     "its DNS route in your Cloudflare account are left as they are"]
+        return _unit_outcome(notes, unit)
+    if kind == "remove-cloudflare":
+        unit = _drop(act, key, old, kind="remove")
+        record.event("remove", key, provider=old.provider, port=old.port, old_host=old.host)
+        return _unit_outcome([f"{key}: {url} is removed"], unit)
     ts = d["ts"]
     if not d["gone"]:
         act.commit({key: replace(old, state=State.REMOVING)})
@@ -540,6 +783,39 @@ def _do_remove(plan: _Plan, act: _Act) -> Outcome:
     act.commit({key: None})
     record.event("remove", key, provider=old.provider, port=old.port, old_host=old.host)
     return Outcome(None, [f"{key}: {url} is removed"])
+
+
+def _drop(act: _Act, key: str, old: Entry, *, kind: str) -> str | None:
+    """Take entry `key` out of the record: a Cloudflare remove commits it `removing` first,
+    so a crash leaves it `half`; a forget drops it in one commit. Returns the core's text
+    when a unit act failed: the act still completes. A file tunnel can't write rolls the
+    act back, the entry kept."""
+    unit = None
+    try:
+        if kind == "remove" and old.provider == "cloudflare":
+            act.commit({key: replace(old, state=State.REMOVING)})
+            _step("remove-removing")
+            cf_.Cloudflare().remove(old)
+    except StepFailed as exc:
+        if exc.file:
+            _rollback(act, key, old, exc, kind=kind, provider_name=old.provider,
+                      port=old.port)
+        unit = exc.reason
+    try:
+        act.commit({key: None})
+    except StepFailed as exc:
+        if exc.file:
+            _rollback(act, key, old, exc, kind=kind, provider_name=old.provider,
+                      port=old.port)
+        unit = exc.reason
+    return unit
+
+
+def _unit_outcome(notes: list[str], unit: str | None) -> Outcome:
+    if unit is None:
+        return Outcome(None, notes)
+    return Outcome(None, [*notes, f"the cloudflared unit did not follow: {unit} (fix: moxi "
+                                  "tunnel repair)"], codes.ERROR)
 
 
 # -- settling a pending copy --------------------------------------------------------------
@@ -631,7 +907,8 @@ def repair(*, ask: Confirm) -> Outcome:
         held: list[str] = []
         acts: list[tuple] = []
         ct_hosts: list[str] = []
-        if pending or any(s.entry.provider == "tailscale" for s in states):
+        if pending or any(s.entry.provider == "tailscale" or _from_tailscale(s.entry)
+                          for s in states):
             ts = live.get("tailscale")
             host_now = ts.host()
             serve = ts.serve_config()
@@ -665,12 +942,17 @@ def repair(*, ask: Confirm) -> Outcome:
                 if ct:
                     ct_hosts.append(host_now)
                 acts.append(("act", s.target, s.check, host_now))
-            elif s.check in ("half", "missing", "moved"):
+            elif s.check in ("half", "missing", "moved") or (
+                    s.check == "changed" and e.known and e.provider == "cloudflare"):
                 lines.append(f"{s.target}: {s.check}, {s.detail}: put {url} right")
                 acts.append(("act", s.target, s.check))
             elif s.check != "ok":
                 held.append(f"{s.target}: {s.check}: {s.detail}" +
                             (f" (fix: {s.fix})" if s.fix else ""))
+        agree, why = cf_.agreement(rec)
+        if agree != "ok":
+            lines.append(f"cloudflared: {why}: bring it into step with the record")
+            acts.append(("step", agree, why))
         signature = ("repair", tuple(acts), tuple(lines))
         data = dict(rec=rec, decls=decls, ts=ts, ct=ct_hosts, held=held)
         if not acts:
@@ -727,15 +1009,116 @@ def _do_repair(plan: _Plan, act: _Act) -> Outcome:
         if got.startswith("held"):
             held.append(f"{key}: {got}")
         serve = ts.serve_config()
-    _cloudflare_step(act)
+    failed |= _repair_cloudflare(act, ts, decls, notes, held)
     code = codes.ERROR if failed else codes.REFUSED if held else codes.OK
     return Outcome(None, notes + held, code)
 
 
+def _from_tailscale(e: Entry) -> bool:
+    return isinstance(e.from_, Mapping) and e.from_.get("provider") == "tailscale"
+
+
+def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Declarations,
+                       notes: list[str], held: list[str]) -> bool:
+    """Repair's Cloudflare part, and its last step. Every Cloudflare entry it acts on is
+    committed `applying` first (with the target's loopback port now), the step then runs,
+    and they are committed `on` once it has started the unit on a file that holds their
+    rules, or left `applying` with the core's text. A `removing` entry is dropped. A
+    switch from Tailscale left half way has its old Tailscale entry removed before it is
+    `on`. Returns True when something failed."""
+    rec = record.read()
+    ports_now = _ports_now(rec, decls)
+    clash = declare.clashes(ports_now)
+    bad = _bad_keys(decls)
+    live = _Live()
+    fixes: dict[str, Entry] = {}
+    drops: dict[str, None] = {}
+    for key in sorted(rec.entries):
+        e = rec.entries[key]
+        if not e.known or e.provider != "cloudflare":
+            continue
+        if key not in decls.targets and key not in bad:
+            continue
+        state = _state(key, e, decls, bad, ports_now, clash, live)
+        if state.check not in ("half", "missing", "moved", "changed"):
+            continue
+        if e.state == State.REMOVING:
+            drops[key] = None
+            continue
+        target = e.target if key in clash else ports_now.get(key, e.target)
+        fixes[key] = replace(e, target=target, state=State.APPLYING, detail=None)
+    failure = None
+    if fixes or drops:
+        try:
+            act.commit({**fixes, **drops})
+        except StepFailed as exc:
+            failure = exc
+    _step("repair-cloudflare")
+    try:
+        _cloudflare_step(act)
+        failure = None
+    except StepFailed as exc:
+        failure = exc
+    for key in drops:
+        record.event("remove", key, provider="cloudflare", port=cf_.PORT)
+        notes.append(f"{key}: removed")
+    if failure is not None:
+        if fixes:
+            act.commit({k: replace(v, detail=failure.reason) for k, v in fixes.items()})
+        notes.append(f"cloudflared: {failure.reason} (fix: {failure.fix or 'moxi tunnel '
+                     'repair'})")
+        return True
+    failed = False
+    for key, e in fixes.items():
+        got = _finish_switch_from_tailscale(act, ts, key, e)
+        if got is not None:
+            notes.append(f"{key}: {got}")
+            failed |= got.startswith("failed")
+            if got.startswith("held"):
+                held.append(f"{key}: {got}")
+            continue
+        act.commit({key: replace(e, state=State.ON, from_=None, detail=None,
+                                 applied_at=record.stamp())})
+        record.event("repair", key, provider="cloudflare", port=e.port, loopback=e.target)
+        notes.append(f"{key}: ok on {api.url(e.host, e.port)}")
+    return failed
+
+
+def _finish_switch_from_tailscale(act: _Act, ts: ts_.Tailscale | None, key: str,
+                                  e: Entry) -> str | None:
+    """For an entry a switch from Tailscale left half way, remove the old Tailscale entry
+    while it is still Moxi's. None when there is nothing left of it."""
+    if not _from_tailscale(e) or ts is None:
+        return None
+    f = e.from_
+    old = Entry(reach=e.reach, provider="tailscale", host=str(f.get("host")),
+                port=int(f.get("port")), target=int(f.get("target", e.target)),
+                state=State.ON)
+    serve = ts.serve_config(fresh=True)
+    if not _hostport_present(serve, old):
+        return None
+    if not ts_.matches(serve, old):
+        return (f"held: the old Tailscale entry on port {old.port} no longer matches what "
+                f"Moxi applied (fix: {_hand_off(old)}, then moxi tunnel repair)")
+    try:
+        ts.remove(old)
+        if _hostport_present(ts.serve_config(fresh=True), old):
+            raise ApplyError(f"port {old.port} still holds it after the removal")
+    except Exception as exc:  # noqa: BLE001 - the entry keeps the failure
+        act.commit({key: replace(e, detail=_reason(exc))})
+        return f"failed: {_reason(exc)}"
+    return None
+
+
 def _cloudflare_step(act: _Act) -> None:
-    """Where repair runs the Cloudflare step last, whether or not it changed a Cloudflare
-    entry. This version has no Cloudflare provider, so there is nothing to bring into
-    step."""
+    """Repair's last act: the Cloudflare step, whether or not it changed a Cloudflare
+    entry, so the file, the switch and the unit agree with the record after."""
+    try:
+        act.last = cf_.step()
+    except StepFailed as exc:
+        if exc.record is not None:
+            act.last = exc.record
+        raise
 
 
 def _finish_remove(act: _Act, ts: ts_.Tailscale, key: str, e: Entry) -> str:
@@ -762,7 +1145,7 @@ def _reapply(act: _Act, ts: ts_.Tailscale, key: str, e: Entry, *, host: str, tar
     `on`. It applies only over a port that holds nothing or Moxi's own config for it, so
     no config Moxi has no copy of is overwritten."""
     serve = ts.serve_config(fresh=True)
-    new = replace(e, host=host, target=target, state=State.ON, detail=None,
+    new = replace(e, host=host, target=target, state=State.ON, detail=None, from_=None,
                   applied_at=record.stamp())
     renamed = normal_host(e.host) != normal_host(host)
     if not ts_.only_ours(serve, e, hosts=[e.host, host], targets=[e.target, target]):

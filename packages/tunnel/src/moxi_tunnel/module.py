@@ -21,6 +21,13 @@ SETTINGS = "settings.toml"
 CONFIG_CHECK = "moxi_tunnel.settings:check"
 SETUP = None
 SEGMENT = None
+#: The Cloudflare named tunnel's daemon, behind its switch: tunnel turns the switch on
+#: exactly while a Cloudflare target is recorded. Tailscale needs no daemon of Moxi's.
+DAEMONS = {"cloudflared": {"command": "moxi-tunnel-cloudflared",
+                           "doc": "the Cloudflare named tunnel",
+                           "switch": "cloudflare.enabled"}}
+#: The daemon's health: `GET /ready` on cloudflared's metrics port.
+HEALTH = {"cloudflared": "moxi_tunnel.cloudflare:health"}
 #: What tunnel keeps, for `moxi paths tunnel`, the doctor's checks and `moxi uninstall
 #: --purge`. Each is made by its first write. The record of what tunnel applied, its event
 #: log and the copies of foreign config a replace took over can't be made again;

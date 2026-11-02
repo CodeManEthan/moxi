@@ -14,6 +14,10 @@ Homepage = "https://github.com/CodeManEthan/moxi"
 Repository = "https://github.com/CodeManEthan/moxi"
 Issues = "https://github.com/CodeManEthan/moxi/issues"
 
+# The Cloudflare daemon's command: runs cloudflared on tunnel's own cloudflared.yml.
+[project.scripts]
+moxi-tunnel-cloudflared = "moxi_tunnel.cloudflared:main"
+
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 tunnel = "moxi_tunnel.module"
