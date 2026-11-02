@@ -138,6 +138,9 @@ test("the daily chart stacks tokens by class on a nice scale", () => {
   const height = 200 - MARGIN.bottom - MARGIN.top;
   assert.ok(Math.abs(sum(first.segments.map((seg) => seg.height)) - height * 600 / 1000) < 1e-9);
   assert.ok(first.x >= MARGIN.left && chart.bars[1].x + chart.bars[1].width <= 400 - MARGIN.right);
+  assert.ok(chart.bars.every((bar) => bar.width <= 56));
+  const narrow = dailyChart(rows, "tokens", 4000, 200);
+  assert.ok(narrow.bars.every((bar) => bar.width === 56));
 });
 
 test("the cost chart splits by model, an unpriced row counting nothing", () => {

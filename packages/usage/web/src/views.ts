@@ -248,7 +248,7 @@ export const CLASSES = [
 ] as const;
 
 /** The theme colours series take, in turn: series `i` takes `SERIES_TOKENS[seriesClass(i)]`. */
-export const SERIES_TOKENS = ["accent", "ok", "warn", "live", "error", "text-dim"] as const;
+export const SERIES_TOKENS = ["accent", "text-dim", "warn", "ok", "error", "live"] as const;
 
 /** A series' colour class, `s0` to `s5`. */
 export function seriesClass(i: number): string {
@@ -279,6 +279,9 @@ export interface Chart {
   undated: number;
 }
 
+/** The widest a bar is drawn, in px. */
+export const BAR_MAX = 56;
+
 /** The chart's inner margins: the left one holds the axis labels. */
 export const MARGIN = { top: 8, right: 4, bottom: 20, left: 44 };
 
@@ -308,7 +311,8 @@ export function dailyChart(rows: DayRow[], measure: Measure, width: number, heig
       }
       base += value;
     });
-    return { period, x: x(period) ?? 0, width: x.bandwidth(), total: base, incomplete, segments };
+    const width = Math.min(x.bandwidth(), BAR_MAX);
+    return { period, x: (x(period) ?? 0) + (x.bandwidth() - width) / 2, width, total: base, incomplete, segments };
   });
   const ticks = y.ticks(4).map((value) => ({ value, y: y(value) }));
   return { width, height, keys, bars, ticks, undated: rows.length - dated.length };

@@ -14,7 +14,7 @@ const TAG = "moxi-usage-limits";
 const TICK_MS = 15_000;
 
 const STYLES = [BASE, css`
-  h2 { margin: 0 0 var(--moxi-gap); font-size: 1.1em; }
+  h2 { margin: 0 0 var(--moxi-gap); padding-left: 8px; border-left: 3px solid var(--moxi-accent); font-size: 1.1em; }
   .notes { margin: var(--moxi-gap) 0 0; padding: 0; list-style: none; }
 `];
 

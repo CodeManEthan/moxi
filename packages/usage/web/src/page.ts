@@ -84,8 +84,9 @@ const STYLES = [BASE, SERIES, css`
   th, td { padding: 4px 6px; border-bottom: 1px solid var(--moxi-border); text-align: left; vertical-align: top; }
   th { color: var(--moxi-text-dim); font-weight: normal; white-space: nowrap; }
   td.wrap { overflow-wrap: anywhere; min-width: 8em; }
+  @media (max-width: 640px) { .wide { display: none; } }
   a.link { color: var(--moxi-accent); }
-  svg { display: block; width: 100%; height: auto; }
+  svg { display: block; width: 100%; height: auto; margin-bottom: var(--moxi-gap); }
   svg text { fill: var(--moxi-text-dim); font-size: 11px; font-family: var(--moxi-font-sans); }
   svg .axis { stroke: var(--moxi-border); }
   svg .cell-label { fill: var(--moxi-bg); font-size: 11px; }
@@ -117,6 +118,8 @@ export class UsagePage extends LitElement {
   #projects: Feed<Report<ProjectRow>> | null = null;
   #models: Feed<Report<ModelRow>> | null = null;
   #event: IndexEvent | null = null;
+  /** How many `index` events have come. */
+  #events = 0;
   #passNote: string | null = null;
   #stops: (() => void)[] = [];
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -199,6 +202,7 @@ export class UsagePage extends LitElement {
     const event = parseIndexEvent(data);
     if (event === null) return;
     this.#event = event;
+    this.#events += 1;
     if (!event.running) {
       void this.#status?.refresh();
       void this.#view?.refresh();
@@ -210,11 +214,14 @@ export class UsagePage extends LitElement {
 
   async #pass(): Promise<void> {
     this.#passNote = null;
+    const seen = this.#events;
     const outcome = passOutcome(await api("usage", "api/pass", {}));
     if (this.#status === null) return;
     if (outcome.outcome === "refused") this.#passNote = outcome.text;
     else if (outcome.outcome === "failed") this.#passNote = `the pass could not be started: ${outcome.why}`;
-    else if (!this.#event?.running) {
+    else if (this.#events === seen) {
+      // The topic hasn't said yet that the pass began; a short pass may have begun and
+      // ended before this answer came, and then its events already told.
       this.#event = { running: true, last_pass: this.#event?.last_pass ?? null, note: null };
     }
     this.requestUpdate();
@@ -395,17 +402,17 @@ export class UsagePage extends LitElement {
 
   #sessions(report: Report<SessionRow>) {
     return html`<div class="scroll"><table>
-      <thead><tr><th>Session</th><th>Harness</th><th>Project</th><th>Last used</th>
-        <th class="num">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <thead><tr><th>Session</th><th class="wide">Harness</th><th class="wide">Project</th><th class="wide">Last used</th>
+        <th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
       <tbody>${report.rows.map((row) => html`
         <tr data-session=${row.session_id ?? ""}>
           <td class="wrap">${row.session_id === null ? html`<span class="dim">${row.title ?? "no session"}</span>`
             : this.#link(sessionRoute(row.session_id), row.title ?? row.session_id)}
             <div class="dim small">${row.models.join(", ")}</div></td>
-          <td>${row.harness}</td>
-          <td class="wrap">${row.project ?? row.cwd ?? ""}</td>
-          <td>${fmtMoment(row.last_ts)}</td>
-          <td class="num">${row.requests.toLocaleString("en-US")}</td>
+          <td class="wide">${row.harness}</td>
+          <td class="wrap wide">${row.project ?? row.cwd ?? ""}</td>
+          <td class="wide">${fmtMoment(row.last_ts)}</td>
+          <td class="num wide">${row.requests.toLocaleString("en-US")}</td>
           <td class="num">${fmtTokens(row.tokens)}</td>
           <td class="num">${costText(row)}${flag(flags(row))}</td>
         </tr>`)}</tbody>
@@ -430,16 +437,16 @@ export class UsagePage extends LitElement {
         })}
       </svg>` : html`<p class="dim">Nothing here has a cost or tokens to draw.</p>`}
       <div class="scroll"><table>
-        <thead><tr><th>Agent</th><th>Kind</th><th>Models</th><th>First request</th>
-          <th class="num">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+        <thead><tr><th>Agent</th><th class="wide">Kind</th><th class="wide">Models</th><th class="wide">First request</th>
+          <th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
         <tbody>${list.map((agent, i) => html`
           <tr data-agent=${agent.agent}>
             <td class="wrap"><span class="swatch ${seriesClass(i)}"></span><code>${agent.agent}</code>
               ${agent.title ? html`<div class="dim small">${agent.title}</div>` : nothing}</td>
-            <td>${agent.kind}</td>
-            <td class="wrap">${agent.models.join(", ")}</td>
-            <td>${fmtMoment(agent.first_ts)}</td>
-            <td class="num">${agent.requests.toLocaleString("en-US")}</td>
+            <td class="wide">${agent.kind}</td>
+            <td class="wrap wide">${agent.models.join(", ")}</td>
+            <td class="wide">${fmtMoment(agent.first_ts)}</td>
+            <td class="num wide">${agent.requests.toLocaleString("en-US")}</td>
             <td class="num">${fmtTokens(agent.tokens)}</td>
             <td class="num">${costText({ ...report.total, cost: agent.cost, harness_cost: agent.harness_cost })}${flag(agent.flags)}</td>
           </tr>`)}</tbody>
@@ -448,13 +455,13 @@ export class UsagePage extends LitElement {
 
   #projectsView(report: Report<ProjectRow>) {
     return html`<div class="scroll"><table>
-      <thead><tr><th>Project</th><th>Models</th><th class="num">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <thead><tr><th>Project</th><th class="wide">Models</th><th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
       <tbody>${report.rows.map((row) => html`
         <tr data-project=${row.project ?? row.cwd ?? ""}>
           <td class="wrap">${row.project ?? html`<span class="dim">no project</span>`}
             ${row.cwd && row.cwd !== row.project ? html`<div class="dim small"><code>${row.cwd}</code></div>` : nothing}</td>
-          <td class="wrap">${row.models.join(", ")}</td>
-          <td class="num">${row.requests.toLocaleString("en-US")}</td>
+          <td class="wrap wide">${row.models.join(", ")}</td>
+          <td class="num wide">${row.requests.toLocaleString("en-US")}</td>
           <td class="num">${fmtTokens(row.tokens)}</td>
           <td class="num">${costText(row)}${flag(flags(row))}</td>
         </tr>`)}</tbody>
@@ -463,14 +470,14 @@ export class UsagePage extends LitElement {
 
   #modelsView(report: Report<ModelRow>) {
     return html`<div class="scroll"><table>
-      <thead><tr><th>Model</th><th>Priced by</th><th class="num">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <thead><tr><th>Model</th><th>Priced by</th><th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
       <tbody>${report.rows.map((row) => html`
         <tr data-model=${row.model ?? ""}>
           <td class="wrap"><code>${row.model ?? UNKNOWN_MODEL}</code></td>
           <td class="wrap small">${row.provenance.length ? row.provenance.map((p) => html`<div>${provenanceLine(p)}</div>`)
             : html`<span class="dim">no price</span>`}
             ${row.rules.length ? html`<div class="dim">${row.rules.join(", ")}</div>` : nothing}</td>
-          <td class="num">${row.requests.toLocaleString("en-US")}</td>
+          <td class="num wide">${row.requests.toLocaleString("en-US")}</td>
           <td class="num">${fmtTokens(row.tokens)}</td>
           <td class="num">${costText(row)}${flag(flags(row))}</td>
         </tr>`)}</tbody>

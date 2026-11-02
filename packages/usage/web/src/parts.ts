@@ -1,9 +1,8 @@
 // The pieces usage's page and blocks share: the base styles, the limits meters and the
 // incomplete-row flag. Each entry bundles its own copy, as each bundles its own Lit.
 
-import { css, html, nothing, unsafeCSS } from "lit";
+import { css, html, nothing, svg, unsafeCSS } from "lit";
 import type { TemplateResult } from "lit";
-import { styleMap } from "lit/directives/style-map.js";
 
 import { SERIES_TOKENS } from "./views.ts";
 import type { Meter } from "./views.ts";
@@ -26,13 +25,16 @@ export const BASE = css`
   .meter .head { display: flex; justify-content: space-between; gap: var(--moxi-gap); align-items: baseline; }
   .meter .name { font-weight: 600; overflow-wrap: anywhere; }
   .track { height: 8px; margin: 6px 0; border-radius: 4px; background: var(--moxi-bg-sunken); overflow: hidden; }
-  .fill { height: 100%; border-radius: 4px; background: var(--moxi-accent); }
-  .tone-warn .fill { background: var(--moxi-warn); }
-  .tone-error .fill { background: var(--moxi-error); }
-  .tone-muted .fill { background: var(--moxi-text-faint); }
+  .track svg { display: block; width: 100%; height: 100%; }
+  .fill { fill: var(--moxi-accent); }
+  .tone-warn .fill { fill: var(--moxi-warn); }
+  .tone-error .fill { fill: var(--moxi-error); }
+  .tone-muted .fill { fill: var(--moxi-text-faint); }
   .tone-warn .pct { color: var(--moxi-warn); }
   .tone-error .pct { color: var(--moxi-error); }
   .meter .line { font-size: var(--moxi-font-size-sm); color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .meter .line.state { color: var(--moxi-warn); }
+  .meter[data-state="reset"] .line.state { color: var(--moxi-text-dim); }
 `;
 
 /** The series colours as classes `s0` to `s5`, for SVG marks and legend swatches: a
@@ -53,8 +55,9 @@ export function meterList(list: Meter[]): TemplateResult {
     <div class="meter tone-${m.tone}" data-window=${m.key} data-state=${m.state}>
       <div class="head"><span class="name">${m.title}</span><span class="pct">${m.percent}</span></div>
       <div class="track" role="meter" aria-label=${m.title} aria-valuemin="0" aria-valuemax="100"
-           aria-valuenow=${Math.round(m.fill * 100)}><div class="fill" style=${styleMap({ width: `${(m.fill * 100).toFixed(1)}%` })}></div></div>
-      ${m.state !== "fresh" ? html`<div class="line">${m.state}</div>` : nothing}
+           aria-valuenow=${Math.round(m.fill * 100)}><svg viewBox="0 0 100 8" preserveAspectRatio="none"
+           aria-hidden="true">${svg`<rect class="fill" x="0" y="0" height="8" width=${(m.fill * 100).toFixed(1)}></rect>`}</svg></div>
+      ${m.state !== "fresh" ? html`<div class="line state">${m.state}</div>` : nothing}
       ${m.reset ? html`<div class="line">${m.reset}</div>` : nothing}
       ${m.full ? html`<div class="line">${m.full}</div>` : nothing}
       ${m.age ? html`<div class="line">${m.age}</div>` : nothing}
