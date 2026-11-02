@@ -8,10 +8,12 @@
    and is left alone.
 2. **The opencode row.** It adds an opencode row to the core's harness table when there
    is none, and records it (`moxi_loadout.harness_row`).
-3. **Adoption.** It hands every installed module's own skill placements to loadout,
-   unseeded, and lists them in the manifest with the harnesses they were placed for
+3. **Adoption.** It lists every installed module's own skill placements in the manifest
+   with the harnesses they were placed for, then hands them to loadout, unseeded
    (`moxi_loadout.adoption.take`), so the yes the user gave at each module's question is
-   kept. The next `moxi loadout install` records them in loadout's ledger.
+   kept. The next `moxi loadout install` records them in loadout's ledger. A manifest
+   that doesn't read, or a write of it that fails, comes before any hand-over, so its
+   line says no module skill was taken over, and none was.
 4. **The global mode.** Only when the manifest has no `[global] mode`: with someone at
    the keyboard it shows the three modes and writes the answer (default `off`) to the
    manifest; with nobody there it writes nothing, so the mode reads `off`, and prints

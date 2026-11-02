@@ -10,9 +10,9 @@ Three rules decide every case:
   handed over *seeded*: it never stands in for a yes to the module's skills question.
 - **Disabled stays off.** A skill the manifest disables is not left placed.
 
-`take(modules)` hands each module's own placements (made after a yes at its question) to
-loadout, unseeded, and lists them in the manifest's `[user] skills` with the harnesses they
-were placed for. It writes the manifest and places nothing.
+`take(modules)` lists each module's own placements (made after a yes at its question) in
+the manifest's `[user] skills` with the harnesses they were placed for, then hands them to
+loadout, unseeded. It writes the manifest first and places nothing.
 
 `place_seeded(module, item)` places a skill nobody has placed (a second machine, the
 cloud): planned and applied as the module, its `add` step alone, then handed over seeded.
@@ -49,9 +49,12 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
     loadout when None) to loadout, unseeded, and list each in the manifest with the
     harnesses taken. Returns what was taken.
 
-    The manifest is read first: one that doesn't read raises its `ManifestError` before
-    anything is handed over, so loadout never holds a placement its manifest can't
-    list (the next plan would remove it)."""
+    The manifest is written first, listing what is about to be handed over: one that
+    doesn't read raises its `ManifestError`, and a write that fails raises (the lock held
+    past its wait, say), both before anything is handed over, so loadout never holds a
+    placement its manifest doesn't list (the next plan would remove it). A skill listed
+    and then not handed over reads `ok`, its module's, and the next `take` hands it
+    over."""
     from moxi import place
 
     from moxi_loadout import manifest, writes
@@ -62,20 +65,17 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
         from moxi.modules import installed
 
         modules = sorted({e.name for e in installed()} - {OWNER})
-    taken: list[Taken] = []
-    for module in modules:
-        if module == OWNER:
-            continue
-        mine = place.status(module)
-        if not mine:
-            continue
-        for p in place.adopt(module, OWNER, mine, say=say):
-            taken.append(Taken(module, p))
+    theirs = {module: place.status(module) for module in modules if module != OWNER}
     skills: dict[str, list[str]] = {}
-    for t in taken:
-        skills.setdefault(f"{t.module}/{t.placed.name}", []).append(t.placed.harness)
+    for module, mine in theirs.items():
+        for p in mine:
+            skills.setdefault(f"{module}/{p.name}", []).append(p.harness)
     if skills:
         writes.adopt(skills, folder=folder)
+    taken: list[Taken] = []
+    for module, mine in theirs.items():
+        if mine:
+            taken += [Taken(module, p) for p in place.adopt(module, OWNER, mine, say=say)]
     return taken
 
 

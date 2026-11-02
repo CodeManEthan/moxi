@@ -242,3 +242,30 @@ def test_the_announcement_names_setup_and_the_listener():
     assert found.setup == "moxi_loadout.setup:setup"
     assert any(e.name == "loadout" and getattr(e.load(), "on_install", None)
                for e in modules.extensions("moxi.installs"))
+
+
+def test_a_manifest_write_that_fails_hands_nothing_over(site, folder, monkeypatch):
+    from moxi import place
+    from moxi.files import LockTimeout
+    from moxi.place import Item
+
+    from moxi_loadout import writes
+
+    package = site.module("demo", SKILLS="'skills'", files={
+        "skills/moxi-demo/SKILL.md": skill_md("moxi-demo")})
+    kit.configure(folder)
+    kit.manifest(folder, "[user]\n")
+    place.apply(place.plan("demo", [Item(site.root / package / "skills" / "moxi-demo",
+                                         "claude", "moxi-demo")]), say=quiet)
+
+    def held(*args, **kwargs):
+        raise LockTimeout(stores.manifest_lock(), 4242)
+
+    monkeypatch.setattr(writes, "adopt", held)
+    result = setup.setup(say=quiet)
+    assert isinstance(result, str) and "no module skill was taken over" in result
+    # The line is true: the module still holds its placement, and loadout holds nothing
+    # its manifest doesn't list.
+    assert kit.owner_of(kit.claude() / "moxi-demo") == "demo"
+    assert kit.handed("demo") == {}
+    assert place.status("loadout") == []
