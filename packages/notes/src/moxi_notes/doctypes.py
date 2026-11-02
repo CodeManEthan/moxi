@@ -254,6 +254,10 @@ def _bad_home(home: str) -> str | None:
         return "must separate folders with /"
     if ".." in home.split("/"):
         return "climbs out of the notes root with .."
+    try:
+        _compile(home)
+    except re.error as exc:
+        return f"is not a glob notes can read: {exc.msg}"
     return None
 
 
