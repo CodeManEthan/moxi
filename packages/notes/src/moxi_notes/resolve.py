@@ -21,7 +21,10 @@ The rules, first answer wins (each answer's `rule` is the name in brackets):
 3. [excluded] `path` under an `exclude` folder: None.
 4. [inside] `path` under the notes root: `path` itself.
 5. [computed] The anchor is the project's root when rule 2 found one, else the git work
-   tree's top (for a linked worktree, its main work tree), else `path`. An anchor
+   tree's top (for a linked worktree, its main work tree), else `path`. The top comes
+   from local reads, never a git process (see `git_top`), because every start row of a
+   session's event shares one wait, and the launcher's handoff pointer calls this
+   resolver inside it. An anchor
    strictly under home, outside the notes root and outside every `exclude` folder gives
    the base joined with the anchor's parts below home. Home itself is not strictly under
    home, so a session started there gets None. [reserved] An answer under topics or
@@ -45,18 +48,6 @@ RULES = ("override", "project", "excluded", "inside", "computed", "reserved", "n
 #: The warning when projects can't be read.
 PROJECTS_UNREADABLE = ("projects could not be read; a project may keep its notes "
                        "elsewhere, check before creating")
-
-#: How long the one git call may take, in seconds.
-GIT_TIMEOUT = 2.0
-
-#: Variables that point git at another repository than the one around a path; the git
-#: call drops them so it answers for the path it is given.
-_GIT_LOCAL = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
-              "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX",
-              "GIT_IMPLICIT_WORK_TREE", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_CONFIG_COUNT",
-              "GIT_CONFIG_PARAMETERS", "GIT_GRAFT_FILE", "GIT_NO_REPLACE_OBJECTS",
-              "GIT_REPLACE_REF_BASE", "GIT_SHALLOW_FILE")
-
 
 class Resolution:
     """The resolver's answer: `dir` (a `Path` or None), `rule` (one of `RULES`) and
@@ -182,34 +173,59 @@ def by_path(path: str, places, anchor) -> tuple[object, str]:
     return computed(anchor(), places)
 
 
-def git_anchor(path: str) -> str | None:
-    """The git work tree's top for `path`, or for a linked worktree its main work tree;
-    None when git can't say within `GIT_TIMEOUT`."""
-    import subprocess
-
-    import moxi.proc
-
-    env = os.environ.copy()
-    for name in _GIT_LOCAL:
-        env.pop(name, None)
+def _read_small(path: str) -> str | None:
     try:
-        done = moxi.proc.run(["git", "-C", path, "rev-parse", "--path-format=absolute",
-                              "--show-toplevel", "--git-common-dir"],
-                             timeout=GIT_TIMEOUT, env=env)
-    except (OSError, subprocess.TimeoutExpired):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read(4096)
+    except (OSError, ValueError):
         return None
-    if done.returncode != 0:
+
+
+def _main_work_tree(top: str) -> str | None:
+    """For a linked worktree whose top is `top`, its main work tree; else None.
+
+    The top's `.git` is a file `gitdir: <dir>` (relative to the file's folder, or
+    absolute), and that git dir holds a `commondir` file naming the common git dir
+    (relative to the git dir, or absolute). The main work tree is the folder holding the
+    common dir, once its links are resolved, when that dir is named `.git`. A
+    submodule's git dir has no `commondir`, so a submodule keeps its own folder."""
+    text = _read_small(os.path.join(top, ".git"))
+    if text is None or not text.startswith("gitdir:"):
         return None
-    lines = done.stdout.decode("utf-8", "surrogateescape").splitlines()
-    if len(lines) < 2 or not lines[0] or not lines[1]:
+    gitdir = text[len("gitdir:"):].strip()
+    if not gitdir:
         return None
-    top = os.path.normpath(lines[0])
-    common = os.path.normpath(lines[1])
-    if os.path.basename(common).lower() == ".git":
-        main = os.path.dirname(common)
-        if not same(main, top):
-            return main
-    return top
+    gitdir = os.path.normpath(os.path.join(top, gitdir))
+    common = _read_small(os.path.join(gitdir, "commondir"))
+    if common is None or not common.strip():
+        return None
+    common = os.path.realpath(os.path.normpath(os.path.join(gitdir, common.strip())))
+    if os.path.basename(common).lower() != ".git":
+        return None
+    return os.path.dirname(common)
+
+
+def git_top(path: str) -> str | None:
+    """The git work tree's top for `path`, or for a linked worktree its main work tree;
+    None when no folder at or above `path` holds a `.git` entry.
+
+    Local reads only, no git process: the nearest folder at or above `path` holding a
+    `.git` entry is the top, with its links resolved, as git itself spells it. When that
+    `.git` is a file, its `gitdir:` line and that git dir's `commondir` lead a linked
+    worktree to its main work tree. The process environment (`GIT_DIR` and the like)
+    plays no part: the answer is about the folder named."""
+    here = path
+    while True:
+        try:
+            os.stat(os.path.join(here, ".git"))
+        except (OSError, ValueError):
+            parent = os.path.dirname(here)
+            if parent == here:
+                return None
+            here = parent
+            continue
+        break
+    return _main_work_tree(here) or os.path.realpath(here)
 
 
 def _project(path: str):
@@ -246,7 +262,7 @@ def notes_dir(path, *, override=None) -> Resolution:
     if project is not None:
         anchor = lambda: os.path.normpath(project.root)  # noqa: E731
     else:
-        anchor = lambda: git_anchor(path) or path  # noqa: E731
+        anchor = lambda: git_top(path) or path  # noqa: E731
     found, rule = by_path(path, places, anchor)
     return Resolution(found, rule, warning)
 
@@ -271,4 +287,4 @@ def notes_root_for(root, kind: str = "project", key: str | None = None):
 
 
 __all__ = ["RULES", "PROJECTS_UNREADABLE", "Resolution", "below", "under", "same",
-           "notes_dir", "notes_root_for", "git_anchor", "computed", "by_path"]
+           "notes_dir", "notes_root_for", "git_top", "computed", "by_path"]

@@ -16,7 +16,7 @@ from moxi_notes.api import notes_dir
 from moxi_notes.resolve import PROJECTS_UNREADABLE, below
 
 from notes_kit import add_project, configure, git, git_env, home, no_projects, \
-    projects_store, repo
+    no_subprocess, projects_store, repo
 
 
 @pytest.fixture(autouse=True)
@@ -149,9 +149,10 @@ def test_the_notes_root_may_be_set_elsewhere(tmp_path):
 def test_a_git_repo_maps_below_home_and_every_subfolder_shares_it():
     alpha = repo(home() / "code" / "alpha")
     (alpha / "src" / "deep").mkdir(parents=True)
-    for where in (alpha, alpha / "src", alpha / "src" / "deep"):
-        found = notes_dir(where)
-        assert (found.dir, found.rule) == (notes() / "code" / "alpha", "computed")
+    with no_subprocess():
+        for where in (alpha, alpha / "src", alpha / "src" / "deep"):
+            found = notes_dir(where)
+            assert (found.dir, found.rule) == (notes() / "code" / "alpha", "computed")
 
 
 def test_the_prefix_puts_the_computed_folders_under_it():
@@ -172,8 +173,37 @@ def test_a_linked_worktree_maps_to_its_main_work_tree(tmp_path):
     linked = home() / "work" / "alpha-feature"
     git("worktree", "add", "-q", str(linked), "-b", "feature", cwd=alpha)
     (linked / "src").mkdir()
-    for where in (linked, linked / "src"):
-        assert notes_dir(where).dir == notes() / "code" / "alpha"
+    with no_subprocess():
+        for where in (linked, linked / "src"):
+            assert notes_dir(where).dir == notes() / "code" / "alpha"
+
+
+def test_a_submodule_is_its_own_top():
+    beta = repo(home() / "code" / "beta", commit=True)
+    alpha = repo(home() / "code" / "alpha", commit=True)
+    git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(beta), "vendor/beta",
+        cwd=alpha)
+    assert (alpha / "vendor" / "beta" / ".git").is_file()
+    (alpha / "vendor" / "beta" / "src").mkdir()
+    with no_subprocess():
+        for where in (alpha / "vendor" / "beta", alpha / "vendor" / "beta" / "src"):
+            assert notes_dir(where).dir == notes() / "code" / "alpha" / "vendor" / "beta"
+
+
+def test_a_symlinked_repo_spelling_gives_the_repos_own_folder():
+    alpha = repo(home() / "code" / "alpha")
+    (alpha / "src").mkdir()
+    (home() / "alpha-link").symlink_to(alpha)
+    with no_subprocess():
+        assert notes_dir(home() / "alpha-link" / "src").dir == notes() / "code" / "alpha"
+
+
+def test_a_git_file_that_leads_nowhere_leaves_its_folder_the_top():
+    alpha = home() / "code" / "alpha"
+    (alpha / "src").mkdir(parents=True)
+    (alpha / ".git").write_text("gitdir: ../gone/.git/worktrees/alpha\n", encoding="utf-8")
+    with no_subprocess():
+        assert notes_dir(alpha / "src").dir == notes() / "code" / "alpha"
 
 
 def test_a_symlinked_home_gives_one_answer_for_either_spelling(tmp_path, monkeypatch):
@@ -233,7 +263,7 @@ def test_the_reserved_folders_follow_the_prefix():
         notes() / "team" / "team" / "topics" / "x")
 
 
-def test_the_git_call_answers_for_the_path_whatever_git_dir_the_caller_set(monkeypatch):
+def test_the_top_is_the_paths_own_whatever_git_dir_the_caller_set(monkeypatch):
     alpha = repo(home() / "code" / "alpha")
     beta = repo(home() / "code" / "beta")
     (alpha / "src").mkdir()
@@ -242,11 +272,11 @@ def test_the_git_call_answers_for_the_path_whatever_git_dir_the_caller_set(monke
     assert notes_dir(alpha / "src").dir == notes() / "code" / "alpha"
 
 
-def test_a_git_that_fails_leaves_the_path_as_its_own_anchor(monkeypatch):
+def test_the_top_needs_no_git_on_the_path(monkeypatch):
     alpha = repo(home() / "code" / "alpha")
     (alpha / "src").mkdir()
     monkeypatch.setenv("PATH", str(home() / "no-git-here"))
-    assert notes_dir(alpha / "src").dir == notes() / "code" / "alpha" / "src"
+    assert notes_dir(alpha / "src").dir == notes() / "code" / "alpha"
 
 
 def test_the_resolver_never_creates_a_folder():

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import io
 import subprocess
-from contextlib import redirect_stderr, redirect_stdout
+import sys
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import moxi.cli
@@ -80,3 +81,35 @@ def no_projects(monkeypatch) -> None:
     real = moxi.modules.available
     monkeypatch.setattr(moxi.modules, "available",
                         lambda name: False if name == "projects" else real(name))
+
+
+#: The audit events that start another process.
+_STARTS = ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn",
+           "os.fork", "os.forkpty", "os.startfile", "pty.spawn")
+_guard = {"on": False, "started": []}
+
+
+def _no_start(event: str, args: tuple) -> None:
+    if _guard["on"] and event in _STARTS:
+        _guard["started"].append((event, args[:2]))
+        raise RuntimeError(f"no process may start here: {event} {args[:2]!r}")
+
+
+_hooked = False
+
+
+@contextmanager
+def no_subprocess():
+    """Fail any process start in the block. The audit hook can't be removed, so it
+    checks a flag this raises for the block; a start the code under test catches is
+    still recorded, and the block fails when it ends."""
+    global _hooked
+    if not _hooked:
+        sys.addaudithook(_no_start)
+        _hooked = True
+    _guard["on"], _guard["started"] = True, []
+    try:
+        yield
+    finally:
+        _guard["on"] = False
+    assert not _guard["started"], _guard["started"]
