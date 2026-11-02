@@ -190,10 +190,11 @@ file with a private name stays left out, every push with one is refused, and the
 | a push | refused | refused |
 
 On a hand commit that concludes a merge or a rebase step, leaving a file out would drop the
-change the commit brings in, so the gate refuses instead. `git rebase --continue` makes its
-commit without running the pre-commit git hook at all, so a secret in a rebase step you
-resolve and continue reaches your local history; the push gate refuses it at push. Conclude
-such a step with `git commit` to have it judged then.
+change the commit brings in, so the gate refuses instead. A rebase step is judged only when
+you conclude it with `git commit`. `git rebase --continue` makes its commit without running
+the pre-commit git hook at all, both after a conflict you resolved and at an `edit` stop
+with changes staged, so a secret in that step reaches your local history; the push gate
+refuses it at push. Conclude such a step with `git commit` to have it judged then.
 
 The push gate is the backstop: it judges every commit the remote lacks, each new file and
 each author and committer line, and refuses the push on any hit not kept by an allowlist.

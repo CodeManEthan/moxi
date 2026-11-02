@@ -274,6 +274,35 @@ def test_rebase_continue_commits_without_the_gate_and_the_push_gate_refuses(tmp_
     assert done.returncode != 0 and "c.md:1 credentials/github-pat" in done.stderr
 
 
+def test_rebase_continue_at_an_edit_stop_commits_without_the_gate_and_the_push_refuses(
+        tmp_path):
+    root = notes_repo(GATE, PUSH)
+    remote = tmp_path / "remote.git"
+    sh(tmp_path, "init", "-q", "--bare", str(remote))
+    sh(root, "remote", "add", "origin", str(remote))
+    write(root, "c.md", "base\n")
+    sh(root, "add", "c.md")
+    sh(root, "commit", "-q", "-m", "base")
+    write(root, "c.md", "next\n")
+    sh(root, "commit", "-q", "-am", "next")
+    editor = tmp_path / "edit_first.py"
+    editor.write_text("import sys\nwith open(sys.argv[1]) as f:\n    t = f.read()\n"
+                      "with open(sys.argv[1], 'w') as f:\n"
+                      "    f.write(t.replace('pick', 'edit', 1))\n", encoding="utf-8")
+    done = sh(root, "rebase", "-q", "-i", "HEAD~1", check=False,
+              env={"GIT_SEQUENCE_EDITOR": f"'{sys.executable}' '{editor}'"})
+    assert done.returncode == 0, done.stderr
+    assert (root / ".git" / "rebase-merge").is_dir()
+    write(root, "c.md", secret())
+    sh(root, "add", "c.md")
+    # the step's commit is the sequencer's own, with no pre-commit git hook
+    done = sh(root, "rebase", "--continue", env={"GIT_EDITOR": "true"}, check=False)
+    assert done.returncode == 0, done.stderr
+    assert sh(root, "show", "main:c.md").stdout == secret()
+    done = push(root, "origin", "main")
+    assert done.returncode != 0 and "c.md:1 credentials/github-pat" in done.stderr
+
+
 # -- the push gate ------------------------------------------------------------------------
 
 @pytest.fixture
