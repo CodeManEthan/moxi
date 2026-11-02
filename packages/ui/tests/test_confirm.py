@@ -8,7 +8,6 @@ The test shell serves `ui` and the `fixture` module (tests/conftest.py)."""
 from __future__ import annotations
 
 import http.client
-import importlib.util
 import json
 import secrets
 
@@ -19,6 +18,14 @@ from moxi_ui.router import FORWARDED_HEADERS, forwarded
 from moxi_ui.snapshot import confirmed_paths, modules_value
 
 pytestmark = pytest.mark.timeout(60)
+
+
+@pytest.fixture(scope="module")
+def ui_shell_options(fixture_site):
+    """The shell over the fixture module, with tunnel left out of what it lists: the desk's
+    confirmed acts need no tunnel, and the workspace installs one."""
+    return {"site": [fixture_site], "leave_out": ["tunnel"]}
+
 
 def _post(shell, session, path: str, body: bytes, extra: dict[str, str]) -> tuple[int, dict]:
     conn = http.client.HTTPConnection("127.0.0.1", shell.port, timeout=10)
@@ -117,7 +124,8 @@ def test_the_modules_answers_to_a_confirmed_act_pass_through_the_shell(ui_shell)
         422, {"refused": "this Idempotency-Key was used for another request"})
 
 
-def test_tunnel_is_not_installed_here():
-    """Everything in this file and the browser's confirm tests runs with no tunnel module:
-    the desk's confirmed acts need none."""
-    assert importlib.util.find_spec("moxi_tunnel") is None
+def test_tunnel_is_left_out_here(ui_shell):
+    """Everything in this file and the browser's confirm tests runs with no tunnel module
+    in the shell's view: the desk's confirmed acts need none."""
+    _, view = ui_shell.session().get("/m/ui/api/modules")
+    assert "tunnel" not in {row["name"] for row in view["modules"]}
