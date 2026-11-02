@@ -14,7 +14,8 @@ Homes, honouring the harnesses' own variables:
 A `Doc` is one harness file read once. JSON files are read with `json` and written back
 with their key order and the indent of their first indented line (two spaces if none);
 a file that doesn't parse as a JSON object (comments, `.jsonc`, a syntax error) is
-refused with one line. Text files are read as UTF-8.
+refused with one line. Text files are read as UTF-8, and any bytes that aren't are
+written back as they were.
 
 `write(doc, harness, keep)` is the one write per file: a backup of the old bytes to
 `DATA/loadout/backups/<harness>/<stamp>-<name>` (0600, pruned past `keep`), a re-read
@@ -95,7 +96,10 @@ class Doc:
             self.data = self._json()
             self.indent = _indent(self.raw)
         else:
-            self.data = "" if self.raw is None else self.raw.decode("utf-8", "replace")
+            # Bytes that aren't UTF-8 pass through as they are, so the user's text comes
+            # back byte-equal around loadout's part.
+            self.data = "" if self.raw is None else self.raw.decode("utf-8",
+                                                                    "surrogateescape")
         self.original = self.dumps() if self.raw is not None else None
 
     def _json(self) -> dict:
@@ -114,7 +118,7 @@ class Doc:
         if self.kind == "json":
             return (json.dumps(self.data, indent=self.indent, ensure_ascii=False)
                     + "\n").encode("utf-8")
-        return self.data.encode("utf-8")
+        return self.data.encode("utf-8", "surrogateescape")
 
     @property
     def changed(self) -> bool:

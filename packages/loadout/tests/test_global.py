@@ -119,3 +119,19 @@ def test_no_mode_in_the_manifest_reads_off_with_a_line(lo):
     assert out.code == 0
     assert any("global mode MODE" in n for n in out.notes)
     assert not harness.global_file("claude").exists()
+
+
+def test_a_global_file_not_in_utf8_comes_back_byte_equal(lo):
+    mine = b"# Mes r\xe8gles\r\n\nPas d'\xe9mojis.\n"   # Latin-1, not UTF-8
+    for name in ("claude", "codex"):
+        path = harness.global_file(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(mine)
+    mode(lo, "managed")
+    assert install.install().code == 0
+    claude = harness.global_file("claude").read_bytes()
+    assert claude.startswith(mine) and claude.endswith(f"@{lo / 'global.md'}\n".encode())
+    assert install.status().code == 0
+    assert cli.main(["global", "off"]) == 0
+    for name in ("claude", "codex"):
+        assert harness.global_file(name).read_bytes() == mine
