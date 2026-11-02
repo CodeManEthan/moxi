@@ -1218,9 +1218,9 @@ def test_the_reminder_gives_no_text_to_send_and_its_plain_answer_asks_nothing_ba
     text, and no posture but the ask-back's `once`, named as the exception after the plain
     answer that leaves the posture out."""
     from moxi_comms import context, owed
-    peer = owed.Debt("8", "l3b", "peer", None, "once", T0, None)
+    peer = owed.Debt("8", "reviewer", "peer", None, "once", T0, None)
     boss = owed.Debt("9", LEAD_Q, "director", None, "once", T0, None)
-    asked = owed.Debt("8", "l3b", "peer", None, "once", T0, None, asked_back=True)
+    asked = owed.Debt("8", "reviewer", "peer", None, "once", T0, None, asked_back=True)
     for form in (None, context.TOOLS, context.TOOLS_ONLY):
         for debts in ([peer], [peer, boss], [asked], [asked, boss]):
             text = owed.reminder_text(debts, T0 + 60, form)
