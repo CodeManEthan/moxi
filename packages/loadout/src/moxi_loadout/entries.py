@@ -526,9 +526,11 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
                                       run.refused[e.file]))
             continue
         if e.kind == "mcp" and shutil.which(e.harness) is None:
+            from moxi_loadout.homes import path_fix
+
             run.actions.append(Action(e, None if rec is None else records[rec], "stand",
                                       f"no {e.harness} on PATH, so its MCP servers are "
-                                      "not written"))
+                                      f"not written; {path_fix(e.harness)}"))
             continue
         action = _one(e, None if rec is None else records[rec], doc, records,
                       _claimed(claims, e.ident(), e.harness))

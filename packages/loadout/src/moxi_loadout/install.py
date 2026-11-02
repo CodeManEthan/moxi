@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
-from moxi_loadout import adoption, entries, ignores, ledger, planner, repo_link
+from moxi_loadout import adoption, entries, homes, ignores, ledger, planner, repo_link
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -102,6 +102,8 @@ class Outcome:
 def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
            git: ignores.Git | None = None, git_seconds: float | None = None) -> Outcome:
     """Every item's state; the scope filters the rows. Takes no lock, writes nothing.
+    When this process's harness homes aren't the ones the user's own last run recorded
+    (`moxi_loadout.homes`), a note says so; it changes neither the rows nor the code.
     `git` runs the would-commit check's git calls (a fresh `ignores.Git` when None).
     `git_seconds` is how long the core placer's tracked check may give git in all (the
     placer's own 10 seconds a call when None)."""
@@ -110,6 +112,9 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
     rows = [r for r in planner.rows(plan) + entries.rows(run) + _ignore_rows(plan.ledger)
             if _shown(scope, r)]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
+    differ = homes.check(plan.ledger)
+    if differ is not None:
+        notes.append(differ)
     return Outcome(rows, list(plan.lines) + run.lines,
                    list(dict.fromkeys(plan.notes + run.notes + notes)), code,
                    orphans(plan, plan.ledger))
@@ -199,7 +204,8 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
             say: Callable[[str], object] | None = None) -> Outcome:
     """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs.
     Every line the run says lands in the outcome's `lines`; `say`, when given, is also
-    told the line that it waits for the core lock, as it waits."""
+    told the line that it waits for the core lock, as it waits. A run that is the user's
+    own records the harness homes it resolved (`moxi_loadout.homes`)."""
     if dry_run:
         out = status(scope, folder=folder, resolver=resolver)
         out.code = planner.exit_code(r.code for r in out.rows
@@ -272,6 +278,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     if folder is not None:
         machine.source = os.path.abspath(folder)
     data = ledger.read()
+    homes.record(data)
     old_source = data.get("source")
     for t in adoption.take(folder=machine.source, say=say):
         say(f"adopted skill {t.module}/{t.placed.name} for {t.placed.harness}")

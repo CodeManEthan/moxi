@@ -17,9 +17,12 @@ OPTIONAL = {
     "repo": "A commit to your loadout folder reinstalls it.",
 }
 GATED = {}
-#: loadout reads no variable of its own. CLAUDE_CONFIG_DIR and CODEX_HOME are the
-#: harnesses' own, read where the harness homes are found.
-INTERNAL_ENV = {}
+#: CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME are the harnesses' own, read where
+#: the harness homes are found.
+INTERNAL_ENV = {
+    "MOXI_LOADOUT_CALLER": "set by loadout's own callers (the git hook's install, a page "
+                           "job), so the run leaves the recorded harness homes as they are",
+}
 #: The machine settings: the loadout folder, whether a commit to it reinstalls it (with
 #: repo), backups kept, each harness's project folders.
 SETTINGS = "settings.toml"
