@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agents, agentTreemap, cellLabel, classTotals, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
+  agents, agentTreemap, cellLabel, classTotals, costAge, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
   fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
   parseRoute, projectMenu, provenanceLine, rangeFor, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay, shouldPass, strip,
   tickText, viewPath,
@@ -309,6 +309,15 @@ test("the cost block sums today and the 7 days by day", () => {
   assert.equal(found.week.tokens, 555);
   assert.equal(found.week.complete, false);
   assert.equal(costDays(report(rows)), null);
+});
+
+test("the cost block says how old the index is, and flags it past 10 minutes", () => {
+  assert.deepEqual(costAge(1000, 1300), { text: "as of 5m ago", stale: false });
+  assert.deepEqual(costAge(1000, 1600), { text: "as of 10m ago", stale: false });
+  const old = costAge(1000, 1000 + 2 * 3600);
+  assert.equal(old.stale, true);
+  assert.match(old.text, /^as of 2h 00m ago, so these may leave out what came since/);
+  assert.equal(costAge(null, 1000).stale, true);
 });
 
 // --- the index strip ---

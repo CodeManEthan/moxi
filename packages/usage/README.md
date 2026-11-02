@@ -305,7 +305,8 @@ the keys that differ.
 With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there: tokens and cost by day or month, by session (each session split
 by agent and model), by project and by model with where its price came from, with the
 limits meters and a strip about the index above them. Two blocks go on the shell's home
-view: the limits, one meter per window, and the cost of today and the last 7 days. Without
+view: the limits, one meter per window, and the cost of today and the last 7 days, with
+how old the index behind it is, flagged once its last pass is over 10 minutes old. Without
 the extra, nothing of usage changes.
 
 The page reads the index as it is: no view runs a pass, so none waits on the index's lock.

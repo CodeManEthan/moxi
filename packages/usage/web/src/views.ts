@@ -572,6 +572,17 @@ export function costDays(report: Report<DayRow>): { today: CostDay; week: CostDa
   return { today: days[6], week, days };
 }
 
+/** How old the cost block's figures are: the index's last pass at `now`, flagged once it
+ * is over `STALE_AFTER` old, since only the usage page and the CLI read new sessions in. */
+export function costAge(lastPass: number | null, now: number): { text: string; stale: boolean } {
+  if (lastPass === null) {
+    return { text: "The index has never been read, so these leave out every session; opening the usage page reads them in.", stale: true };
+  }
+  const age = `as of ${fmtAgo(lastPass, now)}`;
+  if (now - lastPass <= STALE_AFTER) return { text: age, stale: false };
+  return { text: `${age}, so these may leave out what came since; opening the usage page reads it in.`, stale: true };
+}
+
 // --- the index strip ------------------------------------------------------------------------
 
 /** How old the last pass may be when the page opens before the page starts one, in s. */

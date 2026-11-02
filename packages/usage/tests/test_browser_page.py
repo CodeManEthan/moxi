@@ -12,6 +12,7 @@ tests hold under pytest-xdist in any order.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -135,10 +136,14 @@ def test_the_limits_block_keeps_the_contract(indexed, ui_page, ui_component_chec
     assert any("/m/usage/api/limits" in url for url in check.requests), check.requests
 
 
-def test_the_cost_block_keeps_the_contract(indexed, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "usage", "cost")
+def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
+        indexed, ui_page, ui_component_check):
+    check = ui_component_check(ui_page, "usage", "cost", keep=True)
     assert check.element == "moxi-usage-cost"
     assert any("/m/usage/api/cost" in url for url in check.requests), check.requests
+    age = check.locator.locator("[data-age]")
+    expect(age).to_have_attribute("data-age", "fresh")
+    expect(age).to_have_text(re.compile(r"^as of "))
 
 
 # --- the views, at a phone's width ---------------------------------------------------------

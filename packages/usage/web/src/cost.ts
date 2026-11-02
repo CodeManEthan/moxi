@@ -1,6 +1,7 @@
 // <moxi-usage-cost>: today and the last 7 days, cost and tokens, each flagged when its
-// figures aren't whole. It reads `/api/cost`, and again when a pass the page server ran
-// ends (the topic `index`).
+// figures aren't whole, and how old the index they come from is, flagged once its last
+// pass is over 10 minutes old. It reads `/api/cost`, and again when a pass the page
+// server ran ends (the topic `index`).
 
 import { css, html, LitElement, nothing } from "lit";
 import { api, subscribe } from "/m/ui/client.js";
@@ -8,10 +9,11 @@ import { api, subscribe } from "/m/ui/client.js";
 import { Feed, parseIndexEvent, parseReport } from "./feed.ts";
 import type { DayRow, Report } from "./feed.ts";
 import { BASE, flag } from "./parts.ts";
-import { costDays, fmtCost, fmtTokens } from "./views.ts";
+import { costAge, costDays, fmtCost, fmtTokens } from "./views.ts";
 import type { CostDay } from "./views.ts";
 
 const TAG = "moxi-usage-cost";
+const TICK_MS = 15_000;
 
 const STYLES = [BASE, css`
   h2 { margin: 0 0 var(--moxi-gap); font-size: 1.1em; }
@@ -22,6 +24,7 @@ const STYLES = [BASE, css`
   table { width: 100%; margin-top: var(--moxi-gap); border-collapse: collapse; font-size: var(--moxi-font-size-sm); }
   td, th { padding: 2px 4px; border-bottom: 1px solid var(--moxi-border); }
   th { text-align: left; font-weight: normal; color: var(--moxi-text-dim); }
+  .stale { color: var(--moxi-warn); }
 `];
 
 /** The block's report, by day and model, with the server's `today`. */
@@ -33,8 +36,13 @@ const parseCost = (data: unknown): Report<DayRow> | null => {
 export class UsageCost extends LitElement {
   static styles = STYLES;
 
+  static properties = { tick: { state: true } };
+
+  tick = 0;
+
   #feed: Feed<Report<DayRow>> | null = null;
   #stop: (() => void) | null = null;
+  #timer: ReturnType<typeof setInterval> | undefined;
   #shown = (): void => {
     if (document.visibilityState === "visible") void this.#feed?.refresh();
   };
@@ -51,6 +59,7 @@ export class UsageCost extends LitElement {
       });
     });
     document.addEventListener("visibilitychange", this.#shown);
+    this.#timer = setInterval(() => { this.tick += 1; }, TICK_MS);
   }
 
   disconnectedCallback(): void {
@@ -60,6 +69,7 @@ export class UsageCost extends LitElement {
     this.#stop?.();
     this.#stop = null;
     document.removeEventListener("visibilitychange", this.#shown);
+    clearInterval(this.#timer);
   }
 
   render() {
@@ -73,9 +83,11 @@ export class UsageCost extends LitElement {
     }
     const note = feed.value?.index.note;
     const none = feed.value?.rows.length === 0 && note && /moxi usage index/.test(note);
+    const age = none ? null : costAge(feed.value?.index.last_pass ?? null, feed.now());
     return html`
       <h2>Cost</h2>
-      <div data-state="up">${none ? html`<p class="dim small">${note}</p>` : nothing}</div>
+      <div data-state="up">${none ? html`<p class="dim small">${note}</p>` : nothing}
+        ${age ? html`<p class="small ${age.stale ? "stale" : "dim"}" data-age=${age.stale ? "stale" : "fresh"}>${age.text}</p>` : nothing}</div>
       <div class="totals">
         ${this.#total("Today", found.today)}
         ${this.#total("Last 7 days", found.week)}
