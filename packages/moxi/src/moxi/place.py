@@ -5,7 +5,8 @@ manager placing a project's own skills, say). The caller names what it wants pla
 `Item`s, and the placer plans, applies, reads back and removes those placements, keeping
 a ledger of what each owner placed.
 
-    plan(owner, items, form=None)        what placing `items` would do (`Step` per item)
+    plan(owner, items, form=None, git_seconds=None)
+                                         what placing `items` would do (`Step` per item)
     apply(steps, replace=False)          carry a plan out (`Placed` per placement left)
     status(owner)                        each placement of `owner` read against the disk
     remove(owner)                        remove every placement of `owner`
@@ -85,6 +86,13 @@ What `plan` decides (`Step.action`, with `cause` for a `refuse`):
 the way is in git without reading the reason; its reason reads as an occupant's, with
 ", and git tracks it" added. Whatever reads cause `occupant` reads `tracked` alike.
 
+The tracked check asks git once per folder that holds an occupant. Each git call gets 10
+seconds, or, with `plan`'s `git_seconds=`, the plan's git calls get that many seconds in
+all. When git doesn't answer in time, the occupant stays cause `occupant`, never
+`tracked`, and its reason says git did not answer: a slow git can only leave `tracked`
+out, never put it in. A marked folder this ledger lacks is then read as git not tracking
+it, as it is without git.
+
 `plan` never raises for a cause that belongs to one item: each item yields exactly one
 step. Only a wrong call raises: an element of `items` that is not an `Item` (`TypeError`),
 an unknown kind, form or a relative `dest` (`ValueError`). An item whose source is missing
@@ -160,6 +168,8 @@ _AUTO_JUNCTION = False
 _BUILT_IN = ("claude", "codex")
 _NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-_")
 _GIT_SECONDS = 10.0
+#: What `_git_files` gives for a folder when git did not answer in time.
+_NO_ANSWER = object()
 _BLOCK = 64 * 1024
 
 
@@ -313,13 +323,16 @@ def _folder(name: str, kind: str, value: str) -> Path | None:
 
 # -- plan ---------------------------------------------------------------------------------
 
-def plan(owner: str, items: list[Item], *, form: str | None = None) -> list[Step]:
+def plan(owner: str, items: list[Item], *, form: str | None = None,
+         git_seconds: float | None = None) -> list[Step]:
     """What placing `items` for `owner` would do: one `Step` per item, in order, then one
     `remove` per ledger entry of `owner` that no item's target names.
 
     `items` is the owner's whole wanted set. `form` overrides `skills.form` for this
-    plan. Takes no lock and changes nothing (on Windows it may make and remove a test
-    symlink, `.moxi-probe-<hex>`). Raises only for a wrong call (see the module's docs).
+    plan. `git_seconds` is how long the tracked check's git calls may take in all, for a
+    caller with a time budget (a doctor check); None gives each call 10 seconds. Takes no
+    lock and changes nothing (on Windows it may make and remove a test symlink,
+    `.moxi-probe-<hex>`). Raises only for a wrong call (see the module's docs).
     """
     if not isinstance(owner, str) or not owner:
         raise TypeError(f"owner must be a non-empty string, not {owner!r}")
@@ -328,10 +341,14 @@ def plan(owner: str, items: list[Item], *, form: str | None = None) -> list[Step
         _check_item(item)
     if form is not None and form not in SETTINGS:
         raise ValueError(f"form must be one of {', '.join(SETTINGS)}, not {form!r}")
+    if git_seconds is not None and (isinstance(git_seconds, bool)
+                                    or not isinstance(git_seconds, (int, float))
+                                    or not git_seconds >= 0):
+        raise ValueError(f"git_seconds must be a number of seconds, not {git_seconds!r}")
     settings = _core_settings()
     setting = form if form is not None else settings["skills.form"]
     rows, skipped = harnesses(settings)
-    planner = _Planner(owner, setting, rows, skipped, _read_ledger())
+    planner = _Planner(owner, setting, rows, skipped, _read_ledger(), git_seconds)
     steps = [planner.step(item) for item in items]
     steps.extend(planner.removals())
     return steps
@@ -366,7 +383,7 @@ def _good_name(name: object) -> bool:
 
 class _Planner:
     def __init__(self, owner: str, setting: str, rows: dict, skipped: list[str],
-                 ledger: dict):
+                 ledger: dict, git_seconds: float | None = None):
         self.owner = owner
         self.setting = setting
         self.rows = rows
@@ -379,7 +396,9 @@ class _Planner:
         # (harness, kind, name) of items refused for want of a harness folder: their
         # old placements stay, since a broken row is no reason to remove them.
         self.unrouted: set[tuple] = set()
-        self.git: dict[str, frozenset | None] = {}
+        self.git: dict[str, frozenset | None | object] = {}
+        # What is left of the plan's git time, or None for 10 seconds a call.
+        self.git_left = git_seconds
         self.source_hash: str | None = None
 
     def _step(self, item, target, action, cause, reason, *, form="link", occupant=None,
@@ -496,7 +515,10 @@ class _Planner:
 
     def _occupant(self, item, key, form, what: str) -> Step:
         cause = "occupant"
-        if self._tracked(key):
+        tracked = self._tracked(key)
+        if tracked is None:
+            what = f"{what}; git did not answer in time, so whether it tracks it is unknown"
+        elif tracked:
             cause, what = "tracked", f"{what}, and git tracks it"
         return self._step(item, key, "refuse", cause, f"{key} is {what}", form=form,
                           occupant=key)
@@ -550,12 +572,22 @@ class _Planner:
                               form=form, note=note)
         return self._step(item, key, "keep", None, f"{item.name} is current", form=form)
 
-    def _tracked(self, key: str) -> bool:
-        """Whether git tracks `key` or anything under it: one `git ls-files` per folder."""
+    def _tracked(self, key: str) -> bool | None:
+        """Whether git tracks `key` or anything under it: one `git ls-files` per folder.
+        None when git did not answer in time."""
+        import time
+
         folder, base = os.path.split(key)
         if folder not in self.git:
-            self.git[folder] = _git_files(folder)
+            if self.git_left is None:
+                self.git[folder] = _git_files(folder)
+            else:
+                start = time.monotonic()
+                self.git[folder] = _git_files(folder, self.git_left)
+                self.git_left = max(0.0, self.git_left - (time.monotonic() - start))
         files = self.git[folder]
+        if files is _NO_ANSWER:
+            return None
         if not files:
             return False
         return base in files or any(path.startswith(base + "/") for path in files)
@@ -588,11 +620,13 @@ def _entry_item(key: str, entry: dict) -> Item:
                 dest=Path(key), held=bool(entry.get("held")))
 
 
-def _git_files(folder: str) -> frozenset | None:
+def _git_files(folder: str, seconds: float | None = None) -> frozenset | None | object:
     """The paths git tracks under `folder`, relative to it, or None outside a work tree
-    or without git."""
+    or without git, or `_NO_ANSWER` when git did not answer in time. `seconds` is how long
+    both git calls may take together; None gives each 10 seconds."""
     import shutil
     import subprocess
+    import time
 
     from . import proc
 
@@ -600,14 +634,22 @@ def _git_files(folder: str) -> frozenset | None:
         return None
     env = {k: v for k, v in os.environ.items()
            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+    end = None if seconds is None else time.monotonic() + seconds
+
+    def git(*argv):
+        timeout = _GIT_SECONDS if end is None else min(_GIT_SECONDS, end - time.monotonic())
+        if timeout <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
+        return proc.run(["git", "-C", folder, *argv], timeout=timeout, env=env)
+
     try:
-        inside = proc.run(["git", "-C", folder, "rev-parse", "--is-inside-work-tree"],
-                          timeout=_GIT_SECONDS, env=env)
+        inside = git("rev-parse", "--is-inside-work-tree")
         if inside.returncode != 0 or inside.stdout.strip() != b"true":
             return None
-        listed = proc.run(["git", "-C", folder, "ls-files", "-z"], timeout=_GIT_SECONDS,
-                          env=env)
-    except (OSError, subprocess.TimeoutExpired):
+        listed = git("ls-files", "-z")
+    except subprocess.TimeoutExpired:
+        return _NO_ANSWER
+    except OSError:
         return None
     if listed.returncode != 0:
         return None
