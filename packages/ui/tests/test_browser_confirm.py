@@ -12,7 +12,6 @@ The test shell serves `ui` and the `fixture` module (tests/conftest.py)."""
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 
@@ -27,6 +26,13 @@ KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 NOT_SENT = "the module didn't get the act"
 MAY_HAVE_ACTED = "the module may have acted; check its page"
 ACT = "**/m/fixture/api/confirm"
+
+
+@pytest.fixture(scope="module")
+def ui_shell_options(fixture_site):
+    """The shell over the fixture module, with tunnel left out of what it lists: the desk's
+    confirmed acts need no tunnel, and the workspace installs one."""
+    return {"site": [fixture_site], "leave_out": ["tunnel"]}
 
 
 def _lines(shell, name: str) -> list[str]:
@@ -183,7 +189,7 @@ def test_the_shells_answers_that_take_a_wait_give_their_outcomes(ui_page, status
 
 def test_a_page_server_that_fails_to_start_or_dies_and_a_shell_that_is_gone(
         ui_shells, ui_contexts, fixture_site):
-    shell = ui_shells(site=[fixture_site], failed_for=0.5)
+    shell = ui_shells(site=[fixture_site], failed_for=0.5, leave_out=["tunnel"])
     page = ui_contexts(shell).pages[0]
     assert _confirmed(page, {"by": 1})["outcome"] == "accepted"
     # Sent, and the server ended before it answered: the module may have acted.
@@ -201,8 +207,8 @@ def test_a_page_server_that_fails_to_start_or_dies_and_a_shell_that_is_gone(
     assert _confirmed(page, {"by": 1}) == {"outcome": "unknown", "text": MAY_HAVE_ACTED}
 
 
-def test_tunnel_is_not_installed_for_these_tests(ui_shell):
-    """The desk's confirmed acts need no tunnel: every test here runs without one."""
-    assert importlib.util.find_spec("moxi_tunnel") is None
+def test_tunnel_is_left_out_for_these_tests(ui_shell):
+    """The desk's confirmed acts need no tunnel: every test here runs with none in the
+    shell's view."""
     _, view = ui_shell.session().get("/m/ui/api/modules")
     assert "tunnel" not in {row["name"] for row in view["modules"]}

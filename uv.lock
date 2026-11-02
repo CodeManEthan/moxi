@@ -22,6 +22,7 @@ members = [
     "moxi-services",
     "moxi-sessions",
     "moxi-slots",
+    "moxi-tunnel",
     "moxi-turns",
     "moxi-ui",
     "moxi-usage",
@@ -1191,6 +1192,29 @@ dev = [
 name = "moxi-slots"
 version = "0.1.0"
 source = { editable = "packages/slots" }
+dependencies = [
+    { name = "moxi" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "moxi", editable = "packages/moxi" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-tunnel"
+version = "0.1.0"
+source = { editable = "packages/tunnel" }
 dependencies = [
     { name = "moxi" },
 ]
