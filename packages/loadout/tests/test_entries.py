@@ -494,3 +494,27 @@ def test_a_scoped_run_never_takes_an_entry_another_listed_item_wants(lo, how):
     write(lo, f'[user]\npermissions = []\n' + TWO)
     assert install.install().code == 0
     assert "permissions" not in read(settings())
+
+
+def test_a_gone_hook_is_not_taken_for_an_edit_of_another_items_group(lo):
+    hooks = ('[hook.a]\nevent = "PreToolUse"\nmatcher = "Bash"\ncommand = "echo a"\n'
+             'harnesses = ["claude"]\n'
+             '[hook.b]\nevent = "PreToolUse"\nmatcher = "Bash"\ncommand = "echo b"\n'
+             'harnesses = ["claude"]\n')
+    write(lo, '[user]\nhooks = ["a", "b"]\n' + hooks)
+    assert install.install().code == 0
+
+    def drop_a():
+        data = read(settings())
+        data["hooks"]["PreToolUse"] = [g for g in data["hooks"]["PreToolUse"]
+                                       if g["hooks"][0]["command"] != "echo a"]
+        settings().write_text(json.dumps(data))
+
+    drop_a()
+    assert states(install.status())[("hook", "a", "claude")] == "missing"
+    assert install.install().code == 0
+    assert len(read(settings())["hooks"]["PreToolUse"]) == 2
+    drop_a()
+    write(lo, '[user]\nhooks = ["b"]\n' + hooks)
+    assert install.install().code == 0
+    assert [r["item"] for r in ledger.read()["entries"]] == ["hook:b"]

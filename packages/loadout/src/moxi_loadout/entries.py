@@ -434,15 +434,25 @@ def _groups(doc, key: list) -> list:
     return groups if isinstance(groups, list) else []
 
 
-def _near(groups: list, matcher: str, command: str | None):
-    """A group with the matcher; with `command`, only one that holds it."""
+def _near(groups: list, matcher: str, command: str | None, skip=()):
+    """A group with the matcher; with `command`, only one that holds it. A group in
+    `skip` (another of loadout's records locates it) is never one."""
     for g in groups:
+        if g in skip:
+            continue
         if isinstance(g, dict) and (g.get("matcher") or "") == matcher:
             hooks = g.get("hooks") if isinstance(g.get("hooks"), list) else []
             if command is None or any(isinstance(x, dict) and x.get("command") == command
                                       for x in hooks):
                 return g
     return None
+
+
+def _other_groups(records: list, rec: dict) -> list:
+    """The hook groups loadout's other records wrote in `rec`'s file, which an edit of
+    `rec`'s group can't be."""
+    return [x.get("written") for x in records if x is not rec and x.get("kind") == "hook"
+            and x.get("file") == rec.get("file")]
 
 
 def _command(group) -> str | None:
@@ -608,7 +618,7 @@ def _one(e: Entry, rec, doc, records, claimed: bool) -> Action:
             if rec.get("written") in groups:
                 return Action(e, rec, "ok" if rec["written"] == e.value else "update",
                               prior=rec.get("prior", False))
-            near = _near(groups, e.key[1], None)
+            near = _near(groups, e.key[1], None, _other_groups(records, rec))
             if near is not None:
                 if not claimed:
                     return Action(e, rec, "modified", f"edited; found {json.dumps(near)}")
@@ -667,7 +677,7 @@ def _gone(r: dict, doc, records: list, used: set, claimed: bool, want=()) -> Act
         groups = _groups(doc, key)
         if written in groups:
             return Action(None, r, "remove")
-        near = _near(groups, key[1] if len(key) > 1 else "", None)
+        near = _near(groups, key[1] if len(key) > 1 else "", None, _other_groups(records, r))
         if near is None:
             return Action(None, r, "end")
         if not claimed:
