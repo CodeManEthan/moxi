@@ -126,6 +126,7 @@ class Debt:
     session_id: str | None
     counted: bool = False       # its one reminder has counted
     pending: bool = False       # a printed block named it, not yet counted or voided
+    asked_back: bool = False    # R sent the author a `once` message after it, at a Stop
 
 
 @dataclass
@@ -219,16 +220,20 @@ class Ledger:
 
     def settle(self, answer: dict, now: float) -> None:
         """Payments, then the loop-breaker, from the daemon's `owed` answer, settled at a
-        Stop. A paid debt leaves with its state; so does one the loop-breaker exempts."""
+        Stop. A paid debt leaves with its state; so does one the loop-breaker exempts. A
+        debt that R's `once` message to its author followed, which pays nothing, is marked
+        `asked_back`, so its reminder says it was asked back on rather than unanswered."""
         sent = answer.get("sent") or {}
         for d in list(self.debts.values()):
-            paying = [row for row in self._candidates(sent, d)
-                      if _as_id(row.get("id")) > _as_id(d.message_id)
-                      and row.get("posture") != POSTURE_ONCE]
+            later = [row for row in self._candidates(sent, d)
+                     if _as_id(row.get("id")) > _as_id(d.message_id)]
+            paying = [row for row in later if row.get("posture") != POSTURE_ONCE]
             if paying:
                 del self.debts[d.message_id]
                 for row in paying:
                     self.payments.setdefault(str(row["id"]), now)
+            elif later:
+                d.asked_back = True
         referents = answer.get("referents") or {}
         for d in list(self.debts.values()):
             if self._loop_broken(d, referents):
@@ -488,7 +493,8 @@ def reminder_text(debts, now: float, form: str | None = None) -> str:
     holds and gives no sample text to send, and its plain answer leaves the posture out,
     so it asks nothing back. The ask-back sentence, the exception, stays when any listed
     debt is a director's or a peer's (for an operator-only block it has no work to do); a
-    debt to the operator adds the terminal sentence. It never asks for progress.
+    debt to the operator adds the terminal sentence. It never asks for progress. A debt
+    asked back on (`Debt.asked_back`) is said to be still owed, not unanswered.
 
     `form` is the session's form of layer one (`context.layer_one_form`). The CLI form
     (None) names `moxi comms reply`. A tools form names the `reply` tool and its
@@ -502,14 +508,19 @@ def reminder_text(debts, now: float, form: str | None = None) -> str:
     tools = form is not None
     if len(debts) == 1:
         d = debts[0]
-        lines = [f"comms: you are ending this turn without answering {_named(d, now)}."]
+        lines = [f"comms: you asked something back on {_named(d, now)}, so you still "
+                 "owe the reply that settles it." if d.asked_back else
+                 f"comms: you are ending this turn without answering {_named(d, now)}."]
         how = (f"call the reply tool with message_id {d.message_id} and" if tools
                else f"run `moxi comms reply {d.message_id}` with")
         lines.append(f"Answer it now: {how} {ANSWER_WORDS}")
         one = d.message_id
     else:
-        lines = ["comms: you are ending this turn without answering:"]
-        lines += [f"  {_named(d, now)}" for d in shown]
+        lines = ["comms: you are ending this turn still owing a reply to:"
+                 if any(d.asked_back for d in debts) else
+                 "comms: you are ending this turn without answering:"]
+        lines += [f"  {_named(d, now)}" + (", after you asked something back"
+                                           if d.asked_back else "") for d in shown]
         if len(debts) > len(shown):
             lines.append(f"  and {len(debts) - len(shown)} more")
         how = ("call the reply tool with its message_id and" if tools

@@ -841,8 +841,22 @@ def test_a_payment_pays_only_what_is_older_than_it(unit):
 def test_asking_back_with_once_pays_nothing(unit):
     inject(unit, msg(101))
     unit.answers.sent = {LEAD_Q: [{"id": "102", "posture": "once"}]}
-    assert unit.on_stop(dict(QUIET)).names == ("101",)
+    decision = unit.on_stop(dict(QUIET))
+    assert decision.names == ("101",)
     assert "102" not in unit.ledger.payments
+    # It was answered with a question back, so the reminder says it is still owed.
+    assert unit.ledger.debts["101"].asked_back
+    assert decision.block.splitlines()[0].startswith(
+        "comms: you asked something back on lead's msg 101 (directive, ")
+    assert "without answering" not in decision.block
+
+
+def test_a_once_message_older_than_the_debt_is_no_ask_back(unit):
+    inject(unit, msg(101))
+    unit.answers.sent = {LEAD_Q: [{"id": "100", "posture": "once"}]}
+    decision = unit.on_stop(dict(QUIET))
+    assert not unit.ledger.debts["101"].asked_back
+    assert "without answering lead's msg 101" in decision.block
 
 
 def test_only_a_message_to_operator_pays_an_operator_debt(unit):
@@ -1180,6 +1194,25 @@ def test_a_shell_that_cant_reach_comms_is_told_no_command():
     assert "`moxi comms reply <id>` with your answer" in lines[-1]
 
 
+def test_the_reminder_after_an_ask_back_says_the_reply_is_still_owed():
+    from moxi_comms import context, owed
+    d = owed.Debt("8", "reviewer", "peer", None, "once", T0, None, asked_back=True)
+    assert owed.reminder_text([d], T0 + 60).splitlines()[0] == (
+        "comms: you asked something back on reviewer's msg 8 ([reply-once], 1m ago), so "
+        "you still owe the reply that settles it.")
+    tools = owed.reminder_text([d], T0 + 60, context.TOOLS_ONLY).splitlines()
+    assert tools[0] == owed.reminder_text([d], T0 + 60).splitlines()[0]
+    assert tools[1].startswith("Answer it now: call the reply tool with message_id 8")
+    other = owed.Debt("9", LEAD_Q, "director", None, "open", T0, None)
+    lines = owed.reminder_text([d, other], T0 + 60).splitlines()
+    assert lines[:3] == [
+        "comms: you are ending this turn still owing a reply to:",
+        "  reviewer's msg 8 ([reply-once], 1m ago), after you asked something back",
+        "  lead's msg 9 (directive, 1m ago)"]
+    for text in (owed.reminder_text([d], T0 + 60), "\n".join(lines)):
+        assert "without answering" not in text and '"' not in text
+
+
 def test_the_reminder_gives_no_text_to_send_and_its_plain_answer_asks_nothing_back():
     """No form hands the model sample reply text it could send as its answer: no quoted
     text, and no posture but the ask-back's `once`, named as the exception after the plain
@@ -1187,8 +1220,9 @@ def test_the_reminder_gives_no_text_to_send_and_its_plain_answer_asks_nothing_ba
     from moxi_comms import context, owed
     peer = owed.Debt("8", "l3b", "peer", None, "once", T0, None)
     boss = owed.Debt("9", LEAD_Q, "director", None, "once", T0, None)
+    asked = owed.Debt("8", "l3b", "peer", None, "once", T0, None, asked_back=True)
     for form in (None, context.TOOLS, context.TOOLS_ONLY):
-        for debts in ([peer], [peer, boss]):
+        for debts in ([peer], [peer, boss], [asked], [asked, boss]):
             text = owed.reminder_text(debts, T0 + 60, form)
             assert '"' not in text and "<your" not in text
             assert "the result, the blocker" not in text
