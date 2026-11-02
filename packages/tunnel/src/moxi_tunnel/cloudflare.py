@@ -27,7 +27,9 @@ The writer
   one tunnel wrote for an earlier record (a crash, or a step that stopped part way).
 
 The whole file is Moxi's. It is rendered from the record's Cloudflare set: the Cloudflare
-entries in state `applying` or `on`, one rule each.
+entries in state `applying` or `on`, one rule each. While the record holds a Cloudflare
+entry a newer tunnel wrote, whose rule this version can't read, the file is kept as it
+is: the step refuses, and the acts that would change the set refuse at plan.
 
 The step
 --------
@@ -363,6 +365,18 @@ def _unit_failed(text: str, rec: Record) -> StepFailed:
 
 # -- the step -----------------------------------------------------------------------------
 
+def newer(rec: Record) -> list[str]:
+    """The Cloudflare entries a newer tunnel wrote. While one is recorded this version
+    can't render `cloudflared.yml`, since it can't read that entry's rule."""
+    return sorted(k for k, e in rec.entries.items()
+                  if not e.known and e.provider == "cloudflare")
+
+
+def newer_text(names: list[str]) -> str:
+    return (f"{', '.join(names)} {'was' if len(names) == 1 else 'were'} {record.NEWER}, "
+            "so this version can't render cloudflared.yml and keeps it as it is")
+
+
 def step(rec: Record | None = None) -> Record:
     """Bring the file, the switch and the unit into agreement with record `rec` (the
     record now when None), and return the record as it is after. Raises `StepFailed`
@@ -370,6 +384,9 @@ def step(rec: Record | None = None) -> Record:
     if not locks.holds_core():
         raise RuntimeError("the Cloudflare step runs only under the core lock")
     rec = rec if rec is not None else record.read()
+    names = newer(rec)
+    if names:
+        raise StepFailed(newer_text(names), "upgrade moxi-tunnel", file=True, rec=rec)
     on_disk = read_file()
     if rec.cloudflare_set():
         return _step_on(rec, on_disk)
@@ -450,6 +467,9 @@ def agreement(rec: Record | None = None) -> tuple[str, str]:
     since a hostname is then served or dropped against the record; `warn` when only the
     switch, the unit's install state or the started digest disagrees."""
     rec = rec if rec is not None else record.read()
+    names = newer(rec)
+    if names:
+        return "warn", newer_text(names)
     on_disk = read_file()
     on = switch_on()
     state = unit_state()
@@ -482,9 +502,10 @@ def agreement(rec: Record | None = None) -> tuple[str, str]:
 
 def in_step_row() -> Row:
     """The doctor's `cloudflare in step` row."""
-    state, detail = agreement()
-    return Row(MODULE, "cloudflare in step", state, detail,
-               None if state == "ok" else _REPAIR)
+    rec = record.read()
+    state, detail = agreement(rec)
+    fix = None if state == "ok" else "upgrade moxi-tunnel" if newer(rec) else _REPAIR
+    return Row(MODULE, "cloudflare in step", state, detail, fix)
 
 
 def setup_problems() -> list[Problem]:
@@ -620,5 +641,6 @@ class Cloudflare:
 __all__ = ["DAEMON", "SWITCH", "PORT", "StepFailed", "Cloudflare", "check_tunnel_id",
            "check_hostname", "check_path", "credentials_problem", "config_path", "digest",
            "rules", "render", "render_record", "OnDisk", "read_file", "parse_rules",
-           "write_file", "delete_file", "switch_on", "unit_state", "step", "agreement",
+           "write_file", "delete_file", "switch_on", "unit_state", "newer", "newer_text",
+           "step", "agreement",
            "in_step_row", "setup_problems", "setup_row", "find_binary", "health"]

@@ -498,8 +498,17 @@ def _do_add(plan: _Plan, act: _Act) -> Outcome:
 
 # -- Cloudflare adds and provider switches -------------------------------------------------
 
+def _refuse_newer_cloudflare(rec: Record) -> None:
+    """Refuse an act that would change the Cloudflare set while the record holds a
+    Cloudflare entry a newer tunnel wrote: `cloudflared.yml` is kept as it is then."""
+    names = cf_.newer(rec)
+    if names:
+        raise Refused(cf_.newer_text(names), "upgrade moxi-tunnel")
+
+
 def _plan_cloudflare(rec: Record, key: str, target: declare.Target, old: Entry | None,
                      prov: provider.Provider, loop: int, hostname: str | None) -> _Plan:
+    _refuse_newer_cloudflare(rec)
     if old is not None:
         same = hostname is None or cf_.check_hostname(hostname) == normal_host(old.host)
         if not same:
@@ -565,6 +574,7 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
     if old.state != State.ON:
         raise Refused(f"{key} is {old.state}, so it can't switch provider now",
                       f"moxi tunnel repair, or moxi tunnel remove {key}")
+    _refuse_newer_cloudflare(rec)
     data = dict(rec=rec, key=key, old=old, kind="switch")
     lines: list[str] = []
     if prov.name == "cloudflare":
@@ -747,6 +757,8 @@ def remove(text: str, *, ask: Confirm, forget: bool = False) -> Outcome:
             raise Refused(f"the entry for {key} was {NEWER}", "upgrade moxi-tunnel")
         url = api.url(old.host, old.port)
         core = old.provider == "cloudflare"
+        if core:
+            _refuse_newer_cloudflare(rec)
         data = dict(rec=rec, key=key, old=old)
         if record.names_pending(old):
             lines = [f"{key}: undo the replace on port {old.port} that has not finished; "
@@ -1067,7 +1079,9 @@ def repair(*, ask: Confirm) -> Outcome:
                 held.append(f"{s.target}: {s.check}: {s.detail}" +
                             (f" (fix: {s.fix})" if s.fix else ""))
         agree, why = cf_.agreement(rec)
-        if agree != "ok":
+        if cf_.newer(rec):
+            held.append(f"cloudflared: {why} (fix: upgrade moxi-tunnel)")
+        elif agree != "ok":
             lines.append(f"cloudflared: {why}: bring it into step with the record")
             acts.append(("step", agree, why))
         signature = ("repair", tuple(acts), tuple(lines))
@@ -1150,6 +1164,8 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
     switch from Tailscale left half way has its old Tailscale entry removed before it is
     `on`, or before it is dropped. Returns True when something failed."""
     rec = record.read()
+    if cf_.newer(rec):
+        return False  # cloudflared.yml is kept as it is; the plan held it
     ports_now = _ports_now(rec, decls)
     clash = declare.clashes(ports_now)
     bad = _bad_keys(decls)

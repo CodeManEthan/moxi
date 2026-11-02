@@ -382,6 +382,30 @@ def test_a_config_file_the_core_refuses_to_change_rolls_the_remove_back(setup, y
     assert events()[-1] == "rollback"
 
 
+def test_the_file_is_kept_as_it_is_while_a_newer_cloudflare_entry_is_recorded(setup, yes):
+    add("alpha/gateway", A, yes)
+    add("alpha/connector", B, yes)
+    raw = json.loads(record.record_path().read_text())
+    raw["entries"]["alpha/connector"]["form"] = "tcp"
+    record.record_path().write_text(json.dumps(raw))
+    text = cloudflare.read_file().text
+    for act in (lambda: acts.remove("alpha/gateway", ask=yes),
+                lambda: acts.remove("alpha/gateway", forget=True, ask=yes)):
+        with pytest.raises(Refused, match="newer tunnel") as caught:
+            act()
+        assert caught.value.fix == "upgrade moxi-tunnel"
+    with locks.held(core=True), pytest.raises(cloudflare.StepFailed) as caught:
+        cloudflare.step()
+    assert caught.value.file
+    state, why = cloudflare.agreement()
+    assert state == "warn" and "keeps it as it is" in why
+    assert cloudflare.in_step_row().fix == "upgrade moxi-tunnel"
+    got = acts.repair(ask=yes)
+    assert got.code == 3 and any("upgrade moxi-tunnel" in n for n in got.notes)
+    assert cloudflare.read_file().text == text
+    assert B in cloudflare.read_file().rules()
+
+
 # -- moved and repair ----------------------------------------------------------------------
 
 def test_a_moved_target_is_repaired_on_the_same_hostname(setup, yes, config_file):
