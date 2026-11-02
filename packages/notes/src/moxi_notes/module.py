@@ -24,5 +24,10 @@ INTERNAL_ENV = {"MOXI_NOTES_DIR": "set by the launcher for one launch; read from
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then prefix and exclude.
 CONFIG_CHECK = "moxi_notes.settings:check_text"
+#: The timer the core writes (systemd, launchd or the Task Scheduler) once its switch is
+#: on: a snapshot outside agent sessions. It runs one pass and takes no settle duty.
+TIMERS = {"snapshot": {"command": "moxi-notes-snapshot", "args": [], "every": "15m",
+                       "switch": "snapshot.timer",
+                       "doc": "commit a snapshot of the notes outside agent sessions"}}
 SETUP = None
 SEGMENT = None

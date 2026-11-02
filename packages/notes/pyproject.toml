@@ -5,7 +5,9 @@ description = "Where each session keeps its notes, snapshots of the notes repo, 
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1,<0.2"]
+# turns calls the start line and the snapshot trigger; repo's committer takes the
+# snapshots, reached only through moxi_repo.api.
+dependencies = ["moxi>=0.1,<0.2", "moxi-repo>=0.1,<0.2", "moxi-turns>=0.2,<0.3"]
 
 [project.optional-dependencies]
 # A project's own notes folder, the topic kind and projects' remove check. notes reaches
@@ -21,6 +23,11 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 notes = "moxi_notes.module"
+
+# One pass of the snapshot spec: run by the timer, and detached with --settle by the
+# snapshot trigger. Never typed; `moxi notes snapshot` is the verb.
+[project.scripts]
+moxi-notes-snapshot = "moxi_notes.snapshot:main"
 
 # projects reads the topic kind, its field defaults and the remove refusal from here.
 [project.entry-points."moxi.projects"]

@@ -2,12 +2,14 @@
 
     moxi notes dir [PATH] [--json]
     moxi notes handoffs dir [PATH]
+    moxi notes snapshot
     moxi notes inbox list [--json]
     moxi notes inbox add SLUG
     moxi notes inbox rename SLUG NEW
 
 `dir` prints the notes directory for PATH (default: the working directory) and exits 1
-when there is none; a warning goes to stderr. `MOXI_NOTES_DIR` in this command's own
+when there is none; a warning goes to stderr. `snapshot` runs one pass of notes'
+snapshot spec now and prints repo's line. `MOXI_NOTES_DIR` in this command's own
 environment is passed as the override, as the launcher sets it for a launch. A refusal
 prints its reason and the fix to stderr, and exits 1 (an error), 2 (usage or a bad
 setting) or 3 (refused).
@@ -59,6 +61,11 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                        "when it has no notes directory.")
     p.add_argument("path", nargs="?", metavar="PATH",
                    help="the folder (default: the working directory)")
+
+    verbs.add_parser("snapshot", help="commit a snapshot of the notes repo now",
+                     description="Run one pass of notes' snapshot spec through repo's "
+                                 "committer now and print its line. It takes no settle "
+                                 "duty: an unpushed commit waits for the next pass.")
 
     inbox = verbs.add_parser("inbox", help="inbox one-offs: list, add, rename",
                              description="Inbox one-offs: folders of notes for work that "
@@ -126,7 +133,15 @@ def _inbox(args, out) -> int:
     return codes.OK
 
 
-_VERBS = {"dir": _dir, "handoffs": _handoffs, "inbox": _inbox}
+def _snapshot(args, out) -> int:
+    from .snapshot import one_pass
+
+    result, _, _ = one_pass()
+    print(result.line(), file=out if result.exit_code == 0 else sys.stderr)
+    return result.exit_code
+
+
+_VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "inbox": _inbox}
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi notes") -> int:
