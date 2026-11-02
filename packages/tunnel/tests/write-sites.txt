@@ -1,0 +1,10 @@
+# The places in src/ that write a file themselves rather than through moxi.files or
+# moxi.store. `moxi-dev contract` (check 8) fails on a write site not listed here, and on a line
+# that no longer matches one, so this list only shrinks. One line per site:
+# <path> <enclosing scope> <call>.
+#
+# A pending copy of foreign config gets its final name by a rename, once the config it
+# copies is gone from the live config. Whether a target's entry names a pending file turns
+# on that name, so the move must be one step: a write of the final file and a delete of
+# the pending one would leave a moment with two copies, a state the settle cases don't name.
+src/moxi_tunnel/record.py rename_pending os.replace
