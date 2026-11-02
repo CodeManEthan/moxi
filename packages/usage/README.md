@@ -84,7 +84,8 @@ Every limits reading usage sees is kept for `limits.history_days` (8) in
   and the token index's pass reads the rest) and, with turns installed, from Codex's
   app-server as turns hears it. When the newest Codex reading is older than
   `limits.codex_pull_after` seconds (600), `limits` asks Codex for a new one through
-  turns; when it can't, it keeps the stored reading and says why.
+  turns; when it can't, it keeps the stored reading and says why, and it waits
+  `limits.codex_pull_after` again before the next try.
 - **Claude** readings come from Claude Code's own session report, which turns hands
   usage after each turn. Without turns there are none, and Claude's rows say so.
 

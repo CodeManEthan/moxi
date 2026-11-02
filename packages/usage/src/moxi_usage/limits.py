@@ -9,7 +9,8 @@
   seconds and turns is installed, turns' `codex_rate_limits(timeout=3)` asks a live Codex
   host or a short-lived app-server for one more. A pull that fails, or turns absent,
   leaves the stored readings in place, and each Codex row older than the threshold says
-  why no newer reading came.
+  why no newer reading came. A failed pull's time is kept in the store's `meta`, and no
+  pull is tried again until `limits.codex_pull_after` has passed since it.
 * **Claude** readings come only from turns' `usage` event (`moxi_usage.listeners`), so
   with turns absent Claude's rows are `unavailable`, "turns is not installed".
 
@@ -416,11 +417,30 @@ def _read_rollout(conn: sqlite3.Connection, *, now: float, days: float,
 def _maybe_pull(conn: sqlite3.Connection, *, now: float, days: float,
                 after: float) -> Pull | None:
     """Pull a Codex reading through turns when the newest stored one is older than
-    `after` seconds, or there is none. None when no pull was wanted."""
+    `after` seconds, or there is none. None when no pull was wanted. A pull that was
+    tried and brought no reading is remembered, and the next waits `after` seconds from
+    it, so a call never waits out a pull that just failed."""
     newest = conn.execute("SELECT max(observed_at) FROM readings WHERE harness = ?",
                           (CODEX,)).fetchone()[0]
     if newest is not None and now - newest < after:
         return None
+    failed = store.last_failed_pull(conn)
+    if failed is not None and 0 <= now - failed < after:
+        return Pull(tried=False, ok=False,
+                    reason=f"the last pull, {_ago(now - failed)} ago, brought no reading; "
+                           "the next waits for limits.codex_pull_after")
+    pulled = _pull(conn, now=now, days=days)
+    if pulled.tried:
+        store.note_pull(conn, now=now, failed=not pulled.ok)
+    return pulled
+
+
+def _ago(seconds: float) -> str:
+    seconds = int(seconds)
+    return f"{seconds} s" if seconds < 120 else f"{seconds // 60} min"
+
+
+def _pull(conn: sqlite3.Connection, *, now: float, days: float) -> Pull:
     fn, why = _puller()
     if fn is None:
         return Pull(tried=False, ok=False, reason=why)

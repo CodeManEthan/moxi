@@ -377,6 +377,25 @@ def test_a_failed_pull_keeps_the_stored_readings_and_the_row_says_why(turns, ans
     assert row(result, "codex", "7d").note == five.note
 
 
+def test_a_failed_pull_is_not_tried_again_until_the_pull_threshold_has_passed(turns):
+    put(codex(5.0, 300, NOW + HOUR, NOW - 20 * MIN))
+    turns.answer = None
+    assert limits.limits(harness="codex", now=NOW).pull.tried
+    assert turns.calls == [3.0]
+    again = limits.limits(harness="codex", now=NOW + 5 * MIN)
+    assert turns.calls == [3.0]
+    assert (again.pull.tried, again.pull.ok) == (False, False)
+    assert "the last pull, 5 min ago, brought no reading" in again.pull.reason
+    assert row(again, "codex", "5h").note == f"no newer reading: {again.pull.reason}"
+
+    turns.answer = pulled(received=NOW + 10 * MIN)
+    assert limits.limits(harness="codex", now=NOW + 10 * MIN).pull.ok
+    assert turns.calls == [3.0, 3.0]
+    turns.answer = None                    # a success clears the failure it followed
+    assert limits.limits(harness="codex", now=NOW + 21 * MIN).pull.tried
+    assert turns.calls == [3.0, 3.0, 3.0]
+
+
 def test_turns_absent_means_no_pull_and_the_row_says_so(turns):
     put(codex(5.0, 300, NOW + HOUR, NOW - 20 * MIN))
     turns.why = "turns is not installed"

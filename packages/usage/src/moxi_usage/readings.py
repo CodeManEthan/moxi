@@ -84,6 +84,8 @@ DAY = 86_400.0
 
 #: Where the time of the last prune is kept, in the `meta` table.
 LAST_PRUNE = "last_prune"
+#: Where the time of the last Codex pull that brought no reading is kept.
+LAST_FAILED_PULL = "last_failed_pull"
 
 STEPS: Sequence[str] = (
     """
@@ -256,6 +258,26 @@ def prune_store(conn: sqlite3.Connection, *, now: float, days: float) -> int:
         conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
                      (LAST_PRUNE, now))
     return deleted
+
+
+def note_pull(conn: sqlite3.Connection, *, now: float, failed: bool) -> None:
+    """Keep the time of a Codex pull that brought no reading, or clear it after one
+    that did."""
+    from moxi.store import transaction
+
+    with transaction(conn):
+        if failed:
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                         (LAST_FAILED_PULL, now))
+        else:
+            conn.execute("DELETE FROM meta WHERE key = ?", (LAST_FAILED_PULL,))
+
+
+def last_failed_pull(conn: sqlite3.Connection) -> float | None:
+    """When the last Codex pull that brought no reading was tried, or None."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?",
+                       (LAST_FAILED_PULL,)).fetchone()
+    return None if row is None else row[0]
 
 
 def last_prune(conn: sqlite3.Connection) -> float | None:
