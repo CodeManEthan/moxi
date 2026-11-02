@@ -176,8 +176,12 @@ class Entry:
 
     @property
     def known(self) -> bool:
-        """False for an entry a newer tunnel wrote: its form or state is not one of ours."""
-        return self.form in FORMS and self.state in _STATES
+        """False for an entry a newer tunnel wrote: its form or state is not one of ours,
+        or its `from` names a Tailscale entry this version can't read. Such a `from` would
+        otherwise hide a Funnel the switch may have left live, so the entry is left as it
+        is and every act refuses it, as for any entry a newer tunnel wrote."""
+        return (self.form in FORMS and self.state in _STATES
+                and not _unreadable_tailscale_from(self))
 
     @property
     def exposure(self) -> str:
@@ -243,6 +247,17 @@ def old_tailscale(entry: Entry) -> Entry | None:
     reach = old.get("reach") if old.get("reach") in REACHES else entry.reach
     return Entry(reach=reach, provider="tailscale", host=host, port=port, target=target,
                  state=State.ON)
+
+
+def _unreadable_tailscale_from(entry: Entry) -> bool:
+    """True when `entry` is off Tailscale and its `from` names Tailscale with no string
+    `host` or no port in range."""
+    old = entry.from_
+    if (entry.provider == "tailscale" or not isinstance(old, Mapping)
+            or old.get("provider") != "tailscale"):
+        return False
+    host, port = old.get("host"), old.get("port")
+    return not isinstance(host, str) or not _is_int(port) or not 0 < port < 65536
 
 
 def _state(value: object) -> object:

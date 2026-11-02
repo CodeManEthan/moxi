@@ -9,6 +9,8 @@ Funnel is still live.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import moxi.modules
@@ -61,6 +63,21 @@ def test_the_old_entry_reads_back_from_from(half):
     assert (old.provider, old.port, old.reach) == ("tailscale", 443, "public")
     assert record.old_tailscale(old) is None
 
+
+
+@pytest.mark.parametrize("damage", [{"host": 5}, {"port": 0}, {"port": "443"}])
+def test_a_from_naming_tailscale_that_cant_be_read_is_refused_not_hidden(half, tailscale,
+                                                                          yes, damage):
+    path = record.record_path()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["entries"][KEY]["from"].update(damage)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    entry = record.read().entries[KEY]
+    assert not entry.known
+    with pytest.raises(Refused, match="newer tunnel"):
+        acts.remove(KEY, ask=yes)
+    assert record.read().entries[KEY].from_ == raw["entries"][KEY]["from"]
+    assert funnel_live(tailscale)
 
 # -- uninstall ------------------------------------------------------------------------------
 
