@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from moxi import proc
+from moxi import modules, proc
 from moxi.paths import Layout
 
 from moxi_launcher import relaunch, store, target
@@ -158,6 +158,14 @@ class Clock:
         self.now += seconds
         if self.on_sleep is not None:
             self.on_sleep(len(self.slept))
+
+
+@pytest.fixture(autouse=True)
+def without_notes(monkeypatch):
+    """notes not installed, whatever this environment holds, so a handoff may sit anywhere;
+    the test that means notes installed says so itself."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
 
 
 @pytest.fixture(autouse=True)

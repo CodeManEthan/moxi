@@ -1,0 +1,67 @@
+[project]
+name = "moxi-notes"
+version = "0.1.0"
+description = "Where each session keeps its notes, snapshots of the notes repo, and the secret gates that guard it."
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+# turns calls the start line and the snapshot trigger; repo's committer takes the
+# snapshots, reached only through moxi_repo.api; secrets' sets judge what they commit.
+dependencies = ["moxi>=0.1,<0.2", "moxi-repo>=0.1,<0.2", "moxi-secrets>=0.1,<0.2",
+                "moxi-turns>=0.2,<0.3"]
+
+[project.optional-dependencies]
+# A project's own notes folder, the topic kind and projects' remove check. notes reaches
+# projects only through moxi.modules.load("projects"), and projects reads notes' link
+# through its `moxi.projects` group below.
+projects = ["moxi-projects>=0.1,<0.2"]
+
+[project.urls]
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
+
+# The module's one announcement, read by moxi.modules.
+[project.entry-points."moxi.modules"]
+notes = "moxi_notes.module"
+
+# The start line and the snapshot trigger, called by turns in a session's endpoint process.
+[project.entry-points."moxi.turns.listeners"]
+notes = "moxi_notes.listeners"
+
+# One pass of the snapshot spec: run by the timer, and detached with --settle by the
+# snapshot trigger. Never typed; `moxi notes snapshot` is the verb.
+[project.scripts]
+moxi-notes-snapshot = "moxi_notes.snapshot:main"
+
+# The secret gates, which repo's git hook runner calls in the notes repo.
+[project.entry-points."moxi.repo.git_hooks"]
+"notes.secret-gate" = "moxi_notes.gitpieces:SECRET_GATE"
+"notes.push-gate" = "moxi_notes.gitpieces:PUSH_GATE"
+
+# projects reads the topic kind, its field defaults and the remove refusal from here.
+[project.entry-points."moxi.projects"]
+notes = "moxi_notes.projects_link"
+
+[dependency-groups]
+dev = ["pytest", "moxi-dev"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_notes"]
+
+[tool.hatch.build.targets.sdist]
+# A source distribution holds these paths and nothing else.
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_notes", "tests"]
+
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
+# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1). Mark a test that asserts
+# a wall-clock budget `timed`: the check runs it alone, after the parallel pass.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

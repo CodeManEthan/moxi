@@ -5,6 +5,7 @@
     moxi projects set KEY [--root DIR] [--kind KIND] [--lead NAME | --no-lead]
                           [--notes-root DIR | --no-notes-root]
     moxi projects remove KEY
+    moxi projects promote SLUG KEY [--kind KIND] [--root DIR] [--create]
     moxi projects list [--kind KIND]
     moxi projects show KEY
     moxi projects find [PATH]
@@ -12,16 +13,18 @@
     moxi projects agents add KEY NAME
     moxi projects agents remove KEY NAME
 
-A write prints the project as it now stands (remove prints it as it was). `find` prints
-the key of the project PATH (default: the working directory) is in, or nothing. Every
-verb takes `--json`, which prints the read API's field names instead; `find --json`
-prints the project or `null`.
+A write prints the project as it now stands (remove prints it as it was). `promote` makes
+notes' inbox one-off SLUG project KEY, a topic by default, and moves its folder to the
+project's notes folder; it needs notes installed. `find` prints the key of the project
+PATH (default: the working directory) is in, or nothing. Every verb takes `--json`, which
+prints the read API's field names instead; `find --json` prints the project or `null`.
 
 Paths on the command line are made absolute: `~` expanded, relative ones against the
 working directory; an empty `--root` or `--notes-root` is a usage error. Notes that
-refuse nothing (a root that doesn't exist yet, what `--create` made) go to stderr. A
-refusal prints its reason and the command that fixes it to stderr, and exits 1 (an
-error), 2 (usage), 3 (refused) or 75 (the store stayed locked; try again).
+refuse nothing (a root that doesn't exist yet, what `--create` made, what `promote`
+moved) go to stderr. A refusal prints its reason and the command that fixes it to
+stderr, and exits 1 (an error), 2 (usage), 3 (refused) or 75 (the store stayed locked;
+try again).
 """
 
 from __future__ import annotations
@@ -89,6 +92,17 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 
     p = verb("remove", "remove a project")
     p.add_argument("key", metavar="KEY")
+
+    p = verb("promote", "make an inbox one-off of notes' a project, moving its folder to "
+                        "the project's notes folder")
+    p.add_argument("slug", metavar="SLUG", help="the one-off (`moxi notes inbox list`)")
+    p.add_argument("key", metavar="KEY")
+    p.add_argument("--kind", default=acts.TOPIC, metavar="KIND",
+                   help=f"its kind (default: {acts.TOPIC}, whose folder is the one-off)")
+    p.add_argument("--root", metavar="DIR", type=_directory,
+                   help="its directory (needed for any kind but a topic)")
+    p.add_argument("--create", action="store_true",
+                   help="make the root first (not for a topic)")
 
     p = verb("list", "list every project, by key")
     p.add_argument("--kind", metavar="KIND", help="only projects of this kind")
@@ -182,6 +196,15 @@ def _remove(args, out) -> int:
     return codes.OK
 
 
+def _promote(args, out) -> int:
+    added = acts.promote(args.slug, args.key, kind=args.kind, root=_path(args.root),
+                         create=args.create)
+    for note in added.notes:
+        print(f"note: {note}", file=sys.stderr)
+    _print(added.project, args.json, out)
+    return codes.OK
+
+
 def _list(args, out) -> int:
     projects = api.list_projects(args.kind)
     if args.json:
@@ -238,8 +261,8 @@ def _agents(args, out) -> int:
     return codes.OK
 
 
-_VERBS = {"add": _add, "set": _set, "remove": _remove, "list": _list, "show": _show,
-          "find": _find, "kinds": _kinds, "agents": _agents}
+_VERBS = {"add": _add, "set": _set, "remove": _remove, "promote": _promote, "list": _list,
+          "show": _show, "find": _find, "kinds": _kinds, "agents": _agents}
 
 
 # --- printing -------------------------------------------------------------------------------

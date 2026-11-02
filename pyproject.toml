@@ -21,6 +21,7 @@ members = [
     "packages/slots",
     "packages/services",
     "packages/ui",
+    "packages/notes",
 ]
 
 [tool.uv.sources]
@@ -38,6 +39,7 @@ moxi-loopback = { workspace = true }
 moxi-slots = { workspace = true }
 moxi-services = { workspace = true }
 moxi-ui = { workspace = true }
+moxi-notes = { workspace = true }
 
 # The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
 # checks a change must pass.

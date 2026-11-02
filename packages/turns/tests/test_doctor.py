@@ -81,7 +81,11 @@ def test_the_config_row(make_endpoint, turns_env, registry):
     assert row.state == "warn" and "clera" in row.detail and row.fix
 
 
-def test_the_start_list_rows(turns_env, registry, tmp_path):
+def test_the_start_list_rows(turns_env, registry, tmp_path, monkeypatch):
+    # notes stands for a listed module that is not installed, whatever this environment
+    # holds.
+    real_present = modules.present
+    monkeypatch.setattr(modules, "present", lambda name: name != "notes" and real_present(name))
     registry["entries"] = [Entry("comms", [("start", "listener_targets:comms")]),
                            Entry("other", [("start", "listener_targets:cache")])]
     missing = tmp_path / "gone.md"
