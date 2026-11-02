@@ -1,5 +1,5 @@
 """The notes API, interface 1: where a session's notes live, its handoffs folder, the
-inbox one-offs and the frontmatter reader.
+inbox one-offs, the frontmatter reader and validation.
 
 A module reaches it through the core, `available()` first and `load()` only on yes:
 
@@ -24,6 +24,8 @@ The calls:
   start, end)`; it never raises.
 - `upsert_frontmatter(text, key, value, *, order=...)`: `(text, changed)` with `key` added
   as one line when the header lacks it; a key that is there is never replaced.
+- `validate()`: the read-only walk of the notes root against the types file, as a
+  `Report` (`ok` False, with `reason`, when the types file can't be used).
 
 Nothing here reads the process environment for the override: the caller passes it, so a
 launch inside an agent session never hands a child its parent's folder. Paths are
@@ -82,6 +84,13 @@ def upsert_frontmatter(text: str, key: str, value, *, order=None) -> tuple[str, 
     return upsert(text, key, value, order=DEFAULT_REQUIRED if order is None else order)
 
 
+def validate():
+    """The read-only walk of the notes root against the types file, as a `Report`."""
+    from .validate import validate as walk
+
+    return walk()
+
+
 __all__ = ["HANDOFFS", "Resolution", "Inbox", "NotesError", "Refused", "BadSlug", "root",
            "notes_dir", "handoffs_dir", "notes_root_for", "inbox_dir", "make_inbox",
-           "inbox_list", "rename_inbox", "frontmatter", "upsert_frontmatter"]
+           "inbox_list", "rename_inbox", "frontmatter", "upsert_frontmatter", "validate"]

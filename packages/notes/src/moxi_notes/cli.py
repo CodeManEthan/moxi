@@ -8,12 +8,17 @@
     moxi notes inbox list [--json]
     moxi notes inbox add SLUG
     moxi notes inbox rename SLUG NEW
+    moxi notes validate [--json] [--unfiled] [--limit N]
+    moxi notes backfill [--apply] [--json] [--limit N]
 
 `dir` prints the notes directory for PATH (default: the working directory) and exits 1
 when there is none; a warning goes to stderr. `snapshot` runs one pass of notes'
 snapshot spec now and prints repo's line. `scan` prints what a snapshot would leave out
 now and changes nothing; it exits 1 when that is any file, and its `--json` shape is
-`moxi_notes.scan.JSON_SHAPE`, which its help prints. `setup` asks setup's questions
+`moxi_notes.scan.JSON_SHAPE`, which its help prints. `validate` walks the notes and reports each
+note's frontmatter against the types file; it writes nothing, exits 0 whatever it finds,
+and 1 when the types file can't be used. `backfill` proposes the required keys a filed
+note lacks and can be inferred, and writes them only with `--apply`. `setup` asks setup's questions
 again and writes what they change, as `moxi install notes` does. `MOXI_NOTES_DIR` in this
 command's own environment is passed as the override, as the launcher sets it for a launch. A refusal
 prints its reason and the fix to stderr, and exits 1 (an error), 2 (usage or a bad
@@ -92,6 +97,29 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                  "notes repo. With nobody at the keyboard it keeps the "
                                  "current values and prints how to change each.")
 
+    p = verbs.add_parser(
+        "validate", help="check the notes' frontmatter against the types file",
+        description="Walk every .md file under the notes root and report its frontmatter "
+                    "against the document types file (the types setting, under the "
+                    "root). Writes nothing. Exits 0 whatever it finds, 1 when the types "
+                    "file can't be used or the root is not a folder.")
+    p.add_argument("--json", action="store_true", help="print JSON, every file included")
+    p.add_argument("--unfiled", action="store_true",
+                   help="list the files no type's home matches, not just count them")
+    p.add_argument("--limit", type=_limit, default=60, metavar="N",
+                   help="print at most N files with findings (default 60)")
+
+    p = verbs.add_parser(
+        "backfill", help="add the required frontmatter keys notes can infer",
+        description="Propose, for each filed note, the required keys it lacks that can "
+                    "be inferred: type from its home, project from the project whose "
+                    "notes folder holds it, updated from its modified date. A dry run: "
+                    "it writes only with --apply, and never replaces a key.")
+    p.add_argument("--apply", action="store_true", help="write the proposed keys")
+    p.add_argument("--json", action="store_true", help="print JSON, every file included")
+    p.add_argument("--limit", type=_limit, default=80, metavar="N",
+                   help="print at most N files (default 80)")
+
     inbox = verbs.add_parser("inbox", help="inbox one-offs: list, add, rename",
                              description="Inbox one-offs: folders of notes for work that "
                                          "has no project.")
@@ -110,6 +138,13 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 
     _PARSERS[prog] = parser
     return parser
+
+
+def _limit(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return value
 
 
 def _path(text: str | None) -> str:
@@ -186,8 +221,38 @@ def _setup(args, out) -> int:
     return setup(out=out)
 
 
+def _validate(args, out) -> int:
+    from .validate import render, validate
+
+    report = validate()
+    if args.json:
+        print(json.dumps(report.as_dict()), file=out)
+    else:
+        print(render(report, unfiled=args.unfiled, limit=args.limit), end="", file=out)
+    if not report.ok:
+        print(f"notes: can't validate: {report.reason}", file=sys.stderr)
+        return codes.ERROR
+    return codes.OK
+
+
+def _backfill(args, out) -> int:
+    from .backfill import apply, plan, render
+
+    found = plan()
+    if found.ok and args.apply:
+        found = apply(found)
+    if args.json:
+        print(json.dumps(found.as_dict()), file=out)
+    else:
+        print(render(found, limit=args.limit), end="", file=out)
+    if not found.ok:
+        print(f"notes: can't backfill: {found.reason}", file=sys.stderr)
+        return codes.ERROR
+    return codes.ERROR if found.counts()["errors"] else codes.OK
+
+
 _VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "scan": _scan,
-          "setup": _setup, "inbox": _inbox}
+          "setup": _setup, "inbox": _inbox, "validate": _validate, "backfill": _backfill}
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi notes") -> int:

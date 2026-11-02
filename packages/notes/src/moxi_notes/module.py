@@ -1,7 +1,8 @@
 """The announcement of Moxi's notes module, which moxi.modules reads.
 
 It offers interface 1, the API in `moxi_notes.api`: where a session's notes live, its
-handoffs folder and the inbox one-offs. Its verb is `moxi notes`.
+handoffs folder, the inbox one-offs, the frontmatter reader and validation. Its verb is
+`moxi notes`.
 """
 
 ANNOUNCES = 1

@@ -18,6 +18,8 @@ folder into git, and keeps secrets out of what it commits.
    registered with repo, judge every file a commit or a push would carry against secrets'
    `credentials` and `private-names` sets. A file with a secret is left out of the commit,
    or committed redacted, as you choose at install. A push that would carry one is refused.
+5. **It checks the notes' frontmatter** against document types you declare, without
+   writing anything, and can add the keys it can infer when you ask it to.
 
 ```sh
 moxi install notes
@@ -36,11 +38,14 @@ moxi doctor notes
 | `moxi notes scan [--json]` | what a snapshot would leave out now, with rules and lines; changes nothing; exit 1 when any file would be left out |
 | `moxi notes inbox list [--json]`, `add SLUG`, `rename SLUG NEW` | inbox one-offs: folders of notes for work with no project |
 | `moxi notes setup` | ask setup's questions again and write what they change |
+| `moxi notes validate [--json] [--unfiled] [--limit N]` | check every note's frontmatter against the types file; writes nothing; exit 1 only when the types file can't be used |
+| `moxi notes backfill [--apply] [--json] [--limit N]` | the required keys each filed note lacks and that can be inferred; a dry run unless `--apply` |
 
 `MOXI_NOTES_DIR`, set by the launcher for one launch, overrides the computed folder for
 that session and for `moxi notes` run in it. Exit codes: 0 done, 1 an error, no notes
-directory, or a scan that finds a file a snapshot would leave out, 2 bad arguments or a
-bad setting, 3 refused.
+directory, a scan that finds a file a snapshot would leave out, a types file validate or
+backfill can't use, or a backfill write that failed, 2 bad arguments or a bad setting, 3
+refused.
 
 `moxi notes scan` judges the notes folder's files the way the setup preview does, which
 is the way a snapshot does. Under `leave-out` it lists every file with a finding. Under
@@ -211,6 +216,48 @@ driver isn't configured, so a second clone of the notes repo, set up by hand, co
 secrets as they are. notes guards only the clone at its configured root: the doctor fails
 there when `action = redact` and the driver or the attribute is missing. A clone notes was
 never told about has no gates at all, so its commits and pushes are not judged.
+
+## Validation
+
+`moxi notes validate` reads every `.md` file under the notes root and reports what its
+frontmatter (the `---` block at the top) says against the document types you declare. It
+writes nothing, and everything it finds is information: it exits 0 whatever it finds. It
+exits 1 only when the types file can't be used, with the file, the line and the reason,
+or when the root is not a folder.
+
+You write the types file; notes never does. It is TOML at `doc-types.toml` under the root
+(the `types` setting):
+
+```toml
+required = ["type", "project", "description", "tags", "updated"]   # the default
+
+[[type]]
+name = "design"
+homes = ["*/designs/*/design.md"]   # globs under the notes root: * stays in one folder, ** crosses
+nature = "record"                   # record, living-state or ephemeral
+priority = 50                       # optional; the highest matching type wins a file
+status = ["open", "closed"]         # optional: the values a status: key may take
+frozen = false                      # optional: a corpus nothing writes any more
+exempt = false                      # optional: another tool's format, never opened
+```
+
+Each file is `filed` (a type's homes win it, and its frontmatter is checked), `frozen`,
+`exempt` (both counted, never opened) or `unfiled` (no home matches; counted by top
+folder, never opened). With no types file every file is unfiled, and each one's
+frontmatter is still checked against the default required keys. The findings are
+`missing-frontmatter`, `unreadable-frontmatter`, `missing-required`, `unknown-type`,
+`type-disagrees-with-home`, `unknown-keys`, `unknown-status` and `ambiguous-home` (two
+types claim the file at the same priority). The walk never descends into `.git` or a
+vendored folder (`node_modules`, `.venv`, `venv`, `site-packages`, `vendor`,
+`bower_components`) and never follows a symlink; it counts each one it skipped.
+
+`moxi notes backfill` proposes, for each filed note, the required keys it lacks and that
+can be inferred: `type` from its home, `project` (with the projects module) from the
+project whose notes folder holds it, and `updated` from its modified date. It never
+infers `description`, `tags` or any other key a person writes, never replaces a key that
+is there, and gives no proposal for a note whose frontmatter it can't read or whose home
+is a tie. It writes only with `--apply`, only regular files under the root, and never
+through a symlink; a second run adds nothing. The next snapshot commits what it wrote.
 
 ## Doctor
 

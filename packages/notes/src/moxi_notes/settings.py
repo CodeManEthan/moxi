@@ -6,9 +6,10 @@ topics and inbox folders under the base, and the `exclude` folders, each with `~
 expanded. Every key is read at its use, so an edit takes effect at the next read.
 
 `check_text(text)` is the module's whole loader over a config text, the announcement's
-`CONFIG_CHECK`: the schema's check, then the two rules the schema can't say. `prefix` is a
-relative folder that stays under the root (no `..`, no drive, not absolute), and each
-`exclude` entry is an absolute path once `~` is expanded.
+`CONFIG_CHECK`: the schema's check, then the rules the schema can't say. `prefix` is a
+relative folder that stays under the root (no `..`, no drive, not absolute), each
+`exclude` entry is an absolute path once `~` is expanded, and `types` is a file under the
+root, by the same rule as `prefix`.
 
 Standard library only at import; `moxi.config` is light and `pathlib` is imported inside
 the calls that build paths.
@@ -77,6 +78,7 @@ def check_text(text: str) -> None:
     settings = config.check_text(MODULE, schema(), text)
     prefix_parts(settings["prefix"], None)
     exclude_paths(settings["exclude"], None)
+    types_file(settings["types"], None)
 
 
 def prefix_parts(prefix: str, file) -> tuple[str, ...]:
@@ -91,6 +93,18 @@ def prefix_parts(prefix: str, file) -> tuple[str, ...]:
         raise ConfigError(file, "prefix", f"{prefix!r} climbs out of the root with ..",
                           "give a folder name under the root, such as your user name")
     return parts
+
+
+def types_file(types: str, file) -> str:
+    """`types`, the document types file's path under the root, or `ConfigError`."""
+    fix = "give a file name under the root, such as doc-types.toml"
+    if not types.strip():
+        raise ConfigError(file, "types", "is empty", fix)
+    if os.path.isabs(types) or types[:1] in ("/", "\\", "~") or re.match(r"^[A-Za-z]:", types):
+        raise ConfigError(file, "types", f"is the absolute path {types!r}", fix)
+    if ".." in _SEPARATORS.split(types):
+        raise ConfigError(file, "types", f"{types!r} climbs out of the root with ..", fix)
+    return types
 
 
 def exclude_paths(entries, file) -> tuple[str, ...]:
