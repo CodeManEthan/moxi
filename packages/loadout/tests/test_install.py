@@ -155,6 +155,25 @@ def test_a_held_item_is_kept_in_place_and_linked_relatively(lo, tmp_path):
     assert set(states(install.status()).values()) == {"ok"}
 
 
+def test_a_project_item_from_the_folder_copied_is_not_the_projects_own(lo, tmp_path):
+    from moxi import config
+
+    config.set("moxi", "skills.form", "copy", by="test")
+    root = project(tmp_path)
+    kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\nagents = ["helper"]\n')
+    assert install.install().code == 0
+    copied = root / ".claude" / "skills" / "review"
+    assert copied.is_dir() and not copied.is_symlink()
+    for _ in range(2):
+        out = install.install()
+        assert out.code == 0, out.text()
+        assert set(states(out).values()) == {"ok"}
+    assert install.status().code == 0
+    kit.skill(lo / "skills", "review", "Changed.\n")
+    assert install.install().code == 0
+    assert "Changed." in (copied / "SKILL.md").read_text()
+
+
 def test_two_project_sections_place_one_name_each(lo, tmp_path):
     a, b = project(tmp_path, "a"), project(tmp_path, "b")
     kit.manifest(lo, f'[project."{a}"]\nskills = ["review"]\n'

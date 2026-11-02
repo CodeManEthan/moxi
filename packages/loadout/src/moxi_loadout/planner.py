@@ -17,7 +17,8 @@ Rule: loadout always plans the whole manifest; what it applies may be less.
 Sources: an item's own `source` key wins; else `<folder>/skills/<n>/` or
 `<folder>/agents/<n>.md`; else, in a project section, the project's own copy in Claude's
 project folder for the kind (held: placed from where it is, and nothing is placed onto it).
-An item found both in the folder and held is a clash, not an order. A missing or symlinked
+A copy loadout placed there itself (under a copy form) is not the project's own. An item
+found both in the folder and held is a clash, not an order. A missing or symlinked
 source, a frontmatter `name` that differs, or a clash is `bad-source`.
 
 Targets: user scope takes the harness row's folder for the kind; project scope takes
@@ -158,6 +159,8 @@ class Plan:
     lines: list[str] = field(default_factory=list)
     refused: dict[str, Resolution] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    #: The targets of loadout's own copied files, read once.
+    copies: set[str] | None = None
 
     @property
     def resolved_all(self) -> bool:
@@ -350,7 +353,8 @@ def _source(plan: Plan, machine, section: Section, root, kind, name):
             claude = machine.project_folders.get("claude", {}).get(_FOLDERS[kind])
             if claude is not None:
                 theirs = Path(root) / claude / filename
-        theirs_real = theirs is not None and theirs.exists() and not theirs.is_symlink()
+        theirs_real = theirs is not None and theirs.exists() and not theirs.is_symlink() \
+            and not _copied_by_loadout(plan, theirs)
         if os.path.lexists(mine) and theirs_real:
             raise _BadSource(f"clash: {mine} and the project's own {theirs}")
         if os.path.lexists(mine):
@@ -372,6 +376,27 @@ def _source(plan: Plan, machine, section: Section, root, kind, name):
     if fields.get("name") != name:
         raise _BadSource(f"{md}: its name {fields.get('name')!r} is not {name!r}")
     return Path(source), held, fields, body
+
+
+def _copied_by_loadout(plan: Plan, path: Path) -> bool:
+    """Whether `path` is a copy loadout placed there (its own placement under a copy
+    form), which is never the project's own copy: a copied folder whose mark names
+    loadout, or a file the core's ledger records as loadout's copy."""
+    import json
+
+    from moxi import place
+
+    if path.is_dir():
+        try:
+            with open(path / place.MARK, encoding="utf-8") as f:
+                mark = json.load(f)
+        except (OSError, ValueError):
+            return False
+        return isinstance(mark, dict) and mark.get("owner") == OWNER
+    if plan.copies is None:
+        plan.copies = {place.target_key(p.path) for p in place.status(OWNER)
+                       if p.form == "copy"}
+    return place.target_key(path) in plan.copies
 
 
 def _why(exc) -> str:
