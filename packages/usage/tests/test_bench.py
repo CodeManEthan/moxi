@@ -317,6 +317,7 @@ def test_the_index_of_the_corpus_and_its_size(bench):
     assert files == FILES
 
 
+@pytest.mark.timed
 def test_a_pass_with_nothing_changed_stats_each_source_and_takes_about_600_ms(bench):
     OPENS.roots = {str(bench.claude): 0, str(bench.codex): 0}
     OPENS.armed = True
@@ -333,6 +334,7 @@ def test_a_pass_with_nothing_changed_stats_each_source_and_takes_about_600_ms(be
     assert taken < 600
 
 
+@pytest.mark.timed
 def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
     since = bench.now - 30 * DAY
 
@@ -355,6 +357,7 @@ def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
     assert taken < 300
 
 
+@pytest.mark.timed
 def test_the_claim_step_after_a_pass_that_read_13_files_takes_under_50_ms(
         bench, monkeypatch):
     rnd = random.Random(13)
@@ -392,6 +395,7 @@ def test_the_claim_step_after_a_pass_that_read_13_files_takes_under_50_ms(
     assert taken < 50
 
 
+@pytest.mark.timed
 @pytest.mark.skipif((os.cpu_count() or 1) < 4, reason="a rebuild's target needs 4 cores")
 @pytest.mark.xfail(strict=True, reason="a known miss: the workers only read, and this "
                    "process writes every row and runs the claim over every key alone, so "
@@ -435,6 +439,7 @@ def test_a_rebuild_on_4_workers_takes_under_a_quarter_of_one_workers(bench, monk
     assert taken[4] < taken[1] / 4
 
 
+@pytest.mark.timed
 def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
     first = time.perf_counter()
     got = limits.limits(now=bench.now, pull=False)
@@ -445,6 +450,7 @@ def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
     assert taken < 100
 
 
+@pytest.mark.timed
 @pytest.mark.parametrize(("module", "budget"), [("moxi_usage.listeners", 10.0),
                                                 ("moxi_usage.api", 15.0)])
 def test_importing_a_hook_path_module_takes_under_its_budget(module, budget, tmp_path):

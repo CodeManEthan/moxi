@@ -453,6 +453,7 @@ def test_limits_with_no_now_reads_the_clock():
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_limits_with_no_pull_answers_in_under_100_ms(fence):
     root = sessions_root(fence)
     for n in range(200):
