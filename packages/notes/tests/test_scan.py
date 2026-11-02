@@ -10,7 +10,7 @@ import pytest
 
 import moxi.paths
 from moxi_notes import filter as notes_filter
-from moxi_notes.scan import CANT, JSON_SHAPE
+from moxi_notes.scan import CANT, JSON_SHAPE, LINK
 
 from gate_kit import notes_repo, private_names, sh, snapshot, token, tree, write
 from notes_kit import configure, git_env, home, moxi_cmd
@@ -118,6 +118,23 @@ def test_under_redact_a_redacted_file_is_not_left_out_and_one_that_cant_be_is():
     snapshot(root)
     assert "plan.md" in tree(root) and "whole.md" not in tree(root)
     assert "[REDACTED:github-pat]" in sh(root, "show", "HEAD:plan.md").stdout
+
+
+@posix
+def test_under_redact_a_link_whose_target_holds_a_hit_is_left_out_as_the_snapshot_does():
+    root = notes_repo()
+    configure(action="redact")
+    notes_filter.install(root)
+    (root / "link.md").symlink_to("key-" + token())
+    write(root, "clean.md", "nothing here\n")
+    code, found, _ = scan_json()
+    assert code == 1 and found["redacted"] == []
+    assert [(one["path"], one["reason"].endswith(LINK)) for one in found["left_out"]] == [
+        ("link.md", True)]
+    code, out, _ = moxi_cmd("notes", "scan")
+    assert "(a link, which git commits unfiltered)" in out
+    snapshot(root)
+    assert "clean.md" in tree(root) and "link.md" not in tree(root)
 
 
 def test_under_redact_without_the_filter_every_file_with_a_finding_is_left_out():

@@ -50,7 +50,9 @@ refused.
 `moxi notes scan` judges the notes folder's files the way the setup preview does, which
 is the way a snapshot does. Under `leave-out` it lists every file with a finding. Under
 `redact` it asks the clean filter about each one: a file the filter redacts is listed as
-committed with its hits blanked, and one it can't redact is listed as left out. A file
+committed with its hits blanked, and one it can't redact is listed as left out. A
+symbolic link whose target holds a finding is listed as left out too, since git runs no
+clean filter on a link. A file
 already committed stays as committed until it changes. `--json` prints one object, the
 same shape whatever the exit code, and other tools read it, so the shape stays stable:
 

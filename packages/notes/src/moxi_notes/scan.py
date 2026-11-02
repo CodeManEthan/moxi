@@ -8,7 +8,8 @@ out. One already committed stays as it was committed until it changes.
 Under `leave-out` every file with a finding is left out. Under `redact` the clean filter
 gives a file's committed copy, and its own answer decides: a file it redacts commits with
 its hits blanked, and is listed as redacted, not left out. A file it can't redact (too big,
-binary, wholly one secret, a path-only rule) is left out. While the filter is missing, or
+binary, wholly one secret, a path-only rule) is left out, and so is a symbolic link whose
+target holds a finding, since git stores a link's target as it is. While the filter is missing, or
 the allowlist can't be read, it redacts nothing, so every file with a finding is left out.
 
 `scan()` gives a `Scan`; its `as_dict()` is `moxi notes scan --json`, whose shape
@@ -35,6 +36,8 @@ be judged; the lists are then empty."""
 
 #: Why a file the clean filter answered for is left out under `redact`.
 CANT = "the clean filter can't redact it"
+#: Why a symbolic link with a finding is left out under `redact`.
+LINK = "git runs no clean filter on a link"
 
 
 @dataclass
@@ -93,8 +96,11 @@ def _redacts(root: str, where, cap: int, found: dict, out: Scan) -> None:
     state = clean_filter.State(allow=allow, cap=cap, redact=True)
     for path, findings in found.items():
         one = why
-        if why is None and all(f.rule != judge.TOO_LARGE for f in findings):
-            data, _ = _content(os.path.join(root, path), cap)
+        full = os.path.join(root, path)
+        if why is None and os.path.islink(full):
+            one = LINK
+        elif why is None and all(f.rule != judge.TOO_LARGE for f in findings):
+            data, _ = _content(full, cap)
             status, copy = (clean_filter.clean(data, path, state) if data is not None
                             else ("error", None))
             if status == "success" and copy != data:
@@ -140,7 +146,7 @@ def print_scan(found: Scan, out) -> None:
 
     print(f"notes: judged {found.judged} files in {found.root} as a snapshot would "
           f"(action {found.action}); {len(found.left_out)} would be left out", file=out)
-    whys = {why for _, why in found.left_out.values() if why and why != CANT}
+    whys = {why for _, why in found.left_out.values() if why and why not in (CANT, LINK)}
     for why in sorted(whys):
         print(f"notes: {why}", file=out)
     if found.problem and not whys:
@@ -148,7 +154,9 @@ def print_scan(found: Scan, out) -> None:
     for path in sorted(found.left_out):
         findings, why = found.left_out[path]
         for line in _lines({path: findings}):
-            print(line + (" (can't be redacted)" if why == CANT else ""), file=out)
+            print(line + {CANT: " (can't be redacted)",
+                          LINK: " (a link, which git commits unfiltered)"}.get(why, ""),
+                  file=out)
     if found.redacted:
         print(f"notes: {len(found.redacted)} would be committed with the hits blanked",
               file=out)
@@ -161,4 +169,4 @@ def print_scan(found: Scan, out) -> None:
               file=out)
 
 
-__all__ = ["JSON_SHAPE", "CANT", "Scan", "scan", "print_scan"]
+__all__ = ["JSON_SHAPE", "CANT", "LINK", "Scan", "scan", "print_scan"]
