@@ -125,11 +125,12 @@ def _report(report, say) -> None:
         say(str(problem))
 
 
-def state(folder: str | os.PathLike, on: bool):
+def state(folder: str | os.PathLike, on: bool, *, seconds: float | None = None):
     """The doctor's row for the link: `off` when the folder is in no git work tree, when
     repo is absent (with repo, a commit reinstalls) or when the setting is off; `warn`
     when repo can't be loaded or read, or a piece is unregistered or disabled while the
-    setting is on; else `ok`."""
+    setting is on; else `ok`. With `seconds`, repo's reading of the work tree is waited on
+    that long, and a `warn` row says git did not answer past it."""
     from moxi.doctor import Row
 
     name = "git hook"
@@ -147,11 +148,16 @@ def state(folder: str | os.PathLike, on: bool):
         return Row("loadout", name, "off", f"{SETTING} is off, so a commit to the loadout "
                    "folder doesn't reinstall it",
                    f"moxi config set loadout {SETTING} true")
+    unread = "repo can't read the work tree holding the loadout folder"
     try:
-        have = registered(link, folder)
+        have = registered(link, folder) if seconds is None else _within(
+            seconds, registered, link, folder)
     except link.Failure as exc:
-        return Row("loadout", name, "warn", f"repo can't read the work tree holding the "
-                   f"loadout folder: {exc.text}", "moxi repo git-hooks list")
+        return Row("loadout", name, "warn", f"{unread}: {exc.text}",
+                   "moxi repo git-hooks list")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return Row("loadout", name, "warn", f"{unread}: {_git_failed(exc)}",
+                   "moxi repo git-hooks list")
     missing = [pid for pid in PIECES if pid not in have]
     if missing:
         return Row("loadout", name, "warn", f"{SETTING} is on, and the git hook "
@@ -167,6 +173,31 @@ def state(folder: str | os.PathLike, on: bool):
                    + f" (or, to stop it: moxi config set loadout {SETTING} false)")
     return Row("loadout", name, "ok", "a commit or a merge that changes the loadout folder "
                "reinstalls it")
+
+
+def _within(seconds: float, fn, *args):
+    """`fn(*args)` in a daemon thread, waited on for `seconds`: its value, or what it
+    raised; `subprocess.TimeoutExpired` when it is still running. The thread is left to
+    finish on its own; repo bounds each of its git calls."""
+    import threading
+
+    box: list = []
+
+    def work():
+        try:
+            box.append((True, fn(*args)))
+        except BaseException as exc:  # the caller reads what it raised
+            box.append((False, exc))
+
+    thread = threading.Thread(target=work, name="loadout git hook row", daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if not box:
+        raise subprocess.TimeoutExpired(["git"], seconds)
+    done, value = box[0]
+    if not done:
+        raise value
+    return value
 
 
 def _quoted(path) -> str:

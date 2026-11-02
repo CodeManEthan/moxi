@@ -24,7 +24,7 @@ GLOBS = ("packages/loadout/src/moxi_loadout/gitpiece.py",
          "packages/loadout/tests/test_repo_piece.py")
 
 API = '''
-import json, os, subprocess
+import json, os, subprocess, time
 
 
 class Failure(Exception):
@@ -119,6 +119,9 @@ def status(path=None):
     _fail()
     if os.environ.get("FAKE_REPO_STATUS") == "timeout":
         raise subprocess.TimeoutExpired(["git", "rev-parse"], 30)
+    if os.environ.get("FAKE_REPO_STATUS") == "slow":
+        time.sleep(2)
+        return []
     mine = _state().get(_key(path), {})
     return [{"root": path, "pieces": [{"id": pid, **row} for pid, row in mine.items()]}]
 
@@ -646,3 +649,17 @@ def test_the_row_warns_on_a_piece_disabled_in_repo(repo, folder):
     found = row(doctor.rows())
     assert found.state == "warn" and "disabled" in found.detail
     assert "moxi repo git-hooks enable" in found.fix
+
+
+def test_the_row_warns_when_repos_git_does_not_answer_in_its_time(repo, folder,
+                                                                  monkeypatch):
+    kit.configure(in_git(folder))
+    monkeypatch.setattr(doctor, "STATUS_SECONDS", 0.1, raising=False)
+    monkeypatch.setenv("FAKE_REPO_STATUS", "slow")
+    found = row(doctor.rows())
+    assert found.state == "warn"
+    assert "git did not answer in 0.1 s" in found.detail
+
+
+def test_the_doctors_git_budgets_leave_room_inside_its_ten_seconds():
+    assert doctor.STATUS_SECONDS + doctor.GIT_BUDGET + doctor.PLACE_GIT_SECONDS < 10
