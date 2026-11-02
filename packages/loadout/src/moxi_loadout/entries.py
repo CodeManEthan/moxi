@@ -80,6 +80,7 @@ class Entry:
     key: list
     value: object
     sent: object = None
+    by: tuple = ()   # the items' names behind a whole-file entry (the Codex rules file)
 
     def ident(self) -> tuple[str, str]:
         kind, _, name = self.item.partition(":")
@@ -158,7 +159,8 @@ def wanted(manifest, folder, rows: dict, run: Run) -> tuple[list[Entry], set]:
     if rules:
         body = "".join(e.value + "\n" for e in rules)
         text = RULES_HEADER.format(hashlib.sha256(body.encode()).hexdigest()) + body
-        out.append(Entry("permissions:*", "codex", str(hz.rules_file()), "rules", [], text))
+        out.append(Entry("permissions:*", "codex", str(hz.rules_file()), "rules", [], text,
+                         by=tuple(sorted({e.ident()[1] for e in rules}))))
     out += _global(manifest, rows, run, carried)
     return out, carried
 
@@ -575,6 +577,9 @@ def _claimed(claims: dict, ident: tuple[str, str], harness) -> bool:
             continue
         if i is None:
             ok = ident == GLOBAL and text.rsplit("@", 1)[-1] in ("*", harness)
+        elif ident[1] == "*":
+            # The Codex rules file is every permissions item's: any of their ids names it.
+            ok = i.kind == ident[0] and i.harness in ("*", harness)
         else:
             ok = (i.kind, i.name) == ident and i.harness in ("*", harness)
         if ok:
@@ -627,7 +632,8 @@ def _one(e: Entry, rec, doc, records, claimed: bool) -> Action:
                           prior=rec.get("prior", False))
         if claimed:
             return Action(e, rec, "update")
-        return Action(e, rec, "modified", "edited since loadout wrote it; --replace "
+        how = f" permissions:{e.by[0]}@codex" if e.kind == "rules" and e.by else ""
+        return Action(e, rec, "modified", f"edited since loadout wrote it; --replace{how} "
                       "rewrites it")
     if found is _MISSING:
         return Action(e, rec, "add")
@@ -674,7 +680,9 @@ def _gone(r: dict, doc, records: list, used: set, claimed: bool, want=()) -> Act
         return Action(None, r, "end")
     if found == written or claimed:
         return Action(None, r, "remove")
-    return Action(None, r, "modified", "edited since loadout wrote it; --replace removes it")
+    how = " permissions:NAME@codex, NAME any permissions item," if kind == "rules" else ""
+    return Action(None, r, "modified", f"edited since loadout wrote it; --replace{how} "
+                  "removes it")
 
 
 # -- states and rows -----------------------------------------------------------------------

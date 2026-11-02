@@ -277,6 +277,26 @@ def test_codex_rules_file_edited_by_hand_is_modified(lo):
     assert states(out)[("permissions", "*", "codex")] == "modified"
 
 
+@pytest.mark.parametrize("given", ["permissions:git-reads@codex", "permissions:git-reads@*"])
+def test_replace_by_any_permissions_id_takes_the_edited_rules_file_back(lo, given):
+    write(lo, '[user]\npermissions = ["git-reads"]\n' + PERMS)
+    install.install()
+    wrote = harness.rules_file().read_text()
+    harness.rules_file().write_text(wrote + "# mine\n")
+    row = [r for r in install.status().rows if r.name == "*"][0]
+    assert "--replace permissions:git-reads@codex" in row.reason
+    out = install.install(replace=[given])
+    assert out.code == 0, out.text()
+    assert harness.rules_file().read_text() == wrote
+    # Once no item writes rules, an edited file is removed by the same form.
+    harness.rules_file().write_text(wrote + "# mine\n")
+    write(lo, '[user]\npermissions = []\n' + PERMS)
+    row = [r for r in install.status().rows if r.name == "*"][0]
+    assert row.state == "modified" and "--replace permissions:" in row.reason
+    assert install.install(replace=[given]).code == 0
+    assert not harness.rules_file().exists()
+
+
 def test_mcp_through_the_clis_read_back(lo):
     write(lo, '[user]\nmcp = ["docs"]\n[mcp.docs]\ncommand = "uvx"\n'
               'args = ["docs-mcp", "--root", "{source}/docs"]\nenv = { TOKEN = "t" }\n')
