@@ -20,7 +20,9 @@ The core's own rows already show every loadout placement that isn't ok. These ad
 
 The doctor gives the whole check ten seconds, so the would-commit check's git calls get
 two seconds each and four in all here, not install's thirty; a target the check had no
-time for is named in a `warn` row.
+time for is named in a `warn` row. The core placer's tracked check gets two seconds of git
+in all; an occupant it had no time for reads `blocked`, its reason saying git did not
+answer.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ MODULE = "loadout"
 GIT_SECONDS = 2.0
 #: Seconds all of them together may take there.
 GIT_BUDGET = 4.0
+#: Seconds the core placer's tracked check may give git in all there.
+PLACE_GIT_SECONDS = 2.0
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: What makes a hook's command more than one program with its arguments: a check of its
 #: first word could then be wrong, so the doctor leaves such a command unchecked.
@@ -79,7 +83,8 @@ def rows() -> Iterator[Row]:
     from moxi_loadout import ignores
 
     try:
-        outcome = install.status(git=ignores.Git(timeout=GIT_SECONDS, budget=GIT_BUDGET))
+        outcome = install.status(git=ignores.Git(timeout=GIT_SECONDS, budget=GIT_BUDGET),
+                                 git_seconds=PLACE_GIT_SECONDS)
     except Exception as exc:  # noqa: BLE001 - the other rows still say what they can
         yield Row(MODULE, "status", "fail", f"status failed: {exc}", "moxi loadout status")
         outcome = None

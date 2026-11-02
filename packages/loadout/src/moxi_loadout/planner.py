@@ -475,8 +475,9 @@ def _carry(plan: Plan, want: Want, state: str, reason: str, code: int, *,
 
 # -- planning ------------------------------------------------------------------------------
 
-def run(plan: Plan) -> Plan:
-    """Plan every want with the core placer, as owner loadout, and set each want's step."""
+def run(plan: Plan, *, git_seconds: float | None = None) -> Plan:
+    """Plan every want with the core placer, as owner loadout, and set each want's step.
+    `git_seconds` goes to `moxi.place.plan`."""
     from moxi import place
 
     items, owners = [], []
@@ -488,7 +489,7 @@ def run(plan: Plan) -> Plan:
         for item in want.carried:
             items.append(item)
             owners.append(None)
-    steps = place.plan(OWNER, items)
+    steps = place.plan(OWNER, items, git_seconds=git_seconds)
     for want, step in zip(owners, steps[:len(items)]):
         if want is not None:
             want.step = step

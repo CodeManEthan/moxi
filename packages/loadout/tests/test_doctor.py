@@ -205,3 +205,26 @@ def test_the_rows_finish_inside_the_doctors_time_while_git_hangs(lo, tmp_path, m
     took = time.monotonic() - start
     assert took < 8, took
     assert rows["would-commit"].state == "warn"
+
+
+@pytest.mark.timed
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
+def test_an_occupant_with_git_hanging_still_finishes_inside_the_doctors_time(
+        lo, tmp_path, monkeypatch):
+    """The core's tracked check gets the doctor's short git time too: the user's own
+    folder at a target reads blocked, saying git did not answer, inside the time."""
+    kit.skill(kit.claude(), "review", "The user's own.\n")
+    bin_dir = tmp_path / "slow-bin"
+    bin_dir.mkdir()
+    slow = bin_dir / "git"
+    slow.write_text("#!/bin/sh\nsleep 60\n")
+    slow.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    kit.manifest(lo, '[user]\nskills = ["review"]\n')
+    start = time.monotonic()
+    rows = by_name(doctor.rows())
+    took = time.monotonic() - start
+    assert took < 8, took
+    row = rows["harness claude"]
+    assert row.state == "warn" and "blocked" in row.detail
+    assert "git did not answer in time" in row.detail

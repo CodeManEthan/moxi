@@ -95,10 +95,12 @@ class Outcome:
 # -- status ---------------------------------------------------------------------------------
 
 def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
-           git: ignores.Git | None = None) -> Outcome:
+           git: ignores.Git | None = None, git_seconds: float | None = None) -> Outcome:
     """Every item's state; the scope filters the rows. Takes no lock, writes nothing.
-    `git` runs the would-commit check's git calls (a fresh `ignores.Git` when None)."""
-    plan, run = _plan(folder, resolver)
+    `git` runs the would-commit check's git calls (a fresh `ignores.Git` when None).
+    `git_seconds` is how long the core placer's tracked check may give git in all (the
+    placer's own 10 seconds a call when None)."""
+    plan, run = _plan(folder, resolver, git_seconds)
     notes = _check_placed(plan, ignores.Git() if git is None else git)
     rows = [r for r in planner.rows(plan) + entries.rows(run) + _ignore_rows(plan.ledger)
             if _shown(scope, r)]
@@ -142,7 +144,7 @@ def _shown(scope: Scope, r: Row) -> bool:
     return scope.covers(r.scope, r.kind, r.name) if r.scope is not None else scope.whole
 
 
-def _plan(folder, resolver) -> tuple[planner.Plan, entries.Run]:
+def _plan(folder, resolver, git_seconds=None) -> tuple[planner.Plan, entries.Run]:
     from moxi_loadout import manifest as manifest_mod
     from moxi_loadout import settings
 
@@ -152,7 +154,8 @@ def _plan(folder, resolver) -> tuple[planner.Plan, entries.Run]:
     found = manifest_mod.load(machine.source)
     data = ledger.read()
     plan = planner.build(found, machine, data, resolver=resolver)
-    return planner.run(plan), entries.plan(found, machine.source, data)
+    return (planner.run(plan, git_seconds=git_seconds),
+            entries.plan(found, machine.source, data))
 
 
 # -- install --------------------------------------------------------------------------------
