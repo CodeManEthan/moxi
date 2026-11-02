@@ -23,7 +23,8 @@
    file once, and the ledger with their records straight after, `SIGINT` and `SIGTERM`
    deferred across both;
 6. write loadout's ledger: a record per placement made or kept and per entry written or
-   kept, none for one removed.
+   kept, none for one removed; then delete each generated agent file nothing uses any
+   more, unless it was edited by hand (a note names it).
 
 Locks are always taken in one order: `install.lock`, the core lock, the manifest's.
 
@@ -321,6 +322,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     for text in unclaimed:
         lines.append(f"--replace {text}: nothing of loadout's is refused there")
     _write_ledger(plan, data, machine.source, done, seeded_done, removes, now)
+    notes += _drop_generated(plan, data, say)
     for name, res in plan.refused.items():
         if scope.sections() is not None and name not in scope.sections():
             continue
@@ -457,6 +459,45 @@ def _write_generated(want, claims: dict[str, bool], say) -> None:
         say(f"rewrote {path}, which was edited by hand")
 
 
+def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
+    """The generated agent files still in use, by real path: those `wanted` names, those
+    a record in loadout's ledger was placed from, and those a placement of loadout's
+    links to (so a lost ledger keeps them too)."""
+    from moxi import place
+
+    out = {os.path.realpath(p) for p in wanted}
+    for record in data["placed"].values():
+        item = record.get("place")
+        if isinstance(item, dict) and isinstance(item.get("source"), str):
+            out.add(os.path.realpath(item["source"]))
+    for p in place.status(planner.OWNER):
+        if os.path.islink(p.path):
+            out.add(os.path.realpath(p.path))
+    return out
+
+
+def _drop_generated(plan: planner.Plan, data: dict, say) -> list[str]:
+    """Delete each generated agent file no want names and no placement uses any more,
+    as it was generated; one edited by hand is left, and named in the note returned."""
+    from moxi_loadout import convert, stores
+
+    used = generated_in_use(data, [w.generated[0] for w in plan.wants if w.generated])
+    notes = []
+    for top, _, names in os.walk(stores.generated_dir()):
+        for name in sorted(names):
+            path = os.path.join(top, name)
+            if os.path.realpath(path) in used:
+                continue
+            state = convert.state(path)
+            if state == "ok":
+                os.unlink(path)
+                say(f"deleted {path}, which no agent uses any more")
+            elif state == "modified":
+                notes.append(f"{path} was edited by hand and no agent uses it any more; "
+                             "copy the edit into its source if you want it, then delete it")
+    return notes
+
+
 def _remove_in_scope(plan: planner.Plan, step, scope: Scope) -> bool:
     record = plan.record(step)
     if record is None:
@@ -489,4 +530,5 @@ def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
     ledger.write(data)
 
 
-__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "install"]
+__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "install",
+           "generated_in_use"]

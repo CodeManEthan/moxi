@@ -72,7 +72,7 @@ def _teardown(say) -> int | str:
     folders = _folders(data, machine)
     run = _plan(data, machine)
 
-    problems = _changed(run) + _unreadable(run) + _ignore_files(data) + _generated()
+    problems = _changed(run) + _unreadable(run) + _ignore_files(data) + _generated(data)
     if problems:
         raise modules.Refused(
             "uninstall refused; nothing was removed. Changed since loadout wrote it, or "
@@ -191,16 +191,22 @@ def _ignore_files(data: dict) -> list[str]:
             for path, _, _ in ignores.problems(data)]
 
 
-def _generated() -> list[str]:
-    """Each generated agent file edited by hand, which a purge would lose."""
-    from moxi_loadout import convert, stores
+def _generated(data: dict) -> list[str]:
+    """Each generated agent file edited by hand, which a purge would lose. One no
+    placement uses any more has no `--replace` to name: deleting it is the fix."""
+    from moxi_loadout import convert, install, stores
 
     root = stores.generated_dir()
+    used = install.generated_in_use(data)
     out = []
     for top, _, names in os.walk(root):
         for name in sorted(names):
             path = Path(top) / name
             if convert.state(path) != "modified":
+                continue
+            if os.path.realpath(path) not in used:
+                out.append(f"{path} was edited by hand, and no agent uses it any more: "
+                           "copy the edit into its source if you want it, then delete it")
                 continue
             harness = path.relative_to(root).parts[0]
             stem = name.rsplit(".", 1)[0]

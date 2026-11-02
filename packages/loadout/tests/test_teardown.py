@@ -162,6 +162,21 @@ def test_an_edited_entry_refuses_and_nothing_is_removed(lo):
     assert read(settings()) == {"model": "opus"}
 
 
+def test_an_edited_generated_file_no_agent_uses_is_named_to_delete(lo):
+    kit.manifest(lo, '[user]\nagents = ["helper"]\n')
+    assert install.install().code == 0
+    generated = stores.generated_dir() / "codex" / "helper.toml"
+    with open(generated, "a", encoding="utf-8") as f:
+        f.write("# mine\n")
+    kit.manifest(lo, '[user]\n')
+    assert install.install().code == 0
+    reason = refusal(lambda line: None)
+    assert f"{generated} was edited by hand" in reason
+    assert "--replace" not in reason and "delete it" in reason
+    generated.unlink()
+    assert teardown.teardown(say=lambda line: None) == 0
+
+
 def test_an_entry_the_user_had_stays_and_one_running_from_the_folder_is_named(lo):
     kit.manifest(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
     group = {"matcher": "Bash", "hooks": [{"type": "command", "timeout": 10,

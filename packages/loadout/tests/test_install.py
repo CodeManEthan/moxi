@@ -224,6 +224,34 @@ def test_a_hand_edited_generated_agent_is_left_until_replaced(lo):
     assert "# my edit" not in toml.read_text()
 
 
+def test_a_dropped_agents_generated_file_is_deleted_unless_edited(lo):
+    from moxi_loadout import stores
+
+    kit.manifest(lo, '[user]\nagents = ["helper"]\n')
+    assert install.install().code == 0
+    generated = stores.generated_dir() / "codex" / "helper.toml"
+    assert generated.is_file()
+    kit.manifest(lo, '[user]\n')
+    assert install.install().code == 0
+    assert not os.path.lexists(generated)
+    # An edited one stays, with a note naming it.
+    kit.manifest(lo, '[user]\nagents = ["helper"]\n')
+    assert install.install().code == 0
+    with open(generated, "a", encoding="utf-8") as f:
+        f.write("# my edit\n")
+    kit.manifest(lo, '[user]\n')
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert "# my edit" in generated.read_text()
+    assert any(str(generated) in n and "delete it" in n for n in out.notes), out.notes
+    # A carried agent's generated file is still in use, so it stays.
+    kit.manifest(lo, '[user]\nagents = ["helper"]\n')
+    assert install.install(replace=["agent:helper@codex"]).code == 0
+    os.unlink(lo / "agents" / "helper.md")
+    assert install.install().code == 1
+    assert generated.is_file()
+
+
 def test_a_changed_source_regenerates_the_agent(lo):
     kit.manifest(lo, '[user]\nagents = ["helper"]\n')
     install.install()
