@@ -347,6 +347,17 @@ def test_opencode_permissions_and_mcp_go_in_opencode_json(lo):
     assert states(install.status())[("permissions", "git-reads", "opencode")] == "modified"
 
 
+def test_status_says_which_harness_facts_no_run_has_confirmed(lo):
+    write(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK + 'harnesses = ["claude"]\n')
+    assert not [n for n in install.status().notes if "not yet confirmed" in n]
+    opencode_row()
+    write(lo, '[user]\nhooks = ["guard-rm"]\npermissions = ["git-reads"]\n' + HOOK + PERMS)
+    notes = [n for n in install.status().notes if "not yet confirmed by a run" in n]
+    assert len(notes) == 2
+    assert any("hooks.json" in n and "rules" in n and "trust" in n for n in notes)
+    assert any("opencode.json" in n for n in notes)
+
+
 def test_another_value_under_the_key_is_blocked_then_taken_over(lo):
     opencode_row()
     path = harness.settings_file("opencode")

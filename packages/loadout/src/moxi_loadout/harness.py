@@ -7,9 +7,11 @@ Homes, honouring the harnesses' own variables:
   `$CLAUDE_CONFIG_DIR/.claude.json` when the variable is set, else `~/.claude.json`.
 - Codex: `$CODEX_HOME`, else `~/.codex`: `hooks.json`, `rules/loadout.rules` (a whole file
   loadout owns), `AGENTS.md`, and `config.toml` (its MCP servers, read only: the `codex`
-  CLI writes them).
+  CLI writes them). That Codex reads `hooks.json` and the rules file is taken from its
+  binary, not yet confirmed by a run.
 - OpenCode: `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`: `opencode.json` and
-  `AGENTS.md`.
+  `AGENTS.md`. The shapes follow OpenCode's published config schema, not yet confirmed
+  by a run.
 
 A `Doc` is one harness file read once. JSON files are read with `json` and written back
 with their key order and the indent of their first indented line (two spaces if none);

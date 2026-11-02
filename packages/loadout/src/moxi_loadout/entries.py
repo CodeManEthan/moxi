@@ -32,6 +32,10 @@ command, else drops the record and adds loadout's group beside it.
 Writes: the CLI-backed MCP servers first (`claude mcp add-json --scope user`, `codex mcp
 add`), each read back from the file the CLI wrote; then each harness file is read once,
 every kind's entries planned together, and written once (`moxi_loadout.harness.write`).
+
+Not yet confirmed by a run: that Codex reads `hooks.json` and `rules/loadout.rules` as
+written here, how Codex asks for a new hook's trust, and OpenCode's `opencode.json` shapes
+(taken from its published schema). `status` notes each (`UNCONFIRMED`).
 """
 
 from __future__ import annotations
@@ -66,6 +70,14 @@ GLOBAL = ("global", "global")
 #: of the would-commit check (`moxi_loadout.ignores`) and the opencode row in the core's
 #: harness table (`moxi_loadout.harness_row`).
 KEPT_ELSEWHERE = ("ignore-file", "harness-row")
+#: What loadout writes for a harness on facts no run of that harness has confirmed yet.
+UNCONFIRMED = {
+    "codex": "not yet confirmed by a run: that codex reads hooks.json and "
+             "rules/loadout.rules as loadout writes them, and how codex asks you to trust "
+             "a new hook",
+    "opencode": "not yet confirmed by a run: the opencode.json shapes loadout writes "
+                "(permission, mcp, instructions), which follow OpenCode's published schema",
+}
 
 
 @dataclass
@@ -162,6 +174,10 @@ def wanted(manifest, folder, rows: dict, run: Run) -> tuple[list[Entry], set]:
         out.append(Entry("permissions:*", "codex", str(hz.rules_file()), "rules", [], text,
                          by=tuple(sorted({e.ident()[1] for e in rules}))))
     out += _global(manifest, rows, run, carried)
+    if any(e.harness == "codex" and e.kind in ("hook", "rules") for e in out):
+        run.notes.append(UNCONFIRMED["codex"])
+    if any(e.harness == "opencode" for e in out):
+        run.notes.append(UNCONFIRMED["opencode"])
     return out, carried
 
 

@@ -149,7 +149,7 @@ def test_codex_switches_are_noted(lo):
     assert row.state == "ok"
     assert "agents.enabled = false" in row.detail
     assert "desktop import is on" in row.detail
-    assert "trust it in codex: guard" in row.detail
+    assert "which you have trusted: guard" in row.detail
 
 
 def test_an_adopted_skill_whose_module_is_gone_reads_off(lo, site):

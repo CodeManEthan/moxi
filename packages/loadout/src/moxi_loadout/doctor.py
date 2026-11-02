@@ -297,8 +297,8 @@ def _codex(found) -> Iterator[Row]:
              if "codex" in (found.harnesses("hook", n) or table)
              and not found.user.is_disabled("hook", n, "codex")]
     if hooks:
-        said.append(f"codex runs a new hook only once you trust it in codex: "
-                    f"{', '.join(hooks)}")
+        said.append(f"codex runs a new hook only once you trust it in codex, and "
+                    f"loadout can't tell which you have trusted: {', '.join(hooks)}")
     yield Row(MODULE, "codex", "ok", "; ".join(said) if said else "nothing to note")
 
 

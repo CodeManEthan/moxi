@@ -19,12 +19,17 @@ and `moxi loadout status` says what has drifted.
    are; Codex and OpenCode agent files are generated from the Markdown one, and a hand
    edit to a generated file is kept and reported. An item it can't resolve this run
    keeps its placements; only an item you drop or disable is removed.
-4. It writes hooks, permission rules and MCP servers into each harness's own files:
+4. It writes hooks, permission rules and MCP servers into each harness's own files,
+   from the user section only (a project section that lists one is refused with a line):
    Claude's `settings.json`, Codex's `hooks.json` and a rules file of its own, OpenCode's
-   `opencode.json`, and MCP servers through the `claude` and `codex` CLIs. Each file is
-   read once and written once per run, backed up first. It removes only what it added: an
-   entry you had first stays yours, and one you edited is left and reported until
-   `--replace` takes it.
+   `opencode.json` (permission rules and MCP servers; OpenCode takes no hooks, since it
+   extends by plugins), and MCP servers through the `claude` and `codex` CLIs. Each file
+   is read once and written once per run, backed up first. It removes only what it added:
+   an entry you had first stays yours, and one you edited is left and reported until
+   `--replace` takes it. No run has confirmed yet that Codex reads `hooks.json` and the
+   rules file as loadout writes them, or how Codex asks you to trust a new hook; the
+   OpenCode shapes follow its published schema, also unconfirmed by a run. `status`
+   notes both.
 5. The global instruction file, `global.md` in your folder, reaches every session in one
    of three modes: `off` (the default), `managed` (a line or a marked block added to your
    own file, which `moxi loadout global off` takes out exactly) or `if-absent` (placed
