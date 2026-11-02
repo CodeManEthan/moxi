@@ -202,13 +202,22 @@ def _split_flow(inner: str) -> list[str]:
 def render(value) -> str:
     """One value as YAML the reader reads back the same. A list renders flow-style."""
     if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(render(item) for item in value) + "]"
+        return "[" + ", ".join(_render_item(item) for item in value) + "]"
     text = str(value)
     if text == "":
         return "''"
     if (text[0] in "[]{}#&*!|>%@`'\"," or text.strip() != text or ": " in text
             or text.endswith(":") or re.search(r"\s#", text) or "\n" in text
             or "\r" in text):
+        return "'" + text.replace("'", "''") + "'"
+    return text
+
+
+def _render_item(item) -> str:
+    """One list item: as `render`, quoted too when it holds a character that ends or nests a
+    flow item, so the reader gives back the one item."""
+    text = render(item)
+    if not text.startswith("'") and any(char in text for char in ",[]{}"):
         return "'" + text.replace("'", "''") + "'"
     return text
 

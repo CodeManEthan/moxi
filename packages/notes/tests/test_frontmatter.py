@@ -158,9 +158,9 @@ def test_upsert_changes_no_other_byte():
     text = "---\r\ntype: plan\r\nupdated: 1\r\n---\r\nbody   line\r\nend"
     out, _ = api.upsert_frontmatter(text, "project", "alpha")
     assert out == "---\r\ntype: plan\r\nproject: alpha\r\nupdated: 1\r\n---\r\nbody   line\r\nend"
-    bom = "﻿# body\n"
+    bom = "\ufeff# body\n"
     out, _ = api.upsert_frontmatter(bom, "type", "plan")
-    assert out == "﻿---\ntype: plan\n---\n\n# body\n"
+    assert out == "\ufeff---\ntype: plan\n---\n\n# body\n"
     assert api.frontmatter(out).fields == {"type": "plan"}
 
 
@@ -175,7 +175,8 @@ def test_upsert_refuses_a_bad_key_or_a_value_on_two_lines():
     ("plain", "plain"), ("", "''"), (["a", "b"], "[a, b]"), ("has: colon", "'has: colon'"),
     ("#hash", "'#hash'"), ("it's", "it's"), ("'quoted'", "'''quoted'''"),
     ("a #b", "'a #b'"), ("a\t#b", "'a\t#b'"), ("issue#12", "issue#12"),
-    ("2026-11-01", "2026-11-01"),
+    ("2026-11-01", "2026-11-01"), (["a,b", "c"], "['a,b', c]"), (["x[1]"], "['x[1]']"),
+    (["{y}", "z"], "['{y}', z]"),
 ])
 def test_a_written_value_reads_back_the_same(value, line):
     assert fm.render(value) == line
