@@ -2,9 +2,9 @@
 // carry for the listener events: the transcript path at a ready, a prompt's text and origin.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { world } from './world.ts'
-import type { World } from './world.ts'
-import { afterRows, originOf, parseFloors, usageOf } from '../hooks/register.ts'
+import { world } from './world'
+import type { World } from './world'
+import { afterRows, originOf, parseFloors, usageOf } from '../hooks/register'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any

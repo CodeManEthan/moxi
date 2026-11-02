@@ -2,10 +2,10 @@
 // answer, a trip that fails or overruns, the catch, and the prompt list each ask carries.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { world } from './world.ts'
-import type { World } from './world.ts'
-import { catchRefuses, decide, globRegex, parseTable } from '../hooks/register.ts'
-import TABLE from './guard-cases.ts'
+import { world } from './world'
+import type { World } from './world'
+import { catchRefuses, decide, globRegex, parseTable } from '../hooks/register'
+import TABLE from './guard-cases'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
