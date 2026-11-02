@@ -24,7 +24,13 @@
    deferred across both;
 6. write loadout's ledger: a record per placement made or kept and per entry written or
    kept, none for one removed; then delete each generated agent file nothing uses any
-   more, unless it was edited by hand (a note names it).
+   more, unless it was edited by hand (a note names it);
+7. with repo installed and the folder in a git work tree, register the two git hook
+   pieces there while `reinstall_on_commit` is on, or remove them while it is off
+   (`moxi_loadout.repo_link`); a failure is a line, not an exit code.
+
+A clean install of the whole manifest (exit 0) clears the git hook's doctor record of a
+failed reinstall.
 
 Locks are always taken in one order: `install.lock`, the core lock, the manifest's.
 
@@ -48,7 +54,7 @@ from dataclasses import dataclass, field
 
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
-from moxi_loadout import adoption, entries, ignores, ledger, planner
+from moxi_loadout import adoption, entries, ignores, ledger, planner, repo_link
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -177,10 +183,27 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
     try:
         with files.lock(stores.install_lock(), timeout=INSTALL_WAIT):
             with _core_lock(files, paths):
-                return _install(scope, list(replace), folder, resolver, lines)
+                out = _install(scope, list(replace), folder, resolver, lines)
     except files.LockTimeout as exc:
         lines.append(f"{exc}; another install is running, so try again later")
         return Outcome(lines=lines, code=TEMPFAIL)
+    if scope.whole and out.code == 0:
+        _clear_reinstall_record(out)
+    return out
+
+
+def _clear_reinstall_record(out: Outcome) -> None:
+    """A clean install of the whole manifest ends the git hook's record of a failed
+    reinstall."""
+    from moxi import doctor
+
+    from moxi_loadout.gitpiece import RECORD_KEY, RECORD_MODULE
+
+    try:
+        doctor.clear(RECORD_MODULE, RECORD_KEY)
+    except Exception as exc:  # noqa: BLE001 - the install itself went through
+        out.notes.append(f"the git hook's record of a failed reinstall couldn't be "
+                         f"cleared: {exc}; moxi doctor --clear clears it")
 
 
 def _core_lock(files, paths):
@@ -337,6 +360,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
             continue
         rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
     codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
+    repo_link.sync(machine.source, machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
                    planner.exit_code(codes))
 

@@ -11,6 +11,16 @@ default = ""
 doc = "The loadout folder on this machine, holding loadout.toml; empty means the folder in loadout's data directory."
 read = "use"
 
+# With repo installed, register the two git hook pieces in the work tree that holds the
+# loadout folder, so a commit or a merge that changes the folder runs moxi loadout install.
+# repo writes them into that clone's own git config, so this is a fact of this machine.
+[reinstall_on_commit]
+type = "bool"
+default = true
+doc = "With repo, a commit or merge that changes the loadout folder reinstalls it, from a git hook."
+read = "use"
+needs = "repo"
+
 [backups.keep]
 type = "int"
 default = 10

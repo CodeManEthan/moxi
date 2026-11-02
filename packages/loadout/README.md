@@ -48,11 +48,21 @@ and `moxi loadout status` says what has drifted.
 8. On install it writes an example manifest, every item commented out, into an empty
    folder, adds an OpenCode row to the core's harness table, and asks for the global mode
    when the manifest sets none and someone is at the keyboard.
-9. `moxi uninstall loadout` takes out everything it placed or wrote: harness entries, the
-   global part, placements, its ignore files and the OpenCode row. Module skills from your
-   own yes go back to their module; ones placed only because the manifest listed them are
-   removed. When something it wrote was edited since, it refuses and removes nothing,
-   naming each with its fix.
-10. `status`, `add`, `remove`, `enable`, `disable` and `list` show or change the manifest,
+9. With repo installed (`moxi install loadout --with repo`) and the folder in a git work
+   tree, install registers two git hook pieces there, so a commit or a merge that
+   changes the folder runs `moxi loadout install` in that work tree, on whatever branch.
+   The install runs with git's own variables taken out of its environment; one that
+   fails prints the command to run and leaves a doctor record, which the next clean
+   install clears. `moxi config set loadout reinstall_on_commit false` turns it off, and
+   the next install removes the pieces. Without repo, run `moxi loadout install` after a
+   commit.
+10. `moxi uninstall loadout` takes out everything it placed or wrote: harness entries, the
+    global part, placements, its ignore files and the OpenCode row. Module skills from
+    your own yes go back to their module; ones placed only because the manifest listed
+    them are removed. When something it wrote was edited since, it refuses and removes
+    nothing, naming each with its fix. repo's own uninstall listener takes the git hook
+    pieces out.
+11. `status`, `add`, `remove`, `enable`, `disable` and `list` show or change the manifest,
     each with `--json`, and `moxi doctor` shows loadout's rows: the manifest, entries
-    not ok, the global file, hook programs, the projects link and Codex's switches.
+    not ok, the global file, hook programs, the projects link, the git hook pieces and
+    Codex's switches.

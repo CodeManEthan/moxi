@@ -1,8 +1,9 @@
 """loadout's machine settings, read through `moxi.config` at each use.
 
 The schema is `settings.toml` beside this file. It holds only what is true of one machine:
-where the loadout folder is (`source`), how many backups to keep of each harness file
-(`backups.keep`), and each harness's skills and agents folders inside a project
+where the loadout folder is (`source`), whether a commit to it reinstalls it through
+repo's git hook pieces (`reinstall_on_commit`), how many backups to keep of each harness
+file (`backups.keep`), and each harness's skills and agents folders inside a project
 (`project_folders`). Every user choice of what goes where is in the manifest instead
 (`moxi_loadout.manifest`).
 
@@ -30,6 +31,7 @@ MODULE = "loadout"
 SCHEMA_RESOURCE = "settings.toml"
 
 SOURCE = "source"
+REINSTALL_ON_COMMIT = "reinstall_on_commit"
 BACKUPS_KEEP = "backups.keep"
 PROJECT_FOLDERS = "project_folders"
 #: The kinds a harness has a project folder for.
@@ -54,12 +56,14 @@ class Machine:
     """loadout's settings as it uses them.
 
     `source` is the loadout folder, an absolute `Path`; `chosen` is whether the config
-    names it (False means the default folder). `backups_keep` is an int.
+    names it (False means the default folder). `reinstall_on_commit` is a bool;
+    `backups_keep` is an int.
     `project_folders` maps each harness to `{"skills": rel, "agents": rel}`, the default
     rows with the file's entries over them. `settings` is the `Settings` read.
     """
 
-    __slots__ = ("settings", "source", "chosen", "backups_keep", "project_folders")
+    __slots__ = ("settings", "source", "chosen", "reinstall_on_commit", "backups_keep",
+                 "project_folders")
 
     def __init__(self, settings, default_source):
         from pathlib import Path
@@ -68,6 +72,7 @@ class Machine:
         given = settings[SOURCE]
         self.chosen = given is not None
         self.source = Path(os.path.normpath(given)) if given else Path(default_source)
+        self.reinstall_on_commit = settings[REINSTALL_ON_COMMIT]
         self.backups_keep = settings[BACKUPS_KEEP]
         self.project_folders = project_folders(settings[PROJECT_FOLDERS], settings.file)
 
@@ -147,6 +152,6 @@ def _check_keep(keep: int, file) -> None:
                           "keep at least 1 backup of each harness file")
 
 
-__all__ = ["MODULE", "SOURCE", "BACKUPS_KEEP", "PROJECT_FOLDERS", "FOLDER_KINDS", "Machine",
+__all__ = ["MODULE", "SOURCE", "REINSTALL_ON_COMMIT", "BACKUPS_KEEP", "PROJECT_FOLDERS", "FOLDER_KINDS", "Machine",
            "schema", "read", "check_text", "default_folders", "project_folders",
            "relative_folder"]
