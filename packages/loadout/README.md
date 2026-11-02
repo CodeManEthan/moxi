@@ -41,7 +41,10 @@ and `moxi loadout status` says what has drifted.
 7. It takes over the module skills you said yes to at `moxi install`, and writes them into
    the manifest, so a second machine places them too; there it places each one as its
    module and takes it over, so the module still asks about the rest. A skill the
-   manifest disables stays off when its module is installed again.
+   manifest disables stays off when its module is installed again. Removing a module
+   skill, or dropping one of its harnesses from the manifest, lasts only until the
+   module's next `moxi install`, which places it again if you said yes at the module's
+   question.
 8. On install it writes an example manifest, every item commented out, into an empty
    folder, adds an OpenCode row to the core's harness table, and asks for the global mode
    when the manifest sets none and someone is at the keyboard.
