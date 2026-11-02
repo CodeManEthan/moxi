@@ -23,8 +23,11 @@ one function, `commit`, so a reader without a lock always sees one whole version
   `generation`. An entry's change token is `"<id>.<generation>"`, so a token is never
   given to two different entry contents: within one file generations only rise, and a new
   file has a new id.
-- `from` holds the old provider, host and port while a provider switch is under way;
-  `displaced` the final name of the copy a `--replace` wrote; `detail` a provider's
+- `from` holds the old provider, host and port (and the old target and reach) while a
+  provider switch is under way. A `from` that names a Tailscale entry is one of the
+  record's Tailscale entries until the switch settles (`old_tailscale`): whatever
+  removes, counts or reports Tailscale entries counts it too, since the old Funnel or
+  Serve entry may still be live. `displaced` the final name of the copy a `--replace` wrote; `detail` a provider's
   stderr while a failure leaves an entry `applying` or `removing`.
 - `warned_ct` lists the hosts whose certificate-log warning the user has confirmed. It
   lives here, not in the event log, so it never ages out.
@@ -221,6 +224,25 @@ class Entry:
             if problem:
                 raise _damaged(f"its entry {name!r} {problem}")
         return entry
+
+
+def old_tailscale(entry: Entry) -> Entry | None:
+    """The Tailscale entry a provider switch off Tailscale may have left live, read from
+    the entry's `from`, or None when `from` names none. Until the switch settles it is
+    one of the record's Tailscale entries: whatever removes, counts or reports those
+    counts it too."""
+    old = entry.from_
+    if (not entry.known or entry.provider == "tailscale" or not isinstance(old, Mapping)
+            or old.get("provider") != "tailscale"):
+        return None
+    host, port, target = old.get("host"), old.get("port"), old.get("target")
+    if not isinstance(host, str) or not _is_int(port) or not 0 < port < 65536:
+        return None
+    if not _is_int(target) or not 0 < target < 65536:
+        target = entry.target
+    reach = old.get("reach") if old.get("reach") in REACHES else entry.reach
+    return Entry(reach=reach, provider="tailscale", host=host, port=port, target=target,
+                 state=State.ON)
 
 
 def _state(value: object) -> object:
@@ -610,7 +632,8 @@ def _sync_dir(directory: Path) -> None:
 
 
 __all__ = ["FORMAT", "FORMS", "PROVIDERS", "REACHES", "EVENTS", "NEWER", "State", "Entry",
-           "Record", "normal_host", "stamp", "record_path", "events_path", "displaced_dir",
+           "Record", "old_tailscale", "normal_host", "stamp", "record_path", "events_path",
+           "displaced_dir",
            "read", "commit", "event", "Displaced", "is_copy_name", "pending_path",
            "final_path", "write_pending", "is_pending", "names_pending", "rename_pending",
            "delete_pending", "read_copy", "listing"]

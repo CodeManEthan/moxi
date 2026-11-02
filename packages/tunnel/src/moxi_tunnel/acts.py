@@ -554,7 +554,7 @@ def _switched(old: Entry | None, **values) -> Entry:
 def _from(old: Entry) -> dict:
     """What a provider switch keeps of the old address while it is under way."""
     return {"provider": old.provider, "host": old.host, "port": old.port,
-            "target": old.target}
+            "target": old.target, "reach": old.reach}
 
 
 def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
@@ -708,16 +708,16 @@ def _do_switch(plan: _Plan, act: _Act) -> Outcome:
 
 
 def _fail_switch(act: _Act, ts: ts_.Tailscale, exc: BaseException, *, key: str, port: int,
-                 before_serve: Mapping, old: Entry) -> NoReturn:
-    """A switch that failed after its first commit: go back whole when Tailscale's side is
-    as `before` had it, else leave the entry `applying` for `repair` to finish from
-    `from`."""
+                 before_serve: Mapping, old: Entry, kind: str = "switch") -> NoReturn:
+    """A switch (or a remove of an entry a switch left half way) that failed after its
+    first commit: go back whole when Tailscale's side is as `before` had it, else leave
+    the entry as it is for `repair` to finish from `from`."""
     try:
         now = ts.serve_config(fresh=True)
     except TunnelError:
         now = None
     if now is not None and ts_.parts(now, port) == ts_.parts(before_serve, port):
-        _rollback(act, key, old, exc, kind="switch", provider_name=old.provider, port=port)
+        _rollback(act, key, old, exc, kind=kind, provider_name=old.provider, port=port)
     stderr = _reason(exc)
     cur = act.current(key)
     if cur is not None:
@@ -749,17 +749,27 @@ def remove(text: str, *, ask: Confirm, forget: bool = False) -> Outcome:
             lines = [f"{key}: undo the replace on port {old.port} that has not finished; "
                      "nothing of it is live"]
             return _Plan(lines, ("undo", key, tuple(lines)), core, data=dict(data, kind="undo"))
+        ts_old = record.old_tailscale(old)
         if forget:
             lines = [f"{key}: forget {url}. Tunnel drops it from its record and leaves the "
                      "live config as it is."]
             if old.provider == "tailscale":
                 lines.append(f"Remove it by hand later with: {_hand_off(old)}")
+            elif ts_old is not None:
+                lines.append(_old_stays(ts_old))
             return _Plan(lines, ("forget", key, tuple(lines)), core,
                          data=dict(data, kind="forget"))
         if old.provider == "cloudflare":
             lines = [f"{key}: remove {url}", "Paired devices lose this address."]
-            return _Plan(lines, ("remove", key, tuple(lines)), core,
-                         data=dict(data, kind="remove-cloudflare"))
+            data = dict(data, kind="remove-cloudflare")
+            if ts_old is not None:
+                more = _plan_old_removal(key, ts_old)
+                if more is not None:
+                    lines.append(f"Its switch from Tailscale has not finished: its old "
+                                 f"Tailscale entry {api.url(ts_old.host, ts_old.port)} is "
+                                 "removed too.")
+                    data.update(more)
+            return _Plan(lines, ("remove", key, tuple(lines)), core, data=data)
         prov = provider.get(old.provider)
         serve = prov.serve_config()
         gone = not _hostport_present(serve, old)
@@ -775,6 +785,38 @@ def remove(text: str, *, ask: Confirm, forget: bool = False) -> Outcome:
                      data=dict(data, kind="remove", ts=prov, serve=serve, gone=gone))
 
     return _run(plan, _do_remove, ask)
+
+
+def _old_stays(old: Entry) -> str:
+    """The line for a switch's old Tailscale entry that a forget leaves live."""
+    return (f"Its switch from Tailscale had not finished, so its old Tailscale entry "
+            f"{api.url(old.host, old.port)} may stay live; remove it by hand with: "
+            f"{_hand_off(old)}")
+
+
+def _plan_old_removal(key: str, old: Entry) -> dict | None:
+    """For a remove of a Cloudflare entry whose switch from Tailscale has not settled:
+    what removing its old Tailscale entry needs, None when that entry is gone, or
+    `Refused` when tailscale can't be read or the entry no longer matches."""
+    ts = provider.get("tailscale")
+    url = api.url(old.host, old.port)
+    try:
+        serve = ts.serve_config()
+    except TunnelError as exc:
+        raise Refused(f"{key}'s switch from Tailscale has not finished, and tailscale can't "
+                      f"be read to remove its old Tailscale entry {url}: {exc.reason}",
+                      f"{exc.fix or 'tailscale status'}, then run this again; or remove it "
+                      f"by hand with {_hand_off(old)}, then moxi tunnel remove {key} "
+                      "--forget") from None
+    if not _hostport_present(serve, old):
+        return None
+    if not ts_.matches(serve, old):
+        raise Refused(f"{key}'s old Tailscale entry on port {old.port}, from a switch that "
+                      f"has not finished, no longer matches what Moxi applied: "
+                      f"{ts_.describe(ts_.parts(serve, old.port))}",
+                      f"remove it by hand with {_hand_off(old)}, then moxi tunnel remove "
+                      f"{key}")
+    return dict(ts=ts, serve=serve, ts_old=old)
 
 
 def _do_remove(plan: _Plan, act: _Act) -> Outcome:
@@ -798,11 +840,19 @@ def _do_remove(plan: _Plan, act: _Act) -> Outcome:
         else:
             notes = [f"{key}: forgotten; its rule has left cloudflared.yml. The tunnel and "
                      "its DNS route in your Cloudflare account are left as they are"]
+            ts_old = record.old_tailscale(old)
+            if ts_old is not None:
+                notes.append(_old_stays(ts_old))
         return _unit_outcome(notes, unit)
     if kind == "remove-cloudflare":
-        unit = _drop(act, key, old, kind="remove")
+        ts_old = d.get("ts_old")
+        unit = _drop(act, key, old, kind="remove", ts=d.get("ts"), ts_old=ts_old,
+                     serve=d.get("serve"))
         record.event("remove", key, provider=old.provider, port=old.port, old_host=old.host)
-        return _unit_outcome([f"{key}: {url} is removed"], unit)
+        line = f"{key}: {url} is removed"
+        if ts_old is not None:
+            line += f", and its old Tailscale entry {api.url(ts_old.host, ts_old.port)}"
+        return _unit_outcome([line], unit)
     ts = d["ts"]
     if not d["gone"]:
         act.commit({key: replace(old, state=State.REMOVING)})
@@ -822,11 +872,14 @@ def _do_remove(plan: _Plan, act: _Act) -> Outcome:
     return Outcome(None, [f"{key}: {url} is removed"])
 
 
-def _drop(act: _Act, key: str, old: Entry, *, kind: str) -> str | None:
+def _drop(act: _Act, key: str, old: Entry, *, kind: str, ts: ts_.Tailscale | None = None,
+          ts_old: Entry | None = None, serve: Mapping | None = None) -> str | None:
     """Take entry `key` out of the record: a Cloudflare remove commits it `removing` first,
-    so a crash leaves it `half`; a forget drops it in one commit. Returns the core's text
-    when a unit act failed: the act still completes. A file tunnel can't write rolls the
-    act back, the entry kept."""
+    so a crash leaves it `half`; a forget drops it in one commit. With `ts_old`, the old
+    Tailscale entry of a switch that has not settled, a remove takes that out too, after
+    the rule, by the Tailscale remove's rules. Returns the core's text when a unit act
+    failed: the act still completes. A file tunnel can't write rolls the act back, the
+    entry kept."""
     unit = None
     try:
         if kind == "remove" and old.provider == "cloudflare":
@@ -838,6 +891,17 @@ def _drop(act: _Act, key: str, old: Entry, *, kind: str) -> str | None:
             _rollback(act, key, old, exc, kind=kind, provider_name=old.provider,
                       port=old.port)
         unit = exc.reason
+    if ts is not None and ts_old is not None:
+        try:
+            ts.remove(ts_old)
+            _step("remove-removed")
+            now = ts.serve_config(fresh=True)
+            if _hostport_present(now, ts_old):
+                raise ApplyError(f"after the removal, port {ts_old.port} still holds "
+                                 f"{ts_.describe(ts_.parts(now, ts_old.port))}")
+        except Exception as exc:  # noqa: BLE001 - every failure goes back or is kept
+            _fail_switch(act, ts, exc, key=key, port=ts_old.port, before_serve=serve or {},
+                         old=old, kind=kind)
     try:
         act.commit({key: None})
     except StepFailed as exc:
@@ -1071,7 +1135,7 @@ def _unread_line(what: str, exc: TunnelError) -> str:
 
 
 def _from_tailscale(e: Entry) -> bool:
-    return isinstance(e.from_, Mapping) and e.from_.get("provider") == "tailscale"
+    return record.old_tailscale(e) is not None
 
 
 def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Declarations,
@@ -1081,7 +1145,7 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
     and they are committed `on` once it has started the unit on a file that holds their
     rules, or left `applying` with the core's text. A `removing` entry is dropped. A
     switch from Tailscale left half way has its old Tailscale entry removed before it is
-    `on`. Returns True when something failed."""
+    `on`, or before it is dropped. Returns True when something failed."""
     rec = record.read()
     ports_now = _ports_now(rec, decls)
     clash = declare.clashes(ports_now)
@@ -1089,6 +1153,7 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
     live = _Live()
     fixes: dict[str, Entry] = {}
     drops: dict[str, None] = {}
+    failed_early = False
     for key in sorted(rec.entries):
         e = rec.entries[key]
         if not e.known or e.provider != "cloudflare":
@@ -1101,6 +1166,13 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
         if ts is None and _from_tailscale(e):
             continue  # its old Tailscale entry can't be read: the plan held it
         if e.state == State.REMOVING:
+            got = _finish_switch_from_tailscale(act, ts, key, e)
+            if got is not None:
+                notes.append(f"{key}: {got}")
+                if got.startswith("held"):
+                    held.append(f"{key}: {got}")
+                failed_early = failed_early or got.startswith("failed")
+                continue
             drops[key] = None
             continue
         target = e.target if key in clash else ports_now.get(key, e.target)
@@ -1126,7 +1198,7 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
         notes.append(f"cloudflared: {failure.reason} (fix: {failure.fix or 'moxi tunnel '
                      'repair'})")
         return True
-    failed = False
+    failed = failed_early
     for key, e in fixes.items():
         got = _finish_switch_from_tailscale(act, ts, key, e)
         if got is not None:
@@ -1146,12 +1218,9 @@ def _finish_switch_from_tailscale(act: _Act, ts: ts_.Tailscale | None, key: str,
                                   e: Entry) -> str | None:
     """For an entry a switch from Tailscale left half way, remove the old Tailscale entry
     while it is still Moxi's. None when there is nothing left of it."""
-    if not _from_tailscale(e) or ts is None:
+    old = record.old_tailscale(e)
+    if old is None or ts is None:
         return None
-    f = e.from_
-    old = Entry(reach=e.reach, provider="tailscale", host=str(f.get("host")),
-                port=int(f.get("port")), target=int(f.get("target", e.target)),
-                state=State.ON)
     serve = ts.serve_config(fresh=True)
     if not _hostport_present(serve, old):
         return None

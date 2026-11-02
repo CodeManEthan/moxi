@@ -20,6 +20,9 @@ user is told every time tunnel can tell.
   removes the unit next. It then removes each live Tailscale entry, only while it still
   matches the record, and drops what it removed in one more write. A removal that fails
   leaves its entry `removing` with the provider's text, and it refuses naming it.
+- A Cloudflare entry whose switch from Tailscale has not finished may still have its old
+  Tailscale entry live, the one its `from` names. That one counts as a Tailscale entry
+  here: it is removed by the same rules, or named with its hand command.
 - An entry that names a replace's pending copy has nothing live: the replace is undone
   and the entry counts as removed. An entry recorded under a host the machine no longer
   has is dropped, and any key tailscale still lists under that old name is named, since
@@ -61,7 +64,8 @@ class _Plan:
 
     #: entries to commit `removing`, then drop
     drop: dict[str, Entry] = field(default_factory=dict)
-    #: of those, the Tailscale entries whose live config is removed first
+    #: of those, each one whose Tailscale entry is live, with that entry: its own, or for
+    #: a switch from Tailscale that has not settled, the old one its `from` names
     remove: dict[str, Entry] = field(default_factory=dict)
     #: entries that can't be taken out, each with why and what to run by hand
     left: dict[str, tuple[str, str]] = field(default_factory=dict)
@@ -84,37 +88,51 @@ def _plan(rec: Record, keys: Iterable[str], ts: ts_.Tailscale) -> _Plan:
                               "upgrade moxi-tunnel, or see what it left with: tailscale "
                               "serve status")
             continue
-        if entry.provider != "tailscale" or record.names_pending(entry):
+        if record.names_pending(entry):
             plan.drop[key] = entry
             continue
+        # A Cloudflare entry whose switch from Tailscale has not settled may still have
+        # its old Tailscale entry live: that one is removed by the same rules.
+        ts_entry = entry if entry.provider == "tailscale" else record.old_tailscale(entry)
+        if ts_entry is None:
+            plan.drop[key] = entry
+            continue
+        what = "" if ts_entry is entry else _old_part(ts_entry)
         if live is None and unread is None:
             try:
                 live = (ts.serve_config(), ts.host())
             except TunnelError as exc:
                 unread = exc.reason
         if live is None:
-            plan.left[key] = (f"tailscale can't be read: {unread}",
-                              f"remove it by hand with: {_hand(entry)}")
+            plan.left[key] = (f"{what}tailscale can't be read: {unread}",
+                              f"remove it by hand with: {_hand(ts_entry)}")
             continue
         serve, host = live
-        hostport = f"{normal_host(entry.host)}:{entry.port}"
-        if normal_host(entry.host) != host:
+        hostport = f"{normal_host(ts_entry.host)}:{ts_entry.port}"
+        if normal_host(ts_entry.host) != host:
             plan.drop[key] = entry
-            plan.stale += [k for k in ts_.parts(serve, entry.port).get("Web", {})
+            plan.stale += [k for k in ts_.parts(serve, ts_entry.port).get("Web", {})
                            if k.rpartition(":")[0] != host]
             continue
-        held = ts_.parts(serve, entry.port)
+        held = ts_.parts(serve, ts_entry.port)
         if hostport not in held.get("Web", {}) and hostport not in held.get("AllowFunnel", {}):
             plan.drop[key] = entry
             continue
-        if not ts_.matches(serve, entry):
-            plan.left[key] = (f"port {entry.port} no longer holds what Moxi applied: "
-                              f"{ts_.describe(held)}",
-                              f"remove it by hand with: {_hand(entry)}")
+        if not ts_.matches(serve, ts_entry):
+            plan.left[key] = (f"{what}port {ts_entry.port} no longer holds what Moxi "
+                              f"applied: {ts_.describe(held)}",
+                              f"remove it by hand with: {_hand(ts_entry)}")
             continue
         plan.drop[key] = entry
-        plan.remove[key] = entry
+        plan.remove[key] = ts_entry
     return plan
+
+
+def _old_part(old: Entry) -> str:
+    """The words that say a reason is about the old Tailscale entry of a switch that has
+    not settled."""
+    return (f"its switch from Tailscale has not finished, so its old Tailscale entry "
+            f"{api.url(old.host, old.port)} may still be live, and ")
 
 
 @dataclass
@@ -158,7 +176,11 @@ def _take_out(act: acts._Act, plan: _Plan, ts: ts_.Tailscale, *, by: str) -> _Do
         entry = plan.drop[key]
         record.event("remove", key, provider=entry.provider, port=entry.port,
                      old_host=entry.host, by=by)
-        done.lines.append(f"tunnel: removed {key} ({api.url(entry.host, entry.port)})")
+        line = f"tunnel: removed {key} ({api.url(entry.host, entry.port)}"
+        old = plan.remove.get(key)
+        if old is not None and old.provider != entry.provider:
+            line += f", and its old Tailscale entry {api.url(old.host, old.port)}"
+        done.lines.append(line + ")")
     for key, entry in plan.drop.items():
         if key in gone and record.names_pending(entry):
             try:
@@ -296,6 +318,11 @@ def _name_what_stays() -> None:
                   "record; the cloudflared unit goes with tunnel, so Cloudflare stops "
                   "serving it, and the tunnel and its DNS route stay in your Cloudflare "
                   "account")
+            old = record.old_tailscale(entry)
+            if old is not None:
+                print(f"tunnel: {key}'s switch from Tailscale had not finished, so its old "
+                      f"Tailscale entry may stay live at {api.url(old.host, old.port)}; "
+                      f"remove it by hand with: {_hand(old)}")
     if rec.entries:
         print("tunnel: its record is kept, so reinstalling moxi-tunnel takes these "
               "addresses back as they are")

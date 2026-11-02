@@ -123,8 +123,11 @@ def _guard(name: str, fn: Callable[[], list[Row]]) -> list[Row]:
         return [Row(MODULE, name, "fail", f"could not be checked: {reason}")]
 
 
-def _from_tailscale(entry: Entry) -> bool:
-    return isinstance(entry.from_, Mapping) and entry.from_.get("provider") == "tailscale"
+def _public(entry: Entry) -> bool:
+    """True for a Tailscale entry on Funnel: a public one, or the old Tailscale entry of a
+    switch that has not settled, when that one was public."""
+    old = entry if entry.provider == "tailscale" else record.old_tailscale(entry)
+    return old is not None and old.reach == "public"
 
 
 def rows(*, budget: float = BUDGET, read_wait: float = READ_WAIT,
@@ -144,9 +147,8 @@ def rows(*, budget: float = BUDGET, read_wait: float = READ_WAIT,
 
     # -- the tailscale reads, then the rows that need them ----------------------------
     tailscale_keys = sorted(k for k, e in entries.items()
-                            if e.provider == "tailscale" or _from_tailscale(e))
-    public = any(e.provider == "tailscale" and e.reach == "public"
-                 for e in entries.values())
+                            if e.provider == "tailscale" or record.old_tailscale(e))
+    public = any(_public(e) for e in entries.values())
     reads = None
     if tailscale_keys:
         ts = ts_.Tailscale(deadline=deadline, wait=read_wait, clock=clock)

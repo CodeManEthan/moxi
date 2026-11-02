@@ -14,7 +14,8 @@ port can't be both, and Funnel has only three, 443, 8443 and 10000.
   a hostname.
 
 Free means no Tailscale entry of the record holds the port and the live config has no
-`TCP` key for it. A port held by another Moxi target is refused (exit 3) naming the holder.
+`TCP` key for it. The old Tailscale entry a switch onto Cloudflare has not yet removed (the
+entry's `from`) holds its port until the switch settles. A port held by another Moxi target is refused (exit 3) naming the holder.
 An entry a newer tunnel wrote holds its port too, whatever its form, unless it is a
 Cloudflare one: its port is refused, never read as foreign or free.
 A port held by config Moxi did not apply is refused naming that config, unless the user
@@ -29,7 +30,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from .errors import Refused
-from .record import NEWER, Record, normal_host
+from .record import NEWER, Record, normal_host, old_tailscale
 
 FUNNEL_PORTS = (443, 8443, 10000)
 #: The one port of every Cloudflare target.
@@ -51,10 +52,16 @@ class Choice:
 def moxi_ports(record: Record, *, exclude: str | None = None) -> dict[int, str]:
     """The outside ports the record's Tailscale entries hold, each with its target. An
     entry a newer tunnel wrote, of any provider but Cloudflare, holds its port too, its
-    target named as `<target> (written by a newer tunnel)`."""
+    target named as `<target> (written by a newer tunnel)`; and so does the old Tailscale
+    entry of a switch onto Cloudflare that has not settled, the one its `from` names."""
     out: dict[int, str] = {}
     for name, entry in record.entries.items():
-        if name == exclude or entry.provider == "cloudflare":
+        if name == exclude:
+            continue
+        old = old_tailscale(entry)
+        if old is not None:
+            out.setdefault(old.port, name)
+        if entry.provider == "cloudflare":
             continue
         if entry.known:
             out[entry.port] = name
