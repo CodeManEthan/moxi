@@ -260,8 +260,9 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
     assert "rows[].title" in marked("/api/session", "redact")
 
 
-def test_the_page_has_no_assets_until_its_web_files_are_built():
-    assert loopback().export(page.PAGE)["assets"] == []
+def test_the_page_serves_its_three_components_and_the_build_stamp():
+    assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "cost.js",
+                                                      "limits.js", "page.js"]
 
 
 def test_the_announcement_offers_the_page_its_blocks_and_the_ui_extra():

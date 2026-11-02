@@ -22,6 +22,9 @@ Where the API's answer holds a map with open keys, the route carries it as a lis
 hold a path carries the mark `path`, and a session title the mark `redact`; only the
 gateway acts on a mark, and no route is the gateway's.
 
+The page's assets are the built files in `web/` beside this module: the `page`, `limits`
+and `cost` components' scripts and the build's stamp.
+
 The browser UI shell starts the page server on the first request for usage's page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in usage's announcement, API,
@@ -285,6 +288,7 @@ PAGE = lb.Page(
                  topics={"limits": lb.Out("table", items=LIMITS),
                          "index": lb.Out("table", items=INDEX_TOPIC)}),
     ),
+    assets="web",
 )
 
 __all__ = ["AGENT_ROW", "COST", "DAILY", "FILTERS", "HARNESSES", "INDEX", "INDEX_TOPIC",
