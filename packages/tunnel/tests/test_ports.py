@@ -115,6 +115,22 @@ def test_moxi_ports_are_the_records_tailscale_entries():
     assert ports.moxi_ports(record, exclude="c/z") == {8461: "a/x"}
 
 
+def test_an_entry_a_newer_tunnel_wrote_holds_its_port():
+    from dataclasses import replace
+
+    newer = replace(_entry("tailscale", "box.ts.net", 9100), form="tcp")
+    record = Record(entries={"a/x": _entry("tailscale", "box.ts.net", 8461), "n/w": newer,
+                             "o/v": replace(_entry("cloudflare", "v.example.com", 443),
+                                            state="paused")})
+    held = ports.moxi_ports(record)
+    assert held == {8461: "a/x", 9100: "n/w (written by a newer tunnel)"}
+    for kw in ({"replace": False}, {"replace": True}):
+        with pytest.raises(Refused, match="held by n/w .written by a newer tunnel") as caught:
+            choose("own-devices", port=9100, moxi=held, foreign={}, **kw)
+        assert caught.value.fix.startswith("upgrade moxi-tunnel")
+    assert choose("own-devices", target=9100, moxi=held).port == 9101
+
+
 def test_two_cloudflare_targets_may_not_share_a_hostname():
     record = Record(entries={"b/y": _entry("cloudflare", "y.example.com", 443),
                              "a/x": _entry("tailscale", "z.example.com", 443)})

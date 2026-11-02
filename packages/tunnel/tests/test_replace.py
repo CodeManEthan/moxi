@@ -176,3 +176,15 @@ def test_a_repair_waits_for_an_in_flight_replace(foreign, tailscale, yes, monkey
     fixer.join(10)
     assert out["got"].address.state == "on" and out["fix"].notes == ["nothing to repair"]
     assert not copies()[0]["pending"]
+
+
+def test_a_replace_never_takes_a_port_from_an_entry_a_newer_tunnel_wrote(alpha, tailscale,
+                                                                        yes):
+    acts.add("alpha/gateway", port=443, ask=yes)
+    raw = json.loads(record.record_path().read_text())
+    raw["entries"]["alpha/gateway"]["form"] = "tcp"
+    record.record_path().write_text(json.dumps(raw))
+    held = ts.parts(tailscale.serve, 443)
+    got = acts.add("alpha/connector", replace_=True, ask=yes)
+    assert got.address.port == 8443
+    assert ts.parts(tailscale.serve, 443) == held and copies() == []

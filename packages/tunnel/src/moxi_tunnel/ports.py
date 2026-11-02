@@ -15,6 +15,8 @@ port can't be both, and Funnel has only three, 443, 8443 and 10000.
 
 Free means no Tailscale entry of the record holds the port and the live config has no
 `TCP` key for it. A port held by another Moxi target is refused (exit 3) naming the holder.
+An entry a newer tunnel wrote holds its port too, whatever its form, unless it is a
+Cloudflare one: its port is refused, never read as foreign or free.
 A port held by config Moxi did not apply is refused naming that config, unless the user
 adds `--replace`: the foreign config then counts as free, and the add takes it over on
 the port it would choose (or the one `--port` names). Only an add chooses a port: every
@@ -27,7 +29,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from .errors import Refused
-from .record import Record, normal_host
+from .record import NEWER, Record, normal_host
 
 FUNNEL_PORTS = (443, 8443, 10000)
 #: The one port of every Cloudflare target.
@@ -47,9 +49,22 @@ class Choice:
 
 
 def moxi_ports(record: Record, *, exclude: str | None = None) -> dict[int, str]:
-    """The outside ports the record's Tailscale entries hold, each with its target."""
-    return {entry.port: name for name, entry in record.entries.items()
-            if name != exclude and entry.provider == "tailscale" and entry.known}
+    """The outside ports the record's Tailscale entries hold, each with its target. An
+    entry a newer tunnel wrote, of any provider but Cloudflare, holds its port too, its
+    target named as `<target> (written by a newer tunnel)`."""
+    out: dict[int, str] = {}
+    for name, entry in record.entries.items():
+        if name == exclude or entry.provider == "cloudflare":
+            continue
+        if entry.known:
+            out[entry.port] = name
+        elif _is_port(entry.port):
+            out.setdefault(entry.port, f"{name} ({NEWER})")
+    return out
+
+
+def _is_port(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= HIGHEST
 
 
 def choose(reach: str, *, target: int, port: int | None = None,
@@ -87,8 +102,10 @@ def _check_range(port: int) -> None:
 def _take(port: int, moxi: Mapping[int, str], foreign: Mapping[int, str],
           replace: bool) -> Choice:
     if port in moxi:
-        raise Refused(f"port {port} is held by {moxi[port]}",
-                      f"moxi tunnel remove {moxi[port]}, or choose another port")
+        holder = moxi[port]
+        fix = ("upgrade moxi-tunnel, or choose another port" if holder.endswith(f"({NEWER})")
+               else f"moxi tunnel remove {holder}, or choose another port")
+        raise Refused(f"port {port} is held by {holder}", fix)
     if port in foreign:
         if replace:
             return Choice(port, replace=True)
