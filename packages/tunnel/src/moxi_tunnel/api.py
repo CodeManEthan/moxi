@@ -12,6 +12,11 @@ target has no address.
 `Address.exposure` is who can actually reach the address: `internet` for every Cloudflare
 entry and a Tailscale `public` one, `tailnet` only for a Tailscale `own-devices` entry. A
 caller goes by it, not by the reach it declared.
+
+`add` and `remove` fail as the CLI does. An act that completed while a part of it failed
+(the cloudflared unit did not follow a remove, a forget or a switch) exits 1 at the CLI,
+and raises `ApplyError` here, its reason holding the lines the CLI prints: the record
+already holds the act, and `address` reads it.
 """
 
 from __future__ import annotations
@@ -19,7 +24,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from moxi import exit as codes
+
 from . import record
+from .errors import ApplyError, Refused
 
 
 @dataclass(frozen=True)
@@ -91,20 +99,30 @@ def add(module: str, name: str, *, provider: str | None = None, port: int | None
     """Turn target `<module>/<name>` on, after `confirm(lines)` says yes to the warning
     lines, and return its address. A target already on is returned as it is. Raises
     `moxi_tunnel.errors.TunnelError` (its `exit_code` says which) or the core's
-    `moxi.files.LockTimeout`."""
+    `moxi.files.LockTimeout`; `ApplyError` too for a switch that completed while the
+    cloudflared unit did not follow."""
     from . import acts
 
-    return acts.add(f"{module}/{name}", provider_name=provider, port=port,
-                    hostname=hostname, replace_=replace, ask=confirm).address
+    return _done(acts.add(f"{module}/{name}", provider_name=provider, port=port,
+                          hostname=hostname, replace_=replace, ask=confirm)).address
 
 
 def remove(module: str, name: str, *, confirm: Callable[[list[str]], bool],
            forget: bool = False) -> None:
     """Turn target `<module>/<name>` off, or with `forget` drop it from the record and
-    leave its live config alone."""
+    leave its live config alone. Raises as `add` does, and `ApplyError` when the entry is
+    gone while the cloudflared unit did not follow."""
     from . import acts
 
-    acts.remove(f"{module}/{name}", ask=confirm, forget=forget)
+    _done(acts.remove(f"{module}/{name}", ask=confirm, forget=forget))
+
+
+def _done(outcome):
+    """The act's outcome when it exited 0, else its lines raised as the CLI's exit says."""
+    if outcome.code == codes.OK:
+        return outcome
+    error = Refused if outcome.code == codes.REFUSED else ApplyError
+    raise error("; ".join(outcome.notes), "moxi tunnel repair")
 
 
 def check(module: str | None = None, name: str | None = None, *,

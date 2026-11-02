@@ -213,6 +213,27 @@ def test_a_failed_unit_removal_with_an_empty_set_completes_and_the_row_warns(set
     assert_agree(setup)
 
 
+def test_the_python_api_raises_when_the_unit_did_not_follow(setup, tailscale, yes):
+    """The API says what the CLI's exit 1 says: a remove, a forget and a switch off
+    Cloudflare that complete while the unit act fails raise, with the act's lines."""
+    for forget in (False, True):
+        add("alpha/gateway", A, yes)
+        setup.fail.add("remove")
+        with pytest.raises(ApplyError, match="did not follow") as caught:
+            api.remove("alpha", "gateway", confirm=yes, forget=forget)
+        assert caught.value.exit_code == 1 and caught.value.fix == "moxi tunnel repair"
+        assert api.address("alpha", "gateway") is None
+        setup.fail.clear()
+        acts.repair(ask=yes)
+    add("alpha/gateway", A, yes)
+    setup.fail.add("remove")
+    with pytest.raises(ApplyError, match="switched from cloudflare.*did not follow"):
+        api.add("alpha", "gateway", provider="tailscale", confirm=yes)
+    assert api.address("alpha", "gateway").provider == "tailscale"
+    setup.fail.clear()
+    assert api.add("alpha", "gateway", confirm=yes).state == "on"
+
+
 def test_a_repair_of_a_half_add_whose_start_fails_leaves_it_applying_then_finishes(
         setup, yes, monkeypatch):
     monkeypatch.setattr(acts, "_step", _crash_at("cloudflare-applying"))
