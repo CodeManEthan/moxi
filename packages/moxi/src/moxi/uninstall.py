@@ -11,9 +11,13 @@
 2. Its `TEARDOWN`, in a fresh process (`python -m moxi._settle --teardown`), before
    anything is removed, so it still finds the module's units in place. A `TEARDOWN`
    that raises `moxi.modules.Refused` stops the uninstall with its reason (exit 3); any
-   other failure stops it too (exit 1), naming `--skip-teardown` as the way past one
-   that can't run. An interrupt abandons the `TEARDOWN` as a failed one: nothing is
-   removed. A broken module has no teardown to run.
+   other failure stops it too (exit 1). One that never ran (its target can't be loaded,
+   or the child can't start) removed nothing, and the line names `--skip-teardown` as the
+   way past it. Once it ran, the core can't tell what it removed: what the module
+   reported stands on its own, and the line names neither. An interrupt abandons the
+   `TEARDOWN` as a failed one, which may have removed some of its parts by then: the line
+   says the uninstall stopped there and the module stays installed, and names neither. A
+   broken module has no teardown to run.
 3. Every `moxi.installs` listener's `on_uninstall(module)`, the module's own included.
 4. Its units (`moxi.units.remove`, which also unwraps every foreign timer it wrapped and
    drops its `units.json` entries), and its install questions' record.
@@ -197,7 +201,7 @@ class Uninstaller:
     def _teardown(self, target) -> int | None:
         """Run the module's `TEARDOWN` in a child. Returns the exit code when the
         uninstall stops here, None when it goes on."""
-        from . import modules
+        from . import _settle, modules
         from ._settle import guard_streams, say
 
         module = target.name
@@ -212,14 +216,18 @@ class Uninstaller:
         guard_streams()
         outcome = run_teardown(self.env.python, module)
         if outcome.interrupted:
-            raise InstallError(f"interrupted in {module}'s teardown; nothing was removed")
+            raise InstallError(f"interrupted in {module}'s teardown; the uninstall stopped "
+                               f"there and {module} stays installed")
         if outcome.code == REFUSED:
             say(f"{module}'s teardown refused the uninstall; nothing was removed", err=True)
             return REFUSED
+        if outcome.code in (_settle.NOT_RUN, 127):     # 127: the child didn't start
+            say(f"teardown {module}: it could not run, so nothing was removed. To "
+                f"uninstall without it: moxi uninstall {module} --skip-teardown", err=True)
+            return 1
         if outcome.code != 0:
-            say(f"teardown {module}: failed (exit {outcome.code}); nothing was removed. "
-                f"To uninstall without it: moxi uninstall {module} --skip-teardown",
-                err=True)
+            say(f"teardown {module}: failed (exit {outcome.code}); the uninstall stopped "
+                f"here and {module} stays installed", err=True)
             return 1
         return None
 

@@ -1,7 +1,8 @@
 """The skill placer, `moxi.place`: plan, apply, status, remove and adopt.
 
-Every test places into folders under tmp: HOME and CLAUDE_CONFIG_DIR point there, and the
-core's own roots already do (conftest), so no real harness folder is ever read or written.
+Every test places into folders under tmp: HOME points there, CLAUDE_CONFIG_DIR and
+CODEX_HOME are unset or point there, and the core's own roots already do (conftest), so no
+real harness folder is ever read or written.
 """
 
 from __future__ import annotations
@@ -32,7 +33,22 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     return home
+
+
+@pytest.fixture
+def git(tmp_path, monkeypatch):
+    """A function that runs git with no global or system config of the user's, here and
+    in the placer; skips without git."""
+    if shutil.which("git") is None:
+        pytest.skip("no git")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def run(*args):
+        subprocess.run(["git", *map(str, args)], check=True, capture_output=True)
+    return run
 
 
 @pytest.fixture
@@ -104,6 +120,23 @@ def test_claude_config_dir_moves_claudes_folders(tmp_path, monkeypatch, skill):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     step = one(place.plan("comms", [Item(skill(), "claude", "comms-send")]))
     assert step.target == tmp_path / "cc" / "skills" / "comms-send"
+
+
+def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path,
+                                                                   monkeypatch, skill):
+    agent = tmp_path / "pkg" / "reviewer.md"
+    agent.parent.mkdir()
+    agent.write_text("an agent\n")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "cx"))
+    rows, _ = place.harnesses()
+    assert rows["codex"].agents == tmp_path / "cx" / "agents"
+    assert rows["codex"].skills == home / ".agents" / "skills"
+    items = [Item(agent, "codex", "reviewer.md", kind="agent"),
+             Item(skill(), "codex", "comms-send")]
+    place.apply(place.plan("loadout", items))
+    assert os.readlink(tmp_path / "cx" / "agents" / "reviewer.md") == str(agent)
+    assert os.path.islink(home / ".agents" / "skills" / "comms-send")
+    assert not os.path.lexists(home / ".codex")
 
 
 def test_a_dest_places_exactly_there_and_a_relative_one_raises(tmp_path, skill):
@@ -296,12 +329,172 @@ def test_a_path_git_tracks_is_named_and_git_is_asked_once_per_folder(tmp_path, m
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
     calls = []
     real = place._git_files
-    monkeypatch.setattr(place, "_git_files", lambda folder: calls.append(folder) or real(folder))
+    monkeypatch.setattr(place, "_git_files",
+                        lambda folder, *rest: calls.append(folder) or real(folder, *rest))
     src = skill()
     steps = place.plan("loadout", [Item(src, "claude", n, dest=skills / n) for n in "ab"])
-    assert [(s.action, s.cause) for s in steps] == [("refuse", "occupant")] * 2
+    assert [(s.action, s.cause) for s in steps] == [("refuse", "tracked")] * 2
     assert all("git tracks it" in s.reason for s in steps)
     assert calls == [str(skills)]
+
+
+def test_a_tracked_occupant_is_cause_tracked_when_git_answers_in_the_time_given(
+        tmp_path, git, skill):
+    repo = tmp_path / "repo"
+    target = repo / ".claude" / "skills" / "x"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("the project's\n")
+    git("init", "-q", repo)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [Item(skill(), "claude", "x", dest=target)],
+                          git_seconds=5), "refuse")
+    assert (step.cause, step.reason) == (
+        "tracked", f"{target} is a folder the placer did not mark, and git tracks it")
+
+
+@pytest.mark.timed
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
+@pytest.mark.parametrize("how", ["git_seconds", "each call"])
+def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
+        tmp_path, monkeypatch, skill, how):
+    """A git that doesn't answer in time never makes an occupant `tracked`: it stays
+    `occupant`, its reason says so, and `git_seconds` bounds every folder's calls
+    together."""
+    bin_dir = tmp_path / "slow-bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text("#!/bin/sh\nexec sleep 30\n")
+    (bin_dir / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    targets = []
+    for name in ("one", "two"):
+        target = tmp_path / name / ".claude" / "skills" / "x"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text("the user's\n")
+        targets.append(target)
+    items = [Item(skill(), "claude", "x", dest=targets[0]),
+             Item(skill("y"), "claude", "x", dest=targets[1])]
+    if how == "git_seconds":
+        options = {"git_seconds": 0.5}
+    else:
+        monkeypatch.setattr(place, "_GIT_SECONDS", 0.5)
+        options = {}
+    start = time.monotonic()
+    steps = place.plan("loadout", items, **options)
+    took = time.monotonic() - start
+    assert [(s.action, s.cause, s.occupant) for s in steps] == [
+        ("refuse", "occupant", t) for t in targets]
+    for s in steps:
+        assert s.reason == (f"{s.target} is a folder the placer did not mark; git did not "
+                            f"answer in time, so whether it tracks it is unknown")
+    assert took < (2 if how == "git_seconds" else 4), took
+
+
+def test_git_seconds_must_be_a_number(skill):
+    with pytest.raises(ValueError, match="git_seconds"):
+        place.plan("loadout", [Item(skill(), "claude", "x")], git_seconds=-1)
+
+
+def _occupy(case, target, src, other):
+    """Put occupant `case` at `target`, `src` being the item's source."""
+    if case == "a link not the placer's":
+        target.symlink_to(other)
+    elif case == "an unmarked folder":
+        target.mkdir()
+        (target / "SKILL.md").write_text("the user's\n")
+    elif case == "a folder marked for another owner":
+        shutil.copytree(src, target)
+        (target / place.MARK).write_text(json.dumps({"owner": "tidy", "hash": "x"}))
+    elif case == "a modified folder copy":
+        place.apply(place.plan("loadout", [Item(src, "claude", "x", dest=target)],
+                               form="copy"))
+        (target / "SKILL.md").write_text("edited\n")
+    elif case == "a file not the placer's":
+        target.write_text("the user's\n")
+    elif case == "a modified file copy":
+        place.apply(place.plan("loadout", [Item(src, "claude", "x", kind="agent",
+                                                dest=target)], form="copy"))
+        target.write_text("edited\n")
+
+
+OCCUPANTS = [("a link not the placer's", "skill", "a link the placer did not make"),
+             ("an unmarked folder", "skill", "a folder the placer did not mark"),
+             ("a folder marked for another owner", "skill", "a folder the placer did not mark"),
+             ("a modified folder copy", "skill", "a placed copy that has been modified"),
+             ("a file not the placer's", "agent", "a file the placer did not place"),
+             ("a modified file copy", "agent", "a placed copy that has been modified")]
+
+
+@pytest.mark.parametrize("case, kind, what", OCCUPANTS, ids=[c[0] for c in OCCUPANTS])
+def test_an_occupant_git_tracks_is_cause_tracked_with_the_same_reason(
+        tmp_path, git, skill, case, kind, what):
+    """Each kind of occupant reads cause `occupant` while git does not track it and cause
+    `tracked` once it does; the reason only gains ", and git tracks it", and `replace`
+    moves it aside either way."""
+    if kind == "skill":
+        src = skill()
+    else:
+        src = tmp_path / "pkg" / "reviewer.md"
+        src.parent.mkdir()
+        src.write_text("an agent\n")
+    repo = tmp_path / "repo"
+    folder = repo / ".claude" / ("skills" if kind == "skill" else "agents")
+    folder.mkdir(parents=True)
+    git("init", "-q", repo)
+    target = folder / "x"
+    _occupy(case, target, src, tmp_path)
+    item = Item(src, "claude", "x", kind=kind, dest=target)
+
+    step = one(place.plan("loadout", [item], form="copy"), "refuse")
+    assert (step.cause, step.reason, step.occupant) == ("occupant", f"{target} is {what}",
+                                                       target)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [item], form="copy"), "refuse")
+    assert (step.cause, step.reason, step.occupant) == (
+        "tracked", f"{target} is {what}, and git tracks it", target)
+
+    said, say = lines()
+    assert place.apply([step], say=say) == []
+    assert said == [f"x for claude not placed: {step.reason}"]
+    said, say = lines()
+    done = place.apply([step], replace=True, say=say)
+    assert [(p.path, p.state) for p in done] == [(target, "ok")]
+    assert said[0].startswith(f"moved {target} to ")
+    moved = list((moxi.paths.core().data_dir() / "displaced").glob("*/claude/x"))
+    assert len(moved) == 1
+    one(place.plan("loadout", [item], form="copy"), "keep")
+
+
+def test_a_marked_folder_this_ledger_lacks_is_cause_tracked(tmp_path, git, skill):
+    """A copy with this owner's mark that the ledger has no entry for came with a commit:
+    an occupant only because git tracks it, so always cause `tracked`."""
+    src = skill()
+    repo = tmp_path / "repo"
+    target = repo / ".claude" / "skills" / "x"
+    item = Item(src, "claude", "x", dest=target)
+    place.apply(place.plan("loadout", [item], form="copy"))
+    led = ledger()
+    led["loadout"]["placed"].clear()
+    (moxi.paths.core().state_dir() / place.LEDGER).write_text(json.dumps(led))
+    git("init", "-q", repo)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [item], form="copy"), "refuse")
+    assert (step.cause, step.reason) == (
+        "tracked", f"{target} is a marked folder this ledger lacks, and git tracks it")
+    said, say = lines()
+    done = place.apply([step], replace=True, say=say)
+    assert [p.path for p in done] == [target] and said[0].startswith(f"moved {target} to ")
+
+
+def test_another_owners_placement_git_tracks_is_still_cause_owner(tmp_path, git, skill):
+    src = skill()
+    repo = tmp_path / "repo"
+    target = repo / ".claude" / "skills" / "x"
+    place.apply(place.plan("tidy", [Item(src, "claude", "x", dest=target)], form="copy"))
+    git("init", "-q", repo)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [Item(src, "claude", "x", dest=target)]), "refuse")
+    assert step.cause == "owner"
+    assert "tracked" in place.CAUSES and "occupant" in place.CAUSES
 
 
 # -- remove -------------------------------------------------------------------------------
@@ -631,6 +824,78 @@ def test_apply_skips_a_lapsed_hand_over_the_taker_holds_again(home, skill):
     led = ledger()
     assert list(led["comms"]["handed"]) == [str(home / ".claude" / "skills" / "comms-send")]
     assert list(led["loadout"]["placed"]) == list(led["comms"]["handed"])
+
+
+def test_a_seeded_hand_over_is_marked_and_skips_and_lapses_as_any(home, skill):
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    target = home / ".claude" / "skills" / "comms-send"
+    moved = place.adopt("comms", "loadout", place.status("comms"), seeded=True)
+    assert [(p.owner, p.path) for p in moved] == [("loadout", target)]
+    assert ledger()["comms"]["handed"] == {str(target): {
+        "kind": "skill", "harness": "claude", "name": "comms-send", "to": "loadout",
+        "seeded": True}}
+    one(place.plan("comms", [item]), "skip")
+    place.remove("loadout", say=lambda line: None)
+    one(place.plan("comms", [item]), "add")
+    place.apply(place.plan("comms", [item]))
+    assert not ledger()["comms"]["handed"]
+
+
+def test_adopt_replaces_an_existing_handed_entry(home, skill):
+    """A handed entry the giver already has for the target is replaced, seeded or not as
+    the call says."""
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    key = str(home / ".claude" / "skills" / "comms-send")
+    path = moxi.paths.core().state_dir() / place.LEDGER
+    led = ledger()
+    led["comms"]["handed"] = {key: {"kind": "skill", "harness": "claude",
+                                    "name": "comms-send", "to": "tidy", "seeded": True}}
+    path.write_text(json.dumps(led))
+    place.adopt("comms", "loadout", place.status("comms"))
+    assert ledger()["comms"]["handed"] == {key: {
+        "kind": "skill", "harness": "claude", "name": "comms-send", "to": "loadout"}}
+    place.adopt("loadout", "comms", place.status("loadout"))
+    place.adopt("comms", "loadout", place.status("comms"), seeded=True)
+    assert ledger()["comms"]["handed"][key]["seeded"] is True
+
+
+def test_a_seeded_target_is_never_handed_back_and_the_rest_go(home, skill):
+    """The hand-back of a seeded target is refused with a line naming its taker and
+    changes nothing; an unseeded one in the same call goes back whole."""
+    src = skill()
+    items = [Item(src, "claude", "comms-send"), Item(src, "codex", "comms-send")]
+    place.apply(place.plan("comms", items, form="copy"))
+    claude = home / ".claude" / "skills" / "comms-send"
+    codex = home / ".agents" / "skills" / "comms-send"
+    mine = {p.path: p for p in place.status("comms")}
+    place.adopt("comms", "loadout", [mine[claude]], seeded=True)
+    place.adopt("comms", "loadout", [mine[codex]])
+    before = ledger()["comms"]["handed"][str(claude)]
+    said, say = lines()
+    back = place.adopt("loadout", "comms", place.status("loadout"), say=say)
+    assert [p.path for p in back] == [codex]
+    assert said == ["comms-send was seeded; loadout removes it"]
+    led = ledger()
+    assert list(led["loadout"]["placed"]) == [str(claude)]
+    assert led["comms"]["handed"] == {str(claude): before}
+    assert list(led["comms"]["placed"]) == [str(codex)]
+    assert json.loads((claude / place.MARK).read_text())["owner"] == "loadout"
+    assert json.loads((codex / place.MARK).read_text())["owner"] == "comms"
+    place.remove("loadout", say=lambda line: None)
+    assert not os.path.lexists(claude) and os.path.isdir(codex)
+
+
+def test_a_seeded_target_handed_on_is_not_handed_back_by_the_next_owner(home, skill):
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    place.adopt("comms", "loadout", place.status("comms"), seeded=True)
+    place.adopt("loadout", "tidy", place.status("loadout"))
+    said, say = lines()
+    assert place.adopt("tidy", "comms", place.status("tidy"), say=say) == []
+    assert said == ["comms-send was seeded; loadout removes it"]
+    assert [p.owner for p in place.status("tidy")] == ["tidy"]
 
 
 # -- the core lock ------------------------------------------------------------------------

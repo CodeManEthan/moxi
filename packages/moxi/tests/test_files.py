@@ -813,6 +813,35 @@ def test_edit_toml_holds_the_files_lock(tmp_path, holder):
     assert not target.exists()
 
 
+def test_edit_toml_takes_the_lock_it_is_given_and_none_beside_the_file(tmp_path, holder):
+    folder = tmp_path / "loadout"
+    folder.mkdir()
+    target = folder / "loadout.toml"
+    target.write_text("a = 1\n")
+    given = tmp_path / "state" / "loadout" / "manifest.lock"
+    with files.edit_toml(target, lock=given) as doc:
+        doc["a"] = 2
+    assert target.read_text() == "a = 2\n" and given.exists()
+    assert [p.name for p in folder.iterdir()] == ["loadout.toml"]
+    holder(folder / "loadout.toml.lock")          # the default lock is not waited on
+    with files.edit_toml(target, timeout=0.1, lock=given) as doc:
+        doc["a"] = 3
+    assert target.read_text() == "a = 3\n"
+    holder(str(given))
+    with pytest.raises(files.LockTimeout):
+        with files.edit_toml(target, timeout=0.1, lock=str(given)):
+            pytest.fail("the block ran")
+    assert target.read_text() == "a = 3\n"
+
+
+def test_edit_toml_without_a_lock_leaves_its_lock_beside_the_file(tmp_path):
+    folder = tmp_path / "loadout"
+    target = folder / "loadout.toml"
+    with files.edit_toml(target) as doc:
+        doc["a"] = 1
+    assert sorted(p.name for p in folder.iterdir()) == ["loadout.toml", "loadout.toml.lock"]
+
+
 def test_importing_moxi_files_loads_no_tomlkit():
     code = ("import sys, moxi.files\n"
             "print(sorted(m for m in sys.modules if 'tomlkit' in m))\n")

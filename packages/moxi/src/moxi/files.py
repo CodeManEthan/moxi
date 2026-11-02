@@ -460,26 +460,32 @@ def update(path: str | os.PathLike, fn: Callable[[bytes | None], bytes], *,
 
 
 @contextmanager
-def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0) -> Iterator:
+def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
+              lock: str | os.PathLike | None = None) -> Iterator:
     """Edit the TOML file `path` in a `with` block, keeping its comments and order.
 
-    Under the file's lock, `<path>.lock` (waiting `timeout` as `lock` does), the file is
-    read and parsed with the core's vendored tomlkit, and the block gets the document
-    (an empty one when the file is missing). When the block ends cleanly the document's
-    text is written with `atomic_write`, keeping an existing file's permission bits; a new
-    file is 0600. When the block raises, nothing is written and the exception goes on. A
-    file that is not valid TOML raises `ValueError` (tomlkit's `ParseError`) before the
-    block runs. When `path` is a symbolic link, the file it points to is written and the
-    link is kept.
+    Under the file's lock, `<path>.lock` or the lock file `lock` names (waiting `timeout`
+    as `lock` does), the file is read and parsed with the core's vendored tomlkit, and
+    the block gets the document (an empty one when the file is missing). When the block
+    ends cleanly the document's text is written with `atomic_write`, keeping an existing
+    file's permission bits; a new file is 0600. When the block raises, nothing is
+    written and the exception goes on. A file that is not valid TOML raises `ValueError`
+    (tomlkit's `ParseError`) before the block runs. When `path` is a symbolic link, the
+    file it points to is written and the link is kept.
 
     This is the one TOML editor: `moxi config set` edits a module's config file through
     it, and a module that edits a TOML file of its own uses it rather than a TOML library
     of its own.
+
+    `lock` is for a file whose lock must not sit beside it (a file in a folder the user
+    keeps in git, say). Every caller that edits one file must pass the same `lock`, since
+    two lock files don't guard each other.
     """
     from ._vendor import tomlkit
 
     path = Path(path)
-    with _gated_lock(_lock_path(path), timeout=timeout):
+    held = _lock_path(path) if lock is None else Path(lock)
+    with _gated_lock(held, timeout=timeout):
         target = Path(os.path.realpath(path))
         try:
             text = target.read_text(encoding="utf-8")

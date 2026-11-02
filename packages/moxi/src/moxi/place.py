@@ -5,11 +5,13 @@ manager placing a project's own skills, say). The caller names what it wants pla
 `Item`s, and the placer plans, applies, reads back and removes those placements, keeping
 a ledger of what each owner placed.
 
-    plan(owner, items, form=None)        what placing `items` would do (`Step` per item)
+    plan(owner, items, form=None, git_seconds=None)
+                                         what placing `items` would do (`Step` per item)
     apply(steps, replace=False)          carry a plan out (`Placed` per placement left)
     status(owner)                        each placement of `owner` read against the disk
     remove(owner)                        remove every placement of `owner`
-    adopt(from_owner, to_owner, placed)  hand placements from one owner to another
+    adopt(from_owner, to_owner, placed, seeded=False)
+                                         hand placements from one owner to another
     harnesses()                          the harness table, and a line per row skipped
     chosen()                             `skills.harnesses`, and a line per name skipped
     from_package(found, source)          whether a source lies in a module's own package
@@ -29,11 +31,12 @@ row's skills folder, an `agent` to its agents folder. With `dest`, an absolute p
 goes exactly there, and `harness` only labels the placement. The harness table is the core
 setting `harnesses` (`moxi config moxi`): one row per harness, `{name, skills, agents}`. An
 empty folder is the built-in one, which only `claude` (`$CLAUDE_CONFIG_DIR/skills` and
-`/agents`, else `~/.claude/...`) and `codex` (`~/.agents/skills`, `~/.codex/agents`) have;
-another row with an empty folder has no folder of that kind. `~` is expanded. A row whose
-name is not a lower-case word (letters, digits, `-`, `_`), that repeats an earlier row's
-name, or whose folder is not a string or not absolute once `~` is expanded, is skipped
-with one line (`harnesses()`), and the first row of a name wins.
+`/agents`, else `~/.claude/...`) and `codex` (`~/.agents/skills`, and `$CODEX_HOME/agents`,
+else `~/.codex/agents`) have; another row with an empty folder has no folder of that
+kind. `~` is expanded. A row whose name is not a lower-case word (letters, digits, `-`,
+`_`), that repeats an earlier row's name, or whose folder is not a string or not absolute
+once `~` is expanded, is skipped with one line (`harnesses()`), and the first row of a
+name wins.
 
 A placement is known by its owner and its target, the path it sits at: made absolute, `~`
 expanded, and its parent folder resolved (the target itself is not followed, since it may
@@ -73,16 +76,31 @@ What `plan` decides (`Step.action`, with `cause` for a `refuse`):
              hand-over when it places the target
     refuse   source (missing), io (an OSError reading this item), held, duplicate,
              harness (no such row, or no folder of the item's kind), name (not a
-             single path part), occupant (an unmarked path, a modified copy, or a
-             path git tracks), owner (another owner's placement)
+             single path part), occupant (a path in the way: a link the placer did
+             not make, a folder it did not mark or marked for another owner, a file
+             it did not place, or a placed copy since modified), tracked (such an
+             occupant that git tracks, or a marked folder this ledger lacks that git
+             tracks), owner (another owner's placement)
+
+`tracked` differs from `occupant` only in its name, so a caller can tell that the path in
+the way is in git without reading the reason; its reason reads as an occupant's, with
+", and git tracks it" added. Whatever reads cause `occupant` reads `tracked` alike.
+
+The tracked check asks git once per folder that holds an occupant. Each git call gets 10
+seconds, or, with `plan`'s `git_seconds=`, the plan's git calls get that many seconds in
+all. When git doesn't answer in time, the occupant stays cause `occupant`, never
+`tracked`, and its reason says git did not answer: a slow git can only leave `tracked`
+out, never put it in. A marked folder this ledger lacks is then read as git not tracking
+it, as it is without git.
 
 `plan` never raises for a cause that belongs to one item: each item yields exactly one
 step. Only a wrong call raises: an element of `items` that is not an `Item` (`TypeError`),
 an unknown kind, form or a relative `dest` (`ValueError`). An item whose source is missing
 leaves its placement exactly as it is, even a link that now dangles, and its target still
 counts as named, so nothing removes it. `apply(..., replace=True)` moves a refused
-occupant to `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item; it
-never takes another owner's placement.
+occupant (cause `occupant` or `tracked`) to
+`DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item; it never takes
+another owner's placement.
 
 Held items
 ----------
@@ -118,7 +136,11 @@ KINDS = ("skill", "agent")
 #: What `plan` may decide for one item, or for one ledger entry no item names.
 ACTIONS = ("add", "keep", "update", "remove", "refuse", "skip")
 #: The causes a `refuse` carries.
-CAUSES = ("source", "io", "held", "duplicate", "harness", "name", "occupant", "owner")
+CAUSES = ("source", "io", "held", "duplicate", "harness", "name", "occupant", "tracked",
+          "owner")
+#: The causes of a `refuse` for a path in the way, which `apply(..., replace=True)` moves
+#: aside.
+_OCCUPANTS = ("occupant", "tracked")
 #: What `status` may read for one placement.
 STATES = ("ok", "modified", "stale", "missing")
 
@@ -146,6 +168,8 @@ _AUTO_JUNCTION = False
 _BUILT_IN = ("claude", "codex")
 _NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-_")
 _GIT_SECONDS = 10.0
+#: What `_git_files` gives for a folder when git did not answer in time.
+_NO_ANSWER = object()
 _BLOCK = 64 * 1024
 
 
@@ -179,7 +203,7 @@ class Step:
     `form` is how the placement is or will be made (`FORMS`). `action` is one of
     `ACTIONS`, and `cause` says why for a `refuse` (`CAUSES`), else None. `reason` is one
     line for a person. `occupant` is the path in the way of a `refuse` with cause
-    `occupant`, which `apply(..., replace=True)` moves aside.
+    `occupant` or `tracked`, which `apply(..., replace=True)` moves aside.
 
     `owner` is the plan's owner, which `apply` records the placement under. `note` is a
     line `apply` says once for the whole plan (the Windows copy note), or None.
@@ -289,20 +313,26 @@ def _folder(name: str, kind: str, value: str) -> Path | None:
         base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
         return Path(os.path.abspath(os.path.expanduser(base))) / kind
     if name == "codex":
-        home = ".agents" if kind == "skills" else ".codex"
-        return Path(os.path.abspath(os.path.expanduser(os.path.join("~", home)))) / kind
+        if kind == "skills":
+            base = os.path.join("~", ".agents")
+        else:
+            base = os.environ.get("CODEX_HOME") or os.path.join("~", ".codex")
+        return Path(os.path.abspath(os.path.expanduser(base))) / kind
     return None
 
 
 # -- plan ---------------------------------------------------------------------------------
 
-def plan(owner: str, items: list[Item], *, form: str | None = None) -> list[Step]:
+def plan(owner: str, items: list[Item], *, form: str | None = None,
+         git_seconds: float | None = None) -> list[Step]:
     """What placing `items` for `owner` would do: one `Step` per item, in order, then one
     `remove` per ledger entry of `owner` that no item's target names.
 
     `items` is the owner's whole wanted set. `form` overrides `skills.form` for this
-    plan. Takes no lock and changes nothing (on Windows it may make and remove a test
-    symlink, `.moxi-probe-<hex>`). Raises only for a wrong call (see the module's docs).
+    plan. `git_seconds` is how long the tracked check's git calls may take in all, for a
+    caller with a time budget (a doctor check); None gives each call 10 seconds. Takes no
+    lock and changes nothing (on Windows it may make and remove a test symlink,
+    `.moxi-probe-<hex>`). Raises only for a wrong call (see the module's docs).
     """
     if not isinstance(owner, str) or not owner:
         raise TypeError(f"owner must be a non-empty string, not {owner!r}")
@@ -311,10 +341,14 @@ def plan(owner: str, items: list[Item], *, form: str | None = None) -> list[Step
         _check_item(item)
     if form is not None and form not in SETTINGS:
         raise ValueError(f"form must be one of {', '.join(SETTINGS)}, not {form!r}")
+    if git_seconds is not None and (isinstance(git_seconds, bool)
+                                    or not isinstance(git_seconds, (int, float))
+                                    or not git_seconds >= 0):
+        raise ValueError(f"git_seconds must be a number of seconds, not {git_seconds!r}")
     settings = _core_settings()
     setting = form if form is not None else settings["skills.form"]
     rows, skipped = harnesses(settings)
-    planner = _Planner(owner, setting, rows, skipped, _read_ledger())
+    planner = _Planner(owner, setting, rows, skipped, _read_ledger(), git_seconds)
     steps = [planner.step(item) for item in items]
     steps.extend(planner.removals())
     return steps
@@ -349,7 +383,7 @@ def _good_name(name: object) -> bool:
 
 class _Planner:
     def __init__(self, owner: str, setting: str, rows: dict, skipped: list[str],
-                 ledger: dict):
+                 ledger: dict, git_seconds: float | None = None):
         self.owner = owner
         self.setting = setting
         self.rows = rows
@@ -362,7 +396,9 @@ class _Planner:
         # (harness, kind, name) of items refused for want of a harness folder: their
         # old placements stay, since a broken row is no reason to remove them.
         self.unrouted: set[tuple] = set()
-        self.git: dict[str, frozenset | None] = {}
+        self.git: dict[str, frozenset | None | object] = {}
+        # What is left of the plan's git time, or None for 10 seconds a call.
+        self.git_left = git_seconds
         self.source_hash: str | None = None
 
     def _step(self, item, target, action, cause, reason, *, form="link", occupant=None,
@@ -478,9 +514,13 @@ class _Planner:
         return None
 
     def _occupant(self, item, key, form, what: str) -> Step:
-        if self._tracked(key):
-            what = f"{what}, and git tracks it"
-        return self._step(item, key, "refuse", "occupant", f"{key} is {what}", form=form,
+        cause = "occupant"
+        tracked = self._tracked(key)
+        if tracked is None:
+            what = f"{what}; git did not answer in time, so whether it tracks it is unknown"
+        elif tracked:
+            cause, what = "tracked", f"{what}, and git tracks it"
+        return self._step(item, key, "refuse", cause, f"{key} is {what}", form=form,
                           occupant=key)
 
     def _link(self, item, key, source, entry, form, note) -> Step:
@@ -532,12 +572,22 @@ class _Planner:
                               form=form, note=note)
         return self._step(item, key, "keep", None, f"{item.name} is current", form=form)
 
-    def _tracked(self, key: str) -> bool:
-        """Whether git tracks `key` or anything under it: one `git ls-files` per folder."""
+    def _tracked(self, key: str) -> bool | None:
+        """Whether git tracks `key` or anything under it: one `git ls-files` per folder.
+        None when git did not answer in time."""
+        import time
+
         folder, base = os.path.split(key)
         if folder not in self.git:
-            self.git[folder] = _git_files(folder)
+            if self.git_left is None:
+                self.git[folder] = _git_files(folder)
+            else:
+                start = time.monotonic()
+                self.git[folder] = _git_files(folder, self.git_left)
+                self.git_left = max(0.0, self.git_left - (time.monotonic() - start))
         files = self.git[folder]
+        if files is _NO_ANSWER:
+            return None
         if not files:
             return False
         return base in files or any(path.startswith(base + "/") for path in files)
@@ -570,11 +620,13 @@ def _entry_item(key: str, entry: dict) -> Item:
                 dest=Path(key), held=bool(entry.get("held")))
 
 
-def _git_files(folder: str) -> frozenset | None:
+def _git_files(folder: str, seconds: float | None = None) -> frozenset | None | object:
     """The paths git tracks under `folder`, relative to it, or None outside a work tree
-    or without git."""
+    or without git, or `_NO_ANSWER` when git did not answer in time. `seconds` is how long
+    both git calls may take together; None gives each 10 seconds."""
     import shutil
     import subprocess
+    import time
 
     from . import proc
 
@@ -582,14 +634,22 @@ def _git_files(folder: str) -> frozenset | None:
         return None
     env = {k: v for k, v in os.environ.items()
            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+    end = None if seconds is None else time.monotonic() + seconds
+
+    def git(*argv):
+        timeout = _GIT_SECONDS if end is None else min(_GIT_SECONDS, end - time.monotonic())
+        if timeout <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
+        return proc.run(["git", "-C", folder, *argv], timeout=timeout, env=env)
+
     try:
-        inside = proc.run(["git", "-C", folder, "rev-parse", "--is-inside-work-tree"],
-                          timeout=_GIT_SECONDS, env=env)
+        inside = git("rev-parse", "--is-inside-work-tree")
         if inside.returncode != 0 or inside.stdout.strip() != b"true":
             return None
-        listed = proc.run(["git", "-C", folder, "ls-files", "-z"], timeout=_GIT_SECONDS,
-                          env=env)
-    except (OSError, subprocess.TimeoutExpired):
+        listed = git("ls-files", "-z")
+    except subprocess.TimeoutExpired:
+        return _NO_ANSWER
+    except OSError:
         return None
     if listed.returncode != 0:
         return None
@@ -808,7 +868,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     step that places a target the owner handed over is skipped while any other owner
     places it, and otherwise drops that lapsed hand-over. A `refuse` and a
     `skip` say their line and change nothing, except that `replace=True` moves the
-    occupant of a `refuse` with cause `occupant` to
+    occupant of a `refuse` with cause `occupant` or `tracked` to
     `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item. An `OSError`
     on one step says one line and leaves that step's placement as it was; the rest go on.
     """
@@ -823,7 +883,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
         written = json.dumps(ledger, sort_keys=True)
         for step in steps:
             places = step.action in ("add", "update") or (
-                step.action == "refuse" and replace and step.cause == "occupant")
+                step.action == "refuse" and replace and step.cause in _OCCUPANTS)
             if places and step.note and step.note not in notes:
                 notes.append(step.note)
                 say(step.note)
@@ -866,7 +926,7 @@ def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Plac
 def _apply_step(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
     item, key, owner = step.item, step.target, step.owner
     if step.action == "refuse":
-        if not (replace and step.cause == "occupant" and step.occupant is not None):
+        if not (replace and step.cause in _OCCUPANTS and step.occupant is not None):
             say(f"{item.name} for {item.harness} not placed: {step.reason}")
             return None
         moved = _displace(str(step.occupant), stamp, item.harness, item.name)
@@ -1103,7 +1163,7 @@ def remove(owner: str, *, say: Callable[[str], object] = print) -> list[Placed]:
 
 
 def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
-          say: Callable[[str], object] = print) -> list[Placed]:
+          seeded: bool = False, say: Callable[[str], object] = print) -> list[Placed]:
     """Hand placements from `from_owner` to `to_owner`, by target, under the core lock.
 
     Each placement's ledger entry moves to `to_owner`, a copied folder's mark is
@@ -1116,6 +1176,16 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
     `handed` map drops the target, so handing an item back gives it back whole. Nothing
     on disk moves. A placement that is not `from_owner`'s is refused with a line and the
     rest go on. Returns the placements now `to_owner`'s.
+
+    `seeded=True` marks each new `handed` entry `"seeded": true`: the placement was made
+    as `from_owner` only so that `to_owner` could take it, not by `from_owner`'s own
+    install. A seeded entry skips and lapses as any other, but `moxi install` does not
+    count it as the module's own placement when it decides whether to ask its skills
+    question. An existing `handed` entry for the target is replaced, seeded or not as
+    this call says. A seeded hand-over is never handed back: a target `to_owner` handed
+    over seeded is refused with a line, "<name> was seeded; <its taker> removes it", and
+    the rest go on: its taker removes it instead, so a placement made that way never
+    becomes the module's own.
     """
     from . import files
 
@@ -1133,6 +1203,11 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
                     say(f"{placement.name} at {key} is not {from_owner}'s; not handed to "
                         f"{to_owner}")
                     continue
+                back = taker["handed"].get(key)
+                if isinstance(back, dict) and back.get("seeded"):
+                    say(f"{placement.name} was seeded; {back.get('to', from_owner)} "
+                        f"removes it")
+                    continue
                 if entry.get("form") != IN_PLACE and os.path.isdir(key) \
                         and not _is_link(key):
                     mark = _read_mark(key)
@@ -1144,10 +1219,13 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
                 del giver["placed"][key]
                 taker["placed"][key] = entry
                 taker["handed"].pop(key, None)
-                giver["handed"][key] = {"kind": entry.get("kind", "skill"),
-                                        "harness": entry.get("harness", ""),
-                                        "name": entry.get("name", os.path.basename(key)),
-                                        "to": to_owner}
+                handed = {"kind": entry.get("kind", "skill"),
+                          "harness": entry.get("harness", ""),
+                          "name": entry.get("name", os.path.basename(key)),
+                          "to": to_owner}
+                if seeded:
+                    handed["seeded"] = True
+                giver["handed"][key] = handed
                 moved.append(_placed(to_owner, key, entry))
         finally:
             _write_ledger(ledger)

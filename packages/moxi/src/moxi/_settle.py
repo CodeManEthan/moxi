@@ -87,6 +87,9 @@ _WINDOWS = sys.platform == "win32"
 
 #: The child's exit code for "interrupted", private to the parent and child.
 INTERRUPTED = 130
+#: The teardown child's exit code when the module's `TEARDOWN` could not be loaded, so it
+#: never ran and removed nothing; private to the parent and child.
+NOT_RUN = 4
 #: The file in the core's state directory that holds the version each module's `SETUP`
 #: last ran at: `{"<module>": {"version": <str or null>, "at": <UTC>}}`.
 SETUP_FILE = "setup.json"
@@ -855,11 +858,16 @@ def _skills(step: Settle) -> bool:
     another module handed it, a project's skill it placed for a user) are left exactly as
     they are: the plan treats `items` as the owner's whole set, so their `remove` steps
     are dropped before `apply`. When the module has none of its own placements (none
-    placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
-    it has some, there is no question: the plan updates, adds and removes them as the
-    package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
-    has it removed. One handed to another owner is skipped while any other owner places
-    it; once none does, the skill is placed again with no question. A name in
+    placed, and none handed over unless seeded), `skills_wanted` asks first, naming only
+    the skills the plan would place, and a no places nothing. When it has some, there is
+    no question: the plan updates, adds and removes them as the package's `SKILLS` say now,
+    so a module that drops a skill, or `SKILLS` altogether, has it removed. One handed
+    to another owner is skipped while any other owner places it; once none does, the
+    skill is placed again with no question. A seeded hand-over (`moxi.place.adopt(...,
+    seeded=True)`) is the user's choice for that one skill and never stands in for a yes
+    here: it is skipped while it stands, and counts as none of the module's own, so with
+    only seeded hand-overs the question is asked for the rest; once it has lapsed, its
+    skill is named in the question like any other it would place. A name in
     `skills.harnesses` whose harness row is skipped or missing still makes its items:
     the placer refuses each (cause `harness`) with a line and keeps what was placed
     there, so a broken row never removes skills and never fails the step (the doctor
@@ -895,11 +903,19 @@ def _skills(step: Settle) -> bool:
         if s.action == "remove" and place.from_package(found, s.item.source)]
     held_now = {str(p.path) for p in placed}
     labels = {(p.harness, p.kind, p.name) for p in placed}
+    # A hand-over counts as the module's own only when it was not seeded, whether it
+    # stands or has lapsed: the flag is read, never membership of `handed` alone.
+    given = {key for key, entry in handed.items()
+             if not (isinstance(entry, dict) and entry.get("seeded"))}
     own = len(steps) > len(items) or any(
-        s.action == "skip" or str(s.target) in held_now or str(s.target) in handed
+        str(s.target) in held_now or str(s.target) in given
         or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
         for s in steps)
-    if not own and (not items or not skills_wanted(step, skills, usable)):
+    # The question names only the skills it would place: not one whose every target is
+    # skipped as handed over (a standing seeded hand-over, when nothing is the module's).
+    wanted = [name for name in skills
+              if any(s.action != "skip" for s in steps[:len(items)] if s.item.name == name)]
+    if not own and (not wanted or not skills_wanted(step, wanted, usable)):
         return not misnamed
     with held():
         done = place.apply(steps, replace=step.replace,
@@ -970,7 +986,7 @@ def _skills_report(module: str, steps, done, replace: bool) -> bool:
             else:
                 say(f"{module}: removed skill {item.name} for {item.harness} ({target})")
         elif s.action in ("add", "update") or (
-                s.action == "refuse" and replace and s.cause == "occupant"):
+                s.action == "refuse" and replace and s.cause in place._OCCUPANTS):
             if target in left:
                 verb = "updated" if s.action == "update" else "placed"
                 say(f"{module}: {verb} skill {item.name} for {item.harness} ({target})")
@@ -1101,9 +1117,10 @@ def _listeners(step: Settle) -> bool:
 
 def teardown(module: str) -> int:
     """Run `module`'s `TEARDOWN` in this process. 0 when it accepts (or there is none), 3
-    when it raises `moxi.modules.Refused`, 1 on any other failure, `INTERRUPTED` on a stop
-    request: an interrupt abandons it at once, as a failed one, and its own `finally`
-    blocks run as `Interrupted` passes through them."""
+    when it raises `moxi.modules.Refused`, `NOT_RUN` when its target can't be loaded, 1 on
+    any other failure, `INTERRUPTED` on a stop request: an interrupt abandons it at once,
+    as a failed one, and its own `finally` blocks run as `Interrupted` passes through them.
+    A failure's text is the module's own: a returned text is said as it is."""
     from . import modules
 
     found = modules.load(module)
@@ -1117,13 +1134,26 @@ def teardown(module: str) -> int:
         try:
             _state.raising = True
             try:
-                result = _call(found.teardown)
-            except SystemExit as exc:
-                result = exc.code
-            check()
-            code = 1 if _exit_code(result) else 0
-            if code:
-                say(f"teardown {module}: failed (exit {result})", err=True)
+                fn = _target(found.teardown)
+            except modules.Refused:
+                raise
+            except Exception as exc:
+                fn = None
+                _state.raising = False
+                say(f"teardown {module}: {found.teardown} can't be loaded "
+                    f"({_one_line(exc)})", err=True)
+                code = NOT_RUN
+            if fn is not None:
+                try:
+                    result = fn()
+                except SystemExit as exc:
+                    result = exc.code
+                check()
+                code = 1 if _exit_code(result) else 0
+                if code and isinstance(result, str):
+                    say(result, err=True)
+                elif code:
+                    say(f"teardown {module}: failed (exit {result})", err=True)
         except modules.Refused as exc:
             say(f"{module}: {exc.reason}", err=True)
             code = 3
@@ -1136,7 +1166,7 @@ def teardown(module: str) -> int:
     finally:
         _state.raising = False
     if _state.request is not None:
-        say(f"teardown {module}: interrupted; nothing was removed", err=True)
+        say(f"teardown {module}: interrupted", err=True)
         return INTERRUPTED
     return code
 
@@ -1144,13 +1174,18 @@ def teardown(module: str) -> int:
 # -- the child's entry --------------------------------------------------------------------------
 
 def _call(target: str):
+    return _target(target)()
+
+
+def _target(target: str):
+    """The callable a `"pkg.mod:fn"` target names, imported."""
     import importlib
 
     module_name, _, attr = target.partition(":")
     fn = importlib.import_module(module_name)
     for part in attr.split("."):
         fn = getattr(fn, part)
-    return fn()
+    return fn
 
 
 def _exit_code(result) -> int:

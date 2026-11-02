@@ -1,0 +1,59 @@
+# loadout.toml: what moxi loadout places for each harness (Claude Code, Codex, OpenCode).
+#
+# Every item below is commented out. Take the # off the start of a line to use it, then
+# run `moxi loadout install`. `moxi loadout status` says what is placed and what is not.
+#
+# Your own skills go in skills/<name>/SKILL.md in this folder, agent files in
+# agents/<name>.md, and the global instruction text in global.md.
+
+# The global instruction file: off (loadout touches none), managed (your own CLAUDE.md
+# and AGENTS.md stay, and loadout adds its part to each) or if-absent (global.md is
+# placed where a harness has no global file).
+#[global]
+#mode = "off"
+
+# Every session of this user. A skill named <module>/<skill> is a module's own skill.
+# disabled holds <kind>:<name>@<harness> ids; * for every harness.
+#[user]
+#skills = ["review", "launcher/moxi-handoff"]
+#agents = ["helper"]
+#hooks = ["guard-rm"]
+#permissions = ["git-reads"]
+#mcp = ["docs"]
+#disabled = ["mcp:docs@codex"]
+
+# One project, by its path. With projects installed, [project.<key>] names it by key.
+# An item the project holds itself, in its own .claude/skills or .claude/agents, is
+# placed from there.
+#[project."~/code/app"]
+#skills = ["app-deploy"]
+#agents = ["app-lead"]
+
+# Each item's own settings. harnesses defaults to every harness.
+#[skill.review]
+#harnesses = ["claude"]
+
+#[skill."launcher/moxi-handoff"]
+#harnesses = ["claude", "codex"]
+
+# Extra keys for the Codex and OpenCode forms of an agent file.
+#[agent.app-lead]
+#codex = { model = "o4" }
+
+# {source} is this folder's path.
+#[hook.guard-rm]
+#event = "PreToolUse"
+#matcher = "Bash"
+#command = "python3 {source}/hooks/guard_rm.py"
+#timeout = 10
+#harnesses = ["claude", "codex"]
+
+# A shell rule names a command's leading words; claude, codex and opencode take each
+# harness's own form.
+#[permissions.git-reads]
+#allow = [{ shell = ["git", "status"] }, { shell = ["git", "diff"] }]
+#claude = { allow = ["WebFetch(domain:docs.python.org)"] }
+
+#[mcp.docs]
+#command = "uvx"
+#args = ["docs-mcp", "--root", "{source}/docs"]
