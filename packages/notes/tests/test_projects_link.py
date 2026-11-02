@@ -164,6 +164,17 @@ def test_a_notes_root_equal_to_the_computed_folder_is_allowed(no_subprocess):
     assert refuse_remove(Project("alpha", alpha, notes_root=computed)) is None
 
 
+def test_a_notes_root_spelled_through_a_link_to_the_computed_folder_is_allowed(no_subprocess):
+    alpha = home() / "code" / "alpha"
+    (alpha / ".git").mkdir(parents=True)
+    computed = home() / "notes" / "code" / "alpha"
+    computed.mkdir(parents=True)
+    (computed / "a.md").write_text("a\n")
+    link = home() / "alpha-notes"
+    link.symlink_to(computed)
+    assert refuse_remove(Project("alpha", alpha, notes_root=link)) is None
+
+
 def test_a_nested_project_with_files_is_refused_with_its_notes_root_unset():
     outer = repo(home() / "code" / "alpha")
     inner = outer / "tools" / "beta"

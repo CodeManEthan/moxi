@@ -96,7 +96,7 @@ def refuse_remove(project) -> str | None:
     without = resolve.by_path(root, places, lambda: resolve.git_top(root) or root)[0]
     if with_row is None:
         return None
-    if without is not None and resolve.same(with_row, without, real=False):
+    if without is not None and resolve.same(with_row, without):
         return None
     files = _files_in(with_row)
     if not files:
