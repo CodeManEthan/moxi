@@ -27,4 +27,33 @@ class Refused(TunnelError):
     exit_code = codes.REFUSED
 
 
-__all__ = ["TunnelError", "Refused"]
+class ApplyError(TunnelError):
+    """A provider command failed. `reason` is its stderr, unchanged."""
+
+    def __init__(self, stderr: str, fix: str | None = None):
+        super().__init__(stderr, fix)
+
+
+class ReadError(TunnelError):
+    """A provider's state could not be read. `timeout` is True when the read did not
+    answer in time."""
+
+    def __init__(self, reason: str, fix: str | None = None, *, timeout: bool = False):
+        super().__init__(reason, fix)
+        self.timeout = timeout
+
+
+class UsageError(TunnelError):
+    """Options that don't go together."""
+
+    exit_code = codes.USAGE
+
+
+class Busy(TunnelError):
+    """Trying again may work: what the user confirmed changed twice under the lock, or the
+    foreign config a replace takes over changed after the user confirmed."""
+
+    exit_code = codes.TEMPFAIL
+
+
+__all__ = ["TunnelError", "Refused", "ApplyError", "ReadError", "UsageError", "Busy"]

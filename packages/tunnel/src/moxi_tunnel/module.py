@@ -7,6 +7,8 @@ from the record tunnel keeps of what it applied.
 ANNOUNCES = 1
 INTERFACES = frozenset({1})
 API = "moxi_tunnel.api"
+#: `moxi tunnel`: status, add, remove and repair.
+CLI = "moxi_tunnel.cli:main"
 SUMMARY = ("An address something off the box can reach, for a loopback service: Tailscale "
            "Serve, Tailscale Funnel or a Cloudflare named tunnel.")
 OPTIONAL = {}

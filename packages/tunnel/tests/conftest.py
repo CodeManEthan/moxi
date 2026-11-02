@@ -120,3 +120,44 @@ def config_file():
         return path
 
     return write
+
+
+#: Two fixture targets: `alpha/gateway` (own-devices, port setting `port`, 8461) and
+#: `alpha/connector` (public, port setting `other.port`, 9000).
+TARGETS = """
+GATEWAY = {"reach": "own-devices", "port_setting": "port", "doc": "the page"}
+CONNECTOR = {"reach": "public", "port_setting": "other.port"}
+"""
+
+
+@pytest.fixture
+def tailscale(tmp_path, monkeypatch):
+    """A fake `tailscale` first on PATH, logged in with HTTPS and Funnel allowed."""
+    from fake_tailscale import install
+
+    return install(tmp_path / "bin", monkeypatch)
+
+
+@pytest.fixture
+def alpha(site):
+    """The fixture module `alpha`, declaring `alpha/gateway` and `alpha/connector`."""
+    site.module("alpha", {"alpha.gateway": "GATEWAY", "alpha.connector": "CONNECTOR"},
+                values=TARGETS)
+    return site
+
+
+@pytest.fixture
+def yes():
+    """A confirm that says yes and keeps every list of lines it was shown."""
+    class Yes:
+        def __init__(self):
+            self.asked: list[list[str]] = []
+
+        def __call__(self, lines):
+            from moxi_tunnel import locks
+
+            locks.none_held()
+            self.asked.append(list(lines))
+            return True
+
+    return Yes()
