@@ -174,7 +174,8 @@ def test_upsert_refuses_a_bad_key_or_a_value_on_two_lines():
 @pytest.mark.parametrize("value,line", [
     ("plain", "plain"), ("", "''"), (["a", "b"], "[a, b]"), ("has: colon", "'has: colon'"),
     ("#hash", "'#hash'"), ("it's", "it's"), ("'quoted'", "'''quoted'''"),
-    ("a #b", "'a #b'"), ("2026-11-01", "2026-11-01"),
+    ("a #b", "'a #b'"), ("a\t#b", "'a\t#b'"), ("issue#12", "issue#12"),
+    ("2026-11-01", "2026-11-01"),
 ])
 def test_a_written_value_reads_back_the_same(value, line):
     assert fm.render(value) == line

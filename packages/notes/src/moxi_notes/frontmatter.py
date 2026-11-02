@@ -207,7 +207,8 @@ def render(value) -> str:
     if text == "":
         return "''"
     if (text[0] in "[]{}#&*!|>%@`'\"," or text.strip() != text or ": " in text
-            or text.endswith(":") or " #" in text or "\n" in text or "\r" in text):
+            or text.endswith(":") or re.search(r"\s#", text) or "\n" in text
+            or "\r" in text):
         return "'" + text.replace("'", "''") + "'"
     return text
 
