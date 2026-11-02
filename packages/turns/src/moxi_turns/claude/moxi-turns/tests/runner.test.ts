@@ -3,8 +3,8 @@
 // ask, and the session commands.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { ROOT_ARGV, SOCK, commandRow, world } from './world.ts'
-import type { World } from './world.ts'
+import { ROOT_ARGV, SOCK, commandRow, world } from './world'
+import type { World } from './world'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type E = any
@@ -174,12 +174,12 @@ describe('the context asks', () => {
     const w = world(on)
     await start($)
     w.answers['/ask/context'] = { context: 'ROSTER' }
-    const r = $.classic.SessionStart({ source: 'startup' })
+    const r = $.classic.SessionStart({ source: 'startup', transcript_path: '/home/u/.claude/projects/p/S-1.jsonl' })
     await w.clock.advance(100)
     await w.hello()
     const out = await r
     expect(out.additionalContext).toEqual(['ROSTER'])
-    expect(w.got.find(g => g.path === '/ask/context')?.body).toEqual({ event: 'ready', source: 'startup', session_id: expect.any(String) })
+    expect(w.got.find(g => g.path === '/ask/context')?.body).toEqual({ event: 'ready', source: 'startup', session_id: expect.any(String), transcript_path: '/home/u/.claude/projects/p/S-1.jsonl' })
   })
 
   test('SessionStart gives up on the first line after 2 s', async ($: E, on) => {
@@ -499,7 +499,8 @@ describe('compact and the shell stop', () => {
   const subagentStop = ($: E, tasks: unknown[], agent = 'a1') =>
     $.classic.SubagentStop({ stop_hook_active: false, agent_id: agent, agent_type: 'general', agent_transcript_path: '', last_assistant_message: '', background_tasks: tasks })
   const done = (w: World) => w.reports().filter(r => r.kind === 'command.done')
-  const shellsOf = (w: World) => done(w).at(-1)?.shells
+  type Shells = { stopped: string[], left: unknown[], complete: boolean }
+  const shellsOf = (w: World) => done(w).at(-1)?.shells as Shells | undefined
   const UNLISTED = { id: null, why: 'unlisted' }
   async function command(w: World, name: string, stopShells = true, request = 'r1') {
     await w.line({ op: 'command', request, name, stop_shells: stopShells })

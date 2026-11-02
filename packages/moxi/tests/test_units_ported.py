@@ -44,6 +44,10 @@ DAEMONS = {
                "stop = process")),
 }
 
+#: The modules whose daemon declares a socket, which the writer plans as a change of its
+#: own beside the daemon's.
+SOCKETS = {"comms"}
+
 #: A `systemctl` that records its arguments and answers yes.
 SYSTEMCTL = '#!/bin/sh\necho "$*" >> "{log}"\nexit 0\n'
 
@@ -99,6 +103,14 @@ def box(request, tmp_path, monkeypatch):
     moxi.modules.reset()
 
 
+def daemon_of(box, changes):
+    """The daemon's change among `changes`; the rest is its socket, when it has one."""
+    [change] = [c for c in changes if c.kind == "daemon"]
+    rest = sorted(c.kind for c in changes if c is not change)
+    assert rest == (["socket"] if box.module in SOCKETS else [])
+    return change
+
+
 def test_the_module_declares_one_daemon_the_core_accepts(box):
     decl = units.declarations(box.module)
     assert list(decl.daemons) == [box.name] and decl.timers == {}
@@ -109,7 +121,8 @@ def test_the_module_declares_one_daemon_the_core_accepts(box):
 @pytest.mark.parametrize("how", [FROM_INDEX, FROM_WHEEL], ids=["index", "wheel"])
 def test_a_release_install_writes_the_daemon_through_the_writer(box, how):
     box.install(how)
-    [change] = units.plan(box.module)
+    changes = units.plan(box.module)
+    change = daemon_of(box, changes)
     assert (change.name, change.kind, change.action) == (box.name, "daemon", "add")
     assert change.paths == (box.unit,)
     text = change.text.splitlines()
@@ -118,14 +131,13 @@ def test_a_release_install_writes_the_daemon_through_the_writer(box, how):
     for line in box.lines:
         assert line in text
 
-    [done] = box.apply([change])
-    assert done.ok, done.lines
+    done = box.apply(changes)
+    assert all(d.ok for d in done), [d.lines for d in done]
     assert box.unit.read_text() == change.text
     assert oct(box.unit.stat().st_mode & 0o777) == "0o644"
     assert ("enable", "--now", box.unit.name) in box.sup.calls
     assert box.sup.units[box.unit.name] == {"active": True, "enabled": True}
-    [again] = units.plan(box.module)
-    assert again.action == "keep"
+    assert {again.action for again in units.plan(box.module)} == {"keep"}
 
 
 def test_an_editable_install_is_refused_and_nothing_is_written(box):
@@ -161,15 +173,15 @@ def test_the_old_verb_writes_its_unmarked_unit_and_the_writer_refuses_it(box, mo
     assert f"--user enable --now {box.unit.name}" in log.read_text().splitlines()
 
     box.install(FROM_INDEX)
-    [change] = units.plan(box.module)
+    change = daemon_of(box, units.plan(box.module))
     assert (change.action, change.cause, change.foreign) == ("refuse", "foreign", box.unit)
     assert "--replace" in change.reason
     [done] = box.apply([change])
     assert not done.ok
     assert box.unit.read_text() == old
 
-    [done] = box.apply(units.plan(box.module), replace=True)
-    assert done.ok, done.lines
+    done = box.apply(units.plan(box.module), replace=True)
+    assert all(d.ok for d in done), [d.lines for d in done]
     assert box.unit.read_text().startswith(f"# moxi unit: {box.module}/{box.name}\n")
     [moved] = Path(os.environ["MOXI_HOME"]).rglob(f"displaced/*/{box.unit.name}")
     assert moved.read_text() == old

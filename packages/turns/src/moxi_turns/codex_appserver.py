@@ -4,6 +4,11 @@ The child is a foreign binary, so it holds no lifeline of its own: it runs under
 ``moxi.proc.spawn(lifeline="watch")``, whose watchdog ends it and its descendants when
 the host goes, by any death. It stays in the host's process group and session. Its
 stdin is ``/dev/null``: the terminal, when the host has one, belongs to the window.
+
+``codex_rate_limits`` is the library's pull of the account's Codex rate limits: through a
+live Codex host's ``usage.codex_limits``, else through a short-lived app-server of its own
+(this module's ``AppServer`` and the WebSocket client), which starts no thread, so no
+message reaches a model.
 """
 
 from __future__ import annotations
@@ -11,11 +16,15 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import signal
 import socket as socketlib
 import subprocess
+import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from moxi import proc as moxi_proc
 
@@ -25,6 +34,13 @@ from .procs import TERM_GRACE, with_stdin
 log = logging.getLogger("moxi.turns.codex.appserver")
 
 BINARY = "codex"
+#: The app-server's read of the account's rate limits (no params), and its push.
+LIMITS_READ = "account/rateLimits/read"
+LIMITS_UPDATED = "account/rateLimits/updated"
+#: How long a host's own `account/rateLimits/read` may take, in seconds.
+LIMITS_READ_S = 2.5
+#: `codex_rate_limits`'s default bound, in seconds.
+PULL_S = 3.0
 
 
 class AppServerBusy(AppServerOffline):
@@ -143,4 +159,115 @@ class AppServer:
         return self.start()
 
 
-__all__ = ["AppServer", "AppServerBusy", "BINARY", "listen_argv", "socket_answers"]
+@dataclass(frozen=True)
+class CodexLimits:
+    """One reading of the account's Codex rate limits.
+
+    `payload` is `account/rateLimits/read`'s answer as given, unparsed (the limits, and
+    `accountId` and `planType` beside them); `received_at` is when it arrived (Unix
+    seconds); `via` is `host` (a live Codex host read it) or `app-server` (an app-server
+    started for this read)."""
+
+    payload: dict[str, Any]
+    received_at: float
+    via: str
+
+
+def codex_rate_limits(*, timeout: float = PULL_S) -> CodexLimits | None:
+    """The account's Codex rate limits now, or None, with the reason logged.
+
+    First a live Codex host that offers `usage`, newest first: its `usage.codex_limits`
+    reads them on the host's own app-server. Else, when `codex` is on `PATH`, an
+    app-server of its own on a private socket: `initialize`, `account/rateLimits/read`,
+    and it is stopped again. Neither starts a thread, so no message is sent. A host that
+    errs or does not answer passes to the next way while time is left; past `timeout`
+    seconds, None."""
+    deadline = time.monotonic() + timeout
+    reading = _from_hosts(deadline)
+    if reading is not None:
+        return reading
+    if time.monotonic() >= deadline:
+        log.info("no Codex rate limits within %g s", timeout)
+        return None
+    binary = shutil.which(BINARY)
+    if binary is None:
+        log.info("no Codex rate limits: no live Codex host answered and %s is not on "
+                 "PATH", BINARY)
+        return None
+    try:
+        return _from_app_server(binary, deadline)
+    except Exception as exc:  # noqa: BLE001 - the pull answers None with the reason
+        log.info("no Codex rate limits from an app-server of its own: %s",
+                 str(exc).strip() or type(exc).__name__)
+        return None
+
+
+def _from_hosts(deadline: float) -> CodexLimits | None:
+    from . import client
+
+    try:
+        live = client.sessions()
+    except Exception as exc:  # noqa: BLE001 - no host is then the answer
+        log.info("the live sessions could not be listed: %s", exc)
+        return None
+    try:
+        for session in live:
+            if session.harness != "codex" or "usage" not in session.capabilities:
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                answer = session.codex_limits(timeout=remaining)
+            except Exception as exc:  # noqa: BLE001 - the next way is tried
+                log.info("the Codex host pid %s did not read the rate limits: %s",
+                         session.pid, exc)
+                continue
+            payload, at = answer.get("payload"), answer.get("received_at")
+            if isinstance(payload, dict) and isinstance(at, (int, float)) \
+                    and not isinstance(at, bool):
+                return CodexLimits(payload, float(at), "host")
+            log.info("the Codex host pid %s could not read the rate limits: %s",
+                     session.pid, answer.get("reason") or "no reading")
+    finally:
+        for session in live:
+            with contextlib.suppress(Exception):
+                session.close()
+    return None
+
+
+def _from_app_server(binary: str, deadline: float) -> CodexLimits:
+    """`account/rateLimits/read` on an app-server started for it, under a private
+    directory of its own; the app-server is stopped and the directory removed after."""
+    from .codex_ws import AppServerClient
+
+    def left() -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("the time ran out")
+        return remaining
+
+    folder = Path(tempfile.mkdtemp(prefix="moxi-turns-limits-"))
+    server = AppServer(folder / "app.sock", binary=binary)
+    ws = None
+    try:
+        server.start()
+        if not server.wait_for_socket(timeout=left()):
+            raise AppServerOffline(f"the app-server did not open its socket "
+                                   f"(exit {server.returncode})")
+        ws = AppServerClient(server.socket_path, timeout=left())
+        ws.connect(open_timeout=left())
+        ws.initialize()
+        payload = ws.call(LIMITS_READ, None, timeout=left())
+        if not isinstance(payload, dict):
+            raise AppServerOffline(f"{LIMITS_READ} answered {payload!r}")
+        return CodexLimits(payload, time.time(), "app-server")
+    finally:
+        if ws is not None:
+            ws.close()
+        server.stop()
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+__all__ = ["AppServer", "AppServerBusy", "BINARY", "CodexLimits", "LIMITS_READ",
+           "LIMITS_UPDATED", "codex_rate_limits", "listen_argv", "socket_answers"]

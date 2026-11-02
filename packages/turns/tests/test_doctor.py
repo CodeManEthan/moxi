@@ -98,7 +98,8 @@ def test_the_start_list_rows(turns_env, registry, tmp_path):
 
 def test_the_listener_rows(turns_env, registry):
     registry["entries"] = [Entry("early", [("tool", "x.y:z")]),
-                           Entry("later", [("start", "x.y:z", {"floor": 1})]),
+                           Entry("later", [("start", "x.y:z", {"floor": "x.y:f",
+                                                                 "later": 1})]),
                            Entry("fine", [(("ready", "prompt"), "x.y:z")])]
     rows = rows_by_name()
     assert rows["listener early"].state == "fail"
@@ -203,7 +204,7 @@ def test_the_codex_host_times_a_ping_from_its_stamp(monkeypatch, tmp_path):
 
         def __init__(self):
             self.endpoint = types.SimpleNamespace(ready=lambda *a, **k: None,
-                                                  prompt=lambda: None,
+                                                  prompt=lambda *a, **k: None,
                                                   on_stop=lambda facts: None)
 
         def foreign_hook(self, event, session_id):
@@ -251,3 +252,189 @@ def test_the_claude_leg_takes_hook_times_beside_its_handler(tmp_path):
     got = hooktimes.read(tmp_path / "h.jsonl")
     assert [(s.harness, s.event, s.ms) for s in got] == [
         ("claude", "classic.Stop", 12.5), ("claude", "gate prompt.submit", 1.0)]
+
+
+# -- guards, floors and the removal guard's Claude Code version ---------------------------
+
+class GuardEntry:
+    """A `moxi.turns.guards` entry point: its module's `GUARDS`, or an exception."""
+
+    def __init__(self, name, guards_, delay=0.0):
+        self.name = name
+        self._guards = guards_
+        self._delay = delay
+
+    def load(self):
+        if self._delay:
+            time.sleep(self._delay)
+        if isinstance(self._guards, Exception):
+            raise self._guards
+        return types.SimpleNamespace(GUARDS=self._guards)
+
+
+@pytest.fixture
+def guard_group(monkeypatch):
+    """The guard group the doctor reads, set by the test; switches read off unless the
+    test names them in `switches`."""
+    from moxi_turns import guards
+
+    holder = {"entries": [], "switches": {}}
+    real = guards.load
+
+    def load(on=None, *, entries=None, switches=None, env=None):
+        def read(module, key):
+            return holder["switches"].get((module, key), (False, None))
+        return real(on, entries=holder["entries"] if entries is None else entries,
+                    switches=switches or read, env=env)
+
+    monkeypatch.setattr(guards, "load", load)
+    return holder
+
+
+def a_guard(name, **kw):
+    from moxi_turns.guards import Guard
+
+    kw.setdefault("calls", {"claude": ("Bash",), "codex": ("shell",)})
+    kw.setdefault("deny", "no")
+    return Guard(name, **kw)
+
+
+def judge_ok(call):
+    return None
+
+
+def guard_rows():
+    return {name: row for name, row in rows_by_name().items()
+            if name == "guards" or name.startswith("guard ")}
+
+
+def test_with_no_guard_on_the_shipped_guards_read_off_with_their_switch(
+        turns_env, registry):
+    rows = guard_rows()
+    assert rows["guards"].state == "ok" and rows["guards"].detail == "no guard is on"
+    for gid, key in [("turns.removal", "guards.removal"),
+                     ("turns.no-nested-agents", "guards.no_nested_agents"),
+                     ("turns.question-mode", "guards.question_mode")]:
+        row = rows[f"guard {gid}"]
+        assert row.state == "off" and row.detail
+        assert row.fix == f"moxi config set turns {key} true"
+
+
+def test_a_guard_on_names_its_source_and_where_it_runs(turns_env, registry, guard_group):
+    guard_group["entries"] = [GuardEntry("mod", [
+        a_guard("both"), a_guard("claude-only", calls={"claude": ("Bash",)}),
+        a_guard("by-switch", switch="mod.switch"), a_guard("idle", doc="Idle guard.")])]
+    guard_group["switches"][("mod", "mod.switch")] = (True, None)
+    write_config(turns_env, "[guards]\non = ['mod.both', 'mod.claude-only']\n")
+    rows = guard_rows()
+    detail = rows["guards"].detail
+    assert "mod.both (on by guards.on): runs claude in the runner, codex behind the hook" \
+        in detail
+    assert "mod.claude-only (on by guards.on): runs claude in the runner" in detail
+    assert "mod.by-switch (on by its switch)" in detail
+    assert rows["guard mod.claude-only: codex"].state == "ok"
+    assert "covers no call on codex" in rows["guard mod.claude-only: codex"].detail
+    assert "guard mod.both: codex" not in rows and "guard mod.both: claude" not in rows
+    for gid in ("mod.both", "mod.claude-only", "mod.by-switch"):
+        row = rows[f"guard {gid}: opencode"]
+        assert row.state == "ok" and "no pre-tool point" in row.detail
+    idle = rows["guard mod.idle"]
+    assert (idle.state, idle.detail) == ("off", "Idle guard.")
+    assert idle.fix == "moxi config set turns guards.on --add mod.idle"
+    assert not any(r.state in ("fail", "warn") for r in rows.values())
+
+
+def test_guards_on_the_list_that_do_not_load_fail(turns_env, registry, guard_group):
+    guard_group["entries"] = [
+        GuardEntry("mod", [a_guard("alias", calls={"codex": ("Agent",)}),
+                           a_guard("nojudge", judge="nowhere_at_all.mod:judge"),
+                           a_guard("judged", judge="test_doctor:judge_ok"),
+                           a_guard("unlisted-alias", calls={"codex": ("Write",)})]),
+        GuardEntry("broken", ImportError("no such module"))]
+    write_config(turns_env, "[guards]\non = ['mod.alias', 'mod.nojudge', 'mod.judged', "
+                            "'broken.g', 'mod.typo']\n")
+    rows = guard_rows()
+    alias = rows["guard mod.alias"]
+    assert alias.state == "fail" and "spawn_agent" in alias.detail
+    assert alias.fix == "moxi config set turns guards.on --remove mod.alias"
+    nojudge = rows["guard mod.nojudge"]
+    assert nojudge.state == "fail" and "does not import" in nojudge.detail
+    assert nojudge.fix == "moxi config set turns guards.on --remove mod.nojudge"
+    assert "guard mod.judged" not in rows
+    assert rows["guard broken.g"].state == "fail"
+    assert "no such module" in rows["guard broken.g"].detail
+    assert rows["guard mod.typo"].state == "fail"
+    # A shape problem of a guard nobody turned on is no row; neither is the module's own
+    # load problem, which only its listed ids carry.
+    assert "guard mod.unlisted-alias" not in rows and "guard broken" not in rows
+
+
+def test_a_switch_that_fails_the_core_check_fails_listed_or_not(turns_env, registry,
+                                                               guard_group):
+    guard_group["entries"] = [GuardEntry("mod", [a_guard("sw", switch="mod.sw")])]
+    guard_group["switches"][("mod", "mod.sw")] = (False, "its default is true")
+    row = guard_rows()["guard mod.sw"]
+    assert row.state == "fail" and "its default is true" in row.detail
+    assert [r.state for r in doctor.check() if r.name == "guard mod.sw"] == ["fail"]
+
+
+def test_a_listed_module_not_installed_and_a_slow_import_warn(turns_env, registry,
+                                                             guard_group):
+    guard_group["entries"] = [GuardEntry("slow", [a_guard("g")], delay=0.03)]
+    write_config(turns_env, "[guards]\non = ['usage.ceiling', 'slow.g']\n")
+    rows = guard_rows()
+    missing = rows["guard usage.ceiling"]
+    assert missing.state == "warn" and "not installed" in missing.detail
+    assert missing.fix == "moxi config set turns guards.on --remove usage.ceiling"
+    slow = rows["guard slow.g"]
+    assert slow.state == "warn" and "over 10 ms" in slow.detail
+
+
+@pytest.mark.parametrize("installed, warned", [("2.1.320 (Claude Code)", True),
+                                               ("2.1.316 (Claude Code)", False),
+                                               ("2.0.99 (Claude Code)", False)])
+def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, monkeypatch,
+                                                        installed, warned):
+    import subprocess
+
+    from moxi_turns import claude_setup
+    from moxi_turns.guards import removal
+
+    assert removal.CHECKED_CLAUDE == "2.1.316"
+    monkeypatch.setattr(claude_setup, "_claude", lambda: "/x/claude")
+    monkeypatch.setattr(claude_setup, "_run", lambda argv: subprocess.CompletedProcess(
+        argv, 0, installed + "\n", ""))
+    write_config(turns_env, "[guards]\nremoval = true\n")
+    rows = guard_rows()
+    assert "turns.removal (on by its switch): runs claude in the runner" \
+        in rows["guards"].detail
+    row = rows.get("guard turns.removal")
+    if warned:
+        assert row.state == "warn" and "2.1.320" in row.detail and "2.1.316" in row.detail
+        assert row.fix == "moxi config set turns guards.removal false"
+    else:
+        assert row is None
+
+
+def test_an_after_tool_floor_that_does_not_import_fails_its_listener_row(turns_env,
+                                                                        registry):
+    registry["entries"] = [
+        Entry("usage", [("after-tool", "listener_targets:silent",
+                         {"floor": "nowhere_at_all.mod:floor"})]),
+        Entry("fine", [("after-tool", "listener_targets:silent",
+                        {"floor": "listener_targets:silent"})])]
+    usage = [r for r in doctor.check() if r.name == "listener usage"]
+    assert {r.state for r in usage} == {"ok", "fail"}
+    fail = [r for r in usage if r.state == "fail"][0]
+    assert "nowhere_at_all.mod:floor" in fail.detail and "does not import" in fail.detail
+    assert [r.state for r in doctor.check() if r.name == "listener fine"] == ["ok"]
+
+
+def test_hook_time_rows_name_the_guard_and_after_tool_events():
+    rows = hooktimes.rows(samples("claude", "guard", [1.0] * 25)
+                          + samples("claude", "after-tool", [1.0] * 25)
+                          + samples("codex", "after-tool", [1.0] * 25),
+                          budget=2.0, floor=10.0)
+    names = {r.name: r.state for r in rows}
+    assert names == {"hook time: claude after-tool": "ok", "hook time: claude guard": "ok",
+                     "hook time: codex after-tool": "ok"}

@@ -97,10 +97,18 @@ The session's capabilities:
 | `compact` | yes | yes | yes | `command` `compact` |
 | `agents` | yes | yes | yes | `agents` |
 | `stop-shells` | yes | yes | no | `command` `clear` or `compact` with `stop_shells: true` |
+| `guards` | yes | yes | no | the guard list runs at the session's tool calls |
+| `after-tool` | yes | yes | no | an `after-tool` listener row's text reaches the model after the tool |
+| `usage` | yes | yes | no | Claude Code reports its usage to `usage` listener rows; the Codex host hands each rate-limits reading to `codex_limits` rows and answers `usage.codex_limits` |
+| `mcp-token` | no | yes | no | `mcp.reload` |
+| `environ` | yes | yes | yes | `environ` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
 option the session lacks is answered with the `capability` error, never a refusal. OpenCode
-support is experimental.
+support is experimental. An endpoint of an older turns lacks the later capabilities
+(`guards` to `environ`), and a caller reads their absence as "not offered". On OpenCode an
+`after-tool` row is still told of a finished call, observe only: its text reaches no
+model, so OpenCode does not offer `after-tool`.
 
 ## Errors
 
@@ -117,7 +125,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit` |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -315,15 +323,19 @@ Params are an object; a missing optional param takes its default. In short:
 | `watch` | `{}` | `{facts}`, then notifications |
 | `stops.handle` | `{}` | `{}`, then `stop.asked` notifications |
 | `stops.answer` | `{ask, reason}` | `{taken}` |
+| `environ` | `{names}` | `{values}` |
+| `usage.codex_limits` | `{cached?}` | `{payload, received_at}` |
+| `mcp.reload` | `{}` | `{reloaded, servers}` |
 
 `text` is a non-empty string. `ref` is a string of at most 256 bytes as UTF-8, or absent
 or null.
 
-**No answer waits on the harness.** `session`, `deliver`, `steer` and a `wait` with
-`timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
+**No answer waits on the harness.** `session`, `deliver`, `steer`, `environ` and a `wait`
+with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
-bound, `command` and the long-lived `watch` and `stops.handle` wait, each for its own
-reason.
+bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`),
+`mcp.reload` (the host's settle, bounded by its deadline) and the long-lived `watch` and
+`stops.handle` wait, each for its own reason.
 
 ### `session`
 
@@ -434,9 +446,14 @@ waits 30000 for `clear` and `exit` and 330000 for `compact`, plus 10000 with
 only; true needs `stop-shells`).
 
 Runs `/clear`, `/exit` or a compaction. Only with consent: the user's turns config
-`commands.allow`, or the launch's `MOXI_TURNS_COMMANDS` (a comma-separated list) in the
-session's environment. Only one in flight, one accepted per 60 s across all three, and
-only from an idle snapshot: no open turn, no live subagent, no draft. With
+`commands.allow`, or the launch's `MOXI_TURNS_COMMANDS` grant in the session's
+environment. The grant is bound, `<session id>:<commands>`, or bare, `<commands>`, where
+`<commands>` is a comma list. A bound grant counts only while the id it names is the
+session's current id or one of its earlier ids (`session`'s `earlier`), so it survives a
+`/clear`, and a harness started by hand inside the session, under an id of its own,
+gets nothing from it; one with an empty id or a second `:` counts as absent. A bare grant
+counts wherever it reaches. Only one in flight, one accepted per 60 s across all three,
+and only from an idle snapshot: no open turn, no live subagent, no draft. With
 `if_turn_number`, only if the turn number still equals it. The checks run again where the
 command takes effect.
 
@@ -507,6 +524,57 @@ While the connection lives, each Stop of the main loop sends the notification
 open with that text, null lets it end. Result `{taken: bool}`. `taken` is false for a late
 answer, past `stop_handler.wait_ms` (turns config, default 2000), which let the turn end,
 or for an unknown `ask`. Closing the connection gives the handler up.
+
+### `environ`
+
+`environ {names: [string, ...]}` answers `{values: {name: string | null}}`: the value of each
+named variable in the endpoint process's own copy of the session's environment, null for
+one that is unset. Needs `environ`. At most 64 names a call, each an environment variable's
+name (`[A-Za-z_][A-Za-z0-9_]*`); anything else is invalid params. It reads no other
+process, and answers only the names asked.
+
+Whose environment it is: on Claude Code the endpoint is the harness's child, started at
+the session's start, so the values are those the session started with, not a change made
+later inside a shell. The Codex and OpenCode hosts are the launch's own process, so theirs
+is the launch's environment. The endpoint's address is the user's alone, and any process
+of the same user can already read a session's environment, so this adds no reader.
+
+### `usage.codex_limits`
+
+`usage.codex_limits {cached?: bool}` answers a Codex host's reading of the account's rate
+limits: `{payload, received_at}`, `payload` being `account/rateLimits/read`'s answer from
+the host's own app-server as given, unparsed (the limits, with `accountId` and `planType`
+beside them), and `received_at` when it arrived (Unix seconds). No thread turn runs and no
+message reaches the model. When the read fails both are null and `reason` says why. With
+`cached: true` nothing is asked: the answer is the last reading the host saw (its read
+after each accepted load, a push from Codex, or an earlier `usage.codex_limits`) as
+`{payload, received_at, kind}`, `kind` being `read` or `updated`, each null before the
+first. Needs `usage`; a session of another harness that offers `usage` answers the
+`capability` error too. The library's pull, `moxi_turns.codex_rate_limits`, calls it.
+
+### `mcp.reload`
+
+`mcp.reload {}` asks a Codex host to settle the MCP servers its launch's thread config
+names, and answers `{reloaded, servers}`: whether it sent Codex's
+`config/mcpServer/reload`, and each such server's status as it last read it from
+`mcpServerStatus/list` (`connected`, `failed`, `cancelled`, `authenticationRequired`,
+`disabled`, `starting`, `notStarted`, or null: unavailable, or never read). Needs
+`mcp-token`. A session whose launch named no MCP server answers
+`{reloaded: false, servers: {}}` at once.
+
+Codex keeps a server that failed at thread start `failed` for the thread's life; a
+reload brings it back. The host reads the list, waits out each server still starting on
+Codex's own startup notifications (it does not poll the list, since each read opens a
+fresh MCP session to every configured server), and reloads once when one reads `failed`,
+then waits for those again. One deadline of 10 s bounds the whole settle; past it the host
+answers with what it has. A server that ends `failed`, or unsettled at the deadline, is a
+doctor record until a later settle reads it `connected`. The host settles the same way at
+each `session.ready`.
+
+One settle runs at a time. A call that comes before the running settle's first list read
+joins it; one that comes later waits for it and then for one more settle, which every call
+until then joins. So a call answers within 10 s, or within 20 s when it waited; a caller's
+request timeout is above 20 s (the library's `Session.mcp_reload` uses 22 s).
 
 ## Notifications
 
@@ -587,10 +655,9 @@ needs that connection.
 These are reserved for later additions, each one a hello can carry without a version bump.
 An endpoint of this version offers none of them:
 
-- session capabilities `guards`, `after-tool`, `usage` and `mcp-token`, and the client
-  capability `guards`;
-- the method spaces `guard.*`, `tool.*`, `usage.*` and `mcp.*`, and the notifications
-  `tool.*`.
+- the client capability `guards`;
+- the method spaces `guard.*`, `tool.*`, `usage.*` and `mcp.*` beyond the methods this
+  document names, and the notifications `tool.*`.
 
 ## Versions
 

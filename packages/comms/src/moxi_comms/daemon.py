@@ -86,6 +86,7 @@ from moxi import ipc
 from . import (attribution, bindings, cache, claimfile, config, constants, directory,
                membership, wire)
 from .store import books as books_mod
+from .mcp import tokens as mcp_tokens_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
@@ -340,6 +341,10 @@ class Binding:
     #: The ids a turn of this binding left unhandled, back to `waiting` until the next
     #: release point. A live send above one waits with them (`_behind_returned`).
     returned: set = field(default_factory=set)
+    #: The claim key of the adapter that holds this binding (its claim file's key), as
+    #: its `bind` named it. A tool token's row maps to it. None when the bind named none;
+    #: such a binding registers no tool token.
+    claim_key: str | None = None
 
 
 @dataclass
@@ -366,7 +371,8 @@ class Daemon:
     def __init__(self, record, *, db_path=None, socket_path=None, clock=time.time,
                  start_trim_thread: bool = True, history_path=None,
                  first_start=None, kinds=None, settings=None,
-                 cache_store=cache.MISSING):
+                 cache_store=cache.MISSING, serve_tools: bool = False,
+                 mcp_port: int | None = None, on_fatal=None):
         self.record = record
         #: The adapter kinds a register may name: the built-in four and each kind the
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
@@ -403,6 +409,46 @@ class Daemon:
         self.proc_view: membership.ProcView = membership.DEFAULT_PROC
         # custody, recorded: the daemon is the only writer, and the only witness
         self.binding_history = bindings.BindingHistory(history_path, clock=clock)
+        #: The tool tokens' registry (`mcp.tokens`): comms.db's `mcp_tokens` through the
+        #: binding history's connection, and its active rows in memory. Loaded at boot
+        #: after the fence. Its evidence reads processes through `proc_view`.
+        self.mcp_tokens = mcp_tokens_mod.Registry(self.binding_history, clock=clock,
+                                                  proc=lambda: self.proc_view)
+        #: Whether this daemon serves comms' tools over MCP now: what `mcp_token`
+        #: answers as `served`. The endpoint sets it once it settles; until then False.
+        self.mcp_served = False
+        #: Whether this daemon serves comms' tools at all when `[mcp] enabled` says so.
+        #: `main` passes True. A daemon a test or an embedding caller builds serves none
+        #: unless it asks, so it never binds the box's port.
+        self.serve_tools = serve_tools
+        #: The port in place of `[mcp] port`; a test passes 0 for any free port.
+        self._mcp_port = mcp_port
+        #: The endpoint's URL while it serves, and why it doesn't when it doesn't
+        #: (`disabled`, `supervised`, `port-taken`, `bind-failed`, `failed`): what
+        #: `mcp_endpoint` answers. `mcp_held` says whether the supervisor holds the port
+        #: (an inherited socket), and `mcp_detail` is the plain line behind either, for
+        #: the doctor. `mcp_unit` is the state comms' socket unit read after a failed
+        #: bind, None when none was read.
+        self.mcp_url: str | None = None
+        self.mcp_why: str | None = None
+        self.mcp_held = False
+        self.mcp_detail: str | None = None
+        self.mcp_unit: str | None = None
+        #: What takes the endpoint's socket, given the port: `mcp.listen.take` when
+        #: None. A test hands in one with its own environment and launchd.
+        self.mcp_listen = None
+        #: The endpoint (`mcp.server.Endpoint`) once it serves.
+        self.mcp_endpoint = None
+        #: What adds the tools to the endpoint's server, given the SDK's server; None
+        #: serves comms' six tools (`mcp.tools`).
+        self.mcp_tools = None
+        #: Where the tools' calls run (`mcp.inprocess.Calls`), made with the endpoint.
+        self.tool_calls = None
+        #: Called once, from the endpoint's loop, when something this daemon can't run
+        #: without has failed (the endpoint, after it started); `main` stops the daemon
+        #: and exits nonzero. `fatal` says what failed.
+        self._on_fatal = on_fatal
+        self.fatal: str | None = None
 
         self._lock = threading.RLock()
         self.bindings: dict[str, Binding] = {}
@@ -533,10 +579,7 @@ class Daemon:
             "send": self._send,
             "bind": self._bind,
             # The reads take no connection.
-            **{name: _read(self, f"_{name}_query") for name in (
-                "resolve", "agents", "session", "owner", "asks", "owed", "readable",
-                "explain", "binding_window", "attributed_message", "rooms", "message",
-                "history", "max_id", "last_digest")},
+            **{name: _read(self, f"_{name}_query") for name in READS},
             "delete": self._delete,
             "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
@@ -545,6 +588,8 @@ class Daemon:
             "look": self._look,
             "activity": self._activity,
             "unanswered": self._note_unanswered,
+            "mcp_token": self._mcp_token,
+            "mcp_endpoint": _read(self, "_mcp_endpoint_query"),
         }
 
     # ------------------------------------------------------------------ directory
@@ -614,6 +659,10 @@ class Daemon:
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
+            # The tool tokens, after the fence cleared their bindings: those whose
+            # session has positively ended are revoked here, the rest wait for their
+            # adapter's next registration.
+            self.mcp_tokens.load()
         # boot: the reserved names, brought in line with what the installed modules
         # declare, which catches a module installed before comms and a store restored
         # from a backup. A failure is logged; the names stay as they were.
@@ -638,6 +687,10 @@ class Daemon:
         self._rebuild_sent_logged()
         self._spawn(self._window_loop)
         self._spawn(self._expiry_loop)
+        # boot: the endpoint of comms' tools settles before any method is answered, so
+        # an adapter's answered `bind` means the endpoint is up when this daemon serves
+        # it, and `mcp_endpoint` never answers from a half-started one.
+        self._settle_endpoint()
         self.host.open()
 
         self._sub = self.record.subscribe()
@@ -657,6 +710,145 @@ class Daemon:
             self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
+
+    def _settle_endpoint(self) -> None:
+        """Serve comms' tools, or settle why not: `[mcp] enabled` and `[mcp] port`, read
+        once here. The MCP libraries are imported only now, and only when enabled. The
+        endpoint runs on the daemon socket host's loop and pool, and the host's stop hook
+        shuts it down before the daemon socket closes.
+
+        The socket is the one the supervisor holds, else the daemon's own on the port
+        (`mcp.listen.take`). A token is revoked only on positive evidence that its cause
+        holds: every live one is revoked `port-taken` when a listener answers on the port
+        and is shown not to be comms' own socket unit, since sessions may have sent their
+        tokens to it. A failed bind beside comms' active socket unit (`supervised`: this
+        daemon runs outside its unit), a listener that may be that unit, and a bind that
+        fails with nothing listening revoke none."""
+        self.mcp_served, self.mcp_url, self.mcp_endpoint = False, None, None
+        self.mcp_held, self.mcp_detail, self.mcp_unit = False, None, None
+        if not self.serve_tools:
+            self.mcp_why = "disabled"
+            return
+        mcp = self.settings.use("mcp")
+        if not mcp.enabled:
+            self.mcp_why = "disabled"
+            log.info("comms' tools aren't served: [mcp] enabled is false")
+            return
+        port = mcp.port if self._mcp_port is None else self._mcp_port
+        try:
+            from .mcp import server as mcp_server
+            from .mcp import tools as mcp_tools
+        except Exception as e:                                   # noqa: BLE001
+            self.mcp_why = "failed"
+            self.mcp_detail = f"the MCP libraries didn't load: {type(e).__name__}: {e}"
+            log.error("comms' tools aren't served: %s", self.mcp_detail)
+            return
+        from .mcp import listen
+
+        taken = (self.mcp_listen or listen.take)(port)
+        self.mcp_detail, self.mcp_unit = taken.detail, taken.unit
+        if taken.sock is None:
+            self.mcp_why = taken.why
+            if taken.why == "port-taken":
+                revoked = self.mcp_tokens.revoke_all("port-taken")
+                log.error("comms' tools aren't served: %s; %d live tool token(s) revoked",
+                          taken.detail, revoked)
+            else:
+                log.error("comms' tools aren't served: %s", taken.detail)
+            return
+        sock = taken.sock
+        self.mcp_held = taken.inherited
+        if taken.inherited and sock.getsockname()[1] != port:
+            log.warning("comms' tools are served on the supervisor's port %d, not "
+                        "[mcp] port %d; launches get the port served", sock.getsockname()[1],
+                        port)
+        verifier = mcp_server.Verifier(self.mcp_tokens.verify, self.host.pool,
+                                       self.host.opened)
+        from .mcp import inprocess
+
+        # Where tool calls run: on the host's pool, a few at a time, so adapters' and
+        # the verbs' methods always find threads free. Made before the tools are added.
+        self.tool_calls = inprocess.Calls(self.host)
+        tools = self.mcp_tools if self.mcp_tools is not None else mcp_tools.adder(self)
+        endpoint = mcp_server.Endpoint(sock, verifier, tools=tools,
+                                       on_failure=self._endpoint_failed)
+        # Set before the start, so a start that runs late is still stopped with the host.
+        self.host.stop_hook = endpoint.stop
+        try:
+            self.host.run_on_loop(endpoint.start(), timeout=wire.START_WAIT)
+        except Exception as e:                                   # noqa: BLE001
+            self.mcp_why, self.mcp_held = "failed", False
+            self.mcp_detail = f"the endpoint didn't start: {e}"
+            log.error("comms' tools aren't served: %s", self.mcp_detail)
+            return
+        self.mcp_endpoint = endpoint
+        self.mcp_url = endpoint.url
+        self.mcp_why = None
+        self.mcp_served = True
+        log.info("comms' tools served at %s", endpoint.url)
+
+    def _endpoint_failed(self, why: str) -> None:
+        """The endpoint stopped serving after it started (on the host's loop): it isn't
+        restarted here. The daemon stops and exits nonzero, and its supervisor starts it
+        again, which every adapter sees as a rebind."""
+        self.mcp_served, self.mcp_url, self.mcp_why = False, None, why
+        self.fatal = f"comms' tools endpoint {why}"
+        log.error("%s; the daemon stops so its supervisor can start it again",
+                  self.fatal)
+        if self._on_fatal is not None:
+            self._on_fatal(self.fatal)
+
+    def live_credential(self, claim_key: str, identity: str | None = None):
+        """The live binding behind `claim_key`'s active tool token: `(identity,
+        credential)`, the identity the token's row maps to and the credential of that
+        identity's binding now, its token's hash as hex. The daemon keeps no binding's
+        token, only its hash, and accepts the hash in place of the token only from a
+        connection in its own process (`_presented`). None when the claim has no active row (or its row maps to another identity
+        than `identity`), and when the row's binding isn't live: the daemon restarted and
+        the adapter hasn't bound again, or its connection dropped. comms' tools send as
+        this pair, in this process, and the post checks it against the binding as it
+        checks an adapter's token."""
+        rows = [row for row in self.mcp_tokens.active() if row.claim_key == claim_key]
+        with self._lock:
+            for row in rows:
+                if identity is not None and row.identity != identity:
+                    continue
+                if row.binding_id is None:
+                    continue
+                b = self.bindings.get(row.identity)
+                if (b is not None and b.history_id == row.binding_id
+                        and b.claim_key == claim_key and b.token_hash):
+                    return b.qualified, b.token_hash.hex()
+        return None
+
+    def _mcp_endpoint_query(self, frame: dict) -> dict:
+        """`mcp_endpoint`: whether this daemon serves comms' tools, at which URL, and
+        why not when it doesn't; `held`, whether the supervisor holds the port it serves
+        on, `detail`, the plain line behind the answer, `unit`, the state comms' socket
+        unit read after a failed bind (None when none was read), and `revoked`, the live
+        bindings whose session's token was revoked, for the doctor. Settled before any
+        method is answered."""
+        served = bool(self.mcp_served)
+        return {"served": served, "url": self.mcp_url if served else None,
+                "why": None if served else (self.mcp_why or "disabled"),
+                "held": served and self.mcp_held, "detail": self.mcp_detail,
+                "unit": None if served else self.mcp_unit,
+                "revoked": self._revoked_bindings()}
+
+    def _revoked_bindings(self) -> list[dict]:
+        """Each live binding whose claim holds no active tool token and whose newest
+        token was revoked: `{identity, why}`, by identity. The claim key a binding's
+        `bind` named is kept only in memory, so only this daemon can tell. A binding
+        that named no claim, or whose claim never registered a token (a session launched
+        without comms' tools), isn't listed."""
+        with self._lock:
+            live = [(b.qualified, b.claim_key) for b in self.bindings.values()
+                    if b.claim_key]
+        if not live:
+            return []
+        whys = self.mcp_tokens.revoked_of(claim for _, claim in live)
+        return [{"identity": identity, "why": whys[claim]}
+                for identity, claim in sorted(live) if claim in whys]
 
     def _reconcile_reserved(self) -> None:
         from . import reserved
@@ -688,10 +880,13 @@ class Daemon:
         with self._expiry_cond:
             self._expiry_cond.notify_all()
         if self.host is not None:
+            # The endpoint of comms' tools stops first, through the host's stop hook,
+            # while the daemon still holds its socket's lock.
             if not self.host.close():
                 log.warning("the daemon socket did not close within %.0f s",
                             wire.CLOSE_WAIT)
             self.host = None
+        self.mcp_served = False
         if self._sub is not None:
             self.record.unsubscribe(self._sub)
         for t in self._threads:
@@ -918,6 +1113,11 @@ class Daemon:
         if adapter not in self.kinds:
             raise Refusal(f"unknown adapter kind {adapter!r}; expected one of "
                           f"{', '.join(self.kinds.names())}", code=wire.UNKNOWN_ADAPTER)
+        # The adapter's claim key, which a tool token's row maps to. Optional: an adapter
+        # that registers no tool token need not name it.
+        claim_key = frame.get("claim")
+        if claim_key is not None and not mcp_tokens_mod.valid_claim_key(claim_key):
+            raise Refusal("claim: not a claim key", code=wire.INVALID_PARAMS)
         # The catch-up boundary is READ BEFORE THE LOCK. It is a record round trip -- a
         # file read, local or mock -- and taking it under the daemon's ONE lock made every register
         # wait out every other register's network call, and every router, resolver and
@@ -989,7 +1189,7 @@ class Daemon:
             hwm = max(hwm, self._seen_max, key=int)
             binding = Binding(conn=conn, qualified=q, name=name, scope=scope, tier=tier,
                               adapter=adapter, bound_at=self.clock(),
-                              replay_hwm=hwm)
+                              replay_hwm=hwm, claim_key=claim_key)
             # The session behind the name, from the register itself: this frame is the
             # binding's own connection by construction. With it, the shim's evidence for
             # `fresh`; an id another live binding holds is refused.
@@ -1005,6 +1205,9 @@ class Daemon:
             binding.history_id = self.binding_history.bind(
                 qualified=q, name=name, scope=scope, tier=tier,
                 adapter=adapter, at=binding.bound_at)
+            # The name went to this claim: another claim's tool tokens for it are
+            # revoked, so a session that lost its name loses its tools with it.
+            self.mcp_tokens.name_bound(q, claim_key)
             log.info("bind %s tier=%s adapter=%s", q, tier, adapter)
         # `high`, the catch-up boundary: the shim's registration high-water id. A `re:`
         # below it was sent before that shim could see payments.
@@ -1047,8 +1250,7 @@ class Daemon:
             if self._stopping:
                 raise DaemonStopping()
             binding = self.bindings.get(who)
-            given = (hashlib.sha256(token.encode()).digest()
-                     if isinstance(token, str) else b"")
+            given = _presented(conn, token)
             if binding is None or not hmac.compare_digest(binding.token_hash, given):
                 raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                               credential=True)
@@ -1159,8 +1361,7 @@ class Daemon:
         else:
             with self._lock:
                 binding = self.bindings.get(who)
-                given = (hashlib.sha256(token.encode()).digest()
-                         if isinstance(token, str) else b"")
+                given = _presented(conn, token)
                 if binding is None or not hmac.compare_digest(binding.token_hash, given):
                     raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                                   credential=True)
@@ -1322,14 +1523,60 @@ class Daemon:
                 for key in [k for k in self.unanswered if k[0] == b.qualified]:
                     del self.unanswered[key]
                 # the close of the custody interval: the connection IS the liveness
-                # signal, so the connection's end is the release, here and nowhere else
+                # signal, so the connection's end is the release, here and nowhere else.
+                # Its tool tokens lose the binding in the same transaction.
                 self.binding_history.release(b.history_id)
+                self.mcp_tokens.released(b.history_id)
                 log.info("unbind %s: its connection from pid %s ended (a peer that stops "
                          "reading is dropped after %.0f s)", b.qualified,
                          getattr(getattr(conn, "peer", None), "pid", None),
                          wire.WRITE_DEADLINE)
         if gone:
             self._queue_flush()
+            # Each released claim's session may have ended with it: its tool tokens are
+            # revoked only on positive evidence.
+            claims = {b.claim_key for b in gone if b.claim_key}
+            if claims:
+                self.mcp_tokens.check_ended(claims)
+
+    # ------------------------------------------------------------------ the tool token
+    def _mcp_token(self, conn, params: dict) -> dict:
+        """`mcp_token`: register the hash of the session's tool token for the binding
+        this connection holds, after its bind. Answers `served`, whether this daemon
+        serves comms' tools now. Refused `mcp-token-taken` when another claim's row has
+        the hash (or this claim's row for another identity), `mcp-token-revoked` for a
+        revoked one, and `name-reserved` for a reserved identity."""
+        token_hash = params.get("hash")
+        if not mcp_tokens_mod.is_digest(token_hash):
+            raise Refusal("hash: the token's SHA-256 as 64 lowercase hex digits",
+                          code=wire.INVALID_PARAMS)
+        b = self._own_binding(conn, params)
+        self._not_bound(b)
+        with self._lock:
+            # Under the lock a release takes too, so the row never names a binding that
+            # was released while this ran.
+            if self.bindings.get(b.qualified) is not b:
+                self._not_bound(None)
+            with self._db() as db:
+                if reserved_mod.lookup(db, b.qualified) is not None:
+                    raise Refusal(f"{b.qualified} is a reserved name, and a reserved name "
+                                  "has no tools", code=wire.NAME_RESERVED,
+                                  name=b.qualified)
+            if not b.claim_key:
+                raise Refusal("this binding's bind named no claim, so it registers no "
+                              "token", code=wire.INVALID_PARAMS)
+            if b.history_id is None:
+                raise wire.error(wire.FAILED, "this binding isn't recorded in comms' "
+                                 "store; bind again and register then")
+            try:
+                self.mcp_tokens.register(token_hash, claim=b.claim_key,
+                                         identity=b.qualified, adapter=b.adapter,
+                                         binding_id=b.history_id)
+            except mcp_tokens_mod.Refused as e:
+                raise Refusal(e.reason, code=e.code) from None
+            except RuntimeError as e:
+                raise wire.error(wire.FAILED, str(e)) from None
+        return {"served": bool(self.mcp_served)}
 
     # ------------------------------------------------------------------ query
     def _agents_query(self, frame: dict) -> dict:
@@ -3332,6 +3579,12 @@ class DaemonStopping(Exception):
     retries."""
 
 
+#: The read methods: any client may call them, and they take no connection.
+READS = ("resolve", "agents", "session", "owner", "asks", "owed", "readable", "explain",
+         "binding_window", "attributed_message", "rooms", "message", "history", "max_id",
+         "last_digest")
+
+
 class Refusal(Exception):
     """The daemon's own no, with its comms error `code` (`wire`), and in `extra` what
     it names (the holder of a name, say), which goes in the error's `data`. A refusal
@@ -3341,6 +3594,21 @@ class Refusal(Exception):
         super().__init__(message)
         self.code = code
         self.extra = extra
+
+
+def _presented(conn, token) -> bytes:
+    """The hash the `token` of a `send` or `delete` stands for: the token's SHA-256, or,
+    from a connection in comms' own process (its tools, `mcp.inprocess`), the hash
+    itself as hex, since the daemon keeps only the hash of a binding's token. No socket
+    connection is in process, so over the socket only the token itself is accepted."""
+    if not isinstance(token, str):
+        return b""
+    if getattr(conn, "in_process", False) is True:
+        try:
+            return bytes.fromhex(token)
+        except ValueError:
+            return b""
+    return hashlib.sha256(token.encode()).digest()
 
 
 def _unknown_message(mid: str) -> Refusal:
@@ -3492,7 +3760,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     store = (tokens.TokenStore(None, env=os.environ)
              if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
-    daemon = Daemon(record, first_start=first_start, settings=settings)
+    daemon = Daemon(record, first_start=first_start, settings=settings, serve_tools=True,
+                    on_fatal=lambda why: stopping.set())
     try:
         daemon.start()
     except RuntimeError as e:
@@ -3511,7 +3780,9 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
         daemon.stop()
         with contextlib.suppress(Exception):
             record.close()          # the process owns the socket it opened
-    return 0
+    # Exits nonzero when something it can't run without failed, so its supervisor
+    # starts it again.
+    return 1 if daemon.fatal else 0
 
 
 __all__ = ["Daemon", "Refusal", "Author", "Binding", "TRIM_INTERVAL", "TRIM_TICK",

@@ -175,7 +175,8 @@ def test_no_instructions_lays_the_options_alone(host):
 def test_the_host_is_an_endpoint_that_can_start_and_compact(host):
     s, h, world = host()
     assert s.harness == "opencode"
-    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact", "agents"})
+    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact", "agents",
+                                        "environ"})
     assert s.session_id == h.session_id and h.session_id.startswith("ses_")
     for call, lacking in ((lambda: s.steer("x"), "steer"),
                           (lambda: s.command("clear"), "clear"),
@@ -519,9 +520,14 @@ def test_a_4xx_post_refuses_and_ends_the_endpoint(host):
     s, h, world = host()
     world.fake.post_answers.append((400, {"name": "BadRequest"}))
     # The server turned the text down, so it never ran: `unsupported`, settled before the
-    # endpoint ends. A wait that connects only after the end finds nothing serving.
+    # endpoint ends. The end runs on a thread of its own, so the wait can land after it:
+    # while the ending endpoint still listens it answers every method with the `gone`
+    # error, which a wait reads as `lost` (the socket protocol, "Refused"), and once it
+    # has closed a wait finds nothing serving.
     got = bare(s.deliver("x", only_if_idle=True).wait_started(5))
-    assert got in (Refused("unsupported"), Lost("unanswered"))
+    ending = (isinstance(got, Lost) and got.reason.startswith("gone: the endpoint is ending")
+              and "400" in got.reason)
+    assert got in (Refused("unsupported"), Lost("unanswered")) or ending, got
     assert until(lambda: h.endpoint.is_gone)
     assert "400" in h.endpoint._gone
 
@@ -667,3 +673,160 @@ def test_the_doctor_names_the_opencode_binary(monkeypatch, tmp_path):
     monkeypatch.setattr(opencode, "INSTALL_DIR", tmp_path / "none")
     [row] = opencode.rows()
     assert row.state == "off" and "experimental" in row.name
+
+
+# -- after a tool: observe only ------------------------------------------------------------
+
+@pytest.fixture
+def after_rows(monkeypatch):
+    """An installed `after-tool` row (`listener_targets:after`), as the endpoint loads."""
+    import listener_targets
+    from moxi_turns import listeners
+
+    class Row:
+        name = "usage"
+
+        def load(self):
+            import types
+            return types.SimpleNamespace(LISTENERS=[("after-tool", "listener_targets:after")])
+
+    registry = listeners.load([Row()], order=(), limit=0)
+    monkeypatch.setattr(listeners, "load", lambda *a, **kw: registry)
+    listener_targets.CALLS.clear()
+    return listener_targets.CALLS
+
+
+def _after_calls(calls, tool):
+    return [c for c in calls if c[0] == "after" and c[1] == tool]
+
+
+@pytest.fixture
+def floored_rows(monkeypatch):
+    """An installed `after-tool` row with a floor of 1000 tokens."""
+    import listener_targets
+    from moxi_turns import listeners
+
+    class Row:
+        name = "usage"
+
+        def load(self):
+            import types
+            return types.SimpleNamespace(LISTENERS=[
+                ("after-tool", "listener_targets:after",
+                 {"floor": "listener_targets:floor"})])
+
+    registry = listeners.load([Row()], order=(), limit=0)
+    monkeypatch.setattr(listeners, "load", lambda *a, **kw: registry)
+    monkeypatch.setitem(listener_targets.FLOOR, "value", 1000)
+    listener_targets.CALLS.clear()
+    return listener_targets.CALLS
+
+
+def _assistant(world, sid, tokens):
+    """A finished assistant message's update carrying `tokens`, opening no turn."""
+    now = int(time.time() * 1000)
+    world.fake.emit("message.updated", {"sessionID": sid, "info": {
+        "id": fake_opencode.mint("msg"), "role": "assistant", "sessionID": sid,
+        "tokens": tokens, "time": {"created": now, "completed": now}}})
+
+
+def test_the_floor_gates_only_the_sessions_own_calls_by_its_last_reading(
+        host, floored_rows):
+    s, h, world = host()
+    sid = h.session_id
+    assert until(lambda: list(h.endpoint.floors.values().values()) == [1000])
+    child = world.fake.create_session("look", parent=sid)["id"]
+    time.sleep(0.2)
+
+    def asked(tool):
+        world.fake.tool_part(owner[tool], tool, tool, "completed")
+        time.sleep(0.3)
+        return bool(_after_calls(floored_rows, tool))
+
+    owner = {}
+    for tool in ("oc_a", "oc_b", "oc_c", "oc_d", "oc_e"):
+        owner[tool] = sid
+    owner["oc_child"] = child
+    # No reading yet: an unknown context never skips.
+    assert h.context_tokens() is None
+    assert asked("oc_a")
+    _assistant(world, sid, {"input": 300, "output": 50, "reasoning": 0,
+                            "cache": {"read": 200, "write": 0}})
+    assert until(lambda: h.context_tokens() == 500)
+    assert not asked("oc_b")
+    # A subagent's call always reaches the row.
+    assert asked("oc_child")
+    _assistant(world, sid, {"input": 600, "output": 1, "reasoning": 0,
+                            "cache": {"read": 300, "write": 100}})
+    assert until(lambda: h.context_tokens() == 1000)
+    assert asked("oc_c")
+    # A message being written reports zeros, which is no reading.
+    _assistant(world, sid, {"input": 0, "output": 0, "reasoning": 0,
+                            "cache": {"read": 0, "write": 0}})
+    time.sleep(0.2)
+    assert h.context_tokens() == 1000
+    assert asked("oc_d")
+    # A child session's message is not the session's context.
+    _assistant(world, child, {"input": 10, "cache": {"read": 0, "write": 0}})
+    time.sleep(0.2)
+    assert h.context_tokens() == 1000
+    assert asked("oc_e")
+
+
+def test_the_host_has_no_tool_points():
+    h = opencode.OpenCodeHarness
+    assert h.tool_points() == {"pre": False, "after": False}
+    assert opencode.OpenCodeHarness("/").after_tool_point() is None
+
+
+def test_a_finished_tool_part_tells_the_after_tool_rows_once_and_drops_the_text(
+        host, after_rows, caplog):
+    caplog.set_level("INFO", logger="moxi.turns.opencode")
+    s, h, world = host()
+    sid = h.session_id
+    part = world.fake.tool_part(sid, "call_1", "oc_echo", "pending")
+    world.fake.tool_part(sid, "call_1", "oc_echo", "running", part_id=part)
+    time.sleep(0.2)
+    assert _after_calls(after_rows, "oc_echo") == []        # not finished yet
+    world.fake.tool_part(sid, "call_1", "oc_echo", "completed", part_id=part)
+    world.fake.tool_part(sid, "call_1", "oc_echo", "completed", part_id=part)  # sent again
+    world.fake.tool_part(sid, "call_2", "oc_fail", "error")
+    assert until(lambda: _after_calls(after_rows, "oc_fail"))
+    time.sleep(0.2)
+    # (tool, agent_id, is_error, point, record_path, cwd): the session's own calls.
+    assert _after_calls(after_rows, "oc_echo") == [
+        ("after", "oc_echo", None, False, "after", None, h.cwd)]
+    assert _after_calls(after_rows, "oc_fail") == [
+        ("after", "oc_fail", None, True, "after", None, h.cwd)]
+    dropped = [r.getMessage() for r in caplog.records
+               if "after-tool rows' text" in r.getMessage()]
+    assert len(dropped) == 1 and "after oc_" not in dropped[0]
+
+
+def test_a_subagents_tool_part_carries_its_session_and_a_strangers_is_not_told(
+        host, after_rows):
+    s, h, world = host()
+    child = world.fake.create_session("look", parent=h.session_id)["id"]
+    grandchild = world.fake.create_session("deeper", parent=child)["id"]
+    stranger = world.fake.create_session("someone else's")["id"]
+    time.sleep(0.2)
+    world.fake.tool_part(stranger, "call_s", "oc_stranger", "completed")
+    world.fake.tool_part(child, "call_c", "oc_child", "completed")
+    world.fake.tool_part(grandchild, "call_g", "oc_grand", "completed")
+    assert until(lambda: _after_calls(after_rows, "oc_grand"))
+    assert until(lambda: _after_calls(after_rows, "oc_child"))
+    time.sleep(0.2)
+    assert _after_calls(after_rows, "oc_child")[0][2] == child
+    assert _after_calls(after_rows, "oc_grand")[0][2] == grandchild
+    assert _after_calls(after_rows, "oc_stranger") == []
+
+
+def test_with_no_after_tool_row_a_finished_part_asks_nothing(host, monkeypatch):
+    from moxi_turns.endpoint import Endpoint
+
+    asked = []
+    monkeypatch.setattr(Endpoint, "after_tool", lambda self, *a, **kw: asked.append(a))
+    s, h, world = host()
+    world.fake.tool_part(h.session_id, "call_1", "oc_echo", "completed")
+    time.sleep(0.3)
+    assert asked == []

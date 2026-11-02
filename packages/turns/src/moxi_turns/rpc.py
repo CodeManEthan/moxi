@@ -14,7 +14,11 @@ A handler on the loop never waits on the harness or on a blocking write. `sessio
 `deliver`, `steer`, `stops.handle`, `stops.answer` and a `wait` with `timeout_ms` 0 read or
 write the core's record and answer at once: `deliver` and `steer` record the delivery and
 put its hand-off on the endpoint's ordered worker in one locked step, before the handler's
-first `await`. `facts`, `agents` and `watch` await the endpoint's bounded live read, which
+first `await`. `environ` reads the endpoint's own copy of the session's environment and answers at once.
+`usage.codex_limits` and `mcp.reload` (a Codex host's) run on a thread of their own: the
+first waits on one app-server request, the second on the host's MCP settle, which its
+deadline bounds. `usage.codex_limits` with `cached` answers from the host's record at once.
+`facts`, `agents` and `watch` await the endpoint's bounded live read, which
 runs on its reader threads, so they answer within the harness's live bound. A `wait` with
 a bound or none, and a `command`, which waits for its settle, run on a thread of their
 own, so the loop keeps serving every other connection while they wait.
@@ -25,14 +29,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import math
+import re
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from moxi import ipc
 
-from .results import (CAPABILITIES, COMMAND_WAIT_S, COMMANDS, ERROR_CAPABILITY,
-                      ERROR_GONE, ERROR_STOP_HANDLER_TAKEN, REFUSED_GONE,
+from .results import (CAPABILITIES, COMMAND_WAIT_S, COMMANDS, ENVIRON_MAX_NAMES,
+                      ERROR_CAPABILITY, ERROR_GONE, ERROR_STOP_HANDLER_TAKEN, REFUSED_GONE,
                       STOP_SHELLS_WAIT_S, Refused, check_ref)
 
 if TYPE_CHECKING:
@@ -40,6 +45,8 @@ if TYPE_CHECKING:
 
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
+#: A name `environ` may ask: an environment variable's name.
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def gone(reason: str | None) -> ipc.RpcError:
@@ -75,6 +82,9 @@ class Rpc:
             "watch": self._watch,
             "stops.handle": self._stops_handle,
             "stops.answer": self._stops_answer,
+            "environ": self._environ,
+            "usage.codex_limits": self._codex_limits,
+            "mcp.reload": self._mcp_reload,
         }
 
     async def __call__(self, conn: ipc.Connection, method: str, params: object) -> Any:
@@ -221,6 +231,44 @@ class Rpc:
         if reason is not None and not isinstance(reason, str):
             raise invalid("reason is a string, or null to let the turn end")
         return {"taken": self.ep.stop_answer(ask, reason)}
+
+    async def _environ(self, conn, params: dict) -> dict:
+        """The named variables in the endpoint's copy of the session's environment, null
+        for one that is unset. Only the names asked; no other process is read."""
+        names = params.get("names")
+        if not isinstance(names, list):
+            raise invalid("names is a list of environment variable names")
+        if len(names) > ENVIRON_MAX_NAMES:
+            raise invalid(f"names lists at most {ENVIRON_MAX_NAMES} names")
+        for name in names:
+            if not isinstance(name, str) or not ENV_NAME.fullmatch(name):
+                raise invalid(f"{name!r} is not an environment variable name "
+                              "([A-Za-z_][A-Za-z0-9_]*)")
+        self._needs("environ")
+        env = self.ep.env
+        return {"values": {name: env.get(name) for name in names}}
+
+    async def _codex_limits(self, conn, params: dict) -> dict:
+        """A Codex host's rate-limits reading: read now on its app-server, or with
+        `cached` the last one it saw."""
+        cached = _bool(params, "cached")
+        self._needs("usage")
+        read = getattr(self.ep.harness, "codex_limits", None)
+        if read is None:
+            raise ipc.RpcError(ERROR_CAPABILITY, f"this {self.ep.harness.name} session "
+                               "does not offer usage.codex_limits", {"capability": "usage"})
+        if cached:
+            return read(cached=True)
+        return await self._in_thread(read)
+
+    async def _mcp_reload(self, conn, params: dict) -> dict:
+        """A Codex host's MCP settle: `{reloaded, servers}` once it ends or its deadline
+        passes."""
+        self._needs("mcp-token")
+        settle = getattr(self.ep.harness, "mcp_reload", None)
+        if settle is None:
+            raise lacks("mcp-token")
+        return await self._in_thread(settle)
 
     # -- checks -------------------------------------------------------------------------
 

@@ -209,8 +209,9 @@ def reconcile(gone: str | None = None, *, declared=None, chain=None, env=None,
 
 def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result:
     """comms' own uninstall: free every `active` row and remove every token comms
-    minted, so no token outlives the code that checks it. Conflict and unowned rows stay
-    as they are; the rows stay in comms.db until a purge takes it.
+    minted, so no token outlives the code that checks it, and revoke every session's
+    token for comms' tools. Conflict and unowned rows stay as they are; the rows stay in
+    comms.db until a purge takes it.
 
     A token can outlive its row's hash: a freed name whose token couldn't be removed, a
     mint whose commit failed. So after the frees, the token of every name any row or
@@ -225,6 +226,7 @@ def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result
         for name, row in found.items():
             if row["state"] == ACTIVE and row["freed_at"] is None:
                 _free(conn, chain, name, row["module"], clock, result)
+        _revoke_tool_tokens(conn, clock, result)
     done = set(result.freed)
     for name, module in sorted(_minted(chain, found) - done):
         try:
@@ -234,6 +236,21 @@ def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result
             result.lines.append(f"{module}: {name}'s token couldn't be removed: {e}")
             log.warning("%s's token for %s couldn't be removed: %s", name, module, e)
     return result
+
+
+def _revoke_tool_tokens(conn, clock, result: Result) -> None:
+    """comms' uninstall revokes every session's token for comms' tools, in one
+    transaction: a revoked token never comes back, so nothing a session still holds
+    sends through a reinstalled comms."""
+    from moxi.store import transaction
+
+    from .mcp import tokens
+
+    with transaction(conn) as c:
+        revoked = tokens.revoke_store(c, tokens.UNINSTALL, at=clock())
+    if revoked:
+        result.lines.append(f"comms: {revoked} session token(s) for comms' tools "
+                            "revoked")
 
 
 def _minted(chain, found: dict) -> set:

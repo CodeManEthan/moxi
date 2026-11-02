@@ -126,6 +126,7 @@ class Debt:
     session_id: str | None
     counted: bool = False       # its one reminder has counted
     pending: bool = False       # a printed block named it, not yet counted or voided
+    asked_back: bool = False    # R sent the author a `once` message after it, at a Stop
 
 
 @dataclass
@@ -219,16 +220,20 @@ class Ledger:
 
     def settle(self, answer: dict, now: float) -> None:
         """Payments, then the loop-breaker, from the daemon's `owed` answer, settled at a
-        Stop. A paid debt leaves with its state; so does one the loop-breaker exempts."""
+        Stop. A paid debt leaves with its state; so does one the loop-breaker exempts. A
+        debt that R's `once` message to its author followed, which pays nothing, is marked
+        `asked_back`, so its reminder says it was asked back on rather than unanswered."""
         sent = answer.get("sent") or {}
         for d in list(self.debts.values()):
-            paying = [row for row in self._candidates(sent, d)
-                      if _as_id(row.get("id")) > _as_id(d.message_id)
-                      and row.get("posture") != POSTURE_ONCE]
+            later = [row for row in self._candidates(sent, d)
+                     if _as_id(row.get("id")) > _as_id(d.message_id)]
+            paying = [row for row in later if row.get("posture") != POSTURE_ONCE]
             if paying:
                 del self.debts[d.message_id]
                 for row in paying:
                     self.payments.setdefault(str(row["id"]), now)
+            elif later:
+                d.asked_back = True
         referents = answer.get("referents") or {}
         for d in list(self.debts.values()):
             if self._loop_broken(d, referents):
@@ -254,8 +259,9 @@ class Ledger:
         return False
 
     def decide(self, *, stop_hook_active: bool, turn_blocks: int, work: bool,
-               floor, now: float) -> Decision:
-        """The rest of a Stop's decision, after the facts are read and settled."""
+               floor, now: float, form: str | None = None) -> Decision:
+        """The rest of a Stop's decision, after the facts are read and settled. `form`
+        is the session's form of layer one, which the reminder's text follows."""
         if stop_hook_active and turn_blocks == 0:
             return Decision()                       # step 5: another hook blocked
         for d in self.debts.values():               # step 6: settle pending marks
@@ -272,7 +278,7 @@ class Ledger:
                          if not d.counted and self.decidable(d, floor)),
                         key=lambda d: _as_id(d.message_id))
         if turn_blocks == 0 and remind:             # step 9
-            return Decision(block=reminder_text(remind, now),
+            return Decision(block=reminder_text(remind, now, form),
                             names=tuple(d.message_id for d in remind), dropped=recorded)
         return Decision(dropped=recorded)
 
@@ -308,13 +314,16 @@ class ReplyCheck:
     are read in the same hold of the lock as the expiry.
 
     `moment` names the turn end in the log ("Stop"), `check` the check itself, and
-    `start` the session change's log prefix.
+    `start` the session change's log prefix. `form()` gives the session's form of layer
+    one (`context.layer_one_form`), which the reminder's text follows; None, the CLI
+    form, when not given.
     """
 
     def __init__(self, lock, *, clock, identity, queued, owed_query, connection, log,
                  stop_facts=None, moment="Stop", check="Stop check",
-                 start="SessionStart "):
+                 start="SessionStart ", form=None):
         self.lock = lock
+        self.form = form or (lambda: None)
         self.clock = clock
         self.identity = identity
         self.queued = queued
@@ -379,7 +388,8 @@ class ReplyCheck:
                            awaiting=answer.get("awaiting"))
             return self.ledger.decide(stop_hook_active=active,    # steps 5 to 9
                                       turn_blocks=self.turn_blocks, work=work,
-                                      floor=answer.get("floor"), now=now)
+                                      floor=answer.get("floor"), now=now,
+                                      form=self.form())
 
     def _read_facts(self, fields: dict):
         """Step 2, under the lock: the turn end's facts and the query's arguments, or
@@ -454,39 +464,76 @@ def _named(d: Debt, now: float) -> str:
     return f"{d.author}'s msg {d.message_id} (directive, {_age(now - d.at)})"
 
 
-ANSWER_HINT = '"the result, the blocker, or your question"'
-ASK_BACK = ("If you need to ask your director or a peer before you can answer, add "
-            "--posture once: that keeps it open.")
+#: What the answer holds, said as a description: the reminder gives no sample text, since a
+#: model can send a sample as its reply.
+ANSWER_WORDS = ("your answer, in your own words, as its text: what you did or found, or "
+                "what stops you.")
+#: The plain answer asks nothing back: its posture is left out, which closes an ask.
+PLAIN = "Leave out --posture: a plain answer asks nothing back."
+#: The exception: asking back keeps the owed message open, and owes the other side.
+ASK_BACK = ("Ask something back only when you can't answer without it: add --posture "
+            "once to the message that asks, and the one you owe stays open until you "
+            "answer it.")
 TERMINAL = "If you already answered the operator at the terminal, stop again."
 TAIL = "If it needs no answer, stop again."
+#: The tools form's sentences: the `reply` tool's `posture` field, not a flag.
+TOOLS_PLAIN = "Leave posture out: a plain answer asks nothing back."
+TOOLS_ASK_BACK = ("Ask something back only when you can't answer without it: set posture "
+                  "`once` on the message that asks, and the one you owe stays open until "
+                  "you answer it.")
+#: The tools form's CLI fallback, for a session whose shell can reach comms.
+TOOLS_FALLBACK = ("If the comms tools are missing, run `moxi comms reply {id}` with your "
+                  "answer as its text instead.")
 
 
-def reminder_text(debts, now: float) -> str:
+def reminder_text(debts, now: float, form: str | None = None) -> str:
     """The block's reason.
 
-    Up to three owed messages, oldest first, then "and <k> more". The ask-back sentence
-    stays when any listed debt is a director's or a peer's (for an operator-only block it
-    has no work to do); a debt to the operator adds the terminal sentence. It never asks
-    for progress.
+    Up to three owed messages, oldest first, then "and <k> more". It says what the answer
+    holds and gives no sample text to send, and its plain answer leaves the posture out,
+    so it asks nothing back. The ask-back sentence, the exception, stays when any listed
+    debt is a director's or a peer's (for an operator-only block it has no work to do); a
+    debt to the operator adds the terminal sentence. It never asks for progress. A debt
+    asked back on (`Debt.asked_back`) is said to be still owed, not unanswered.
+
+    `form` is the session's form of layer one (`context.layer_one_form`). The CLI form
+    (None) names `moxi comms reply`. A tools form names the `reply` tool and its
+    `posture`; `TOOLS` adds the CLI as the fallback, and `TOOLS_ONLY`, a session whose
+    shell can't reach comms, names no command at all.
     """
+    from .context import TOOLS_ONLY
+
     debts = sorted(debts, key=lambda d: _as_id(d.message_id))
     shown = debts[:REMINDER_LIST]
+    tools = form is not None
     if len(debts) == 1:
         d = debts[0]
-        lines = [f"comms: you are ending this turn without answering {_named(d, now)}. "
-                 "Answer it now with",
-                 f"  moxi comms reply {d.message_id} {ANSWER_HINT}"]
+        lines = [f"comms: you asked something back on {_named(d, now)}, so you still "
+                 "owe the reply that settles it." if d.asked_back else
+                 f"comms: you are ending this turn without answering {_named(d, now)}."]
+        how = (f"call the reply tool with message_id {d.message_id} and" if tools
+               else f"run `moxi comms reply {d.message_id}` with")
+        lines.append(f"Answer it now: {how} {ANSWER_WORDS}")
+        one = d.message_id
     else:
-        lines = ["comms: you are ending this turn without answering:"]
-        lines += [f"  {_named(d, now)}" for d in shown]
+        lines = ["comms: you are ending this turn still owing a reply to:"
+                 if any(d.asked_back for d in debts) else
+                 "comms: you are ending this turn without answering:"]
+        lines += [f"  {_named(d, now)}" + (", after you asked something back"
+                                           if d.asked_back else "") for d in shown]
         if len(debts) > len(shown):
             lines.append(f"  and {len(debts) - len(shown)} more")
-        lines += ["Answer each now with", f"  moxi comms reply <id> {ANSWER_HINT}"]
-    tail = []
+        how = ("call the reply tool with its message_id and" if tools
+               else "run `moxi comms reply <id>` with")
+        lines.append(f"Answer each now: {how} {ANSWER_WORDS}")
+        one = "<id>"
+    tail = [TOOLS_PLAIN if tools else PLAIN]
     if any(d.branch in (BRANCH_DIRECTOR, BRANCH_PEER) for d in debts):
-        tail.append(ASK_BACK)
+        tail.append(TOOLS_ASK_BACK if tools else ASK_BACK)
     if any(d.branch == BRANCH_OPERATOR for d in debts):
         tail.append(TERMINAL)
+    if tools and form != TOOLS_ONLY:
+        tail.append(TOOLS_FALLBACK.format(id=one))
     tail.append(TAIL)
     return "\n".join(lines + [" ".join(tail)])
 

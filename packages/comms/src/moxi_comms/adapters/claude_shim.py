@@ -464,6 +464,13 @@ class ClaudeShim:
     #: A first bind into a name another session holds waits for it. A wrapper that
     #: refuses such a launch before its harness starts turns this off.
     WAIT_WHEN_HELD: bool = True
+    #: The session's token for comms' tools (`binding.ToolToken`), registered after
+    #: every bind; None when the launch carries none.
+    tool_token: binding.ToolToken | None = None
+    #: The form of layer one this session was taught (`context.layer_one_form` of its
+    #: launch), read before the token leaves the environment; None is the CLI form. The
+    #: reply reminder follows it.
+    layer_form: str | None = None
 
     def __init__(self, *, name=None, scope=None, global_=False,
                  project=None, injector=None, socket_path=None, status_sink=None,
@@ -571,7 +578,7 @@ class ClaudeShim:
             self._lock, clock=lambda: self.clock(), identity=lambda: self.identity,
             queued=lambda: bool(self.queue),
             owed_query=lambda *args: self.owed_query(*args),
-            connection=lambda: self._client, log=log)
+            connection=lambda: self._client, log=log, form=lambda: self.layer_form)
         #: Why the supervisor ended, recorded on each of its two ways out: "stopped", or
         #: the has-held stop's reason. None while it runs.
         self.ended_because: str | None = None
@@ -756,7 +763,8 @@ class ClaudeShim:
                                global_=self.global_, project=self.project,
                                adapter="claude-shim", session_id=session_id,
                                projects_root=projects_root,
-                               turned=turned, endpoint=endpoint)
+                               turned=turned, endpoint=endpoint,
+                               claim=self.claims.key)
 
         owed_ready = None
 
@@ -773,7 +781,7 @@ class ClaudeShim:
 
         resp = binding.register_and_install(
             self, client_type=DaemonClient, on_close=self._on_close, register=register,
-            install=install, bound=bound, ledger=self.ledger)
+            install=install, bound=bound, ledger=self.ledger, token=self.tool_token)
         if resp in (binding.STOPPED, binding.DROPPED):
             return False
         log.info("registered as %s (tier %s)", self.identity, self.tier)

@@ -53,6 +53,8 @@ class FakeRunner:
         self.draft = False
         self.agent_list: list | None = []
         self.answer_live = True
+        #: Every `guards` line's table, in order; the hello's table is in `first`.
+        self.tables: queue.Queue = queue.Queue()
         self._seq = itertools.count(1)
         self._first = threading.Event()
         self.parked = threading.Event()
@@ -71,6 +73,9 @@ class FakeRunner:
                 self.parked.set()
                 self._resume.wait()
                 self.parked.clear()
+                continue
+            if line.get("op") == leg.LINE_GUARDS:
+                self.tables.put(line["table"])
                 continue
             if line.get("op") == leg.LINE_AGENTS:
                 if self.answer_live:

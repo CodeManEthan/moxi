@@ -116,6 +116,10 @@ class BindingHistory:
 
         A fenced row records only that the daemon did not witness a clean release. A
         reserved name's interval is no binding a daemon held, and stays open.
+
+        In the same transaction every tool token's row loses its binding: no binding of
+        the last daemon is live. The rows themselves stay, so a session's token works
+        again once its adapter binds and registers it with this daemon.
         """
         with self._lock:
             if self._conn is None:
@@ -126,6 +130,8 @@ class BindingHistory:
                     cur = conn.execute(
                         "UPDATE bindings SET released_at = ?, fenced = 1 "
                         "WHERE released_at IS NULL AND kind = 'session'", (marker,))
+                    conn.execute("UPDATE mcp_tokens SET binding_id = NULL "
+                                 "WHERE binding_id IS NOT NULL")
             except sqlite3.Error:
                 log.exception("boot fence failed; dangling custody intervals remain open")
                 return 0
@@ -152,7 +158,9 @@ class BindingHistory:
             return cur.lastrowid
 
     def release(self, row_id: int | None, at: float | None = None) -> None:
-        """Close an interval at the connection-close deregistration."""
+        """Close an interval at the connection-close deregistration. In the same
+        transaction the tool tokens registered to this binding lose it (`binding_id`
+        NULL); the rows stay until a cause revokes them."""
         if row_id is None:
             return
         with self._lock:
@@ -164,9 +172,25 @@ class BindingHistory:
                         "UPDATE bindings SET released_at = ? WHERE id = ? "
                         "AND released_at IS NULL",
                         (stamp(self.clock() if at is None else at), int(row_id)))
+                    conn.execute("UPDATE mcp_tokens SET binding_id = NULL "
+                                 "WHERE binding_id = ?", (int(row_id),))
             except sqlite3.Error:
                 log.exception("binding history: failed to record the release of row %s",
                               row_id)
+
+    # -- the tool tokens' table, on the same connection ----------------------
+    def write(self, step):
+        """Run `step(conn)` in one transaction on the daemon's connection, under the
+        history's lock, and return what it returns. The tool tokens' registry
+        (`mcp.tokens`) writes `mcp_tokens` through here, so its writes and a release's
+        share one connection and never interleave. Unlike the methods above it does not
+        swallow failures: a `sqlite3.Error` reaches the caller. Raises `RuntimeError`
+        when the store isn't open."""
+        with self._lock:
+            if self._conn is None:
+                raise RuntimeError("comms' store isn't open")
+            with transaction(self._conn) as conn:
+                return step(conn)
 
     # -- read-back for the daemon's never-bound checks -----------------------
     def ever_bound(self, name: str, scope: str) -> bool | None:

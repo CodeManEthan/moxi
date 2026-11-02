@@ -11,7 +11,8 @@ two shared connections, each opened on first use and closed with the `Session` (
 `close()`, or its collection):
 
 - the first carries the calls whose answer never waits on the harness: `session`,
-  `deliver`, `steer`, and the look-up by `ref` of a hand-in whose answer never came;
+  `deliver`, `steer`, `environ`, and the look-up by `ref` of a hand-in whose answer never
+  came;
 - the second carries `facts` and `agents`, which wait on the harness's live read for up
   to its live bound, so a `deliver` never queues behind one.
 
@@ -20,7 +21,8 @@ its own and closes it when done. Before a call writes on a shared connection it 
 the connection is still open, and opens a new one first if not, so a request is never
 lost to a connection that had already closed.
 
-Read bounds. A short call (`session`, `deliver`, `steer`, the look-up, `stops.answer`)
+Read bounds. A short call (`session`, `deliver`, `steer`, `environ`, the look-up,
+`stops.answer`)
 waits `READ_S` for its answer. `facts`, `agents` and `watch`'s first answer wait
 `LIVE_READ_S`, which is longer than any harness's live bound (1 s on Claude, 2 s on Codex
 and OpenCode), so a slow live read answers with its live part unreadable instead of
@@ -52,7 +54,7 @@ import logging
 import threading
 import time
 import weakref
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +64,7 @@ from moxi.paths import Layout
 from . import protocol
 from .procs import DEFAULT as DEFAULT_PROC, ProcView
 from .results import (COMMAND_WAIT_S, COMMANDS, ERROR_GONE, FAILED_UNANSWERED,
-                      LOST_UNANSWERED, REFUSED_GONE, STOP_SHELLS_WAIT_S, Agents, Ended,
+                      LOST_UNANSWERED, MCP_SETTLE_S, REFUSED_GONE, STOP_SHELLS_WAIT_S, Agents, Ended,
                       Facts, Failed, Gone, Lost, Passed, Ran, Refused, Started, StopFacts,
                       check_ref, from_notification, from_wire)
 
@@ -77,6 +79,10 @@ READ_S = 2.0
 #: waits on the harness's live read for at most its live bound (1 s on Claude, 2 s on
 #: Codex and OpenCode), so this is set well past the longest.
 LIVE_READ_S = 5.0
+#: The read bound for `mcp.reload`, in seconds: above twice the host's settle deadline,
+#: since a call that comes while a settle is past its first read waits for it and then
+#: runs one of its own.
+MCP_RELOAD_S = 2 * MCP_SETTLE_S + READ_S
 #: How long a gate-passed `exit` may take to end the harness process before it reads
 #: `Failed("not-exited")`.
 EXIT_BOUND_S = 5.0
@@ -358,9 +364,9 @@ class Session:
 
     # -- reads --------------------------------------------------------------------------
 
-    def _read(self, link: _Link, method: str, timeout: float) -> Any:
+    def _read(self, link: _Link, method: str, timeout: float, params: Any = None) -> Any:
         try:
-            return _call(link.get(), method, None, timeout)
+            return _call(link.get(), method, params, timeout)
         except _NotWritten as exc:
             raise exc.error from None
         except _Unanswered as exc:
@@ -398,6 +404,55 @@ class Session:
         """The session's subagents as the harness records them. Raises `TurnsError`."""
         return self._value(self._read(self._reads, "agents", LIVE_READ_S), "agents",
                            Agents)
+
+    def environ(self, names: Iterable[str]) -> dict[str, str | None]:
+        """The values of the named variables in the session's own environment, None for
+        one that is unset, read from the session's endpoint: on Claude Code the
+        environment the session started with, on the Codex and OpenCode hosts the
+        launch's. At most `ENVIRON_MAX_NAMES` names, each `[A-Za-z_][A-Za-z0-9_]*`.
+        Raises `TurnsError`: code -32602 for names the endpoint refuses, the
+        `capability` error on a session without `environ`."""
+        if isinstance(names, str):
+            raise TypeError("names is an iterable of variable names, not one string")
+        asked = list(names)
+        raw = self._read(self._short, "environ", READ_S, {"names": asked})
+        values = raw.get("values") if isinstance(raw, dict) else None
+        if not isinstance(values, dict) or set(values) != set(asked) or not all(
+                v is None or isinstance(v, str) for v in values.values()):
+            # The answer is not echoed: it may hold a secret's value.
+            raise TurnsError(f"the endpoint at {self.address} answered environ with "
+                             "something turns cannot read")
+        return dict(values)
+
+    def codex_limits(self, *, cached: bool = False,
+                     timeout: float = READ_S) -> dict[str, Any]:
+        """A Codex host's `usage.codex_limits`: `{payload, received_at}` read from its
+        app-server now (`payload` null and a `reason` when it could not be), or with
+        `cached` the last reading the host saw, `{payload, received_at, kind}`, each null
+        before the first. Most callers want `moxi_turns.codex_rate_limits()`. Raises
+        `TurnsError`: the `capability` error on a session without it."""
+        params = {"cached": True} if cached else {}
+        answer = self._read(self._short, "usage.codex_limits", timeout, params)
+        if not isinstance(answer, dict) or not isinstance(answer.get("payload"),
+                                                          (dict, type(None))):
+            raise TurnsError(f"the endpoint at {self.address} answered "
+                             f"usage.codex_limits with something turns cannot read")
+        return answer
+
+    def mcp_reload(self, *, timeout: float = MCP_RELOAD_S) -> dict[str, Any]:
+        """A Codex host's `mcp.reload`: settle the MCP servers its launch rendered,
+        reloading them once when one reads `failed`. Answers `{reloaded, servers}`,
+        `servers` mapping each rendered server to the status it last read (null: never
+        read, or unavailable). The host answers within its settle deadline, or twice
+        that when the call waits behind a settle already past its first read, so the
+        default `timeout` is above both. Raises `TurnsError`: the `capability` error on a
+        session without `mcp-token`, or no answer within `timeout`."""
+        answer = self._read(self._short, "mcp.reload", timeout, {})
+        if (not isinstance(answer, dict) or not isinstance(answer.get("reloaded"), bool)
+                or not isinstance(answer.get("servers"), dict)):
+            raise TurnsError(f"the endpoint at {self.address} answered mcp.reload with "
+                             f"{answer!r}")
+        return answer
 
     # -- deliveries ---------------------------------------------------------------------
 
@@ -975,6 +1030,6 @@ def wait_ready(*, session_id: str | None = None, pid: int | None = None,
         delay = min(delay * 2, 1.0)
 
 
-__all__ = ["CONNECT_S", "READ_S", "LIVE_READ_S", "EXIT_BOUND_S", "NOT_EXITED",
-           "TurnsError", "VersionError", "Session", "Delivery", "Watch", "StopHandler",
+__all__ = ["CONNECT_S", "READ_S", "LIVE_READ_S", "MCP_RELOAD_S", "EXIT_BOUND_S",
+           "NOT_EXITED", "TurnsError", "VersionError", "Session", "Delivery", "Watch", "StopHandler",
            "runtime_dir", "sessions", "find", "wait_ready"]

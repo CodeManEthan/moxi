@@ -88,10 +88,12 @@ def test_the_public_identity_is_one_everywhere():
 # ------------------------------------------------------------------ the package
 
 def test_the_package_requires_the_core_and_turns_and_codex_is_an_extra():
-    """turns is required: it is the one way into a harness session."""
+    """turns is required: it is the one way into a harness session. The MCP SDK is too:
+    comms' tools are how a session's model sends, served on uvicorn."""
     project = PYPROJECT["project"]
     assert project["dependencies"] == ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3",
-                                       "keyring>=25", "psutil>=5.9"]
+                                       "keyring>=25", "psutil>=5.9", "mcp>=2.3,<3",
+                                       "uvicorn>=0.54,<1"]
     assert [d.split(">")[0] for d in project["optional-dependencies"]["codex"]] == \
         ["moxi-turns[codex]"]
     dev = PYPROJECT["dependency-groups"]["dev"]
@@ -135,6 +137,7 @@ def test_internal_env_is_the_wrapper_wiring_the_secrets_step_and_the_test_seam()
         "MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
         "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_SOCKET", "MOXI_COMMS_CLAIM_SOCKET",
         "MOXI_COMMS_PROJECT", "MOXI_COMMS_OPERATOR", "MOXI_COMMS_SECRET_",
-        "MOXI_COMMS_MOCK_BACKEND",
+        "MOXI_COMMS_MOCK_BACKEND", "MOXI_COMMS_MCP_TOKEN", "MOXI_COMMS_MCP_URL",
+        "MOXI_COMMS_SHELL_REACH",
     }
     assert all(why.strip() for why in module.INTERNAL_ENV.values())

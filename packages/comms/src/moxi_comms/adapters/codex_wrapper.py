@@ -18,16 +18,24 @@ What the wrapper does, in order:
 
   1. builds the host's line: `--cwd` (the current directory, or the row's), the settings
      flags, then what comms adds (below), and checks it whole with turns' own parser, so
-     a flag the host would refuse refuses the launch before anything starts (exit 2);
-  2. makes the session's runtime directory (0700), which holds layer one; the claim
+     a flag the host would refuse refuses the launch before anything starts (exit 2).
+     Before it adds comms' flags it asks the daemon whether it serves comms' tools, since
+     the answer decides the network default;
+  2. when the daemon serves the tools, mints the session's token and stamps it with the
+     URL the daemon answered (`MOXI_COMMS_MCP_TOKEN`, `MOXI_COMMS_MCP_URL`) into the
+     environment the adapter and the host get, so the host's launch additions carry
+     comms' MCP server, and layer one names the tools. When it doesn't, the session
+     starts without them, and the wrapper says so. When the agent's shell can't reach
+     comms, it stamps `MOXI_COMMS_SHELL_REACH=off` beside them;
+  3. makes the session's runtime directory (0700), which holds layer one; the claim
      socket is beside it in comms' runtime directory (`paths.claim_socket`);
-  3. forks the session's adapter (`codex.CodexAdapter`). The adapter binds the name with
+  4. forks the session's adapter (`codex.CodexAdapter`). The adapter binds the name with
      the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with this
      process as the claim's root, then says so. The wrapper waits for its word, at most
      `READY_WAIT` seconds;
-  4. writes layer one, the thread's developer instructions, to a 0600 file in that
+  5. writes layer one, the thread's developer instructions, to a 0600 file in that
      directory;
-  5. execs `moxi-turns-codex-host` (found by `moxi.paths.script`, never on PATH) with
+  6. execs `moxi-turns-codex-host` (found by `moxi.paths.script`, never on PATH) with
      the line and `--instructions-file`. The host keeps this process's pid, so it is the
      session's process in the terminal, and the adapter finds its session with
      `turns.wait_ready(pid=<that pid>)`.
@@ -46,7 +54,9 @@ What comms adds to the host's settings, so the agent can use comms from its shel
   * with no sandbox and no permission profile named, `--sandbox workspace-write`, a
     roster row's default;
   * on a sandbox (not a permission profile), the `workspace-write` settings: network
-    access on unless the launch sets it (the agent's shell reaches the daemon socket only
+    access, unless the launch or its row sets it, off when the launch carries comms'
+    tools (the agent sends through them; Codex's MCP client runs outside the shell's
+    sandbox) and on when it doesn't (the agent's shell reaches the daemon socket only
     with it), and the directory the agent's own `comms` writes the record into added to
     the writable roots.
 
@@ -81,10 +91,12 @@ from .. import directors as directors_mod
 from ..claimhold import CLAIM_SOCKET_ENV
 from ..config import ConfigError
 from ..context import BARE_COMMS, own_comms
+from ..mcp.additions import SHELL_REACH_ENV, SHELL_REACH_OFF, TOKEN_ENV
 from ..paths import claim_socket, codex_threads_dir, log_dir
 from ..scoping import GLOBAL, NAME_RE, qualify
 from . import codex_roster
 from .harness import plan_comms, plan_head
+from .session import stamp_tools, tools_endpoint, tools_off
 from .word import BOUND, FAILED, await_word, exit_of, teller, word_for
 
 PROG = "moxi-comms-codex"
@@ -158,16 +170,20 @@ def row_flags(agent: codex_roster.CodexAgent) -> list[str]:
         flags += ["--sandbox", agent.sandbox or DEFAULT_SANDBOX]
         flags += option(["sandbox_workspace_write", "writable_roots"],
                         [str(r) for r in agent.writable_roots])
-        flags += option(["sandbox_workspace_write", "network_access"],
-                        bool(agent.network_access))
+        if agent.network_access is not None:
+            # A row that names none leaves it to the launch (`comms_flags`).
+            flags += option(["sandbox_workspace_write", "network_access"],
+                            bool(agent.network_access))
     if agent.model:
         flags += ["--model", agent.model]
     return flags
 
 
-def comms_flags(options: dict, added_root=None) -> list[str]:
+def comms_flags(options: dict, added_root=None, *, network: bool = True) -> list[str]:
     """What comms adds to a launch whose host flags give `options` (the thread
-    parameters `turns.codex.launch_args` reads from them). See the module's docstring."""
+    parameters `turns.codex.launch_args` reads from them). See the module's docstring.
+    `network` is the network access a sandbox gets when the flags name none: off for a
+    launch that carries comms' tools, on for one that doesn't."""
     flags: list[str] = []
     sandbox = options.get("sandbox")
     if sandbox is None and options.get("permissions") is None:
@@ -177,7 +193,7 @@ def comms_flags(options: dict, added_root=None) -> list[str]:
         settings = (options.get("config") or {}).get("sandbox_workspace_write")
         settings = settings if isinstance(settings, dict) else {}
         if "network_access" not in settings:
-            flags += option(["sandbox_workspace_write", "network_access"], True)
+            flags += option(["sandbox_workspace_write", "network_access"], bool(network))
         roots = settings.get("writable_roots")
         roots = [str(r) for r in roots] if isinstance(roots, list) else []
         if added_root is not None:
@@ -186,6 +202,23 @@ def comms_flags(options: dict, added_root=None) -> list[str]:
                 flags += option(["sandbox_workspace_write", "writable_roots"],
                                 [*roots, str(added_root)])
     return flags + ["--option", MULTI_AGENT_OFF]
+
+
+def shell_reach_off(options: dict) -> bool:
+    """Whether the agent's shell can't reach comms under the thread parameters
+    `options`: a `read-only` sandbox, or `workspace-write` with network access off. Any
+    other sandbox, and a permission profile (whose network the wrapper doesn't read),
+    say nothing."""
+    if options.get("permissions"):
+        return False
+    sandbox = options.get("sandbox")
+    if sandbox == "read-only":
+        return True
+    if sandbox == "workspace-write":
+        settings = (options.get("config") or {}).get("sandbox_workspace_write")
+        settings = settings if isinstance(settings, dict) else {}
+        return not settings.get("network_access")
+    return False
 
 
 def launch_args(argv) -> dict:
@@ -226,6 +259,10 @@ class Launch:
     write_root_reason: str = ""
     comms_path: str | None = None
     key: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    #: The URL comms' tools answer at, as the daemon said, or None when it serves none.
+    tools_url: str | None = None
+    #: Why the session gets no comms tools, when `tools_url` is None.
+    tools_why: str = ""
 
     @property
     def dir(self) -> Path:
@@ -248,14 +285,22 @@ class Launch:
         return [str(host), "--cwd", self.cwd, *self.flags,
                 "--instructions-file", str(self.instructions)]
 
+    @property
+    def shell_reach_off(self) -> bool:
+        """Whether the agent's shell can't reach comms (`shell_reach_off`)."""
+        return shell_reach_off(self.options)
+
     def env(self, base=None) -> dict:
         """The host's environment: `base` (this process's) with comms' variables the
         launch didn't stamp scrubbed, the identity stamp and the claim socket over it,
-        and no lifeline."""
+        `MOXI_COMMS_SHELL_REACH=off` when the agent's shell can't reach comms, and no
+        lifeline. The tools' token and URL are stamped at the fork (`start`)."""
         from moxi import proc as moxi_proc
 
         env = self.agent.env(os.environ if base is None else base)
         env[CLAIM_SOCKET_ENV] = str(self.claim_socket)
+        if self.shell_reach_off:
+            env[SHELL_REACH_ENV] = SHELL_REACH_OFF
         env.pop(moxi_proc.LIFELINE_ENV, None)
         return env
 
@@ -315,9 +360,14 @@ def _named_agent(args, cwd: str) -> codex_roster.CodexAgent:
         directors=list(directors))
 
 
-def plan(args, *, cwd: str | None = None) -> Launch:
+def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     """The launch `args` asks for: its row, its host flags and their thread parameters.
-    Raises `Refused`, with nothing started and nothing written."""
+    Raises `Refused`, with nothing started and nothing written.
+
+    `endpoint()` answers whether the daemon serves comms' tools, `(url, why)` as
+    `session.tools_endpoint` does; it is asked once the launch's own settings have
+    passed, since its answer is the network default. None asks nothing and reads as no
+    tools."""
     if args.identity is not None:
         if args.name is not None:
             raise Refused("name the launch once: a roster IDENTITY or --name, not both")
@@ -350,13 +400,26 @@ def plan(args, *, cwd: str | None = None) -> Launch:
             settings_flags(args)
     asked = launch_args(["--cwd", cwd, *settings])["options"]
     write_root, reason = codex_roster.record_write_root(agent.env(), cwd)
-    flags = settings + comms_flags(asked, write_root)
+    tools_url, tools_why = endpoint() if endpoint is not None else (None, "")
+    # One fact, the stamped pair, decides the default: a launch that carries comms' tools
+    # starts with the network off.
+    flags = settings + comms_flags(asked, write_root, network=tools_url is None)
     if not window:
         flags.append("--no-window")
     options = launch_args(["--cwd", cwd, *flags])["options"]
     return Launch(agent=agent, source=source, cwd=cwd, flags=flags, options=options,
                   window=window, write_root=write_root, write_root_reason=reason,
-                  comms_path=own_comms())
+                  comms_path=own_comms(), tools_url=tools_url, tools_why=tools_why)
+
+
+def reach_note(launch: Launch) -> str | None:
+    """What a launch whose agent can't reach comms from its shell, and has no tools,
+    costs; None otherwise."""
+    if launch.tools_url is not None or not launch.shell_reach_off:
+        return None
+    return ("this agent's shell can't reach the daemon socket (its sandbox has the "
+            "network off) and it has no comms tools, so it cannot send or run `moxi "
+            "comms reply`")
 
 
 def print_plan(launch: Launch, host_line: list, out=None) -> None:
@@ -376,6 +439,9 @@ def print_plan(launch: Launch, host_line: list, out=None) -> None:
         network = "on" if settings.get("network_access") else "OFF"
         say(f"  sandbox    {options.get('sandbox')} (network {network}, approvals never "
             "by turns)")
+        if launch.shell_reach_off and launch.tools_url is not None:
+            say(f"  shell      can't reach comms; the agent sends through comms' tools "
+                f"({SHELL_REACH_ENV}={SHELL_REACH_OFF})")
         if options.get("sandbox") == "workspace-write":
             for root in settings.get("writable_roots") or []:
                 say(f"  writable   {root}")
@@ -384,6 +450,8 @@ def print_plan(launch: Launch, host_line: list, out=None) -> None:
     if options.get("model"):
         say(f"  model      {options['model']}")
     plan_comms(launch.comms_path, say)
+    if launch.tools_url is not None:
+        say(f"  tools      {launch.tools_url} (token in {TOKEN_ENV}, minted at launch)")
     say(f"  claim      {launch.claim_socket}")
     say(f"  adapter    log {launch.log_path()}")
     say("  launch     " + " ".join(host_line))
@@ -432,7 +500,7 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 def main(argv=None, prog: str = PROG) -> int:
     args = build_parser(prog).parse_args(argv)
     try:
-        launch = plan(args)
+        launch = plan(args, endpoint=tools_endpoint)
     except Refused as e:
         print(f"{prog}: {e}", file=sys.stderr)
         return e.code
@@ -446,6 +514,11 @@ def main(argv=None, prog: str = PROG) -> int:
     if launch.comms_path is None:
         print(f"{prog}: this environment has no `moxi` script; layer one names a bare "
               f"`{BARE_COMMS}`, which the agent's PATH decides", file=sys.stderr)
+    if launch.tools_url is None:
+        print(f"{prog}: {tools_off(launch.tools_why)}", file=sys.stderr)
+    note = reach_note(launch)
+    if note is not None:
+        print(f"{prog}: {note}", file=sys.stderr)
     if args.dry_run:
         return moxi_exit.OK
     refusal = _cannot_start(host, launch)
@@ -487,10 +560,14 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     session of its own, so it is never the host's child. A refusal the adapter reports
     ends the launch here, with its exit code; past `ready_wait` the host starts anyway,
     and the wrapper says so. `roster` stands in for the daemon's roster in layer one."""
+    from ..context import layer_one_form
     from .codex import fetch_roster, layer_one_text
     from .terminal import pidfd_open   # needs termios: not at the top
 
     env = launch.env()
+    # comms' tools: minted and stamped before the adapter forks, so the adapter and the
+    # host it execs (turns' one caller of the launch additions here) both see the pair.
+    stamp_tools(env, launch.tools_url)
     launch.write()
     harness_pid = os.getpid()
     handle = pidfd_open(harness_pid)
@@ -526,8 +603,11 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
         _remove(launch)
         return exit_of(code)
     info = roster if roster is not None else fetch_roster()
+    # A launch carrying comms' tools gets layer one's tools form: the tools first, the
+    # CLI last as the fallback, or not at all when the shell can't reach comms.
     launch.write_instructions(layer_one_text(info, launch.comms_path or BARE_COMMS,
-                                             directors=launch.agent.directors))
+                                             directors=launch.agent.directors,
+                                             form=layer_one_form(env)))
     argv = launch.host_argv(host)
     return exec_(str(host), argv, env)
 
@@ -544,11 +624,22 @@ def serve(adapter, handle: int, *, say=None) -> int:
     until the session or the host ends. `say(code, reason)` gives the wrapper its word:
     `BOUND` once the bind has been answered and the claim socket listens, or why the
     bind failed. A host that ended before its session was ready ends the adapter
-    quietly: the host said why on its own terminal."""
+    quietly: the host said why on its own terminal.
+
+    A launch that carries comms' tools has the session's token in this process's
+    environment: the adapter keeps its hash (the value leaves the environment) and
+    registers it after every bind, the first before `BOUND` is said. The form of layer
+    one the wrapper wrote is read first, while the token is still there to show it: the
+    thread record hashes that form, and the reply reminder follows it."""
+    from ..context import layer_one_form
+    from .binding import ToolToken
     from .claude_adapter import wait_for_exit
     from .codex import HostGone
 
     say = say or (lambda code, reason="": None)
+    if adapter.tool_token is None:
+        adapter.layer_form = layer_one_form(os.environ)
+        adapter.tool_token = ToolToken.from_environ()
     stopping = threading.Event()
     adapter.exit_hook = stopping.set
     adapter._on_bound = lambda: say(BOUND)
@@ -616,7 +707,8 @@ def _remove(launch: Launch) -> None:
 
 __all__ = ["HOST", "Launch", "MULTI_AGENT_OFF", "PROG", "READY_WAIT", "Refused",
            "build_parser", "comms_flags", "launch_args", "main", "option", "plan",
-           "print_plan", "row_flags", "serve", "start", "toml_key", "toml_value"]
+           "print_plan", "reach_note", "row_flags", "serve", "shell_reach_off", "start",
+           "toml_key", "toml_value"]
 
 
 if __name__ == "__main__":  # pragma: no cover

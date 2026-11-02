@@ -11,6 +11,13 @@ printed when comms wrote its own hooks (`adapters/shim_roster`):
     prompt   the roster's joins and leaves since this session last looked, and each
              ignored reminder naming this session as its author, once; or nothing
 
+**comms' tools.** A session whose launch carries comms' MCP entry (the wrapper stamped
+the token and the URL, `moxi_comms.mcp.additions.carries`) gets layer one's tools form at
+`start` (`context.layer_one_form`): the tools taught as the way to send and read, the CLI
+named last as the fallback, or, when its shell can't reach comms, not at all. The event's
+environment is the launch's, so the form follows only what the launch stamped. A Codex
+thread and an OpenCode session get the same form in the layer one their wrappers write.
+
 A session comms did not launch has no identity stamp, and comms binds no such session, so
 the listener answers None there. It answers only for Claude Code sessions: a Codex thread
 gets layer one as developer instructions at its launch.

@@ -51,6 +51,12 @@ Codex's own hooks, as checked live on codex-cli 0.153.0, run through
     `stop_hook_active: true` (codex-rs core/src/session/turn.rs:511-546).
 
 `hooks/list` answers from `hook_states` (`{key: (trustStatus, currentHash)}`).
+`account/rateLimits/read` answers `limits` (the shape Codex 0.153 gave), which turns'
+host reads after each load. `mcpServerStatus/list` answers each MCP server a thread's
+start named (`config.mcp_servers`) with its status in `mcp_status` (`connected` when it
+names none), and `config/mcpServer/reload` sets each `failed` one to
+`mcp_after_reload` (default `connected`) and sends `mcpServer/startupStatus/updated`
+`starting`, then `ready` (or `failed`), as 0.153 does after a reload.
 `thread/backgroundTerminals/list` answers from `background_terminals`
 (`{thread id: [terminal]}`), or with an error while `background_error` is set.
 
@@ -69,6 +75,10 @@ from http import HTTPStatus
 from websockets.sync.server import unix_serve
 
 INVALID_REQUEST = -32600
+#: What `account/rateLimits/read` answers by default: the shape Codex 0.153 gave.
+LIMITS = {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 12,
+                                                         "windowDurationMins": 300}},
+          "accountId": "acct-fake", "planType": "pro"}
 
 
 def _uuid() -> str:
@@ -111,6 +121,12 @@ class FakeAppServer:
         self.background_terminals: dict = {}
         #: Set: `thread/backgroundTerminals/list` answers an error.
         self.background_error = False
+        #: What `account/rateLimits/read` answers.
+        self.limits: dict = dict(LIMITS)
+        #: `{server name: runtimeStatus}` for `mcpServerStatus/list`; unnamed: connected.
+        self.mcp_status: dict = {}
+        #: What a reload turns a `failed` server into.
+        self.mcp_after_reload = "connected"
         #: (turn id, reason) of every Stop block the hook printed.
         self.blocks: list = []
         self._lock = threading.RLock()
@@ -212,7 +228,47 @@ class FakeAppServer:
                      for key, (trust, current) in self.hook_states.items()]
             return {"data": [{"cwd": (params.get("cwds") or [None])[0], "hooks": hooks,
                               "warnings": [], "errors": []}]}
+        if method == "account/rateLimits/read":
+            return dict(self.limits)
+        if method == "mcpServerStatus/list":
+            thread = self._thread_of(params)
+            with self._lock:
+                data = [{"name": name, "runtimeStatus": self.mcp_status.get(name,
+                                                                             "connected")}
+                        for name in self._mcp_servers(thread)]
+            return {"data": data, "nextCursor": None}
+        if method == "config/mcpServer/reload":
+            self._mcp_reload()
+            return {}
         raise _Error(-32601, f"method not found: {method}")
+
+    # ------------------------------------------------------------------ MCP servers
+    @staticmethod
+    def _mcp_servers(thread: dict) -> list:
+        config = thread["start_params"].get("config") or {}
+        servers = config.get("mcp_servers")
+        return list(servers) if isinstance(servers, dict) else []
+
+    def _mcp_reload(self) -> None:
+        """Reload every `failed` server of every thread, as Codex answers `{}` first and
+        reports the servers' startup after."""
+        with self._lock:
+            changed = []
+            for thread in self.threads.values():
+                for name in self._mcp_servers(thread):
+                    if self.mcp_status.get(name, "connected") == "failed":
+                        self.mcp_status[name] = self.mcp_after_reload
+                        changed.append((thread["id"], name, self.mcp_after_reload))
+
+        def report():
+            for thread_id, name, status in changed:
+                self._notify(thread_id, "mcpServer/startupStatus/updated",
+                             {"threadId": thread_id, "name": name, "status": "starting"})
+                self._notify(thread_id, "mcpServer/startupStatus/updated",
+                             {"threadId": thread_id, "name": name,
+                              "status": "ready" if status == "connected" else status})
+
+        threading.Timer(0.01, report).start()
 
     # ------------------------------------------------------------------ threads
     def _thread_of(self, params: dict) -> dict:
@@ -408,8 +464,11 @@ class FakeAppServer:
         for event, groups in hooks.items():
             label = re.sub(r"(?<!^)([A-Z])", r"_\1", event).lower()
             handler = groups[0]["hooks"][0]
-            blob = json.dumps({"event_name": label, "hooks": [handler]}, sort_keys=True,
-                              separators=(",", ":"))
+            # A group's matcher is hashed with its handler, as Codex 0.153 hashes it.
+            ident = {"event_name": label, "hooks": [handler]}
+            if groups[0].get("matcher") is not None:
+                ident["matcher"] = groups[0]["matcher"]
+            blob = json.dumps(ident, sort_keys=True, separators=(",", ":"))
             current = "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
             key = f"/<session-flags>/config.toml:{label}:0:0"
             trusted = (state.get(key) or {}).get("trusted_hash") == current
@@ -524,4 +583,4 @@ class _Error(Exception):
         self.message = message
 
 
-__all__ = ["FakeAppServer"]
+__all__ = ["LIMITS", "FakeAppServer"]

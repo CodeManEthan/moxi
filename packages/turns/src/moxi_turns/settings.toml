@@ -43,6 +43,54 @@ default = 0
 doc = "The most start context a session gets, in characters; 0 (or a value past the harness's ceiling) means the ceiling."
 read = "start"
 
+# Guards: checks that run before a tool call and may refuse it. A guard runs only when its
+# id or its file is on guards.on, or its module's switch for it reads true. turns' own
+# three guards each have a switch below, asked once at install, all off by default.
+
+[guards.on]
+type = "list"
+items = "str"
+default = []
+doc = "The guards that run: guard ids (turns.removal, usage.ceiling) and paths to custom guard files."
+read = "use"
+
+[guards.removal]
+type = "bool"
+default = false
+doc = "Run the removal guard: refuse shell removals Claude Code would stop for approval."
+read = "use"
+
+[guards.no_nested_agents]
+type = "bool"
+default = false
+doc = "Run the no-nested-agents guard: stop subagents from starting subagents of their own."
+read = "use"
+
+[guards.question_mode]
+type = "bool"
+default = false
+doc = "Run question mode: let agents ask questions only in a turn where the person typed something about a question."
+read = "use"
+
+[guards.max_wait_ms]
+type = "int"
+default = 3000
+doc = "The most any guard's judge may take on one tool call, in milliseconds; a guard's own deadline is clamped to it."
+read = "use"
+
+[after_tool.wait_ms]
+type = "int"
+default = 300
+doc = "How long the after-tool listeners may take on one tool call, together, in milliseconds."
+read = "use"
+
+[question_mode.origins]
+type = "list"
+items = "str"
+default = ["composer"]
+doc = "The prompt origins question mode counts as the person's own (composer is a prompt typed at this terminal)."
+read = "use"
+
 # Keys an earlier turns read, kept declared so a file that still sets one is told what to
 # do rather than refused as unknown.
 

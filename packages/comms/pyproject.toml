@@ -21,7 +21,11 @@ classifiers = [
 # delivery, its Stop hold and its context all go through it).
 # keyring is the credential chain's keychain step (the macOS Keychain, Windows Credential
 # Manager, the Secret Service): required, since Windows is a target and has no other.
-dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9"]
+# mcp is the SDK comms' tools are served with, from the daemon alone, and uvicorn the
+# HTTP server the daemon starts it on: required, since the tools are how a session's
+# model sends; `[mcp] enabled = false` turns them off.
+dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9",
+                "mcp>=2.3,<3", "uvicorn>=0.54,<1"]
 
 [project.optional-dependencies]
 # `moxi-comms-codex` launches each Codex session through turns' Codex host, whose
@@ -64,6 +68,11 @@ comms = "moxi_comms.reserved"
 [project.entry-points."moxi.turns.listeners"]
 comms = "moxi_comms.listeners"
 
+# comms' MCP server in a launch: turns asks it what a launch adds, and it answers the
+# server only when comms' wrapper stamped the session's token and the server's URL.
+[project.entry-points."moxi.turns.additions"]
+comms = "moxi_comms.mcp.additions:additions"
+
 # The adapter kinds a binding may register as. comms declares its own here, as any module
 # declares one (see moxi_comms/kinds.py).
 [project.entry-points."moxi.comms.kinds"]
@@ -77,9 +86,9 @@ opencode = "moxi_comms.kinds:OPENCODE"
 # dependency of turns' `codex` extra) and `moxi-cache` beside pytest. moxi-ui's pytest
 # plugin runs comms' pages in a real shell, and its testing extra brings the browser; the
 # browser tests import Playwright themselves, so it is named too. moxi-dev brings
-# pytest-xdist.
+# pytest-xdist. The endpoint's tests drive it with the MCP SDK's own client, over httpx2.
 dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2", "moxi-dev",
-       "moxi-ui[testing]", "playwright>=1.56,<2"]
+       "moxi-ui[testing]", "playwright>=1.56,<2", "httpx2>=2.16,<3"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
