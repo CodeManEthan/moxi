@@ -535,6 +535,27 @@ def test_the_session_report_counts_a_child_session_under_its_parent(conn):
     assert [(r["agent"], r["requests"]) for r in narrow.rows] == [("ses_c", 1)]
 
 
+def test_an_agent_of_several_titled_files_takes_the_title_of_its_earliest(conn):
+    day1, day2 = at("2026-10-01T12:00"), at("2026-10-02T12:00")
+    source(conn, "/p/s9.jsonl", [request("m1", day1)], session_id="s9", title="Main")
+    # agent x's later file is written first, agent y's earlier one first
+    source(conn, "/p/s9/x-2.jsonl", [request("x2", day2)], session_id="s9",
+           kind="subagent", agent_id="x", title="Applied the plan")
+    source(conn, "/p/s9/x-1.jsonl", [request("x1", day1 + 60, model="m-b")],
+           session_id="s9", kind="subagent", agent_id="x", title="Wrote the plan")
+    source(conn, "/p/s9/y-1.jsonl", [request("y1", day1 + 90)], session_id="s9",
+           kind="subagent", agent_id="y", title="Begun")
+    source(conn, "/p/s9/y-2.jsonl", [request("y2", day2 + 90)], session_id="s9",
+           kind="subagent", agent_id="y", title="Carried on")
+    report = reports.session(conn, session="s9", tz="UTC", table=table())
+    assert {(r["agent"], r["title"]) for r in report.rows} == {
+        ("main", "Main"), ("x", "Wrote the plan"), ("y", "Begun")}
+    # over a range that leaves out the earlier files, the later titles stand
+    later = reports.session(conn, session="s9", since="2026-10-02", tz="UTC", table=table())
+    assert {(r["agent"], r["title"]) for r in later.rows} == {
+        ("x", "Applied the plan"), ("y", "Carried on")}
+
+
 def test_a_key_another_sessions_copy_claims_is_counted_once(conn):
     one_session_index(conn)
     s1 = reports.session(conn, session="s1", tz="UTC", table=table())

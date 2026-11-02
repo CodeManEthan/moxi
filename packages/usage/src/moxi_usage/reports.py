@@ -649,8 +649,9 @@ def session(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
             model: str | None = None, tz: Any = None, table: Table | None = None,
             session: str | None = None) -> Report:
     """One session by agent and model: the main file's requests as agent `main`, each
-    subagent or workflow file's under its agent id, with the file's `kind` and title, and
-    each row's first and last request in range. `main` comes first, then each agent's
+    subagent or workflow file's under its agent id, with the file's `kind` and title (for
+    an agent of several titled files, the title of the one whose request in range comes
+    first), and each row's first and last request in range. `main` comes first, then each agent's
     rows together, the agents by their first request.
 
     `session` is the id a `sessions` row gives, and the files it takes are the ones that
@@ -662,10 +663,15 @@ def session(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
     query = _query(since, until, harness, project, model, tz, session)
     groups = grouped(conn, query, {"agent": _AGENT_SQL, "kind": "f.kind", "title": "f.title"},
                      _table(table))
-    titles: dict[str, str] = {}
-    for found, _, _ in groups:
+    # An agent of several titled files takes the title of the one with the earliest request
+    # in range (the lesser title on a tie), whatever order the groups come in.
+    firsts: dict[str, tuple[bool, float, str]] = {}
+    for found, _, extra in groups:
         if found["title"] is not None:
-            titles.setdefault(found["agent"], found["title"])
+            first = extra["first_ts"]
+            rank = (first is None, first or 0.0, found["title"])
+            firsts[found["agent"]] = min(firsts.get(found["agent"], rank), rank)
+    titles = {agent: rank[2] for agent, rank in firsts.items()}
     rows, total = _fold(groups, lambda k, e: (k["agent"], k["kind"], _label(e["model"])),
                         lambda k, e: {"agent": k["agent"], "kind": k["kind"],
                                       "model": e["model"]})

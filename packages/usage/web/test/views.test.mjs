@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agents, agentTreemap, cellLabel, classTotals, costAge, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
-  fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
-  parseRoute, projectMenu, provenanceLine, rangeFor, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay, shouldPass, strip,
-  tickText, viewPath,
+  agents, agentTreemap, cellLabel, classTotals, costAge, costDays, costText, dailyChart,
+  filterKeys, flags, fmtAgo, fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons,
+  labelEvery, MARGIN, menuPaths, meter, NO_FILTERS, parseRoute, projectMenu, provenanceLine,
+  rangeFor, refusedLine, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay,
+  shouldPass, strip, tickText, viewPath,
 } from "../src/views.ts";
 
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
@@ -342,9 +343,14 @@ test("the strip's last pass, lanes not online, held files and note", () => {
                                 { lane: "opencode", state: "not read yet", reason: null }]);
   assert.equal(view.held, 2);
   assert.equal(view.note, null);
+  assert.equal(view.canPass, true);
   const older = strip(up(status({}, [], "the index is at version 2, before 3; run `moxi usage index` to bring it up")), null, 1600);
   assert.match(older.note, /version 2/);
   assert.equal(older.command, "moxi usage index");
+  assert.equal(older.canPass, false);
+  assert.equal(refusedLine(older.note, older), null);
+  assert.equal(refusedLine("a pass already holds the index", older), "a pass already holds the index");
+  assert.equal(refusedLine(null, view), null);
 });
 
 test("the strip says why files are held back, from each lane's reasons or the held rows", () => {
@@ -381,6 +387,8 @@ test("the page starts a pass as it opens only over an index read more than 10 mi
   assert.equal(shouldPass(status({ last_pass: 1000 }), 1700), true);
   assert.equal(shouldPass(status({ last_pass: null }), 1700), true);
   assert.equal(shouldPass(status({ index_version: 0, last_pass: null }), 1700), false);
+  const older = status({ index_version: 2, last_pass: null }, [], "the index is at version 2, before 3; run `moxi usage index` to bring it up");
+  assert.equal(shouldPass(older, 1700), false);
   assert.equal(shouldPass(null, 1700), false);
 });
 

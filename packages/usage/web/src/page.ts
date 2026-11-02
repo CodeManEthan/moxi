@@ -38,10 +38,11 @@ import type {
 } from "./feed.ts";
 import { BASE, flag, meterList, SERIES } from "./parts.ts";
 import {
-  agents, agentTreemap, CLASSES, cellLabel, classTotals, costText, dailyChart, filterKeys, flags,
-  fmtMoment, fmtTokens, HARNESSES, heldLine, labelEvery, localDay, MARGIN, menuPaths, meters,
-  NO_FILTERS, parseRoute, PRESETS, projectMenu, provenanceLine, reportState, segmentTitle, seriesClass, sessionFilters, sessionRoute,
-  shouldPass, strip, tickText, UNKNOWN_MODEL, viewPath, VIEWS,
+  agents, agentTreemap, CLASSES, cellLabel, classTotals, costText, dailyChart, filterKeys,
+  flags, fmtMoment, fmtTokens, HARNESSES, heldLine, labelEvery, localDay, MARGIN, menuPaths,
+  meters, NO_FILTERS, parseRoute, PRESETS, projectMenu, provenanceLine, refusedLine,
+  reportState, segmentTitle, seriesClass, sessionFilters, sessionRoute, shouldPass, strip,
+  tickText, UNKNOWN_MODEL, viewPath, VIEWS,
 } from "./views.ts";
 import type { Filters, Measure, PageRoute, Preset } from "./views.ts";
 
@@ -260,6 +261,7 @@ export class UsagePage extends LitElement {
     const report = this.#view?.value ?? null;
     const unpriced = report?.unpriced_models ?? [];
     const last = this.#event?.last_pass ?? this.#status?.value?.total.last_pass ?? null;
+    const refused = refusedLine(this.#passNote, view);
     if (view.state === "loading") return html`<div class="strip" data-state="loading"><span class="dim">Reading the index…</span></div>`;
     if (view.state === "failed") return html`<div class="strip" data-state="failed"><span class="problem">The index's status can't be read: ${view.note}.</span></div>`;
     if (view.state === "none") {
@@ -268,13 +270,13 @@ export class UsagePage extends LitElement {
     }
     return html`<div class="strip" data-state=${view.running ? "running" : "up"}>
       <span class="grow last" data-last-pass=${last === null ? "" : String(last)}>${view.running ? "Reading new sessions…" : view.lastPass}</span>
-      <button type="button" class="primary" ?disabled=${view.running} @click=${() => { void this.#pass(); }}>Read new sessions</button>
-      ${view.lanes.length || view.held || unpriced.length || view.note || this.#passNote ? html`<ul>
+      <button type="button" class="primary" ?disabled=${view.running || !view.canPass} @click=${() => { void this.#pass(); }}>Read new sessions</button>
+      ${view.lanes.length || view.held || unpriced.length || view.note || refused ? html`<ul>
         ${view.lanes.map((lane) => html`<li data-lane=${lane.lane}>${lane.lane}: ${lane.state}${lane.reason ? html`, ${lane.reason}` : nothing}</li>`)}
         ${view.held ? html`<li data-part="held">${heldLine(view)}</li>` : nothing}
         ${unpriced.length ? html`<li>No price for ${unpriced.join(", ")}: their tokens count, their cost doesn't</li>` : nothing}
         ${view.note ? html`<li>${view.note}${view.command ? html` <code>${view.command}</code>` : nothing}</li>` : nothing}
-        ${this.#passNote ? html`<li class="problem" data-state="refused">${this.#passNote}</li>` : nothing}
+        ${refused ? html`<li class="problem" data-state="refused">${refused}</li>` : nothing}
       </ul>` : nothing}
     </div>`;
   }

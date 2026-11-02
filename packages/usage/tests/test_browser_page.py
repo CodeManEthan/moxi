@@ -1,7 +1,8 @@
 """usage's page in a browser, through a real shell that starts usage's real page server:
-the contract check on the page and its two blocks, each view drawn over a small index and
-fitting a phone, the strip with no index, a read over a stale index that runs no pass,
-and "Read new sessions" bringing new sessions in.
+the contract check on the page and its two blocks (the cost block saying how old the index
+is), each view drawn over a small index and fitting a phone, the daily view's figures by
+token class, a session opened under its row's harness, the strip with no index, a read over a stale index that runs no pass, and "Read new sessions" bringing
+new sessions in.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
 the shell's own environment, so they sit under the shell's home where its page servers

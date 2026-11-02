@@ -602,12 +602,20 @@ export interface Strip {
   note: string | null;
   /** The command to run when the page can't, or null. */
   command: string | null;
+  /** Whether the page can run a pass: an index this usage reads, at its version. */
+  canPass: boolean;
+}
+
+/** Whether the index's note says only `moxi usage index` can bring it up: there is none,
+ * or an older usage wrote it, and the page server refuses a pass over it. */
+function needsCommand(note: string | null | undefined): boolean {
+  return /run `moxi usage index`/.test(note ?? "");
 }
 
 /** The strip from `/api/status` and the last `index` event, at `now`. */
 export function strip(status: FeedState<Status>, event: IndexEvent | null, now: number): Strip {
   const base = { lastPass: "", running: event?.running ?? false, lanes: [], held: 0, heldReasons: [], note: null,
-                 command: null };
+                 command: null, canPass: false };
   if (status.value === null) {
     if (status.failure !== null || status.refused !== null || status.gone) {
       return { ...base, state: "failed", note: status.refused ?? status.failure?.why ?? null };
@@ -630,7 +638,8 @@ export function strip(status: FeedState<Status>, event: IndexEvent | null, now: 
     held: total.held,
     heldReasons: heldReasons(status.value),
     note: note && !/^no pass ran first/.test(note) ? note : null,
-    command: /run `moxi usage index`/.test(index.note ?? "") ? INDEX_COMMAND : null,
+    command: needsCommand(index.note) ? INDEX_COMMAND : null,
+    canPass: !needsCommand(index.note),
   };
 }
 
@@ -657,10 +666,16 @@ export function heldLine(view: Strip): string | null {
   return `${files}: ${view.heldReasons.map(({ reason, count }) => `${reason} (${count})`).join("; ")}`;
 }
 
-/** Whether the page starts a pass as it opens: there is an index, and its last pass is
- * over `STALE_AFTER` old or never ran. */
+/** The line a refused pass adds to the strip, or null when the strip's note already says
+ * it, as it does over an index only `moxi usage index` can bring up. */
+export function refusedLine(refused: string | null, view: Strip): string | null {
+  return refused !== null && refused !== view.note ? refused : null;
+}
+
+/** Whether the page starts a pass as it opens: there is an index at this usage's version,
+ * and its last pass is over `STALE_AFTER` old or never ran. */
 export function shouldPass(status: Status | null, now: number): boolean {
-  if (status === null || status.total.index_version === 0) return false;
+  if (status === null || status.total.index_version === 0 || needsCommand(status.index.note)) return false;
   const last = status.total.last_pass;
   return last === null || now - last > STALE_AFTER;
 }
