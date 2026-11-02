@@ -323,8 +323,8 @@ snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
   give a row (20 files or more by the measure's own rules) but the measure in effect has
   none for (so no warn-at mark), or when the measure is over 14 days old; the fix is
   `moxi usage restart-point --measure`. Models and populations seen in the last 30 days
-  that the measure gives no row (too few files, headless or short sessions, or no input
-  price) are counted, not warned on.
+  that the measure gives no row (too few files, headless or short sessions, or no usable
+  input price: unknown, missing or 0) are counted, not warned on.
 - `marks`: deletes fired-mark files older than `marks.max_age_days` (7) and the worker
   ceiling's agent markers older than `ceiling.max_age_days` (7), and counts them; a
   warning when the worker ceiling is on but a threshold is 0, so it allows every call.
