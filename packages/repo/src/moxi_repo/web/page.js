@@ -42,7 +42,7 @@ var N=globalThis,L=N.ShadowRoot&&(N.ShadyCSS===void 0||N.ShadyCSS.nativeShadow)&
   details > .copy + .copy { margin-top: 6px; }
 `,lt=class extends x{constructor(){super(...arguments);this.route="";this.#t=null;this.#s=null;this.#n=()=>{document.visibilityState==="visible"&&this.#t?.refresh()}}static{this.styles=fe}static{this.properties={route:{type:String}}}#t;#s;#n;connectedCallback(){super.connectedCallback(),this.#t=new G(()=>me("repo","api/repos"),()=>this.requestUpdate()),this.#t.refresh(),this.requestUpdate(),document.addEventListener("visibilitychange",this.#n)}disconnectedCallback(){super.disconnectedCallback(),this.#t?.close(),this.#t=null,document.removeEventListener("visibilitychange",this.#n)}async#o(e,s){try{await navigator.clipboard.writeText(e),this.#s=s}catch{this.#s=`!${s}`}this.requestUpdate()}render(){let e=this.#t;if(e===null)return h;let s=jt(e);if(s.state==="gone")return h;let r=e.now();return c`
       <h1>Git hooks</h1>
-      <p class="lede">Each repo repo writes git hooks for: the pieces each git event runs, in order, the existing git hook, the committer's specs and the doctor records repo has open. This page changes nothing. Each command here is one to copy and run in a terminal.</p>
+      <p class="lede">For each repo with git hook pieces: the pieces each git event runs, in order, the existing git hook, the committer's specs and the open doctor records. This page changes nothing. Each command here is one to copy and run in a terminal.</p>
       <div class="bar">
         <button data-action="read" ?disabled=${e.reading} @click=${()=>{e.refresh()}}>Read again</button>
         ${e.reading&&!e.loading?c`<span class="dim">Reading…</span>`:h}

@@ -1,7 +1,7 @@
 // <moxi-repo-page route="...">: repo's panel, read-only. For each indexed repo: its
 // problems, each event with its pieces in order, the existing git hook and the chain
-// line's state, each committer spec's last pass, last commit and pushes, and the doctor
-// records repo has open. The page runs nothing: every action is one of `moxi repo`'s
+// line's state, each committer spec's last pass, last commit and pushes, and the open
+// doctor records. The page runs nothing: every action is one of `moxi repo`'s
 // commands, shown to copy and run in a terminal. It reads `/api/repos` when it opens,
 // when its tab is shown again, and on "Read again".
 
@@ -107,7 +107,7 @@ export class RepoPage extends LitElement {
     const now = feed.now();
     return html`
       <h1>Git hooks</h1>
-      <p class="lede">Each repo repo writes git hooks for: the pieces each git event runs, in order, the existing git hook, the committer's specs and the doctor records repo has open. This page changes nothing. Each command here is one to copy and run in a terminal.</p>
+      <p class="lede">For each repo with git hook pieces: the pieces each git event runs, in order, the existing git hook, the committer's specs and the open doctor records. This page changes nothing. Each command here is one to copy and run in a terminal.</p>
       <div class="bar">
         <button data-action="read" ?disabled=${feed.reading} @click=${() => void feed.refresh()}>Read again</button>
         ${feed.reading && !feed.loading ? html`<span class="dim">Reading…</span>` : nothing}
