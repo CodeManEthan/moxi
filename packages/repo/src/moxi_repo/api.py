@@ -888,10 +888,12 @@ def teardown() -> Teardown:
 
 # -- committer specs ----------------------------------------------------------------------
 
-def specs(path: str | os.PathLike | None = None) -> list[dict]:
+def specs(path: str | os.PathLike | None = None, *, sweep: bool = True) -> list[dict]:
     """Each indexed repo, or the one at `path`, with its saved specs and the specs that ran
     there without being saved, each with its last result (`moxi repo specs --json`). Runs
-    the record sweep for each repo first."""
+    the record sweep for each repo first, unless `sweep` is false: then nothing is
+    written. A saved spec's `last_commit` is its author's newest commit, `{"sha",
+    "time"}`, or None; a spec not saved names no author, so its `last_commit` is None."""
     from moxi_repo import committer
 
     if path is not None:
@@ -900,13 +902,19 @@ def specs(path: str | os.PathLike | None = None) -> list[dict]:
         repos = [repo for _, _, repo, _ in indexed_repos() if repo is not None]
     out = []
     for repo in repos:
-        _sweep(repo)
+        if sweep:
+            _sweep(repo)
         try:
             listed = committer.listing(repo.root)
         except committer.SpecError as exc:
             raise Failure(str(exc)) from None
         if path is None and not listed:
             continue
+        for item in listed:
+            author = (item.get("spec") or {}).get("author")
+            found = committer.last_commit(repo.root, tuple(author)) if author else None
+            item["last_commit"] = (None if found is None
+                                   else {"sha": found[0], "time": found[1]})
         out.append({"root": str(repo.root), "common_dir": str(repo.common_dir),
                     "specs": listed})
     return out
@@ -940,7 +948,8 @@ def forget_spec(path: str | os.PathLike, name: str) -> Report:
 def status(path: str | os.PathLike | None = None) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
-    enabled, fail policy, order, settings and whether a doctor record of it is open."""
+    enabled, fail policy, order, settings and whether a doctor record of it is open, and
+    its `records` each doctor record repo has open for it (`_records.open_of`)."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -954,6 +963,7 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
             root = index[key].get("root") or key
             out.append({"root": root, "common_dir": index[key].get("common_dir"),
                         "indexed": True, "pieces": [], "events": {},
+                        "records": _records.open_of(index[key].get("common_dir") or key),
                         "problems": [Problem(why,
                                              f"moxi repo git-hooks remove {_arg(root)}",
                                              state="warn")]})
@@ -1081,7 +1091,7 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
             "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
             "git_version": gitconf.version_text(version), "mode": mode,
             "mode_set": state.mode_set, "pieces": listed, "events": events,
-            "problems": problems}
+            "records": _records.open_of(repo.common_dir), "problems": problems}
 
 
 def _runnable(path: Path) -> bool:

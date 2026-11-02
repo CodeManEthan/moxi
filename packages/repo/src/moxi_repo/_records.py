@@ -125,6 +125,37 @@ def keys_of_repo(cgd: str | os.PathLike) -> list[str]:
     return sorted(k for k, v in ledger().items() if v.get("cgd") == want)
 
 
+def open_of(cgd: str | os.PathLike) -> list[dict]:
+    """Each open record of one repo, by key: its `kind`, `subject`, and the record's
+    `text`, `fix` and `at` as the doctor shows them. A ledger key whose record is already
+    gone (`moxi doctor --clear` took it) is left out."""
+    from moxi import doctor, paths
+
+    want = key_of(cgd)
+    keys = {k: v for k, v in ledger().items() if v.get("cgd") == want}
+    if not keys:
+        return []
+    try:
+        held = json.loads((paths.Layout(MODULE).state_dir() / doctor.RECORDS_FILE)
+                          .read_bytes())
+    except (OSError, ValueError):
+        return []
+    if not isinstance(held, dict):
+        return []
+    out = []
+    for key, entry in sorted(keys.items()):
+        record = held.get(key)
+        if not isinstance(record, dict):
+            continue
+        subject = entry.get("subject") if isinstance(entry.get("subject"), dict) else {}
+        out.append({"key": key, "kind": entry.get("kind"),
+                    "piece": subject.get("piece"), "spec": subject.get("spec"),
+                    "branch": subject.get("branch"),
+                    "text": str(record.get("text", "")), "fix": record.get("fix"),
+                    "at": record.get("at")})
+    return out
+
+
 def close_repo(cgd: str | os.PathLike) -> list[str]:
     """Clear every key of one repo (`remove PATH`); return the keys cleared."""
     keys = keys_of_repo(cgd)
