@@ -87,3 +87,31 @@ def test_config_check_runs_the_schema_first():
     with pytest.raises(ConfigError):
         settings.check('[marks]\ndefault = "3x"\n')
     settings.check('[marks]\ndefault = "1.5x"\n')
+
+
+@pytest.mark.parametrize("text, key, said", [
+    ("[limits]\nhistory_days = 0\n", "limits.history_days", "every limits reading"),
+    ("[limits]\nprojection_minutes = 0\n", "limits.projection_minutes", "projection off"),
+    ("[limits]\ncodex_pull_after = -1\n", "limits.codex_pull_after", "stale"),
+    ("[restart_point]\ndays = 0\n", "restart_point.days", "empty measure"),
+    ("[marks]\nmax_age_days = 0\n", "marks.max_age_days", "said again"),
+    ("[marks]\nmax_age_days = -3\n", "marks.max_age_days", "said again"),
+    ("[ceiling]\nmax_age_days = 0\n", "ceiling.max_age_days", "latched"),
+    ("[ceiling]\nwarn_tokens = 200\nhard_tokens = 200\n", "ceiling.warn_tokens", "never"),
+    ("[ceiling]\nwarn_tokens = 300\nhard_tokens = 200\n", "ceiling.warn_tokens", "never"),
+])
+def test_config_check_refuses_a_value_that_destroys_state_or_switches_off(text, key, said):
+    with pytest.raises(ConfigError, match=said) as caught:
+        settings.check(text)
+    assert caught.value.key == key and caught.value.fix
+
+
+@pytest.mark.parametrize("text", [
+    "[limits]\nhistory_days = 1\nprojection_minutes = 1\ncodex_pull_after = 0\n",
+    "[restart_point]\ndays = 1\n[marks]\nmax_age_days = 1\n[ceiling]\nmax_age_days = 1\n",
+    "[ceiling]\nwarn_tokens = 100\nhard_tokens = 200\n",
+    "[ceiling]\nwarn_tokens = 300\nhard_tokens = 0\n",
+    "[ceiling]\nwarn_tokens = 0\nhard_tokens = 200\n",
+])
+def test_config_check_takes_the_least_values(text):
+    settings.check(text)

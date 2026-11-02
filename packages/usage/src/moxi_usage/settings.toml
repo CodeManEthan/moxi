@@ -40,19 +40,19 @@ read = "use"
 [limits.codex_pull_after]
 type = "int"
 default = 600
-doc = "Seconds after which the newest Codex limits reading counts as stale, so limits asks the Codex app-server for a new one (needs turns)."
+doc = "Seconds after which the newest Codex limits reading counts as stale, so limits asks the Codex app-server for a new one (needs turns); 0 or more."
 read = "use"
 
 [limits.history_days]
 type = "int"
 default = 8
-doc = "Days of limits readings kept."
+doc = "Days of limits readings kept; 1 or more, since the readings cannot be rebuilt."
 read = "use"
 
 [limits.projection_minutes]
 type = "int"
 default = 60
-doc = "Minutes of readings a window's burn-rate projection fits."
+doc = "Minutes of readings a window's burn-rate projection fits; 1 or more."
 read = "use"
 
 [marks.default]
@@ -65,7 +65,7 @@ read = "use"
 [marks.max_age_days]
 type = "int"
 default = 7
-doc = "Days a fired mark's record is kept after its session was last seen."
+doc = "Days a fired mark's record is kept after its session was last seen; 1 or more."
 read = "use"
 
 [marks.handler_wait_ms]
@@ -77,7 +77,7 @@ read = "use"
 [restart_point.days]
 type = "int"
 default = 21
-doc = "Days of indexed sessions the restart-point measure reads."
+doc = "Days of indexed sessions the restart-point measure reads; 1 or more."
 read = "use"
 
 [restart_point.interactive_only]
@@ -108,7 +108,7 @@ read = "use"
 [ceiling.warn_tokens]
 type = "int"
 default = 0
-doc = "Context growth in tokens at which a subagent is warned once; the ceiling acts only when this and hard_tokens are both above 0."
+doc = "Context growth in tokens at which a subagent is warned once, below hard_tokens; the ceiling acts only when this and hard_tokens are both above 0."
 read = "use"
 
 [ceiling.hard_tokens]
@@ -159,5 +159,5 @@ read = "use"
 [ceiling.max_age_days]
 type = "int"
 default = 7
-doc = "Days a subagent's ceiling markers are kept."
+doc = "Days a subagent's ceiling markers are kept; 1 or more."
 read = "use"

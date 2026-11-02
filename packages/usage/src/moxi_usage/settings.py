@@ -32,6 +32,11 @@ trees for the token index to read: each a `[[claude.archive_roots]]` row with `p
 directory holding a `projects/` tree, and `id`, which names its lane (`archive:<id>`).
 `archive_roots(settings)` reads them in config order, and `check` runs it too.
 
+`bounds(settings)`, which `check` runs first, refuses the whole-number values that would
+destroy state or switch a feature off without a word: the day and minute keys below 1,
+`limits.codex_pull_after` below 0, and a `ceiling.warn_tokens` at or above a set
+`ceiling.hard_tokens`.
+
 The worker ceiling's roots must be absolute paths and each `ceiling.allow_commands` entry
 a list of words; `moxi_usage.ceiling.rules_of` reads them, and `check` runs it too.
 """
@@ -127,11 +132,49 @@ def check(text: str) -> None:
     """The announcement's `CONFIG_CHECK`: the whole of usage's config reader over a
     config text alone. Raises `ConfigError` when usage would refuse the text."""
     settings = check_text(MODULE, schema(), text)
+    bounds(settings)
     overrides(settings)
     archive_roots(settings)
     from .ceiling import rules_of
 
     rules_of(settings)
+
+
+# --- bounds ---------------------------------------------------------------------------
+
+#: Whole-number keys with their least value and why a smaller one is refused.
+MINIMA: Mapping[str, tuple[int, str]] = {
+    "limits.history_days": (1, "0 would delete every limits reading on the next prune, "
+                            "and the readings cannot be rebuilt"),
+    "limits.projection_minutes": (1, "0 would turn the burn-rate projection off"),
+    "limits.codex_pull_after": (0, "a reading cannot be stale before it is taken"),
+    "restart_point.days": (1, "0 would write an empty measure over a good one, and every "
+                           "mark would go unavailable"),
+    "marks.max_age_days": (1, "0 would delete live sessions' fired marks, so they would be "
+                           "said again"),
+    "ceiling.max_age_days": (1, "0 would sweep every agent's ceiling markers, latched "
+                             "ones included"),
+}
+
+
+def bounds(settings: Settings, *, file: Any = None) -> None:
+    """Refuse a value the schema takes but that would destroy state or switch a feature
+    off without saying so: a key of `MINIMA` below its least value, or a ceiling whose
+    `warn_tokens` is not below its `hard_tokens` when both are set. Raises `ConfigError`
+    naming the key and why."""
+    where = file if file is not None else settings.file
+    for key, (least, why) in MINIMA.items():
+        value = settings[key]
+        if value < least:
+            raise ConfigError(where, key, f"is {value}: {why}",
+                              f"set {key} to {least} or more")
+    warn, hard = settings["ceiling.warn_tokens"], settings["ceiling.hard_tokens"]
+    if warn > 0 and hard > 0 and warn >= hard:
+        raise ConfigError(where, "ceiling.warn_tokens",
+                          f"is {warn}, not below hard_tokens {hard}, so the warning "
+                          "would never be said",
+                          "set warn_tokens below hard_tokens, or either to 0 to turn the "
+                          "ceiling off")
 
 
 # --- archive roots ----------------------------------------------------------------------
