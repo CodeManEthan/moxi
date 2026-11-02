@@ -548,12 +548,29 @@ class _ClaudeBack:
                                    agent_id=self.source.agent_id, prompt_id=prompt,
                                    keep_raw=self.keep_raw, unterminated=unterminated)
 
-    def run(self, segment: list[tuple[bytes, bool, int]]) -> list[Record]:
+    def gives(self, raw: bytes) -> bool:
+        """Whether a line can give a kept record or change one (end a request, so set an
+        older one's `final`). A line that can't matters only by the turn it may start,
+        and that reaches only the lines newer than it. Always true without a filter."""
+        if self.wanted is None:
+            return True
+        for kind in self.wanted:
+            markers = claude.MARKER_BYTES.get(kind)
+            if markers is None or any(marker in raw for marker in markers):
+                return True
+        return b'"turn_duration"' in raw
+
+    def run(self, segment: list[tuple[bytes, bool, int]],
+            newest: int = 0) -> list[Record]:
         """One run of lines (newest first) whose oldest line sets the turn, or that
-        starts the file. Returns its records, newest first."""
+        starts the file. Returns its records, newest first.
+
+        `newest` is the place in the run of its newest line that `gives`; the lines
+        newer than it are not decoded: they give no kept record, and the turn they may
+        start reaches no line that does."""
         lines = []
         prompt = None
-        for raw, unterminated, offset in reversed(segment):
+        for raw, unterminated, offset in reversed(segment[newest:]):
             if self.wanted is not None and not claude.needs_decode(raw, self.wanted):
                 continue
             before = prompt
@@ -582,14 +599,26 @@ class _ClaudeBack:
         return tuple(out)
 
     def records(self, lines: Iterator) -> Iterator[Record]:
+        """The records of `lines` (newest first), a run at a time.
+
+        A line that can't give a kept record (`gives`), read while no newer line of the
+        run can either, is not looked at for the turn it starts: that turn would reach
+        no line that gives a record, and the older lines map the same in either run. So
+        a long tool result after a session's newest request is not decoded at all."""
         segment: list = []
+        newest = None                    # the run's newest line that gives a kept record
         for item in lines:
             segment.append(item)
+            if newest is None:
+                if not self.gives(item[0]):
+                    continue
+                newest = len(segment) - 1
             if _claude_anchor(item[0]):
-                yield from self.run(segment)
+                yield from self.run(segment, newest)
                 segment = []
+                newest = None
         if segment:
-            yield from self.run(segment)
+            yield from self.run(segment, len(segment) if newest is None else newest)
 
 
 class _CodexBack:
@@ -774,7 +803,10 @@ def last_request(source: Any, *, synthetic: bool = False, limit: int = BACK_LIMI
     set), where every line is sidechain, it is every line. A synthetic request (Claude
     Code's `<synthetic>`) is passed over unless `synthetic` is true. OpenCode's is the
     session's newest request whose step has finished, since an open step has no tokens
-    yet. The read is backward only, and stops at the first request it takes.
+    yet. The read is backward only, and stops at the first request it takes. A Claude
+    line newer than that request that can hold no request (a long tool result, say) is
+    passed over without being decoded; the answer is the one a read decoding every line
+    gives.
     """
     src, bound = unpack(source)
     if src.harness == OPENCODE:
