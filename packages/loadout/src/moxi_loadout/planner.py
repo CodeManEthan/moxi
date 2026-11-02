@@ -31,7 +31,8 @@ nobody has placed it, install places it as the module and takes it over
 
 States: `ok`, `missing`, `stale`, `modified`, `blocked`, `would-commit`, `bad-source`, `off`.
 A step the placer refused for a path in the way reads `blocked`, one whose path git tracks
-`would-commit`, both by the step's cause, never its reason.
+`would-commit`, both by the step's cause, never its reason. A target git would commit
+because nothing ignores it reads `would-commit` too (`moxi_loadout.ignores`).
 """
 
 from __future__ import annotations
@@ -106,6 +107,7 @@ class Want:
     notes: tuple[str, ...] = ()
     step: object = None
     adoptable: bool = False
+    commit: str | None = None   # why git would commit its target, when it would
 
     @property
     def scope(self) -> str:
@@ -488,6 +490,8 @@ def state_of(want: Want) -> tuple[str, str, int]:
         return "off", "", 0
     if want.adoptable:
         return "ok", f"{want.module} placed it; install takes it over", 0
+    if want.commit is not None:
+        return "would-commit", want.commit, REFUSED
     if want.kind == GLOBAL_KIND and step.action == "refuse" \
             and step.cause in ("occupant", "tracked"):
         return "ok", f"{step.target} is there already; if-absent leaves it", 0
@@ -511,6 +515,23 @@ def state_of(want: Want) -> tuple[str, str, int]:
             return "bad-source", step.reason, ERROR
         return "blocked", step.reason, REFUSED
     return "ok", "", 0
+
+
+def places(want: Want, *, forced: bool = False) -> bool:
+    """Whether applying `want`'s step places (or keeps) a placement of loadout's at its
+    target: an `add`, an `update`, a `keep` (but never a target held in place), and with
+    `forced` a refusal that `--replace` places over. The would-commit check covers
+    these."""
+    from moxi.place import HELD_IN_PLACE
+
+    step = want.step
+    if step is None or want.state is not None or want.adoptable or step.target is None:
+        return False
+    if step.action in ("add", "update"):
+        return True
+    if step.action == "keep":
+        return step.reason != HELD_IN_PLACE
+    return forced and step.action == "refuse" and step.cause in ("occupant", "tracked")
 
 
 def target_of(want: Want) -> str | None:
@@ -547,4 +568,4 @@ def exit_code(codes: Iterable[int]) -> int:
 
 __all__ = ["OWNER", "STATES", "FINE", "Resolution", "resolve_key", "Want", "Row", "Plan",
            "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "exit_code",
-           "target_of"]
+           "places", "target_of"]

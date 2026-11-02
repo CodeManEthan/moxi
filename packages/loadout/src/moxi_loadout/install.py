@@ -12,6 +12,10 @@
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
    or a link of loadout's own under the folder the last install read; a module skill
    nobody has placed, as its module, then taken over seeded;
+   before anything is placed, the would-commit check (`moxi_loadout.ignores`): loadout's
+   ignore file written first where it covers a target, and a target git would still
+   commit left out with its line; after, loadout's ignore files brought into line with
+   what it holds;
 5. write the harness entries (`moxi_loadout.entries`): hooks, permission rules, MCP
    servers and the managed global file, CLI-backed MCP servers first, then each harness
    file once;
@@ -40,7 +44,7 @@ from dataclasses import dataclass, field
 
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
-from moxi_loadout import adoption, entries, ledger, planner
+from moxi_loadout import adoption, entries, ignores, ledger, planner
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -82,13 +86,47 @@ class Outcome:
 
 # -- status ---------------------------------------------------------------------------------
 
-def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key) -> Outcome:
-    """Every item's state; the scope filters the rows. Takes no lock, writes nothing."""
+def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
+           git: ignores.Git | None = None) -> Outcome:
+    """Every item's state; the scope filters the rows. Takes no lock, writes nothing.
+    `git` runs the would-commit check's git calls (a fresh `ignores.Git` when None)."""
     plan, run = _plan(folder, resolver)
-    rows = [r for r in planner.rows(plan) + entries.rows(run) if _shown(scope, r)]
+    notes = _check_placed(plan, ignores.Git() if git is None else git)
+    rows = [r for r in planner.rows(plan) + entries.rows(run) + _ignore_rows(plan.ledger)
+            if _shown(scope, r)]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
     return Outcome(rows, list(plan.lines) + run.lines,
-                   list(dict.fromkeys(plan.notes + run.notes)), code)
+                   list(dict.fromkeys(plan.notes + run.notes + notes)), code)
+
+
+def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
+    """The would-commit check over every target the plan places or keeps, for `status`:
+    a target git would commit reads `would-commit`; so does a placement already made
+    that nothing ignores, which the next install covers with loadout's ignore file."""
+    wants = [w for w in plan.wants if planner.places(w)]
+    verdicts = ignores.check([str(w.step.target) for w in wants], git)
+    skipped = []
+    for w in wants:
+        v = verdicts.get(str(w.step.target))
+        if v is None:
+            continue
+        if v.state == "would-commit":
+            w.commit = v.line
+        elif v.state == "needs" and w.step.action == "keep":
+            w.commit = (f"git would commit it; install writes "
+                        f"{os.path.join(v.folder, ignores.IGNORE)}")
+        elif v.state == "unchecked":
+            skipped.append(v.line)
+    if not skipped:
+        return []
+    return [f"the would-commit check skipped {len(skipped)} target"
+            f"{'s' * (len(skipped) != 1)}: {skipped[0]}"]
+
+
+def _ignore_rows(data: dict) -> list[Row]:
+    """A row for each of loadout's ignore files edited since loadout wrote it."""
+    return [Row(section, "ignore", path, "*", "modified", why, path, REFUSED)
+            for path, section, why in ignores.problems(data)]
 
 
 def _shown(scope: Scope, r: Row) -> bool:
@@ -208,6 +246,8 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
             forced.append(step)
         else:
             rows.append(planner.row(want))
+    touched = _cover(in_scope, plain, forced, seeded, place.status(planner.OWNER), data,
+                     rows, say)
     removes = [s for s in plan.removals if _remove_in_scope(plan, s, scope)]
     done = {str(p.path): p for p in place.apply(plain + removes, say=say)}
     done.update({str(p.path): p for p in place.apply(forced, replace=True, say=say)})
@@ -238,7 +278,8 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
                 if step.action != "keep":
                     verb = "updated" if step.action == "update" else "placed"
                     say(f"{verb} {want.label()} ({target})")
-                rows.append(planner.row(want, "ok", ""))
+                rows.append(planner.row(want, "ok", "") if want.commit is None
+                            else planner.row(want))
             else:
                 rows.append(planner.row(want, "missing", f"not placed at {target}", ERROR))
     for step in removes:
@@ -250,9 +291,13 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
         else:
             say(f"removed {r.kind} {r.name} for {r.harness} ({target})")
 
+    folders = None if scope.whole else touched | {os.path.dirname(str(s.target))
+                                                  for s in removes}
+    lines.extend(ignores.settle(data, place.status(planner.OWNER), folders, say=say))
     if found.global_mode == "managed":
         harness_entries()
     rows += written
+    rows += [r for r in _ignore_rows(data) if _shown(scope, r)]
     unclaimed = [c for c in claims if not claims[c]]
     for text in unclaimed:
         lines.append(f"--replace {text}: nothing of loadout's is refused there")
@@ -267,6 +312,55 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
                    planner.exit_code(codes))
+
+
+def _cover(in_scope, plain, forced, seeded, placed, data, rows, say) -> set[str]:
+    """The would-commit check, before anything is placed: each target the run will place
+    or keep is checked against git's ignore rules; loadout's ignore file is written first
+    where it covers a target, and a target git would still commit is taken out of the run
+    with its row. Returns the folders checked."""
+    from moxi.place import IN_PLACE
+
+    chosen = {id(s) for s in plain} | {id(s) for s in forced}
+    by_target: dict[str, list] = {}
+    for want in in_scope:
+        if want.step is None:
+            continue
+        if any(want is w for w in seeded) or (
+                id(want.step) in chosen and planner.places(want, forced=True)):
+            by_target.setdefault(str(want.step.target), []).append(want)
+    verdicts = ignores.check(list(by_target), ignores.Git())
+    have: dict[str, set[str]] = {}
+    for p in placed:
+        if p.form != IN_PLACE:
+            have.setdefault(os.path.dirname(str(p.path)), set()).add(p.path.name)
+    needs: dict[str, list[str]] = {}
+    stopped: set[str] = set()
+    for target, v in verdicts.items():
+        if v.state == "needs":
+            needs.setdefault(v.folder, []).append(target)
+        elif v.state in ("would-commit", "unchecked"):
+            line = v.line if v.state == "would-commit" else (
+                f"loadout can't tell whether git would commit it ({v.line})")
+            for want in by_target[target]:
+                want.commit = line
+            stopped.add(target)
+    for folder, targets in needs.items():
+        names = have.get(folder, set()) | {os.path.basename(t) for t in targets}
+        problem = ignores.write(folder, names, data, by_target[targets[0]][0].scope, say)
+        if problem:
+            for t in targets:
+                for want in by_target[t]:
+                    want.commit = f"git would commit it; {problem}"
+                stopped.add(t)
+    for target in stopped:
+        for want in by_target[target]:
+            if want.step.action != "keep":
+                rows.append(planner.row(want))
+    plain[:] = [s for s in plain if s.action == "keep" or str(s.target) not in stopped]
+    forced[:] = [s for s in forced if str(s.target) not in stopped]
+    seeded[:] = [w for w in seeded if str(w.step.target) not in stopped]
+    return {v.folder for v in verdicts.values()}
 
 
 def _claims(replace: list[str]) -> dict[str, bool]:
