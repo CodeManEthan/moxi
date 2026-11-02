@@ -18,8 +18,8 @@ whole-text placeholder would destroy the note. When `redact` gives exactly one
 `[REDACTED:<rule>]` for a text that wasn't already that (a text the fallback engine
 couldn't scan in time, a rule that matches the path alone, or `redact`'s own last
 resort), the filter answers `status=error` for that file: git keeps its content, and the
-prepare step leaves it out. A one-line file that is wholly one secret is left out the same
-way. A placeholder that replaces one line of a longer text is redaction and stays.
+prepare step leaves it out. A file whose whole text, with no line end, is one secret is
+left out the same way. A placeholder that replaces one line of a longer text is redaction and stays.
 
 A failure costs only the files it failed on: setup writes the driver with
 `required = false`. A file the filter fails on is answered `status=error` and git keeps
