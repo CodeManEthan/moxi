@@ -280,7 +280,9 @@ def params(env: Mapping[str, str] | None = None) -> dict | None:
 def read_multiplier(model: Any, *, table: Any = None,
                     env: Mapping[str, str] | None = None) -> tuple[float | None, str | None]:
     """r, the model's cache-read price over its input price, from the model table in
-    effect (or `table`), and None; or None and why there is none."""
+    effect (or `table`), and None; or None and why there is none. Only the row's own
+    cache-read price counts: one the lookup filled from the provider's default
+    (`provenance.filled`) is no price of the row's, so it gives no `r`."""
     from moxi_sessions.api import UNKNOWN
 
     if table is None:
@@ -291,6 +293,8 @@ def read_multiplier(model: Any, *, table: Any = None,
     if not facts.known:
         return None, f"the model table does not know {model}"
     read, base = facts.cache_read, facts.input
+    if "cache_read" in facts.provenance.filled:
+        read = UNKNOWN
     if read is UNKNOWN or base is UNKNOWN:
         missing = " and ".join(name for name, value in (("input", base),
                                                         ("cache-read", read))

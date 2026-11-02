@@ -182,6 +182,16 @@ def test_a_row_without_a_read_multiplier_is_unavailable():
     assert unknown.reason == "the model table does not know claude-new-1"
 
 
+def test_a_cache_read_price_filled_from_the_providers_default_gives_no_mark():
+    params = copy.deepcopy(PARAMS)
+    params["models"]["claude-new-1"] = params["models"]["claude-opus-5"]
+    rows = {"claude-new-1": {"input": 10.0, "output": 50.0, "provider": "anthropic"}}
+    filled = models.Table(doc(rows, defaults={"anthropic": {"cache_read": 0.1}}))
+    assert filled.lookup("claude-new-1").provenance.filled == ("cache_read",)
+    found = thresholds.threshold("claude-new-1", "1x", doc=params, table=filled)
+    assert found.reason == "the model table has no cache-read price for claude-new-1"
+
+
 @pytest.mark.parametrize("change,reason", [
     ({"g": None}, "is incomplete"),
     ({"g": 0}, "gives no restart point"),
