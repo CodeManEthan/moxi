@@ -176,7 +176,8 @@ def test_upsert_refuses_a_bad_key_or_a_value_on_two_lines():
     ("#hash", "'#hash'"), ("it's", "it's"), ("'quoted'", "'''quoted'''"),
     ("a #b", "'a #b'"), ("a\t#b", "'a\t#b'"), ("issue#12", "issue#12"),
     ("2026-11-01", "2026-11-01"), (["a,b", "c"], "['a,b', c]"), (["x[1]"], "['x[1]']"),
-    (["{y}", "z"], "['{y}', z]"),
+    (["{y}", "z"], "['{y}', z]"), (["it's", "a"], "['it''s', a]"),
+    (['say "hi"', "b"], """['say "hi"', b]"""),
 ])
 def test_a_written_value_reads_back_the_same(value, line):
     assert fm.render(value) == line

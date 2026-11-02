@@ -214,10 +214,11 @@ def render(value) -> str:
 
 
 def _render_item(item) -> str:
-    """One list item: as `render`, quoted too when it holds a character that ends or nests a
-    flow item, so the reader gives back the one item."""
+    """One list item: as `render`, quoted too when it holds a character the flow reader
+    treats as structure (a comma, a bracket or brace, or a quote, which opens a quoted span
+    anywhere in an item), so the reader gives back the one item."""
     text = render(item)
-    if not text.startswith("'") and any(char in text for char in ",[]{}"):
+    if not text.startswith("'") and any(char in text for char in ",[]{}'\""):
         return "'" + text.replace("'", "''") + "'"
     return text
 
