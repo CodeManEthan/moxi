@@ -855,11 +855,16 @@ def _skills(step: Settle) -> bool:
     another module handed it, a project's skill it placed for a user) are left exactly as
     they are: the plan treats `items` as the owner's whole set, so their `remove` steps
     are dropped before `apply`. When the module has none of its own placements (none
-    placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
-    it has some, there is no question: the plan updates, adds and removes them as the
-    package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
-    has it removed. One handed to another owner is skipped while any other owner places
-    it; once none does, the skill is placed again with no question. A name in
+    placed, and none handed over unless seeded), `skills_wanted` asks first, naming only
+    the skills the plan would place, and a no places nothing. When it has some, there is
+    no question: the plan updates, adds and removes them as the package's `SKILLS` say now,
+    so a module that drops a skill, or `SKILLS` altogether, has it removed. One handed
+    to another owner is skipped while any other owner places it; once none does, the
+    skill is placed again with no question. A seeded hand-over (`moxi.place.adopt(...,
+    seeded=True)`) is the user's choice for that one skill and never stands in for a yes
+    here: it is skipped while it stands, and counts as none of the module's own, so with
+    only seeded hand-overs the question is asked for the rest; once it has lapsed, its
+    skill is named in the question like any other it would place. A name in
     `skills.harnesses` whose harness row is skipped or missing still makes its items:
     the placer refuses each (cause `harness`) with a line and keeps what was placed
     there, so a broken row never removes skills and never fails the step (the doctor
@@ -895,11 +900,19 @@ def _skills(step: Settle) -> bool:
         if s.action == "remove" and place.from_package(found, s.item.source)]
     held_now = {str(p.path) for p in placed}
     labels = {(p.harness, p.kind, p.name) for p in placed}
+    # A hand-over counts as the module's own only when it was not seeded, whether it
+    # stands or has lapsed: the flag is read, never membership of `handed` alone.
+    given = {key for key, entry in handed.items()
+             if not (isinstance(entry, dict) and entry.get("seeded"))}
     own = len(steps) > len(items) or any(
-        s.action == "skip" or str(s.target) in held_now or str(s.target) in handed
+        str(s.target) in held_now or str(s.target) in given
         or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
         for s in steps)
-    if not own and (not items or not skills_wanted(step, skills, usable)):
+    # The question names only the skills it would place: not one whose every target is
+    # skipped as handed over (a standing seeded hand-over, when nothing is the module's).
+    wanted = [name for name in skills
+              if any(s.action != "skip" for s in steps[:len(items)] if s.item.name == name)]
+    if not own and (not wanted or not skills_wanted(step, wanted, usable)):
         return not misnamed
     with held():
         done = place.apply(steps, replace=step.replace,

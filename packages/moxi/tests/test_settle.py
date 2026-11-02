@@ -1665,6 +1665,115 @@ def test_a_skill_handed_on_is_skipped_until_no_owner_holds_it(sk, capsys, monkey
     assert not owned(sk)["handed"]
 
 
+def seed(w, name, *harnesses):
+    """What another owner does to place a skill of demo's that the user chose there: place
+    it as demo, then take it over, seeded."""
+    place = w.place
+    items = [place.Item(w.pkg / "skills" / name, h, name) for h in harnesses]
+    steps = place.plan("demo", items)[:len(items)]
+    done = place.apply(steps, say=lambda line: None)
+    place.adopt("demo", "loadout", done, seeded=True, say=lambda line: None)
+
+
+def test_with_only_seeded_hand_overs_the_question_is_asked_for_the_rest(sk, capsys,
+                                                                         monkeypatch):
+    sk.skills("moxi-demo-send", "moxi-demo-read")
+    seed(sk, "moxi-demo-send", "claude", "codex")
+    asked = at_terminal(monkeypatch, "y")
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert asked == ["demo ships 1 skill (moxi-demo-read). Place them for claude and codex? "
+                     "[y/N] "]
+    assert "demo: moxi-demo-send was handed to loadout; skipped" in out
+    assert sorted((p.name, p.harness) for p in sk.place.status("demo")) == [
+        ("moxi-demo-read", "claude"), ("moxi-demo-read", "codex")]
+    assert len(sk.place.status("loadout")) == 2
+    assert all(e.get("seeded") for e in owned(sk)["handed"].values())
+
+
+def test_with_only_seeded_hand_overs_nobody_there_places_nothing(sk, capsys, monkeypatch):
+    """As on a clean machine: nobody at the keyboard, nothing placed and the line; an
+    upgrade asks again, and the flags answer ahead."""
+    sk.skills("moxi-demo-send", "moxi-demo-read")
+    seed(sk, "moxi-demo-send", "claude", "codex")
+    handed = owned(sk)["handed"]
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    for _ in range(2):
+        code, out = place_settle(sk, capsys)
+        assert code == 0, out
+        assert "demo: skills not placed; place them with: moxi install demo --skills" in out
+        assert sk.place.status("demo") == [] and owned(sk)["handed"] == handed
+    code, out = place_settle(sk, capsys, skills=False)
+    assert code == 0 and sk.place.status("demo") == []
+    asked = at_terminal(monkeypatch, "n")
+    code, out = place_settle(sk, capsys)
+    assert code == 0 and len(asked) == 1 and sk.place.status("demo") == []
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(sk, capsys, skills=True)
+    assert code == 0, out
+    assert sorted(p.name for p in sk.place.status("demo")) == ["moxi-demo-read"] * 2
+    assert owned(sk)["handed"] == handed
+
+
+def test_a_seeded_hand_over_for_one_harness_leaves_the_skill_in_the_question(
+        sk, capsys, monkeypatch):
+    sk.skills("moxi-demo-send")
+    seed(sk, "moxi-demo-send", "claude")
+    asked = at_terminal(monkeypatch, "y")
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert asked == ["demo ships 1 skill (moxi-demo-send). Place them for claude and codex? "
+                     "[y/N] "]
+    assert [p.harness for p in sk.place.status("demo")] == ["codex"]
+
+
+def test_with_only_seeded_hand_overs_of_every_skill_nothing_is_asked(sk, capsys,
+                                                                      monkeypatch):
+    sk.skills("moxi-demo-send")
+    seed(sk, "moxi-demo-send", "claude", "codex")
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert "skills not placed" not in out and sk.place.status("demo") == []
+
+
+def test_an_unseeded_hand_over_beside_a_seeded_one_counts_as_placed(sk, capsys,
+                                                                     monkeypatch):
+    sk.skills("moxi-demo-send", "moxi-demo-read")
+    seed(sk, "moxi-demo-send", "claude", "codex")
+    place = sk.place
+    items = [place.Item(sk.pkg / "skills" / "moxi-demo-read", h, "moxi-demo-read")
+             for h in ("claude", "codex")]
+    done = place.apply(place.plan("demo", items)[:2], say=lambda line: None)
+    place.adopt("demo", "loadout", done, say=lambda line: None)
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert out.count("was handed to loadout; skipped") == 4
+    assert "skills not placed" not in out and sk.place.status("demo") == []
+
+
+def test_a_lapsed_seeded_hand_over_is_named_and_counted_in_the_question(sk, capsys,
+                                                                       monkeypatch):
+    """The taker removed it, so the hand-over has lapsed: the skill plans `add` and is
+    asked about, never placed as the module's own without a yes."""
+    sk.skills("moxi-demo-send")
+    seed(sk, "moxi-demo-send", "claude", "codex")
+    sk.place.remove("loadout", say=lambda line: None)
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert "demo: skills not placed; place them with: moxi install demo --skills" in out
+    assert not os.path.lexists(sk.claude("moxi-demo-send"))
+    asked = at_terminal(monkeypatch, "y")
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert asked == ["demo ships 1 skill (moxi-demo-send). Place them for claude and codex? "
+                     "[y/N] "]
+    assert [p.state for p in sk.place.status("demo")] == ["ok", "ok"]
+    assert not owned(sk)["handed"]
+
+
 def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monkeypatch):
     """A name in `skills.harnesses` whose row is skipped, or that has no row at all,
     still reaches the placer, which refuses it and leaves what it placed there. The

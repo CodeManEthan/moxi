@@ -769,6 +769,78 @@ def test_apply_skips_a_lapsed_hand_over_the_taker_holds_again(home, skill):
     assert list(led["loadout"]["placed"]) == list(led["comms"]["handed"])
 
 
+def test_a_seeded_hand_over_is_marked_and_skips_and_lapses_as_any(home, skill):
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    target = home / ".claude" / "skills" / "comms-send"
+    moved = place.adopt("comms", "loadout", place.status("comms"), seeded=True)
+    assert [(p.owner, p.path) for p in moved] == [("loadout", target)]
+    assert ledger()["comms"]["handed"] == {str(target): {
+        "kind": "skill", "harness": "claude", "name": "comms-send", "to": "loadout",
+        "seeded": True}}
+    one(place.plan("comms", [item]), "skip")
+    place.remove("loadout", say=lambda line: None)
+    one(place.plan("comms", [item]), "add")
+    place.apply(place.plan("comms", [item]))
+    assert not ledger()["comms"]["handed"]
+
+
+def test_adopt_replaces_an_existing_handed_entry(home, skill):
+    """A handed entry the giver already has for the target is replaced, seeded or not as
+    the call says."""
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    key = str(home / ".claude" / "skills" / "comms-send")
+    path = moxi.paths.core().state_dir() / place.LEDGER
+    led = ledger()
+    led["comms"]["handed"] = {key: {"kind": "skill", "harness": "claude",
+                                    "name": "comms-send", "to": "tidy", "seeded": True}}
+    path.write_text(json.dumps(led))
+    place.adopt("comms", "loadout", place.status("comms"))
+    assert ledger()["comms"]["handed"] == {key: {
+        "kind": "skill", "harness": "claude", "name": "comms-send", "to": "loadout"}}
+    place.adopt("loadout", "comms", place.status("loadout"))
+    place.adopt("comms", "loadout", place.status("comms"), seeded=True)
+    assert ledger()["comms"]["handed"][key]["seeded"] is True
+
+
+def test_a_seeded_target_is_never_handed_back_and_the_rest_go(home, skill):
+    """The hand-back of a seeded target is refused with a line naming its taker and
+    changes nothing; an unseeded one in the same call goes back whole."""
+    src = skill()
+    items = [Item(src, "claude", "comms-send"), Item(src, "codex", "comms-send")]
+    place.apply(place.plan("comms", items, form="copy"))
+    claude = home / ".claude" / "skills" / "comms-send"
+    codex = home / ".agents" / "skills" / "comms-send"
+    mine = {p.path: p for p in place.status("comms")}
+    place.adopt("comms", "loadout", [mine[claude]], seeded=True)
+    place.adopt("comms", "loadout", [mine[codex]])
+    before = ledger()["comms"]["handed"][str(claude)]
+    said, say = lines()
+    back = place.adopt("loadout", "comms", place.status("loadout"), say=say)
+    assert [p.path for p in back] == [codex]
+    assert said == ["comms-send was seeded; loadout removes it"]
+    led = ledger()
+    assert list(led["loadout"]["placed"]) == [str(claude)]
+    assert led["comms"]["handed"] == {str(claude): before}
+    assert list(led["comms"]["placed"]) == [str(codex)]
+    assert json.loads((claude / place.MARK).read_text())["owner"] == "loadout"
+    assert json.loads((codex / place.MARK).read_text())["owner"] == "comms"
+    place.remove("loadout", say=lambda line: None)
+    assert not os.path.lexists(claude) and os.path.isdir(codex)
+
+
+def test_a_seeded_target_handed_on_is_not_handed_back_by_the_next_owner(home, skill):
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    place.adopt("comms", "loadout", place.status("comms"), seeded=True)
+    place.adopt("loadout", "tidy", place.status("loadout"))
+    said, say = lines()
+    assert place.adopt("tidy", "comms", place.status("tidy"), say=say) == []
+    assert said == ["comms-send was seeded; loadout removes it"]
+    assert [p.owner for p in place.status("tidy")] == ["tidy"]
+
+
 # -- the core lock ------------------------------------------------------------------------
 
 def _hold_the_core_lock(seconds=1.0):

@@ -9,7 +9,8 @@ a ledger of what each owner placed.
     apply(steps, replace=False)          carry a plan out (`Placed` per placement left)
     status(owner)                        each placement of `owner` read against the disk
     remove(owner)                        remove every placement of `owner`
-    adopt(from_owner, to_owner, placed)  hand placements from one owner to another
+    adopt(from_owner, to_owner, placed, seeded=False)
+                                         hand placements from one owner to another
     harnesses()                          the harness table, and a line per row skipped
     chosen()                             `skills.harnesses`, and a line per name skipped
     from_package(found, source)          whether a source lies in a module's own package
@@ -1120,7 +1121,7 @@ def remove(owner: str, *, say: Callable[[str], object] = print) -> list[Placed]:
 
 
 def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
-          say: Callable[[str], object] = print) -> list[Placed]:
+          seeded: bool = False, say: Callable[[str], object] = print) -> list[Placed]:
     """Hand placements from `from_owner` to `to_owner`, by target, under the core lock.
 
     Each placement's ledger entry moves to `to_owner`, a copied folder's mark is
@@ -1133,6 +1134,16 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
     `handed` map drops the target, so handing an item back gives it back whole. Nothing
     on disk moves. A placement that is not `from_owner`'s is refused with a line and the
     rest go on. Returns the placements now `to_owner`'s.
+
+    `seeded=True` marks each new `handed` entry `"seeded": true`: the placement was made
+    as `from_owner` only so that `to_owner` could take it, not by `from_owner`'s own
+    install. A seeded entry skips and lapses as any other, but `moxi install` does not
+    count it as the module's own placement when it decides whether to ask its skills
+    question. An existing `handed` entry for the target is replaced, seeded or not as
+    this call says. A seeded hand-over is never handed back: a target `to_owner` handed
+    over seeded is refused with a line, "<name> was seeded; <its taker> removes it", and
+    the rest go on: its taker removes it instead, so a placement made that way never
+    becomes the module's own.
     """
     from . import files
 
@@ -1150,6 +1161,11 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
                     say(f"{placement.name} at {key} is not {from_owner}'s; not handed to "
                         f"{to_owner}")
                     continue
+                back = taker["handed"].get(key)
+                if isinstance(back, dict) and back.get("seeded"):
+                    say(f"{placement.name} was seeded; {back.get('to', from_owner)} "
+                        f"removes it")
+                    continue
                 if entry.get("form") != IN_PLACE and os.path.isdir(key) \
                         and not _is_link(key):
                     mark = _read_mark(key)
@@ -1161,10 +1177,13 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
                 del giver["placed"][key]
                 taker["placed"][key] = entry
                 taker["handed"].pop(key, None)
-                giver["handed"][key] = {"kind": entry.get("kind", "skill"),
-                                        "harness": entry.get("harness", ""),
-                                        "name": entry.get("name", os.path.basename(key)),
-                                        "to": to_owner}
+                handed = {"kind": entry.get("kind", "skill"),
+                          "harness": entry.get("harness", ""),
+                          "name": entry.get("name", os.path.basename(key)),
+                          "to": to_owner}
+                if seeded:
+                    handed["seeded"] = True
+                giver["handed"][key] = handed
                 moved.append(_placed(to_owner, key, entry))
         finally:
             _write_ledger(ledger)
