@@ -141,6 +141,23 @@ def test_off_imports_nothing_beyond_the_mark_module():
     assert out == ["moxi_usage", "moxi_usage.mark"]
 
 
+def test_unstamped_beside_turns_endpoint_imports_only_usages_settings():
+    """With no stamp the first call reads `marks.default`. In turns' endpoint, the one
+    caller, the core is loaded already, so of Moxi's modules only usage's settings
+    module is new; `marks.default` is off, so the listener answers None."""
+    code = ("import sys; from types import SimpleNamespace as N; import __future__; "
+            "import moxi_turns.endpoint, moxi_turns.listeners; "
+            "before = set(sys.modules); import moxi_usage.mark as m; "
+            "e = N(event='after-tool', harness='claude', session_id='s', agent_id=None, "
+            "env={}, record_path='/nowhere'); "
+            "assert m.on_tool(e) is None and m.floor(e) == m.NEVER; "
+            "print(' '.join(sorted(set(sys.modules) - before)))")
+    out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
+                         text=True, check=True).stdout.split()
+    assert [name for name in out if name.startswith("moxi")] == [
+        "moxi_usage", "moxi_usage.mark", "moxi_usage.settings"]
+
+
 # --- firing -----------------------------------------------------------------------------
 
 def test_a_first_observation_past_the_mark_fires_once():

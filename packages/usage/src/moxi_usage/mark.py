@@ -17,7 +17,12 @@ its own context and its own marks. A reader carries up to two purposes, each wit
   `MOXI_USAGE_CROSSING_AT`, which the launcher stamps when its recycle at limit is on;
   there is no config default.
 
-With both off the listener returns at once, having imported nothing beyond this module.
+With both stamped off the listener returns at once, having imported nothing beyond this
+module. A launch with no `MOXI_USAGE_WARN_AT` stamp reads `marks.default` instead, which
+imports usage's settings module and the core's config reader once per endpoint (beside
+turns' endpoint, which holds the core already, that is `moxi_usage.settings` and the
+standard library's TOML and resource readers, a few milliseconds); the file is then read
+again only when it changes.
 
 **The measure.** The reader's newest request, by sessions' `last_request`: its input
 tokens are the whole prompt. turns hands the file the harness writes (`record_path`);
