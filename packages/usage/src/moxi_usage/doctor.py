@@ -20,7 +20,9 @@ at what usage's answers rest on:
   the measure is older than 14 days, or when its file cannot be read.
 * `marks`: deletes the warn-at mark's fired-mark files older than `marks.max_age_days`
   and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
-  many it deleted and kept; `warn` when one could not be deleted.
+  many it deleted and kept; `warn` when one could not be deleted, or when the worker
+  ceiling runs (by `ceiling.on`, or by turns' `guards.on` as turns' guard loader reports
+  it) while `ceiling.warn_tokens` or `ceiling.hard_tokens` is 0, so it allows every call.
 * `turns`: `off` when turns is not installed, saying what needs it; else `ok`, naming
   the events usage registers with turns and what each is for.
 
@@ -411,7 +413,57 @@ def marks_row(*, now: float, env: Mapping[str, str] | None = None) -> Row:
     if swept.problems:
         shown = "; ".join(swept.problems[:REASONS_SHOWN])
         return Row(MODULE, "marks", "warn", f"{detail}; could not delete: {shown}")
+    unset = ceiling_unset(settings, env=env)
+    if unset is not None:
+        return Row(MODULE, "marks", "warn", f"{detail}; {unset}", CEILING_FIX)
     return Row(MODULE, "marks", "ok", detail)
+
+
+#: The fix the ceiling's warning names.
+CEILING_FIX = ("moxi config set usage ceiling.warn_tokens <tokens> and "
+               "moxi config set usage ceiling.hard_tokens <tokens>")
+
+
+def ceiling_unset(settings: Any, *, env: Mapping[str, str] | None = None) -> str | None:
+    """Why the worker ceiling runs with nothing to do, or None: it is on (by
+    `ceiling.on`, or by turns' guard loader reporting `usage.ceiling` on) while
+    `ceiling.warn_tokens` or `ceiling.hard_tokens` is 0, so it allows every call."""
+    from .ceiling import GUARD_ID, SWITCH
+
+    warn, hard = settings["ceiling.warn_tokens"], settings["ceiling.hard_tokens"]
+    if warn > 0 and hard > 0:
+        return None
+    by = SWITCH if settings[SWITCH] else ceiling_on_in_turns(env)
+    if by is None:
+        return None
+    zero = " and ".join(name for name, value in (("ceiling.warn_tokens", warn),
+                                                 ("ceiling.hard_tokens", hard))
+                        if value <= 0)
+    return (f"the worker ceiling is on ({by}) but {zero} is 0, so it allows every "
+            f"call; set both above 0, or turn {GUARD_ID} off")
+
+
+def ceiling_on_in_turns(env: Mapping[str, str] | None = None) -> str | None:
+    """What turned `usage.ceiling` on, as turns' guard loader reports it (`guards.on`,
+    `ceiling.on` or both), or None when it is off, turns is absent or the loader can't
+    be read."""
+    import importlib
+
+    import moxi.modules
+
+    from .ceiling import GUARD_ID, SWITCH
+
+    if not moxi.modules.available("turns"):
+        return None
+    try:
+        loader = importlib.import_module("moxi_turns.guards")
+        found = loader.load(env=env).get(GUARD_ID)
+    except Exception:  # noqa: BLE001 - a loader that can't be read leaves ceiling.on alone
+        return None
+    if found is None:
+        return None
+    said = {"list": "turns' guards.on", "switch": SWITCH}
+    return " and ".join(said.get(b, b) for b in found.by)
 
 
 # --- turns ------------------------------------------------------------------------------
@@ -477,4 +529,5 @@ def _utc(epoch: float) -> str:
 
 
 __all__ = ["rows", "model_rows", "snapshot_row", "unpriced_row", "index_row",
-           "imports_row", "restart_point_row", "seen_populations", "turns_row", "open_index", "IndexOpen", "MODULE"]
+           "imports_row", "restart_point_row", "seen_populations", "marks_row", "ceiling_unset",
+           "ceiling_on_in_turns", "turns_row", "open_index", "IndexOpen", "MODULE"]

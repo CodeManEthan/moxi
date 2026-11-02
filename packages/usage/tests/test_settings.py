@@ -24,6 +24,7 @@ DEFAULTS = {
     "restart_point.interactive_only": True,
     "restart_point.interactive_originators": ["codex-tui", "Codex Desktop"],
     "restart_point.measure_weekly": False,
+    "ceiling.on": False,
     "ceiling.warn_tokens": 0,
     "ceiling.hard_tokens": 0,
     "ceiling.return_tools": ["StructuredOutput"],

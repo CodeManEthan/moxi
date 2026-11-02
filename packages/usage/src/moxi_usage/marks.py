@@ -273,18 +273,6 @@ class Swept:
     problems: tuple[str, ...] = ()
 
 
-def _newest(path: str) -> float:
-    """The newest mtime of a directory and everything under it."""
-    newest = os.lstat(path).st_mtime
-    for root, dirs, files in os.walk(path):
-        for name in (*dirs, *files):
-            try:
-                newest = max(newest, os.lstat(os.path.join(root, name)).st_mtime)
-            except OSError:
-                continue
-    return newest
-
-
 def sweep(*, now: float, marks_days: float, ceiling_days: float,
           env: Mapping[str, str] | None = None) -> Swept:
     """Delete the fired-mark files (and their lock files) last changed more than
@@ -292,10 +280,6 @@ def sweep(*, now: float, marks_days: float, ceiling_days: float,
     `ceiling/<session>/<agent>/`, last changed more than `ceiling_days` before it; a
     session directory left empty goes too. Never raises: a file that can't be deleted is
     named in `problems`."""
-    import shutil
-
-    from moxi.paths import Layout
-
     problems: list[str] = []
     swept_marks = kept = swept_ceiling = 0
     directory = listener.state_dir(env)
@@ -320,33 +304,10 @@ def sweep(*, now: float, marks_days: float, ceiling_days: float,
             continue
         except OSError as exc:
             problems.append(f"{path}: {exc}")
-    ceiling = os.path.join(Layout("usage").state_dir(env), CEILING_DIR)
-    oldest = now - ceiling_days * _DAY
-    try:
-        sessions = os.listdir(ceiling)
-    except FileNotFoundError:
-        sessions = []
-    except OSError as exc:
-        sessions = []
-        problems.append(f"{ceiling}: {exc}")
-    for session in sessions:
-        top = os.path.join(ceiling, session)
-        if not os.path.isdir(top) or os.path.islink(top):
-            continue
-        try:
-            for agent in os.listdir(top):
-                where = os.path.join(top, agent)
-                if os.path.islink(where) or not os.path.isdir(where):
-                    continue
-                if _newest(where) < oldest:
-                    shutil.rmtree(where)
-                    swept_ceiling += 1
-            if not os.listdir(top):
-                os.rmdir(top)
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            problems.append(f"{top}: {exc}")
+    from .ceiling import sweep as sweep_ceiling
+
+    swept_ceiling, more = sweep_ceiling(now=now, max_age_days=ceiling_days, env=env)
+    problems.extend(more)
     return Swept(swept_marks, swept_ceiling, kept, tuple(problems))
 
 

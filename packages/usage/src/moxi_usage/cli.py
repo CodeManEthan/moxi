@@ -33,7 +33,7 @@ it (`moxi_usage.measure`).
 `marks SESSION` prints the session's warn-at marks: its context, the notice's and the
 crossing's mark with its threshold and state (armed, or fired and when), and its agents'
 fired notices; it exits 1 when the session's context cannot be read. `marks` alone prints
-each session's fired marks kept on disk.
+each session's fired marks kept on disk, and each agent the worker ceiling has stopped.
 
 The report verbs run the index's pass first, unless `--no-pass`, and print tokens and cost
 from the index (`moxi_usage.reports`). Days are local time, or UTC with `--utc`; `--since`
@@ -421,7 +421,8 @@ def _marks_parser(verbs: Any) -> None:
         "marks", help="print a session's warn-at marks, or every session's fired marks",
         description="Print a session's warn-at marks: its context, each mark in force "
                     "with its threshold and state, and its agents' fired notices. With "
-                    "no SESSION, print the fired marks kept on disk.")
+                    "no SESSION, print the fired marks kept on disk and the agents "
+                    "the worker ceiling has stopped.")
     marks.add_argument("session", nargs="?", metavar="SESSION",
                        help="the session id (a Codex thread id, an OpenCode session id)")
     marks.add_argument("--harness", choices=("claude", "codex", "opencode"),
@@ -440,12 +441,22 @@ def _marks_verb(args: argparse.Namespace) -> int:
             for line in found.lines():
                 print(line)
         return codes.OK if found.tokens is not marks.UNKNOWN else codes.ERROR
+    from .ceiling import latched
+
     files = marks.fired()
+    stopped = latched()
     if args.json:
-        print(json.dumps({"fired": [f.as_dict() for f in files]}, indent=2))
+        print(json.dumps({"fired": [f.as_dict() for f in files],
+                          "ceiling": [a.as_dict() for a in stopped]}, indent=2))
         return codes.OK
     if not files:
         print("no fired marks kept")
+    for agent in stopped:
+        grown = f"grew {agent.growth:,}" if agent.growth is not None else "grew past it"
+        when = _local(agent.at) if agent.at is not None else "?"
+        print(f"{agent.session_id} agent {agent.agent_id}: past the worker ceiling "
+              f"({grown} against {agent.threshold if agent.threshold is not None else '?'}) "
+              f"since {when}")
     for item in files:
         for reader, purposes in sorted(item.readers.items()):
             for name, rec in sorted(purposes.items()):

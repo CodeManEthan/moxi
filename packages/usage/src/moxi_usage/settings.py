@@ -31,6 +31,9 @@ The other key the schema checks only as a list is `claude.archive_roots`, more C
 trees for the token index to read: each a `[[claude.archive_roots]]` row with `path`, a
 directory holding a `projects/` tree, and `id`, which names its lane (`archive:<id>`).
 `archive_roots(settings)` reads them in config order, and `check` runs it too.
+
+The worker ceiling's roots must be absolute paths and each `ceiling.allow_commands` entry
+a list of words; `moxi_usage.ceiling.rules_of` reads them, and `check` runs it too.
 """
 
 from __future__ import annotations
@@ -126,6 +129,9 @@ def check(text: str) -> None:
     settings = check_text(MODULE, schema(), text)
     overrides(settings)
     archive_roots(settings)
+    from .ceiling import rules_of
+
+    rules_of(settings)
 
 
 # --- archive roots ----------------------------------------------------------------------

@@ -29,6 +29,10 @@ usage = "moxi_usage.module"
 [project.entry-points."moxi.turns.listeners"]
 usage = "moxi_usage.listeners"
 
+# usage's guard for turns: the worker ceiling.
+[project.entry-points."moxi.turns.guards"]
+usage = "moxi_usage.guards"
+
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
 

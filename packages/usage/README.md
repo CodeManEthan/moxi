@@ -205,6 +205,29 @@ Fired marks are kept in `STATE/usage/marks/`, so a restarted endpoint doesn't sa
 twice; a session's file goes when its endpoint ends. `moxi usage marks SESSION` prints a
 session's marks, thresholds and states; `moxi usage marks` lists the fired marks on disk.
 
+## The worker ceiling
+
+With turns installed, usage offers turns a guard, `usage.ceiling`, that stops a subagent
+whose context has grown too far since its first request. It is off until you turn it on,
+with `ceiling.on` (the install asks) or by adding `usage.ceiling` to turns' `guards.on`,
+and it acts only when `ceiling.warn_tokens` and `ceiling.hard_tokens` are both above 0
+(both start at 0):
+
+    moxi config set usage ceiling.on true
+    moxi config set usage ceiling.warn_tokens 250000
+    moxi config set usage ceiling.hard_tokens 300000
+
+Past `warn_tokens` of growth the agent is told once, in one added line
+(`ceiling.warning_text`). Past `hard_tokens` its tools are refused (`ceiling.deny_text`)
+until it returns, and this holds after a compaction. A refused agent may still call the
+return tools (`ceiling.return_tools`, `StructuredOutput`), write, edit and read `.md` files
+under `ceiling.handoff_roots`, run git's status, diff, add and commit forms in its working
+directory or under `ceiling.work_roots`, and run the commands whose words start with an
+entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`. Both root lists start
+empty, and no command beyond git is allowed until you add one. Markers live in
+`STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the agents past the
+ceiling. The guard covers Claude and Codex subagents; turns runs no guard on OpenCode.
+
 ## Commands
 
     moxi usage limits [--harness claude|codex] [--no-pull] [--json]
@@ -245,8 +268,8 @@ usage keeps its files in Moxi's roots, each made by its first write and readable
 you: the token index `STATE/usage/index.db`, the limits readings `STATE/usage/readings.db`
 (kept 8 days), the restart-point measure `STATE/usage/restart-point.json` and the model
 snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
-`STATE/usage/marks/`. `ceiling/` under `STATE/usage` is declared for the worker ceiling,
-which is still to come. `moxi paths usage` lists them all.
+`STATE/usage/marks/`, and the worker ceiling's markers `STATE/usage/ceiling/`.
+`moxi paths usage` lists them all.
 
 `moxi doctor usage` checks each store and adds usage's own rows; only `marks` deletes:
 
@@ -261,9 +284,10 @@ which is still to come. `moxi paths usage` lists them all.
   with no measured row (so no warn-at mark), or when the measure is over 14 days old; the
   fix is `moxi usage restart-point --measure`.
 - `marks`: deletes fired-mark files older than `marks.max_age_days` (7) and the worker
-  ceiling's agent markers older than `ceiling.max_age_days` (7), and counts them.
-- `turns`: off when turns is not installed, since Claude limits and the warn-at mark need
-  it; else the events usage registers with turns.
+  ceiling's agent markers older than `ceiling.max_age_days` (7), and counts them; a
+  warning when the worker ceiling is on but a threshold is 0, so it allows every call.
+- `turns`: off when turns is not installed, since Claude limits, the warn-at mark and the
+  worker ceiling need it; else the events usage registers with turns.
 
 ## From Python
 

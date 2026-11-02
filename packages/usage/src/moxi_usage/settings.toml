@@ -99,16 +99,22 @@ default = false
 doc = "Measure the restart point once a week on a timer."
 read = "use"
 
+[ceiling.on]
+type = "bool"
+default = false
+doc = "Run the worker ceiling, the guard that warns a subagent and then refuses its tools once its context has grown past warn_tokens and hard_tokens; naming usage.ceiling on turns' guards.on runs it too."
+read = "use"
+
 [ceiling.warn_tokens]
 type = "int"
 default = 0
-doc = "Context growth in tokens at which a subagent is warned once; the ceiling is off unless this and hard_tokens are both above 0."
+doc = "Context growth in tokens at which a subagent is warned once; the ceiling acts only when this and hard_tokens are both above 0."
 read = "use"
 
 [ceiling.hard_tokens]
 type = "int"
 default = 0
-doc = "Context growth in tokens past which a subagent's tools are refused, except handing off; the ceiling is off unless this and warn_tokens are both above 0."
+doc = "Context growth in tokens past which a subagent's tools are refused, except handing off; the ceiling acts only when this and warn_tokens are both above 0."
 read = "use"
 
 [ceiling.return_tools]
@@ -127,7 +133,7 @@ read = "use"
 [ceiling.deny_text]
 type = "string"
 default = "This subagent has passed its context ceiling, so the tool call was refused. Save your work, write a short hand-off and return your result."
-doc = "The reason given for each tool call refused past hard_tokens."
+doc = "The reason given for each tool call refused past hard_tokens; {growth}, {current} and {hard} are filled in."
 read = "use"
 
 [ceiling.handoff_roots]
