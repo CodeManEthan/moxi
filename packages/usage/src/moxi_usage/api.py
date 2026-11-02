@@ -22,6 +22,23 @@ Limits (`moxi_usage.limits`):
   `Limits`, whose `pull` says what the pull did. What a reading did not say, and every
   fact of a window with no reading, is `UNKNOWN`; the state's reason says which.
 
+Context (`moxi_usage.context`):
+
+* `context(session_id, *, harness=None, agent_id=None)`: how full a session's context
+  is, or one of its agents', from its newest request, as a `Context`: `tokens` (the
+  whole prompt), `window` (the one the harness reported, else the model table's) and
+  `percent`, each `UNKNOWN` with a `reason` when it cannot be said; `text()` prints
+  the line with its denominator. `harness` None asks Claude, Codex and OpenCode in that
+  order. It reads through sessions alone, so it works without turns.
+
+The restart point (`moxi_usage.measure`, `moxi_usage.thresholds`):
+
+* `restart_point()`: the measured parameters per model and population (`main`,
+  `subagent`) and each warn-at mark's threshold in tokens, as a `RestartPoint`. A mark
+  that cannot be worked out is unavailable with its reason, never guessed.
+* `threshold(model, mark, population="main")`: one mark's `Threshold`; `stamp()`, which
+  changes whenever the measure or the model table does.
+
 Reports (`moxi_usage.reports`):
 
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
@@ -52,6 +69,9 @@ _HOMES: dict[str, str] = {
                      "Provenance", "Table", "STEPS"), "models"),
     **dict.fromkeys(("limits", "Limits", "Row", "Pull"), "limits"),
     **dict.fromkeys(("report", "Report", "ReportError", "KINDS"), "reports"),
+    **dict.fromkeys(("context", "Context"), "context"),
+    **dict.fromkeys(("restart_point", "RestartPoint"), "measure"),
+    **dict.fromkeys(("threshold", "Threshold", "stamp", "MARKS"), "thresholds"),
 }
 
 __all__ = [*_HOMES, "UNKNOWN"]

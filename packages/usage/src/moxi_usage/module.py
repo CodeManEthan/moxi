@@ -53,9 +53,15 @@ STORES = {
     "snapshot": {"root": "data", "path": "models-snapshot.json", "kind": "file",
                  "private": True, "retention": "keep", "rebuildable": True, "lazy": True},
 }
-#: usage's own checks: the model table's age and gaps, the token index, Codex's imports
-#: and whether turns is installed.
+#: usage's own checks: the model table's age and gaps, the token index, Codex's imports,
+#: the restart-point measure and whether turns is installed.
 DOCTOR = "moxi_usage.doctor:rows"
+#: The weekly restart-point measure, off until `restart_point.measure_weekly` is turned
+#: on. A timer runs every few minutes or hours, or at set times on set days; this one
+#: runs once a week.
+TIMERS = {"measure": {"command": "moxi-usage-measure", "at": ["04:30"], "days": ["mon"],
+                      "switch": "restart_point.measure_weekly",
+                      "doc": "measure the restart point from the last 21 days"}}
 #: No daemon, so no idle CPU, memory or fd budget; a hook may cost the agent at most twice
 #: the floor, `python -I -c pass`.
 BUDGETS = {"hook_ms": 2.0}

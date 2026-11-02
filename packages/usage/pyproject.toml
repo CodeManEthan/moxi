@@ -17,6 +17,10 @@ Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/usage/issues"
 
+# The weekly restart-point measure, the command of the announcement's TIMERS.
+[project.scripts]
+moxi-usage-measure = "moxi_usage.measure:main"
+
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 usage = "moxi_usage.module"

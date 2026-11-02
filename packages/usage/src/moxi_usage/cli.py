@@ -3,6 +3,8 @@
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
     moxi usage limits [--harness H] [--no-pull] [--json]
+    moxi usage context SESSION [--harness H] [--agent ID] [--json]
+    moxi usage restart-point [--measure] [--json]
     moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
         [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
     moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
@@ -16,6 +18,16 @@ JSON object.
 `limits` prints one line per harness: each window's percent used, when it resets and,
 when it is filling, when it reaches 100% at the recent rate, then the age of the oldest
 reading on the line. A window it cannot state says why. It exits 0 whatever the states.
+
+`context SESSION` prints how full the session's context is, or with `--agent` one of its
+agents', with its denominator: `context 412,330 / 1,000,000 (41%)`. It exits 1 when the
+session, the agent or a request with its input tokens cannot be found, and 2 with no
+SESSION.
+
+`restart-point` prints the measured restart point per model and population and each
+warn-at mark's threshold in tokens, or why a mark is unavailable; it exits 1 when there
+is no measure to read. `--measure` runs the index's pass and the measure first and writes
+it (`moxi_usage.measure`).
 
 The report verbs run the index's pass first, unless `--no-pass`, and print tokens and cost
 from the index (`moxi_usage.reports`). Days are local time, or UTC with `--utc`; `--since`
@@ -71,12 +83,18 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
                         help="never ask Codex for a new reading, even when the newest is "
                              "stale")
     limits.add_argument("--json", action="store_true", help="print one JSON object")
+    _context_parser(verbs)
+    _restart_parser(verbs)
     _report_verbs(verbs)
     _index_parser(verbs)
     parsed = parser.parse_args(args)
     try:
         if parsed.verb == "limits":
             return _limits(parsed, prog)
+        if parsed.verb == "context":
+            return _context(parsed, prog)
+        if parsed.verb == "restart-point":
+            return _restart_point(parsed, prog)
         if parsed.verb in REPORT_VERBS:
             return _report(parsed, prog)
         if parsed.verb == "index":
@@ -353,6 +371,118 @@ def format_reset(epoch: Any, now: float) -> str:
     if abs((when - today).days) < 7:
         return when.strftime("%a %H:%M")
     return when.strftime("%b %d %H:%M")
+
+
+# --- context --------------------------------------------------------------------------
+
+def _context_parser(verbs: Any) -> None:
+    context = verbs.add_parser(
+        "context", help="print how full a session's context is",
+        description="Print how full a session's context is, from its newest request: "
+                    "the tokens, the window and the percent used.")
+    context.add_argument("session", nargs="?", metavar="SESSION",
+                         help="the session id (a Codex thread id, an OpenCode session id)")
+    context.add_argument("--harness", choices=("claude", "codex", "opencode"),
+                         help="the harness that holds the session; else each is asked")
+    context.add_argument("--agent", metavar="ID", help="one of the session's agents")
+    context.add_argument("--json", action="store_true", help="print one JSON object")
+
+
+def _context(args: argparse.Namespace, prog: str) -> int:
+    from .context import context
+
+    if not args.session:
+        print(f"{prog} context: give a SESSION id; nothing stamped tells usage the "
+              "current session", file=sys.stderr)
+        return codes.USAGE
+    found = context(args.session, harness=args.harness, agent_id=args.agent)
+    if args.json:
+        print(json.dumps(found.as_dict(), indent=2))
+    else:
+        print(found.text())
+        if found.known and found.reason:
+            print(f"note: {found.reason}")
+    return codes.OK if found.known else codes.ERROR
+
+
+# --- the restart point ------------------------------------------------------------------
+
+def _restart_parser(verbs: Any) -> None:
+    restart = verbs.add_parser(
+        "restart-point", help="print the measured restart point and the warn-at marks",
+        description="Print the restart point measured per model and population, and "
+                    "each warn-at mark's threshold in tokens. --measure measures it "
+                    "again from the token index first.")
+    restart.add_argument("--measure", action="store_true",
+                         help="run the index's pass and the measure, and write it")
+    restart.add_argument("--json", action="store_true", help="print one JSON object")
+
+
+def _restart_point(args: argparse.Namespace, prog: str) -> int:
+    import moxi.store
+
+    from . import measure
+
+    done = None
+    if args.measure:
+        try:
+            done = measure.run()
+        except moxi.store.StoreTooNew as exc:
+            print(f"{prog} restart-point: {exc}", file=sys.stderr)
+            return codes.REFUSED
+        except measure.MeasureError as exc:
+            print(f"{prog} restart-point: {exc}", file=sys.stderr)
+            return codes.ERROR
+    found = measure.restart_point()
+    if args.json:
+        doc = found.as_dict()
+        if done is not None:
+            doc["note"] = done.note
+        print(json.dumps(doc, indent=2))
+    else:
+        if done is not None:
+            print(done.line())
+            if done.note:
+                print(f"note: {done.note}")
+        for line in restart_lines(found):
+            print(line)
+    return codes.OK if found.doc is not None else codes.ERROR
+
+
+def restart_lines(found: Any) -> list[str]:
+    """The text of `moxi usage restart-point`: when and over what it was measured, then
+    one line per model and population with S, P, g and each mark."""
+    from .thresholds import MARKS
+
+    if found.doc is None:
+        return [f"restart point: {found.problem}"]
+    doc = found.doc
+    sample = doc.get("sample") or {}
+    w = doc.get("w")
+    lines = [f"measured {doc.get('measured_at')} over the last {doc.get('days')} days: "
+             f"{sample.get('files', 0)} files, {sample.get('requests', 0)} requests; "
+             f"w {'unknown' if w is None else w}"
+             + ("" if doc.get("interactive_only", True) else "; every main session")]
+    if not found.rows:
+        lines.append("  no population has a row (each needs 20 files of 5 requests or "
+                     "more)")
+    for model, population, row, marks in found.rows:
+        cells = []
+        for mark in MARKS:
+            each = marks[mark]
+            cells.append(f"{mark} {each.tokens:,}" if each.available else f"{mark} -")
+        said = "" if "fallback" not in row else ", its main row"
+        line = (f"  {model:<24} {population:<8} n {row.get('n')}{said}: S {row.get('S'):,.0f}"
+                f", P {row.get('P'):,.0f}, g {row.get('g'):,.0f}   " + "   ".join(cells))
+        lines.append(line)
+        reasons = dict.fromkeys(each.reason for each in marks.values() if not each.available)
+        for reason in reasons:
+            lines.append(f"  {'':<24} {'':<8} unavailable: {reason}")
+    for model, populations in sorted((doc.get("thin") or {}).items()):
+        for population, count in sorted(populations.items()):
+            lines.append(f"  {model:<24} {population:<8} {count} files, under the 20 a "
+                         "row needs")
+    return lines
 
 
 # --- reports --------------------------------------------------------------------------
