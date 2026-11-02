@@ -212,7 +212,9 @@ def test_the_imports_table_maps_an_import_to_its_distribution(repo):
     repo.src("core.py", "import yaml\n")
     assert run(repo) == {}
     repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta", "PyYAML>=6")))
-    assert "'yaml' imported but missing" in run(repo)[OUTSIDE]
+    # Without the table the import is not mapped: deptry reads it as missing, or as
+    # transitive when some package in the environment installs PyYAML.
+    assert "'yaml' imported but" in run(repo)[OUTSIDE]
 
 
 def test_a_moxi_import_maps_by_its_spelling(repo):
