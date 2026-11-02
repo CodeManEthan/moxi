@@ -6,8 +6,9 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 # turns calls the start line and the snapshot trigger; repo's committer takes the
-# snapshots, reached only through moxi_repo.api.
-dependencies = ["moxi>=0.1,<0.2", "moxi-repo>=0.1,<0.2", "moxi-turns>=0.2,<0.3"]
+# snapshots, reached only through moxi_repo.api; secrets' sets judge what they commit.
+dependencies = ["moxi>=0.1,<0.2", "moxi-repo>=0.1,<0.2", "moxi-secrets>=0.1,<0.2",
+                "moxi-turns>=0.2,<0.3"]
 
 [project.optional-dependencies]
 # A project's own notes folder, the topic kind and projects' remove check. notes reaches
@@ -32,6 +33,11 @@ notes = "moxi_notes.listeners"
 # snapshot trigger. Never typed; `moxi notes snapshot` is the verb.
 [project.scripts]
 moxi-notes-snapshot = "moxi_notes.snapshot:main"
+
+# The secret gates, which repo's git hook runner calls in the notes repo.
+[project.entry-points."moxi.repo.git_hooks"]
+"notes.secret-gate" = "moxi_notes.gitpieces:SECRET_GATE"
+"notes.push-gate" = "moxi_notes.gitpieces:PUSH_GATE"
 
 # projects reads the topic kind, its field defaults and the remove refusal from here.
 [project.entry-points."moxi.projects"]

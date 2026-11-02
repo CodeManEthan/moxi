@@ -790,6 +790,7 @@ source = { editable = "packages/notes" }
 dependencies = [
     { name = "moxi" },
     { name = "moxi-repo" },
+    { name = "moxi-secrets" },
     { name = "moxi-turns" },
 ]
 
@@ -809,6 +810,7 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-repo", editable = "packages/repo" },
+    { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "moxi-turns", editable = "packages/turns" },
 ]
 provides-extras = ["projects"]
