@@ -70,19 +70,6 @@ def prepare(fields) -> dict | None:
     return out or None
 
 
-def _nearest_git(path: str) -> str | None:
-    """The nearest folder at or above `path` that holds a `.git` entry: a local read
-    standing in for git's own answer."""
-    here = path
-    while True:
-        if os.path.lexists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
-
-
 def _files_in(folder) -> int:
     """How many files `folder` holds, at any depth; links are not followed."""
     count = 0
@@ -106,7 +93,7 @@ def refuse_remove(project) -> str | None:
         with_row = Path(project.notes_root)
     else:
         with_row = resolve.by_path(root, places, lambda: root)[0]
-    without = resolve.by_path(root, places, lambda: _nearest_git(root) or root)[0]
+    without = resolve.by_path(root, places, lambda: resolve.git_top(root) or root)[0]
     if with_row is None:
         return None
     if without is not None and resolve.same(with_row, without, real=False):

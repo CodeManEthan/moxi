@@ -10,7 +10,7 @@ import pytest
 from moxi_notes import projects_link
 from moxi_notes.projects_link import prepare, refuse_remove
 
-from notes_kit import add_project, configure, git_env, home, moxi_cmd, repo
+from notes_kit import add_project, configure, git, git_env, home, moxi_cmd, repo
 
 check_topic = projects_link.KINDS["topic"][1]
 
@@ -184,6 +184,19 @@ def test_a_project_at_its_repo_top_with_its_notes_root_unset_is_allowed(no_subpr
     folder.mkdir(parents=True)
     (folder / "plan.md").write_text("p\n")
     assert refuse_remove(Project("alpha", alpha)) is None
+
+
+def test_a_project_at_a_linked_worktree_is_refused_as_its_main_work_tree_would_answer():
+    alpha = repo(home() / "code" / "alpha", commit=True)
+    linked = home() / "work" / "alpha-feature"
+    git("worktree", "add", "-q", str(linked), "-b", "feature", cwd=alpha)
+    folder = home() / "notes" / "work" / "alpha-feature"
+    folder.mkdir(parents=True)
+    (folder / "plan.md").write_text("p\n")
+    said = refuse_remove(Project("feature", linked))
+    assert said == (f"project feature's notes folder {folder} holds 1 file; removing "
+                    f"feature moves its sessions' notes to "
+                    f"{home() / 'notes' / 'code' / 'alpha'}; move them first")
 
 
 def test_a_topic_is_never_refused(no_subprocess):
