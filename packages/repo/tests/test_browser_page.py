@@ -4,8 +4,9 @@ the empty state, a failed read, "Read again", copying a command, and the 360 px 
 check.
 
 The repos are made with the shell's own environment, so repo's index and records are
-under the shell's home. Git there reads a global config of the test's own and no system
-config.
+under the shell's home. The shell is given a global git config of the test's own and no
+system config, so the test's git commands and the page server's read the same config, and
+none of the machine's.
 """
 
 from __future__ import annotations
@@ -36,18 +37,19 @@ EMPTY = ("No repo has git hook pieces yet. See the pieces installed modules decl
          "moxi repo git-hooks available, and add one with moxi repo git-hooks add PATH PIECE.")
 
 
-def env_of(shell) -> dict[str, str]:
-    """The shell's environment, with git's global config in its home and no system one."""
-    home = Path(shell.env["HOME"])
-    gitconfig = home / "gitconfig"
-    if not gitconfig.exists():
-        gitconfig.write_text("[user]\n\tname = sample-bot\n\temail = bot@example.invalid\n"
-                             "[init]\n\tdefaultBranch = main\n", encoding="utf-8")
-    return {**shell.env, "GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}
+@pytest.fixture(scope="module")
+def ui_shell_options(tmp_path_factory) -> dict:
+    """Every shell here runs git, its page servers included, with the test's own global
+    config and no system config."""
+    gitconfig = tmp_path_factory.mktemp("git") / "gitconfig"
+    gitconfig.write_text("[user]\n\tname = sample-bot\n\temail = bot@example.invalid\n"
+                         "[init]\n\tdefaultBranch = main\n", encoding="utf-8")
+    return {"env": {"GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}}
 
 
 def run(shell, *argv: str, cwd: Path | None = None, check: bool = True):
-    done = subprocess.run(list(argv), cwd=cwd, env=env_of(shell), capture_output=True,
+    assert shell.env["GIT_CONFIG_NOSYSTEM"] == "1" and "GIT_CONFIG_GLOBAL" in shell.env
+    done = subprocess.run(list(argv), cwd=cwd, env=shell.env, capture_output=True,
                           text=True, timeout=120)
     if check and done.returncode != 0:
         raise AssertionError(f"{argv} failed ({done.returncode}):\n{done.stdout}{done.stderr}")
@@ -155,8 +157,8 @@ def test_a_failed_read_shows_the_failure_line(notes_repo, ui_page, status):
     expect(panel.locator("section[data-repo]")).to_have_count(0)
 
 
-def test_with_no_repo_the_page_says_how_to_add_one(ui_shells, ui_contexts):
-    shell = ui_shells()
+def test_with_no_repo_the_page_says_how_to_add_one(ui_shells, ui_shell_options, ui_contexts):
+    shell = ui_shells(**ui_shell_options)
     page = ui_contexts(shell).pages[0]
     panel = open_panel(page)
     state = panel.locator("div[data-state]")

@@ -3,9 +3,9 @@
 `TestShell(home, ...)` starts `python -P -m moxi_ui.testing.run` with an environment of
 its own: `HOME`, the XDG homes, `XDG_RUNTIME_DIR`, `TMPDIR` and `MOXI_HOME` all under
 `home`, `PYTHONPATH` the `site` directories given (and nothing of this process's), and
-`PATH` and the locale kept. So the shell, its page servers and the `moxi` commands it
-runs keep every file under `home`, and this process's own environment never reaches
-them. The modules it serves are this environment's installed ones, plus any installed
+`PATH` and the locale kept, with any `env` a test adds. So the shell, its page servers and
+the `moxi` commands it runs keep every file under `home`, and this process's own
+environment never reaches them. The modules it serves are this environment's installed ones, plus any installed
 as a distribution in a `site` directory.
 
 A test reaches it three ways:
@@ -40,6 +40,10 @@ STOP_TIMEOUT = 15.0
 STDERR_LINES = 200
 
 _KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT")
+#: The variables that keep a test shell under its home; a test's `env` can't set them.
+_OWNED = frozenset({"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+                    "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "MOXI_HOME", "TMPDIR", "TEMP", "TMP",
+                    "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PYTHONPATH"})
 _BROWSER = (("Sec-Fetch-Site", "same-origin"), ("Sec-Fetch-Mode", "cors"),
             ("Sec-Fetch-Dest", "empty"))
 
@@ -48,9 +52,23 @@ class ShellError(RuntimeError):
     """A test shell that did not start, or answered what a test helper can't use."""
 
 
-def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = ()) -> dict[str, str]:
-    """The whole environment a test shell under `home` runs with (see the module doc)."""
+def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
+              extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The whole environment a test shell under `home` runs with (see the module doc).
+
+    `extra` adds variables of a test's own, or replaces a kept one such as `PATH`. Raises
+    `ValueError` for a variable that keeps the shell under `home` (`HOME`, the XDG homes,
+    `XDG_RUNTIME_DIR`, `MOXI_HOME`, the temp directories, `PYTHONPATH` and their Windows
+    forms), or a name or value that isn't a string.
+    """
     home = Path(home)
+    extra = dict(extra or {})
+    for key, value in extra.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError(f"a test shell's env maps names to strings, not {key!r}: {value!r}")
+        if key.upper() in _OWNED:
+            raise ValueError(f"a test shell's env can't set {key}: the shell sets it to keep "
+                             "its files under its home")
     env = {key: value for key, value in os.environ.items()
            if key in _KEPT or key.startswith("LC_")}
     env["HOME"] = str(home)
@@ -67,6 +85,7 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = ()) -
         env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
     if site:
         env["PYTHONPATH"] = os.pathsep.join(str(Path(path)) for path in site)
+    env.update(extra)
     return env
 
 
@@ -80,7 +99,9 @@ class TestShell:
     leaves out. `failed_for` shortens the seconds a page server's failed start answers
     with its failure (10 by default), for a test that waits out several. These reach only
     this shell: no setting or variable carries them. `port` is the port it binds on
-    127.0.0.1, 0 (the default) for one the system picks.
+    127.0.0.1, 0 (the default) for one the system picks. `env` adds variables to the
+    shell's environment, which its page servers and the `moxi` commands it runs inherit
+    (for example `{"GIT_CONFIG_NOSYSTEM": "1"}`); see `shell_env` for the ones it can't set.
     """
 
     __test__ = False  # pytest: not a test class
@@ -88,6 +109,7 @@ class TestShell:
     def __init__(self, home: str | os.PathLike, *, site: Sequence[str | os.PathLike] = (),
                  child_args: Sequence[str] = (), leave_out: Sequence[str] = (),
                  failed_for: float | None = None, port: int = 0,
+                 env: Mapping[str, str] | None = None,
                  start_timeout: float = START_TIMEOUT):
         self.home = Path(home)
         self.site = tuple(Path(path) for path in site)
@@ -96,7 +118,7 @@ class TestShell:
         self.failed_for = None if failed_for is None else float(failed_for)
         self.bind_port = int(port)
         self.start_timeout = start_timeout
-        self.env = shell_env(self.home, self.site)
+        self.env = shell_env(self.home, self.site, env)
         self.port: int | None = None
         self.info: Any = None
         self._process: subprocess.Popen | None = None

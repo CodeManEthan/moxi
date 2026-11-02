@@ -96,6 +96,29 @@ def test_a_fixture_that_fails_its_start_is_a_502_naming_exit_3(ui_shells, fixtur
     assert shell.wait_server("fixture", "failed")["failed_in_row"] == 1
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="reads a page server's environment from /proc")
+def test_a_shells_env_reaches_its_page_servers(ui_shells, fixture_site):
+    shell = ui_shells(site=[fixture_site], env={"GIT_CONFIG_NOSYSTEM": "1"})
+    assert shell.env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert shell.session().get("/m/fixture/api/summary")[0] == 200
+    pid = shell.wait_server("fixture", "running")["pid"]
+    environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    assert b"GIT_CONFIG_NOSYSTEM=1" in environ
+    assert f"HOME={shell.home}".encode() in environ
+
+
+def test_a_shells_env_cant_move_it_out_of_its_home(tmp_path):
+    from moxi_ui.testing.shell import TestShell, shell_env
+
+    assert shell_env(tmp_path, extra={"PATH": "/opt/bin"})["PATH"] == "/opt/bin"
+    for key in ("HOME", "MOXI_HOME", "XDG_STATE_HOME", "TMPDIR", "PYTHONPATH"):
+        with pytest.raises(ValueError, match=key):
+            TestShell(tmp_path, env={key: str(tmp_path / "elsewhere")})
+    with pytest.raises(ValueError, match="strings"):
+        TestShell(tmp_path, env={"GIT_CONFIG_NOSYSTEM": 1})
+
+
 def test_a_left_out_module_is_not_in_the_snapshot(ui_shells, fixture_site):
     shell = ui_shells(site=[fixture_site], leave_out=["cache"])
     status, view = shell.session().get("/m/ui/api/modules")
