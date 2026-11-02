@@ -271,6 +271,27 @@ def test_a_listener_with_the_unit_unread_and_this_users_uid_is_bind_failed(unit_
     assert f"127.0.0.1:{port}" in got.detail
 
 
+def test_a_listener_of_this_user_with_no_reach_to_the_user_manager_is_bind_failed(
+        unit_read, monkeypatch):
+    # A daemon run by hand from cron, `env -i` or a system service reads `nobackend`,
+    # though the user manager may hold comms' socket: no read was made.
+    unit_read.state = "nobackend"
+    probed = []
+    real_answers = listen.answers
+    monkeypatch.setattr(listen, "answers",
+                        lambda *a, **k: probed.append(a) or real_answers(*a, **k))
+    with listener() as holder:
+        port = holder.getsockname()[1]
+        clock = Clock()
+        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+    assert got.sock is None and got.why == "bind-failed" and clock.slept == []
+    assert "whether it is comms' own socket unit couldn't be read" in got.detail
+    assert len(probed) == 1 and unit_read.asked == 1
+    if LINUX:
+        assert got.holder_uid == os.getuid()
+    assert "nobackend" not in listen.NOT_HOLDING
+
+
 def test_a_listener_of_another_user_is_port_taken_with_the_unit_unread(unit_read,
                                                                         monkeypatch):
     unit_read.state = "unknown"
@@ -569,12 +590,15 @@ def test_a_daemon_beside_its_active_socket_unit_is_supervised_and_revokes_nothin
     assert row.fix == checks.SUPERVISED
 
 
+@pytest.mark.parametrize("state", ["unknown", "nobackend"])
 def test_a_listener_that_may_be_the_unit_is_bind_failed_and_revokes_nothing(
-        serving, sessions, unit_read):
+        serving, sessions, unit_read, state):
+    # `nobackend` is a hand-run daemon with no reach to the user manager, beside a
+    # listener of this user's uid that may be comms' socket unit.
     serving()
     s = sessions()
     s.bind()
-    unit_read.state = "unknown"
+    unit_read.state = state
     with listener() as holder:
         daemon = serving(port=holder.getsockname()[1])
         answer = ask_daemon("mcp_endpoint")

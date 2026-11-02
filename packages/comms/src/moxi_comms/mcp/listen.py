@@ -33,9 +33,11 @@ hand edit drifts.
 Otherwise `take` connects to `127.0.0.1:<port>`. A listener that answers is not this
 daemon's (it holds its socket's lock, and its predecessor closed its listener before it
 let the lock go). It is `port-taken` only when the unit read showed comms' unit not
-holding the port (`inactive`, `failed`, `missing`, `off`, `nobackend`) or the kernel's table
-names another user's uid as its holder. A listener with neither shown may be comms' own
-unit, so the answer is `bind-failed` with a detail that says so. With no listener it binds
+holding the port (`inactive`, `failed`, `missing`, `off`) or the kernel's table names
+another user's uid as its holder. A listener with neither shown may be comms' own unit, so
+the answer is `bind-failed` with a detail that says so. That covers `nobackend` as well as
+`unknown`: a process with no reach to the user manager (cron, `env -i`, a system service)
+reads `nobackend` though the manager may hold comms' socket. With no listener it binds
 again every half second for at most five seconds, then answers `bind-failed`. The caller
 decides what each answer means for the tokens.
 
@@ -74,9 +76,13 @@ LISTENERS = "Listeners"
 UNIT_READ_WAIT = 2.0
 #: The module and daemon whose socket unit holds the port when comms is installed.
 _MODULE, _DAEMON = "comms", "daemon"
-#: The socket row's states that show comms' unit does not hold the port: not running, not
-#: written, not on this platform (Windows skips the socket), or no supervisor at all.
-NOT_HOLDING = frozenset({"inactive", "failed", "missing", "off", "nobackend"})
+#: The socket row's states that show comms' unit does not hold the port: the supervisor
+#: read it not running (`inactive`, `failed`), no unit is written for it (`missing`), or
+#: none is made for it here (`off`: Windows skips the socket, or the daemon is switched
+#: off and its units removed). `nobackend` is not among them: the core gives it when this
+#: process can't reach a user manager (on Linux, whenever `XDG_RUNTIME_DIR` is unset), so
+#: no read was made, and the unit may hold the port all the same. It counts as `unknown`.
+NOT_HOLDING = frozenset({"inactive", "failed", "missing", "off"})
 
 #: systemd's first passed descriptor (`SD_LISTEN_FDS_START`).
 _FIRST_FD = 3
