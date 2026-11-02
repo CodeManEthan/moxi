@@ -19,7 +19,9 @@ user is told every time tunnel can tell.
   `cloudflared.yml`; a unit act that fails there doesn't stop it, since the uninstall
   removes the unit next. It then removes each live Tailscale entry, only while it still
   matches the record, and drops what it removed in one more write. A removal that fails
-  leaves its entry `removing` with the provider's text, and it refuses naming it.
+  leaves its entry `removing` with the provider's text, and it refuses naming it. When
+  no Cloudflare entry was recorded, so no write ran the step, it still runs the step once
+  if the switch, the unit or a `cloudflared.yml` left behind disagree with the empty set.
 - A Cloudflare entry whose switch from Tailscale has not finished may still have its old
   Tailscale entry live, the one its `from` names. That one counts as a Tailscale entry
   here: it is removed by the same rules, or named with its hand command.
@@ -32,7 +34,9 @@ user is told every time tunnel can tell.
 
 - for another module, it removes that module's addresses without asking, by the same
   rules, and can't refuse: an address it could not remove stays in the record, where the
-  doctor shows it as an orphan once its module is gone, and it prints one line for each;
+  doctor shows it as an orphan once its module is gone, and it prints one line for each.
+  When `cloudflared.yml` can't be written while other Cloudflare entries stay, the
+  module's Cloudflare entries go back as they were, since the file still serves them;
 - for tunnel itself it removes nothing and prints one line for each address still in the
   record, with the command that removes it by hand. After a teardown that accepted there
   is none; after `--skip-teardown`, this is where what stays live is named.
@@ -152,8 +156,13 @@ def _take_out(act: acts._Act, plan: _Plan, ts: ts_.Tailscale, *, by: str) -> _Do
     try:
         act.commit({k: replace(e, state=State.REMOVING) for k, e in plan.drop.items()})
     except StepFailed as exc:
-        done.lines.append(f"tunnel: cloudflared did not follow: {exc.reason}"
-                          + (f" (fix: {exc.fix})" if exc.fix and exc.file else ""))
+        if exc.file and act.last is not None and act.last.cloudflare_set():
+            # cloudflared.yml could not be written, so it still serves these hostnames
+            # for the Cloudflare entries left: they go back, as a plain remove's would.
+            _put_back(act, plan, done, exc)
+        else:
+            done.lines.append(f"tunnel: cloudflared did not follow: {exc.reason}"
+                              + (f" (fix: {exc.fix})" if exc.fix and exc.file else ""))
     acts._step("uninstall-removing")
     kept: dict[str, Entry] = {}
     for key, entry in plan.remove.items():
@@ -193,6 +202,29 @@ def _take_out(act: acts._Act, plan: _Plan, ts: ts_.Tailscale, *, by: str) -> _Do
         done.lines.append(f"tunnel: tailscale still lists {key} under a name this machine "
                           "no longer has; it no longer reaches this machine")
     return done
+
+
+def _put_back(act: acts._Act, plan: _Plan, done: _Done, exc: StepFailed) -> None:
+    """Take the Cloudflare entries out of `plan` and commit them back as they were, since
+    the step could not write their rules out of `cloudflared.yml`; name each in
+    `done.left`. One that was `on` goes back `applying`, then `on` once the step agrees."""
+    back = {k: e for k, e in plan.drop.items()
+            if e.provider == "cloudflare" and not record.names_pending(e)}
+    for key in back:
+        del plan.drop[key]
+        plan.remove.pop(key, None)
+        done.left[key] = (f"cloudflared.yml can't be written, so it still serves it: "
+                          f"{exc.reason}", exc.fix or "moxi tunnel repair")
+    going = {k: replace(e, state=State.APPLYING) if e.state == State.ON else e
+             for k, e in back.items()}
+    try:
+        act.commit(going)
+        act.commit(back)
+    except StepFailed as again:
+        act.commit({k: replace(e, detail=again.reason) for k, e in going.items()})
+    for key, entry in back.items():
+        record.event("rollback", key, provider=entry.provider, port=entry.port,
+                     act="uninstall")
 
 
 def _refusal(left: Mapping[str, tuple[str, str]], rec: Record | None) -> str:
@@ -236,6 +268,13 @@ def teardown() -> None:
             before = rec
             act = acts._Act(rec)
             done = _take_out(act, plan, ts, by="teardown")
+            if not rec.cloudflare_set() and cf_.agreement(act.last or rec)[0] != "ok":
+                # No commit changed the Cloudflare set, so no step ran; a switch left on
+                # or a file left behind still goes, else a reinstall puts the unit back.
+                try:
+                    cf_.step(act.last or rec)
+                except StepFailed as exc:
+                    done.lines.append(f"tunnel: cloudflared did not follow: {exc.reason}")
     except files.LockTimeout as exc:
         raise modules.Refused(f"tunnel's lock is held by process {exc.holder}, so its "
                               f"teardown could not run; wait for that process and uninstall "

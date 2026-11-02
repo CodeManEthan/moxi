@@ -406,3 +406,33 @@ def test_after_purge_the_live_entries_read_as_foreign_and_repair_turns_the_switc
     assert acts.repair(ask=lambda lines: True).code == 0
     assert not cloudflare.switch_on() and units.unit is None
     assert cloudflare.agreement()[0] == "ok"
+
+
+# -- the step with nothing recorded, and a file the step can't write ------------------------
+
+def test_teardown_with_nothing_recorded_turns_a_switch_left_on_off(alpha, cf, units):
+    import moxi.config
+
+    moxi.config.set("tunnel", "cloudflare.enabled", True, by="test")
+    cloudflare.write_file("# left behind\n")
+    assert cloudflare.switch_on()
+    teardown()
+    assert_cloudflare_gone(units)
+
+
+def test_another_modules_uninstall_keeps_its_cloudflare_entry_while_the_file_cant_be_written(
+        three, tailscale, units, yes, capsys):
+    acts.add("alpha/gateway", provider_name="cloudflare", hostname="g.example.com", ask=yes)
+    cloudflare.config_path().chmod(0o644)
+    capsys.readouterr()
+    on_uninstall("alpha")
+    out = capsys.readouterr().out
+    assert "tunnel: alpha/gateway stays in tunnel's record" in out
+    assert "removed alpha/gateway" not in out
+    assert "tunnel: removed alpha/connector" in out
+    assert entries()["alpha/gateway"].state == State.ON
+    assert "g.example.com" in cloudflare.read_file().rules()
+    assert "alpha/connector" not in entries()
+    assert ("rollback", "alpha/gateway") in [(e["event"], e.get("target")) for e in events()]
+    cloudflare.config_path().chmod(0o600)
+    assert acts.remove("alpha/gateway", ask=yes).code == 0
