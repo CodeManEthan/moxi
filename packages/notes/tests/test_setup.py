@@ -327,11 +327,12 @@ def test_teardown_with_no_notes_repo_does_nothing(no_terminal):
     assert not (home() / "notes").exists()
 
 
-def test_the_announcement_names_setup_and_teardown():
+def test_the_announcement_names_setup_teardown_and_the_doctor():
     from moxi_notes import module
 
     assert module.SETUP == "moxi_notes.setup:setup"
     assert module.TEARDOWN == "moxi_notes.setup:teardown"
+    assert module.DOCTOR == "moxi_notes.doctor:rows"
 
 
 @posix

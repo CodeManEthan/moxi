@@ -34,4 +34,5 @@ TIMERS = {"snapshot": {"command": "moxi-notes-snapshot", "args": [], "every": "1
 SETUP = "moxi_notes.setup:setup"
 #: Removes the clean filter; repo's own listener removes the pieces and the spec.
 TEARDOWN = "moxi_notes.setup:teardown"
+DOCTOR = "moxi_notes.doctor:rows"
 SEGMENT = None
