@@ -11,6 +11,10 @@ ledger's `entries`:
      "kind": "harness-row", "key": ["harnesses", "opencode"], "written": <the row>,
      "prior": false}
 
+When the config file didn't set `harnesses` before, the record also holds `made_key`,
+the rows the key read then (its default), and uninstall unsets the key again when what is
+left after the opencode row equals them.
+
 A row already there when loadout first looks is the user's: it is recorded with `prior`
 true, and loadout never removes it. A row loadout recorded is left as it is, edited or
 not; uninstall reads the record to decide what to take out. A recorded row the user has
@@ -83,13 +87,41 @@ def add(*, say: Callable[[str], object] = print) -> str:
                 "loadout leaves it as yours")
             return "prior"
         row = wanted()
+        try:
+            made = file_rows() is None
+        except ValueError:
+            made = False   # add_item names the fault
         config.add_item("moxi", "harnesses", row, by=BY)
+        new = _record(row, prior=False)
+        if made:
+            # The key held its default until now: what it held, so uninstall can unset
+            # it again rather than leave the table pinned at that value.
+            new["made_key"] = [r for r in (file_rows() or []) if r != row]
         data["entries"] = [r for r in data["entries"] if r is not record]
-        data["entries"].append(_record(row, prior=False))
+        data["entries"].append(new)
         ledger.write(data)
         say(f"loadout: added an opencode row to the core's harness table (skills in "
             f"{row['skills']}, agents in {row['agents']})")
         return "added"
+
+
+def file_rows() -> list | None:
+    """The `harnesses` list as the core's config file holds it, or None when the file
+    doesn't set the key. Raises `ValueError` when the file is there and doesn't read."""
+    import tomllib
+    from pathlib import Path
+
+    from moxi import paths
+
+    path = Path(paths.core().config_file())
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"{path} can't be read ({exc})") from None
+    rows = data.get("harnesses")
+    return rows if isinstance(rows, list) else None
 
 
 def _current() -> dict | None:
@@ -111,4 +143,5 @@ def _record(row: dict, *, prior: bool) -> dict:
             "kind": KIND, "key": list(KEY), "written": dict(row), "prior": prior}
 
 
-__all__ = ["NAME", "KIND", "ITEM", "KEY", "wanted", "record_of", "present", "add"]
+__all__ = ["NAME", "KIND", "ITEM", "KEY", "wanted", "record_of", "present", "add",
+           "file_rows"]

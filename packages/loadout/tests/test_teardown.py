@@ -228,6 +228,43 @@ def test_an_opencode_row_the_user_had_first_stays(folder):
     assert "opencode" in place.harnesses()[0]
 
 
+def core_config() -> dict:
+    from moxi import paths
+
+    path = Path(paths.core().config_file())
+    return tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+@pytest.mark.parametrize("had_key", [False, True])
+def test_a_harnesses_key_setup_made_is_unset_at_uninstall(folder, had_key):
+    from moxi import config
+
+    kit.configure(folder)
+    default = [{"name": "claude", "skills": "", "agents": ""},
+               {"name": "codex", "skills": "", "agents": ""}]
+    if had_key:
+        config.set("moxi", "harnesses", default, by="test")
+    harness_row.add(say=lambda line: None)
+    assert [r["name"] for r in core_config()["harnesses"]] == ["claude", "codex", "opencode"]
+    lines, say = said()
+    assert teardown.teardown(say=say) == 0, lines
+    if had_key:
+        assert core_config()["harnesses"] == default
+    else:
+        assert "harnesses" not in core_config()
+
+
+def test_a_harnesses_key_changed_since_setup_is_kept(folder):
+    from moxi import config
+
+    kit.configure(folder)
+    harness_row.add(say=lambda line: None)
+    config.add_item("moxi", "harnesses", {"name": "other", "skills": "~/o", "agents": ""},
+                    by="test")
+    assert teardown.teardown(say=lambda line: None) == 0
+    assert [r["name"] for r in core_config()["harnesses"]] == ["claude", "codex", "other"]
+
+
 def test_a_missing_cli_refuses_while_its_server_is_there(lo, monkeypatch):
     import shutil
 

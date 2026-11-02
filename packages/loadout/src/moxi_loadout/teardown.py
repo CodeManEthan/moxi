@@ -26,7 +26,8 @@ or it takes everything out. `teardown()`, in order:
    then loadout's ignore files (after the placements, so a placement is never left
    un-ignored), and last the opencode row in the core's harness table: removed unless
    it was there before loadout, it was edited since, or `skills.harnesses` names
-   opencode, each of which leaves it as the user's with a line.
+   opencode, each of which leaves it as the user's with a line. When `SETUP` set the
+   `harnesses` key and what is left equals what it read before, the key is unset.
 
 It runs under the uninstall's claim on the core lock and never takes `install.lock`. A
 failure in steps 2 and 3 (a CLI that fails, a file that can't be written) returns the
@@ -321,6 +322,14 @@ def _opencode_row(data: dict, say) -> list[str]:
         except config.ConfigError as exc:
             return [f"loadout: the opencode row wasn't removed: {exc}"]
         say("loadout: removed the opencode row from the core's harness table")
+        if "made_key" in record:
+            try:
+                if harness_row.file_rows() == record["made_key"]:
+                    # loadout set the key; what is left is what it read before, so the
+                    # key goes back to its default (a later core's rows show again).
+                    config.unset("moxi", "harnesses", by=harness_row.BY)
+            except (ValueError, config.ConfigError) as exc:
+                return [f"loadout: the harnesses key loadout set wasn't unset: {exc}"]
     data["entries"] = keep
     return []
 
