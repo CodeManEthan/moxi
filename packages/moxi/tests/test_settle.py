@@ -1041,6 +1041,27 @@ def test_teardown_codes(w, capsys, monkeypatch):
     assert "demo: its store holds unsent mail" in capsys.readouterr().err
 
 
+def test_a_teardown_that_returns_text_is_said_as_it_is(w, capsys):
+    w.site.write("moxi_demo/down.py", textwrap.dedent("""
+        def run():
+            return "demo: the mail store was not emptied\\ndemo: run it again to finish"
+        """))
+    w.module(TEARDOWN="'moxi_demo.down:run'")
+    assert _settle.teardown("demo") == 1
+    err = capsys.readouterr().err
+    assert "demo: the mail store was not emptied\ndemo: run it again to finish" in err
+    assert "failed (exit" not in err
+
+
+@pytest.mark.parametrize("target", ["moxi_demo.gone:run", "moxi_demo.down:missing"])
+def test_a_teardown_that_cant_be_loaded_never_runs(w, capsys, target):
+    w.site.write("moxi_demo/down.py", "def run():\n    raise RuntimeError('ran')\n")
+    w.module(TEARDOWN=repr(target))
+    assert _settle.teardown("demo") == _settle.NOT_RUN
+    err = capsys.readouterr().err
+    assert f"teardown demo: {target} can't be loaded (" in err and "ran" not in err
+
+
 # -- steps 4 to 6: skills, install questions, listeners ---------------------------------------
 
 QSETTINGS = SETTINGS + """

@@ -87,6 +87,9 @@ _WINDOWS = sys.platform == "win32"
 
 #: The child's exit code for "interrupted", private to the parent and child.
 INTERRUPTED = 130
+#: The teardown child's exit code when the module's `TEARDOWN` could not be loaded, so it
+#: never ran and removed nothing; private to the parent and child.
+NOT_RUN = 4
 #: The file in the core's state directory that holds the version each module's `SETUP`
 #: last ran at: `{"<module>": {"version": <str or null>, "at": <UTC>}}`.
 SETUP_FILE = "setup.json"
@@ -1114,9 +1117,10 @@ def _listeners(step: Settle) -> bool:
 
 def teardown(module: str) -> int:
     """Run `module`'s `TEARDOWN` in this process. 0 when it accepts (or there is none), 3
-    when it raises `moxi.modules.Refused`, 1 on any other failure, `INTERRUPTED` on a stop
-    request: an interrupt abandons it at once, as a failed one, and its own `finally`
-    blocks run as `Interrupted` passes through them."""
+    when it raises `moxi.modules.Refused`, `NOT_RUN` when its target can't be loaded, 1 on
+    any other failure, `INTERRUPTED` on a stop request: an interrupt abandons it at once,
+    as a failed one, and its own `finally` blocks run as `Interrupted` passes through them.
+    A failure's text is the module's own: a returned text is said as it is."""
     from . import modules
 
     found = modules.load(module)
@@ -1130,13 +1134,26 @@ def teardown(module: str) -> int:
         try:
             _state.raising = True
             try:
-                result = _call(found.teardown)
-            except SystemExit as exc:
-                result = exc.code
-            check()
-            code = 1 if _exit_code(result) else 0
-            if code:
-                say(f"teardown {module}: failed (exit {result})", err=True)
+                fn = _target(found.teardown)
+            except modules.Refused:
+                raise
+            except Exception as exc:
+                fn = None
+                _state.raising = False
+                say(f"teardown {module}: {found.teardown} can't be loaded "
+                    f"({_one_line(exc)})", err=True)
+                code = NOT_RUN
+            if fn is not None:
+                try:
+                    result = fn()
+                except SystemExit as exc:
+                    result = exc.code
+                check()
+                code = 1 if _exit_code(result) else 0
+                if code and isinstance(result, str):
+                    say(result, err=True)
+                elif code:
+                    say(f"teardown {module}: failed (exit {result})", err=True)
         except modules.Refused as exc:
             say(f"{module}: {exc.reason}", err=True)
             code = 3
@@ -1157,13 +1174,18 @@ def teardown(module: str) -> int:
 # -- the child's entry --------------------------------------------------------------------------
 
 def _call(target: str):
+    return _target(target)()
+
+
+def _target(target: str):
+    """The callable a `"pkg.mod:fn"` target names, imported."""
     import importlib
 
     module_name, _, attr = target.partition(":")
     fn = importlib.import_module(module_name)
     for part in attr.split("."):
         fn = getattr(fn, part)
-    return fn()
+    return fn
 
 
 def _exit_code(result) -> int:

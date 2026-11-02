@@ -249,13 +249,26 @@ def test_a_teardown_that_refuses_removes_nothing_and_exits_3(torn, capsys):
     assert "moxi-turns" in torn.installed
 
 
-def test_a_teardown_that_fails_names_skip_teardown_and_removes_nothing(torn, capsys):
+def test_a_teardown_that_fails_after_it_ran_claims_nothing_and_names_no_skip(torn, capsys):
+    """Once a teardown ran, the core can't tell what it removed: its line says the
+    uninstall stopped, and neither that nothing was removed nor `--skip-teardown`."""
     torn.teardown_code = 1
     code, _, err = moxi_uninstall(capsys, "turns")
     assert code == 1
-    assert ("teardown turns: failed (exit 1); nothing was removed. To uninstall without "
-            "it: moxi uninstall turns --skip-teardown") in err
-    assert torn.runs == []
+    assert ("teardown turns: failed (exit 1); the uninstall stopped here and turns stays "
+            "installed") in err
+    assert "nothing was removed" not in err and "--skip-teardown" not in err
+    assert torn.runs == [] and "moxi-turns" in torn.installed
+
+
+@pytest.mark.parametrize("child", [_settle.NOT_RUN, 127], ids=["not loaded", "no child"])
+def test_a_teardown_that_never_ran_names_skip_teardown(torn, capsys, child):
+    torn.teardown_code = child
+    code, _, err = moxi_uninstall(capsys, "turns")
+    assert code == 1
+    assert ("teardown turns: it could not run, so nothing was removed. To uninstall "
+            "without it: moxi uninstall turns --skip-teardown") in err
+    assert torn.runs == [] and "moxi-turns" in torn.installed
 
 
 @pytest.mark.parametrize("how", ["code", "signal"])
