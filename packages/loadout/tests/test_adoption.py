@@ -174,6 +174,19 @@ def test_a_module_skill_whose_module_is_absent_reads_off(site, folder):
     assert "gone is not installed" in out.rows[0].reason
 
 
+def test_a_module_skill_whose_module_is_broken_reads_broken(site, folder, monkeypatch):
+    from moxi import modules
+
+    kit.configure(folder)
+    kit.manifest(folder, '[user]\nskills = ["bent/moxi-bent"]\n')
+    found = modules.Found(name="bent", state=modules.BROKEN, reason="its announcement fails")
+    monkeypatch.setattr(modules, "load", lambda name: found)
+    out = install.install()
+    assert out.code == 0
+    assert {r.state for r in out.rows} == {"off"}
+    assert out.rows[0].reason == "bent is broken"
+
+
 def test_disable_then_enable_an_adopted_skill(demo, folder):
     from moxi_loadout import writes
 

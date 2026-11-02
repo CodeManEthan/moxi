@@ -328,7 +328,7 @@ def _module_want(plan: Plan, want: Want, user_skills) -> Want:
         want.state, want.reason = "off", f"{module} is not installed"
         return want
     if not found.ok:
-        return _carry(plan, want, "off", f"{module} is not installed", 0, filename=skill)
+        return _carry(plan, want, "off", f"{module} is broken", 0, filename=skill)
     try:
         folder = importlib.resources.files(found.package).joinpath(found.skills or "")
         ok = found.skills is not None and isinstance(folder, Path) \
@@ -584,7 +584,21 @@ def removal_row(plan: Plan, step) -> Row:
     record = plan.record(step) or {}
     return Row(record.get("section"), record.get("kind", step.item.kind),
                record.get("item", step.item.name), step.item.harness, "stale",
-               "no longer wanted; install removes it", str(step.target), ERROR)
+               _removal_reason(record), str(step.target), ERROR)
+
+
+def _removal_reason(record: dict) -> str:
+    """Why a placement is going: its module is gone or broken, else it is no longer wanted."""
+    module, slash, _ = str(record.get("item") or "").partition("/")
+    if slash and record.get("kind") == "skill":
+        from moxi import modules
+
+        found = modules.load(module)
+        if found.state == "absent":
+            return f"{module} is not installed; install removes the placement"
+        if not found.ok:
+            return f"{module} is broken; install removes the placement"
+    return "no longer wanted; install removes it"
 
 
 def rows(plan: Plan) -> list[Row]:

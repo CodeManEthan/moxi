@@ -212,6 +212,9 @@ def test_a_failed_removal_at_module_uninstall_is_ended_by_the_next_install(demo,
     before = install.status()
     assert before.code == 1
     assert any(r.target == str(target) and r.state == "stale" for r in before.rows)
+    assert any(r.target == str(target) and
+               r.reason == "demo is not installed; install removes the placement"
+               for r in before.rows)
     out = install.install()
     assert out.code == 0, out.text()
     assert not os.path.lexists(target)

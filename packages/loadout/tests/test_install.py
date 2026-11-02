@@ -101,6 +101,8 @@ def test_a_dropped_item_is_removed_and_a_remove_outside_the_scope_waits(lo, tmp_
     assert (kit.claude() / "other").is_symlink()
     status = install.status()
     assert any(r.state == "stale" and r.name == "other" for r in status.rows)
+    assert any(r.name == "other" and r.reason == "no longer wanted; install removes it"
+               for r in status.rows)
     assert install.install().code == 0
     assert not os.path.lexists(kit.claude() / "other")
     assert (kit.claude() / "review").is_symlink()
