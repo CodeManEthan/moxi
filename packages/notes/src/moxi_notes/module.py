@@ -29,5 +29,9 @@ CONFIG_CHECK = "moxi_notes.settings:check_text"
 TIMERS = {"snapshot": {"command": "moxi-notes-snapshot", "args": [], "every": "15m",
                        "switch": "snapshot.timer",
                        "doc": "commit a snapshot of the notes outside agent sessions"}}
-SETUP = None
+#: Asks where the notes are and what a commit does with a secret, previews the first
+#: snapshot, then registers the gates, the clean filter and the snapshot spec.
+SETUP = "moxi_notes.setup:setup"
+#: Removes the clean filter; repo's own listener removes the pieces and the spec.
+TEARDOWN = "moxi_notes.setup:teardown"
 SEGMENT = None

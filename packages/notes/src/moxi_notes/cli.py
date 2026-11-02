@@ -3,13 +3,15 @@
     moxi notes dir [PATH] [--json]
     moxi notes handoffs dir [PATH]
     moxi notes snapshot
+    moxi notes setup
     moxi notes inbox list [--json]
     moxi notes inbox add SLUG
     moxi notes inbox rename SLUG NEW
 
 `dir` prints the notes directory for PATH (default: the working directory) and exits 1
 when there is none; a warning goes to stderr. `snapshot` runs one pass of notes'
-snapshot spec now and prints repo's line. `MOXI_NOTES_DIR` in this command's own
+snapshot spec now and prints repo's line. `setup` asks setup's questions again and
+writes what they change, as `moxi install notes` does. `MOXI_NOTES_DIR` in this command's own
 environment is passed as the override, as the launcher sets it for a launch. A refusal
 prints its reason and the fix to stderr, and exits 1 (an error), 2 (usage or a bad
 setting) or 3 (refused).
@@ -66,6 +68,14 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                      description="Run one pass of notes' snapshot spec through repo's "
                                  "committer now and print its line. It takes no settle "
                                  "duty: an unpushed commit waits for the next pass.")
+
+    verbs.add_parser("setup", help="ask setup's questions again and write the answers",
+                     description="Ask where the notes are, what a commit does with a "
+                                 "secret and where snapshots are pushed; preview what "
+                                 "snapshots would leave out; then register the git hook "
+                                 "gates, the clean filter and the snapshot spec in the "
+                                 "notes repo. With nobody at the keyboard it keeps the "
+                                 "current values and prints how to change each.")
 
     inbox = verbs.add_parser("inbox", help="inbox one-offs: list, add, rename",
                              description="Inbox one-offs: folders of notes for work that "
@@ -141,7 +151,14 @@ def _snapshot(args, out) -> int:
     return result.exit_code
 
 
-_VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "inbox": _inbox}
+def _setup(args, out) -> int:
+    from .setup import setup
+
+    return setup(out=out)
+
+
+_VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "setup": _setup,
+          "inbox": _inbox}
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi notes") -> int:

@@ -95,6 +95,17 @@ def allowlist(root, common_dir) -> tuple[object, str | None]:
         return Allowlist(), f"{exc.filename or 'an allowlist'}: can't be read ({exc.strerror})"
 
 
+def private_place_ok(common_dir) -> bool:
+    """True when secrets will read a private allowlist in `common_dir`: its resolved path
+    has a folder named `.git` in it, as secrets requires of a private file outside its own
+    config directory. A notes repo made with `--separate-git-dir`, or one whose common git
+    dir is a bare `notes.git`, has none, and every judge then reads its allowlist as
+    empty."""
+    from pathlib import Path
+
+    return ".git" in Path(os.fspath(common_dir)).resolve().parts
+
+
 def common_dir(git) -> str:
     """The repo's common git dir, absolute, from one `git rev-parse`."""
     from . import blobs
@@ -143,4 +154,5 @@ def scan_names(text: str, allow) -> list[Finding]:
 
 
 __all__ = ["SETS", "PUBLIC", "PRIVATE", "TOO_LARGE", "Finding", "too_large", "words",
-           "config", "max_bytes", "allowlist", "common_dir", "scan", "judge", "scan_names"]
+           "config", "max_bytes", "allowlist", "private_place_ok", "common_dir", "scan",
+           "judge", "scan_names"]
