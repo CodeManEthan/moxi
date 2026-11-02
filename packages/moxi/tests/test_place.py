@@ -1,7 +1,8 @@
 """The skill placer, `moxi.place`: plan, apply, status, remove and adopt.
 
-Every test places into folders under tmp: HOME and CLAUDE_CONFIG_DIR point there, and the
-core's own roots already do (conftest), so no real harness folder is ever read or written.
+Every test places into folders under tmp: HOME points there, CLAUDE_CONFIG_DIR and
+CODEX_HOME are unset or point there, and the core's own roots already do (conftest), so no
+real harness folder is ever read or written.
 """
 
 from __future__ import annotations
@@ -32,7 +33,22 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     return home
+
+
+@pytest.fixture
+def git(tmp_path, monkeypatch):
+    """A function that runs git with no global or system config of the user's, here and
+    in the placer; skips without git."""
+    if shutil.which("git") is None:
+        pytest.skip("no git")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def run(*args):
+        subprocess.run(["git", *map(str, args)], check=True, capture_output=True)
+    return run
 
 
 @pytest.fixture
@@ -104,6 +120,23 @@ def test_claude_config_dir_moves_claudes_folders(tmp_path, monkeypatch, skill):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     step = one(place.plan("comms", [Item(skill(), "claude", "comms-send")]))
     assert step.target == tmp_path / "cc" / "skills" / "comms-send"
+
+
+def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path,
+                                                                   monkeypatch, skill):
+    agent = tmp_path / "pkg" / "reviewer.md"
+    agent.parent.mkdir()
+    agent.write_text("an agent\n")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "cx"))
+    rows, _ = place.harnesses()
+    assert rows["codex"].agents == tmp_path / "cx" / "agents"
+    assert rows["codex"].skills == home / ".agents" / "skills"
+    items = [Item(agent, "codex", "reviewer.md", kind="agent"),
+             Item(skill(), "codex", "comms-send")]
+    place.apply(place.plan("loadout", items))
+    assert os.readlink(tmp_path / "cx" / "agents" / "reviewer.md") == str(agent)
+    assert os.path.islink(home / ".agents" / "skills" / "comms-send")
+    assert not os.path.lexists(home / ".codex")
 
 
 def test_a_dest_places_exactly_there_and_a_relative_one_raises(tmp_path, skill):
@@ -299,9 +332,112 @@ def test_a_path_git_tracks_is_named_and_git_is_asked_once_per_folder(tmp_path, m
     monkeypatch.setattr(place, "_git_files", lambda folder: calls.append(folder) or real(folder))
     src = skill()
     steps = place.plan("loadout", [Item(src, "claude", n, dest=skills / n) for n in "ab"])
-    assert [(s.action, s.cause) for s in steps] == [("refuse", "occupant")] * 2
+    assert [(s.action, s.cause) for s in steps] == [("refuse", "tracked")] * 2
     assert all("git tracks it" in s.reason for s in steps)
     assert calls == [str(skills)]
+
+
+def _occupy(case, target, src, other):
+    """Put occupant `case` at `target`, `src` being the item's source."""
+    if case == "a link not the placer's":
+        target.symlink_to(other)
+    elif case == "an unmarked folder":
+        target.mkdir()
+        (target / "SKILL.md").write_text("the user's\n")
+    elif case == "a folder marked for another owner":
+        shutil.copytree(src, target)
+        (target / place.MARK).write_text(json.dumps({"owner": "tidy", "hash": "x"}))
+    elif case == "a modified folder copy":
+        place.apply(place.plan("loadout", [Item(src, "claude", "x", dest=target)],
+                               form="copy"))
+        (target / "SKILL.md").write_text("edited\n")
+    elif case == "a file not the placer's":
+        target.write_text("the user's\n")
+    elif case == "a modified file copy":
+        place.apply(place.plan("loadout", [Item(src, "claude", "x", kind="agent",
+                                                dest=target)], form="copy"))
+        target.write_text("edited\n")
+
+
+OCCUPANTS = [("a link not the placer's", "skill", "a link the placer did not make"),
+             ("an unmarked folder", "skill", "a folder the placer did not mark"),
+             ("a folder marked for another owner", "skill", "a folder the placer did not mark"),
+             ("a modified folder copy", "skill", "a placed copy that has been modified"),
+             ("a file not the placer's", "agent", "a file the placer did not place"),
+             ("a modified file copy", "agent", "a placed copy that has been modified")]
+
+
+@pytest.mark.parametrize("case, kind, what", OCCUPANTS, ids=[c[0] for c in OCCUPANTS])
+def test_an_occupant_git_tracks_is_cause_tracked_with_the_same_reason(
+        tmp_path, git, skill, case, kind, what):
+    """Each kind of occupant reads cause `occupant` while git does not track it and cause
+    `tracked` once it does; the reason only gains ", and git tracks it", and `replace`
+    moves it aside either way."""
+    if kind == "skill":
+        src = skill()
+    else:
+        src = tmp_path / "pkg" / "reviewer.md"
+        src.parent.mkdir()
+        src.write_text("an agent\n")
+    repo = tmp_path / "repo"
+    folder = repo / ".claude" / ("skills" if kind == "skill" else "agents")
+    folder.mkdir(parents=True)
+    git("init", "-q", repo)
+    target = folder / "x"
+    _occupy(case, target, src, tmp_path)
+    item = Item(src, "claude", "x", kind=kind, dest=target)
+
+    step = one(place.plan("loadout", [item], form="copy"), "refuse")
+    assert (step.cause, step.reason, step.occupant) == ("occupant", f"{target} is {what}",
+                                                       target)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [item], form="copy"), "refuse")
+    assert (step.cause, step.reason, step.occupant) == (
+        "tracked", f"{target} is {what}, and git tracks it", target)
+
+    said, say = lines()
+    assert place.apply([step], say=say) == []
+    assert said == [f"x for claude not placed: {step.reason}"]
+    said, say = lines()
+    done = place.apply([step], replace=True, say=say)
+    assert [(p.path, p.state) for p in done] == [(target, "ok")]
+    assert said[0].startswith(f"moved {target} to ")
+    moved = list((moxi.paths.core().data_dir() / "displaced").glob("*/claude/x"))
+    assert len(moved) == 1
+    one(place.plan("loadout", [item], form="copy"), "keep")
+
+
+def test_a_marked_folder_this_ledger_lacks_is_cause_tracked(tmp_path, git, skill):
+    """A copy with this owner's mark that the ledger has no entry for came with a commit:
+    an occupant only because git tracks it, so always cause `tracked`."""
+    src = skill()
+    repo = tmp_path / "repo"
+    target = repo / ".claude" / "skills" / "x"
+    item = Item(src, "claude", "x", dest=target)
+    place.apply(place.plan("loadout", [item], form="copy"))
+    led = ledger()
+    led["loadout"]["placed"].clear()
+    (moxi.paths.core().state_dir() / place.LEDGER).write_text(json.dumps(led))
+    git("init", "-q", repo)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [item], form="copy"), "refuse")
+    assert (step.cause, step.reason) == (
+        "tracked", f"{target} is a marked folder this ledger lacks, and git tracks it")
+    said, say = lines()
+    done = place.apply([step], replace=True, say=say)
+    assert [p.path for p in done] == [target] and said[0].startswith(f"moved {target} to ")
+
+
+def test_another_owners_placement_git_tracks_is_still_cause_owner(tmp_path, git, skill):
+    src = skill()
+    repo = tmp_path / "repo"
+    target = repo / ".claude" / "skills" / "x"
+    place.apply(place.plan("tidy", [Item(src, "claude", "x", dest=target)], form="copy"))
+    git("init", "-q", repo)
+    git("-C", repo, "add", ".")
+    step = one(place.plan("loadout", [Item(src, "claude", "x", dest=target)]), "refuse")
+    assert step.cause == "owner"
+    assert "tracked" in place.CAUSES and "occupant" in place.CAUSES
 
 
 # -- remove -------------------------------------------------------------------------------

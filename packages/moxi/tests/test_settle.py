@@ -1791,6 +1791,32 @@ def test_an_occupant_is_refused_and_exits_1_and_replace_moves_it_aside(sk, capsy
     assert [p.read_text() for p in displaced.rglob("SKILL.md")] == ["# mine\n"]
 
 
+def test_an_occupant_git_tracks_is_refused_and_replace_moves_it_aside(sk, capsys,
+                                                                     monkeypatch):
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("no git")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(sk.tmp / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    sk.skills("moxi-demo-send")
+    mine = sk.claude("moxi-demo-send")
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("# mine\n")
+    repo = sk.user / ".claude"
+    for args in (["init", "-q", str(repo)], ["-C", str(repo), "add", "."]):
+        subprocess.run(["git", *args], check=True, capture_output=True)
+    code, out = place_settle(sk, capsys, skills=True)
+    assert code == 1
+    assert (f"demo: moxi-demo-send for claude not placed: {mine} is a folder the placer "
+            f"did not mark, and git tracks it") in out
+    code, out = place_settle(sk, capsys, replace=True)
+    assert code == 0, out
+    assert os.path.islink(mine) and f"demo: moved {mine} to " in out
+    assert f"demo: placed skill moxi-demo-send for claude ({mine})" in out
+
+
 def test_a_skills_folder_not_on_disk_or_a_broken_ledger_fails_the_step(sk, capsys,
                                                                        monkeypatch):
     import importlib.resources

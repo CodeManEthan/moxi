@@ -970,7 +970,7 @@ def _skills_report(module: str, steps, done, replace: bool) -> bool:
             else:
                 say(f"{module}: removed skill {item.name} for {item.harness} ({target})")
         elif s.action in ("add", "update") or (
-                s.action == "refuse" and replace and s.cause == "occupant"):
+                s.action == "refuse" and replace and s.cause in place._OCCUPANTS):
             if target in left:
                 verb = "updated" if s.action == "update" else "placed"
                 say(f"{module}: {verb} skill {item.name} for {item.harness} ({target})")

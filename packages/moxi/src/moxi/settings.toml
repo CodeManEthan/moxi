@@ -16,8 +16,8 @@ doc = "The harnesses `moxi install` places a module's skills for, each a name in
 read = "use"
 
 # An empty folder means the harness's built-in one, which only claude and codex have:
-# claude's under $CLAUDE_CONFIG_DIR, else ~/.claude; codex's ~/.agents/skills and
-# ~/.codex/agents. `~` is expanded.
+# claude's under $CLAUDE_CONFIG_DIR, else ~/.claude; codex's ~/.agents/skills, and
+# $CODEX_HOME/agents, else ~/.codex/agents. `~` is expanded.
 [harnesses]
 type = "list"
 default = [

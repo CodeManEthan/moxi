@@ -29,11 +29,12 @@ row's skills folder, an `agent` to its agents folder. With `dest`, an absolute p
 goes exactly there, and `harness` only labels the placement. The harness table is the core
 setting `harnesses` (`moxi config moxi`): one row per harness, `{name, skills, agents}`. An
 empty folder is the built-in one, which only `claude` (`$CLAUDE_CONFIG_DIR/skills` and
-`/agents`, else `~/.claude/...`) and `codex` (`~/.agents/skills`, `~/.codex/agents`) have;
-another row with an empty folder has no folder of that kind. `~` is expanded. A row whose
-name is not a lower-case word (letters, digits, `-`, `_`), that repeats an earlier row's
-name, or whose folder is not a string or not absolute once `~` is expanded, is skipped
-with one line (`harnesses()`), and the first row of a name wins.
+`/agents`, else `~/.claude/...`) and `codex` (`~/.agents/skills`, and `$CODEX_HOME/agents`,
+else `~/.codex/agents`) have; another row with an empty folder has no folder of that
+kind. `~` is expanded. A row whose name is not a lower-case word (letters, digits, `-`,
+`_`), that repeats an earlier row's name, or whose folder is not a string or not absolute
+once `~` is expanded, is skipped with one line (`harnesses()`), and the first row of a
+name wins.
 
 A placement is known by its owner and its target, the path it sits at: made absolute, `~`
 expanded, and its parent folder resolved (the target itself is not followed, since it may
@@ -73,16 +74,24 @@ What `plan` decides (`Step.action`, with `cause` for a `refuse`):
              hand-over when it places the target
     refuse   source (missing), io (an OSError reading this item), held, duplicate,
              harness (no such row, or no folder of the item's kind), name (not a
-             single path part), occupant (an unmarked path, a modified copy, or a
-             path git tracks), owner (another owner's placement)
+             single path part), occupant (a path in the way: a link the placer did
+             not make, a folder it did not mark or marked for another owner, a file
+             it did not place, or a placed copy since modified), tracked (such an
+             occupant that git tracks, or a marked folder this ledger lacks that git
+             tracks), owner (another owner's placement)
+
+`tracked` differs from `occupant` only in its name, so a caller can tell that the path in
+the way is in git without reading the reason; its reason reads as an occupant's, with
+", and git tracks it" added. Whatever reads cause `occupant` reads `tracked` alike.
 
 `plan` never raises for a cause that belongs to one item: each item yields exactly one
 step. Only a wrong call raises: an element of `items` that is not an `Item` (`TypeError`),
 an unknown kind, form or a relative `dest` (`ValueError`). An item whose source is missing
 leaves its placement exactly as it is, even a link that now dangles, and its target still
 counts as named, so nothing removes it. `apply(..., replace=True)` moves a refused
-occupant to `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item; it
-never takes another owner's placement.
+occupant (cause `occupant` or `tracked`) to
+`DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item; it never takes
+another owner's placement.
 
 Held items
 ----------
@@ -118,7 +127,11 @@ KINDS = ("skill", "agent")
 #: What `plan` may decide for one item, or for one ledger entry no item names.
 ACTIONS = ("add", "keep", "update", "remove", "refuse", "skip")
 #: The causes a `refuse` carries.
-CAUSES = ("source", "io", "held", "duplicate", "harness", "name", "occupant", "owner")
+CAUSES = ("source", "io", "held", "duplicate", "harness", "name", "occupant", "tracked",
+          "owner")
+#: The causes of a `refuse` for a path in the way, which `apply(..., replace=True)` moves
+#: aside.
+_OCCUPANTS = ("occupant", "tracked")
 #: What `status` may read for one placement.
 STATES = ("ok", "modified", "stale", "missing")
 
@@ -179,7 +192,7 @@ class Step:
     `form` is how the placement is or will be made (`FORMS`). `action` is one of
     `ACTIONS`, and `cause` says why for a `refuse` (`CAUSES`), else None. `reason` is one
     line for a person. `occupant` is the path in the way of a `refuse` with cause
-    `occupant`, which `apply(..., replace=True)` moves aside.
+    `occupant` or `tracked`, which `apply(..., replace=True)` moves aside.
 
     `owner` is the plan's owner, which `apply` records the placement under. `note` is a
     line `apply` says once for the whole plan (the Windows copy note), or None.
@@ -289,8 +302,11 @@ def _folder(name: str, kind: str, value: str) -> Path | None:
         base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
         return Path(os.path.abspath(os.path.expanduser(base))) / kind
     if name == "codex":
-        home = ".agents" if kind == "skills" else ".codex"
-        return Path(os.path.abspath(os.path.expanduser(os.path.join("~", home)))) / kind
+        if kind == "skills":
+            base = os.path.join("~", ".agents")
+        else:
+            base = os.environ.get("CODEX_HOME") or os.path.join("~", ".codex")
+        return Path(os.path.abspath(os.path.expanduser(base))) / kind
     return None
 
 
@@ -478,9 +494,10 @@ class _Planner:
         return None
 
     def _occupant(self, item, key, form, what: str) -> Step:
+        cause = "occupant"
         if self._tracked(key):
-            what = f"{what}, and git tracks it"
-        return self._step(item, key, "refuse", "occupant", f"{key} is {what}", form=form,
+            cause, what = "tracked", f"{what}, and git tracks it"
+        return self._step(item, key, "refuse", cause, f"{key} is {what}", form=form,
                           occupant=key)
 
     def _link(self, item, key, source, entry, form, note) -> Step:
@@ -808,7 +825,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     step that places a target the owner handed over is skipped while any other owner
     places it, and otherwise drops that lapsed hand-over. A `refuse` and a
     `skip` say their line and change nothing, except that `replace=True` moves the
-    occupant of a `refuse` with cause `occupant` to
+    occupant of a `refuse` with cause `occupant` or `tracked` to
     `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item. An `OSError`
     on one step says one line and leaves that step's placement as it was; the rest go on.
     """
@@ -823,7 +840,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
         written = json.dumps(ledger, sort_keys=True)
         for step in steps:
             places = step.action in ("add", "update") or (
-                step.action == "refuse" and replace and step.cause == "occupant")
+                step.action == "refuse" and replace and step.cause in _OCCUPANTS)
             if places and step.note and step.note not in notes:
                 notes.append(step.note)
                 say(step.note)
@@ -866,7 +883,7 @@ def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Plac
 def _apply_step(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
     item, key, owner = step.item, step.target, step.owner
     if step.action == "refuse":
-        if not (replace and step.cause == "occupant" and step.occupant is not None):
+        if not (replace and step.cause in _OCCUPANTS and step.occupant is not None):
             say(f"{item.name} for {item.harness} not placed: {step.reason}")
             return None
         moved = _displace(str(step.occupant), stamp, item.harness, item.name)
