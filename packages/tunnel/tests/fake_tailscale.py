@@ -2,7 +2,8 @@
 JSON file beside it, in the shapes Tailscale 1.104.1 prints.
 
 It answers `status --json`, `serve status --json` (and `funnel status --json`), `debug
-prefs`, an apply (`serve|funnel --bg --yes --https=<port> <url>`) and an `off`
+prefs`, `version` (the state's `version`, 1.104.1 unless set), an apply
+(`serve|funnel --bg --yes --https=<port> <url>`) and an `off`
 (`serve|funnel --https=<port> off`). An apply sets the `/` handler of the machine's
 current `<host>:<port>` and keeps any other mount there; `off` takes out the port's `TCP`
 key and the current host's `Web` and `AllowFunnel` keys for it, and leaves keys under any
@@ -37,6 +38,8 @@ def kind():
         return "serve-status"
     if args[:2] == ["debug", "prefs"]:
         return "prefs"
+    if args[:1] == ["version"]:
+        return "version"
     if args and args[-1] == "off":
         return "off"
     return "apply"
@@ -57,6 +60,9 @@ elif what == "serve-status":
     print(json.dumps({k: v for k, v in serve.items() if v}))
 elif what == "prefs":
     print(json.dumps(state["prefs"]))
+elif what == "version":
+    print(state.get("version", "1.104.1"))
+    print("  tailscale commit: 0123456789abcdef")
 else:
     port = next(a.split("=", 1)[1] for a in args if a.startswith("--https="))
     key = f"{host}:{port}"

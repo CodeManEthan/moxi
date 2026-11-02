@@ -2,7 +2,8 @@
 
 Tunnel drives the `tailscale` CLI through `moxi.proc.run`, each call with a 30 s timeout
 (or what is left of a caller's deadline), and reads only its JSON output:
-`tailscale status --json`, `tailscale serve status --json` and `tailscale debug prefs`.
+`tailscale status --json`, `tailscale serve status --json` and `tailscale debug prefs`,
+and the first line of `tailscale version`.
 
     apply   tailscale serve  --bg --yes --https=<port> http://127.0.0.1:<target>
             tailscale funnel --bg --yes --https=<port> http://127.0.0.1:<target>
@@ -262,9 +263,15 @@ class Tailscale:
 
     name = "tailscale"
 
-    def __init__(self, *, deadline: float | None = None, binary: object = _UNSET):
+    def __init__(self, *, deadline: float | None = None, binary: object = _UNSET,
+                 wait: float | None = None, clock=time.monotonic):
         self.deadline = deadline
+        #: Each call's own limit, in seconds, in place of `TIMEOUT` (the doctor's 2 s).
+        self.wait = wait
+        #: The clock `deadline` is read against.
+        self.clock = clock
         self._binary = binary
+        self._version: str | None = None
         self._status: dict | None = None
         self._serve: dict | None = None
         self._prefs: object = _UNSET
@@ -287,13 +294,14 @@ class Tailscale:
                        "tailscale.binary <path>")
 
     def _timeout(self) -> float:
+        limit = TIMEOUT if self.wait is None else self.wait
         if self.deadline is None:
-            return TIMEOUT
-        left = self.deadline - time.monotonic()
+            return limit
+        left = self.deadline - self.clock()
         if left <= 0:
             raise ReadError("tailscale was not asked: the time for it ran out",
                             "tailscale status", timeout=True)
-        return min(TIMEOUT, left)
+        return min(limit, left)
 
     def run(self, *args: str) -> subprocess.CompletedProcess:
         exe = self.binary()
@@ -328,6 +336,21 @@ class Tailscale:
         return value
 
     # reads
+
+    def version(self) -> str:
+        """`tailscale version`: its first line, such as `1.104.1`."""
+        if self._version is None:
+            done = self.run("version")
+            if done.returncode != 0:
+                raise ReadError(_text(done.stderr).strip() or
+                                f"tailscale version exited {done.returncode}",
+                                "check the tailscale CLI")
+            lines = _text(done.stdout).strip().splitlines()
+            if not lines or not lines[0].strip():
+                raise ReadError("tailscale version printed nothing",
+                                "check the tailscale CLI")
+            self._version = lines[0].strip()
+        return self._version
 
     def status(self, *, fresh: bool = False) -> dict:
         """`tailscale status --json`."""
@@ -477,6 +500,15 @@ class Tailscale:
         return live_state(self.serve_config(), entry, self.host())
 
 
+def version_tuple(text: str) -> tuple[int, ...] | None:
+    """`1.104.1` (or `1.104.1-t1234abcd`) as `(1, 104, 1)`; None when it isn't one."""
+    head = text.strip().split()[0] if text.strip() else ""
+    numbers = head.split("-", 1)[0].split(".")
+    if not numbers or not all(n.isdigit() for n in numbers):
+        return None
+    return tuple(int(n) for n in numbers)
+
+
 def _text(data: object) -> str:
     if isinstance(data, bytes):
         return data.decode("utf-8", "replace")
@@ -485,4 +517,4 @@ def _text(data: object) -> str:
 
 __all__ = ["TIMEOUT", "FUNNEL_PORTS_CAP", "PLATFORM_PATHS", "Tailscale", "upstream", "verb",
            "parts", "tcp_ports", "handler_ok", "matches", "only_ours", "describe", "copy_of",
-           "live_state", "find_binary"]
+           "live_state", "find_binary", "version_tuple"]

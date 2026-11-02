@@ -28,6 +28,12 @@ DAEMONS = {"cloudflared": {"command": "moxi-tunnel-cloudflared",
                            "switch": "cloudflare.enabled"}}
 #: The daemon's health: `GET /ready` on cloudflared's metrics port.
 HEALTH = {"cloudflared": "moxi_tunnel.cloudflare:health"}
+#: Run first by `moxi uninstall tunnel`: removes every address tunnel applied, or stops the
+#: uninstall naming each one it could not remove and the command that removes it.
+TEARDOWN = "moxi_tunnel.uninstall:teardown"
+#: tunnel's doctor rows: Tailscale's setup (off while no Tailscale target is recorded),
+#: each address against its live config, each target's loopback port, and Cloudflare's.
+DOCTOR = "moxi_tunnel.doctor:rows"
 #: What tunnel keeps, for `moxi paths tunnel`, the doctor's checks and `moxi uninstall
 #: --purge`. Each is made by its first write. The record of what tunnel applied, its event
 #: log and the copies of foreign config a replace took over can't be made again;

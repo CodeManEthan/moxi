@@ -50,9 +50,17 @@ def test_the_check_refuses_what_the_schema_passes_and_tunnel_would_not(text, key
     assert caught.value.key == key
 
 
-def test_the_install_listener_has_both_hooks_and_does_nothing_yet():
+def test_the_install_listener_has_both_hooks(capsys):
     (ep,) = [e for e in entry_points(group="moxi.installs") if e.name == "tunnel"]
     assert ep.value == "moxi_tunnel.installs"
     assert installs.on_install("ui", None) is None
+    # With nothing recorded, neither hook has anything to remove or to name.
     assert installs.on_uninstall("ui") is None
     assert installs.on_uninstall("tunnel") is None
+    assert capsys.readouterr().out == ""
+
+
+def test_the_teardown_and_the_doctor_are_declared():
+    found = moxi.modules.load("tunnel")
+    assert found.teardown == "moxi_tunnel.uninstall:teardown"
+    assert found.doctor == "moxi_tunnel.doctor:rows"
