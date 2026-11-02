@@ -38,7 +38,7 @@ moxi doctor notes
 | `moxi notes scan [--json]` | what a snapshot would leave out now, with rules and lines; changes nothing; exit 1 when any file would be left out |
 | `moxi notes inbox list [--json]`, `add SLUG`, `rename SLUG NEW` | inbox one-offs: folders of notes for work with no project |
 | `moxi notes setup` | ask setup's questions again and write what they change |
-| `moxi notes validate [--json] [--unfiled] [--limit N]` | check every note's frontmatter against the types file; writes nothing; exit 1 only when the types file can't be used |
+| `moxi notes validate [--json] [--unfiled] [--limit N]` | check every note's frontmatter against the types file; writes nothing; exit 1 only when the types file can't be used or the root is not a folder |
 | `moxi notes backfill [--apply] [--json] [--limit N]` | the required keys each filed note lacks and that can be inferred; a dry run unless `--apply` |
 
 `MOXI_NOTES_DIR`, set by the launcher for one launch, overrides the computed folder for
@@ -81,7 +81,8 @@ terminal it asks; with nobody at the keyboard it keeps the current value (or the
 prints the command that would change each, and goes on.
 
 1. **Where are your notes?** Default `~/notes`. When that folder is in no git repo, setup
-   offers to make it one (`git init`, default yes). That is the only `git init` notes ever
+   offers to make it one (`git init`, default yes); with no terminal it takes the yes, so a
+   run from a script makes the folder and its repo. That is the only `git init` notes ever
    runs: nothing in notes makes a git repository inside your notes folder, because the
    committer leaves a nested repository out of every snapshot. A notes folder that sits
    inside another repo, below its top, gets no snapshots or gates; make it a repo of its

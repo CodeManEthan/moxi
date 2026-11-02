@@ -19,9 +19,10 @@ moxi projects promote sketch alpha --kind project --root ~/code/alpha --create
   are one folder under the notes' `topics` folder, and the move makes it, so a topic
   takes neither `--root` nor `--create`.
 - **Any other kind** needs `--root DIR`. Its notes folder is the one notes computes for
-  DIR (`~/code/alpha` gets `code/alpha` under the notes root), stored as the row's notes root, so a
-  later move of the code keeps its notes. `--create` makes DIR first, as `add --create`
-  does, and is refused for a git repository inside the notes root.
+  DIR (`~/code/alpha` gets `code/alpha` under the notes root, and under your prefix if you
+  set one), stored as the row's notes root, so a later move of the code keeps its notes.
+  `--create` makes DIR first, as `add --create` does, and is refused for a git repository
+  inside the notes root.
 
 Promote checks everything `moxi projects add` checks, and refuses before anything is made
 or moved: no such one-off, a notes folder that already exists (it never merges two
