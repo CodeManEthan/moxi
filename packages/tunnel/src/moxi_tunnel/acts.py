@@ -510,8 +510,10 @@ def _do_remove(plan: _Plan, act: _Act) -> Outcome:
     url = api.url(old.host, old.port)
     if kind == "undo":
         act.commit({key: None})
-        ts = provider.get("tailscale")
-        got = _settle(old.displaced, ts, act, finishing=False)
+        try:
+            got = _settle(old.displaced, provider.get("tailscale"), act, finishing=False)
+        except TunnelError as exc:
+            got = f"its copy stays pending until moxi tunnel repair: {exc.reason}"
         record.event("remove", key, provider=old.provider, port=old.port, undo=got)
         return Outcome(None, [f"{key}: the replace is undone ({got})"])
     if kind == "forget":
