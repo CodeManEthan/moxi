@@ -509,10 +509,10 @@ HOOK_SESSION = "0190b000-0000-7000-8000-0000000005c1"
 HOOK_AGENT = "a0190b00000005c1"
 HOOK_MODEL = "claude-opus-5-5"
 #: The measure's row for the model, and the price rows that give its `r` (0.05).
-HOOK_PARAMS = {"schema": 1, "measured_at": "2026-10-26T00:00:00+00:00", "w": 2.0,
+HOOK_PARAMS = {"schema": 1, "measured_at": "2026-10-26T00:00:00+00:00",
                "models": {HOOK_MODEL: {
-                   "main": {"n": 50, "S": 47058, "P": 23171, "g": 1476},
-                   "subagent": {"n": 50, "S": 47058, "P": 23171, "g": 1476,
+                   "main": {"n": 50, "S": 47058, "P": 23171, "g": 1476, "w": 2.0},
+                   "subagent": {"n": 50, "S": 47058, "P": 23171, "g": 1476, "w": 2.0,
                                 "fallback": "main"}}}}
 HOOK_PRICES = f"""
 [[model]]

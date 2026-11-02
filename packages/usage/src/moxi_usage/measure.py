@@ -32,9 +32,15 @@ Per population (`thresholds` has the equations they feed):
   request; `n`, the file count. A request's context is its whole prompt (the index's
   `input`, cache reads and writes included).
 * A population of fewer than 20 files gets no row, so a thin sample never gives a mark.
-* Over the whole sample, the 1-hour share of cache writes (counting the requests that
-  split their writes by lifetime), and from it `w = 2.0 x share + 1.25 x (1 - share)`.
-  With no cache writes in the sample there is no `w` and no row.
+* `w`, per model from the model table and never borrowed from another model: the
+  model's own cache-write price over its input price (`thresholds.write_multiplier`). A
+  model priced for both 5-minute and 1-hour writes (Anthropic's) weighs the two by the
+  1-hour share of cache writes over the population's own requests that state both
+  counts (0 when none does); with Anthropic's prices that is `2.0 x share + 1.25 x (1 -
+  share)`. A model with one write price takes it; one with none takes 1.0 (writes bill
+  as input). A model the table gives no input price, or one of 0, has no `w` and so no
+  row, and `no_w` names it with the reason. So a sample of only Codex or only OpenCode
+  sessions gets its rows like any other.
 * A subagent population with no row of its own carries the same model's `main` row,
   marked `fallback: main`.
 
@@ -161,13 +167,28 @@ def _row(group: list[list[tuple]]) -> dict[str, Any] | None:
     return row
 
 
-def measure(conn: sqlite3.Connection, *, now: float, rules: Rules = Rules()) -> dict:
-    """The measure's document over the index on `conn` at `now` (epoch seconds)."""
-    return document(_files(conn, now - rules.days * _DAY), now=now, rules=rules)
+def measure(conn: sqlite3.Connection, *, now: float, rules: Rules = Rules(),
+            table: Any = None, env: Mapping[str, str] | None = None) -> dict:
+    """The measure's document over the index on `conn` at `now` (epoch seconds), with
+    the model table in effect (or `table`)."""
+    return document(_files(conn, now - rules.days * _DAY), now=now, rules=rules,
+                    table=table, env=env)
 
 
-def document(files: Iterable[Sampled], *, now: float, rules: Rules = Rules()) -> dict:
-    """The measure's document over the sample's files."""
+def _share_1h(group: list[list[tuple]]) -> float | None:
+    """The 1-hour share of cache writes over the group's requests that state both
+    counts, or None when none does."""
+    split = [(c[3], c[4]) for calls in group for c in calls
+             if c[3] is not None and c[4] is not None]
+    write_all = sum(total for total, _ in split)
+    write_1h = sum(min(hour, total) for total, hour in split)
+    return write_1h / write_all if write_all else None
+
+
+def document(files: Iterable[Sampled], *, now: float, rules: Rules = Rules(),
+             table: Any = None, env: Mapping[str, str] | None = None) -> dict:
+    """The measure's document over the sample's files, with the model table in effect
+    (or `table`) for each model's `w`."""
     skipped = {"not_interactive": 0, "short": 0, "unknown_counts": 0, "no_model": 0}
     groups: dict[tuple[str, str], list[list[tuple]]] = {}
     kept: list[list[tuple]] = []
@@ -191,23 +212,30 @@ def document(files: Iterable[Sampled], *, now: float, rules: Rules = Rules()) ->
         groups.setdefault((model, population), []).append(each.calls)
         kept.append(each.calls)
 
-    split = [(c[3], c[4]) for calls in kept for c in calls
-             if c[3] is not None and c[4] is not None]
-    write_all = sum(total for total, _ in split)
-    write_1h = sum(min(hour, total) for total, hour in split)
-    share = write_1h / write_all if write_all else None
-    w = thresholds.write_multiplier(share) if share is not None else None
-
     models: dict[str, dict[str, Any]] = {}
     thin: dict[str, dict[str, int]] = {}
+    no_w: dict[str, str] = {}
+    facts: dict[str, Any] = {}
     for (model, population), group in sorted(groups.items()):
         if len(group) < MIN_FILES:
             thin.setdefault(model, {})[population] = len(group)
             continue
+        if model not in facts:
+            if table is None:
+                from .models import table as current
+
+                table = current(env)
+            facts[model] = table.lookup(model)
+        share = _share_1h(group)
+        w, why = thresholds.write_multiplier(facts[model], share)
         if w is None:
+            no_w[model] = why or "no write multiplier"
             continue
         row = _row(group)
         if row is not None:
+            row["w"] = _round(w)
+            if share is not None:
+                row["write_share_1h"] = _round(share)
             models.setdefault(model, {})[population] = row
     for rows in models.values():
         if SUBAGENT not in rows and MAIN in rows:
@@ -227,10 +255,9 @@ def document(files: Iterable[Sampled], *, now: float, rules: Rules = Rules()) ->
                    "main_files": population_files[MAIN],
                    "subagent_files": population_files[SUBAGENT],
                    "skipped": skipped},
-        "write_share_1h": None if share is None else _round(share),
-        "w": None if w is None else _round(w),
         "models": models,
         "thin": thin,
+        "no_w": no_w,
     }
 
 
@@ -270,8 +297,8 @@ class RestartPoint:
         if self.problem is not None:
             out["problem"] = self.problem
         if self.doc is not None:
-            for name in ("measured_at", "days", "interactive_only", "sample",
-                         "write_share_1h", "w", "thin"):
+            for name in ("measured_at", "days", "interactive_only", "sample", "thin",
+                         "no_w"):
                 out[name] = self.doc.get(name)
         out["rows"] = [{"model": model, "population": population, **row,
                         "marks": {mark: found.as_dict() for mark, found in marks.items()}}
@@ -327,8 +354,10 @@ class Run:
                 f"{sample['requests']} requests of the last {self.doc['days']} days: "
                 f"{rows} population row{'s' if rows != 1 else ''} for "
                 f"{len(self.doc['models'])} model{'s' if len(self.doc['models']) != 1 else ''}")
-        if self.doc["w"] is None and sample["files"]:
-            line += "; the sample holds no cache writes, so no row"
+        no_w = self.doc.get("no_w") or {}
+        if no_w:
+            line += (f"; {len(no_w)} model{'s' if len(no_w) != 1 else ''} without an "
+                     "input price in the model table, so no row")
         return line
 
 
@@ -373,7 +402,7 @@ def run(*, now: float | None = None, fresh: bool = True,
             raise MeasureError(f"the token index is at version {version}, before this "
                                f"usage's {store.INDEX_VERSION}; run `moxi usage index` "
                                "to bring it up")
-        doc = measure(conn, now=when, rules=rules)
+        doc = measure(conn, now=when, rules=rules, env=env)
     finally:
         conn.close()
     out = thresholds.params_path(env)

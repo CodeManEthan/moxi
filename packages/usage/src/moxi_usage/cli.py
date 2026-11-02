@@ -526,10 +526,8 @@ def restart_lines(found: Any) -> list[str]:
         return [f"restart point: {found.problem}"]
     doc = found.doc
     sample = doc.get("sample") or {}
-    w = doc.get("w")
     lines = [f"measured {doc.get('measured_at')} over the last {doc.get('days')} days: "
-             f"{sample.get('files', 0)} files, {sample.get('requests', 0)} requests; "
-             f"w {'unknown' if w is None else w}"
+             f"{sample.get('files', 0)} files, {sample.get('requests', 0)} requests"
              + ("" if doc.get("interactive_only", True) else "; every main session")]
     if not found.rows:
         lines.append("  no population has a row (each needs 20 files of 5 requests or "
@@ -540,8 +538,10 @@ def restart_lines(found: Any) -> list[str]:
             each = marks[mark]
             cells.append(f"{mark} {each.tokens:,}" if each.available else f"{mark} -")
         said = "" if "fallback" not in row else ", its main row"
+        w = row.get("w")
         line = (f"  {model:<24} {population:<8} n {row.get('n')}{said}: S {row.get('S'):,.0f}"
-                f", P {row.get('P'):,.0f}, g {row.get('g'):,.0f}   " + "   ".join(cells))
+                f", P {row.get('P'):,.0f}, g {row.get('g'):,.0f}, "
+                f"w {'unknown' if w is None else w}   " + "   ".join(cells))
         lines.append(line)
         reasons = dict.fromkeys(each.reason for each in marks.values() if not each.available)
         for reason in reasons:
@@ -550,6 +550,8 @@ def restart_lines(found: Any) -> list[str]:
         for population, count in sorted(populations.items()):
             lines.append(f"  {model:<24} {population:<8} {count} files, under the 20 a "
                          "row needs")
+    for model, why in sorted((doc.get("no_w") or {}).items()):
+        lines.append(f"  {model:<24} {'':<8} no row: {why}")
     return lines
 
 

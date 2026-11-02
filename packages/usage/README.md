@@ -181,7 +181,13 @@ the harness marked a person at the keyboard: Claude Code's `cli` entrypoint, Cod
 source or an originator in `restart_point.interactive_originators`; set
 `restart_point.interactive_only = false` to take every main session. A population needs
 20 files for a row; a model's subagents with no row of their own use its main row, and say
-so. The result goes to `STATE/usage/restart-point.json`. `moxi usage restart-point` prints
+so. A restart's write cost `w` is each model's own, from the model table: its cache-write
+price over its input price. A model priced for both 5-minute and 1-hour writes (Claude's)
+weighs the two by how much of that population's writes were for an hour; a model with one
+write price takes it, and one with none (OpenAI bills writes as input) takes 1.0. So
+Codex and OpenCode sessions get rows on their own, never Claude's `w`. A model the table
+gives no input price has no row, and the measure names it. The result goes to
+`STATE/usage/restart-point.json`. `moxi usage restart-point` prints
 the rows and each warn-at mark (1x, 1.5x, 2x) in tokens. A mark the measure or the model
 table can't support (no row, no cache-read price) is shown as unavailable with the reason,
 never guessed. Turn on `restart_point.measure_weekly` to measure once a week on a timer

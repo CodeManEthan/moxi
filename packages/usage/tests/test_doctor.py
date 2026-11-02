@@ -272,10 +272,10 @@ def write_measure(*, measured_at="2026-10-28T00:00:00+00:00", models=None):
 
     path = thresholds.params_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    rows = {"claude-model-x": {"main": {"n": 20, "S": 1.0, "P": 1.0, "g": 1.0},
-                               "subagent": {"n": 20, "S": 1.0, "P": 1.0, "g": 1.0,
+    rows = {"claude-model-x": {"main": {"n": 20, "S": 1.0, "P": 1.0, "g": 1.0, "w": 2.0},
+                               "subagent": {"n": 20, "S": 1.0, "P": 1.0, "g": 1.0, "w": 2.0,
                                             "fallback": "main"}}}
-    path.write_text(json.dumps({"schema": 1, "measured_at": measured_at, "w": 2.0,
+    path.write_text(json.dumps({"schema": 1, "measured_at": measured_at,
                                 "models": rows if models is None else models}))
     return path
 

@@ -28,12 +28,12 @@ MODEL = "claude-opus-5-5"
 OTHER = "claude-fable-5-1"
 #: The two models' rows; the subagent row of MODEL is its main row's numbers.
 PARAMS = {
-    "schema": 1, "measured_at": "2026-10-26T00:00:00+00:00", "w": 2.0,
+    "schema": 1, "measured_at": "2026-10-26T00:00:00+00:00",
     "models": {
-        MODEL: {"main": {"n": 50, "S": 47058, "P": 23171, "g": 1476},
-                "subagent": {"n": 50, "S": 47058, "P": 23171, "g": 1476,
+        MODEL: {"main": {"n": 50, "S": 47058, "P": 23171, "g": 1476, "w": 2.0},
+                "subagent": {"n": 50, "S": 47058, "P": 23171, "g": 1476, "w": 2.0,
                              "fallback": "main"}},
-        OTHER: {"main": {"n": 147, "S": 51053, "P": 23116, "g": 2539}},
+        OTHER: {"main": {"n": 147, "S": 51053, "P": 23116, "g": 2539, "w": 2.0}},
     },
 }
 #: The thresholds those rows give with r 0.05 and 0.025.

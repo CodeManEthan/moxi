@@ -1,6 +1,6 @@
 """The restart-point measure over the token index: the sample, the populations, the
-interactive-only rule, the inherited spec, the subagent fallback and the file it writes.
-Transcripts come from sessions' builders; `now` is an argument."""
+interactive-only rule, the inherited spec, each model's own `w`, the subagent fallback and
+the file it writes. Transcripts come from sessions' builders; `now` is an argument."""
 
 import json
 from pathlib import Path
@@ -14,6 +14,7 @@ from conftest import write_config
 
 ClaudeTranscript = sessions.testing.ClaudeTranscript
 CodexRollout = sessions.testing.CodexRollout
+OpenCodeDb = sessions.testing.OpenCodeDb
 usage = sessions.testing.usage
 
 DAY = 86400.0
@@ -22,6 +23,37 @@ MODEL = "claude-model-x"
 #: Each test session's requests: context 10,000 + 1,000 per request, the cache read the
 #: previous request's context (the first's 5,000), every write for an hour.
 BASE, STEP, PREFIX = 10_000, 1_000, 5_000
+CODEX_MODEL = "codex-model-x"
+OPENCODE_MODEL = "opencode-model-x"
+#: The test models' price rows: the Claude model priced like Anthropic's (5-minute writes
+#: 1.25x input, 1-hour writes 2x), the Codex and OpenCode ones with no write price.
+PRICES = f"""
+[[model]]
+id = "{MODEL}"
+input = 4.0
+output = 20.0
+cache_read = 0.4
+cache_write_5m = 5.0
+cache_write_1h = 8.0
+
+[[model]]
+id = "{CODEX_MODEL}"
+input = 1.25
+output = 10.0
+cache_read = 0.125
+
+[[model]]
+id = "{OPENCODE_MODEL}"
+input = 2.0
+output = 8.0
+cache_read = 0.2
+cache_write_5m = 3.0
+"""
+
+
+@pytest.fixture(autouse=True)
+def priced():
+    write_config(PRICES)
 
 
 def context_of(n):
@@ -75,8 +107,8 @@ def test_the_inherited_spec_over_twenty_interactive_sessions():
     found = measured()
     row = found["models"][MODEL]["main"]
     assert row == {"n": 20, "S": float(context_of(4)), "P": float(PREFIX), "g": float(STEP),
-                   "out": 100.0}
-    assert found["write_share_1h"] == 1.0 and found["w"] == 2.0
+                   "out": 100.0, "w": 2.0, "write_share_1h": 1.0}
+    assert "w" not in found and found["no_w"] == {}
     assert found["sample"]["files"] == 20 and found["sample"]["requests"] == 120
     assert found["schema"] == 1 and found["days"] == 21
     assert found["measured_at"] == "2026-10-30T22:40:00+00:00"
@@ -115,7 +147,7 @@ def test_short_files_old_files_synthetic_and_sidechain_requests_are_left_out():
     assert found["sample"]["files"] == 20
 
 
-def test_subagents_get_their_own_row_and_the_write_share_is_over_the_sample():
+def test_subagents_get_their_own_row_and_the_write_share_is_over_each_population():
     for n in range(20):
         session(n, agents=1)
     found = measured()
@@ -123,9 +155,9 @@ def test_subagents_get_their_own_row_and_the_write_share_is_over_the_sample():
     assert rows["subagent"]["n"] == 20 and "fallback" not in rows["subagent"]
     assert rows["subagent"]["S"] == 2 * context_of(4)
     assert rows["subagent"]["g"] == 2 * STEP
-    assert 0 < found["write_share_1h"] < 1
-    assert found["w"] == pytest.approx(thresholds.write_multiplier(found["write_share_1h"]),
-                                       abs=1e-3)
+    # The main sessions write for an hour, their agents for five minutes.
+    assert (rows["main"]["write_share_1h"], rows["main"]["w"]) == (1.0, 2.0)
+    assert (rows["subagent"]["write_share_1h"], rows["subagent"]["w"]) == (0.0, 1.25)
 
 
 def test_a_subagent_population_without_a_row_carries_the_main_row():
@@ -249,25 +281,84 @@ def test_the_timer_is_declared_behind_a_switch_the_core_accepts():
     assert script.value == "moxi_usage.measure:main"
 
 
-def test_a_codex_rollout_from_the_tui_joins_main():
-    """Codex writes no cache-write count, so w comes from the Claude sessions beside it:
-    the share is over the whole sample."""
+def rollout(n, *, model=CODEX_MODEL):
+    """One Codex rollout from the TUI with 5 requests."""
+    r = CodexRollout(Path(sessions.root("codex")),
+                     thread_id=f"0190c000-0000-7000-8000-{n:012d}",
+                     originator="codex-tui", source="vscode", start=NOW - DAY)
+    r.turn(model)
+    for k in range(1, 6):
+        r.user("go")
+        r.request(sessions.testing.token_usage(input=context_of(k),
+                                               cached=PREFIX if k == 1
+                                               else context_of(k - 1)),
+                  response_id=f"resp_{n}_{k}")
+    r.turn_end()
+    r.write()
+
+
+def test_a_codex_rollout_from_the_tui_joins_main_with_its_own_w():
+    """In a sample mixed with Claude sessions, the Codex model takes its own `w` (no
+    write price, so 1.0), never the Claude model's 2.0."""
     for n in range(20):
         session(n)
     for n in range(20):
-        r = CodexRollout(Path(sessions.root("codex")),
-                         thread_id=f"0190c000-0000-7000-8000-{n:012d}",
-                         originator="codex-tui", source="vscode", start=NOW - DAY)
-        r.turn()
-        for k in range(1, 6):
-            r.user("go")
-            r.request(sessions.testing.token_usage(input=context_of(k),
-                                                   cached=PREFIX if k == 1
-                                                   else context_of(k - 1)),
-                      response_id=f"resp_{n}_{k}")
-        r.turn_end()
-        r.write()
+        rollout(n)
     found = measured()
-    rows = found["models"]["codex-model-x"]
+    rows = found["models"][CODEX_MODEL]
     assert rows["main"]["n"] == 20 and rows["main"]["g"] == STEP
-    assert found["w"] == 2.0
+    assert rows["main"]["w"] == 1.0 and "write_share_1h" not in rows["main"]
+    assert found["models"][MODEL]["main"]["w"] == 2.0
+
+
+def test_a_codex_only_sample_gets_its_rows_and_marks():
+    for n in range(20):
+        rollout(n)
+    found = measured()
+    row = found["models"][CODEX_MODEL]["main"]
+    assert row["n"] == 20 and row["w"] == 1.0
+    from moxi_usage import models
+
+    mark = thresholds.threshold(CODEX_MODEL, "1x", doc=found, table=models.table())
+    assert mark.available, mark.reason
+
+
+def test_an_opencode_only_sample_gets_its_rows_when_main_is_widened():
+    db = OpenCodeDb(Path(sessions.root("opencode")).parent,
+                    name=Path(sessions.root("opencode")).name, start=NOW - DAY)
+    for n in range(20):
+        each = db.session(title=f"s{n}")
+        for k in range(1, 6):
+            each.user("go")
+            reply = each.assistant(model=("opencode", OPENCODE_MODEL))
+            read = PREFIX if k == 1 else context_of(k - 1)
+            reply.step(input=context_of(k) - read, cache_read=read, output=10)
+            reply.complete()
+    db.write()
+    found = measured(interactive_only=False)
+    row = found["models"][OPENCODE_MODEL]["main"]
+    assert row["n"] == 20 and row["w"] == 1.5                # its 5-minute price over input
+    assert row["g"] == STEP
+
+
+def test_a_model_without_an_input_price_or_one_of_0_has_no_row_and_is_named():
+    from moxi_usage import models
+
+    from conftest import doc
+
+    for n in range(20):
+        rollout(n)
+    for n in range(20, 40):
+        rollout(n, model="free-model-x")
+    conn = build()
+    try:
+        found = measure.measure(conn, now=NOW, table=models.Table(doc({
+            CODEX_MODEL: {"output": 10.0, "cache_write_5m": 1.0},
+            "free-model-x": {"input": 0.0, "output": 0.0}})))
+    finally:
+        conn.close()
+    assert found["models"] == {}
+    assert "no input price" in found["no_w"][CODEX_MODEL]
+    assert "not above 0" in found["no_w"]["free-model-x"]
+    run = measure.Run(found, "here")
+    assert "2 models without an input price" in run.line()

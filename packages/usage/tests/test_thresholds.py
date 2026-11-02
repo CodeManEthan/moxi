@@ -15,15 +15,14 @@ from moxi_usage import models, thresholds
 
 from conftest import doc, write_config
 
-#: Three measured rows, with the sample's w at 2.0 (every cache write for an hour).
+#: Three measured rows, each with w at 2.0 (every cache write for an hour).
 PARAMS = {
     "schema": 1,
     "measured_at": "2026-09-26T00:00:00+00:00",
-    "w": 2.0,
     "models": {
-        "claude-fable-5-1": {"main": {"n": 147, "S": 51053, "P": 23116, "g": 2539}},
-        "claude-opus-5-5": {"main": {"n": 50, "S": 47058, "P": 23171, "g": 1476}},
-        "claude-opus-5": {"main": {"n": 58, "S": 45999, "P": 23050, "g": 1745}},
+        "claude-fable-5-1": {"main": {"n": 147, "S": 51053, "P": 23116, "g": 2539, "w": 2.0}},
+        "claude-opus-5-5": {"main": {"n": 50, "S": 47058, "P": 23171, "g": 1476, "w": 2.0}},
+        "claude-opus-5": {"main": {"n": 58, "S": 45999, "P": 23050, "g": 1745, "w": 2.0}},
     },
 }
 #: Each model's cache-read price over its input price.
@@ -96,10 +95,50 @@ def test_a_bracket_or_date_suffix_reads_the_base_models_row():
     assert thresholds.base_model("") is None and thresholds.base_model(None) is None
 
 
-def test_the_write_multiplier_follows_the_one_hour_share():
-    assert thresholds.write_multiplier(1.0) == 2.0
-    assert thresholds.write_multiplier(0.0) == 1.25
-    assert thresholds.write_multiplier(0.5) == pytest.approx(1.625)
+def _w(row, share=None, *, defaults=None):
+    found = models.Table(doc({"m": row}, defaults=defaults)).lookup("m")
+    return thresholds.write_multiplier(found, share)
+
+
+ANTHROPIC = {"input": 4.0, "output": 20.0, "cache_write_5m": 5.0, "cache_write_1h": 8.0,
+             "provider": "anthropic"}
+
+
+def test_w_with_both_write_prices_weighs_them_by_the_one_hour_share():
+    assert _w(ANTHROPIC, 1.0) == (2.0, None)
+    assert _w(ANTHROPIC, 0.0) == (1.25, None)
+    assert _w(ANTHROPIC, None) == (1.25, None)          # no request stated the split
+    assert _w(ANTHROPIC, 0.5)[0] == pytest.approx(1.625)
+
+
+def test_w_with_one_write_price_is_that_price_over_input_whatever_the_share():
+    five = {"input": 4.0, "output": 20.0, "cache_write_5m": 5.0}
+    hour = {"input": 4.0, "output": 20.0, "cache_write_1h": 6.0}
+    assert _w(five, 1.0) == (1.25, None) and _w(five, None) == (1.25, None)
+    assert _w(hour, 0.0) == (1.5, None)
+
+
+def test_w_with_no_write_price_of_its_own_is_one():
+    plain = {"input": 1.25, "output": 10.0, "cache_read": 0.125, "provider": "openai"}
+    assert _w(plain, None) == (1.0, None)
+    # A provider default fills both write prices for the lookup, but they are not the
+    # row's own, so w stays 1.0.
+    filled = _w(plain, 1.0, defaults={"openai": {"cache_write_5m": 1.0,
+                                                 "cache_write_1h": 2.0}})
+    assert filled == (1.0, None)
+    # One write price of its own and one filled: the own one alone.
+    partly = _w({**plain, "cache_write_5m": 1.5625}, 1.0,
+                defaults={"openai": {"cache_write_1h": 2.0}})
+    assert partly == (1.25, None)
+
+
+def test_a_model_with_no_input_price_or_one_of_0_or_no_row_has_no_w():
+    w, why = _w({"output": 20.0, "cache_write_5m": 5.0}, None)
+    assert w is None and "no input price" in why
+    w, why = _w({"input": 0.0, "output": 0.0, "cache_write_5m": 0.0}, None)
+    assert w is None and "not above 0" in why
+    w, why = thresholds.write_multiplier(table().lookup("nobody-knows"), None)
+    assert w is None and "does not know nobody-knows" in why
 
 
 def test_a_subagents_fallback_row_gives_the_main_mark_and_says_so():
@@ -155,8 +194,9 @@ def test_parameters_that_give_no_restart_point_are_unavailable(change, reason):
     assert not found.available and found.reason.endswith(reason)
 
 
-def test_with_no_w_every_mark_is_unavailable():
-    params = {**PARAMS, "w": None}
+def test_a_row_with_no_w_gives_no_mark():
+    params = copy.deepcopy(PARAMS)
+    del params["models"]["claude-opus-5"]["main"]["w"]
     found = thresholds.all_marks("claude-opus-5", doc=params, table=table())
     assert set(found) == {"1x", "1.5x", "2x"}
     assert not any(each.available for each in found.values())

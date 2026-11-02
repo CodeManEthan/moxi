@@ -4,9 +4,10 @@ The model is Wilson's economic order quantity. Restarting a session costs a cach
 its settled context; carrying on costs a cache read of the whole context on every call,
 and the context grows each call. All costs are in units of the base input price, so no
 dollar figure enters anywhere. For one population's measured parameters `S` (the settled
-context), `P` (the prefix a fresh session reads from cache) and `g` (the growth per
-call), the sample's write multiplier `w`, and the model's read multiplier `r` (its
-cache-read price over its input price, from the model table):
+context), `P` (the prefix a fresh session reads from cache), `g` (the growth per
+call) and `w` (the model's own cache-write price over its input price, measured with the
+row), and the model's read multiplier `r` (its cache-read price over its input price,
+from the model table):
 
     W       = w(S - P) + rP                 what one restart costs
     N*      = sqrt(2W / (rg))               the restart interval, in calls
@@ -55,11 +56,6 @@ SUBAGENT = "subagent"
 POPULATIONS = (MAIN, SUBAGENT)
 #: The `fallback` a subagent row carries when it is the same model's main row.
 FALLBACK_MAIN = MAIN
-
-#: Cache-write multipliers by lifetime: w = 2.0 x share + 1.25 x (1 - share), where share
-#: is the sample's 1-hour share of cache writes.
-WRITE_MULTIPLIER_1H = 2.0
-WRITE_MULTIPLIER_5M = 1.25
 
 #: The measure's file, under usage's state directory.
 PARAMS_FILE = "restart-point.json"
@@ -123,9 +119,37 @@ class Threshold:
 
 # --- the equations ----------------------------------------------------------------------
 
-def write_multiplier(share_1h: float) -> float:
-    """w from the 1-hour share of cache writes."""
-    return WRITE_MULTIPLIER_1H * share_1h + WRITE_MULTIPLIER_5M * (1.0 - share_1h)
+def write_multiplier(facts: Any, share_1h: float | None = None
+                     ) -> tuple[float | None, str | None]:
+    """w, one model's cache-write price over its input price, from its model-table
+    answer `facts`, and None; or None and why there is none.
+
+    Only the row's own write prices count: a price the lookup filled from the provider's
+    default (`provenance.filled`) is not the row's. With both a 5-minute and a 1-hour
+    price, `w` weighs them by `share_1h`, the 1-hour share of the model's cache writes
+    (0 when no request stated it); with one of them, that price over the input price;
+    with neither, 1.0, since the writes bill as input. A model with no input price, or
+    one of 0, has no `w`."""
+    from moxi_sessions.api import UNKNOWN
+
+    model = facts.model
+    if not facts.known:
+        return None, f"the model table does not know {model}"
+    base = facts.input
+    if base is UNKNOWN:
+        return None, f"the model table has no input price for {model}"
+    if not base > 0:
+        return None, f"the model table's input price for {model} is not above 0"
+    filled = set(facts.provenance.filled)
+    own = {name: float(getattr(facts, name)) for name in ("cache_write_5m", "cache_write_1h")
+           if name not in filled and getattr(facts, name) is not UNKNOWN}
+    five, hour = own.get("cache_write_5m"), own.get("cache_write_1h")
+    if five is not None and hour is not None:
+        share = share_1h or 0.0
+        return (hour * share + five * (1.0 - share)) / float(base), None
+    if five is not None or hour is not None:
+        return (five if five is not None else hour) / float(base), None
+    return 1.0, None
 
 
 def restart_cost(S: float, P: float, w: float, r: float) -> float:
@@ -333,7 +357,7 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
     if r is None:
         return Threshold(base, mark, population, None, why, fallback=fallback)
     S, P, g, w = (_number(row.get("S")), _number(row.get("P")), _number(row.get("g")),
-                  _number(doc.get("w")))
+                  _number(row.get("w")))
     if S is None or P is None or g is None or w is None:
         return Threshold(base, mark, population, None,
                          f"the measured {population} row for {base} is incomplete",
@@ -359,7 +383,7 @@ def all_marks(model: Any, population: str = MAIN, *, doc: Any = _UNSET, table: A
 
 
 __all__ = ["MARK_MULTIPLES", "MARKS", "OFF", "MAIN", "SUBAGENT", "POPULATIONS",
-           "FALLBACK_MAIN", "WRITE_MULTIPLIER_1H", "WRITE_MULTIPLIER_5M", "PARAMS_FILE",
+           "FALLBACK_MAIN", "PARAMS_FILE",
            "PARAMS_SCHEMA", "ParamsError", "Threshold", "write_multiplier", "restart_cost",
            "optimum_calls", "mark_exact", "base_model", "population_of", "params_path",
            "load_params", "stamp", "params", "read_multiplier", "threshold", "all_marks"]
