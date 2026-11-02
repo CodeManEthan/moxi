@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import moxi.paths
@@ -25,16 +24,9 @@ from notes_kit import configure, git_env, home, repo
 SOURCES = ("startup", "resume", "clear", "compact")
 
 
-@dataclass(frozen=True)
-class Event:
-    """A stand-in for turns' event once it carries the session's working directory."""
-
-    event: str
-    harness: str = "claude"
-    session_id: str | None = "s-1"
-    env: dict = field(default_factory=dict)
-    source: str | None = None
-    cwd: str | None = None
+def begin(env: dict, **fields) -> SessionEvent:
+    """A `start` event of one session, as turns hands it to the listener."""
+    return SessionEvent("start", "claude", "s-1", env=env, **fields)
 
 
 @pytest.fixture(autouse=True)
@@ -73,49 +65,44 @@ def test_the_table_imports_nothing():
 # --- the start line ----------------------------------------------------------------------
 
 def test_every_start_source_gives_the_same_line(alpha):
-    lines = {listener.start(SessionEvent("start", "claude", "s-1", env={"PWD": str(alpha)},
-                                         source=source)) for source in SOURCES}
+    lines = {listener.start(begin({"PWD": str(alpha)}, source=source)) for source in SOURCES}
     assert lines == {expected(alpha)}
 
 
 def test_the_sessions_override_wins(alpha):
     there = home() / "elsewhere" / "alpha"
-    event = Event("start", env={"PWD": str(alpha), "MOXI_NOTES_DIR": str(there)},
-                  source="startup")
+    event = begin({"PWD": str(alpha), "MOXI_NOTES_DIR": str(there)}, source="startup")
     assert listener.start(event) == f"Notes directory: {there}"
 
 
 def test_the_processs_own_override_is_not_the_sessions(alpha, monkeypatch):
     monkeypatch.setenv("MOXI_NOTES_DIR", str(home() / "elsewhere"))
-    event = Event("start", env={"PWD": str(alpha)}, source="startup")
+    event = begin({"PWD": str(alpha)}, source="startup")
     assert listener.start(event) == expected(alpha)
 
 
 def test_no_notes_directory_gives_no_line():
-    event = Event("start", env={"PWD": str(home())}, source="startup")
+    event = begin({"PWD": str(home())}, source="startup")
     assert listener.start(event) is None
 
 
 def test_the_folder_is_the_events_cwd_then_pwd_then_the_process(alpha, monkeypatch):
     beta = repo(home() / "code" / "beta")
     beta_line = f"Notes directory: {home() / 'notes' / 'code' / 'beta'}"
-    assert listener.start(Event("start", env={"PWD": str(beta)}, cwd=str(alpha))) \
-        == expected(alpha)
+    assert listener.start(begin({"PWD": str(beta)}, cwd=str(alpha))) == expected(alpha)
     for cwd in (None, "relative/alpha", str(home() / "gone")):
-        assert listener.start(Event("start", env={"PWD": str(beta)}, cwd=cwd)) == beta_line
+        assert listener.start(begin({"PWD": str(beta)}, cwd=cwd)) == beta_line
     monkeypatch.chdir(alpha)
     for pwd in (None, "relative", str(home() / "gone")):
         env = {} if pwd is None else {"PWD": pwd}
-        assert listener.start(Event("start", env=env)) == expected(alpha)
-        assert listener.start(SessionEvent("start", "claude", "s-1", env=env)) \
-            == expected(alpha)
+        assert listener.start(begin(env)) == expected(alpha)
 
 
 def test_the_projects_warning_rides_on_the_line(alpha, monkeypatch):
     from moxi_notes import resolve
 
     monkeypatch.setattr(resolve, "_project", lambda path: (None, PROJECTS_UNREADABLE))
-    line = listener.start(Event("start", env={"PWD": str(alpha)}))
+    line = listener.start(begin({"PWD": str(alpha)}))
     assert line == f"{expected(alpha)} ({PROJECTS_UNREADABLE})"
 
 
