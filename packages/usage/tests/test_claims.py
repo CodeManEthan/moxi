@@ -175,3 +175,38 @@ def test_the_claim_step_reaches_copies_outside_any_time_range(conn):
         store.upsert_requests(conn, new, [row(1, ts=1_000_000.0)], touched=touched)
         store.claim(conn, touched)
     assert store.check(conn) == [] and winners(conn) == {1: old}
+
+
+# --- the duplicates ----------------------------------------------------------------------
+
+def plans(conn, run) -> list[str]:
+    """SQLite's plan for every query `run(conn)` makes, one line per step."""
+    seen: list[str] = []
+    conn.set_trace_callback(seen.append)
+    try:
+        run(conn)
+    finally:
+        conn.set_trace_callback(None)
+    return [step[-1] for sql in seen if sql.lstrip().upper().startswith("SELECT")
+            for step in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+
+
+def test_a_file_whose_every_request_another_claims_is_a_duplicate_of_its_first_ones(conn):
+    first = write(conn, "claude", "/first.jsonl", [1, 2, 3], first_ts=1.0, size=30)
+    write(conn, "claude", "/again.jsonl", [1, 2], first_ts=5.0, size=20)
+    write(conn, "claude", "/more.jsonl", [2, 9], first_ts=6.0, size=20)     # 9 is its own
+    write(conn, "codex", "/gone.jsonl", [3], first_ts=7.0, size=5, excluded="imported")
+    [dup] = store.duplicates(conn)
+    assert (dup["path"], dup["requests"], dup["of_path"]) == ("/again.jsonl", 2,
+                                                              "/first.jsonl")
+    assert winners(conn)[1] == first
+    assert store.duplicates(conn, lanes=["codex"]) == []
+
+
+def test_the_duplicates_read_each_files_rows_by_its_key_not_the_won_index(conn):
+    # without stats, SQLite takes the won index for `won = 1`, where nearly every row is
+    # won: each file then walks every claimed row, minutes on a large index
+    write(conn, "claude", "/first.jsonl", [1, 2], first_ts=1.0, size=30)
+    write(conn, "claude", "/again.jsonl", [1, 2], first_ts=5.0, size=20)
+    steps = plans(conn, store.duplicates)
+    assert steps and not any("requests_won_ts" in step for step in steps), steps

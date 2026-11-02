@@ -599,16 +599,20 @@ def duplicates(conn: sqlite3.Connection, *, lanes: Iterable[str] | None = None,
             return []
         where = f" AND f.lane IN ({','.join('?' * len(lanes))})"
         args.extend(lanes)
+    # `+won` keeps SQLite on each file's primary key and on the key index. With no stats,
+    # it takes the won index for `won = 1`, which nearly every row matches, so each file
+    # would walk every claimed row: minutes on a large index, where this way reads each
+    # file's own rows once.
     sql = (
         "SELECT f.lane, f.path, f.part, f.session_id,"
         " (SELECT count(*) FROM requests c WHERE c.file_id = f.id) AS requests,"
         " w.lane AS of_lane, w.path AS of_path, w.part AS of_part"
         " FROM files f"
         " JOIN requests rw ON rw.key = (SELECT r.key FROM requests r WHERE r.file_id = f.id"
-        "                               ORDER BY r.seq, r.key LIMIT 1) AND rw.won = 1"
+        "                               ORDER BY r.seq, r.key LIMIT 1) AND +rw.won = 1"
         " JOIN files w ON w.id = rw.file_id"
         " WHERE f.excluded IS NULL AND w.id != f.id"
-        " AND NOT EXISTS (SELECT 1 FROM requests x WHERE x.file_id = f.id AND x.won = 1)"
+        " AND NOT EXISTS (SELECT 1 FROM requests x WHERE x.file_id = f.id AND +x.won = 1)"
         + where + " ORDER BY f.lane, f.path, f.part")
     if limit is not None:
         sql += " LIMIT ?"

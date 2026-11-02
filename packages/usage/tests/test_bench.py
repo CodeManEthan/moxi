@@ -360,6 +360,25 @@ def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
 
 
 @pytest.mark.timed
+def test_the_status_over_the_corpus_takes_under_1_s(bench):
+    # the index pass, `moxi usage status` and the doctor all print it; a query that reads
+    # every claimed row once per file takes minutes here
+    first = time.perf_counter()
+    got = reports.report("status", fresh=False)
+    first = time.perf_counter() - first
+    assert got.total["files"] == FILES and got.total["duplicate_files"] == 0
+    conn = store.connect(create=False)
+    try:
+        bare = median_ms(lambda: reports.status(conn), 5)
+        dup = median_ms(lambda: store.duplicates(conn), 5)
+    finally:
+        conn.close()
+    print(f"\nstatus over {FILES} files: {first * 1000:.0f} ms through report(); "
+          f"{bare:.0f} ms on an open connection, of which the duplicates {dup:.0f} ms")
+    assert first < 1 and bare < 1000
+
+
+@pytest.mark.timed
 def test_the_claim_step_after_a_pass_that_read_13_files_takes_under_50_ms(
         bench, monkeypatch):
     rnd = random.Random(13)
