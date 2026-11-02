@@ -252,6 +252,174 @@ def test_each_agent_is_measured_against_its_own_context():
     assert mark.on_tool(s.event(agent_id=AGENT)) is None
 
 
+# --- Codex and OpenCode -----------------------------------------------------------------
+#
+# turns' Codex host hands the main session's events the main rollout and a subagent's
+# events the subagent's own rollout as `record_path`, with the child's thread id as
+# `agent_id`; its OpenCode host hands no `record_path`, and a child session's id as
+# `agent_id`. The model rows are the Claude ones above, named by every harness alike.
+
+BOTH = {"MOXI_USAGE_WARN_AT": "1x", "MOXI_USAGE_CROSSING_AT": "1x"}
+THREAD = "0190c000-0000-7000-8000-0000000004d1"
+CHILD = "0190c000-0000-7000-8000-0000000004d2"
+
+
+def crossing_handler(monkeypatch):
+    got = []
+    monkeypatch.setattr(mark, "handlers", lambda: [
+        SimpleNamespace(name="launcher", load=lambda: lambda c: got.append(c) or "recycle")])
+    return got
+
+
+def event(harness, session_id, *, agent_id=None, record_path=None, env=BOTH):
+    return SimpleNamespace(
+        event="after-tool", harness=harness, session_id=session_id, env=env,
+        agent_id=agent_id, tool="Bash", tool_use_id="exec-1", is_error=False,
+        point="after", record_path=record_path, cwd="/work/project")
+
+
+class Codex:
+    """A Codex thread, and a subagent it spawned, whose contexts the test sets."""
+
+    def __init__(self):
+        self.r = sessions.testing.CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
+        self.r.turn(MODEL)
+        self.child = None
+
+    def context(self, tokens):
+        self.r.user("go")
+        self.r.request(sessions.testing.token_usage(input=tokens, cached=tokens // 2))
+        self.r.write()
+
+    def agent_context(self, tokens):
+        if self.child is None:
+            self.child = self.r.spawn(CHILD, "explore")
+            self.child.turn(MODEL)
+        self.child.user("look")
+        self.child.request(sessions.testing.token_usage(input=tokens, cached=0))
+        self.r.write()
+        self.child.write()
+
+    def event(self, **kw):
+        return event("codex", THREAD, record_path=str(self.r.path), **kw)
+
+    def agent_event(self, **kw):
+        return event("codex", THREAD, agent_id=CHILD, record_path=str(self.child.path), **kw)
+
+
+class OpenCode:
+    """An OpenCode session, and a child session a task made, whose contexts the test
+    sets."""
+
+    def __init__(self):
+        root = Path(sessions.root("opencode"))
+        self.db = sessions.testing.OpenCodeDb(root.parent, name=root.name)
+        self.s = self.db.session(model=("provider", MODEL))
+        self.kid = None
+
+    @staticmethod
+    def _step(session, tokens):
+        session.user("go", model=("provider", MODEL))
+        reply = session.assistant(model=("provider", MODEL))
+        reply.step(input=tokens - 1000, cache_read=1000, output=10)
+        reply.complete()
+
+    def context(self, tokens):
+        self._step(self.s, tokens)
+        self.db.write()
+
+    def agent_context(self, tokens):
+        if self.kid is None:
+            self.kid = self.s.child(title="look")
+        self._step(self.kid, tokens)
+        self.db.write()
+
+    def event(self, **kw):
+        return event("opencode", self.s.id, **kw)
+
+    def agent_event(self, **kw):
+        return event("opencode", self.s.id, agent_id=self.kid.id, **kw)
+
+
+@pytest.mark.parametrize("make", [Codex, OpenCode], ids=["codex", "opencode"])
+def test_a_main_session_gets_the_notice_and_the_crossing_once_per_rise(monkeypatch, make):
+    got = crossing_handler(monkeypatch)
+    h = make()
+    h.context(50_000)
+    assert mark.on_tool(h.event()) is None
+    assert mark.floor(h.event()) == ONE_X
+    h.context(110_000)
+    assert mark.on_tool(h.event()) == f"{notice(110_000)}\nrecycle"
+    assert mark.floor(h.event()) == 0
+    h.context(115_000)
+    assert mark.on_tool(h.event()) is None
+    h.context(30_000)                            # compacted: both are armed again
+    assert mark.on_tool(h.event()) is None
+    h.context(105_000)
+    assert mark.on_tool(h.event()) == f"{notice(105_000)}\nrecycle"
+    harness, session_id = h.event().harness, h.event().session_id
+    assert [(c.harness, c.session_id, c.tokens, c.threshold, c.model) for c in got] == [
+        (harness, session_id, 110_000, ONE_X, MODEL),
+        (harness, session_id, 105_000, ONE_X, MODEL)]
+    assert mark.state_file(harness, session_id).is_file()
+
+
+@pytest.mark.parametrize("make", [Codex, OpenCode], ids=["codex", "opencode"])
+def test_a_subagent_is_warned_on_its_own_context_and_its_line_drains(monkeypatch, make):
+    got = crossing_handler(monkeypatch)
+    h = make()
+    h.context(20_000)
+    assert mark.on_tool(h.event()) is None
+    h.agent_context(101_000)
+    own = notice(101_000)
+    assert mark.on_tool(h.agent_event()) == own
+    assert got == []                             # an agent has no crossing
+    assert mark.floor(h.agent_event()) == 0
+    assert mark.floor(h.event()) == 0            # a line waits
+    label = mark.agent_label(h.agent_event().agent_id)
+    assert mark.on_tool(h.event()) == f"subagent {label} {own}"
+    assert mark.on_tool(h.event()) is None
+    h.agent_context(102_000)
+    assert mark.on_tool(h.agent_event()) is None  # fired once per rise
+
+
+def test_a_codex_subagents_source_is_its_own_rollout():
+    h = Codex()
+    h.context(20_000)
+    h.agent_context(150_000)
+    mark.on_tool(h.agent_event())
+    reader = mark._sessions[("codex", THREAD)].readers[CHILD]
+    assert reader.source == sessions.Source("codex", str(h.child.path), CHILD, CHILD)
+
+
+def test_a_codex_event_with_no_record_path_finds_its_rollouts_by_id():
+    h = Codex()
+    h.context(20_000)
+    h.agent_context(120_000)
+    assert mark.on_tool(event("codex", THREAD, agent_id=CHILD)) == notice(120_000)
+    h.context(130_000)
+    assert mark.on_tool(event("codex", THREAD, env={"MOXI_USAGE_WARN_AT": "1x"})) == (
+        f"{notice(130_000)}\nsubagent {mark.agent_label(CHILD)} {notice(120_000)}")
+
+
+def test_an_open_opencode_step_neither_fires_nor_re_arms():
+    """A step still running has no tokens yet; sessions passes over it, so a tool call
+    inside it reads the last finished step."""
+    one = {"MOXI_USAGE_WARN_AT": "1x"}
+    h = OpenCode()
+    h.context(120_000)
+    assert mark.on_tool(h.event(env=one)) == notice(120_000)
+    h.s.user("go", model=("provider", MODEL))
+    reply = h.s.assistant(model=("provider", MODEL))
+    reply.step_start()
+    reply.tool("bash", {"command": "ls"})
+    h.db.write()
+    assert mark.on_tool(h.event(env=one)) is None
+    reply.step_finish(input=125_000)
+    h.db.write()
+    assert mark.on_tool(h.event(env=one)) is None
+
+
 # --- the floor --------------------------------------------------------------------------
 
 def test_the_floor_before_any_reading_is_the_smallest_over_every_row():

@@ -192,7 +192,10 @@ mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`), else
 their own context; an agent's line also reaches its parent at the parent's next tool
 call. A mark fires once per rise past it: after a compaction brings the context below it,
 it can fire again. A floor tells turns the context below which the main session's calls
-have nothing for usage to do, so they skip the listener.
+have nothing for usage to do, so they skip the listener. The mark reads Claude Code,
+Codex and OpenCode sessions alike, and a Codex or OpenCode subagent's own record; on
+OpenCode, turns hears tool calls but has no way to hand the model a line, so there the
+notice reaches only turns' log.
 
 A launcher that recycles at a limit stamps `MOXI_USAGE_CROSSING_AT`; each rise of the
 main session past that mark calls every handler registered on the entry-point group
@@ -227,6 +230,12 @@ entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`. Both root li
 empty, and no command beyond git is allowed until you add one. Markers live in
 `STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the agents past the
 ceiling. The guard covers Claude and Codex subagents; turns runs no guard on OpenCode.
+
+On Codex the same rules hold for its shell tool, and its file tool, `apply_patch`, is
+allowed when the patch only adds or updates `.md` files under `ceiling.handoff_roots`; a
+patch that deletes or moves a file, or that doesn't read as a patch, is refused. Codex
+has no tool that reads a file on its own, so a refused Codex agent can add a new hand-off
+file, but can update one only from what it still holds in its context.
 
 ## Commands
 
