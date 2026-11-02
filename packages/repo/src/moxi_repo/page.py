@@ -9,6 +9,12 @@ show. The route is a read and writes nothing: the listing of specs runs without 
 record sweep. It is not the gateway's. Every command the page offers is a line to copy
 and run in a terminal; the page runs none.
 
+Every value that can hold a path carries a mark: `root` and `hook` are `path`, and each
+sentence or command line that can name a path or a remote is `redact`. Only the gateway
+acts on a mark, so today the page gets each value as it is; if the route is ever opened to
+the gateway, those values are cut or swapped for a handle there. The chain line names no
+path, so it carries none.
+
 The browser UI shell starts the page server on the first request for repo's page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in repo's announcement, API,
@@ -29,8 +35,11 @@ lb = _loopback.api
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
 _PATH = lb.Out("string", mark="path")
+#: A sentence or command line that can name a path or a remote.
+_SAYS = lb.Out("string", mark="redact")
+_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _WHEN = lb.Out("float", nullable=True)
-_COMMAND = lb.Out("table", items={"label": _TEXT, "command": _TEXT})
+_COMMAND = lb.Out("table", items={"label": _TEXT, "command": _SAYS})
 
 #: One event that has pieces: how git reaches them (`config entry`, `shim`, `launcher`,
 #: or null when every piece of it is disabled), the existing git hook, and in launcher mode
@@ -39,7 +48,7 @@ EVENT = lb.Out("table", items={
     "event": _TEXT,
     "via": _MAYBE,
     "pieces": lb.Out("list", items=_TEXT),
-    "existing": _MAYBE,
+    "existing": _MAYBE_SAYS,
     "chain_line": _MAYBE,
     "hook": lb.Out("string", mark="path", nullable=True),
     "line": _MAYBE,
@@ -53,7 +62,7 @@ PIECE = lb.Out("table", items={
     "fail": _TEXT,
     "order": lb.Out("int"),
     "settings": lb.Out("list", items=lb.Out("table", items={
-        "key": _TEXT, "values": lb.Out("list", items=_TEXT)})),
+        "key": _TEXT, "values": lb.Out("list", items=_SAYS)})),
     "declared": lb.Out("bool"),
     "recorded": lb.Out("bool"),
     "toggle": _COMMAND,
@@ -61,25 +70,25 @@ PIECE = lb.Out("table", items={
 })
 
 #: One problem the listing names: `state` is `fail`, `warn` or `ok`, `fix` the command.
-PROBLEM = lb.Out("table", items={"state": _TEXT, "detail": _TEXT, "fix": _MAYBE})
+PROBLEM = lb.Out("table", items={"state": _TEXT, "detail": _SAYS, "fix": _MAYBE_SAYS})
 
 #: One committer spec: its last pass (`status` null when none has run), its author's last
 #: commit, each branch's last pushed commit and each branch whose last push failed.
 SPEC = lb.Out("table", items={
     "name": _TEXT,
     "saved": lb.Out("bool"),
-    "problem": _MAYBE,
+    "problem": _MAYBE_SAYS,
     "status": _MAYBE,
-    "line": _MAYBE,
+    "line": _MAYBE_SAYS,
     "time": _WHEN,
     "refused_since": _WHEN,
     "refused_passes": lb.Out("int", nullable=True),
     "last_commit": _MAYBE,
     "last_commit_time": _WHEN,
-    "remote": _MAYBE,
+    "remote": _MAYBE_SAYS,
     "pushed": lb.Out("list", items=lb.Out("table", items={"branch": _TEXT, "sha": _TEXT})),
     "push_failed": lb.Out("list", items=lb.Out("table", items={
-        "branch": _TEXT, "error": _MAYBE, "failed_at": _WHEN})),
+        "branch": _TEXT, "error": _MAYBE_SAYS, "failed_at": _WHEN})),
     "run": _COMMAND,
     "forget": _COMMAND,
 })
@@ -90,8 +99,8 @@ RECORD = lb.Out("table", items={
     "piece": _MAYBE,
     "spec": _MAYBE,
     "branch": _MAYBE,
-    "text": _TEXT,
-    "fix": _MAYBE,
+    "text": _SAYS,
+    "fix": _MAYBE_SAYS,
     "at": _MAYBE,
 })
 
@@ -106,7 +115,7 @@ REPO = lb.Out("table", items={
     "pieces": lb.Out("list", items=PIECE),
     "problems": lb.Out("list", items=PROBLEM),
     "specs": lb.Out("list", items=SPEC),
-    "specs_problem": _MAYBE,
+    "specs_problem": _MAYBE_SAYS,
     "records": lb.Out("list", items=RECORD),
     "commands": lb.Out("list", items=_COMMAND),
 })
@@ -115,7 +124,7 @@ REPO = lb.Out("table", items={
 REPOS = {
     "now": lb.Out("float"),
     "state": _TEXT,
-    "detail": _MAYBE,
+    "detail": _MAYBE_SAYS,
     "repos": lb.Out("list", items=REPO),
 }
 

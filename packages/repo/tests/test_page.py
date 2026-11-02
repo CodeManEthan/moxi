@@ -99,6 +99,35 @@ def test_the_page_declares_one_read_not_the_gateways_and_its_built_assets():
     assert exported["assets"] == ["build-stamp.txt", "page.js"]
 
 
+def _marks(shape: dict, at: str = "") -> dict[str, str]:
+    """Each marked value of an exported shape, by its dotted place (`[]` a list's item)."""
+    found = {at: shape["mark"]} if shape.get("mark") else {}
+    items = shape.get("items")
+    if shape["type"] == "list":
+        found.update(_marks(items, at + "[]"))
+    elif shape["type"] == "table":
+        for key, sub in items.items():
+            found.update(_marks(sub, f"{at}.{key}"))
+    return found
+
+
+def test_every_value_that_can_hold_a_path_carries_a_mark():
+    [route] = loopback().export(page.PAGE)["routes"]
+    marks: dict[str, str] = {}
+    for key, shape in route["returns"].items():
+        marks.update(_marks(shape, key))
+    said = ["detail", "repos[].specs_problem", "repos[].commands[].command",
+            "repos[].events[].existing", "repos[].pieces[].settings[].values[]",
+            "repos[].pieces[].toggle.command", "repos[].pieces[].remove.command",
+            "repos[].problems[].detail", "repos[].problems[].fix",
+            "repos[].specs[].problem", "repos[].specs[].line", "repos[].specs[].remote",
+            "repos[].specs[].push_failed[].error", "repos[].specs[].run.command",
+            "repos[].specs[].forget.command", "repos[].records[].text",
+            "repos[].records[].fix"]
+    assert marks == {"repos[].root": "path", "repos[].events[].hook": "path",
+                     **dict.fromkeys(said, "redact")}
+
+
 def test_the_announcement_offers_the_page_and_nothing_imports_it():
     from moxi_repo import module
 
