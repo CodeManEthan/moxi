@@ -11,7 +11,9 @@
    `keep`; each `remove` whose record names a section in scope (a `remove` with no record
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
    or a link of loadout's own under the folder the last install read; a module skill
-   nobody has placed, as its module, then taken over seeded;
+   nobody has placed, as its module, then taken over seeded, and so is one whose
+   occupant `--replace` names (moved aside as the module), so loadout never holds a
+   module's skill the module didn't hand over;
    before anything is placed, the would-commit check (`moxi_loadout.ignores`): loadout's
    ignore file written first where it covers a target, and a target git would still
    commit left out with its line; after, loadout's ignore files brought into line with
@@ -233,17 +235,23 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     mine = {str(p.path) for p in place.status(planner.OWNER)}
     rows: list[Row] = []
     plain, forced, seeded = [], [], []
+    replaced: set[int] = set()   # the seeded wants `--replace` places over an occupant
     for want in in_scope:
         step = want.step
         state, _, _ = planner.state_of(want)
         if want.state is not None or step is None:
             rows.append(planner.row(want))
             continue
+        in_the_way = step.action == "refuse" and step.cause in ("occupant", "tracked")
         if want.module and step.action == "add":
             seeded.append(want)
+        elif want.module and in_the_way and _claimed(claims, want):
+            # A module skill is placed as its module and handed over, never as loadout.
+            seeded.append(want)
+            replaced.add(id(want))
         elif step.action in ("add", "update", "keep") and state != "modified":
             plain.append(step)
-        elif step.action == "refuse" and step.cause in ("occupant", "tracked") and (
+        elif not want.module and in_the_way and (
                 _claimed(claims, want) or _moved(step, mine, old_source)):
             forced.append(step)
         else:
@@ -257,7 +265,8 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
 
     seeded_done: dict[str, object] = {}
     for want in seeded:
-        result = adoption.place_seeded(want.module, want.item, say=say)
+        result = adoption.place_seeded(want.module, want.item,
+                                       replace=id(want) in replaced, say=say)
         if result.placed is not None:
             seeded_done[str(result.placed.path)] = result.placed
             say(f"placed skill {want.name} for {want.harness} ({result.placed.path})")
@@ -379,6 +388,12 @@ def _claims(replace: list[str]) -> dict[str, bool]:
 
 
 def _is_path(text: str) -> bool:
+    """Whether a `--replace` value is a target path: an id (`skill:demo/moxi-demo@claude`
+    holds a `/` too) never is."""
+    from moxi_loadout.manifest import _ID
+
+    if _ID.fullmatch(text):
+        return False
     return "/" in text or "\\" in text or text[:1] in ("~", ".")
 
 

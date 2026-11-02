@@ -16,6 +16,8 @@ were placed for. It writes the manifest and places nothing.
 
 `place_seeded(module, item)` places a skill nobody has placed (a second machine, the
 cloud): planned and applied as the module, its `add` step alone, then handed over seeded.
+With `replace` (an occupant `--replace` names), the module's refusal for that path is
+applied the same way, moving the path aside, and the skill is handed over seeded too.
 If the hand-over fails, the one placement is undone in the same run. The span from the
 placement to the hand-over defers `SIGINT` and `SIGTERM` until it ends.
 
@@ -87,22 +89,26 @@ class Seeded:
     line: str = ""
 
 
-def place_seeded(module: str, item, *, say: Callable[[str], object] = print) -> Seeded:
+def place_seeded(module: str, item, *, replace: bool = False,
+                 say: Callable[[str], object] = print) -> Seeded:
     """Place `item` (a skill of `module`) as `module`, then hand it to loadout seeded.
 
     The module's plan for the item is applied for its own step only, never the `remove`
-    steps the plan yields for the module's other placements. A refused step is returned
-    and nothing is adopted. When the placement is made but the hand-over fails, the
+    steps the plan yields for the module's other placements. With `replace`, a step
+    refused for a path in the way (cause `occupant` or `tracked`) is applied with
+    `replace=True`, which moves the path aside. Any other refused step is returned and
+    nothing is adopted. When the placement is made but the hand-over fails, the
     placement is undone: the `remove` step for that target out of `plan(module, [])`,
     applied alone. If that fails too, the line names the target."""
     from moxi import place
 
     step = place.plan(module, [item])[0]
-    if step.action != "add":
+    forced = replace and step.action == "refuse" and step.cause in ("occupant", "tracked")
+    if step.action != "add" and not forced:
         return Seeded(step=step)
     target = str(step.target)
     with deferred_signals():
-        done = place.apply([step], say=say)
+        done = place.apply([step], replace=forced, say=say)
         if not any(str(p.path) == target for p in done):
             return Seeded(line=f"could not place {item.name} at {target}")
         try:

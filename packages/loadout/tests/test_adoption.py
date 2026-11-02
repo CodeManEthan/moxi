@@ -97,6 +97,34 @@ def test_the_modules_add_refused_adopts_nothing(demo, folder):
     assert kit.owner_of(kit.claude() / "moxi-demo") is None
 
 
+@pytest.mark.parametrize("form", ["id", "path"])
+def test_replace_on_a_module_skill_places_it_as_the_module_seeded(demo, folder, form):
+    from moxi_loadout import teardown
+
+    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+                         '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
+    target = kit.claude() / "moxi-demo"
+    kit.claude().mkdir(parents=True)
+    target.mkdir()
+    (target / "mine.txt").write_text("in the way\n")
+    assert install.install().code == 3
+    named = "skill:demo/moxi-demo@claude" if form == "id" else str(target)
+    out = install.install(replace=[named])
+    assert out.code == 0, out.text()
+    assert os.readlink(target) == str(demo / "moxi-demo")
+    assert kit.owner_of(target) == "loadout"
+    assert kit.handed("demo")[str(target)]["seeded"] is True
+    assert ledger.read()["placed"][str(target)]["seeded"] is True
+    assert module_step(demo).action == "skip"
+    assert install.status().code == 0
+    # At loadout's uninstall the skill is removed, never handed to the module.
+    lines = []
+    assert teardown.teardown(say=lines.append) == 0, lines
+    assert not any("back to demo" in line for line in lines)
+    assert not os.path.lexists(target)
+    assert kit.owner_of(target) is None
+
+
 def test_a_failed_hand_over_undoes_the_placement(demo, folder, monkeypatch):
     from moxi import place
 
