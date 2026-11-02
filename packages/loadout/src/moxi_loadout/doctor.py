@@ -38,6 +38,14 @@ GIT_SECONDS = 2.0
 #: Seconds all of them together may take there.
 GIT_BUDGET = 4.0
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+#: What makes a hook's command more than one program with its arguments: a check of its
+#: first word could then be wrong, so the doctor leaves such a command unchecked.
+_SHELL_OPERATORS = re.compile(r"&&|\|\||[;|&<>`\n]|\$\(")
+#: Shell builtins a command may start with, which no PATH lookup finds.
+_BUILTINS = frozenset({":", ".", "alias", "break", "builtin", "cd", "command", "continue",
+                       "eval", "exec", "exit", "export", "readonly", "return", "set",
+                       "shift", "source", "trap", "type", "ulimit", "umask", "unset",
+                       "wait", "true", "false", "echo", "printf", "test", "["})
 _NOT_OK = ("missing", "stale", "modified", "blocked", "would-commit", "bad-source")
 
 
@@ -188,7 +196,11 @@ def _hooks(found, source) -> Row:
 
 
 def _unresolved(command: str) -> str | None:
-    """Why `command`'s program, or a script it names by path, can't be found, or None."""
+    """Why `command`'s program, or a script it names by path, can't be found, or None.
+    Only what can be told for certain warns: a command with shell operators, a builtin,
+    and a word holding a variable are left unchecked, since the shell resolves them."""
+    if _SHELL_OPERATORS.search(command):
+        return None
     try:
         words = shlex.split(command, posix=sys.platform != "win32")
     except ValueError as exc:
@@ -198,12 +210,16 @@ def _unresolved(command: str) -> str | None:
     if not words:
         return "its command is empty"
     program = words[0]
+    if "$" in program or program in _BUILTINS:
+        return None
     if os.sep in program or "/" in program:
-        if not os.path.exists(program):
+        if not os.path.exists(os.path.expanduser(program)):
             return f"{program} is not there"
     elif shutil.which(program) is None:
         return f"{program} is not on PATH"
     for word in words[1:]:
+        if "$" in word:
+            continue
         if (os.path.isabs(word) or word.startswith("~")) and not os.path.exists(
                 os.path.expanduser(word)):
             return f"{word} is not there"

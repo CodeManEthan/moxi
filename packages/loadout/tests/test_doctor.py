@@ -91,6 +91,25 @@ def test_a_hook_program_that_does_not_resolve_warns(lo):
     assert by_name(doctor.rows())["hooks"].state == "ok"
 
 
+@pytest.mark.parametrize("command", [
+    "~/bin/guard.sh",                      # the shell expands the home
+    "$HOME/bin/guard.sh",                  # and its variables
+    "cd /nowhere-made-up && guard.sh",     # a builtin, then an operator
+    "exit 0",
+    "guard.sh | tee /nowhere-made-up/log",
+])
+def test_a_hook_command_the_shell_runs_does_not_warn(lo, command):
+    script = os.path.join(os.environ["HOME"], "bin", "guard.sh")
+    os.makedirs(os.path.dirname(script))
+    with open(script, "w") as f:
+        f.write("#!/bin/sh\n")
+    os.chmod(script, 0o755)
+    kit.manifest(lo, '[user]\nhooks = ["guard"]\n[hook.guard]\nevent = "PreToolUse"\n'
+                     f'command = "{command}"\n')
+    row = by_name(doctor.rows())["hooks"]
+    assert row.state == "ok", row.detail
+
+
 def test_a_key_section_without_projects_warns(lo, site):
     kit.manifest(lo, '[project.app]\nskills = ["review"]\n')
     row = by_name(doctor.rows())["projects"]
