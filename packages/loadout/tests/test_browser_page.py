@@ -1,0 +1,383 @@
+"""loadout's page in a browser, through a real shell that starts loadout's real page server,
+whose acts run as real page jobs: the contract check; a toggle off and on again; add and
+remove; a page install refused while no terminal run has recorded the harness homes;
+Replace and Turn off through the confirm sheet, where Cancel sends nothing and each
+confirmation sends its own key; every control off while a job runs; an interrupted job;
+a refused act; the project picker; and the 360 px width check.
+
+The loadout folder, its manifest and every `moxi` command here use the shell's own
+environment, so loadout's config, ledger, jobs and every harness file are under the
+shell's home, and after each act the test checks that every harness file loadout names
+lies there. The shell has a fake `claude` and `codex` first on its `PATH`, which fail if
+run (no item here needs them), and a global git config of the test's own with no system
+config.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from playwright.sync_api import expect
+
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+              pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                 reason="loadout's page is checked in a browser on Linux; the "
+                                        "Windows and macOS runs are owed")]
+
+JOB = "**/m/loadout/api/job?*"
+#: The event loadout's page sends on the document when an act has ended.
+CHANGED = "moxi-loadout-changed"
+FAKE_CLI = "#!/bin/sh\necho \"fake $(basename \"$0\"): no test here runs it\" >&2\nexit 1\n"
+KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
+BASE = '[user]\nskills = ["tidy-notes"]\n'
+OWN_TEXT = "My own instructions, which loadout leaves alone.\n"
+
+
+@pytest.fixture(scope="module")
+def ui_shell_options(tmp_path_factory) -> dict:
+    """A fake `claude` and `codex` first on the shell's `PATH`, which its page servers and
+    their jobs inherit, and git with the test's own global config and no system config."""
+    bin_dir = tmp_path_factory.mktemp("fake-clis")
+    for name in ("claude", "codex"):
+        path = bin_dir / name
+        path.write_text(FAKE_CLI, encoding="utf-8")
+        path.chmod(0o755)
+    gitconfig = tmp_path_factory.mktemp("git") / "gitconfig"
+    gitconfig.write_text("[user]\n\tname = sample-bot\n\temail = bot@example.invalid\n",
+                         encoding="utf-8")
+    return {"env": {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                    "GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}}
+
+
+def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    """`moxi ARGS` as the user would run it in a terminal with the shell's environment."""
+    done = subprocess.run([sys.executable, "-m", "moxi", *args], env=shell.env,
+                          cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=120)
+    if check and done.returncode != 0:
+        raise AssertionError(f"moxi {' '.join(args)} failed ({done.returncode}):\n"
+                             f"{done.stdout}{done.stderr}")
+    return done
+
+
+def skill(folder: Path, name: str) -> None:
+    (folder / "skills" / name).mkdir(parents=True, exist_ok=True)
+    (folder / "skills" / name / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: A skill.\n---\nDo the thing.\n", encoding="utf-8")
+
+
+def make_folder(shell) -> Path:
+    """The configured loadout folder under the shell's home: three skills and a global
+    file, with only `tidy-notes` in the manifest. Nothing is installed."""
+    folder = Path(shell.env["HOME"]) / "my-loadout"
+    for name in ("tidy-notes", "review-diff", "fresh-skill"):
+        skill(folder, name)
+    (folder / "global.md").write_text("Be brief.\n", encoding="utf-8")
+    (folder / "loadout.toml").write_text(BASE, encoding="utf-8")
+    moxi(shell, "config", "set", "loadout", "source", str(folder))
+    return folder
+
+
+@pytest.fixture(scope="module")
+def folder(ui_shell) -> Path:
+    return make_folder(ui_shell)
+
+
+@pytest.fixture
+def installed(folder, ui_shell) -> Path:
+    """The folder with only `tidy-notes` listed and installed from a terminal, which also
+    records the harness homes the page's jobs compare."""
+    (folder / "loadout.toml").write_text(BASE, encoding="utf-8")
+    moxi(ui_shell, "loadout", "install")
+    return folder
+
+
+def status(shell) -> dict:
+    return json.loads(moxi(shell, "loadout", "status", "--json", check=False).stdout)
+
+
+def written_under_home(shell) -> None:
+    """Every harness file loadout names, its placements and the global files, lies under
+    the shell's home."""
+    home = Path(shell.env["HOME"]).resolve()
+    paths = [Path(row["target"]) for row in status(shell)["rows"] if row["target"]]
+    shown = json.loads(moxi(shell, "loadout", "global", "show", "--json").stdout)
+    paths += [Path(f["file"]) for f in shown["files"]]
+    for path in paths:
+        assert path.is_relative_to(home) or path.resolve().is_relative_to(home), path
+
+
+def open_panel(page):
+    page.goto("/m/loadout/")
+    panel = page.locator("#moxi-panel > moxi-loadout-page")
+    expect(panel.locator('section[data-part="items"]')).to_have_attribute("data-state", "up")
+    return panel
+
+
+def item(panel, name: str, section: str = "user"):
+    return panel.locator(f'[data-section="{section}"] li[data-item="skill:{name}"]')
+
+
+def cell(panel, name: str, harness: str, section: str = "user"):
+    return item(panel, name, section).locator(f'.cell[data-harness="{harness}"]')
+
+
+def job_done(panel, exit_code: int = 0):
+    job = panel.locator('section[data-part="job"]')
+    expect(job).to_have_attribute("data-state", "done", timeout=30_000)
+    expect(job).to_have_attribute("data-exit", str(exit_code))
+    return job
+
+
+def count_changes(page) -> None:
+    page.evaluate(f"""() => {{ window.__changed = 0;
+      document.addEventListener('{CHANGED}', () => {{ window.__changed += 1; }}); }}""")
+
+
+def posts_to(page, path: str) -> list:
+    seen: list = []
+    page.on("request", lambda request: seen.append(request)
+            if request.method == "POST" and request.url.endswith(f"/m/loadout/{path}") else None)
+    return seen
+
+
+def test_the_page_keeps_the_contract(installed, ui_page, ui_component_check):
+    check = ui_component_check(ui_page, "loadout", "page", keep=True)
+    assert check.element == "moxi-loadout-page"
+    for route in ("status", "list", "global", "projects"):
+        assert any(url.endswith(f"/m/loadout/api/{route}") for url in check.requests), check.requests
+    expect(check.locator.locator('li[data-item="skill:tidy-notes"]')).to_have_count(1)
+
+
+def test_a_toggle_turns_a_harness_off_and_on_again(installed, ui_shell, ui_page):
+    panel = open_panel(ui_page)
+    codex = cell(panel, "tidy-notes", "codex")
+    expect(codex).to_have_attribute("data-state", "ok")
+    target = next(Path(row["target"]) for row in status(ui_shell)["rows"]
+                  if row["name"] == "tidy-notes" and row["harness"] == "codex")
+    assert target.exists()
+    count_changes(ui_page)
+
+    codex.get_by_role("switch").click()
+    job = job_done(panel)
+    expect(job.locator('[data-line="command"]')).to_have_text(
+        "moxi loadout disable skill:tidy-notes@codex --user")
+    expect(codex).to_have_attribute("data-state", "off")
+    expect(codex.get_by_role("switch")).not_to_be_checked()
+    assert 'disabled = ["skill:tidy-notes@codex"]' in (installed / "loadout.toml").read_text()
+    assert not target.exists()
+    # The page told the drift block, which read again.
+    assert ui_page.evaluate("window.__changed") >= 1
+    expect(panel.locator("moxi-loadout-drift .drift")).to_have_attribute("data-count", "0")
+    written_under_home(ui_shell)
+
+    codex.get_by_role("switch").click()
+    job_done(panel)
+    expect(job.locator('[data-line="command"]')).to_have_text(
+        "moxi loadout enable skill:tidy-notes@codex --user")
+    expect(codex).to_have_attribute("data-state", "ok")
+    assert target.exists()
+    written_under_home(ui_shell)
+
+
+def test_add_places_an_item_and_remove_takes_it_away(installed, ui_shell, ui_page):
+    panel = open_panel(ui_page)
+    add = panel.locator('[data-part="add"]')
+    add.get_by_label("Kind").select_option("skill")
+    add.get_by_label("Name").fill("fresh-skill")
+    add.get_by_label("Section").select_option("user")
+    add.get_by_role("button", name="Add").click()
+    job = job_done(panel)
+    expect(job.locator('[data-line="command"]')).to_have_text("moxi loadout add skill fresh-skill")
+    expect(job.locator('[data-part="job-lines"]')).to_contain_text("placed skill fresh-skill")
+    expect(cell(panel, "fresh-skill", "claude")).to_have_attribute("data-state", "ok")
+    assert "fresh-skill" in (installed / "loadout.toml").read_text()
+    written_under_home(ui_shell)
+
+    item(panel, "fresh-skill").get_by_role("button", name="Remove").click()
+    expect(job.locator('[data-line="command"]')).to_have_text(
+        "moxi loadout remove skill fresh-skill")
+    job_done(panel)
+    expect(item(panel, "fresh-skill")).to_have_count(0)
+    assert "fresh-skill" not in (installed / "loadout.toml").read_text()
+    assert all(row["name"] != "fresh-skill" for row in status(ui_shell)["rows"])
+
+
+def test_a_page_install_is_refused_until_a_terminal_run_records_the_homes(
+        ui_shells, ui_shell_options, ui_contexts):
+    shell = ui_shells(**ui_shell_options)
+    make_folder(shell)
+    page = ui_contexts(shell).pages[0]
+    panel = open_panel(page)
+    panel.get_by_role("button", name="Install").click()
+    job = job_done(panel, 3)
+    expect(job.locator('[data-line="job"]')).to_have_text(re.compile(r"^Refused"))
+    expect(job.locator('[data-part="job-lines"]')).to_contain_text(
+        "run moxi loadout install once in a terminal")
+    # Nothing was written: no placement, and the manifest as it was.
+    assert {row["state"] for row in status(shell)["rows"]} == {"missing"}
+    assert not (Path(shell.env["HOME"]) / ".claude" / "skills").exists()
+    assert (Path(shell.env["HOME"]) / "my-loadout" / "loadout.toml").read_text() == BASE
+
+
+def test_replace_goes_through_the_sheet_and_cancel_sends_nothing(installed, ui_shell, ui_page):
+    home = Path(ui_shell.env["HOME"])
+    occupant = home / ".claude" / "skills" / "review-diff"
+    occupant.mkdir(parents=True)
+    (occupant / "SKILL.md").write_text("the user's own review-diff\n", encoding="utf-8")
+    (installed / "loadout.toml").write_text('[user]\nskills = ["tidy-notes", "review-diff"]\n',
+                                            encoding="utf-8")
+    assert moxi(ui_shell, "loadout", "install", check=False).returncode == 3
+    panel = open_panel(ui_page)
+    claude = cell(panel, "review-diff", "claude")
+    expect(claude).to_have_attribute("data-state", "blocked")
+    expect(panel.locator("moxi-loadout-drift .drift")).to_have_attribute("data-count", "1")
+    posts = posts_to(ui_page, "api/replace")
+
+    claude.get_by_role("button", name="Replace…").click()
+    sheet = ui_page.locator("moxi-ui-confirm").get_by_role("dialog")
+    expect(sheet).to_contain_text("moxi loadout install --replace skill:review-diff@claude")
+    expect(sheet).to_contain_text(str(occupant))
+    sheet.get_by_role("button", name="Cancel").click()
+    expect(ui_page.locator("moxi-ui-confirm")).to_have_count(0)
+    assert posts == []
+    expect(claude).to_have_attribute("data-state", "blocked")
+
+    claude.get_by_role("button", name="Replace…").click()
+    ui_page.locator("moxi-ui-confirm").get_by_role("button", name="Confirm").click()
+    job = job_done(panel)
+    expect(job.locator('[data-line="command"]')).to_have_text(
+        "moxi loadout install --replace=skill:review-diff@claude --user")
+    expect(claude).to_have_attribute("data-state", "ok")
+    expect(panel.locator("moxi-loadout-drift .drift")).to_have_attribute("data-count", "0")
+    assert len(posts) == 1 and KEY.match(posts[0].headers["idempotency-key"])
+    # The user's own copy was kept, under the shell's home.
+    kept = [p for p in home.rglob("SKILL.md") if "the user's own" in p.read_text()]
+    assert kept and all(p.resolve().is_relative_to(home.resolve()) for p in kept)
+    written_under_home(ui_shell)
+
+
+def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
+        ui_shells, ui_shell_options, ui_contexts):
+    shell = ui_shells(**ui_shell_options)
+    folder = make_folder(shell)
+    claude_md = Path(shell.env["HOME"]) / ".claude" / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True, exist_ok=True)
+    claude_md.write_text(OWN_TEXT, encoding="utf-8")
+    moxi(shell, "loadout", "install")
+    page = ui_contexts(shell).pages[0]
+    panel = open_panel(page)
+    glob = panel.locator('section[data-part="global"]')
+    expect(glob).to_have_attribute("data-chosen", "false")
+    posts = posts_to(page, "api/global-off")
+
+    for _ in range(2):
+        glob.get_by_role("button", name="Managed").click()
+        job_done(panel)
+        expect(glob).to_have_attribute("data-mode", "managed")
+        expect(glob.locator(f'li[data-file="{claude_md}"]')).to_have_count(1)
+        assert f"@{folder / 'global.md'}" in claude_md.read_text()
+        written_under_home(shell)
+
+        glob.get_by_role("button", name="Turn off…").click()
+        sheet = page.locator("moxi-ui-confirm").get_by_role("dialog")
+        expect(sheet).to_contain_text(f"{claude_md}: loadout's part comes out.")
+        sheet.get_by_role("button", name="Cancel").click()
+        expect(page.locator("moxi-ui-confirm")).to_have_count(0)
+        expect(glob).to_have_attribute("data-mode", "managed")
+        glob.get_by_role("button", name="Turn off…").click()
+        page.locator("moxi-ui-confirm").get_by_role("button", name="Confirm").click()
+        job = job_done(panel)
+        expect(job.locator('[data-line="command"]')).to_have_text("moxi loadout global off")
+        expect(glob).to_have_attribute("data-mode", "off")
+        expect(glob).to_have_attribute("data-chosen", "true")
+        assert claude_md.read_text() == OWN_TEXT
+    keys = [request.headers["idempotency-key"] for request in posts]
+    assert len(keys) == 2 and keys[0] != keys[1] and all(KEY.match(k) for k in keys)
+    expect(glob.get_by_role("button", name="Turn off…")).to_have_count(0)
+
+
+def test_every_control_is_off_while_a_job_runs(installed, ui_page):
+    panel = open_panel(ui_page)
+    install = panel.get_by_role("button", name="Install")
+    held = {"job": "held", "argv": ["install"], "state": "running", "exit": None,
+            "outcome": None, "lines": []}
+    ui_page.route(JOB, lambda route: route.fulfill(json=held))
+    install.click()
+    job = panel.locator('section[data-part="job"]')
+    expect(job.locator('[data-line="job"]')).to_have_text("Running…")
+    expect(install).to_be_disabled()
+    expect(cell(panel, "tidy-notes", "claude").get_by_role("switch")).to_be_disabled()
+    expect(item(panel, "tidy-notes").get_by_role("button", name="Remove")).to_be_disabled()
+    expect(panel.get_by_text("A change is running.")).to_be_visible()
+    ui_page.unroute(JOB)
+    job_done(panel)
+    expect(install).to_be_enabled()
+    expect(cell(panel, "tidy-notes", "claude").get_by_role("switch")).to_be_enabled()
+
+
+def test_an_interrupted_job_says_to_run_it_again(installed, ui_page):
+    panel = open_panel(ui_page)
+    count_changes(ui_page)
+    cut = {"job": "cut", "argv": ["install"], "state": "interrupted", "exit": None,
+           "outcome": None, "lines": ["the job stopped before it ended; run it again"]}
+    ui_page.route(JOB, lambda route: route.fulfill(json=cut))
+    panel.get_by_role("button", name="Install").click()
+    job = panel.locator('section[data-part="job"]')
+    expect(job).to_have_attribute("data-state", "interrupted")
+    expect(job.locator('[data-line="job"]')).to_have_text("Interrupted.")
+    expect(job.locator('[data-part="job-lines"]')).to_have_text(
+        "the job stopped before it ended; run it again")
+    expect(panel.get_by_role("button", name="Install")).to_be_enabled()
+    assert ui_page.evaluate("window.__changed") >= 1
+
+
+def test_a_refused_act_starts_no_job_and_says_why(installed, ui_page):
+    panel = open_panel(ui_page)
+    add = panel.locator('[data-part="add"]')
+    add.get_by_label("Name").fill("not a name!")
+    add.get_by_role("button", name="Add").click()
+    job = panel.locator('section[data-part="job"]')
+    expect(job).to_have_attribute("data-state", "refused")
+    expect(job.locator('[data-line="said"]')).to_contain_text("loadout: the page names skill")
+    assert "not a name" not in (installed / "loadout.toml").read_text()
+
+
+def test_the_project_picker_offers_projects_by_key_or_says_why_not(installed, ui_page):
+    ui_page.route("**/m/loadout/api/projects", lambda route: route.fulfill(json={
+        "projects": [{"key": "sample-site", "root": "/w/sample-site"}], "reason": None}))
+    panel = open_panel(ui_page)
+    section = panel.locator('[data-part="add"]').get_by_label("Section")
+    expect(section.locator("option")).to_have_text(
+        ["Your user section", "Project sample-site (new section)"])
+    ui_page.unroute("**/m/loadout/api/projects")
+    ui_page.route("**/m/loadout/api/projects", lambda route: route.fulfill(json={
+        "projects": [], "reason": "projects is busy; try again"}))
+    panel = open_panel(ui_page)
+    expect(panel.locator('[data-line="projects"]')).to_have_text(
+        "Projects by key: projects is busy; try again")
+
+
+def test_the_page_fits_a_phone(installed, ui_shell, ui_page, ui_width_check):
+    (installed / "loadout.toml").write_text(
+        '[user]\nskills = ["tidy-notes", "review-diff"]\ndisabled = ["skill:review-diff@codex"]\n'
+        '\n[global]\nmode = "managed"\n', encoding="utf-8")
+    moxi(ui_shell, "loadout", "install", check=False)
+    try:
+        ui_width_check(ui_page, module="loadout")
+        panel = ui_page.locator("#moxi-panel > moxi-loadout-page")
+        expect(panel.locator('section[data-part="items"]')).to_have_attribute("data-state", "up")
+        expect(panel.locator('section[data-part="global"]')).to_have_attribute("data-mode", "managed")
+        for summary in panel.locator("details > summary").all():
+            summary.click()
+        ui_width_check(ui_page)
+    finally:
+        (installed / "loadout.toml").write_text(BASE + '\n[global]\nmode = "off"\n',
+                                                encoding="utf-8")
+        moxi(ui_shell, "loadout", "install", check=False)

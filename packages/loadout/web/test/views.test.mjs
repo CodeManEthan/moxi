@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { countLine, driftView } from "../src/views.ts";
+import {
+  addChoices, canReplace, cellLine, choiceScope, commandLine, countLine, driftView, exitLine,
+  globalOffSheet, globalView, installAct, installChoices, itemAct, itemsView, jobPathOf, jobView,
+  readState, replaceAct, replaceValue, saidOf, startedOf, toggleAct,
+} from "../src/views.ts";
 
 const state = (over) => ({ loading: false, gone: false, failure: null, value: null, ...over });
 const NOTE = "Claude Code's home here is /a, but the last run in a terminal used /b. ...";
@@ -49,4 +53,178 @@ test("a failure keeps the last count read, and a 404 draws nothing", () => {
   assert.equal(first.count, null);
   assert.equal(driftView(state({ gone: true, value: { problem: null, count: 2, note: null } })).state,
                "gone");
+});
+
+// -- the panel ------------------------------------------------------------------------------
+
+const USER = { name: "user", where: "user", root: null };
+const PROJ = { name: "/w/app", where: "path", root: "/w/app" };
+const KEYED = { name: "site", where: "key", root: null };
+const row = (over) => ({ scope: "user", kind: "skill", name: "tidy", harness: "claude",
+                         state: "ok", reason: "", target: "/h/.claude/skills/tidy", ...over });
+const item = (over) => ({ kind: "skill", name: "tidy", scope: "user", harnesses: null,
+                          source: "/f/skills/tidy", disabled: [], ...over });
+const outcome = (over) => ({ rows: [], lines: [], notes: [], counts: {}, exit: 0, ...over });
+
+test("a toggle enables or disables one id in one section", () => {
+  assert.deepEqual(toggleAct("skill", "tidy", "codex", { user: true }, false),
+                   { path: "api/disable", body: { id: "skill:tidy@codex", user: true } });
+  assert.deepEqual(toggleAct("mcp", "docs", "*", { project: "/w/app" }, true),
+                   { path: "api/enable", body: { id: "mcp:docs@*", project: "/w/app" } });
+});
+
+test("add and remove name a project section only when it isn't the user's", () => {
+  assert.deepEqual(itemAct("add", "agent", "rev", { user: true }),
+                   { path: "api/add", body: { kind: "agent", name: "rev" } });
+  assert.deepEqual(itemAct("remove", "skill", "x", { project: "site" }),
+                   { path: "api/remove", body: { kind: "skill", name: "x", project: "site" } });
+});
+
+test("the install picker gives every section, then each, and its act", () => {
+  const listing = { problem: null, manifest: "/f/loadout.toml", sections: [USER, PROJ], items: [] };
+  assert.deepEqual(installChoices(listing).map((c) => c.value), ["", "user", "project:/w/app"]);
+  assert.deepEqual(installAct(""), { path: "api/install", body: {} });
+  assert.deepEqual(installAct("user"), { path: "api/install", body: { user: true } });
+  assert.deepEqual(installAct("project:/w/app"), { path: "api/install", body: { projects: ["/w/app"] } });
+});
+
+test("the add picker offers the sections, then the projects by key that have none", () => {
+  const listing = { problem: null, manifest: null, sections: [USER, KEYED], items: [] };
+  const projects = { projects: [{ key: "site", root: "/w/site" }, { key: "blog", root: "/w/blog" }],
+                     reason: null };
+  const choices = addChoices(listing, projects);
+  assert.deepEqual(choices.map((c) => c.value), ["user", "project:site", "project:blog"]);
+  assert.match(choices[2].label, /blog \(new section\)/);
+  assert.deepEqual(choiceScope("project:blog"), { project: "blog" });
+  assert.deepEqual(choiceScope("user"), { user: true });
+  assert.deepEqual(addChoices(null, null).map((c) => c.value), ["user"]);
+});
+
+test("items by section with each harness's state, the switched-off harness among them", () => {
+  const listing = { problem: null, manifest: null, sections: [USER, PROJ], items: [
+    item({ disabled: ["codex"] }),
+    item({ scope: "/w/app" }),
+    item({ name: "ext/helper", source: "module ext" }),
+  ] };
+  const status = { problem: null, ...outcome({ rows: [
+    row({ state: "missing" }),
+    row({ harness: "codex", state: "off", reason: "disabled", target: null }),
+    row({ scope: "/w/app", state: "blocked", reason: "a file is there", target: "/w/app/.claude/skills/tidy" }),
+    row({ scope: "/w/app", harness: "codex", target: "/w/app/.agents/skills/tidy" }),
+    row({ name: "ext/helper", harness: "codex" }),
+    row({ scope: null, kind: null, name: "/h/.gitignore", harness: null, state: "stale" }),
+    row({ kind: "global", name: "global", harness: "*", state: "bad-source", target: null }),
+  ] }) };
+  const view = itemsView(listing, status);
+  assert.deepEqual(view.sections.map((s) => s.key), ["user", "/w/app"]);
+  const [own, module] = view.sections[0].groups;
+  assert.equal(own.module, null);
+  assert.equal(module.module, "ext");
+  const tidy = own.items[0];
+  assert.deepEqual(tidy.cells.map((c) => [c.harness, c.state, c.on]),
+                   [["claude", "missing", true], ["codex", "off", false]]);
+  assert.deepEqual(tidy.cells[1].toggle, { path: "api/enable", body: { id: "skill:tidy@codex", user: true } });
+  assert.deepEqual(tidy.remove, { path: "api/remove", body: { kind: "skill", name: "tidy" } });
+  // A module's skill with rows for one harness has that harness only.
+  assert.deepEqual(module.items[0].cells.map((c) => c.harness), ["codex"]);
+  const app = view.sections[1].groups[0].items[0];
+  assert.deepEqual(app.cells[0].toggle, { path: "api/disable",
+                                          body: { id: "skill:tidy@claude", project: "/w/app" } });
+  assert.equal(canReplace(app.cells[0].row), true);
+  assert.deepEqual(view.others.map((r) => r.name), ["/h/.gitignore", "global"]);
+  assert.equal(cellLine(app.cells[0]), "blocked: a file is there");
+});
+
+test("an item off for every harness turns on only with @*", () => {
+  const listing = { problem: null, manifest: null, sections: [USER], items: [
+    item({ harnesses: ["claude", "opencode"], disabled: ["*"] })] };
+  const view = itemsView(listing, null);
+  const tidy = view.sections[0].groups[0].items[0];
+  assert.equal(tidy.allOff, true);
+  assert.deepEqual(tidy.cells.map((c) => [c.harness, c.on, c.toggle]),
+                   [["claude", false, null], ["opencode", false, null]]);
+  assert.deepEqual(tidy.enableAll, { path: "api/enable", body: { id: "skill:tidy@*", user: true } });
+  assert.equal(cellLine(tidy.cells[0]), "off");
+});
+
+test("replace names the item for its harness, or the target, in the row's section", () => {
+  const blocked = row({ scope: "/w/app", state: "blocked", target: "/w/app/.claude/skills/tidy" });
+  assert.equal(replaceValue(blocked), "skill:tidy@claude");
+  const act = replaceAct(blocked);
+  assert.deepEqual(act.body, { replace: ["skill:tidy@claude"], projects: ["/w/app"] });
+  assert.equal(act.path, "api/replace");
+  assert.match(act.sheet[0], /--replace skill:tidy@claude/);
+  assert.match(act.sheet[1], /\/w\/app\/\.claude\/skills\/tidy/);
+  const ignore = row({ scope: null, kind: null, name: null, harness: null, state: "modified",
+                       target: "/h/.gitignore" });
+  assert.deepEqual(replaceAct(ignore).body, { replace: ["/h/.gitignore"] });
+  assert.deepEqual(replaceAct(row({ state: "modified" })).body, { replace: ["skill:tidy@claude"], user: true });
+  assert.equal(canReplace(row({ state: "missing" })), false);
+  assert.equal(canReplace(row({ state: "would-commit" })), false);
+});
+
+test("the global view offers the modes not in force, and off unless chosen off", () => {
+  const unchosen = globalView({ problem: null, mode: "off", chosen: false, files: [] });
+  assert.deepEqual(unchosen.modes.map((m) => m.mode), ["managed", "if-absent"]);
+  assert.equal(unchosen.canTurnOff, true);
+  assert.match(unchosen.line, /chooses no global mode/);
+  const managed = globalView({ problem: null, mode: "managed", chosen: true, files: [] });
+  assert.deepEqual(managed.modes.map((m) => m.act), [{ path: "api/global-mode", body: { mode: "if-absent" } }]);
+  assert.equal(globalView({ problem: null, mode: "off", chosen: true, files: [] }).canTurnOff, false);
+});
+
+test("the global off sheet says what leaves each file", () => {
+  const lines = globalOffSheet({ problem: null, mode: "managed", chosen: true, files: [
+    { file: "/h/.claude/CLAUDE.md", changes: false, diff: "", placed: false, state: null },
+    { file: "/h/.codex/AGENTS.md", changes: false, diff: "", placed: true, state: "ok" }] });
+  assert.match(lines[0], /global off/);
+  assert.deepEqual(lines.slice(1), ["/h/.claude/CLAUDE.md: loadout's part comes out.",
+                                    "/h/.codex/AGENTS.md: the copy loadout placed is removed."]);
+});
+
+test("an act's answer: a job to follow, or the line it was refused with", () => {
+  assert.deepEqual(startedOf(202, { status: "/api/job?job=abc_D-1" }), { kind: "job", path: "api/job?job=abc_D-1" });
+  assert.equal(startedOf(202, { status: "/api/other" }).kind, "refused");
+  assert.deepEqual(startedOf(422, { refused: "loadout: no" }), { kind: "refused", text: "loadout: no" });
+  assert.deepEqual(startedOf(400, { error: "unknown key: x" }), { kind: "refused", text: "unknown key: x" });
+  assert.deepEqual(startedOf(0, null), { kind: "refused", text: "no answer from the shell" });
+  assert.deepEqual(startedOf(500, null), { kind: "refused", text: "loadout's page server answered 500" });
+  assert.equal(jobPathOf("api/job?job=x&y=1"), null);
+  assert.equal(saidOf({ conflict: "busy" }), "busy");
+});
+
+test("a job running, done by its exit code, interrupted, or lost", () => {
+  const job = (over) => ({ job: "j1", argv: ["add", "skill", "tidy"], state: "running", exit: null,
+                           outcome: null, lines: [], ...over });
+  const at = (value, over) => ({ loading: false, gone: false, failure: null, value, ...over });
+  assert.equal(jobView(at(null)).title, "Starting…");
+  const running = jobView(at(job()));
+  assert.equal(running.state, "running");
+  assert.equal(running.command, "moxi loadout add skill tidy");
+  const done = jobView(at(job({ state: "done", exit: 0, outcome: outcome({
+    rows: [row(), row({ harness: "codex", state: "blocked", reason: "a file" })],
+    lines: ["placed skill tidy for claude"], notes: ["a note"] }) })));
+  assert.equal(done.tone, "ok");
+  assert.equal(done.title, "Done.");
+  assert.deepEqual(done.lines, ["placed skill tidy for claude", "a note"]);
+  assert.deepEqual(done.rows.map((r) => r.state), ["blocked"]);
+  const refused = jobView(at(job({ state: "done", exit: 3, lines: ["Claude Code's home here is /a"] })));
+  assert.equal(refused.tone, "warn");
+  assert.deepEqual(refused.lines, ["Claude Code's home here is /a"]);
+  assert.match(exitLine(75), /Run it again/);
+  const cut = jobView(at(job({ state: "interrupted", lines: ["the job was interrupted; run it again"] })));
+  assert.equal(cut.state, "interrupted");
+  assert.deepEqual(cut.lines, ["the job was interrupted; run it again"]);
+  const failure = { status: 0, why: "no answer from the shell" };
+  assert.equal(jobView(at(job(), { failure }), true).state, "failed");
+  assert.equal(jobView(at(job(), { failure })).state, "running");
+  assert.equal(commandLine(["install", "--json"]), "moxi loadout install");
+});
+
+test("a read's state", () => {
+  const at = (value, over) => ({ loading: false, gone: false, failure: null, value, ...over });
+  assert.equal(readState(at(null, { loading: true })).state, "loading");
+  assert.deepEqual(readState(at({ problem: "loadout: bad" })), { state: "problem", detail: "loadout: bad" });
+  assert.equal(readState(at({ problem: null })).state, "up");
+  assert.equal(readState(at({ problem: null }, { failure: { status: 500, why: "w" } })).state, "failed");
 });
