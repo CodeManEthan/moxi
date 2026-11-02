@@ -13,13 +13,26 @@ Allowed:
 * `Write` and `Edit` of a `.md` file under one of `handoff_roots`;
 * `Read` of the same paths, with `limit` a whole number from 1 to 200 and `offset`
   absent or a whole number of at least 0;
+* `apply_patch` (Codex's file tool) whose patch text, in `command`, adds or updates only
+  `.md` files under one of `handoff_roots`, and deletes and moves nothing;
 * `Bash` running one of git's wrap-up forms (status, diff, add, commit and a few reads,
   `GIT_FORMS`), as `git [-C <dir>] <form>` or `cd <dir> && git <form>`;
 * `Bash` running a command whose words start with one of `commands`, the argument-word
   prefixes the user adds (`ceiling.allow_commands`), bare or after `cd <dir> &&`.
 
-The directory a command runs in is `<dir>` when named, else `cwd`, and must be `cwd` or
-lie under it or under one of `work_roots`.
+Claude's `Bash` and Codex's shell tool, which Codex's hooks also name `Bash`, both carry
+the shell text in `command`. The directory a command runs in is `<dir>` when named, else
+the input's `workdir` when it has one (Codex's own argument), else `cwd`; it must be `cwd`
+or lie under it or under one of `work_roots`.
+
+**The patch.** Codex's patch grammar: `*** Begin Patch`, then file sections, then
+`*** End Patch`. A section is `*** Add File: <path>` followed by `+` lines, or
+`*** Update File: <path>` followed by change lines (`@@`, ` `, `+`, `-`, or empty) and an
+optional `*** End of File`. Any `*** Delete File:` or `*** Move to:` refuses the call, and
+so does a line this reading does not place (a heredoc wrapper, a line before the first
+section, a header it doesn't know, an update with no change). Relative paths join `cwd`,
+as Codex resolves them. Where this reading and Codex's own parser differ, this one
+refuses or Codex's fails, so every file Codex would touch is one judged here.
 
 **The path rule.** Every path accepted (a hand-off file, a `<dir>`, an `add --` path) lies
 inside its root both as the shell or git reads it (as typed, joined to its base, with
@@ -110,8 +123,11 @@ def allowed(tool: object, tool_input: object, cwd: object, *,
         elif tool == "Read":
             _handoff_path(tool_input, cwd, handoff_roots)
             _read_bounds(tool_input)
+        elif tool == "apply_patch":
+            _patch(tool_input.get("command"), cwd, handoff_roots)
         elif tool == "Bash":
-            _bash(tool_input.get("command"), cwd, work_roots, commands, home)
+            _bash(tool_input.get("command"), cwd, work_roots, commands, home,
+                  start=_workdir(tool_input, cwd, work_roots))
         else:
             raise Refused(f"{tool or 'this tool'} is not a wrap-up operation")
     except Refused as exc:
@@ -174,6 +190,12 @@ def _handoff_path(tool_input: Mapping, cwd: object, roots: object) -> None:
     p = tool_input.get("file_path")
     if not isinstance(p, str) or not p:
         raise Refused("no file_path")
+    _handoff_file(p, cwd, roots)
+
+
+def _handoff_file(p: str, cwd: object, roots: object) -> None:
+    """`p`, as typed (a relative one joins `cwd`), is a `.md` file under a hand-off root
+    by the path rule; else `Refused`."""
     if not p.endswith(HANDOFF_SUFFIX):
         raise Refused("a hand-off file must end in .md")
     base = cwd if os.path.isabs(p) else _cwd(cwd)
@@ -197,6 +219,68 @@ def _read_bounds(tool_input: Mapping) -> None:
     offset = tool_input.get("offset")
     if offset is not None and (not _is_int(offset) or offset < 0):
         raise Refused("a hand-off Read's offset must be a whole number of at least 0")
+
+
+# --- apply_patch ------------------------------------------------------------------------
+
+#: What Codex's patch parser trims from a line (Rust's `trim`): Unicode White_Space.
+_WS = ("\t\n\x0b\x0c\r \x85\xa0 " + "".join(chr(c) for c in range(0x2000, 0x200B))
+       + "    　")
+BEGIN_PATCH, END_PATCH = "*** Begin Patch", "*** End Patch"
+ADD_FILE, UPDATE_FILE = "*** Add File: ", "*** Update File: "
+DELETE_FILE, MOVE_TO = "*** Delete File:", "*** Move to:"
+END_OF_FILE = "*** End of File"
+
+
+def patch_files(text: object) -> list[str]:
+    """The paths, as written, of the files a Codex patch adds or updates, in order.
+    Raises `Refused` for a patch that deletes or moves a file, and for any text this
+    reading does not place."""
+    if not isinstance(text, str) or not text.strip(_WS):
+        raise Refused("no patch text in command")
+    lines = [line[:-1] if line.endswith("\r") else line
+             for line in text.strip(_WS).split("\n")]
+    if (len(lines) < 2 or lines[0].strip(_WS) != BEGIN_PATCH
+            or lines[-1].strip(_WS) != END_PATCH):
+        raise Refused("the patch is not one '*** Begin Patch' ... '*** End Patch'")
+    paths: list[str] = []
+    section: str | None = None          # before the first header, then "add" or "update"
+    changes = 0                         # change lines in the current update section
+    for n, line in enumerate(lines[1:-1], start=2):
+        if section == "add" and line.startswith("+"):
+            continue
+        if section == "update" and not line.startswith("***"):
+            if line[:1] in ("", " ", "+", "-") or line.startswith("@@"):
+                changes += 1
+                continue
+            raise Refused(f"patch line {n} is not a change line")
+        header = line.strip(_WS)
+        if header.startswith(DELETE_FILE):
+            raise Refused("the patch deletes a file")
+        if header.startswith(MOVE_TO):
+            raise Refused("the patch moves a file")
+        if section == "update" and header == END_OF_FILE and changes:
+            continue
+        if section == "update" and not changes:
+            raise Refused(f"patch line {n}: an update with no change")
+        if header.startswith(ADD_FILE):
+            section = "add"
+            paths.append(header[len(ADD_FILE):])
+        elif header.startswith(UPDATE_FILE):
+            section, changes = "update", 0
+            paths.append(header[len(UPDATE_FILE):])
+        else:
+            raise Refused(f"patch line {n} is not a line of a file section")
+    if section == "update" and not changes:
+        raise Refused("the patch ends in an update with no change")
+    if not paths:
+        raise Refused("the patch changes no file")
+    return paths
+
+
+def _patch(text: object, cwd: object, roots: object) -> None:
+    for path in patch_files(text):
+        _handoff_file(path, cwd, roots)
 
 
 # --- Bash -------------------------------------------------------------------------------
@@ -282,9 +366,11 @@ def lex(text: str, home: str) -> list:
     return tokens
 
 
-def _resolve_dir(d: str, cwd: str, work_roots: object, logical: bool) -> str:
+def _resolve_dir(d: str, cwd: str, work_roots: object, logical: bool,
+                 base: str | None = None) -> str:
     """The directory `<dir>` names: absolute, `~/` (the lexer expanded it) or relative to
-    `cwd`; by the path rule it must be `cwd` or lie under it or a work root. Returns the
+    `base` (`cwd` when None); by the path rule it must be `cwd` or lie under it or a work
+    root. Returns the
     directory the command runs in: for `cd` (logical, as `cd -L` moves) the real path of
     the lexical reading, for `git -C` (a physical change of directory) the real path of
     the path as typed."""
@@ -292,12 +378,23 @@ def _resolve_dir(d: str, cwd: str, work_roots: object, logical: bool) -> str:
         raise Refused("empty directory")
     if d.startswith("-"):
         raise Refused("a directory may not start with '-'")
-    got = _inside(d, cwd, [cwd] + _abs_roots(work_roots))
+    got = _inside(d, cwd if base is None else base, [cwd] + _abs_roots(work_roots))
     if got is None:
         raise Refused("the repository directory is outside the working directory and "
                       "every work root")
     lexical, real = got
     return _real(lexical) if logical else real
+
+
+def _workdir(tool_input: Mapping, cwd: object, work_roots: object) -> str | None:
+    """The directory a shell call starts in when the input names one (Codex's
+    `workdir`), which must pass the directory rule; None when it names none."""
+    workdir = tool_input.get("workdir")
+    if workdir is None:
+        return None
+    if not isinstance(workdir, str):
+        raise Refused("workdir is not a path")
+    return _resolve_dir(workdir, _cwd(cwd), work_roots, False)
 
 
 def _git_form(args: list[str], repo: str) -> None:
@@ -336,10 +433,13 @@ def _prefixes(commands: object) -> list[tuple[str, ...]]:
 
 
 def _bash(command: object, cwd: object, work_roots: object, commands: object,
-          home: str | None) -> None:
+          home: str | None, *, start: str | None = None) -> None:
+    """`start` is the directory the shell starts in when it is not `cwd` (a real path
+    that already passed the directory rule); relative directories join it."""
     if not isinstance(command, str) or not command.strip():
         raise Refused("no command")
     cwd = _cwd(cwd)
+    base = cwd if start is None else start
     if home is None:
         home = os.path.expanduser("~")
     if not isinstance(home, str) or not os.path.isabs(home):
@@ -351,7 +451,7 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
             raise Refused("a second '&&'")
         if ands[0] != 2 or tokens[0] != "cd":
             raise Refused("'&&' is allowed only directly after cd <dir>")
-        repo: str | None = _resolve_dir(tokens[1], cwd, work_roots, True)
+        repo: str | None = _resolve_dir(tokens[1], cwd, work_roots, True, base)
         rest = tokens[3:]
         in_cd = True
     else:
@@ -371,14 +471,14 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
             raise Refused("git -C after cd")
         if len(args) < 2:
             raise Refused("git -C with no directory")
-        repo = _resolve_dir(args[1], cwd, work_roots, False)
+        repo = _resolve_dir(args[1], cwd, work_roots, False, base)
         args = args[2:]
     elif repo is None:
-        repo = _real(cwd)
+        repo = _real(base)
     if args[:1] and args[0].startswith("-"):
         raise Refused(f"git option {args[0]} is not allowed")
     _git_form(args, repo)
 
 
-__all__ = ["allowed", "lex", "Refused", "AND", "GIT_FORMS", "HANDOFF_SUFFIX",
-           "READ_LIMIT_MAX"]
+__all__ = ["allowed", "lex", "patch_files", "Refused", "AND", "GIT_FORMS",
+           "HANDOFF_SUFFIX", "READ_LIMIT_MAX"]

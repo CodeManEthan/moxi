@@ -349,6 +349,129 @@ def table(P):
     expect_tool("bounded read through a link from outside into the root", "Read",
                 {"file_path": E + "/notelink/build-report.md", "limit": 50}, False)
 
+    # Codex's shell tool: Bash with `command` alone, and its own `workdir` --------------------
+    def codex_bash(label, inp, want):
+        ok, reason = ask("Bash", inp, CWD, WORK_ROOTS, NOTES)
+        check("codex Bash %s: %s" % ("allowed" if want else "refused", label), ok, want, reason)
+
+    codex_bash("git -C status", {"command": "git -C %s status --short" % REPO}, True)
+    codex_bash("cd && commit", {"command": "cd %s && git commit -m 'hand off'" % REPO}, True)
+    codex_bash("cd && add -A", {"command": "cd %s && git add -A" % REPO}, True)
+    codex_bash("a user's command prefix", {"command": "make handoff"}, True)
+    codex_bash("push", {"command": "git -C %s push" % REPO}, False)
+    codex_bash("workdir in the work root", {"command": "git status --short", "workdir": REPO}, True)
+    codex_bash("workdir under cwd", {"command": "git add -A", "workdir": "sub"}, True)
+    codex_bash("workdir relative to cwd, into the work root",
+               {"command": "git commit -m x", "workdir": REPO_REL}, True)
+    codex_bash("workdir outside every root", {"command": "git status --short", "workdir": P["ELSE"]}, False)
+    codex_bash("workdir through a link out of the work root",
+               {"command": "git status --short", "workdir": WORK + "/link-out"}, False)
+    codex_bash("workdir not a string", {"command": "git status --short", "workdir": 7}, False)
+    codex_bash("workdir empty", {"command": "git status --short", "workdir": ""}, False)
+    codex_bash("cd from the workdir to a place outside every root",
+               {"command": "cd %s && git status --short" % P["OTHER"], "workdir": REPO}, False)
+    codex_bash("cd from the workdir back under cwd",
+               {"command": "cd %s && git status --short" % P["SUB"], "workdir": REPO}, True)
+    codex_bash("a relative cd joins the workdir",
+               {"command": "cd .. && git status --short", "workdir": REPO}, True)
+    codex_bash("a relative -C joins the workdir",
+               {"command": "git -C S add -- L/x", "workdir": REPO}, True)
+    codex_bash("add -- reads its paths from the workdir",
+               {"command": "git add -- up/x", "workdir": REPO}, False)
+    codex_bash("command as an argv list", {"command": ["git", "status", "--short"]}, False)
+
+    # Codex's apply_patch: adds and updates of Markdown under the hand-off root -------------
+    def patch(*sections, begin="*** Begin Patch\n", end="*** End Patch\n"):
+        return begin + "".join(sections) + end
+
+    def add(path, *lines):
+        return "*** Add File: %s\n" % path + "".join("+%s\n" % line for line in lines)
+
+    def update(path, *lines):
+        return "*** Update File: %s\n" % path + "".join("%s\n" % line for line in lines)
+
+    def expect_patch(label, text, want, cwd=CWD, key="command"):
+        ok, reason = ask("apply_patch", {key: text}, cwd, WORK_ROOTS, NOTES)
+        check("apply_patch %s: %s" % ("allowed" if want else "refused", label), ok, want, reason)
+        if not ok and not reason:
+            RESULTS.append(("apply_patch refusal has a reason: " + label, False, ""))
+
+    NEW = NOTES + "/designs/r/build/next.md"
+    CHANGE = ("@@", "-old line", "+new line")
+    expect_patch("add a report under the root", patch(add(NEW, "# Hand-off", "", "done")), True)
+    expect_patch("add an empty report", patch(add(NEW)), True)
+    expect_patch("add in a new directory", patch(add(NOTES + "/new/dir/r.md", "x")), True)
+    expect_patch("add relative to cwd", patch(add("../../notes/r.md", "x")), True)
+    expect_patch("update the report", patch(update(REPORT, *CHANGE)), True)
+    expect_patch("update with no @@ first", patch(update(REPORT, " context", "+added")), True)
+    expect_patch("update with two chunks and End of File",
+                 patch(update(REPORT, "@@ ## Done", "-a", "+b", "@@", "+c", "*** End of File")), True)
+    expect_patch("update whose context line is a Markdown rule", patch(update(REPORT, " ***", "+x")), True)
+    expect_patch("add and update, both under the root", patch(add(NEW, "x"), update(REPORT, *CHANGE)), True)
+    expect_patch("CRLF line ends", patch(add(NEW, "x")).replace("\n", "\r\n"), True)
+    expect_patch("blank lines around the patch", "\n\n" + patch(add(NEW, "x")) + "\n  \n", True)
+    expect_patch("padded markers", patch(add(NEW, "x"), begin="  *** Begin Patch \n",
+                                         end=" *** End Patch"), True)
+    expect_patch("a link inside the root, then ..", patch(add(NOTES + "/dlink/../x.md", "x")), True)
+    expect_patch(".. that stays inside the root", patch(add(NOTES + "/designs/../x.md", "x")), True)
+    expect_patch("not Markdown", patch(add(NOTES + "/r.py", "x")), False)
+    expect_patch("one Markdown, one not", patch(add(NEW, "x"), add(NOTES + "/r.py", "x")), False)
+    expect_patch("update of a source file", patch(update(REPO + "/hooks/x.py", *CHANGE)), False)
+    expect_patch("Markdown outside the root", patch(add(P["ELSE"] + "/r.md", "x")), False)
+    expect_patch("Markdown in the repository", patch(add(REPO + "/README.md", "x")), False)
+    expect_patch("relative Markdown in cwd", patch(add("README.md", "x")), False)
+    expect_patch("~/ is not expanded: a path under cwd", patch(add("~/notes/r.md", "x")), False)
+    expect_patch(".. out of the root", patch(add(NOTES + "/../code/app/x.md", "x")), False)
+    expect_patch("relative .. out of the root", patch(add("../../notes/../x.md", "x")), False)
+    expect_patch("a .md link under the root leading outside", patch(update(NOTES + "/link.md", *CHANGE)), False)
+    expect_patch("a directory link under the root leading outside",
+                 patch(add(NOTES + "/uplink/new.md", "x")), False)
+    expect_patch("a link out of the root, then .. (lexically inside)",
+                 patch(add(NOTES + "/uplink/../outside.md", "x")), False)
+    expect_patch("a link from outside into the root", patch(add(E + "/notelink/r.md", "x")), False)
+    expect_patch("a .md name leading to source", patch(update(NOTES + "/src.md", *CHANGE)), False)
+    expect_patch("a sibling with the root as name prefix", patch(add(NOTES + "2/r.md", "x")), False)
+    for label, text, why in [
+        ("delete a report", patch("*** Delete File: %s\n" % REPORT), "deletes"),
+        ("delete after an add", patch(add(NEW, "x"), "*** Delete File: %s\n" % REPORT), "deletes"),
+        ("an indented delete after an add", patch(add(NEW, "x"), "   *** Delete File: %s\n" % REPORT),
+         "deletes"),
+        ("move within the root", patch(update(REPORT, "*** Move to: %s" % NEW, *CHANGE)), "moves"),
+        ("move out of the root", patch(update(REPORT, "*** Move to: %s/r.md" % P["ELSE"], *CHANGE)),
+         "moves"),
+        ("move after a change", patch(update(REPORT, *CHANGE), "*** Move to: %s\n" % NEW), "moves"),
+        ("no begin marker", patch(add(NEW, "x"), begin=""), "Begin Patch"),
+        ("no end marker", patch(add(NEW, "x"), end=""), "Begin Patch"),
+        ("a heredoc wrapper", "<<'EOF'\n" + patch(add(NEW, "x")) + "EOF\n", "Begin Patch"),
+        ("a shell call around the patch", "apply_patch <<'EOF'\n" + patch(add(NEW, "x")) + "EOF\n",
+         "Begin Patch"),
+        ("nothing between the markers", patch(), "changes no file"),
+        ("a line before the first section", patch("+x\n", add(NEW, "x")), "not a line of a file section"),
+        ("an add line without +", patch(add(NEW, "x"), "y\n"), "not a line of a file section"),
+        ("a blank line in an add", patch(add(NEW, "x"), "\n"), "not a line of a file section"),
+        ("an unknown header", patch("*** Copy File: %s\n" % NEW), "not a line of a file section"),
+        ("a header with no space", patch("*** Add File:%s\n+x\n" % NEW), "not a line of a file section"),
+        ("an add with no path", patch("*** Add File: \n+x\n"), "not a line of a file section"),
+        ("an update with no change", patch(update(REPORT)), "no change"),
+        ("an update with no change before the next", patch(update(REPORT), add(NEW, "x")), "no change"),
+        ("End of File with no change", patch(update(REPORT, "*** End of File")), "no change"),
+        ("a stray line in an update", patch(update(REPORT, "@@", "x")), "not a change line"),
+        ("a tab-led line in an update", patch(update(REPORT, "@@", "\t+x")), "not a change line"),
+        ("only whitespace", "  \n ", "no patch text"),
+        ("empty", "", "no patch text"),
+    ]:
+        ok, reason = ask("apply_patch", {"command": text}, CWD, WORK_ROOTS, NOTES)
+        check("apply_patch refused: %s (reason: %s)" % (label, why), (ok, why in reason),
+              (False, True), reason)
+    expect_patch("the text under another key", patch(add(NEW, "x")), False, key="input")
+    expect_patch("the text under patch", patch(add(NEW, "x")), False, key="patch")
+    expect_patch("command not a string", ["*** Begin Patch"], False)
+    expect_patch("cwd relative", patch(add("../../notes/r.md", "x")), False, cwd="code/app")
+    check("apply_patch with no hand-off root",
+          ask("apply_patch", {"command": patch(add(NEW, "x"))}, CWD, WORK_ROOTS, [])[0], False)
+    check("apply_patch input not an object",
+          ask("apply_patch", patch(add(NEW, "x")), CWD, WORK_ROOTS, NOTES)[0], False)
+
 
     # Every other tool is refused -----------------------------------------------------------------
     for name, inp in [

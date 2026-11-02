@@ -302,6 +302,53 @@ def test_a_codex_agents_own_rollout_is_its_source():
     assert isinstance(ceiling.judge(call), turns.Deny)
 
 
+def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path):
+    """Codex's hooks name its shell tool `Bash` with the shell text in `command`, and its
+    file tool `apply_patch` with the patch text in `command`."""
+    notes, work = tmp_path / "notes", tmp_path / "work"
+    repo = work / "build"
+    for d in (notes, repo):
+        d.mkdir(parents=True)
+    write_config(THRESHOLDS + f'handoff_roots = ["{notes}"]\nwork_roots = ["{work}"]\n')
+    r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
+    r.turn()
+    r.user("look into it")
+    r.request(token_usage(input=30_000, cached=0), response_id="resp_1")
+    r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")
+    r.write()
+    parent = "0190c000-0000-7000-8000-0000000004c3"
+
+    def call(tool, tool_input):
+        return turns.ToolCall("codex", parent, THREAD, tool, "exec-1", tool_input,
+                              str(tmp_path), str(r.path), {}, ())
+
+    def patch(*lines):
+        return "\n".join(("*** Begin Patch", *lines, "*** End Patch")) + "\n"
+
+    report = notes / "hand-off.md"
+    got = ceiling.judge(call("Bash", {"command": "ls"}))
+    assert isinstance(got, turns.Deny) and "ls is not a wrap-up command" in got.reason
+    assert ceiling.latched()[0].agent_id == THREAD
+    assert ceiling.judge(call("apply_patch", {"command": patch(
+        f"*** Add File: {report}", "+# Hand-off", "+", "+done: the parser")})) is None
+    assert ceiling.judge(call("apply_patch", {"command": patch(
+        "*** Update File: notes/hand-off.md", "@@", "-done: the parser",
+        "+done: the parser and its tests")})) is None
+    assert ceiling.judge(call("Bash", {"command": f"cd {repo} && git add -A"})) is None
+    assert ceiling.judge(call("Bash", {"command": f"git -C {repo} commit -m 'hand off'"})) is None
+    for tool, tool_input, why in [
+        ("apply_patch", {"command": patch(f"*** Add File: {repo}/x.py", "+x")}, "must end in .md"),
+        ("apply_patch", {"command": patch(f"*** Delete File: {report}")}, "deletes a file"),
+        ("apply_patch", {"command": patch(f"*** Update File: {report}",
+                                          f"*** Move to: {notes}/moved.md", "@@", "+x")},
+         "moves a file"),
+        ("apply_patch", {"input": patch(f"*** Add File: {report}", "+x")}, "no patch text"),
+        ("Bash", {"command": f"git -C {repo} push"}, "git push is not a wrap-up git form"),
+    ]:
+        got = ceiling.judge(call(tool, tool_input))
+        assert isinstance(got, turns.Deny) and why in got.reason, (tool_input, got)
+
+
 # --- markers ----------------------------------------------------------------------------
 
 def test_markers_live_in_a_private_directory_per_agent():
