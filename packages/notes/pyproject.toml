@@ -24,6 +24,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 notes = "moxi_notes.module"
 
+# The start line and the snapshot trigger, called by turns in a session's endpoint process.
+[project.entry-points."moxi.turns.listeners"]
+notes = "moxi_notes.listeners"
+
 # One pass of the snapshot spec: run by the timer, and detached with --settle by the
 # snapshot trigger. Never typed; `moxi notes snapshot` is the verb.
 [project.scripts]
