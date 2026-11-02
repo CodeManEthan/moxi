@@ -12,6 +12,7 @@ members = [
     "packages/turns",
     "packages/cache",
     "packages/comms",
+    "packages/usage",
     "packages/moxi-dev",
     "packages/launcher",
     "packages/repo",
@@ -30,6 +31,7 @@ moxi-sessions = { workspace = true }
 moxi-turns = { workspace = true }
 moxi-cache = { workspace = true }
 moxi-comms = { workspace = true }
+moxi-usage = { workspace = true }
 moxi-dev = { workspace = true }
 moxi-launcher = { workspace = true }
 moxi-repo = { workspace = true }

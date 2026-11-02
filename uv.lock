@@ -23,6 +23,7 @@ members = [
     "moxi-slots",
     "moxi-turns",
     "moxi-ui",
+    "moxi-usage",
 ]
 
 [manifest.dependency-groups]
@@ -1245,6 +1246,44 @@ provides-extras = ["testing"]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-usage"
+version = "0.1.0"
+source = { editable = "packages/usage" }
+dependencies = [
+    { name = "moxi" },
+    { name = "moxi-sessions" },
+]
+
+[package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
+turns = [
+    { name = "moxi-turns" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-sessions", editable = "packages/sessions" },
+    { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+]
+provides-extras = ["turns", "projects"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "pytest" },
 ]
 

@@ -392,6 +392,156 @@ def test_last_request_on_a_main_transcript_passes_over_sidechain_and_synthetic(p
     assert last_request(src).request.input_tokens == 100 + 10 + 0
 
 
+#: A tool result long enough that decoding it is the read's whole cost (about 300 KB).
+BIG = "y" * 300_000
+
+
+def full_decode_answer(src, *, synthetic=False):
+    """What last_request answers, worked out from a backward read that decodes every
+    line: the newest own-chain request, synthetic ones passed over."""
+    for record in records_back(src):
+        if record.kind != "request":
+            continue
+        if src.agent_id is None and record.sidechain is True:
+            continue
+        if record.synthetic is True and not synthetic:
+            continue
+        return record
+    return None
+
+
+def big_decodes(monkeypatch):
+    """Count the decodes of a line at least as long as BIG."""
+    seen = []
+    real = claude.parse_line
+    real_records = claude.line_records
+
+    def parse(line):
+        if len(line) >= len(BIG):
+            seen.append("parse")
+        return real(line)
+
+    def line_records(raw, **kw):
+        if len(raw) >= len(BIG):
+            seen.append("records")
+        return real_records(raw, **kw)
+
+    monkeypatch.setattr(claude, "parse_line", parse)
+    monkeypatch.setattr(claude, "line_records", line_records)
+    return seen
+
+
+def test_last_request_with_a_long_tool_result_last_skips_it_and_answers_the_same(
+        projects, monkeypatch):
+    t = ClaudeTranscript(projects)
+    t.user("go")
+    call = t.request()
+    call.text("reading")
+    call.tool_use("Read", {"file_path": "/work/big.txt"}, call_id="toolu_big")
+    t.tool_result("toolu_big", BIG)
+    t.write()
+    src = claude_source(t)
+    want = full_decode_answer(src)
+    assert want is not None and want.request_id == call.request_id
+    seen = big_decodes(monkeypatch)
+    got = last_request(src)
+    assert seen == []
+    assert plain(got.request) == plain(want) and got.ended is None
+
+
+def test_last_request_after_a_long_tool_result_answers_the_same(projects):
+    """The request after the tool result takes its turn from that line, so the line
+    is read; the answer is the full decode's, its turn and `final` included."""
+    t = ClaudeTranscript(projects)
+    t.user("go")
+    call = t.request()
+    call.tool_use("Read", {"file_path": "/work/big.txt"}, call_id="toolu_big")
+    t.tool_result("toolu_big", BIG)
+    after = t.assistant("read it", usage=usage(input=7))
+    t.tool_result("toolu_none", "small")
+    t.write()
+    src = claude_source(t)
+    want = full_decode_answer(src)
+    assert want.request_id == after.request_id
+    got = last_request(src)
+    assert plain(got.request) == plain(want)
+    assert got.request.turn_id == want.turn_id and want.turn_id is not UNKNOWN
+
+
+@pytest.mark.parametrize("tail", [
+    "a long tool result, then a malformed long line",
+    "a malformed long line that names a turn, then a request",
+    "two long results in two turns, with a turn's end between",
+])
+def test_last_request_over_long_and_malformed_lines_answers_as_a_full_decode(
+        projects, tail):
+    t = ClaudeTranscript(projects)
+    t.user("go")
+    t.assistant("first", usage=usage(input=3))
+    if tail.startswith("a long tool result"):
+        t.tool_result("toolu_a", BIG)
+        t.add_raw('{"type":"user","promptId":"prompt-x","message":' + '"' + BIG)
+    elif tail.startswith("a malformed"):
+        t.add_raw('{"type":"user","promptId":"prompt-x","message":' + '"' + BIG)
+        t.assistant("second", usage=usage(input=5))
+    else:
+        t.tool_result("toolu_a", BIG)
+        t.assistant("second", usage=usage(input=5))
+        t.add_raw(json.dumps({"type": "system", "subtype": "turn_duration",
+                              "durationMs": 10}))
+        t.user("again")
+        t.tool_result("toolu_b", BIG)
+    t.write()
+    src = claude_source(t)
+    want = full_decode_answer(src)
+    got = last_request(src)
+    assert plain(got.request) == plain(want)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_filtered_backward_reads_answer_as_full_decodes_over_mixed_lines(projects, seed):
+    """Random runs of long and short tool results, requests, sidechain and synthetic
+    ones, malformed lines, a turn's end and new prompts: last_request and a backward
+    read kept to requests give what a read decoding every line gives."""
+    import random
+
+    rng = random.Random(seed)
+    long = "z" * 6000                          # past the head-first length
+    t = ClaudeTranscript(projects, session_id=f"0190b000-0000-7000-8000-{seed:012d}")
+    for n in range(rng.randint(1, 14)):
+        pick = rng.randrange(9)
+        if pick == 0:
+            t.user(f"prompt {n}")
+        elif pick == 1:
+            t.tool_result(f"toolu_{n}", long + "x" * rng.randrange(50))
+        elif pick == 2:
+            t.tool_result(f"toolu_{n}", "short")
+        elif pick in (3, 4):
+            t.assistant(f"answer {n}", usage=usage(input=n))
+        elif pick == 5:
+            t.request().text("inline subagent", isSidechain=True)
+        elif pick == 6:
+            t.synthetic()
+        elif pick == 7:
+            t.add_raw(rng.choice([
+                '{"type":"user","promptId":"prompt-m%d","message":"%s' % (n, long),
+                '{"type":"assistant","message":{"usage":' + long,
+                '{"type":"user","promptId":"prompt-v%d","message":"%s"}' % (n, long)]))
+        else:
+            t.add_raw(json.dumps({"type": "system", "subtype": "turn_duration",
+                                  "durationMs": n}))
+    t.write(terminated=rng.random() < 0.8)
+    src = claude_source(t)
+    for synthetic in (False, True):
+        want = full_decode_answer(src, synthetic=synthetic)
+        got = last_request(src, synthetic=synthetic).request
+        assert (got is None) == (want is None)
+        if want is not None:
+            assert plain(got) == plain(want)
+    every = [r for r in records_back(src) if r.kind == "request"]
+    assert plains(records_back(src, kinds={"request"})) == plains(every)
+
+
 def test_last_request_says_how_a_read_that_found_none_ended(projects):
     t = ClaudeTranscript(projects)
     t.user()
