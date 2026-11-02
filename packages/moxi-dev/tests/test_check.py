@@ -220,7 +220,8 @@ def test_the_real_workspace_picks_by_the_same_rule():
         return [p.dir for p in check.pick(packages, [path])]
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
-    # cache depends on sessions, comms on cache through an extra, the launcher on comms.
+    # cache depends on sessions, comms on cache through an extra, the launcher on comms,
+    # and usage on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
         "sessions", "cache", "comms", "launcher", "usage"}
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
