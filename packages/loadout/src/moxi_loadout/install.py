@@ -53,6 +53,8 @@ INSTALL_WAIT = 60.0
 #: How long install waits for a `moxi install` or `moxi uninstall` that holds the core
 #: lock (it may be installing packages), in seconds.
 CORE_WAIT = 600.0
+#: How the note naming targets the would-commit check had no time for starts.
+SKIPPED = "the would-commit check skipped"
 
 
 @dataclass
@@ -119,7 +121,7 @@ def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
             skipped.append(v.line)
     if not skipped:
         return []
-    return [f"the would-commit check skipped {len(skipped)} target"
+    return [f"{SKIPPED} {len(skipped)} target"
             f"{'s' * (len(skipped) != 1)}: {skipped[0]}"]
 
 
@@ -464,4 +466,4 @@ def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
     ledger.write(data)
 
 
-__all__ = ["INSTALL_WAIT", "CORE_WAIT", "Outcome", "status", "install"]
+__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "install"]

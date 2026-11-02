@@ -25,6 +25,9 @@ SETTINGS = "settings.toml"
 CONFIG_CHECK = "moxi_loadout.settings:check_text"
 SETUP = None
 SEGMENT = None
+#: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
+#: global file, hook programs, the projects link, Codex's switches, modules gone.
+DOCTOR = "moxi_loadout.doctor:rows"
 #: The loadout folder is the user's data, often a git clone (0755), so it is not private
 #: and never rebuilt. The ledger records what loadout placed and wrote. Generated agent
 #: files are made again from their sources. Backups can hold MCP tokens, so they are
