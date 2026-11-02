@@ -19,8 +19,8 @@ at what usage's answers rest on:
   now (by its own sample rules, with at least 20 files) that the measure in effect has
   no row for, so it has no warn-at mark; when the measure is older than 14 days; or when
   its file cannot be read. The models and populations seen in the last 30 days that the
-  measure gives no row (too few files, headless sessions, short ones, or no input price)
-  are counted, not warned on: measuring again would not give them one.
+  measure gives no row (too few files, headless sessions, short ones, or no usable input
+  price) are counted, not warned on: measuring again would not give them one.
 * `marks`: deletes the warn-at mark's fired-mark files older than `marks.max_age_days`
   and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
   many it deleted and kept; `warn` when one could not be deleted, or when the worker
@@ -442,8 +442,9 @@ def _unrowed(others: list[tuple[str, str]], no_w: Mapping[str, str]) -> str:
             "files of 5 requests or more in its window, or headless main sessions)")
     if priceless:
         text += (f"; {_n(len(priceless), 'model')} of them "
-                 f"{'has' if len(priceless) == 1 else 'have'} no input price, so no write "
-                 f"cost: {', '.join(priceless[:MODELS_SHOWN])}")
+                 f"{'has' if len(priceless) == 1 else 'have'} no usable input price in the "
+                 "model table (unknown, missing or 0), so no write cost: "
+                 f"{', '.join(priceless[:MODELS_SHOWN])}")
     return text
 
 

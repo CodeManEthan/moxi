@@ -38,12 +38,12 @@ Per population (`thresholds` has the equations they feed):
   1-hour share of cache writes over the population's own requests that state both
   counts (0 when none does); with Anthropic's prices that is `2.0 x share + 1.25 x (1 -
   share)`. A model with one write price takes it; one with none takes 1.0 (writes bill
-  as input). A model the table gives no input price, or one of 0, has no `w` and so no
-  row, and `no_w` names it with the reason. So a sample of only Codex or only OpenCode
-  sessions gets its rows like any other. Each row keeps the `w` it was measured with and
-  its 1-hour share (`write_share_1h`, null when no request stated both counts); a mark
-  works `w` out again from that share and the table in effect, so a price change moves
-  it.
+  as input). A model the table doesn't know, gives no input price or gives one of 0
+  has no `w` and so no row, and `no_w` names it with the reason. So a sample of only
+  Codex or only OpenCode sessions gets its rows like any other. Each row keeps the `w`
+  it was measured with and its 1-hour share (`write_share_1h`, null when no request
+  stated both counts); a mark works `w` out again from that share and the table in
+  effect, so a price change moves it.
 * A subagent population with no row of its own carries the same model's `main` row,
   marked `fallback: main`.
 
@@ -362,8 +362,9 @@ class Run:
                 f"{len(self.doc['models'])} model{'s' if len(self.doc['models']) != 1 else ''}")
         no_w = self.doc.get("no_w") or {}
         if no_w:
-            line += (f"; {len(no_w)} model{'s' if len(no_w) != 1 else ''} without an "
-                     "input price in the model table, so no row")
+            line += (f"; {len(no_w)} model{'s' if len(no_w) != 1 else ''} without a "
+                     "usable input price in the model table (unknown, missing or 0), so "
+                     "no row")
         return line
 
 

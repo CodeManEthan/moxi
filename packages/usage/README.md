@@ -186,8 +186,9 @@ price over its input price. A model priced for both 5-minute and 1-hour writes (
 weighs the two by how much of that population's writes were for an hour; a model with one
 write price takes it, and one with none (OpenAI bills writes as input) takes 1.0. So
 Codex and OpenCode sessions get rows on their own, never Claude's `w`. A model the table
-gives no input price has no row, and the measure names it. The result goes to
-`STATE/usage/restart-point.json`. `moxi usage restart-point` prints
+doesn't know, or gives no input price or one of 0, has no row, and the measure names it
+with the reason. The result goes to `STATE/usage/restart-point.json`. `moxi usage
+restart-point` prints
 the rows and each warn-at mark (1x, 1.5x, 2x) in tokens. A mark the measure or the model
 table can't support (no row, no cache-read price) is shown as unavailable with the reason,
 never guessed. Turn on `restart_point.measure_weekly` to measure once a week on a timer
@@ -234,26 +235,27 @@ and it acts only when `ceiling.warn_tokens` and `ceiling.hard_tokens` are both a
     moxi config set usage ceiling.hard_tokens 300000
 
 Past `warn_tokens` of growth the agent is told once, in one added line
-(`ceiling.warning_text`). Past `hard_tokens` its tools are refused (`ceiling.deny_text`)
-until it returns, and this holds after a compaction. A refused agent may still call the
-return tools (`ceiling.return_tools`, `StructuredOutput`), write, edit and read `.md` files
-under `ceiling.handoff_roots`, run git's status, diff, add and commit forms in its working
-directory or under `ceiling.work_roots`, and run the commands whose words start with an
-entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`. Both root lists start
-empty, and no command beyond git is allowed until you add one. Markers live in
-`STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the agents past the
-ceiling. The guard covers Claude and Codex subagents; turns runs no guard on OpenCode.
+(`ceiling.warning_text`). Past `hard_tokens` the agent is latched: its tools are refused
+(`ceiling.deny_text`) until it returns, and this holds after a compaction. A latched agent
+may still call the return tools (`ceiling.return_tools`, `StructuredOutput`), write, edit
+and read `.md` files under `ceiling.handoff_roots`, run git's status, diff, add and commit
+forms in its working directory or under `ceiling.work_roots`, and run the commands whose
+words start with an entry of `ceiling.allow_commands`, such as `[["make", "handoff"]]`.
+Both root lists start empty, and no command beyond git is allowed until you add one.
+Markers live in `STATE/usage/ceiling/<session>/<agent>/`; `moxi usage marks` lists the
+agents past the ceiling. The guard covers Claude and Codex subagents; turns runs no guard
+on OpenCode.
 
 On Codex the same rules hold for its shell tool, and its file tool, `apply_patch`, is
 allowed when the patch only adds or updates `.md` files under `ceiling.handoff_roots`; a
 patch that deletes or moves a file, or that doesn't read as a patch, is refused. Codex
-has no tool that reads a file on its own, so a refused Codex agent can add a new hand-off
+has no tool that reads a file on its own, so a latched Codex agent can add a new hand-off
 file, but can update one only from what it still holds in its context. A patch's relative
 paths are read from the agent's working directory, as Codex applies them.
 
 One gap remains on Codex. Its shell tool can be told to run in another directory
 (`workdir`), but Codex doesn't pass that directory to the guard, so the guard judges a
-Codex shell call by the agent's working directory alone. A refused Codex agent can
+Codex shell call by the agent's working directory alone. A latched Codex agent can
 therefore run git's status, diff, add and commit forms in a repository outside its
 working directory and `ceiling.work_roots`. It can't push or run any other command that
 way. If a later Codex passes the directory, the guard holds it to the same rule.

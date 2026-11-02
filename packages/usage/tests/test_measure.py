@@ -361,4 +361,5 @@ def test_a_model_without_an_input_price_or_one_of_0_has_no_row_and_is_named():
     assert "no input price" in found["no_w"][CODEX_MODEL]
     assert "not above 0" in found["no_w"]["free-model-x"]
     run = measure.Run(found, "here")
-    assert "2 models without an input price" in run.line()
+    assert ("2 models without a usable input price in the model table (unknown, missing "
+            "or 0), so no row" in run.line())

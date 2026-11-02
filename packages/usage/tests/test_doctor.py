@@ -313,7 +313,7 @@ def test_restart_point_with_a_measurable_model_and_no_measure_warns_naming_it():
 
 
 def test_restart_point_does_not_warn_for_what_measuring_again_would_not_give_a_row():
-    """Thin, short and headless populations, and a model with no input price, are
+    """Thin, short and headless populations, and a model the table can't price, are
     counted in the detail; a measure would give them no row, so they are no warning."""
     measurable_sessions(19)                               # under 20 files
     measurable_sessions(20, entrypoint="sdk-cli", first=100)   # headless
@@ -327,12 +327,13 @@ def test_restart_point_does_not_warn_for_what_measuring_again_would_not_give_a_r
     found = row("restart_point")
     assert found.state == "ok", found.detail
     assert "every population the measure would give a row has one" in found.detail
-    # Enough interactive files, but the model table has no price for the model.
+    # Enough interactive files, but the model table doesn't know the model.
     measurable_sessions(1, first=19)
     run_pass()
     found = row("restart_point")
     assert found.state == "ok", found.detail
-    assert "1 model of them has no input price" in found.detail
+    assert ("1 model of them has no usable input price in the model table (unknown, "
+            "missing or 0), so no write cost" in found.detail)
     assert "claude-model-x" in found.detail
 
 
