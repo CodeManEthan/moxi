@@ -1100,10 +1100,13 @@ def test_the_reminder_for_one_director_debt():
     d = owed.Debt("4611686018427999600", LEAD_Q, "director", None, "open", T0, None)
     assert owed.reminder_text([d], T0 + 12 * 60) == (
         "comms: you are ending this turn without answering lead's msg "
-        "4611686018427999600 (directive, 12m ago). Answer it now with\n"
-        '  moxi comms reply 4611686018427999600 "the result, the blocker, or your question"\n'
-        "If you need to ask your director or a peer before you can answer, add --posture "
-        "once: that keeps it open. If it needs no answer, stop again.")
+        "4611686018427999600 (directive, 12m ago).\n"
+        "Answer it now: run `moxi comms reply 4611686018427999600` with your answer, in "
+        "your own words, as its text: what you did or found, or what stops you.\n"
+        "Leave out --posture: a plain answer asks nothing back. Ask something back only "
+        "when you can't answer without it: add --posture once to the message that asks, "
+        "and the one you owe stays open until you answer it. If it needs no answer, stop "
+        "again.")
 
 
 def test_the_reminder_for_one_operator_debt():
@@ -1111,10 +1114,11 @@ def test_the_reminder_for_one_operator_debt():
     d = owed.Debt("7", "operator", "operator", None, "open", T0, None)
     assert owed.reminder_text([d], T0 + 60) == (
         "comms: you are ending this turn without answering the operator's msg 7 "
-        "(directive, 1m ago). Answer it now with\n"
-        '  moxi comms reply 7 "the result, the blocker, or your question"\n'
-        "If you already answered the operator at the terminal, stop again. If it needs "
-        "no answer, stop again.")
+        "(directive, 1m ago).\n"
+        "Answer it now: run `moxi comms reply 7` with your answer, in your own words, as "
+        "its text: what you did or found, or what stops you.\n"
+        "Leave out --posture: a plain answer asks nothing back. If you already answered "
+        "the operator at the terminal, stop again. If it needs no answer, stop again.")
 
 
 def test_the_reminder_for_the_operator_drops_ask_back_too():
@@ -1122,7 +1126,7 @@ def test_the_reminder_for_the_operator_drops_ask_back_too():
     d = owed.Debt("7", "operator", "operator", None, "open", T0, None)
     text = owed.reminder_text([d], T0 + 60)
     assert "the operator's msg 7 (directive, 1m ago)" in text
-    assert "ask your director" not in text and owed.TERMINAL in text
+    assert "Ask something back" not in text and owed.TERMINAL in text
 
 
 def test_the_reminder_keeps_ask_back_when_any_debt_is_to_a_director():
@@ -1141,7 +1145,9 @@ def test_the_reminder_lists_three_oldest_first_and_counts_the_rest():
     assert lines[0] == "comms: you are ending this turn without answering:"
     assert [line.split()[2] for line in lines[1:4]] == ["11", "12", "13"]
     assert lines[4] == "  and 2 more"
-    assert lines[6] == '  moxi comms reply <id> "the result, the blocker, or your question"'
+    assert lines[5] == ("Answer each now: run `moxi comms reply <id>` with your answer, in "
+                        "your own words, as its text: what you did or found, or what stops "
+                        "you.")
 
 
 def test_the_tools_form_of_the_reminder_names_the_reply_tool_then_the_cli():
@@ -1149,12 +1155,14 @@ def test_the_tools_form_of_the_reminder_names_the_reply_tool_then_the_cli():
     d = owed.Debt("8", LEAD_Q, "director", None, "open", T0, None)
     assert owed.reminder_text([d], T0 + 60, context.TOOLS) == (
         "comms: you are ending this turn without answering lead's msg 8 (directive, 1m "
-        "ago). Answer it now with\n"
-        '  the reply tool: message_id 8, text "the result, the blocker, or your question"\n'
-        "If you need to ask your director or a peer before you can answer, give `reply` "
-        "the posture `once`: that keeps it open. If the comms tools are missing, run "
-        '`moxi comms reply 8 "the result, the blocker, or your question"` instead. If it '
-        "needs no answer, stop again.")
+        "ago).\n"
+        "Answer it now: call the reply tool with message_id 8 and your answer, in your own "
+        "words, as its text: what you did or found, or what stops you.\n"
+        "Leave posture out: a plain answer asks nothing back. Ask something back only when "
+        "you can't answer without it: set posture `once` on the message that asks, and the "
+        "one you owe stays open until you answer it. If the comms tools are missing, run "
+        "`moxi comms reply 8` with your answer as its text instead. If it needs no answer, "
+        "stop again.")
 
 
 def test_a_shell_that_cant_reach_comms_is_told_no_command():
@@ -1166,8 +1174,30 @@ def test_a_shell_that_cant_reach_comms_is_told_no_command():
         assert "moxi comms" not in text and "--posture" not in text
         assert "the reply tool" in text and owed.TOOLS_ASK_BACK in text
     lines = owed.reminder_text(many, T0 + 60, context.TOOLS).splitlines()
-    assert lines[-2] == '  the reply tool: its message_id, text "the result, the blocker, or your question"'
-    assert "`moxi comms reply <id> " in lines[-1]
+    assert lines[-2] == ("Answer each now: call the reply tool with its message_id and your "
+                         "answer, in your own words, as its text: what you did or found, or "
+                         "what stops you.")
+    assert "`moxi comms reply <id>` with your answer" in lines[-1]
+
+
+def test_the_reminder_gives_no_text_to_send_and_its_plain_answer_asks_nothing_back():
+    """No form hands the model sample reply text it could send as its answer: no quoted
+    text, and no posture but the ask-back's `once`, named as the exception after the plain
+    answer that leaves the posture out."""
+    from moxi_comms import context, owed
+    peer = owed.Debt("8", "l3b", "peer", None, "once", T0, None)
+    boss = owed.Debt("9", LEAD_Q, "director", None, "once", T0, None)
+    for form in (None, context.TOOLS, context.TOOLS_ONLY):
+        for debts in ([peer], [peer, boss]):
+            text = owed.reminder_text(debts, T0 + 60, form)
+            assert '"' not in text and "<your" not in text
+            assert "the result, the blocker" not in text
+            plain = owed.TOOLS_PLAIN if form else owed.PLAIN
+            ask = owed.TOOLS_ASK_BACK if form else owed.ASK_BACK
+            assert text.index(plain) < text.index(ask)
+            assert ask.startswith("Ask something back only when")
+            assert text.count("once") == text.count("[reply-once]") + 1
+            assert "none" not in text
 
 
 def test_the_reminder_never_asks_for_progress():

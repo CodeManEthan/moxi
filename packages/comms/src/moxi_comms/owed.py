@@ -459,25 +459,36 @@ def _named(d: Debt, now: float) -> str:
     return f"{d.author}'s msg {d.message_id} (directive, {_age(now - d.at)})"
 
 
-ANSWER_HINT = '"the result, the blocker, or your question"'
-ASK_BACK = ("If you need to ask your director or a peer before you can answer, add "
-            "--posture once: that keeps it open.")
+#: What the answer holds, said as a description: the reminder gives no sample text, since a
+#: model can send a sample as its reply.
+ANSWER_WORDS = ("your answer, in your own words, as its text: what you did or found, or "
+                "what stops you.")
+#: The plain answer asks nothing back: its posture is left out, which closes an ask.
+PLAIN = "Leave out --posture: a plain answer asks nothing back."
+#: The exception: asking back keeps the owed message open, and owes the other side.
+ASK_BACK = ("Ask something back only when you can't answer without it: add --posture "
+            "once to the message that asks, and the one you owe stays open until you "
+            "answer it.")
 TERMINAL = "If you already answered the operator at the terminal, stop again."
 TAIL = "If it needs no answer, stop again."
-#: The tools form's ask-back sentence: the `reply` tool's `posture`, not a flag.
-TOOLS_ASK_BACK = ("If you need to ask your director or a peer before you can answer, give "
-                  "`reply` the posture `once`: that keeps it open.")
+#: The tools form's sentences: the `reply` tool's `posture` field, not a flag.
+TOOLS_PLAIN = "Leave posture out: a plain answer asks nothing back."
+TOOLS_ASK_BACK = ("Ask something back only when you can't answer without it: set posture "
+                  "`once` on the message that asks, and the one you owe stays open until "
+                  "you answer it.")
 #: The tools form's CLI fallback, for a session whose shell can reach comms.
-TOOLS_FALLBACK = "If the comms tools are missing, run `moxi comms reply {id} {hint}` instead."
+TOOLS_FALLBACK = ("If the comms tools are missing, run `moxi comms reply {id}` with your "
+                  "answer as its text instead.")
 
 
 def reminder_text(debts, now: float, form: str | None = None) -> str:
     """The block's reason.
 
-    Up to three owed messages, oldest first, then "and <k> more". The ask-back sentence
-    stays when any listed debt is a director's or a peer's (for an operator-only block it
-    has no work to do); a debt to the operator adds the terminal sentence. It never asks
-    for progress.
+    Up to three owed messages, oldest first, then "and <k> more". It says what the answer
+    holds and gives no sample text to send, and its plain answer leaves the posture out,
+    so it asks nothing back. The ask-back sentence, the exception, stays when any listed
+    debt is a director's or a peer's (for an operator-only block it has no work to do); a
+    debt to the operator adds the terminal sentence. It never asks for progress.
 
     `form` is the session's form of layer one (`context.layer_one_form`). The CLI form
     (None) names `moxi comms reply`. A tools form names the `reply` tool and its
@@ -491,27 +502,27 @@ def reminder_text(debts, now: float, form: str | None = None) -> str:
     tools = form is not None
     if len(debts) == 1:
         d = debts[0]
-        lines = [f"comms: you are ending this turn without answering {_named(d, now)}. "
-                 "Answer it now with"]
-        lines.append(f"  the reply tool: message_id {d.message_id}, text {ANSWER_HINT}"
-                     if tools else f"  moxi comms reply {d.message_id} {ANSWER_HINT}")
+        lines = [f"comms: you are ending this turn without answering {_named(d, now)}."]
+        how = (f"call the reply tool with message_id {d.message_id} and" if tools
+               else f"run `moxi comms reply {d.message_id}` with")
+        lines.append(f"Answer it now: {how} {ANSWER_WORDS}")
         one = d.message_id
     else:
         lines = ["comms: you are ending this turn without answering:"]
         lines += [f"  {_named(d, now)}" for d in shown]
         if len(debts) > len(shown):
             lines.append(f"  and {len(debts) - len(shown)} more")
-        lines += (["Answer each now with", f"  the reply tool: its message_id, text {ANSWER_HINT}"]
-                  if tools else
-                  ["Answer each now with", f"  moxi comms reply <id> {ANSWER_HINT}"])
+        how = ("call the reply tool with its message_id and" if tools
+               else "run `moxi comms reply <id>` with")
+        lines.append(f"Answer each now: {how} {ANSWER_WORDS}")
         one = "<id>"
-    tail = []
+    tail = [TOOLS_PLAIN if tools else PLAIN]
     if any(d.branch in (BRANCH_DIRECTOR, BRANCH_PEER) for d in debts):
         tail.append(TOOLS_ASK_BACK if tools else ASK_BACK)
     if any(d.branch == BRANCH_OPERATOR for d in debts):
         tail.append(TERMINAL)
     if tools and form != TOOLS_ONLY:
-        tail.append(TOOLS_FALLBACK.format(id=one, hint=ANSWER_HINT))
+        tail.append(TOOLS_FALLBACK.format(id=one))
     tail.append(TAIL)
     return "\n".join(lines + [" ".join(tail)])
 

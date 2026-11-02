@@ -1061,8 +1061,7 @@ def test_the_reminders_peer_form_alone_and_in_a_list():
     ledger = peer_ledger()
     text = owed.reminder_text(list(ledger.debts.values()), NOW)
     assert text.splitlines()[0] == (f"comms: you are ending this turn without answering "
-                                    f"{R}'s msg 1000 ([reply-once], 5m ago). Answer it "
-                                    "now with")
+                                    f"{R}'s msg 1000 ([reply-once], 5m ago).")
     assert owed.ASK_BACK in text
     ledger.open(payload("operator", tier="operator", mid="1002"), (), "s", NOW)
     listed = owed.reminder_text(list(ledger.debts.values()), NOW)
