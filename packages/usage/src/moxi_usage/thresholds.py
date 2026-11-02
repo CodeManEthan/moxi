@@ -5,9 +5,9 @@ its settled context; carrying on costs a cache read of the whole context on ever
 and the context grows each call. All costs are in units of the base input price, so no
 dollar figure enters anywhere. For one population's measured parameters `S` (the settled
 context), `P` (the prefix a fresh session reads from cache), `g` (the growth per
-call) and `w` (the model's own cache-write price over its input price, measured with the
-row), and the model's read multiplier `r` (its cache-read price over its input price,
-from the model table):
+call), the model's write multiplier `w` (its own cache-write price over its input price,
+weighed by the row's measured 1-hour share of writes) and its read multiplier `r` (its
+cache-read price over its input price), both from the model table:
 
     W       = w(S - P) + rP                 what one restart costs
     N*      = sqrt(2W / (rg))               the restart interval, in calls
@@ -150,6 +150,19 @@ def write_multiplier(facts: Any, share_1h: float | None = None
     if five is not None or hour is not None:
         return (five if five is not None else hour) / float(base), None
     return 1.0, None
+
+
+def measured_write_multiplier(model: Any, row: Mapping[str, Any], *, table: Any
+                              ) -> tuple[float | None, str | None]:
+    """w for a measured row of `model`, from the model table `table`, and None; or None
+    and why there is none. The measure stores each row's 1-hour share of cache writes
+    (`write_share_1h`, null when no request stated it), and `w` is worked out from it
+    with the table given, so a price change moves `w` as it moves `r`. A row from before
+    the share was stored has only its `w`, and that is used as it is."""
+    if "write_share_1h" not in row:
+        w = _number(row.get("w"))
+        return (w, None) if w is not None else (None, None)
+    return write_multiplier(table.lookup(model), _number(row.get("write_share_1h")))
 
 
 def restart_cost(S: float, P: float, w: float, r: float) -> float:
@@ -325,6 +338,7 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
 
     `doc` is the measure's document (None for no measure); left out, it is the measure
     in effect (`params`). `table` is the model table; left out, the table in effect.
+    Both `r` and `w` come from that table (`w` with the row's measured 1-hour share).
     A config or model table that cannot be read gives `unavailable` with why."""
     if mark not in MARK_MULTIPLES:
         return Threshold(None, mark, population, None, f"{mark!r} is not a mark")
@@ -350,7 +364,11 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
                          f"the restart-point measure has no {population} row for {base}")
     fallback = row.get("fallback") if row.get("fallback") == FALLBACK_MAIN else None
     try:
-        r, why = read_multiplier(base, table=table, env=env)
+        if table is None:
+            from .models import table as current
+
+            table = current(env)
+        r, why = read_multiplier(base, table=table)
     except Exception as exc:                 # a config or table that cannot be read
         from moxi.config import ConfigError
 
@@ -360,8 +378,10 @@ def threshold(model: Any, mark: str, population: str = MAIN, *, doc: Any = _UNSE
                          f"the model table cannot be read: {exc}", fallback=fallback)
     if r is None:
         return Threshold(base, mark, population, None, why, fallback=fallback)
-    S, P, g, w = (_number(row.get("S")), _number(row.get("P")), _number(row.get("g")),
-                  _number(row.get("w")))
+    w, why = measured_write_multiplier(base, row, table=table)
+    if why is not None:
+        return Threshold(base, mark, population, None, why, fallback=fallback)
+    S, P, g = _number(row.get("S")), _number(row.get("P")), _number(row.get("g"))
     if S is None or P is None or g is None or w is None:
         return Threshold(base, mark, population, None,
                          f"the measured {population} row for {base} is incomplete",
@@ -388,6 +408,7 @@ def all_marks(model: Any, population: str = MAIN, *, doc: Any = _UNSET, table: A
 
 __all__ = ["MARK_MULTIPLES", "MARKS", "OFF", "MAIN", "SUBAGENT", "POPULATIONS",
            "FALLBACK_MAIN", "PARAMS_FILE",
-           "PARAMS_SCHEMA", "ParamsError", "Threshold", "write_multiplier", "restart_cost",
+           "PARAMS_SCHEMA", "ParamsError", "Threshold", "write_multiplier",
+           "measured_write_multiplier", "restart_cost",
            "optimum_calls", "mark_exact", "base_model", "population_of", "params_path",
            "load_params", "stamp", "params", "read_multiplier", "threshold", "all_marks"]

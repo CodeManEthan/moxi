@@ -40,7 +40,10 @@ Per population (`thresholds` has the equations they feed):
   share)`. A model with one write price takes it; one with none takes 1.0 (writes bill
   as input). A model the table gives no input price, or one of 0, has no `w` and so no
   row, and `no_w` names it with the reason. So a sample of only Codex or only OpenCode
-  sessions gets its rows like any other.
+  sessions gets its rows like any other. Each row keeps the `w` it was measured with and
+  its 1-hour share (`write_share_1h`, null when no request stated both counts); a mark
+  works `w` out again from that share and the table in effect, so a price change moves
+  it.
 * A subagent population with no row of its own carries the same model's `main` row,
   marked `fallback: main`.
 
@@ -234,8 +237,7 @@ def document(files: Iterable[Sampled], *, now: float, rules: Rules = Rules(),
         row = _row(group)
         if row is not None:
             row["w"] = _round(w)
-            if share is not None:
-                row["write_share_1h"] = _round(share)
+            row["write_share_1h"] = None if share is None else _round(share)
             models.setdefault(model, {})[population] = row
     for rows in models.values():
         if SUBAGENT not in rows and MAIN in rows:
@@ -280,7 +282,8 @@ class RestartPoint:
 
     `doc` is the measure's document, None when there is none or it cannot be read, and
     then `problem` says which. `rows` holds one `(model, population, row, marks)` per
-    measured population, `row` the measured parameters and `marks` each mark's
+    measured population, `row` the measured parameters (its `w` the one the table in
+    effect gives, None when it gives none) and `marks` each mark's
     `thresholds.Threshold`, a fallback subagent row among them."""
 
     path: str
@@ -331,7 +334,10 @@ def restart_point(*, env: Mapping[str, str] | None = None, table: Any = None) ->
             if not isinstance(row, Mapping):
                 continue
             marks = thresholds.all_marks(model, population, doc=doc, table=table)
-            rows.append((model, population, dict(row), marks))
+            shown = dict(row)
+            w, _ = thresholds.measured_write_multiplier(model, row, table=table)
+            shown["w"] = None if w is None else _round(w)
+            rows.append((model, population, shown, marks))
     return RestartPoint(str(path), doc, None, tuple(rows))
 
 

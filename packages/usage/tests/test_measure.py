@@ -307,7 +307,7 @@ def test_a_codex_rollout_from_the_tui_joins_main_with_its_own_w():
     found = measured()
     rows = found["models"][CODEX_MODEL]
     assert rows["main"]["n"] == 20 and rows["main"]["g"] == STEP
-    assert rows["main"]["w"] == 1.0 and "write_share_1h" not in rows["main"]
+    assert rows["main"]["w"] == 1.0 and rows["main"]["write_share_1h"] is None
     assert found["models"][MODEL]["main"]["w"] == 2.0
 
 

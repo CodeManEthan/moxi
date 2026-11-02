@@ -272,3 +272,48 @@ def test_importing_the_module_loads_nothing_heavy():
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True).stdout.split()
     assert out == ["moxi_usage.thresholds"]
+
+
+OPUS_PRICES = ('[[model]]\nid = "claude-opus-5"\ninput = 10.0\noutput = 50.0\n'
+               'cache_read = 1.0\ncache_write_5m = 12.5\ncache_write_1h = {hour}\n')
+
+
+def test_a_write_price_change_after_the_measure_moves_the_mark():
+    # the row keeps its 1-hour share, and w comes from the table in effect, as r does
+    params = copy.deepcopy(PARAMS)
+    params["models"]["claude-opus-5"]["main"]["write_share_1h"] = 1.0
+    write_params(params)
+    write_config(OPUS_PRICES.format(hour=20.0))                 # w 2.0, as measured
+    first = thresholds.threshold("claude-opus-5", "1x")
+    assert first.tokens == EXACT["claude-opus-5"]["1x"]
+    write_config(OPUS_PRICES.format(hour=30.0))                 # w 3.0
+    again = thresholds.threshold("claude-opus-5", "1x")
+    three = copy.deepcopy(PARAMS)
+    three["models"]["claude-opus-5"]["main"]["w"] = 3.0
+    assert again.tokens > first.tokens
+    assert again.tokens == thresholds.threshold("claude-opus-5", "1x", doc=three,
+                                                table=table()).tokens
+    from moxi_usage import measure
+
+    [shown] = [row for model, _, row, _ in measure.restart_point().rows
+               if model == "claude-opus-5"]
+    assert shown["w"] == 3.0 and shown["write_share_1h"] == 1.0
+
+
+def test_a_row_whose_share_is_null_takes_the_five_minute_price():
+    params = copy.deepcopy(PARAMS)
+    params["models"]["claude-opus-5"]["main"]["write_share_1h"] = None
+    write_config(OPUS_PRICES.format(hour=20.0))
+    found = thresholds.threshold("claude-opus-5", "1x", doc=params)
+    five = copy.deepcopy(PARAMS)
+    five["models"]["claude-opus-5"]["main"]["w"] = 1.25
+    assert found.tokens == thresholds.threshold("claude-opus-5", "1x", doc=five,
+                                                table=table()).tokens
+
+
+def test_a_measure_from_before_the_share_was_stored_keeps_its_w():
+    write_params()                                              # rows with w alone
+    write_config(OPUS_PRICES.format(hour=30.0))
+    found = thresholds.threshold("claude-opus-5", "1x")
+    assert found.tokens == EXACT["claude-opus-5"]["1x"]
+
