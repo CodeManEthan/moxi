@@ -15,9 +15,12 @@ at what usage's answers rest on:
   `warn` when the last pass could not read it, so a rollout imported from elsewhere may
   be counted twice, or when rollouts carrying only the desktop app's `originator` mark
   were counted, naming how many.
-* `restart_point`: `warn` naming each model and population the index saw in the last 30
-  days that the restart-point measure has no row for (so it has no warn-at mark), when
-  the measure is older than 14 days, or when its file cannot be read.
+* `restart_point`: `warn` naming each model and population the measure would give a row
+  now (by its own sample rules, with at least 20 files) that the measure in effect has
+  no row for, so it has no warn-at mark; when the measure is older than 14 days; or when
+  its file cannot be read. The models and populations seen in the last 30 days that the
+  measure gives no row (too few files, headless sessions, short ones, or no input price)
+  are counted, not warned on: measuring again would not give them one.
 * `marks`: deletes the warn-at mark's fired-mark files older than `marks.max_age_days`
   and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
   many it deleted and kept; `warn` when one could not be deleted, or when the worker
@@ -345,11 +348,34 @@ def seen_populations(found: IndexOpen, *, now: float) -> list[tuple[str, str]]:
     return sorted(seen)
 
 
+def measurable(found: IndexOpen, *, now: float, rules: Any, table: Any
+               ) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """What a measure run now would give: each `(model, population)` it would give a row
+    of its own (by the measure's own sample rules, `rules`), and the models it would
+    leave out for want of an input price, with why. Empty when the index can't be read
+    (the index row says so)."""
+    import sqlite3
+
+    from . import measure
+
+    if found.conn is None:
+        return [], {}
+    try:
+        doc = measure.measure(found.conn, now=now, rules=rules, table=table)
+    except sqlite3.Error:
+        return [], {}
+    rows = sorted((model, population) for model, populations in doc["models"].items()
+                  for population, row in populations.items() if "fallback" not in row)
+    return rows, dict(doc.get("no_w") or {})
+
+
 def restart_point_row(found: IndexOpen, *, now: float,
                       env: Mapping[str, str] | None = None) -> Row:
-    """`warn` naming the models seen in the last `SEEN_DAYS` days with no measured row,
-    and when the measure is older than `MEASURE_STALE_DAYS` days or cannot be read."""
-    from . import measure, thresholds
+    """`warn` naming the populations a measure run now would give a row that the measure
+    in effect has none for, and when the measure is older than `MEASURE_STALE_DAYS` days
+    or cannot be read. The other models and populations seen in the last `SEEN_DAYS`
+    days are counted in the detail: measuring again would not give them a row."""
+    from . import measure, models, settings, thresholds
 
     path = thresholds.params_path(env)
     try:
@@ -358,15 +384,30 @@ def restart_point_row(found: IndexOpen, *, now: float,
         return Row(MODULE, "restart_point", "warn",
                    f"{exc}; no warn-at mark is available until it is measured again",
                    _MEASURE)
+    try:
+        rules = measure.Rules.from_settings(settings.current(env))
+        table = models.table(env)
+    except ConfigError as exc:
+        return Row(MODULE, "restart_point", "warn",
+                   f"usage's config cannot be read, so the measure's rules are unknown: "
+                   f"{exc}", _CONFIG)
+    would, no_w = measurable(found, now=now, rules=rules, table=table)
     seen = seen_populations(found, now=now)
+    measured = doc.get("models") if doc is not None else None
+    measured = measured if isinstance(measured, Mapping) else {}
+
+    def has_row(model: str, population: str) -> bool:
+        return isinstance((measured.get(model) or {}).get(population), Mapping)
+
+    others = [pair for pair in seen if pair not in would and not has_row(*pair)]
+    unrowed = _unrowed(others, no_w)
     if doc is None:
-        if not seen:
-            return Row(MODULE, "restart_point", "ok",
-                       f"not measured yet, and the token index saw no model in the last "
-                       f"{_days(SEEN_DAYS)}")
+        if not would:
+            said = "not measured yet, and nothing in the token index would give a row"
+            return Row(MODULE, "restart_point", "ok", said + unrowed)
         return Row(MODULE, "restart_point", "warn",
                    "the restart point has not been measured, so no warn-at mark is "
-                   f"available for {_named(seen)}", _MEASURE)
+                   f"available for {_named(would)}" + unrowed, _MEASURE)
     problems = []
     when = measure.measured_epoch(doc)
     if when is None:
@@ -377,18 +418,33 @@ def restart_point_row(found: IndexOpen, *, now: float,
         said = f"measured {_utc(when)}, {_days(days)} ago"
         if days > MEASURE_STALE_DAYS:
             problems.append(f"{said}, past {MEASURE_STALE_DAYS} days")
-    models = doc.get("models") if isinstance(doc.get("models"), Mapping) else {}
-    missing = [(model, population) for model, population in seen
-               if not isinstance((models.get(model) or {}).get(population), Mapping)]
+    missing = [pair for pair in would if not has_row(*pair)]
     if missing:
         problems.append(f"no measured row, so no warn-at mark, for {_named(missing)}")
     if problems:
-        return Row(MODULE, "restart_point", "warn", "; ".join(problems), _MEASURE)
-    rows = sum(1 for populations in models.values() for row in populations.values()
+        return Row(MODULE, "restart_point", "warn", "; ".join(problems) + unrowed,
+                   _MEASURE)
+    rows = sum(1 for populations in measured.values() if isinstance(populations, Mapping)
+               for row in populations.values()
                if isinstance(row, Mapping) and "fallback" not in row)
     return Row(MODULE, "restart_point", "ok",
-               f"{said}: {_n(rows, 'population row')} for {_n(len(models), 'model')}; "
-               f"every model seen in the last {_days(SEEN_DAYS)} has one")
+               f"{said}: {_n(rows, 'population row')} for {_n(len(measured), 'model')}; "
+               "every population the measure would give a row has one" + unrowed)
+
+
+def _unrowed(others: list[tuple[str, str]], no_w: Mapping[str, str]) -> str:
+    """The detail's count of what was seen and gets no row, or ''."""
+    if not others:
+        return ""
+    priceless = sorted({model for model, _ in others if model in no_w})
+    text = (f". {_n(len(others), 'model and population', 'models and populations')} seen "
+            f"in the last {_days(SEEN_DAYS)} get no row by the measure's rules (under 20 "
+            "files of 5 requests or more in its window, or headless main sessions)")
+    if priceless:
+        text += (f"; {_n(len(priceless), 'model')} of them "
+                 f"{'has' if len(priceless) == 1 else 'have'} no input price, so no write "
+                 f"cost: {', '.join(priceless[:MODELS_SHOWN])}")
+    return text
 
 
 def _named(pairs: list[tuple[str, str]]) -> str:
@@ -543,5 +599,5 @@ def _utc(epoch: float) -> str:
 
 
 __all__ = ["rows", "model_rows", "snapshot_row", "unpriced_row", "index_row",
-           "imports_row", "restart_point_row", "seen_populations", "marks_row", "ceiling_unset",
+           "imports_row", "restart_point_row", "seen_populations", "measurable", "marks_row", "ceiling_unset",
            "ceiling_on_in_turns", "turns_row", "open_index", "IndexOpen", "MODULE"]

@@ -285,12 +285,55 @@ def test_restart_point_with_nothing_measured_or_seen_is_ok():
     assert found.state == "ok" and "not measured yet" in found.detail
 
 
-def test_restart_point_with_a_model_seen_and_no_measure_warns_naming_it():
-    transcript(sessions.root("claude"))
+PRICED = '[[model]]\nid = "claude-model-x"\ninput = 4.0\noutput = 20.0\n'
+
+
+def measurable_sessions(count=20, *, entrypoint="cli", first=0):
+    """`count` Claude sessions of 6 requests each, enough for the measure's rules when
+    `count` is 20 or more and they are interactive."""
+    for n in range(first, first + count):
+        t = ClaudeTranscript(Path(sessions.root("claude")),
+                             session_id=f"0190b000-0000-7000-8000-{n:012d}",
+                             entrypoint=entrypoint, start=NOW - 3600)
+        for k in range(1, 7):
+            t.user("go")
+            t.assistant("ok", request_id=f"req_{n}_{k}",
+                        usage=usage(input=2, cache_read=1000 * k, cache_write=1000,
+                                    output=11))
+        t.write()
+
+
+def test_restart_point_with_a_measurable_model_and_no_measure_warns_naming_it():
+    write_config(PRICED)
+    measurable_sessions()
     run_pass()
     found = row("restart_point")
     assert found.state == "warn" and found.fix == "moxi usage restart-point --measure"
     assert "has not been measured" in found.detail and "claude-model-x (main)" in found.detail
+
+
+def test_restart_point_does_not_warn_for_what_measuring_again_would_not_give_a_row():
+    """Thin, short and headless populations, and a model with no input price, are
+    counted in the detail; a measure would give them no row, so they are no warning."""
+    measurable_sessions(19)                               # under 20 files
+    measurable_sessions(20, entrypoint="sdk-cli", first=100)   # headless
+    transcript(sessions.root("claude"), "0190b000-0000-7000-8000-0000000000f1")  # short
+    run_pass()
+    found = row("restart_point")
+    assert found.state == "ok", found.detail
+    assert "not measured yet, and nothing in the token index would give a row" in found.detail
+    assert "1 model and population seen in the last 30 days get no row" in found.detail
+    write_measure(models={})
+    found = row("restart_point")
+    assert found.state == "ok", found.detail
+    assert "every population the measure would give a row has one" in found.detail
+    # Enough interactive files, but the model table has no price for the model.
+    measurable_sessions(1, first=19)
+    run_pass()
+    found = row("restart_point")
+    assert found.state == "ok", found.detail
+    assert "1 model of them has no input price" in found.detail
+    assert "claude-model-x" in found.detail
 
 
 def test_restart_point_with_a_row_for_every_model_seen_is_ok():
@@ -303,7 +346,8 @@ def test_restart_point_with_a_row_for_every_model_seen_is_ok():
 
 
 def test_restart_point_warns_on_a_model_with_no_row_and_on_an_old_measure():
-    transcript(sessions.root("claude"))
+    write_config(PRICED)
+    measurable_sessions()
     run_pass()
     write_measure(measured_at="2026-10-01T00:00:00+00:00", models={})
     found = row("restart_point")

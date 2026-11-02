@@ -313,9 +313,12 @@ snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
   (each lane's reasons) or a last pass more than 7 days old.
 - `codex.imports`: a warning when the last pass couldn't read Codex's imports file, or
   counted rollouts whose only import mark is the desktop app's originator.
-- `restart_point`: a warning naming each model and population seen in the last 30 days
-  with no measured row (so no warn-at mark), or when the measure is over 14 days old; the
-  fix is `moxi usage restart-point --measure`.
+- `restart_point`: a warning naming each model and population that measuring now would
+  give a row (20 files or more by the measure's own rules) but the measure in effect has
+  none for (so no warn-at mark), or when the measure is over 14 days old; the fix is
+  `moxi usage restart-point --measure`. Models and populations seen in the last 30 days
+  that the measure gives no row (too few files, headless or short sessions, or no input
+  price) are counted, not warned on.
 - `marks`: deletes fired-mark files older than `marks.max_age_days` (7) and the worker
   ceiling's agent markers older than `ceiling.max_age_days` (7), and counts them; a
   warning when the worker ceiling is on but a threshold is 0, so it allows every call.
