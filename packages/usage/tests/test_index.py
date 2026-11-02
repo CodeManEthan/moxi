@@ -877,12 +877,36 @@ def test_status_shows_each_lane_its_holds_duplicates_and_imports(readings, roots
             total["excluded"]) == (4, 5, 2, 1, 1)
     assert [row["lane"] for row in total["held_rows"]] == ["archive:two"]
     assert total["held_rows"][0]["reason"] == reason
+    assert total["duplicate_files"] == 1
+    [dup] = total["duplicate_rows"]
+    assert (dup["lane"], dup["of_lane"], dup["requests"]) == ("archive:two", "archive:one", 2)
+    assert dup["path"].startswith(str(two)) and dup["of_path"].startswith(str(one))
     assert total["index_version"] == store.INDEX_VERSION
     assert total["last_pass"] == NOW == found.index["last_pass"]
     assert [row["lane"] for row in api.report("status", harness="codex",
                                               fresh=False).rows] == ["codex"]
     with pytest.raises(reports.ReportError, match="takes no since"):
         api.report("status", since="2026-10-01", fresh=False)
+
+
+def test_the_index_verb_names_a_file_that_wholly_repeats_another(roots, capsys):
+    first = transcript(roots["claude"], SESSION_A).write()
+    again = transcript(roots["claude"], SESSION_B).write()      # the same two requests
+    own = ClaudeTranscript(roots["claude"], session_id=THREAD_A)
+    own.user("go")
+    own.assistant("one", usage=usage(output=11))                # repeats one request
+    own.assistant("own", usage=usage(output=5), request_id="req_own", message_id="msg_own")
+    own.write()
+    assert cli.main(["index"]) == 0
+    out = capsys.readouterr().out
+    assert "index: 3 files, 6 requests, 3 duplicates" in out
+    [line] = [line for line in out.splitlines() if "duplicate:" in line]
+    assert line == f"  duplicate: claude {again} repeats claude {first}"
+    assert cli.main(["index", "--json"]) == 0
+    total = index.json.loads(capsys.readouterr().out)["status"]["total"]
+    assert total["duplicate_files"] == 1
+    assert [(d["path"], d["of_path"], d["requests"]) for d in total["duplicate_rows"]] == [
+        (str(again), str(first), 2)]
 
 
 def test_status_with_no_index_yet_is_empty_and_says_so():

@@ -266,7 +266,9 @@ shipped table rules again. A fetch that fails exits 75.
 
 `index` runs a pass, prints what it did in one line, then the index's status: each lane's
 state, its files, the requests it holds and how many are copies counted once, the rollouts
-left out as imported, the rows held and why, the last pass and the index's schema version
+left out as imported, the rows held and why, each file whose every request another file
+holds (named as a duplicate of the file that holds its first request), the last pass and
+the index's schema version
 (also `api.report("status")`). Only one pass writes at a time: another waits
 up to `index.wait_seconds` (30) and then exits 75; `--no-wait` exits 75 at once.
 `--rebuild` reads every source again from its start, in `index.workers` processes (0 picks

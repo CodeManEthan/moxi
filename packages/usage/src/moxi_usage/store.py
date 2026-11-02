@@ -584,6 +584,39 @@ def _settle(conn: sqlite3.Connection, *, scoped: bool) -> int:
     return lost + gained
 
 
+def duplicates(conn: sqlite3.Connection, *, lanes: Iterable[str] | None = None,
+               limit: int | None = None) -> list[dict[str, Any]]:
+    """The files whose every request another file claims, each named as a duplicate of
+    the file that claims its first request (lowest `seq`, then key), in lane and path
+    order. A file left out as imported is not one. `lanes` keeps the duplicates in those
+    lanes; `limit` keeps the first so many. Each is a dict of `lane`, `path`, `part`,
+    `session_id`, `requests` (its count) and `of_lane`, `of_path`, `of_part`."""
+    where, args = "", []
+    if lanes is not None:
+        lanes = list(lanes)
+        if not lanes:
+            return []
+        where = f" AND f.lane IN ({','.join('?' * len(lanes))})"
+        args.extend(lanes)
+    sql = (
+        "SELECT f.lane, f.path, f.part, f.session_id,"
+        " (SELECT count(*) FROM requests c WHERE c.file_id = f.id) AS requests,"
+        " w.lane AS of_lane, w.path AS of_path, w.part AS of_part"
+        " FROM files f"
+        " JOIN requests rw ON rw.key = (SELECT r.key FROM requests r WHERE r.file_id = f.id"
+        "                               ORDER BY r.seq, r.key LIMIT 1) AND rw.won = 1"
+        " JOIN files w ON w.id = rw.file_id"
+        " WHERE f.excluded IS NULL AND w.id != f.id"
+        " AND NOT EXISTS (SELECT 1 FROM requests x WHERE x.file_id = f.id AND x.won = 1)"
+        + where + " ORDER BY f.lane, f.path, f.part")
+    if limit is not None:
+        sql += " LIMIT ?"
+        args.append(limit)
+    return [dict(zip(("lane", "path", "part", "session_id", "requests", "of_lane",
+                      "of_path", "of_part"), row))
+            for row in conn.execute(sql, args)]
+
+
 def check(conn: sqlite3.Connection) -> list[int]:
     """The keys whose stored claim differs from the `claimed` view, over the whole index,
     sorted; empty when they agree."""

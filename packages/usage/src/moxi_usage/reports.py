@@ -661,6 +661,8 @@ def projects(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
 
 #: How many held rows `status` names before it only counts them.
 HELD_SHOWN = 20
+#: How many duplicate files `status` names before it only counts them.
+DUPLICATES_SHOWN = 20
 #: `status`'s totals over its lanes.
 _STATUS_SUMS = ("files", "excluded", "held", "requests", "duplicates")
 
@@ -676,7 +678,10 @@ def status(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
     left out as imported), `held` and `held_reasons` (each reason's count), `requests`
     and `duplicates` (copies of a request another file holds, counted once). `total`
     sums those and adds `held_rows` (the first `HELD_SHOWN` held rows with their
-    reasons), `last_pass` (epoch seconds, or None) and `index_version`.
+    reasons), `duplicate_files` (how many files have every request claimed by another
+    file) and `duplicate_rows` (the first `DUPLICATES_SHOWN` of them, each naming the
+    file that claims its first request, from `store.duplicates`), `last_pass` (epoch
+    seconds, or None) and `index_version`.
 
     `harness` keeps one harness's lanes. The index has no range, project or model to
     filter, so `status` refuses those; `tz` and `table` are not used.
@@ -728,10 +733,13 @@ def status(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
             f"SELECT lane, path, part, held AS reason FROM files WHERE held IS NOT NULL"
             f" AND lane IN ({marks}) ORDER BY lane, path, part LIMIT ?",
             (*lanes, HELD_SHOWN))]
+    duplicate_files = store.duplicates(conn, lanes=lanes) if lanes else []
     last = store.get_meta(conn, store.META_LAST_PASS)
     total = _status_total(rows, held_rows,
                           last_pass=None if last is None else float(last),
                           version=conn.execute("PRAGMA user_version").fetchone()[0])
+    total["duplicate_files"] = len(duplicate_files)
+    total["duplicate_rows"] = duplicate_files[:DUPLICATES_SHOWN]
     return Report(kind="status", rows=rows, total=total,
                   filters={} if harness is None else {"harness": harness})
 

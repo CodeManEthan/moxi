@@ -795,6 +795,14 @@ def _print_status(found: Any) -> None:
             print(f"  {'':<16} held ({count}): {reason}")
         if len(reasons) > REASONS_SHOWN:
             print(f"  {'':<16} held for {len(reasons) - REASONS_SHOWN} more reasons")
+    shown = total.get("duplicate_rows") or []
+    for dup in shown:
+        part = f" ({dup['part']})" if dup["part"] else ""
+        of_part = f" ({dup['of_part']})" if dup["of_part"] else ""
+        print(f"  duplicate: {dup['lane']} {dup['path']}{part} repeats {dup['of_lane']} "
+              f"{dup['of_path']}{of_part}")
+    if total.get("duplicate_files", 0) > len(shown):
+        print(f"  and {total['duplicate_files'] - len(shown)} more duplicate files")
     last = total["last_pass"]
     when = "never" if last is None else _local(last)
     print(f"index: {total['files']} files, {total['requests']} requests, "
