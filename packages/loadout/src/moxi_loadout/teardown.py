@@ -87,8 +87,9 @@ def _teardown(say) -> int | str:
             failed.append(f"loadout: {_label(a.record)} was not removed from "
                           f"{a.record.get('file')}")
         elif a.op == "end" and a.record.get("prior") and _runs_from(a.record, folders):
+            how = "reads" if a.record.get("kind") in _GLOBAL_KINDS else "runs from"
             say(f"loadout: {_label(a.record)} stays in {a.record.get('file')}, as it was "
-                f"there before loadout; it runs from {_runs_from(a.record, folders)}")
+                f"there before loadout; it {how} {_runs_from(a.record, folders)}")
 
     try:
         _hand_back(data, say)
@@ -236,9 +237,15 @@ def _ident(record: dict) -> str | None:
     return text
 
 
+#: The kinds of entry that bring the global file into a harness: Claude's `@` line,
+#: OpenCode's `instructions` path, the Codex block.
+_GLOBAL_KINDS = ("global-line", "instructions", "global-block")
+
+
 def _runs_from(record: dict, folders: list[str]) -> str | None:
-    """The loadout folder a kept entry names (a hook's script, an MCP server's), or None."""
-    if record.get("kind") not in ("hook", "mcp"):
+    """The loadout folder a kept entry names (a hook's script, an MCP server's, the
+    global file a global entry brings in), or None."""
+    if record.get("kind") not in ("hook", "mcp", "opencode-mcp") + _GLOBAL_KINDS:
         return None
     texts = list(_strings(record.get("written")))
     return next((f for f in folders if any(f in t for t in texts)), None)

@@ -194,6 +194,25 @@ def test_an_entry_the_user_had_stays_and_one_running_from_the_folder_is_named(lo
     assert ledger.read()["entries"] == []
 
 
+def test_a_global_line_the_user_had_naming_the_folder_is_named(lo):
+    kit.manifest(lo, '[global]\nmode = "managed"\n')
+    line = f"@{lo / 'global.md'}"
+    harness.global_file("claude").parent.mkdir(parents=True, exist_ok=True)
+    harness.global_file("claude").write_text(MINE + line + "\n")
+    opencode = harness.settings_file("opencode")
+    opencode.parent.mkdir(parents=True, exist_ok=True)
+    opencode.write_text(json.dumps({"instructions": [str(lo / "global.md")]}))
+    assert install.install().code == 0
+    assert {r["prior"] for r in ledger.read()["entries"]
+            if r["kind"] in ("global-line", "instructions")} == {True}
+    lines, say = said()
+    assert teardown.teardown(say=say) == 0, lines
+    assert harness.global_file("claude").read_text() == MINE + line + "\n"
+    for name in ("global global for claude", "global global for opencode"):
+        assert any(x.startswith(f"loadout: {name} stays in") and x.endswith(f"it reads {lo}")
+                   for x in lines), lines
+
+
 def test_the_opencode_row_stays_while_skills_harnesses_names_it(lo):
     from moxi import config, place
 
