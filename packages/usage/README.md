@@ -301,7 +301,8 @@ the keys that differ.
 ## Stores and the doctor
 
 usage keeps its files in Moxi's roots, each made by its first write and readable only by
-you: the token index `STATE/usage/index.db`, the limits readings `STATE/usage/readings.db`
+you: the token index `STATE/usage/index.db` and the lock a pass holds on it,
+`STATE/usage/index.lock`, the limits readings `STATE/usage/readings.db`
 (kept 8 days), the restart-point measure `STATE/usage/restart-point.json` and the model
 snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
 `STATE/usage/marks/`, and the worker ceiling's markers `STATE/usage/ceiling/`.

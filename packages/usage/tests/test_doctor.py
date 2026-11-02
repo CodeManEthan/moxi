@@ -415,8 +415,8 @@ def test_the_announcement_loads_with_its_stores_doctor_and_stamps():
     found = modules.load("usage")
     assert found.ok, found.reason
     assert found.doctor == "moxi_usage.doctor:rows"
-    assert set(found.stores) == {"index", "readings", "marks", "ceiling", "restart_point",
-                                 "snapshot"}
+    assert set(found.stores) == {"index", "index_lock", "readings", "marks", "ceiling",
+                                 "restart_point", "snapshot"}
     assert all(entry["private"] and entry["lazy"] for entry in found.stores.values())
     assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}
     assert set(found.optional) == {"turns", "projects"}
@@ -431,6 +431,7 @@ def test_the_announcement_loads_with_its_stores_doctor_and_stamps():
     where = {name: getattr(layout, f"{entry['root']}_dir")() / entry["path"]
              for name, entry in found.stores.items()}
     assert where["index"] == store.index_path()
+    assert where["index_lock"] == store.lock_path()
     assert where["readings"] == readings.path()
     assert where["snapshot"] == models.snapshot_path()
 

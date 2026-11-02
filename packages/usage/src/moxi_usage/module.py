@@ -43,10 +43,13 @@ CONFIG_CHECK = "moxi_usage.settings:check"
 #: --purge`. Each is made by its first write. The index and the model snapshot can be
 #: made again (a rebuild, `moxi usage prices update`); the restart-point measure by
 #: `moxi usage restart-point --measure`. Limits readings, fired marks and the ceiling's
-#: markers are history no harness file holds whole, so nothing rebuilds them.
+#: markers are history no harness file holds whole, so nothing rebuilds them. The index's
+#: lock is declared beside it so `--purge` takes it with the index.
 STORES = {
     "index": {"root": "state", "path": "index.db", "kind": "sqlite", "private": True,
               "retention": "keep", "rebuildable": True, "lazy": True},
+    "index_lock": {"root": "state", "path": "index.lock", "kind": "file", "private": True,
+                   "retention": "keep", "rebuildable": True, "lazy": True},
     "readings": {"root": "state", "path": "readings.db", "kind": "sqlite", "private": True,
                  "retention": "8d", "rebuildable": False, "lazy": True},
     "marks": {"root": "state", "path": "marks", "kind": "dir", "private": True,
