@@ -16,6 +16,14 @@ from moxi_launcher import handoffs, store
 CLAUDE_ID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 
 
+@pytest.fixture(autouse=True)
+def without_notes(monkeypatch):
+    """notes not installed, whatever this environment holds: the folder is the launcher's own
+    unless a test fakes notes with the `notes` fixture."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
 def row(**fields):
     base = {"identity": None, "scope": None, "preset_kind": None, "preset_name": None,
             "project_key": None, "cwd": "/work", "values": {}}

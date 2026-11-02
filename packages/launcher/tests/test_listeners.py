@@ -43,9 +43,20 @@ class Event:
 
 
 @pytest.fixture(autouse=True)
+def without_notes(monkeypatch):
+    """notes not installed, whatever this environment holds: these tests mean the launcher
+    alone, with its handoffs in the launcher's own folder."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+@pytest.fixture(autouse=True)
 def projects_never_read(monkeypatch):
     """Every listener test fails if the code asks for projects: a listener takes the
-    project key from the launch row and has no time for a projects read."""
+    project key from the launch row and has no time for a projects read. The rule binds
+    the launcher's own code. With notes installed, the handoff listener asks notes for its
+    folder, and notes' answer may read projects: that read counts in notes' own start
+    cost, and `without_notes` keeps the call out of these tests."""
     asked = []
     real_available, real_load = modules.available, modules.load
 
