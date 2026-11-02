@@ -245,35 +245,6 @@ def test_a_failure_before_the_verb_is_written_as_exit_1(lo, monkeypatch, page):
                          "lines": ["loadout: the page job failed: sample log failure"]}
 
 
-def test_an_end_moxi_cant_write_is_written_beside_the_record(lo, monkeypatch, page):
-    folder = pagejob.jobs_dir(create=True)
-    (folder / "j1.json").write_text(json.dumps({"job": "j1", "argv": ["install"],
-                                                "created": time.time()}))
-    monkeypatch.chdir(folder.parent)               # where `start` starts the runner
-
-    def broken(*, create=False):
-        raise ImportError("sample import failure")
-
-    monkeypatch.setattr(pagejob, "jobs_dir", broken)
-    assert pagejob.run("j1", ["install"]) == 1
-    record = json.loads((folder / "j1.end.json").read_text())
-    assert record == {"exit": 1, "outcome": None,
-                      "lines": ["loadout: the page job failed: sample import failure"]}
-    assert (folder / "j1.end.json").stat().st_mode & 0o777 == 0o600
-    assert sorted(p.name for p in folder.iterdir()) == ["j1.end.json", "j1.json"]
-
-
-def test_an_end_with_no_record_beside_it_is_not_written_elsewhere(lo, monkeypatch, page,
-                                                                  tmp_path):
-    elsewhere = tmp_path / "elsewhere"
-    (elsewhere / pagejob.JOBS).mkdir(parents=True)
-    monkeypatch.chdir(elsewhere)
-    monkeypatch.setattr(pagejob, "jobs_dir", lambda *, create=False: 1 / 0)
-    with pytest.raises(ZeroDivisionError):
-        pagejob.run("j1", ["install"])
-    assert list((elsewhere / pagejob.JOBS).iterdir()) == []
-
-
 def test_the_runner_prunes_records_older_than_a_day(lo, page):
     folder = pagejob.jobs_dir(create=True)
     old, new = folder / "old.json", folder / "new.json"

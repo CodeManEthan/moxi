@@ -25,12 +25,11 @@ A job's record is two files under `STATE/loadout/jobs/`, each field with one wri
   "outcome", "lines"}`. `outcome` is what the verb printed with `--json`, or None when
   it printed nothing that reads; `lines` is what was said outside it: the homes check's
   refusal, the CLI's own error lines, or an error outside the CLI, the log's setup
-  included, written as exit 1. When moxi's own calls can't write it, the runner writes
-  it with the standard library beside the record.
+  included, written as exit 1.
 
 The runner's own stdout and stderr go to `<job>.log` beside them, which holds anything
 only when the runner fails before it can write its end: when loadout's package itself
-can't be imported, or the end can't be written at all.
+can't be imported, or the end can't be written.
 
 `read` gives a job in one of three states: `done` once its end is written; `running`
 while it has no pid and is a few seconds old, or while its pid is alive with that start
@@ -354,35 +353,11 @@ def _run(argv: list[str]) -> tuple[int, object, list[str]]:
 
 
 def _end(job: str, code: int, outcome: object, lines: list[str]) -> None:
-    text = json.dumps({"exit": code, "outcome": outcome, "lines": lines}) + "\n"
-    try:
-        from moxi.files import atomic_write
+    from moxi.files import atomic_write
 
-        jobs_dir(create=True)
-        atomic_write(end_path(job), text, mode=0o600)
-    except Exception:
-        if not _end_here(job, text):
-            raise
-
-
-def _end_here(job: str, text: str) -> bool:
-    """Write job `job`'s end with the standard library alone, beside its record in the
-    folder the runner was started from (`start` starts it from loadout's state folder):
-    the way left when moxi's own calls fail. Returns False, writing nothing, when no
-    record of `job` is there."""
-    folder = os.path.join(os.getcwd(), JOBS)
-    if not valid(job) or not os.path.isfile(os.path.join(folder, f"{job}.json")):
-        return False
-    written = os.path.join(folder, f".{job}{_END}.{os.getpid()}{_TMP}")
-    fd = os.open(written, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(text)
-        os.replace(written, os.path.join(folder, f"{job}{_END}"))
-    finally:
-        if os.path.exists(written):
-            os.unlink(written)
-    return True
+    jobs_dir(create=True)
+    atomic_write(end_path(job), json.dumps({"exit": code, "outcome": outcome,
+                                            "lines": lines}) + "\n", mode=0o600)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
