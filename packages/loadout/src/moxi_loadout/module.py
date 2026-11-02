@@ -15,6 +15,8 @@ SUMMARY = 'Your own skills, agents and settings, placed for each harness: Claude
 OPTIONAL = {
     "projects": "Name a project section by its project key, not only by its path.",
     "repo": "A commit to your loadout folder reinstalls it.",
+    "ui": "The loadout page in the browser UI shell: items, states, the global file and "
+          "installs.",
 }
 GATED = {}
 #: CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME are the harnesses' own, read where
@@ -39,6 +41,8 @@ SETUP = "moxi_loadout.setup:setup"
 #: something was changed since loadout wrote it, a refusal that removes nothing.
 TEARDOWN = "moxi_loadout.teardown:teardown"
 SEGMENT = None
+#: loadout's page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_loadout.page:PAGE"
 #: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
 #: global file, hook programs, the projects link, the git hook link to repo, Codex's
 #: switches, modules gone.

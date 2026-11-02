@@ -941,10 +941,15 @@ projects = [
 repo = [
     { name = "moxi-repo" },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -953,13 +958,16 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-repo", marker = "extra == 'repo'", editable = "packages/repo" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
 ]
-provides-extras = ["projects", "repo"]
+provides-extras = ["projects", "repo", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 
