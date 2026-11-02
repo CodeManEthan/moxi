@@ -103,6 +103,7 @@ class Action:
     done: bool = False
     written: object = _MISSING   # an MCP server as its CLI wrote it, read back
     follows: Action | None = None   # another item's action on the same entry
+    shared: bool = False   # an `end` whose entry another wanted item keeps
 
     @property
     def where(self) -> Entry | dict:
@@ -489,7 +490,7 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
             else:
                 run.actions.append(Action(e, None if rec is None else records[rec],
                                           first.op, first.reason, first.prior,
-                                          follows=first))
+                                          replace=first.replace, follows=first))
             continue
         doc = _doc(run, e.file, e.kind)
         if doc is None:
@@ -520,7 +521,7 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
             continue
         kind, _, name = str(r.get("item")).partition(":")
         run.actions.append(_gone(r, doc, records, used,
-                                 _claimed(claims, (kind, name), r.get("harness"))))
+                                 _claimed(claims, (kind, name), r.get("harness")), want))
     return run
 
 
@@ -638,8 +639,10 @@ def _one(e: Entry, rec, doc, records, claimed: bool) -> Action:
     return Action(e, rec, "blocked", "something else is there; --replace takes it over")
 
 
-def _gone(r: dict, doc, records: list, used: set, claimed: bool) -> Action:
-    """A record no wanted entry names: its item was dropped or disabled."""
+def _gone(r: dict, doc, records: list, used: set, claimed: bool, want=()) -> Action:
+    """A record no wanted entry names: its item was dropped or disabled. While another
+    item still wants the same entry, the entry stays and only this record goes; when
+    that item holds no record of it yet, this one is kept until it does."""
     kind, key, written = r.get("kind"), r.get("key") or [], r.get("written")
     if r.get("prior"):
         return Action(None, r, "end")
@@ -647,6 +650,10 @@ def _gone(r: dict, doc, records: list, used: set, claimed: bool) -> Action:
               x.get("key"), x.get("written")) == (r.get("file"), kind, key, written)]
     if any(records.index(x) in used for x in others):
         return Action(None, r, "end")
+    if any((e.file, e.kind, e.key) == (r.get("file"), kind, key)
+           and (e.sent == r.get("sent") if kind == "mcp" else e.value == written)
+           for e in want):
+        return Action(None, r, "end", shared=True)
     if kind in MEMBERS:
         present = key and key[-1] in _members(doc, kind, key)
         return Action(None, r, "remove" if present else "end")
@@ -719,8 +726,21 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
     write per file. Updates the ledger's `entries` in `data`. Returns the rows in scope."""
     todo = [a for a in run.actions if covers(scope, a)
             and a.op in ("add", "update", "remove", "end", "ok")]
-    followers = [a for a in todo if a.follows is not None]
-    todo = [a for a in todo if a.follows is None]
+    # An action on an entry another item writes too follows that item's action; when
+    # that item is out of scope, the first such action in scope is applied in its place.
+    leading = {id(a) for a in todo if a.follows is None}
+    stand_in: dict[int, Action] = {}
+    followers: list[tuple[Action, Action]] = []
+    for a in todo:
+        if a.follows is None:
+            continue
+        if id(a.follows) in leading:
+            followers.append((a, a.follows))
+        elif id(a.follows) in stand_in:
+            followers.append((a, stand_in[id(a.follows)]))
+        else:
+            stand_in[id(a.follows)] = a
+    todo = [a for a in todo if a.follows is None or a in stand_in.values()]
     for a in todo:
         if (a.where.kind if a.entry else a.record.get("kind")) == "mcp" \
                 and a.op in ("add", "update", "remove"):
@@ -749,8 +769,8 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
         for a in actions:
             a.done = True
             say(_said(a))
-    for a in followers:
-        a.done, a.written = a.follows.done, a.follows.written
+    for a, lead in followers:
+        a.done, a.written = lead.done, lead.written
     _record(run, data, scope)
     return [row(a) for a in run.actions if covers(scope, a) and _shown(a)] + [
         r for r in run.rows if _row_covered(scope, r)]
@@ -880,11 +900,15 @@ def _record(run: Run, data: dict, scope) -> None:
     and so do the records another part of loadout keeps (its ignore files)."""
     out = [r for r in data.get("entries", []) if isinstance(r, dict)
            and r.get("kind") in KEPT_ELSEWHERE]
+    shared = []
     for a in run.actions:
         e, r = a.entry, a.record
         if not (a.done and covers(scope, a)):
             if r is not None:
                 out.append(r)
+            continue
+        if a.shared:
+            shared.append(r)
             continue
         if a.op in ("remove", "end") or e is None:
             continue
@@ -897,6 +921,13 @@ def _record(run: Run, data: dict, scope) -> None:
         if e.kind == "mcp":
             rec["sent"] = e.sent
         out.append(rec)
+    # A dropped item's record of an entry another item still wants goes once that item
+    # holds a record of it, so the entry is never left with none (the next run would
+    # take it for the user's).
+    where = ("file", "kind", "key", "written")
+    for r in shared:
+        if not any(x is not r and all(x.get(k) == r.get(k) for k in where) for x in out):
+            out.append(r)
     data["entries"] = out
 
 

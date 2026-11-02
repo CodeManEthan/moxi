@@ -414,3 +414,63 @@ def test_a_file_shaped_otherwise_is_refused_for_its_harness_alone(lo, shape):
     # Once the file reads as loadout expects, the next install writes it.
     path.write_text("{}")
     assert install.install().code == 0
+
+
+TWO = ('[permissions.a]\nallow = [{ shell = ["git", "status"] }]\nharnesses = ["claude"]\n'
+       '[permissions.b]\nallow = [{ shell = ["git", "status"] }]\nharnesses = ["claude"]\n')
+SHARED = "Bash(git status:*)"
+
+
+def allowed() -> list:
+    return read(settings()).get("permissions", {}).get("allow", [])
+
+
+def recorded_items() -> set:
+    return {r["item"] for r in ledger.read()["entries"] if r["kind"] == "permission"}
+
+
+def test_a_shared_entry_added_alone_is_recorded_and_outlives_its_first_item(lo):
+    write(lo, '[user]\npermissions = ["a"]\n' + TWO)
+    assert install.install().code == 0
+    # Adding b runs b's scope alone: b's entry is a's, already there, and b keeps a record.
+    write(lo, '[user]\npermissions = ["a", "b"]\n' + TWO)
+    assert install.install(Scope(item=("permissions", "b"))).code == 0
+    assert recorded_items() == {"permissions:a", "permissions:b"}
+    # Removing a runs a's scope alone, and b still wants the entry.
+    write(lo, '[user]\npermissions = ["b"]\n' + TWO)
+    assert install.install(Scope(item=("permissions", "a"))).code == 0
+    assert allowed() == [SHARED]
+    assert install.status().code == 0
+    write(lo, '[user]\npermissions = []\n' + TWO)
+    assert install.install().code == 0
+    assert "permissions" not in read(settings())
+
+
+def test_a_shared_entry_whose_leader_is_pending_is_written_by_its_own_scope(lo):
+    write(lo, '[user]\npermissions = ["a"]\n' + TWO)
+    install.install()
+    settings().write_text("{}")   # a's entry is gone: a would add it again
+    write(lo, '[user]\npermissions = ["a", "b"]\n' + TWO)
+    assert install.install(Scope(item=("permissions", "b"))).code == 0
+    assert allowed() == [SHARED]
+    assert "permissions:b" in recorded_items()
+    assert install.status().code == 0
+
+
+@pytest.mark.parametrize("how", ["remove", "disable"])
+def test_a_scoped_run_never_takes_an_entry_another_listed_item_wants(lo, how):
+    write(lo, '[user]\npermissions = ["a"]\n' + TWO)
+    install.install()
+    # b is listed by hand and has never run; a goes, by its own scope.
+    gone = 'disabled = ["permissions:a@claude"]\n' if how == "disable" else ""
+    listed = '"a", "b"' if how == "disable" else '"b"'
+    write(lo, f'[user]\npermissions = [{listed}]\n{gone}' + TWO)
+    assert install.install(Scope(item=("permissions", "a"))).code == 0
+    assert allowed() == [SHARED]
+    assert install.status().code == 0
+    # A whole run hands the entry to b, which then takes it out with its last record.
+    assert install.install().code == 0
+    assert recorded_items() == {"permissions:b"}
+    write(lo, f'[user]\npermissions = []\n' + TWO)
+    assert install.install().code == 0
+    assert "permissions" not in read(settings())
