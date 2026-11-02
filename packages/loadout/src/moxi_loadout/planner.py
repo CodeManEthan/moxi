@@ -7,12 +7,14 @@ Rule: loadout always plans the whole manifest; what it applies may be less.
   (`--user`, `--project P`, one item's verb) chooses which planned steps are applied, never
   what is planned.
 - An item that can't be resolved this run is **carried as it stands**: its project section
-  is refused, its source is bad, its module is not installed, or its harness has no project
+  is refused, its source is bad, its module doesn't load, or its harness has no project
   folder. The planner passes the `Item` loadout's ledger recorded at its last apply (or,
   with no record, one naming the target it would have), so the placer names the placement
   and keeps it; none of its steps is applied. An item never placed has nothing to carry.
 - Only an item the manifest drops (from its section, or a harness from its list) or
-  disables plans a `remove`.
+  disables plans a `remove`, and a module skill whose module is not installed: it reads
+  `off`, and a placement of it loadout still holds (the module's uninstall failed to
+  remove it) is removed.
 
 Sources: an item's own `source` key wins; else `<folder>/skills/<n>/` or
 `<folder>/agents/<n>.md`; else, in a project section, the project's own copy in Claude's
@@ -320,6 +322,11 @@ def _module_want(plan: Plan, want: Want, user_skills) -> Want:
         want.code = REFUSED
         return want
     found = modules.load(module)
+    if found.state == "absent":
+        # Not carried: a placement of it loadout still holds (one the module's uninstall
+        # couldn't remove) plans its `remove`, so nothing is left dangling.
+        want.state, want.reason = "off", f"{module} is not installed"
+        return want
     if not found.ok:
         return _carry(plan, want, "off", f"{module} is not installed", 0, filename=skill)
     try:

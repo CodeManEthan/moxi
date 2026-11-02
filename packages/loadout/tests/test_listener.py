@@ -184,6 +184,42 @@ def test_a_module_uninstall_removes_its_skills_seeded_or_not(demo, folder):
     assert step.action == "add"
 
 
+def test_a_failed_removal_at_module_uninstall_is_ended_by_the_next_install(demo, site,
+                                                                          folder,
+                                                                          monkeypatch):
+    import shutil
+
+    import moxi.modules
+    from moxi import place
+
+    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+                         '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
+    assert install.install().code == 0
+    target = kit.claude() / "moxi-demo"
+    real_apply = place.apply
+    monkeypatch.setattr(place, "apply", lambda steps, **kwargs: [])
+    with pytest.raises(RuntimeError) as raised:
+        listener.on_uninstall("demo", say=lambda line: None)
+    assert str(target) in str(raised.value)
+    assert "moxi loadout install removes it" in str(raised.value)
+    monkeypatch.setattr(place, "apply", real_apply)
+    # The package goes; the link it left dangles.
+    for path in site.root.iterdir():
+        if path.name.startswith("moxi_demo"):
+            shutil.rmtree(path)
+    moxi.modules.reset()
+    assert os.path.islink(target) and not os.path.exists(target)
+    before = install.status()
+    assert before.code == 1
+    assert any(r.target == str(target) and r.state == "stale" for r in before.rows)
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert not os.path.lexists(target)
+    assert place.status("loadout") == []
+    assert [r.state for r in out.rows] == ["off"]
+    assert install.status().code == 0
+
+
 def test_a_module_uninstall_with_a_lost_ledger_still_finds_its_skills(demo, folder):
     module_install(demo)
     assert install.install().code == 0

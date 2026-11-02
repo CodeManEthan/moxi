@@ -27,9 +27,8 @@ or a lost ledger, still counts. For loadout's own install and uninstall both do 
 `SETUP` and `TEARDOWN` do that work.
 
 A failure raises, so the module's install or uninstall names it and exits 1. A disabled
-skill left placed is removed by the next `moxi loadout install`'s plan; a skill whose
-module is gone is carried by that plan as it stands, so the line says to remove it by
-hand.
+skill left placed is removed by the next `moxi loadout install`'s plan, and so is a skill
+whose module is gone: that plan reads the item `off` and removes the placement.
 """
 
 from __future__ import annotations
@@ -61,7 +60,7 @@ def on_uninstall(module: str, *, say: Callable[[str], object] = print) -> None:
     if module == OWNER:
         return
     _remove(held(module), f"{module} is being uninstalled",
-            "remove it by hand; loadout leaves a skill whose module is gone in place", say)
+            "moxi loadout install removes it once the module is gone", say)
 
 
 def held(module: str, taken: Iterable = ()) -> list:
