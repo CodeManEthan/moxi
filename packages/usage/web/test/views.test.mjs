@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   agents, agentTreemap, cellLabel, classTotals, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
   fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
-  parseRoute, projectMenu, provenanceLine, rangeFor, reportState, segmentTitle, sessionRoute, shiftDay, shouldPass, strip,
+  parseRoute, projectMenu, provenanceLine, rangeFor, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay, shouldPass, strip,
   tickText, viewPath,
 } from "../src/views.ts";
 
@@ -91,6 +91,15 @@ test("each view sends only the keys its route reads", () => {
 });
 
 // --- states and flags ---
+
+test("a sessions row opens its session under its own harness", () => {
+  const today = "2026-11-02";
+  const opened = sessionFilters({ ...NO_FILTERS, model: "m" }, { harness: "codex" });
+  assert.deepEqual(opened, { ...NO_FILTERS, model: "m", harness: "codex" });
+  const query = new URLSearchParams(viewPath({ view: "session", session: "s1" }, opened, today).split("?")[1]);
+  assert.equal(query.get("harness"), "codex");
+  assert.equal(query.get("session"), "s1");
+});
 
 test("the project menu offers project keys only, never a row's cwd", () => {
   const rows = [{ project: "alpha", cwd: null }, { project: null, cwd: "/work/loose" }, { project: "beta", cwd: null },

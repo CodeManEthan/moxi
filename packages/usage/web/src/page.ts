@@ -40,7 +40,7 @@ import { BASE, flag, meterList, SERIES } from "./parts.ts";
 import {
   agents, agentTreemap, CLASSES, cellLabel, classTotals, costText, dailyChart, filterKeys, flags,
   fmtMoment, fmtTokens, HARNESSES, heldLine, labelEvery, localDay, MARGIN, menuPaths, meters,
-  NO_FILTERS, parseRoute, PRESETS, projectMenu, provenanceLine, reportState, segmentTitle, seriesClass, sessionRoute,
+  NO_FILTERS, parseRoute, PRESETS, projectMenu, provenanceLine, reportState, segmentTitle, seriesClass, sessionFilters, sessionRoute,
   shouldPass, strip, tickText, UNKNOWN_MODEL, viewPath, VIEWS,
 } from "./views.ts";
 import type { Filters, Measure, PageRoute, Preset } from "./views.ts";
@@ -279,11 +279,13 @@ export class UsagePage extends LitElement {
     </div>`;
   }
 
-  #link(route: string, label: string | TemplateResult, current = false) {
+  /** A link to one of the page's routes; `follow` runs just before the page moves there. */
+  #link(route: string, label: string | TemplateResult, current = false, follow?: () => void) {
     return html`<a href=${`/m/usage/${route}`} class=${current ? "" : "link"} aria-current=${current ? "page" : "false"}
       @click=${(event: MouseEvent) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
+        follow?.();
         navigate("usage", route);
       }}>${label}</a>`;
   }
@@ -405,7 +407,8 @@ export class UsagePage extends LitElement {
       <tbody>${report.rows.map((row) => html`
         <tr data-session=${row.session_id ?? ""}>
           <td class="wrap">${row.session_id === null ? html`<span class="dim">${row.title ?? "no session"}</span>`
-            : this.#link(sessionRoute(row.session_id), row.title ?? row.session_id)}
+            : this.#link(sessionRoute(row.session_id), row.title ?? row.session_id, false,
+              () => { filters = sessionFilters(filters, row); })}
             <div class="dim small">${row.models.join(", ")}</div></td>
           <td class="wide">${row.harness}</td>
           <td class="wrap wide">${row.project ?? row.cwd ?? ""}</td>

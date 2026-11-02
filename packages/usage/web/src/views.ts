@@ -135,6 +135,12 @@ export function sessionRoute(id: string): string {
   return `session/${encodeURIComponent(id)}`;
 }
 
+/** The filters a sessions row's link opens its session with: the row's own harness, so
+ * that two harnesses' sessions of one id stay apart and the view sums to the row. */
+export function sessionFilters(filters: Filters, row: { harness: string }): Filters {
+  return { ...filters, harness: row.harness };
+}
+
 /** The page's filters, as the user set them. */
 export interface Filters {
   preset: Preset;

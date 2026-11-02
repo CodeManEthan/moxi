@@ -187,6 +187,21 @@ def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
     expect(panel.locator(f'section[data-part=view] svg g[data-agent="{AGENT}"]')).to_have_count(1)
 
 
+def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_page):
+    panel = open_view(ui_page, "sessions")
+    harness = panel.locator("select[aria-label=Harness]")
+    row = panel.locator(f'section[data-part=view] tr[data-session="{FIRST}"]')
+    expect(row).to_be_visible()
+    expect(harness).to_have_value("")
+    tokens = row.locator("td.num").nth(-2).inner_text()
+    with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
+        row.locator("a").click()
+    assert "harness=claude" in sent.value.url, sent.value.url
+    expect(harness).to_have_value("claude")
+    totals = panel.locator("section[data-part=view] [data-part=totals]")
+    expect(totals.locator("span", has_text="Tokens").locator("b")).to_have_text(tokens)
+
+
 # --- the index's states --------------------------------------------------------------------
 
 def test_with_no_index_the_strip_gives_the_command_that_builds_it(own_shell):
