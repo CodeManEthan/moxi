@@ -189,6 +189,14 @@ export function menuPaths(filters: Filters, today: string): { projects: string; 
   };
 }
 
+/** The project menu's entries: the project keys the rows carry, with `current` first when
+ * no row has it. A row with no key has only its `cwd`, a path, which is shown and never
+ * sent back in a request, so it isn't offered. */
+export function projectMenu(rows: { project: string | null }[], current: string): string[] {
+  const keys = [...new Set(rows.map((row) => row.project).filter((key): key is string => !!key))];
+  return current && !keys.includes(current) ? [current, ...keys] : keys;
+}
+
 // --- completeness -------------------------------------------------------------------------
 
 /** Why a row's figures are not whole, one line each; empty for a complete row. */

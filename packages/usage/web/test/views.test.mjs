@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   agents, agentTreemap, cellLabel, classTotals, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
   fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
-  parseRoute, provenanceLine, rangeFor, reportState, segmentTitle, sessionRoute, shiftDay, shouldPass, strip,
+  parseRoute, projectMenu, provenanceLine, rangeFor, reportState, segmentTitle, sessionRoute, shiftDay, shouldPass, strip,
   tickText, viewPath,
 } from "../src/views.ts";
 
@@ -91,6 +91,15 @@ test("each view sends only the keys its route reads", () => {
 });
 
 // --- states and flags ---
+
+test("the project menu offers project keys only, never a row's cwd", () => {
+  const rows = [{ project: "alpha", cwd: null }, { project: null, cwd: "/work/loose" }, { project: "beta", cwd: null },
+                { project: "alpha", cwd: null }];
+  assert.deepEqual(projectMenu(rows, ""), ["alpha", "beta"]);
+  assert.deepEqual(projectMenu(rows, "beta"), ["alpha", "beta"]);
+  assert.deepEqual(projectMenu(rows, "gamma"), ["gamma", "alpha", "beta"]);
+  assert.deepEqual(projectMenu([{ project: null, cwd: "/work/loose" }], ""), []);
+});
 
 test("a row is flagged with each reason its figures aren't whole", () => {
   assert.deepEqual(flags(sums()), []);

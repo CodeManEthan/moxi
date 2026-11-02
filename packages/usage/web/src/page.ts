@@ -40,7 +40,7 @@ import { BASE, flag, meterList, SERIES } from "./parts.ts";
 import {
   agents, agentTreemap, CLASSES, cellLabel, classTotals, costText, dailyChart, filterKeys, flags,
   fmtMoment, fmtTokens, HARNESSES, heldLine, labelEvery, localDay, MARGIN, menuPaths, meters,
-  NO_FILTERS, parseRoute, PRESETS, provenanceLine, reportState, segmentTitle, seriesClass, sessionRoute,
+  NO_FILTERS, parseRoute, PRESETS, projectMenu, provenanceLine, reportState, segmentTitle, seriesClass, sessionRoute,
   shouldPass, strip, tickText, UNKNOWN_MODEL, viewPath, VIEWS,
 } from "./views.ts";
 import type { Filters, Measure, PageRoute, Preset } from "./views.ts";
@@ -295,13 +295,8 @@ export class UsagePage extends LitElement {
   }
 
   #filters() {
-    const projects = (this.#projects?.value?.rows ?? [])
-      .map((row) => ({ value: row.project ?? row.cwd ?? "", label: row.project ?? row.cwd ?? "" }))
-      .filter((item) => item.value !== "");
+    const projects = projectMenu(this.#projects?.value?.rows ?? [], filters.project);
     const models = (this.#models?.value?.rows ?? []).map((row) => row.model).filter((m): m is string => !!m);
-    if (filters.project && !projects.some((item) => item.value === filters.project)) {
-      projects.unshift({ value: filters.project, label: filters.project });
-    }
     if (filters.model && !models.includes(filters.model)) models.unshift(filters.model);
     const pick = (event: Event) => (event.target as HTMLSelectElement).value;
     return html`<div class="filters" data-part="filters">
@@ -318,7 +313,7 @@ export class UsagePage extends LitElement {
       </select></label>
       <label>Project <select aria-label="Project" @change=${(e: Event) => this.#setFilters({ project: pick(e) })}>
         <option value="" ?selected=${filters.project === ""}>all</option>
-        ${projects.map((item) => html`<option value=${item.value} ?selected=${filters.project === item.value}>${item.label}</option>`)}
+        ${projects.map((key) => html`<option value=${key} ?selected=${filters.project === key}>${key}</option>`)}
       </select></label>
     </div>`;
   }
