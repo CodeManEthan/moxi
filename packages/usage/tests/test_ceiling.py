@@ -199,6 +199,26 @@ def test_the_warning_is_one_added_line_once():
     assert ceiling.judge(a.call()) is None
 
 
+def test_in_the_warning_band_the_marker_is_written_once_per_endpoint(monkeypatch):
+    from moxi import files
+
+    write_config(THRESHOLDS)
+    a = started()
+    a.context(20_000 + WARN + 5)
+    writes = []
+    real = files.update
+    monkeypatch.setattr(files, "update", lambda *x, **k: writes.append(x[0]) or real(*x, **k))
+    assert isinstance(ceiling.judge(a.call()), turns.Allow)
+    for extra in (10, 20, 30):
+        a.context(20_000 + WARN + extra)
+        assert ceiling.judge(a.call()) is None
+    assert len(writes) == 1
+    ceiling.reset()                          # a new endpoint reads the marker once
+    assert ceiling.judge(a.call()) is None
+    assert ceiling.judge(a.call()) is None
+    assert len(writes) == 2
+
+
 def test_past_the_hard_mark_the_call_is_refused_with_the_deny_text():
     write_config(THRESHOLDS + 'deny_text = "Stop: {growth} grown, past {hard}."\n')
     a = started()

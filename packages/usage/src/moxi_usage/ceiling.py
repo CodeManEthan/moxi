@@ -238,6 +238,8 @@ def decide(call, *, now: float | None = None, env=None):
         agent.latched = (r.hard, growth)
         return _wrap_up(call, r, growth, current)
     if growth >= r.warn:
+        if agent.warned == r.warn:
+            return None                      # this endpoint warned it, or saw the marker
         if where is not None:
             first = _mark(where, WARN, r.warn, body, r, now=now, env=env)
         else:
