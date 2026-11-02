@@ -22,8 +22,18 @@ Allowed:
 
 Claude's `Bash` and Codex's shell tool, which Codex's hooks also name `Bash`, both carry
 the shell text in `command`. The directory a command runs in is `<dir>` when named, else
-the input's `workdir` when it has one (Codex's own argument), else `cwd`; it must be `cwd`
-or lie under it or under one of `work_roots`.
+`cwd`; it must be `cwd` or lie under it or under one of `work_roots`.
+
+**What Codex's hook hands over** (Codex 0.153.0, read from its source). The shell tool
+takes a `workdir` argument, but Codex resolves it after the hook runs and leaves it out of
+the hook's input, so a Codex `Bash` call is judged against `cwd` alone, and a latched
+agent can point git's wrap-up forms at a repository outside every root through
+`workdir`. The git forms bound that: no push and no other command. Should a later Codex
+send `workdir`, it is held to the same directory rule and is where the command starts;
+one that is not a path is refused. `apply_patch` takes no `workdir` at all: its patch
+text is `command`, its relative paths resolve against the hook's `cwd`, and an
+`apply_patch` input that carries a `workdir` is refused, since its paths could then mean
+other files than the ones judged here.
 
 **The patch.** Codex's patch grammar: `*** Begin Patch`, then file sections, then
 `*** End Patch`. A section is `*** Add File: <path>` followed by `+` lines, or
@@ -31,8 +41,9 @@ or lie under it or under one of `work_roots`.
 optional `*** End of File`. Any `*** Delete File:` or `*** Move to:` refuses the call, and
 so does a line this reading does not place (a heredoc wrapper, a line before the first
 section, a header it doesn't know, an update with no change). Relative paths join `cwd`,
-as Codex resolves them. Where this reading and Codex's own parser differ, this one
-refuses or Codex's fails, so every file Codex would touch is one judged here.
+as Codex resolves them for its `apply_patch` tool, which has no `workdir`. Where this
+reading and Codex's own parser differ, this one refuses or Codex's fails, so every file
+Codex would touch is one judged here.
 
 **The path rule.** Every path accepted (a hand-off file, a `<dir>`, an `add --` path) lies
 inside its root both as the shell or git reads it (as typed, joined to its base, with
@@ -124,6 +135,9 @@ def allowed(tool: object, tool_input: object, cwd: object, *,
             _handoff_path(tool_input, cwd, handoff_roots)
             _read_bounds(tool_input)
         elif tool == "apply_patch":
+            if "workdir" in tool_input:
+                raise Refused("apply_patch with a workdir: its paths would not resolve "
+                              "against cwd")
             _patch(tool_input.get("command"), cwd, handoff_roots)
         elif tool == "Bash":
             _bash(tool_input.get("command"), cwd, work_roots, commands, home,
@@ -387,8 +401,10 @@ def _resolve_dir(d: str, cwd: str, work_roots: object, logical: bool,
 
 
 def _workdir(tool_input: Mapping, cwd: object, work_roots: object) -> str | None:
-    """The directory a shell call starts in when the input names one (Codex's
-    `workdir`), which must pass the directory rule; None when it names none."""
+    """The directory a shell call starts in when the input names one, which must pass
+    the directory rule; None when it names none. Codex 0.153.0 resolves a shell call's
+    `workdir` after its hook runs and never sends it, so this holds only for a later
+    version that does."""
     workdir = tool_input.get("workdir")
     if workdir is None:
         return None

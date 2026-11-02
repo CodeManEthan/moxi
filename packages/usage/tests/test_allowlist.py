@@ -349,7 +349,7 @@ def table(P):
     expect_tool("bounded read through a link from outside into the root", "Read",
                 {"file_path": E + "/notelink/build-report.md", "limit": 50}, False)
 
-    # Codex's shell tool: Bash with `command` alone, and its own `workdir` --------------------
+    # Codex's shell tool: Bash with `command` alone, and a `workdir` a later Codex may send --
     def codex_bash(label, inp, want):
         ok, reason = ask("Bash", inp, CWD, WORK_ROOTS, NOTES)
         check("codex Bash %s: %s" % ("allowed" if want else "refused", label), ok, want, reason)
@@ -466,6 +466,9 @@ def table(P):
     expect_patch("the text under another key", patch(add(NEW, "x")), False, key="input")
     expect_patch("the text under patch", patch(add(NEW, "x")), False, key="patch")
     expect_patch("command not a string", ["*** Begin Patch"], False)
+    check("apply_patch with a workdir is refused, its paths resolving elsewhere",
+          ask("apply_patch", {"command": patch(add("../../notes/r.md", "x")), "workdir": CWD},
+              CWD, WORK_ROOTS, NOTES)[0], False)
     expect_patch("cwd relative", patch(add("../../notes/r.md", "x")), False, cwd="code/app")
     check("apply_patch with no hand-off root",
           ask("apply_patch", {"command": patch(add(NEW, "x"))}, CWD, WORK_ROOTS, [])[0], False)

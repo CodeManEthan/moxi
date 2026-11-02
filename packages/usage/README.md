@@ -245,7 +245,15 @@ On Codex the same rules hold for its shell tool, and its file tool, `apply_patch
 allowed when the patch only adds or updates `.md` files under `ceiling.handoff_roots`; a
 patch that deletes or moves a file, or that doesn't read as a patch, is refused. Codex
 has no tool that reads a file on its own, so a refused Codex agent can add a new hand-off
-file, but can update one only from what it still holds in its context.
+file, but can update one only from what it still holds in its context. A patch's relative
+paths are read from the agent's working directory, as Codex applies them.
+
+One gap remains on Codex. Its shell tool can be told to run in another directory
+(`workdir`), but Codex doesn't pass that directory to the guard, so the guard judges a
+Codex shell call by the agent's working directory alone. A refused Codex agent can
+therefore run git's status, diff, add and commit forms in a repository outside its
+working directory and `ceiling.work_roots`. It can't push or run any other command that
+way. If a later Codex passes the directory, the guard holds it to the same rule.
 
 ## Commands
 
