@@ -1,0 +1,21 @@
+{
+  "name": "moxi-usage-web",
+  "private": true,
+  "description": "The usage module's web sources: its panel of tokens and cost, and its limits and cost blocks.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "d3-array": "3.2.4",
+    "d3-hierarchy": "3.1.2",
+    "d3-scale": "4.0.2",
+    "lit": "3.3.3"
+  },
+  "devDependencies": {
+    "@types/d3-array": "3.2.2",
+    "@types/d3-hierarchy": "3.1.7",
+    "@types/d3-scale": "4.0.9"
+  }
+}

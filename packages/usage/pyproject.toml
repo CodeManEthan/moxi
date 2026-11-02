@@ -11,6 +11,9 @@ dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 [project.optional-dependencies]
 turns = ["moxi-turns>=0.2,<0.3"]
 projects = ["moxi-projects>=0.1,<0.2"]
+# The browser UI shell: with it, the usage page and its limits and cost blocks show there.
+# Loopback, which usage's page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -34,7 +37,9 @@ usage = "moxi_usage.listeners"
 usage = "moxi_usage.guards"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs usage's page in a real shell; its testing extra brings the
+# browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -48,7 +53,8 @@ packages = ["src/moxi_usage"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds only these paths; hatchling adds
 # pyproject.toml and .gitignore itself.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_usage", "tests", "tools"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_usage", "tests", "tools",
+               "web"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

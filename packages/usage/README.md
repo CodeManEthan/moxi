@@ -300,6 +300,22 @@ drive is offline is refused (exit 3) until the drive is back, or until `--rebuil
 drops them. `--check` compares the stored claims with the claimed view and exits 1 naming
 the keys that differ.
 
+## The page
+
+With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there: tokens and cost by day or month, by session (each session split
+by agent and model), by project and by model with where its price came from, with the
+limits meters and a strip about the index above them. Two blocks go on the shell's home
+view: the limits, one meter per window, and the cost of today and the last 7 days, with
+how old the index behind it is, flagged once its last pass is over 10 minutes old. Without
+the extra, nothing of usage changes.
+
+The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
+"Read new sessions" runs one in the page server, which the page also asks for when it opens
+and the last pass is over 10 minutes old. With no index yet, or one an older usage wrote,
+the page says to run `moxi usage index`, and it builds or migrates nothing itself. Days are
+the page server's local days, or UTC when asked. The page only reads and shows; it changes
+no setting and runs no command but the pass.
+
 ## Stores and the doctor
 
 usage keeps its files in Moxi's roots, each made by its first write and readable only by

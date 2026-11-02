@@ -1328,10 +1328,15 @@ projects = [
 turns = [
     { name = "moxi-turns" },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -1341,12 +1346,15 @@ requires-dist = [
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["turns", "projects"]
+provides-extras = ["turns", "projects", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 

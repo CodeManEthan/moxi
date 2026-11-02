@@ -10,6 +10,7 @@ OPTIONAL = {
              "worker ceiling",
     "projects": "the token index records each session's project, so the projects report "
                 "and --project keep one project across worktrees and harnesses",
+    "ui": "the usage page, with its limits and cost blocks, in the browser UI shell",
 }
 GATED = {}
 #: The launcher stamps these per launch; usage reads them in the session's listener.
@@ -34,6 +35,18 @@ QUESTIONS = {
 }
 SETUP = None
 SEGMENT = None
+#: usage's page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_usage.page:PAGE"
+#: What usage offers the browser UI shell: its panel, and two blocks for the home view.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Usage", "contract": 1, "place": "page",
+             "doc": "Tokens and cost by day, session, project and model, with the limits"},
+    "limits": {"script": "limits.js", "title": "Limits", "contract": 1, "place": "block",
+               "home": True,
+               "doc": "Each plan window: how much is used, when it resets and when it fills"},
+    "cost": {"script": "cost.js", "title": "Cost", "contract": 1, "place": "block",
+             "home": True, "doc": "Cost and tokens today and over the last 7 days"},
+}
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1
 # The config file's whole check: the `[[model]]` override rows hold more rules than the
