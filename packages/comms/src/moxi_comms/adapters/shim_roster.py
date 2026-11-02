@@ -274,7 +274,9 @@ def render_delta(joins: list[str], leaves: list[str], now: dict) -> str:
 #: memory file. No qualified name can start with `#`.
 SHOWN_KEY = "#unanswered-shown"
 
-#: What the author's session is told, once per ignored reminder naming it.
+#: What the author's session is told, once per ignored reminder naming it. It reads the
+#: same after the owing session asked something back, since the reminder it is built from
+#: doesn't carry that mark; the line is true to the ledger but blunt in that case.
 UNANSWERED_LINE = "(comms: {owing} ended a turn without answering your msg {message_id}.)"
 
 
