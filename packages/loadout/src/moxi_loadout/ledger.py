@@ -18,8 +18,10 @@
   for an MCP server written through its CLI. `prior` marks an entry the user had first,
   which loadout never removes.
 
-The file is written only under `install.lock`, whole, through `moxi.files.atomic_write`
-(0600). A missing file reads empty; a file that doesn't read as a JSON object raises
+The file is written whole, through `moxi.files.atomic_write` (0600), under the core
+lock: `install` reads and writes it under `install.lock` and then the core lock, and
+`SETUP`, which runs under an install's claim on the core lock and never takes
+`install.lock`, records the opencode row under the core lock alone. A missing file reads empty; a file that doesn't read as a JSON object raises
 `LedgerError` naming the fix.
 """
 
@@ -64,7 +66,8 @@ def read() -> dict:
 
 
 def write(data: Mapping) -> None:
-    """Write the ledger whole. The caller holds `install.lock`."""
+    """Write the ledger whole. The caller holds the core lock (and `install.lock`, for an
+    install)."""
     from moxi.files import atomic_write
 
     from moxi_loadout import stores

@@ -23,7 +23,10 @@ INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text: the schema, then the project folders.
 CONFIG_CHECK = "moxi_loadout.settings:check_text"
-SETUP = None
+#: On every install and upgrade: the example manifest into an empty folder, the opencode
+#: harness row, every module's own skill placements taken over, and the global mode asked
+#: when the manifest has none (only at a terminal). It places nothing.
+SETUP = "moxi_loadout.setup:setup"
 SEGMENT = None
 #: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
 #: global file, hook programs, the projects link, Codex's switches, modules gone.

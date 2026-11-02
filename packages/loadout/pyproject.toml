@@ -21,6 +21,12 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 loadout = "moxi_loadout.module"
 
+# loadout's install listener: a module's install hands its own skill placements to
+# loadout and removes the ones the manifest disables; its uninstall removes the ones
+# loadout holds.
+[project.entry-points."moxi.installs"]
+loadout = "moxi_loadout.listener"
+
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
 

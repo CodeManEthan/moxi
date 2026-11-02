@@ -45,10 +45,16 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
          say: Callable[[str], object] = print) -> list[Taken]:
     """Hand every placement of each module in `modules` (every installed module but
     loadout when None) to loadout, unseeded, and list each in the manifest with the
-    harnesses taken. Returns what was taken."""
+    harnesses taken. Returns what was taken.
+
+    The manifest is read first: one that doesn't read raises its `ManifestError` before
+    anything is handed over, so loadout never holds a placement its manifest can't
+    list (the next plan would remove it)."""
     from moxi import place
 
-    from moxi_loadout import writes
+    from moxi_loadout import manifest, writes
+
+    manifest.load(folder)
 
     if modules is None:
         from moxi.modules import installed
