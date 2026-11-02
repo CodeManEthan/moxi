@@ -19,14 +19,18 @@ A job's record is two files under `STATE/loadout/jobs/`, each field with one wri
 - `<job>.json`, created by the page server (`start`) before the spawn, exclusively, so a
   job id is used once: `{"job", "argv", "created"}`. Right after the spawn the page
   server adds the job's `pid` and `started` (its start time, `moxi.proc.identity`). A
-  spawn that fails removes the file.
+  spawn that fails removes the file; a pid that can't be added after the spawn is
+  logged, and the act still answers that the job started.
 - `<job>.end.json`, written by the runner in one write as its last act: `{"exit",
   "outcome", "lines"}`. `outcome` is what the verb printed with `--json`, or None when
   it printed nothing that reads; `lines` is what was said outside it: the homes check's
-  refusal, the CLI's own error lines, or an error outside the CLI, written as exit 1.
+  refusal, the CLI's own error lines, or an error outside the CLI, the log's setup
+  included, written as exit 1. When moxi's own calls can't write it, the runner writes
+  it with the standard library beside the record.
 
 The runner's own stdout and stderr go to `<job>.log` beside them, which holds anything
-only when the runner fails before it can write its end.
+only when the runner fails before it can write its end: when loadout's package itself
+can't be imported, or the end can't be written at all.
 
 `read` gives a job in one of three states: `done` once its end is written; `running`
 while it has no pid and is a few seconds old, or while its pid is alive with that start
@@ -42,6 +46,7 @@ section names and absolute paths, never a path relative to a directory.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sys
@@ -65,6 +70,8 @@ INTERRUPTED = ("the job stopped before it finished (the browser shell stopped, t
                "process was killed, or the machine restarted); run it again")
 #: The value of loadout's marker a page job sets.
 CALLER = PAGE_JOB
+
+log = logging.getLogger("moxi.loadout.pagejob")
 
 _ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _END = ".end.json"
@@ -153,7 +160,9 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
     gets the job's pid and start time right after it. A record of `job` with the same
     arguments is found, not started again (`Started.new` False), so a confirmed act's
     retry after a restart of the page server reaches the job it started; one with other
-    arguments raises `Clash`. A spawn that fails removes the record and raises."""
+    arguments raises `Clash`. A spawn that fails removes the record and raises. Once the
+    spawn returns the job is running, so a pid that can't be recorded is logged, never
+    raised: the job then reads `interrupted` from the grace period until its end lands."""
     from moxi import proc
     from moxi.files import atomic_write
 
@@ -180,9 +189,13 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
         path.unlink(missing_ok=True)
         log_path(job).unlink(missing_ok=True)
         raise
-    ident = proc.identity(pid)
-    record.update(pid=pid, started=None if ident is None else ident.started)
-    atomic_write(path, json.dumps(record) + "\n", mode=0o600)
+    # The job runs from here on, so nothing below may answer as if it didn't start.
+    try:
+        ident = proc.identity(pid)
+        record.update(pid=pid, started=None if ident is None else ident.started)
+        atomic_write(path, json.dumps(record) + "\n", mode=0o600)
+    except Exception:  # noqa: BLE001 - the job reads interrupted until its end lands
+        log.exception("page job %s started (pid %s), but its pid wasn't recorded", job, pid)
     return Started(job, True)
 
 
@@ -283,23 +296,29 @@ def prune(now: float | None = None) -> int:
 
 def run(job: str, argv: Sequence[str]) -> int:
     """Run job `job`: prune, check the homes, run verb `argv` through `cli.main` with
-    `--json`, and write the end in one write. Returns the exit code written."""
-    from moxi import log as moxi_log
-
+    `--json`, and write the end in one write. Returns the exit code written. An error
+    anywhere before the end, the log's setup included, is written as exit 1 with its
+    line."""
     os.environ[MARKER] = CALLER
-    # Set up before the CLI's output is taken, so the log's handler keeps the real stderr.
-    log = moxi_log.setup("loadout").getChild("pagejob")
     try:
-        prune()
-    except OSError as exc:
-        log.warning("old page jobs weren't removed: %s", exc)
-    try:
-        code, outcome, lines = _run(list(argv))
+        code, outcome, lines = _steps(list(argv))
     except Exception as exc:  # noqa: BLE001 - an error outside the CLI is the job's end
         log.exception("page job %s failed", job)
         code, outcome, lines = 1, None, [f"loadout: the page job failed: {exc}"]
     _end(job, code, outcome, lines)
     return code
+
+
+def _steps(argv: list[str]) -> tuple[int, object, list[str]]:
+    from moxi import log as moxi_log
+
+    # Set up before the CLI's output is taken, so the log's handler keeps the real stderr.
+    moxi_log.setup("loadout")
+    try:
+        prune()
+    except OSError as exc:
+        log.warning("old page jobs weren't removed: %s", exc)
+    return _run(argv)
 
 
 def _run(argv: list[str]) -> tuple[int, object, list[str]]:
@@ -334,11 +353,35 @@ def _run(argv: list[str]) -> tuple[int, object, list[str]]:
 
 
 def _end(job: str, code: int, outcome: object, lines: list[str]) -> None:
-    from moxi.files import atomic_write
+    text = json.dumps({"exit": code, "outcome": outcome, "lines": lines}) + "\n"
+    try:
+        from moxi.files import atomic_write
 
-    jobs_dir(create=True)
-    atomic_write(end_path(job), json.dumps({"exit": code, "outcome": outcome,
-                                            "lines": lines}) + "\n", mode=0o600)
+        jobs_dir(create=True)
+        atomic_write(end_path(job), text, mode=0o600)
+    except Exception:
+        if not _end_here(job, text):
+            raise
+
+
+def _end_here(job: str, text: str) -> bool:
+    """Write job `job`'s end with the standard library alone, beside its record in the
+    folder the runner was started from (`start` starts it from loadout's state folder):
+    the way left when moxi's own calls fail. Returns False, writing nothing, when no
+    record of `job` is there."""
+    folder = os.path.join(os.getcwd(), JOBS)
+    if not valid(job) or not os.path.isfile(os.path.join(folder, f"{job}.json")):
+        return False
+    written = os.path.join(folder, f".{job}{_END}.{os.getpid()}{_TMP}")
+    fd = os.open(written, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(text)
+        os.replace(written, os.path.join(folder, f"{job}{_END}"))
+    finally:
+        if os.path.exists(written):
+            os.unlink(written)
+    return True
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -233,6 +233,47 @@ def test_a_job_with_no_claude_on_path_writes_the_rest(lo, monkeypatch, page):
     assert not harness.claude_json().exists()
 
 
+def test_a_failure_before_the_verb_is_written_as_exit_1(lo, monkeypatch, page):
+    from moxi import log as moxi_log
+
+    def broken(module, level=None):
+        raise RuntimeError("sample log failure")
+
+    monkeypatch.setattr(moxi_log, "setup", broken)
+    assert pagejob.run("j1", ["install"]) == 1
+    assert end("j1") == {"exit": 1, "outcome": None,
+                         "lines": ["loadout: the page job failed: sample log failure"]}
+
+
+def test_an_end_moxi_cant_write_is_written_beside_the_record(lo, monkeypatch, page):
+    folder = pagejob.jobs_dir(create=True)
+    (folder / "j1.json").write_text(json.dumps({"job": "j1", "argv": ["install"],
+                                                "created": time.time()}))
+    monkeypatch.chdir(folder.parent)               # where `start` starts the runner
+
+    def broken(*, create=False):
+        raise ImportError("sample import failure")
+
+    monkeypatch.setattr(pagejob, "jobs_dir", broken)
+    assert pagejob.run("j1", ["install"]) == 1
+    record = json.loads((folder / "j1.end.json").read_text())
+    assert record == {"exit": 1, "outcome": None,
+                      "lines": ["loadout: the page job failed: sample import failure"]}
+    assert (folder / "j1.end.json").stat().st_mode & 0o777 == 0o600
+    assert sorted(p.name for p in folder.iterdir()) == ["j1.end.json", "j1.json"]
+
+
+def test_an_end_with_no_record_beside_it_is_not_written_elsewhere(lo, monkeypatch, page,
+                                                                  tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / pagejob.JOBS).mkdir(parents=True)
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(pagejob, "jobs_dir", lambda *, create=False: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        pagejob.run("j1", ["install"])
+    assert list((elsewhere / pagejob.JOBS).iterdir()) == []
+
+
 def test_the_runner_prunes_records_older_than_a_day(lo, page):
     folder = pagejob.jobs_dir(create=True)
     old, new = folder / "old.json", folder / "new.json"
@@ -283,6 +324,24 @@ def test_a_failed_spawn_leaves_no_record(lo, monkeypatch):
     assert pagejob.read("k1") is None
 
 
+def test_a_pid_that_cant_be_recorded_after_the_spawn_still_starts_the_job(
+        lo, monkeypatch, caplog):
+    from moxi import proc
+
+    calls = fake_spawn(monkeypatch)
+
+    def broken(pid):
+        raise OSError("sample identity failure")
+
+    monkeypatch.setattr(proc, "identity", broken)
+    started = pagejob.start(["install"], job="k1")
+    assert started == pagejob.Started("k1", True) and len(calls) == 1
+    record = json.loads(pagejob.record_path("k1").read_text())
+    assert "pid" not in record and record["argv"] == ["install"]
+    assert "its pid wasn't recorded" in caplog.text
+    assert pagejob.read("k1")["state"] == "running"    # within the start grace
+
+
 def test_a_confirmed_acts_repeat_finds_its_record(lo, monkeypatch):
     calls = fake_spawn(monkeypatch)
     key = "A" * 43
@@ -316,6 +375,19 @@ def test_a_record_whose_process_is_gone_reads_interrupted(lo, monkeypatch):
     monkeypatch.setattr(proc, "identity", lambda pid: ident)
     started = pagejob.start(["install"])
     assert pagejob.read(started.job)["state"] == "interrupted"
+
+
+def test_a_record_whose_pid_was_reused_reads_interrupted(lo):
+    from moxi import proc
+
+    ident = proc.identity(os.getpid())
+    folder = pagejob.jobs_dir(create=True)
+    # This process is alive under the pid, but started at another time than the job.
+    (folder / "j1.json").write_text(json.dumps({
+        "job": "j1", "argv": ["install"], "created": time.time() - 60,
+        "pid": os.getpid(), "started": ident.started - 1000}))
+    found = pagejob.read("j1")
+    assert found["state"] == "interrupted" and found["lines"] == [pagejob.INTERRUPTED]
 
 
 def test_a_record_with_its_end_reads_done(lo):

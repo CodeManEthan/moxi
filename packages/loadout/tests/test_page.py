@@ -472,6 +472,19 @@ def test_a_job_that_does_not_start_is_refused_and_leaves_no_record(lo, monkeypat
     assert list(pagejob.jobs_dir().iterdir()) == []
 
 
+def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeypatch):
+    from moxi import proc
+
+    def broken(pid):
+        raise OSError("sample identity failure")
+
+    monkeypatch.setattr(proc, "identity", broken)
+    status, answer = post("/api/install", {})
+    assert status == 202, answer
+    assert len(spawned) == 1
+    assert read("/api/job", f"job={job_of(answer)}")["state"] == "running"
+
+
 # -- confirmed acts -------------------------------------------------------------------------
 
 @pytest.mark.parametrize("path, body, verb", [
