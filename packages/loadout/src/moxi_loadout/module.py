@@ -43,6 +43,14 @@ TEARDOWN = "moxi_loadout.teardown:teardown"
 SEGMENT = None
 #: loadout's page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_loadout.page:PAGE"
+#: The page, and the drift block the shell's home places: how many items aren't ok,
+#: linking to the page.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Loadout", "contract": 1, "place": "page",
+             "doc": "Your items for each harness, their states, the global file and installs"},
+    "drift": {"script": "drift.js", "title": "Loadout drift", "contract": 1, "place": "block",
+              "home": True, "doc": "How many of your items aren't ok, linking to the page"},
+}
 #: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
 #: global file, hook programs, the projects link, the git hook link to repo, Codex's
 #: switches, modules gone.

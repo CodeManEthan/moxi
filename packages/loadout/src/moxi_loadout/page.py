@@ -32,6 +32,9 @@ Every value that can hold a path carries a mark: a file or a target is `path`, a
 sentence, a section's name or an item's source that can name a path is `redact`. Only the
 gateway acts on a mark, and no route here is the gateway's.
 
+The page's assets are what the repository's web build writes from `packages/loadout/web/`
+into this package's `web/`: `page.js`, the page, and `drift.js`, the drift block.
+
 The browser UI shell starts the page server on the first request for loadout's page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in loadout's announcement, CLI,
@@ -189,6 +192,7 @@ def _act(path: str, handler: str, body: dict) -> lb.Route:
 
 
 PAGE = lb.Page(
+    assets="web",
     routes=(
         lb.Route("/api/status", "read", _target("status"), returns=STATUS),
         lb.Route("/api/list", "read", _target("listing"), returns=LIST),
