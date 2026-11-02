@@ -1,5 +1,5 @@
-"""The notes API, interface 1: where a session's notes live, its handoffs folder and the
-inbox one-offs.
+"""The notes API, interface 1: where a session's notes live, its handoffs folder, the
+inbox one-offs and the frontmatter reader.
 
 A module reaches it through the core, `available()` first and `load()` only on yes:
 
@@ -20,6 +20,10 @@ The calls:
   at `root` gets by default, or None.
 - `inbox_dir(slug)`, `make_inbox(slug)`, `inbox_list()`, `rename_inbox(slug, new)`: the
   inbox one-offs (see `moxi_notes.inbox`).
+- `frontmatter(text)`: a note's header, as `Frontmatter(present, ok, reason, fields, order,
+  start, end)`; it never raises.
+- `upsert_frontmatter(text, key, value, *, order=...)`: `(text, changed)` with `key` added
+  as one line when the header lacks it; a key that is there is never replaced.
 
 Nothing here reads the process environment for the override: the caller passes it, so a
 launch inside an agent session never hands a child its parent's folder. Paths are
@@ -61,6 +65,23 @@ def handoffs_dir(path, *, create: bool = False, override=None):
     return folder
 
 
+def frontmatter(text: str):
+    """The header of a note's `text`, as a `Frontmatter`. Never raises."""
+    from .frontmatter import parse
+
+    return parse(text)
+
+
+def upsert_frontmatter(text: str, key: str, value, *, order=None) -> tuple[str, bool]:
+    """`(text, changed)`: `text` with `key: value` added as one line when its header
+    lacks the key, or a header made to hold it. `order` is the required keys' canonical
+    order (default: the five). A key that is there is never replaced, and a header that
+    can't be read is never written into."""
+    from .frontmatter import DEFAULT_REQUIRED, upsert
+
+    return upsert(text, key, value, order=DEFAULT_REQUIRED if order is None else order)
+
+
 __all__ = ["HANDOFFS", "Resolution", "Inbox", "NotesError", "Refused", "BadSlug", "root",
            "notes_dir", "handoffs_dir", "notes_root_for", "inbox_dir", "make_inbox",
-           "inbox_list", "rename_inbox"]
+           "inbox_list", "rename_inbox", "frontmatter", "upsert_frontmatter"]
