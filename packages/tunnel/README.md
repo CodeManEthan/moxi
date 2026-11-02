@@ -34,7 +34,7 @@ may change the serve config only as Tailscale's operator, set once with
 | `moxi tunnel status [--json] [--check]` | every declared or recorded target: reach, exposure, provider, state, URL and loopback port, then the copies in `displaced/`. `--check` compares each with the live config |
 | `moxi tunnel add TARGET [--provider tailscale\|cloudflare] [--port N] [--hostname H] [--replace] [--yes]` | turns a target on. On a target already recorded with another provider, it switches provider |
 | `moxi tunnel remove TARGET [--forget] [--yes]` | turns it off. It also removes an address whose module is gone, and undoes a replace that has not finished. `--forget` drops the entry from the record and leaves a Tailscale entry's live config as it is |
-| `moxi tunnel repair [--yes]` | puts each recorded address right: missing, moved, renamed or left half way |
+| `moxi tunnel repair [--yes]` | puts each recorded address right: missing, moved, renamed or left half way. It also rewrites a `cloudflared.yml` edited by hand, and brings the Cloudflare switch and the `cloudflared` unit into step with the record |
 
 A target is named `<module>/<name>`, such as `ui/gateway`; the bare name works when only
 one module declares it. Every act prints the warnings that apply and asks once before it
@@ -85,6 +85,15 @@ and follows a moved port on the same address. A module reads its address with
 `moxi_tunnel.address(module, name)` once `moxi.modules.available("tunnel")` is true, or
 with `moxi tunnel status --json` from outside Python. It uses the URL only while `state` is
 `on`.
+
+`moxi tunnel status --json` prints one object, `{"targets": [...], "displaced": [...]}`.
+Each item of `targets` is one declared or recorded target, with `module`, `name`, `reach`,
+`exposure`, `provider`, `state` (`applying`, `on` or `removing`), `url`, `host`, `port`,
+`target`, `change`, `displaced`, `applied_at` and `detail`, each null but the first three
+while the target is not recorded; with `--check` it also has `check`, the live
+comparison, and `check_detail` and `fix` when that is not `ok`. Each item
+of `displaced` is one file in `displaced/`: `name`, `port`, `pending`, `path`, `target` and
+`settles`. A failure prints `{"error": ..., "fix": ...}` and exits with its code.
 
 The module behind the address must itself:
 
@@ -154,7 +163,9 @@ that needed it say "not checked", so a hung tailscaled never costs the whole rep
 turns the Cloudflare daemon off. When an address can't be removed (its live config was
 changed by hand, tailscale can't be reached), the uninstall stops before changing anything
 and names each one, with the command that removes it by hand and
-`moxi tunnel remove <target> --forget` for one you want to keep.
+`moxi tunnel remove <target> --forget` for one you want to keep. A Tailscale removal that
+fails part way through also stops the uninstall and names what is left, but by then the
+Cloudflare addresses are already gone.
 `moxi uninstall tunnel --skip-teardown` goes past it: the Tailscale addresses then stay
 live, and the uninstall names each with its hand command. The record stays, so reinstalling
 tunnel takes them back as they were. With `--purge` too, the record goes once you say yes;
