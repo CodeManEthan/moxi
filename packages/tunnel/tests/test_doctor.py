@@ -335,3 +335,26 @@ def test_off_linux_the_cli_is_found_in_the_platforms_place_and_no_operator_is_as
     # An own-devices target there needs no prefs: debug prefs is not run.
     calls = json.loads((app.parent / tailscale.path.name).read_text())["calls"]
     assert ["debug", "prefs"] not in calls
+
+
+def test_a_unit_state_that_does_not_come_back_leaves_its_row_not_checked(alpha, cf, units,
+                                                                        yes, monkeypatch):
+    import threading
+
+    acts.add("alpha/gateway", provider_name="cloudflare", hostname="a.example.com",
+             ask=yes)
+    release = threading.Event()
+    real = units.status
+
+    def hung(*args, **kwargs):
+        release.wait(30)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(units, "status", hung)
+    try:
+        got = by_name(quick())
+    finally:
+        release.set()
+    row = got["cloudflare in step"]
+    assert row.state == "warn" and row.detail.startswith("not checked")
+    assert got["alpha/gateway"].state == "ok"

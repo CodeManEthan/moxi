@@ -4,9 +4,9 @@ The core calls `rows()` with no arguments, in a worker thread with ten seconds; 
 that overruns becomes one `fail` row with none of its detail. So one run sets one
 deadline, `BUDGET` seconds from its start, and every wait in it is cut to what is left:
 
-- the local rows come first: the record, the declarations, the Cloudflare rows (files and
-  the core's unit status only) and a connect to each recorded target's loopback port,
-  each waiting at most `CONNECT_WAIT`;
+- the local rows come first: the record, the declarations, the Cloudflare rows (files,
+  and the core's unit status, waited for at most `READ_WAIT`) and a connect to each
+  recorded target's loopback port, each waiting at most `CONNECT_WAIT`;
 - then the `tailscale` reads, each run once and shared by every row and by the entries'
   comparison: `version`, `status --json`, `serve status --json` and `debug prefs`, each
   waiting at most `READ_WAIT`;
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import socket
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -143,7 +144,9 @@ def rows(*, budget: float = BUDGET, read_wait: float = READ_WAIT,
     answers = _answer_rows(entries, connect_wait=connect_wait, deadline=deadline,
                            budget=budget, clock=clock)
     cloudflare = _guard("cloudflare", lambda: [_setup_row(entries)])
-    in_step = _guard("cloudflare in step", lambda: [cf_.in_step_row()])
+    in_step = _guard("cloudflare in step",
+                     lambda: [_in_step_row(wait=read_wait, deadline=deadline, budget=budget,
+                                           clock=clock)])
 
     # -- the tailscale reads, then the rows that need them ----------------------------
     tailscale_keys = sorted(k for k, e in entries.items()
@@ -194,6 +197,36 @@ def _declaration_rows() -> tuple[declare.Declarations, list[Row]]:
 
 
 # -- Cloudflare ----------------------------------------------------------------------------
+
+def _in_step_row(*, wait: float, deadline: float, budget: float,
+                 clock: Callable[[], float]) -> Row:
+    """The `cloudflare in step` row, which reads the unit's install state from the core's
+    `moxi.units.status`: a supervisor call with a limit of its own, longer than this run's.
+    So it runs in a thread and is waited for at most `wait`, cut to what is left of the
+    deadline; past that the row is `warn`, not checked."""
+    name = "cloudflare in step"
+    left = min(wait, deadline - clock())
+    if left <= 0:
+        return Row(MODULE, name, "warn", f"not checked: {_ran_out(budget)}")
+    got: dict[str, object] = {}
+
+    def read() -> None:
+        try:
+            got["row"] = cf_.in_step_row()
+        except Exception as exc:  # noqa: BLE001 - handed to the caller's guard
+            got["error"] = exc
+
+    worker = threading.Thread(target=read, name="tunnel-doctor-unit-state", daemon=True)
+    worker.start()
+    worker.join(left)
+    if worker.is_alive():
+        return Row(MODULE, name, "warn", f"not checked: the cloudflared unit's state did not "
+                   f"come back in {left:g} s", "moxi doctor tunnel, once the user's unit "
+                   "manager answers")
+    if "error" in got:
+        raise got["error"]
+    return got["row"]
+
 
 def _setup_row(entries: Mapping[str, Entry]) -> Row:
     if not any(e.provider == "cloudflare" for e in entries.values()):
