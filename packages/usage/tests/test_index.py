@@ -361,6 +361,41 @@ def test_an_archive_copy_of_a_live_session_is_not_read_and_its_row_goes(readings
     assert result.deleted == 1
 
 
+def test_the_pass_that_sees_a_live_transcript_gone_reads_its_archive_copy(readings, roots,
+                                                                         tmp_path):
+    archive = tmp_path / "old-machine"
+    transcript(archive / "projects", SESSION_A).write()
+    live = transcript(roots["claude"], SESSION_A).write()
+    other = ClaudeTranscript(roots["claude"], session_id=SESSION_B)
+    other.user("go")
+    other.assistant("b", usage=usage(output=33), request_id="req_b", message_id="msg_b")
+    other.write()
+    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    run(readings)
+    assert files("archive:old") == []
+
+    os.unlink(live)
+    run(readings)
+    [row] = files("archive:old")
+    assert row["session_id"] == SESSION_A
+    assert {r["lane"] for r in requests() if r["won"]} == {"claude", "archive:old"}
+    assert sorted(r["output"] for r in won()) == [11, 22, 33]
+
+
+def test_a_live_row_held_on_an_empty_listing_still_keeps_its_archive_copy_unread(
+        readings, roots, tmp_path):
+    archive = tmp_path / "old-machine"
+    transcript(archive / "projects", SESSION_A).write()
+    live = transcript(roots["claude"], SESSION_A).write()
+    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    run(readings)
+    os.unlink(live)
+    result = run(readings)
+    assert result.lanes["claude"]["state"] == "held"
+    assert files("archive:old") == []
+    assert {r["lane"] for r in requests() if r["won"]} == {"claude"}
+
+
 def test_archive_ranks_follow_the_config_and_a_reorder_moves_the_claim(readings,
                                                                        tmp_path):
     one, two = tmp_path / "one", tmp_path / "two"

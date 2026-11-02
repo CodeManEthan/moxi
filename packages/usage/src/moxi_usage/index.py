@@ -35,7 +35,8 @@
    requests, and its keys are claimed again in the same transaction. A lane whose archive
    id left the config is dropped.
 6. **Live precedence.** An archive file whose session has a live main transcript is not
-   read, and its row goes.
+   read, and its row goes. The live set is taken after the live lane ran, so the pass
+   that sees a live transcript gone reads its archive copy.
 7. **Project keys.** With the projects module installed, a row with no `project` gets
    one: first from another row of the same session and directory that recorded one (the
    session's start), else, only while its `cwd` exists, from `for_path(cwd)`, one lookup
@@ -345,7 +346,9 @@ class _Pass:
         self.cancel = cancel
         self.result = result
         self.tasks: list[tuple[Lane, Any, dict | None, str | None]] = []
-        self.live_mains: set[str] = set()
+        #: The sessions with a live main transcript, worked out after the live lane ran
+        #: and before the first archive lane.
+        self.live_mains: set[str] | None = None
 
     def cancelled(self) -> bool:
         if self.result.cancelled:
@@ -419,10 +422,11 @@ def pass_(*, lanes: Iterable[str] | None = None, rebuild: bool = False,
                     cancel=cancel, result=result)
         if wanted is None:
             _drop_unconfigured(run, {lane.id for lane in every})
-        run.live_mains = _live_mains(run, listings.get(CLAUDE))
         for lane in chosen:
             if run.cancelled():
                 break
+            if lane.archive and run.live_mains is None:
+                run.live_mains = _live_mains(run, listings.get(CLAUDE))
             if lane.harness == OPENCODE:
                 _opencode_lane(run, lane, listings[lane.id], sessions)
             else:
@@ -507,7 +511,11 @@ def _drop_unconfigured(run: _Pass, configured: set[str]) -> None:
 
 
 def _live_mains(run: _Pass, listing: Any) -> set[str]:
-    """The sessions with a live main transcript: listed now, or kept in the index."""
+    """The sessions with a live main transcript: listed now, or kept in the index. It is
+    asked after the live lane ran, so a live transcript this pass saw gone has lost its
+    row and its archive copy is read in the same pass; a row the lane held (its listing
+    failed or came back empty, or the file sits where it could not be read) still
+    counts."""
     mains = {row[0] for row in run.conn.execute(
         "SELECT DISTINCT session_id FROM files WHERE lane = ? AND kind = 'main' "
         "AND session_id IS NOT NULL", (CLAUDE,))}
