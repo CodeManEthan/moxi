@@ -278,6 +278,31 @@ def test_a_moved_folder_updates_its_links(lo, tmp_path):
     assert os.readlink(kit.claude() / "review") == str(moved / "skills" / "review")
 
 
+def test_entries_written_before_an_interrupt_are_recorded(lo, monkeypatch):
+    import json
+
+    kit.manifest(lo, '[user]\nhooks = ["guard"]\n'
+                     '[hook.guard]\nevent = "PreToolUse"\ncommand = "guard-cmd"\n')
+    real = planner.build
+
+    def stopped(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(planner, "build", stopped)
+    with pytest.raises(KeyboardInterrupt):
+        install.install()
+    monkeypatch.setattr(planner, "build", real)
+    settings = kit.claude("settings.json")
+    assert "guard-cmd" in settings.read_text()
+    records = [r for r in ledger.read()["entries"] if r.get("kind") == "hook"]
+    assert records and not any(r.get("prior") for r in records)
+    # So the next install keeps it as loadout's, and a drop removes it.
+    assert install.install().code == 0
+    kit.manifest(lo, '[user]\n')
+    assert install.install().code == 0
+    assert "guard-cmd" not in json.dumps(json.loads(settings.read_text()))
+
+
 def test_dry_run_changes_nothing(lo):
     kit.manifest(lo, '[user]\nskills = ["review"]\n')
     out = install.install(dry_run=True)

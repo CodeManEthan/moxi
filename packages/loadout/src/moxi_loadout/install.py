@@ -20,7 +20,8 @@
    what it holds;
 5. write the harness entries (`moxi_loadout.entries`): hooks, permission rules, MCP
    servers and the managed global file, CLI-backed MCP servers first, then each harness
-   file once;
+   file once, and the ledger with their records straight after, `SIGINT` and `SIGTERM`
+   deferred across both;
 6. write loadout's ledger: a record per placement made or kept and per entry written or
    kept, none for one removed.
 
@@ -218,7 +219,13 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
 
     def harness_entries() -> None:
         run = entries.plan(found, machine.source, data, claims=claims)
-        written.extend(entries.apply(run, scope, data, keep=machine.backups_keep, say=say))
+        # The entries and their records land together: an interrupt waits for the ledger
+        # write, so an entry loadout wrote is never left unrecorded (the next run would
+        # take it for the user's).
+        with adoption.deferred_signals():
+            written.extend(entries.apply(run, scope, data, keep=machine.backups_keep,
+                                         say=say))
+            ledger.write(data)
         lines.extend(run.lines)
         notes.extend(run.notes)
 
