@@ -5,14 +5,17 @@ another format as `fail` rows, and the deadline rule with short waits."""
 from __future__ import annotations
 
 import json
+import shutil
 import socket
 import sys
 import time
+import types
 
 import pytest
 
 from fake_tailscale import HOST, status
 from moxi_tunnel import acts, doctor, record
+from moxi_tunnel import tailscale as ts_
 from moxi_tunnel.doctor import TAILSCALE_ROWS
 
 
@@ -307,3 +310,28 @@ def test_the_cloudflare_row_fails_when_its_setup_is_gone(alpha, cf, tailscale, y
     config_file("tunnel", "[cloudflare]\nenabled = true\ntunnel_id = 'not-a-uuid'\n")
     row = by_name(quick())["cloudflare"]
     assert row.state == "fail"
+
+
+# -- the platforms, as far as Linux can show them ------------------------------------------
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_off_linux_the_cli_is_found_in_the_platforms_place_and_no_operator_is_asked(
+        alpha, tailscale, yes, monkeypatch, tmp_path, platform):
+    acts.add("alpha/gateway", ask=yes)
+    app = tmp_path / "app" / "Tailscale"
+    app.parent.mkdir()
+    shutil.copy(tailscale.bin / "tailscale", app)
+    tailscale.edit(lambda st: st.update(calls=[]))
+    shutil.copy(tailscale.path, app.parent / tailscale.path.name)
+    monkeypatch.setenv("PATH", "/nowhere")
+    monkeypatch.setitem(ts_.PLATFORM_PATHS, platform, str(app))
+    # Only tunnel's reading of the platform changes; Python's own stays Linux's.
+    seen = types.SimpleNamespace(platform=platform)
+    monkeypatch.setattr(ts_, "sys", seen)
+    monkeypatch.setattr(doctor, "sys", seen)
+    got = by_name(quick())
+    assert got["tailscale CLI"].state == "ok" and str(app) in got["tailscale CLI"].detail
+    assert got["may change serve config"].state == "off"
+    # An own-devices target there needs no prefs: debug prefs is not run.
+    calls = json.loads((app.parent / tailscale.path.name).read_text())["calls"]
+    assert ["debug", "prefs"] not in calls
