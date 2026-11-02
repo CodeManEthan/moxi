@@ -1,0 +1,27 @@
+# loadout's machine settings. The file it governs is CONFIG/loadout/config.toml;
+# `moxi config loadout` shows every key and `moxi config set loadout KEY VALUE` sets one.
+# Only what is true of one machine lives here. Every choice of what goes where (items,
+# sections, harness lists, what is disabled, the global mode) is in the manifest,
+# loadout.toml in the loadout folder, so a second machine or a cloud session cloned from
+# the folder installs what the user chose. Every key is read at its use.
+
+[source]
+type = "path"
+default = ""
+doc = "The loadout folder on this machine, holding loadout.toml; empty means the folder in loadout's data directory."
+read = "use"
+
+[backups.keep]
+type = "int"
+default = 10
+doc = "How many backups loadout keeps of each harness file it rewrites."
+read = "use"
+
+# Each harness's folders for skills and agent files inside a project, relative to the
+# project's root. A harness or kind the file leaves out keeps its default, so setting
+# `[project_folders.codex] agents = "..."` changes only that one folder.
+[project_folders]
+type = "table"
+default = { claude = { skills = ".claude/skills", agents = ".claude/agents" }, codex = { skills = ".agents/skills", agents = ".codex/agents" }, opencode = { skills = ".opencode/skills", agents = ".opencode/agents" } }
+doc = "Each harness's skills and agents folders inside a project, relative to its root."
+read = "use"

@@ -13,6 +13,7 @@ members = [
     "moxi-comms",
     "moxi-dev",
     "moxi-launcher",
+    "moxi-loadout",
     "moxi-loopback",
     "moxi-notes",
     "moxi-projects",
@@ -919,6 +920,38 @@ dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
     { name = "playwright", specifier = ">=1.56,<2" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-loadout"
+version = "0.1.0"
+source = { editable = "packages/loadout" }
+dependencies = [
+    { name = "moxi" },
+]
+
+[package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+]
+provides-extras = ["projects"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "pytest" },
 ]
 
