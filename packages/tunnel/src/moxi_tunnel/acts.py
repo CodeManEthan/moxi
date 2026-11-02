@@ -146,6 +146,8 @@ def _state(key, entry, decls, bad, ports_now, clash, live) -> EntryState:
         return EntryState(key, "half", entry, entry.detail or f"left {entry.state}",
                           "moxi tunnel repair")
     got = live(entry)
+    if isinstance(got, _Unread):
+        return EntryState(key, "changed", entry, f"not checked: {got.reason}", got.fix)
     if got == "renamed":
         return EntryState(key, "renamed", entry, "the machine's name changed",
                           "moxi tunnel repair")
@@ -174,23 +176,38 @@ def _clash_fix(key: str, others: list[str], decls: declare.Declarations) -> str:
     return "give these settings different ports: " + "; ".join(names)
 
 
+@dataclass(frozen=True)
+class _Unread:
+    """A provider whose live config could not be read: why, and the fix."""
+
+    reason: str
+    fix: str | None
+
+
 class _Live:
-    """The live-state reader for `check` and the plans: one provider each, read once."""
+    """The live-state reader for `check` and the plans: one provider each, read once. A
+    provider that can't be read is asked once; each of its entries then reads `changed`,
+    "not checked", with the read's reason and fix, and the others are still compared."""
 
     def __init__(self, deadline: float | None = None):
         self.deadline = deadline
         self.providers: dict[str, provider.Provider] = {}
+        #: Each provider whose read failed, with the failure.
+        self.failed: dict[str, TunnelError] = {}
 
     def get(self, name: str) -> provider.Provider:
         if name not in self.providers:
             self.providers[name] = provider.get(name, deadline=self.deadline)
         return self.providers[name]
 
-    def __call__(self, entry: Entry) -> str | None:
-        try:
-            return self.get(entry.provider).live_state(entry)
-        except Refused as exc:
-            return exc.reason
+    def __call__(self, entry: Entry) -> str | _Unread | None:
+        exc = self.failed.get(entry.provider)
+        if exc is None:
+            try:
+                return self.get(entry.provider).live_state(entry)
+            except TunnelError as caught:
+                exc = self.failed[entry.provider] = caught
+        return _Unread(exc.reason, exc.fix)
 
 
 def check(module: str | None = None, name: str | None = None, *,
@@ -922,14 +939,21 @@ def repair(*, ask: Confirm) -> Outcome:
         held: list[str] = []
         acts: list[tuple] = []
         ct_hosts: list[str] = []
+        ts, host_now, serve, unread = None, None, {}, None
         if pending or any(s.entry.provider == "tailscale" or _from_tailscale(s.entry)
                           for s in states):
-            ts = live.get("tailscale")
-            host_now = ts.host()
-            serve = ts.serve_config()
-        else:
-            ts, host_now, serve = None, None, {}
+            unread = live.failed.get("tailscale")
+            if unread is None:
+                try:
+                    ts = live.get("tailscale")
+                    host_now = ts.host()
+                    serve = ts.serve_config()
+                except TunnelError as exc:
+                    ts, host_now, serve, unread = None, None, {}, exc
         for d in pending:
+            if unread is not None:
+                held.append(_unread_line(f"the copy {d.name} on port {d.port}", unread))
+                continue
             copy = record.read_copy(d.name)
             naming = [k for k, e in rec.entries.items() if e.displaced == d.name]
             if naming and ts_.parts(serve, d.port) == copy["parts"]:
@@ -942,6 +966,12 @@ def repair(*, ask: Confirm) -> Outcome:
             e = s.entry
             url = api.url(e.host, e.port)
             if s.check == "half" and e.provider == "tailscale" and record.names_pending(e):
+                if unread is not None:
+                    held.append(_unread_line(s.target, unread))
+                continue
+            if unread is not None and s.check == "half" and (
+                    e.provider == "tailscale" or _from_tailscale(e)):
+                held.append(_unread_line(s.target, unread))
                 continue
             moving = (e.provider == "tailscale" and host_now is not None
                       and normal_host(e.host) != host_now
@@ -1029,6 +1059,12 @@ def _do_repair(plan: _Plan, act: _Act) -> Outcome:
     return Outcome(None, notes + held, code)
 
 
+def _unread_line(what: str, exc: TunnelError) -> str:
+    """The held line for something repair leaves while tailscale can't be read."""
+    return (f"{what}: left as it is, since tailscale can't be read: {exc.reason}"
+            + (f" (fix: {exc.fix}, then moxi tunnel repair)" if exc.fix else ""))
+
+
 def _from_tailscale(e: Entry) -> bool:
     return isinstance(e.from_, Mapping) and e.from_.get("provider") == "tailscale"
 
@@ -1057,6 +1093,8 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
         state = _state(key, e, decls, bad, ports_now, clash, live)
         if state.check not in ("half", "missing", "moved", "changed"):
             continue
+        if ts is None and _from_tailscale(e):
+            continue  # its old Tailscale entry can't be read: the plan held it
         if e.state == State.REMOVING:
             drops[key] = None
             continue

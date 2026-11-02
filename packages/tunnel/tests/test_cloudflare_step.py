@@ -474,3 +474,50 @@ def test_listeners_hear_a_switch_once(setup, tailscale, yes, alpha):
     listen = importlib.import_module("moxi_alpha.listen")  # the site's fixture module
     assert listen.HEARD == [("alpha/gateway", None, "tailscale"),
                             ("alpha/gateway", "tailscale", "cloudflare")]
+
+
+# -- while tailscale can't be read ----------------------------------------------------------
+
+def test_check_gives_each_entry_its_state_while_tailscale_cant_be_read(setup, tailscale, yes):
+    acts.add("alpha/gateway", ask=yes)
+    add("alpha/connector", A, yes)
+    tailscale.fail("status", "tailscaled is not running\n")
+    tailscale.fail("serve-status", "tailscaled is not running\n")
+    calls = len(tailscale.calls)
+    got = {s.target: s for s in acts.check()}
+    assert got["alpha/connector"].check == "ok"
+    gateway = got["alpha/gateway"]
+    assert gateway.check == "changed"
+    assert gateway.detail == "not checked: tailscaled is not running"
+    assert gateway.fix == "tailscale status"
+    assert len(tailscale.calls) == calls + 1
+    rows = {r["name"]: r for r in acts.status(live=True)["targets"]}
+    assert rows["gateway"]["check_detail"].startswith("not checked")
+
+
+def test_repair_puts_cloudflare_right_and_holds_tailscale_while_it_cant_be_read(
+        setup, tailscale, yes, monkeypatch):
+    acts.add("alpha/gateway", ask=yes)
+    add("alpha/connector", A, yes)
+    monkeypatch.setattr(acts, "_step", _crash_at("switch-applying"))
+    with pytest.raises(Crash):
+        acts.add("alpha/gateway", provider_name="cloudflare", hostname=B, ask=yes)
+    monkeypatch.setattr(acts, "_step", lambda name: None)
+    assert record.read().entries["alpha/gateway"].from_ is not None
+    cloudflare.delete_file()
+    tailscale.fail("status", "tailscaled is not running\n")
+    tailscale.fail("serve-status", "tailscaled is not running\n")
+    got = acts.repair(ask=yes)
+    assert got.code == 3
+    assert any(n.startswith("alpha/connector: ok") for n in got.notes)
+    held = [n for n in got.notes if n.startswith("alpha/gateway")]
+    assert held and "tailscaled is not running" in held[0]
+    rec = record.read()
+    assert rec.entries["alpha/connector"].state == State.ON
+    gateway = rec.entries["alpha/gateway"]
+    assert gateway.state == State.APPLYING and gateway.from_ is not None
+    tailscale.ok()
+    assert acts.repair(ask=yes).code == 0
+    assert tailscale.serve["TCP"] == {}
+    assert states() == {"alpha/connector": "ok", "alpha/gateway": "ok"}
+    assert_agree(setup)
