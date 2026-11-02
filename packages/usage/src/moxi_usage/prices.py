@@ -70,6 +70,9 @@ class Update:
     added: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     repriced: list[str] = field(default_factory=list)
+    #: Supplement rows left out because their model is no longer in LiteLLM and they give
+    #: no input or output price, so the table below keeps that model's price.
+    dropped: list[str] = field(default_factory=list)
     written: bool = False
     #: What the change does to the models the token index has seen (`InIndex`), or None
     #: when there is no index to read.
@@ -79,7 +82,7 @@ class Update:
         return {"url": self.url, "path": str(self.path), "snapshot": dict(self.snapshot),
                 "rows": self.rows, "shipped_rows": self.shipped_rows,
                 "added": self.added, "removed": self.removed, "repriced": self.repriced,
-                "written": self.written,
+                "dropped": self.dropped, "written": self.written,
                 "in_index": None if self.in_index is None else self.in_index.as_dict()}
 
 
@@ -125,9 +128,11 @@ def update(*, fetcher: Fetch | None = None, now: float | None = None,
         raise FetchError(f"{url} did not return a JSON document ({exc})") from exc
     when = time.time() if now is None else now
     date = datetime.datetime.fromtimestamp(when, datetime.timezone.utc).date().isoformat()
+    dropped: list[str] = []
     try:
         doc = convert.convert(litellm, supplement(), date=date,
-                              sha256=hashlib.sha256(raw).hexdigest(), url=url)
+                              sha256=hashlib.sha256(raw).hexdigest(), url=url,
+                              dropped=dropped)
     except convert.ConvertError as exc:
         raise Refused(str(exc)) from exc
     shipped = models.shipped()
@@ -146,7 +151,8 @@ def update(*, fetcher: Fetch | None = None, now: float | None = None,
         atomic_write(path, convert.dumps(doc))
     return Update(url=url, path=path, snapshot=doc["snapshot"], rows=rows,
                   shipped_rows=shipped_rows, added=added, removed=removed,
-                  repriced=repriced, written=not dry_run, in_index=in_index)
+                  repriced=repriced, dropped=sorted(dropped), written=not dry_run,
+                  in_index=in_index)
 
 
 def index_models(env: Mapping[str, str] | None = None) -> list[tuple[Any, Any]] | None:

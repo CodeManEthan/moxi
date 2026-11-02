@@ -111,6 +111,22 @@ def test_update_writes_the_snapshot_and_names_the_changes(fetched, capsys):
     assert models.snapshot_path().stat().st_mode & 0o777 == 0o600
 
 
+def test_update_keeps_a_model_priced_when_litellm_drops_one_the_supplement_adds_to(
+        fetched, capsys):
+    gone = big_litellm()
+    del gone["claude-opus-4-8"]
+    fetched(gone)
+    assert cli.main(["prices", "update", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["dropped"] == ["claude-opus-4-8"]
+    facts = models.model_facts("claude-opus-4-8")
+    assert facts.priced and facts.provenance.layer == "shipped"
+    assert facts.tiers["fast"]["input"] > facts.input
+    fetched(gone)
+    assert cli.main(["prices", "update", "--dry-run"]) == 0
+    assert "no longer in LiteLLM: 1: claude-opus-4-8" in capsys.readouterr().out
+
+
 def test_update_text_and_dry_run_write_nothing(fetched, capsys):
     fetched(big_litellm())
     assert cli.main(["prices", "update", "--dry-run"]) == 0

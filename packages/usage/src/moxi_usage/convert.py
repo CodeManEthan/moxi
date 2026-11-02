@@ -36,7 +36,9 @@ speed tiers (`fast`, with `speed`). Other LiteLLM prices
 
 `check_fields(litellm)` says which of the field names above the file does not carry, so a
 LiteLLM rename stops the conversion instead of emptying a column. The supplement's rows
-are laid over LiteLLM's, field by field, and a row's `provenance` names both.
+are laid over LiteLLM's, field by field, and a row's `provenance` names both. An
+exact supplement row that adds to a model LiteLLM no longer lists, and gives no input or
+output price of its own, is left out and named, so it never stands as an unpriced row.
 """
 
 from __future__ import annotations
@@ -111,10 +113,15 @@ def check_fields(litellm: Mapping[str, Any]) -> list[str]:
 
 
 def convert(litellm: Mapping[str, Any], supplement: Mapping[str, Any], *, date: str,
-            sha256: str, url: str | None = None) -> dict[str, Any]:
+            sha256: str, url: str | None = None,
+            dropped: list[str] | None = None) -> dict[str, Any]:
     """The model table from a parsed LiteLLM file and a parsed supplement. Raises
     `ConvertError` when the LiteLLM file is not a JSON object, lacks a field name the
-    converter reads, or the supplement is malformed."""
+    converter reads, or the supplement is malformed.
+
+    An exact supplement row that finds no LiteLLM row and gives neither `input` nor
+    `output` is left out, since it would make a row with no base price that replaces a
+    priced one in a table below. Its id is appended to `dropped` when one is given."""
     if not isinstance(litellm, Mapping):
         raise ConvertError("the LiteLLM file is not a JSON object")
     missing = check_fields(litellm)
@@ -132,6 +139,11 @@ def convert(litellm: Mapping[str, Any], supplement: Mapping[str, Any], *, date: 
     prefixes: dict[str, dict[str, Any]] = {}
     for row in supplement["model"]:
         target = prefixes if row.get("match") == "prefix" else models
+        if (target is models and row["id"] not in models
+                and "input" not in row and "output" not in row):
+            if dropped is not None:
+                dropped.append(row["id"])
+            continue
         _lay(target, row)
     snapshot = {"source": "litellm", "date": date, "sha256": sha256}
     if url:

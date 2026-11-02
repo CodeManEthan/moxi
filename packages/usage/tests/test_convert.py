@@ -95,6 +95,17 @@ def test_supplement_only_row_and_prefix_row():
     assert table["prefixes"]["fam-2-"]["input"] == 3.0
 
 
+def test_a_supplement_row_with_no_base_price_for_a_model_litellm_dropped_is_left_out():
+    extra = supplement(model=[
+        {"id": "gone-1", "tiers": {"fast": {"speed": "fast", "input": 8, "output": 40}},
+         "source": "s", "as_of": "d"},
+        {"id": "gone-2", "window": 400000, "source": "s", "as_of": "d"}])
+    dropped: list[str] = []
+    table = convert.convert(litellm(), extra, date="d", sha256="s", dropped=dropped)
+    assert "gone-1" not in table["models"] and "gone-2" not in table["models"]
+    assert dropped == ["gone-1", "gone-2"]
+
+
 @pytest.mark.parametrize("bad, said", [
     ({"model": [{"id": "m", "input": 1, "as_of": "d"}]}, "needs a source"),
     ({"model": [{"id": "fam-", "match": "prefix", "input": 1, "source": "s",

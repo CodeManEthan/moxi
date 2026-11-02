@@ -268,6 +268,11 @@ def _update(args: argparse.Namespace, prog: str, *, fetcher: Any = None,
         shown = ", ".join(ids[:SHOWN])
         more = f" and {len(ids) - SHOWN} more" if len(ids) > SHOWN else ""
         print(f"  {name:<9} {len(ids)}{': ' if ids else ''}{shown}{more}")
+    if result.dropped:
+        shown = ", ".join(result.dropped[:SHOWN])
+        more = f" and {len(result.dropped) - SHOWN} more" if len(result.dropped) > SHOWN else ""
+        print(f"  supplement rows left out, their models no longer in LiteLLM: "
+              f"{len(result.dropped)}: {shown}{more}")
     _print_in_index(result.in_index)
     if result.written:
         print(f"wrote {result.path}")
