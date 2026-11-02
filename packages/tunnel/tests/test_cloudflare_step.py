@@ -385,6 +385,31 @@ def test_a_switch_to_tailscale_refused_by_tailscale_goes_back_whole(setup, tails
     assert_agree(setup)
 
 
+def _add_unknown_key(target: str) -> None:
+    """Give a recorded entry a key this version doesn't know, as a later tunnel would."""
+    raw = json.loads(record.record_path().read_text())
+    raw["entries"][target]["asks"] = {"upstream": "unix"}
+    record.record_path().write_text(json.dumps(raw))
+
+
+@pytest.mark.parametrize("direction", ["to-cloudflare", "to-tailscale"])
+def test_a_switch_keeps_the_entry_keys_a_later_tunnel_added(setup, tailscale, yes,
+                                                            direction):
+    if direction == "to-cloudflare":
+        acts.add("alpha/gateway", ask=yes)
+        _add_unknown_key("alpha/gateway")
+        add("alpha/gateway", A, yes)
+    else:
+        add("alpha/gateway", A, yes)
+        _add_unknown_key("alpha/gateway")
+        acts.add("alpha/gateway", provider_name="tailscale", ask=yes)
+    entry = record.read().entries["alpha/gateway"]
+    assert entry.provider == ("cloudflare" if direction == "to-cloudflare" else "tailscale")
+    assert entry.extra == {"asks": {"upstream": "unix"}}
+    assert entry.from_ is None and entry.state == State.ON
+    assert_agree(setup)
+
+
 @pytest.mark.parametrize("direction", ["to-cloudflare", "to-tailscale"])
 def test_a_crash_mid_switch_is_finished_by_repair_from_from(setup, tailscale, yes,
                                                             monkeypatch, direction):

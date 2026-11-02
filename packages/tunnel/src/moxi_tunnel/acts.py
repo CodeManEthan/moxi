@@ -483,7 +483,7 @@ def _plan_cloudflare(rec: Record, key: str, target: declare.Target, old: Entry |
                                        f"{api.url(old.host, old.port)}"]))
         raise Refused(f"{key} is recorded but not ok as it is",
                       f"moxi tunnel repair, or moxi tunnel remove {key}")
-    entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, from_=None)
+    entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, old=None)
     url = api.url(entry.host, entry.port)
     lines = [f"{key}: Cloudflare {url} to {ts_.upstream(loop)} ({entry.exposure})"]
     more, _ = warn.add_lines(provider="cloudflare", host=entry.host, url=url,
@@ -496,9 +496,9 @@ def _plan_cloudflare(rec: Record, key: str, target: declare.Target, old: Entry |
 
 
 def _cloudflare_entry(rec: Record, key: str, target: declare.Target, prov: provider.Provider,
-                      loop: int, hostname: str | None, *, from_: dict | None) -> Entry:
+                      loop: int, hostname: str | None, *, old: Entry | None) -> Entry:
     """The entry an act puts onto Cloudflare, once its hostname and the provider's
-    prerequisites pass."""
+    prerequisites pass. A switch passes the `old` entry, which is rewritten in place."""
     if hostname is None:
         raise UsageError("--provider cloudflare needs --hostname H, a hostname you routed "
                          "to your tunnel")
@@ -510,8 +510,17 @@ def _cloudflare_entry(rec: Record, key: str, target: declare.Target, prov: provi
     problems = prov.ready(target.reach)
     if problems:
         _refuse_problems(problems, "Cloudflare")
-    return Entry(reach=target.reach, provider="cloudflare", host=host, port=cf_.PORT,
-                 target=loop, state=State.APPLYING, from_=from_)
+    return _switched(old, reach=target.reach, provider="cloudflare", host=host,
+                     port=cf_.PORT, target=loop)
+
+
+def _switched(old: Entry | None, **values) -> Entry:
+    """A new `applying` entry, or with `old` (a provider switch) that entry rewritten in
+    place: the keys this version doesn't know are kept, and `from` holds the old address."""
+    if old is None:
+        return Entry(**values, state=State.APPLYING)
+    return replace(old, **values, state=State.APPLYING, from_=_from(old), displaced=None,
+                   detail=None, applied_at=None)
 
 
 def _from(old: Entry) -> dict:
@@ -539,7 +548,7 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
                           f"Moxi applied: {ts_.describe(ts_.parts(serve, old.port))}",
                           f"remove it by hand with {_hand_off(old)}, then moxi tunnel "
                           f"remove {key} --forget")
-        entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, from_=_from(old))
+        entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, old=old)
         data.update(ts=ts, serve=serve, gone=gone)
     else:
         problems = prov.ready(target.reach)
@@ -553,8 +562,8 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
         funnel = prov.funnel_ports() if target.reach == "public" else None
         choice = ports.choose(target.reach, target=loop, port=port, moxi=moxi,
                               foreign=foreign, funnel_ports=funnel)
-        entry = Entry(reach=target.reach, provider="tailscale", host=host, port=choice.port,
-                      target=loop, state=State.APPLYING, from_=_from(old))
+        entry = _switched(old, reach=target.reach, provider="tailscale", host=host,
+                          port=choice.port, target=loop)
         lines += choice.lines
         data.update(ts=prov, serve=serve, gone=True)
     url = api.url(entry.host, entry.port)
