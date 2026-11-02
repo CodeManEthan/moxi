@@ -25,7 +25,9 @@ A `[[model]]` row:
              exclusive; a date (UTC midnight) or a date and time; either may be left out
     note     text shown beside the row
 
-A row must give at least one fact.
+A row must give at least one fact. A row that gives any price or tier replaces every price
+and tier the table has for the model, so such a row must give `input` and `output` too; a
+row that gives only `window`, `max_output` or `provider` changes only those.
 
 The other key the schema checks only as a list is `claude.archive_roots`, more Claude Code
 trees for the token index to read: each a `[[claude.archive_roots]]` row with `path`, a
@@ -300,6 +302,12 @@ def _override(row: Any, n: int, where: Any) -> Override:
         raise _refuse(where, n, f"({model}) gives no fact",
                       "give a price, window, max_output, tiers or provider, or remove "
                       "the row")
+    if (prices or tiers is not None) and not {"input", "output"} <= set(prices):
+        lacking = " and ".join(name for name in ("input", "output") if name not in prices)
+        raise _refuse(where, n, f"({model}) gives prices or tiers but no {lacking}; a "
+                      "row that gives any price or tier replaces every price and tier "
+                      "the table has for the model, so it would leave it unpriced",
+                      "give input and output in the row too")
     return Override(id=model, match=match, prices=prices, limits=limits, tiers=tiers,
                     provider=provider, start=start, end=end, note=note, number=n)
 

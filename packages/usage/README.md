@@ -45,9 +45,11 @@ note = "promotional price"
 ```
 
 `match = "prefix"` makes a row cover every id that starts with `id` (the prefix must carry
-a digit, so it never covers every future model). A row that gives any price replaces all
-of the lower layer's prices for that model, so a cache price never stays behind at an old
-rate; `window` and `max_output` replace only themselves.
+a digit, so it never covers every future model). A row that gives any price or tier
+replaces all of the lower layer's prices and tiers for that model, so a cache price never
+stays behind at an old rate. Such a row must give `input` and `output` too, or usage
+refuses it, since it would leave the model unpriced. `window`, `max_output` and
+`provider` replace only themselves.
 
 A model id is looked up in this order, the first match winning:
 

@@ -48,11 +48,11 @@ def test_every_key_and_default():
         if part in current["ceiling.warning_text"]}
 
 
-ROW = '[[model]]\nid = "m-1"\ninput = 1\n'
+ROW = '[[model]]\nid = "m-1"\ninput = 1\noutput = 2\n'
 
 
 def test_a_good_row_reads():
-    text = ROW + ('output = 2.5\nwindow = 128000\nmatch = "exact"\nprovider = "openai"\n'
+    text = ('[[model]]\nid = "m-1"\ninput = 1\n' 'output = 2.5\nwindow = 128000\nmatch = "exact"\nprovider = "openai"\n'
                   'from = 2026-09-01\nto = "2026-11-01T12:00:00Z"\nnote = "n"\n'
                   'tiers.fast = {input = 2, output = 5, speed = "fast"}\n')
     settings.check(text)
@@ -76,11 +76,19 @@ def test_a_good_row_reads():
     (ROW + 'from = 2026-11-01\nto = 2026-10-01\n', "earlier"),
     (ROW + 'tiers = {fast = {inptu = 1}}\n', "tier"),
     ('[[model]]\nid = "m-1"\nnote = "only a note"\n', "no fact"),
+    ('[[model]]\nid = "m-1"\noutput = 2\n', "no input;"),
+    ('[[model]]\nid = "m-1"\ninput = 1\ncache_read = 0.1\n', "no output;"),
+    ('[[model]]\nid = "m-1"\ntiers.fast = {input = 2, output = 5}\n', "no input and output"),
 ])
 def test_config_check_refuses_what_the_loader_refuses(text, said):
     with pytest.raises(ConfigError, match=said) as caught:
         settings.check(text)
     assert caught.value.key == "model"
+
+
+def test_a_row_of_limits_or_provider_alone_needs_no_price():
+    settings.check('[[model]]\nid = "m-1"\nwindow = 1000\n')
+    settings.check('[[model]]\nid = "m-1"\nprovider = "openai"\nmax_output = 10\n')
 
 
 def test_config_check_runs_the_schema_first():

@@ -10,7 +10,7 @@ read = "use"
 [model]
 type = "list"
 default = []
-doc = "Your own [[model]] rows over the shipped model table: id, match (exact or prefix), any of input, output, cache_read, cache_write_5m, cache_write_1h (dollars per million tokens), window, max_output, tiers, provider, from and to (a price period, matched on the request's own time) and note."
+doc = "Your own [[model]] rows over the shipped model table: id, match (exact or prefix), any of input, output, cache_read, cache_write_5m, cache_write_1h (dollars per million tokens), window, max_output, tiers, provider, from and to (a price period, matched on the request's own time) and note. A row that gives any price or tier replaces every price and tier the table has for that model, so it must give input and output too."
 read = "use"
 
 [prices.url]

@@ -200,7 +200,7 @@ def test_the_stamp_changes_with_the_measure_the_snapshot_and_the_config():
     snapshot.write_text(json.dumps(doc({})), encoding="utf-8")
     after_snapshot = thresholds.stamp()
     assert after_snapshot != after_measure
-    write_config('[[model]]\nid = "claude-opus-5"\ninput = 5.0\n')
+    write_config('[[model]]\nid = "claude-opus-5"\ninput = 5.0\noutput = 25.0\n')
     assert thresholds.stamp() != after_snapshot
     assert str(Layout("usage").config_file()) in [path for path, _ in thresholds.stamp()]
 
