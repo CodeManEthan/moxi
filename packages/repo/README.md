@@ -28,7 +28,8 @@ moxi repo git-hooks list                         # every repo repo has written t
 
 - `moxi repo git-hooks [list] [PATH] [--projects] [--json]` lists each repo repo has
   written to, or the one at PATH: git's version and the mode, each event's pieces in
-  order (id, fail policy, enabled, settings), the existing git hook, and problems.
+  order (id, fail policy, enabled, settings), the existing git hook, and problems. Its
+  JSON also gives the doctor records repo has open for each repo.
 - `moxi repo git-hooks available [--json]` lists the pieces installed modules declare: id,
   event, fail policy, the settings each takes, and one line about it.
 - `moxi repo git-hooks add PATH [PIECE...] [--mode auto|config|shim] [--set KEY=VALUE]...`
@@ -320,7 +321,8 @@ that text the commit's subject, and a callable `message` can't be saved.
   every spec saved in that repo, and prints each pass's line. It exits 1 on an error or a
   failed push, 3 when a pass was refused, 75 when `--wait` ran out on a busy lock, else 0.
 - `moxi repo specs [PATH] [--json]` lists saved specs, and specs that ran without being
-  saved, each with its last result.
+  saved, each with its last result. Its JSON also gives a saved spec's last commit (its
+  author's newest) and each branch's last pushed commit.
 - `moxi repo specs remove PATH NAME` forgets a spec: its saved section, its state and its
   doctor records.
 
