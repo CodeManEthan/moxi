@@ -63,6 +63,8 @@ def test_a_replace_takes_the_port_and_keeps_a_final_copy(foreign, tailscale, yes
     assert copy["parts"] == foreign and not copy["pending"]
     assert copy["remove"] == "tailscale serve --https=8461 off"
     assert any("Moxi will not bring it back" in line for line in yes.asked[0])
+    assert any(f"A copy is kept in a new file in {record.displaced_dir()}." in line
+               for line in yes.asked[0])
     assert record.read().entries["alpha/gateway"].displaced == record.listing()[0].name
 
 

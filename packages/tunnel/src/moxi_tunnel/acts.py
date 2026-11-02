@@ -414,7 +414,8 @@ def add(text: str, *, provider_name: str | None = None, port: int | None = None,
         copy = None
         if choice.replace:
             copy = ts_.copy_of(serve, choice.port, host)
-            lines.append(warn.replace_line(choice.port, copy, str(record.displaced_dir())))
+            lines.append(warn.replace_line(choice.port, copy,
+                                       f"a new file in {record.displaced_dir()}"))
         signature = ("add", key, json.dumps(entry.to_json(), sort_keys=True),
                      json.dumps(copy, sort_keys=True), tuple(lines))
         return _Plan(lines, signature, core=False,
