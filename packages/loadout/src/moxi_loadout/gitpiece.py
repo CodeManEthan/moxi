@@ -81,7 +81,9 @@ def run(ctx):
     span = _span(link, ctx.root, ctx.event)
     if span is None:
         return link.Outcome.ok()
-    rel = os.path.relpath(_real(folder), _real(ctx.root))
+    # The path git reads keeps the folder's case as it is on disk: normcase lowercases on
+    # Windows, and git's pathspec matches case exactly even where the file system doesn't.
+    rel = os.path.relpath(os.path.realpath(folder), os.path.realpath(ctx.root))
     paths = () if rel == os.curdir else (rel,)
     if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):
         return link.Outcome.ok()

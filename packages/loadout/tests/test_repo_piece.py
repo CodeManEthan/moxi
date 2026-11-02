@@ -401,6 +401,24 @@ def test_a_commit_elsewhere_in_the_work_tree_is_skipped(tree, installs, repo):
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
+def test_a_capitalised_folder_keeps_its_case_where_the_os_folds_case(
+        repo, folder, tmp_path, installs, monkeypatch):
+    """Windows' normcase lowercases; git's pathspec still matches case exactly, so the
+    path the piece gives git is the folder's own spelling."""
+    root = tmp_path / "Dots"
+    root.mkdir()
+    git(root, "init", "-q")
+    commit(root, "README", "readme\n", "start")
+    kit.configure(root / "Loadout")
+    commit(root, "Loadout/loadout.toml", "[user]\n")
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+    assert gitpiece.run(Ctx("post-commit", root)).kind == "ok"
+    assert len(installs.calls) == 1
+    assert [c for c in repo.calls() if c.startswith("changes ")][0].endswith(" Loadout")
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
 def test_the_root_commit_is_read_against_the_empty_tree(repo, folder, tmp_path, installs):
     root = tmp_path / "fresh"
     root.mkdir()
