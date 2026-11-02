@@ -937,6 +937,9 @@ dependencies = [
 projects = [
     { name = "moxi-projects" },
 ]
+repo = [
+    { name = "moxi-repo" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -948,9 +951,10 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-repo", marker = "extra == 'repo'", editable = "packages/repo" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
 ]
-provides-extras = ["projects"]
+provides-extras = ["projects", "repo"]
 
 [package.metadata.requires-dev]
 dev = [
