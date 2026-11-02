@@ -11,6 +11,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from moxi import modules, proc
@@ -56,7 +57,8 @@ def projects_never_read(monkeypatch):
     project key from the launch row and has no time for a projects read. The rule binds
     the launcher's own code. With notes installed, the handoff listener asks notes for its
     folder, and notes' answer may read projects: that read counts in notes' own start
-    cost, and `without_notes` keeps the call out of these tests."""
+    cost, so the tests with notes present use `stand_in_notes`, whose answer reads
+    nothing."""
     asked = []
     real_available, real_load = modules.available, modules.load
 
@@ -587,6 +589,52 @@ def test_the_key_of_a_project_launch_is_its_project_key(conn, endpoint):
     waiting = handoff("moxi")
     assert str(waiting) in listen_handoff.answer(start("claude", CLAUDE_ID, "r1"))
     assert store.picked(conn, "moxi") == [str(waiting)]
+
+
+@pytest.fixture
+def stand_in_notes(monkeypatch, tmp_path):
+    """notes installed, as a stand-in whose `handoffs_dir` reads nothing and answers one
+    folder. It wraps the fixtures' own `available` and `load`, so a projects read still
+    fails the test."""
+    calls = []
+    folder = tmp_path / "notes" / "code" / "alpha" / "handoffs"
+
+    def handoffs_dir(path, *, create=False, override=None):
+        calls.append((path, create, override))
+        if create:
+            folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    found = SimpleNamespace(state=modules.PRESENT, reason="",
+                            api=SimpleNamespace(handoffs_dir=handoffs_dir))
+    available, load = modules.available, modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or available(name))
+    monkeypatch.setattr(modules, "load", lambda name, *, interface=None: (
+        found if name == "notes" else load(name, interface=interface)))
+    return SimpleNamespace(calls=calls, folder=folder)
+
+
+def test_with_notes_a_launched_seat_is_pointed_into_notes_folder(conn, endpoint,
+                                                                 stand_in_notes):
+    launch_claude(conn, cwd="/work/alpha")
+    stand_in_notes.folder.mkdir(parents=True)
+    waiting = handoff("lead", folder=stand_in_notes.folder)
+    handoff("lead", "2026-10-30")  # the launcher's own folder is not where it looks
+    text = listen_handoff.answer(start("claude", CLAUDE_ID, "r1"))
+    assert text == f"Handoff waiting: {waiting} (2026-10-29). Read it before other work."
+    assert stand_in_notes.calls == [("/work/alpha", True, None)]
+    assert store.picked(conn, "lead") == [str(waiting)]
+
+
+def test_with_notes_a_session_by_hand_is_pointed_into_notes_folder(conn, endpoint,
+                                                                   stand_in_notes):
+    stand_in_notes.folder.mkdir(parents=True)
+    waiting = handoff("planner", folder=stand_in_notes.folder)
+    event = Event("start", "claude", "hand-1",
+                  {"MOXI_COMMS_NAME": "planner", "PWD": "/work/alpha"}, source="startup")
+    assert str(waiting) in listen_handoff.answer(event)
+    assert stand_in_notes.calls == [("/work/alpha", True, None)]
+    assert store.picked(conn, "planner") == []
 
 
 def test_a_codex_seat_gets_both_answers(conn, endpoint):
