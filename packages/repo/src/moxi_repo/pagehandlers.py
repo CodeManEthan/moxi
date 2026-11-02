@@ -10,7 +10,9 @@ It never raises. A failure of repo's own (`api.Failure`, such as an index that c
 read) is a 200 with `state` `error` and that failure's text, which is what the command
 would print. Any other failure is `state` `error` with a fixed `detail` naming only the
 exception's class; the class and its traceback are logged once. A repo whose specs alone
-can't be listed keeps its git hooks, with `specs_problem` saying why.
+can't be listed, for any reason, keeps its git hooks, with `specs_problem` saying why (for
+a failure that isn't repo's own, a fixed text naming only the exception's class, logged
+once), and the other repos are listed as usual.
 
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
@@ -109,6 +111,10 @@ def _repo(listed: dict, found: Any) -> dict[str, Any]:
                 specs += [_spec(root, item) for item in repo["specs"]]
         except api.Failure as exc:
             specs_problem = str(exc)
+        except Exception as err:
+            _log_once(err, "listing a repo's specs failed")
+            specs_problem = (f"an unexpected error ({type(err).__name__}); the page "
+                             "server's log has the details")
     path = quote_arg(root)
     return {
         "root": root, "project": project, "git_version": listed.get("git_version"),

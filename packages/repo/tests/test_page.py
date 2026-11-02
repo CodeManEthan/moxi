@@ -217,6 +217,36 @@ def test_a_repo_whose_specs_cant_be_listed_keeps_its_git_hooks(demo, monkeypatch
     assert [p["id"] for p in listed["pieces"]] == ["demo/gate"]
 
 
+def test_an_unexpected_spec_listing_failure_stays_with_its_repo_and_is_logged_once(
+        demo, monkeypatch, caplog):
+    broken_repo, fine_repo = demo.repo("broken"), demo.repo("fine")
+    api.add(broken_repo, ["demo/gate"])
+    api.add(fine_repo, ["demo/gate"])
+    moxi_repo.save_spec(spec(fine_repo))
+    listing = api.specs
+
+    def specs(path=None, *, sweep=True):
+        if path == str(broken_repo):
+            raise PermissionError(13, "Permission denied", str(broken_repo / "state.json"))
+        return listing(path, sweep=sweep)
+
+    monkeypatch.setattr(api, "specs", specs)
+    caplog.set_level(logging.ERROR, logger="moxi.repo.page")
+    for _ in range(2):
+        body = read()
+        assert (body["state"], body["detail"]) == ("up", None)
+        listed = {r["root"]: r for r in body["repos"]}
+        assert set(listed) == {str(broken_repo), str(fine_repo)}
+        broken, fine = listed[str(broken_repo)], listed[str(fine_repo)]
+        assert broken["specs"] == [] and broken["specs_problem"] == (
+            "an unexpected error (PermissionError); the page server's log has the details")
+        assert [p["id"] for p in broken["pieces"]] == ["demo/gate"]
+        assert fine["specs_problem"] is None and [s["name"] for s in fine["specs"]] == [
+            spec(fine_repo).name]
+    assert [r.message for r in caplog.records] == [
+        "listing a repo's specs failed (PermissionError)"]
+
+
 def test_an_unreadable_index_is_state_error_with_repos_own_words(demo):
     api.index_path().parent.mkdir(parents=True, exist_ok=True)
     api.index_path().write_text("[1, 2]", encoding="utf-8")
