@@ -26,7 +26,7 @@ DEFAULT_REQUIRED: tuple[str, ...] = ("type", "project", "description", "tags", "
 
 FENCE = "---"
 _CLOSERS = ("---", "...")
-_BOM = "﻿"
+_BOM = "\ufeff"
 KEY = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:(?P<rest>.*)$")
 _BLOCK = re.compile(r"^[|>][+-]?\d*$")
 
