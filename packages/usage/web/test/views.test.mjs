@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agents, agentTreemap, cellLabel, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
+  agents, agentTreemap, cellLabel, classTotals, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
   fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
-  parseRoute, provenanceLine, rangeFor, reportState, sessionRoute, shiftDay, shouldPass, strip,
+  parseRoute, provenanceLine, rangeFor, reportState, segmentTitle, sessionRoute, shiftDay, shouldPass, strip,
   tickText, viewPath,
 } from "../src/views.ts";
 
@@ -157,6 +157,26 @@ test("the cost chart splits by model, an unpriced row counting nothing", () => {
   assert.equal(tickText(1.5, "cost"), "$1.50");
   assert.equal(tickText(2, "cost"), "$2");
   assert.equal(tickText(2000, "tokens"), "2.00k");
+});
+
+test("the daily view totals each token class, leaving out one the index can't say", () => {
+  const total = sums({ input: 5000, fresh_input: 200, cache_write: 800, cache_read: 4000, output: 1500 });
+  assert.deepEqual(classTotals(total).map(({ key, value }) => [key, value]),
+                   [["input", 5000], ["fresh_input", 200], ["cache_write", 800], ["cache_read", 4000], ["output", 1500]]);
+  assert.deepEqual(classTotals(total).map(({ label }) => label),
+                   ["Input", "Fresh input", "Cache write", "Cache read", "Output"]);
+  const unsaid = classTotals(sums({ input: 5000, unknown: ["fresh_input", "cache_write"] }));
+  assert.deepEqual(unsaid.map(({ key, value }) => [key, value]),
+                   [["input", 5000], ["cache_write", null], ["cache_read", 0], ["output", 0]]);
+});
+
+test("each segment of a bar has its own title", () => {
+  const rows = [{ period: "2026-11-01", model: "a", ...sums({ fresh_input: 10, cache_read: 3000, cache_write: 20, output: 40 }) }];
+  const chart = dailyChart(rows, "tokens", 400, 200);
+  assert.deepEqual(chart.bars[0].segments.map((seg) => segmentTitle("2026-11-01", seg.key, seg.value, "tokens")),
+                   ["2026-11-01, fresh input: 10 tokens", "2026-11-01, cache read: 3.00k tokens",
+                    "2026-11-01, cache write: 20 tokens", "2026-11-01, output: 40 tokens"]);
+  assert.equal(segmentTitle("2026-11", "claude-x", 1.5, "cost"), "2026-11, claude-x: $1.50");
 });
 
 test("period labels thin out on a narrow chart", () => {

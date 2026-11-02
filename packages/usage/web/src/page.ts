@@ -38,9 +38,9 @@ import type {
 } from "./feed.ts";
 import { BASE, flag, meterList, SERIES } from "./parts.ts";
 import {
-  agents, agentTreemap, CLASSES, cellLabel, costText, dailyChart, filterKeys, flags,
+  agents, agentTreemap, CLASSES, cellLabel, classTotals, costText, dailyChart, filterKeys, flags,
   fmtMoment, fmtTokens, HARNESSES, heldLine, labelEvery, localDay, MARGIN, menuPaths, meters,
-  NO_FILTERS, parseRoute, PRESETS, provenanceLine, reportState, seriesClass, sessionRoute,
+  NO_FILTERS, parseRoute, PRESETS, provenanceLine, reportState, segmentTitle, seriesClass, sessionRoute,
   shouldPass, strip, tickText, UNKNOWN_MODEL, viewPath, VIEWS,
 } from "./views.ts";
 import type { Filters, Measure, PageRoute, Preset } from "./views.ts";
@@ -336,7 +336,7 @@ export class UsagePage extends LitElement {
         ? html`${detail}` : "Nothing was used in this range."}</p>`;
     }
     const report = feed.value;
-    return html`${stale}${this.#heading(route)}${this.#totals(report)}${this.#view_(route, report)}`;
+    return html`${stale}${this.#heading(route)}${this.#totals(report, route)}${this.#view_(route, report)}`;
   }
 
   #heading(route: PageRoute) {
@@ -344,13 +344,15 @@ export class UsagePage extends LitElement {
     return html`<p>${this.#link("sessions", "All sessions")} › <code>${route.session}</code></p>`;
   }
 
-  #totals(report: AnyReport) {
+  #totals(report: AnyReport, route: PageRoute) {
     const total = report.total;
     return html`<div class="totals" data-part="totals">
       <span>Cost <b>${costText(total)}</b>${flag(flags({ ...total, unpriced_models: report.unpriced_models }))}</span>
       <span>Tokens <b>${fmtTokens(total.tokens)}</b></span>
       <span>Requests <b>${total.requests.toLocaleString("en-US")}</b></span>
-    </div>`;
+    </div>
+    ${route.view === "daily" ? html`<div class="totals small" data-part="classes">${classTotals(total).map((item) =>
+      html`<span data-class=${item.key}>${item.label} <b>${fmtTokens(item.value)}</b></span>`)}</div>` : nothing}`;
   }
 
   #view_(route: PageRoute, report: AnyReport) {
@@ -390,7 +392,8 @@ export class UsagePage extends LitElement {
         ${chart.bars.map((bar, i) => svg`
           <g data-period=${bar.period}>
             <title>${bar.period}: ${measure === "tokens" ? `${fmtTokens(bar.total)} tokens` : tickText(bar.total, "cost")}${bar.incomplete ? " (not whole)" : ""}</title>
-            ${bar.segments.map((seg) => svg`<rect class=${seriesClass(seg.index)} x=${bar.x} y=${seg.y} width=${bar.width} height=${Math.max(0, seg.height)}></rect>`)}
+            ${bar.segments.map((seg) => svg`<rect class=${seriesClass(seg.index)} data-key=${seg.key} x=${bar.x} y=${seg.y} width=${bar.width} height=${Math.max(0, seg.height)}>
+              <title>${segmentTitle(bar.period, seg.key, seg.value, measure)}</title></rect>`)}
             ${bar.incomplete && bar.segments.length ? svg`<rect class="incomplete" fill="none" x=${bar.x} y=${bar.segments[bar.segments.length - 1].y} width=${bar.width}
               height=${Math.max(0, CHART_HEIGHT - MARGIN.bottom - bar.segments[bar.segments.length - 1].y)}></rect>` : nothing}
             ${i % every === 0 ? svg`<text x=${bar.x + bar.width / 2} y=${CHART_HEIGHT - 6} text-anchor="middle">${by === "day" ? bar.period.slice(5) : bar.period}</text>` : nothing}

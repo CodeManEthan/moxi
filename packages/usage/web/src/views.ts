@@ -318,6 +318,31 @@ export function dailyChart(rows: DayRow[], measure: Measure, width: number, heig
   return { width, height, keys, bars, ticks, undated: rows.length - dated.length };
 }
 
+/** What one segment of a bar holds, as its own `<title>` says it. */
+export function segmentTitle(period: string, key: string, value: number, measure: Measure): string {
+  if (measure === "cost") return `${period}, ${key}: ${fmtCost(value)}`;
+  const label = CLASSES.find(([name]) => name === key)?.[1] ?? key;
+  return `${period}, ${label}: ${fmtTokens(value)} tokens`;
+}
+
+/** A total by token class: its name in the report, its label, and its sum, or null when
+ * the index can't say it. */
+export interface ClassTotal { key: string; label: string; value: number | null }
+
+/** The daily view's sums by token class: the whole prompt, its fresh part where the
+ * report gives it, cache writes, cache reads and output. */
+export function classTotals(total: Sums): ClassTotal[] {
+  const known = (key: keyof Sums): number | null =>
+    total.unknown.includes(key) || !Number.isFinite(total[key]) ? null : total[key] as number;
+  const out: ClassTotal[] = [{ key: "input", label: "Input", value: known("input") }];
+  const fresh = known("fresh_input");
+  if (fresh !== null) out.push({ key: "fresh_input", label: "Fresh input", value: fresh });
+  out.push({ key: "cache_write", label: "Cache write", value: known("cache_write") },
+           { key: "cache_read", label: "Cache read", value: known("cache_read") },
+           { key: "output", label: "Output", value: known("output") });
+  return out;
+}
+
 /** An axis label for `value` of `measure`. */
 export function tickText(value: number, measure: Measure): string {
   if (measure === "tokens") return fmtTokens(value);

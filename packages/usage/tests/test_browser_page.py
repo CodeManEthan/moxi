@@ -163,6 +163,20 @@ def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_c
     ui_width_check(ui_page)
 
 
+def test_the_daily_view_gives_each_token_class_as_a_figure_and_each_segment_a_title(
+        indexed, ui_page):
+    panel = open_view(ui_page)
+    view = panel.locator("section[data-part=view]")
+    expect(view.locator("[data-part=classes] [data-class]")).to_have_count(5)
+    # Two sessions of three requests (output 1000, 1500, 2000) and a subagent of two (400).
+    expect(view.locator("[data-part=classes] [data-class=output] b")).to_have_text("9.80k")
+    segments = view.locator("svg g[data-period] rect[data-key]")
+    expect(segments.first).to_be_attached()
+    assert segments.count() == view.locator("svg g[data-period] rect[data-key] > title").count()
+    expect(view.locator("svg g[data-period] rect[data-key=output] > title").first).to_contain_text(
+        "output: ")
+
+
 def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
