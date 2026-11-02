@@ -213,6 +213,7 @@ def test_a_read_that_fails_at_once_fails_its_row_and_the_others_go_on(alpha, tai
 
 # -- the deadline ---------------------------------------------------------------------------
 
+@pytest.mark.timed
 def test_a_hung_tailscale_fails_the_first_read_and_leaves_the_rest_not_checked(
         alpha, tailscale, yes):
     acts.add("alpha/connector", ask=yes)
@@ -281,6 +282,7 @@ def test_connects_after_the_deadline_are_not_checked(alpha, tailscale, yes):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_with_the_real_waits_a_hung_tailscale_still_returns_inside_the_cores_ten_seconds(
         alpha, tailscale, yes):
     acts.add("alpha/connector", ask=yes)
