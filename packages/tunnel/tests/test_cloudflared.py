@@ -162,6 +162,29 @@ def test_health_fails_when_nothing_answers(config_file):
     assert row.state == "fail" and "doesn't answer" in row.detail
 
 
+def test_health_fails_with_its_detail_when_the_port_does_not_speak_http(config_file):
+    import socket
+    import threading
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    config_file("tunnel", f"[cloudflare]\nmetrics_port = {srv.getsockname()[1]}\n")
+
+    def serve():
+        conn, _ = srv.accept()
+        conn.recv(1024)
+        conn.sendall(b"garbage\r\n\r\n")
+        conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        row = cloudflare.health()
+    finally:
+        srv.close()
+    assert row.state == "fail" and "doesn't answer" in row.detail
+
+
 # -- the CLI -------------------------------------------------------------------------------
 
 def test_cloudflare_through_the_cli(cf, alpha, units, capsys):

@@ -565,7 +565,7 @@ def health() -> Row:
         conn.request("GET", "/ready")
         answer = conn.getresponse()
         body = answer.read(4096).decode("utf-8", "replace")
-    except OSError as exc:
+    except (OSError, http.client.HTTPException) as exc:
         return Row(MODULE, DAEMON, "fail", f"cloudflared doesn't answer on {where} ({exc})",
                    "moxi doctor tunnel, then moxi tunnel repair")
     finally:
