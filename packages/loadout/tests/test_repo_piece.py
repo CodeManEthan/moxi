@@ -566,3 +566,51 @@ def test_a_repo_failure_is_a_line_not_an_exit_code(repo, folder, monkeypatch):
     assert "the git hook pieces weren't registered: git is too old" in out.lines
     assert "  git said no" in out.lines
     assert setup.setup() == 0
+
+
+# -- the doctor's row ----------------------------------------------------------------------
+
+def row(rows):
+    [found] = [r for r in rows if r.name == "git hook"]
+    return found
+
+
+def test_the_row_is_off_for_a_folder_in_no_work_tree(repo, folder):
+    kit.configure(folder)
+    assert row(doctor.rows()).state == "off"
+
+
+def test_the_row_is_off_with_repo_absent_saying_what_repo_would_do(no_repo, folder):
+    kit.configure(in_git(folder))
+    found = row(doctor.rows())
+    assert found.state == "off" and "with repo, a commit reinstalls" in found.detail
+    assert found.fix == "moxi install loadout --with repo"
+
+
+def test_the_row_warns_while_the_setting_is_on_and_a_piece_is_unregistered(repo, folder):
+    kit.configure(in_git(folder))
+    found = row(doctor.rows())
+    assert found.state == "warn" and "loadout/reinstall-commit" in found.detail
+    assert found.fix == "moxi loadout install"
+    install.install()
+    assert row(doctor.rows()).state == "ok"
+
+
+def test_the_row_is_off_while_the_setting_is_off(repo, folder):
+    from moxi import config
+
+    kit.configure(in_git(folder))
+    config.set("loadout", "reinstall_on_commit", "false", by="test")
+    found = row(doctor.rows())
+    assert found.state == "off" and "reinstall_on_commit" in found.detail
+
+
+def test_the_row_warns_on_a_piece_disabled_in_repo(repo, folder):
+    kit.configure(in_git(folder))
+    install.install()
+    state = json.loads(repo.state_file.read_text())
+    state[os.path.realpath(folder)]["loadout/reinstall-merge"]["enabled"] = False
+    repo.state_file.write_text(json.dumps(state))
+    found = row(doctor.rows())
+    assert found.state == "warn" and "disabled" in found.detail
+    assert "moxi repo git-hooks enable" in found.fix

@@ -14,6 +14,11 @@ The core's own rows already show every loadout placement that isn't ok. These ad
 - hooks: each hook's program resolves (`warn` when one doesn't).
 - projects: a section named by key while projects is absent (`warn`); else the link,
   `off` without projects.
+- git hook: the link to repo. `off` when the loadout folder is in no git work tree,
+  when the folder is in git and repo is absent ("with repo, a commit reinstalls") or when
+  `reinstall_on_commit` is off; `warn` when a piece is unregistered or disabled while the
+  setting is on; else `ok`. A failed reinstall is a record of its own, which the core's
+  rows show.
 - codex: Codex's agents switch, its desktop import, and hooks waiting for trust (`ok`
   with the detail).
 - module <name>: an adopted module skill whose module is gone (`off`).
@@ -96,6 +101,7 @@ def rows() -> Iterator[Row]:
         yield from _orphans(outcome)
     yield _hooks(found, machine.source)
     yield _projects(found, outcome)
+    yield _git_hook(machine)
     yield from _codex(found)
     yield from _modules(found)
 
@@ -268,6 +274,16 @@ def _projects(found, outcome) -> Row:
                    "moxi projects list")
     return Row(MODULE, "projects", "ok", f"{len(keys)} section{'s' * (len(keys) != 1)} "
                "named by key resolved" if keys else "no section is named by key")
+
+
+def _git_hook(machine) -> Row:
+    from moxi_loadout import repo_link
+
+    try:
+        return repo_link.state(machine.source, machine.reinstall_on_commit)
+    except Exception as exc:  # noqa: BLE001 - one row's failure is that row's
+        return Row(MODULE, "git hook", "warn", f"the link to repo can't be read: {exc}",
+                   "moxi doctor")
 
 
 def _codex(found) -> Iterator[Row]:
