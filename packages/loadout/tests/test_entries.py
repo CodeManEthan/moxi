@@ -375,3 +375,42 @@ def test_no_lock_file_lands_in_a_harness_home(lo):
     install.install()
     for home in (harness.claude_home(), harness.codex_home()):
         assert not [p for p in home.rglob("*.lock")]
+
+
+SHAPES = {
+    # OpenCode's published config takes a whole permission as one action, and a tool's
+    # permission as one action in place of an object of patterns.
+    "opencode-permission-one-action": ("opencode", '{"permission": "ask"}'),
+    "opencode-bash-one-action": ("opencode", '{"permission": {"bash": "ask"}}'),
+    # Claude's hooks hold a list of groups per event, never an object.
+    "claude-hook-event-object": ("claude", '{"hooks": {"PreToolUse": {}}}'),
+}
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_a_file_shaped_otherwise_is_refused_for_its_harness_alone(lo, shape):
+    opencode_row()
+    harness_name, text = SHAPES[shape]
+    path = harness.settings_file(harness_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    before = path.read_bytes()
+    kit.skill(lo / "skills", "review")
+    write(lo, '[user]\nskills = ["review"]\nhooks = ["guard-rm"]\n'
+              'permissions = ["git-reads"]\n' + HOOK + PERMS)
+    out = install.install()
+    assert out.code == 3, out.text()
+    assert path.read_bytes() == before
+    said = [line for line in out.lines if str(path) in line]
+    assert len(said) == 1 and "loadout leaves it" in said[0]
+    assert {r.state for r in out.rows if r.harness == harness_name
+            and r.kind in ("hook", "permissions")} == {"blocked"}
+    # Every other harness's entries are written and recorded, and the skill is placed.
+    recorded = {(r["harness"], r["kind"]) for r in ledger.read()["entries"]}
+    other = "codex" if harness_name == "claude" else "claude"
+    assert (other, "hook") in recorded
+    assert not any(h == harness_name for h, _ in recorded)
+    assert (kit.claude() / "review").exists()
+    # Once the file reads as loadout expects, the next install writes it.
+    path.write_text("{}")
+    assert install.install().code == 0

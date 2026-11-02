@@ -470,6 +470,9 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
     records = [r for r in data.get("entries", []) if isinstance(r, dict)
                and r.get("kind") not in KEPT_ELSEWHERE]
     claims = {} if claims is None else claims
+    for where in want + [r for r in records
+                         if (r.get("item"), r.get("harness")) not in carried]:
+        _check_shape(run, where)
     used: set[int] = set()
     by_location: dict[tuple, Action] = {}
     for e in want:
@@ -519,6 +522,39 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
         run.actions.append(_gone(r, doc, records, used,
                                  _claimed(claims, (kind, name), r.get("harness"))))
     return run
+
+
+def _check_shape(run: Run, where: Entry | dict) -> None:
+    """Refuse `where`'s file for its harness, with one line, when a node on the entry's
+    path isn't the object or list loadout writes into: nothing in that file is written,
+    and its entries stand."""
+    get = (lambda k: getattr(where, k)) if isinstance(where, Entry) else where.get
+    file, kind, key = get("file") or "", get("kind") or "", get("key") or []
+    doc = _doc(run, file, kind)
+    if doc is None or doc.kind != "json":
+        return
+    if kind == "hook":
+        path, last = ["hooks", key[0]] if key else [], list
+    elif kind in MEMBERS:
+        path, last = key[:-1], list
+    elif kind in ("opencode-permission", "opencode-mcp"):
+        path, last = key[:-1], dict
+    else:
+        return
+    node = doc.data
+    for i, part in enumerate(path):
+        node = node.get(part, _MISSING)
+        if node is _MISSING:
+            return
+        want = last if i == len(path) - 1 else dict
+        if not isinstance(node, want):
+            shape = "a list" if want is list else "an object"
+            line = (f"{doc.path}: {'.'.join(map(str, path[:i + 1]))} is not {shape}; "
+                    "loadout leaves it, so its entries for this harness are not written")
+            run.refused[file] = line
+            run.lines.append(line)
+            run.docs.pop(file, None)
+            return
 
 
 def _same(record: dict, e: Entry) -> bool:
