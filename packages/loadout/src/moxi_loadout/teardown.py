@@ -179,8 +179,13 @@ def _unreadable(run) -> list[str]:
         if r.get("kind") == "mcp" and a.reason.startswith("no "):
             out.append(f"{_label(r)}: {a.reason}; put {r.get('harness')} on PATH, or "
                        "remove the server by hand")
-        else:
+        elif "is not plain JSON" in a.reason:
             out.append(f"{_label(r)}: {a.reason}; make the file plain JSON again, or "
+                       "moxi uninstall loadout --skip-teardown leaves loadout's entries "
+                       "in it")
+        else:
+            out.append(f"{_label(r)}: {a.reason}; the file's shape is not what loadout "
+                       "expects, so put the key it names back to that shape, or "
                        "moxi uninstall loadout --skip-teardown leaves loadout's entries "
                        "in it")
     return list(dict.fromkeys(out))

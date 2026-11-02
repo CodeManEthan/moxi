@@ -306,6 +306,18 @@ def test_a_harness_file_that_doesnt_read_refuses(lo):
     settings().write_text("// mine\n" + settings().read_text())
     reason = refusal(lambda line: None)
     assert str(settings()) in reason and "--skip-teardown" in reason
+    assert "make the file plain JSON again" in reason
+
+
+def test_a_harness_file_of_the_wrong_shape_says_so(lo):
+    installed(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
+    data = read(settings())
+    data["hooks"]["PreToolUse"] = {"mine": 1}
+    settings().write_text(json.dumps(data))
+    reason = refusal(lambda line: None)
+    assert "hooks.PreToolUse is not a list" in reason
+    assert "shape is not what loadout expects" in reason
+    assert "plain JSON" not in reason and "--skip-teardown" in reason
 
 
 def test_a_failed_removal_keeps_what_is_left_for_a_second_run(lo, monkeypatch):
