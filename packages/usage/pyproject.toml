@@ -13,9 +13,9 @@ turns = ["moxi-turns>=0.2,<0.3"]
 projects = ["moxi-projects>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/usage/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # The weekly restart-point measure, the command of the announcement's TIMERS.
 [project.scripts]
