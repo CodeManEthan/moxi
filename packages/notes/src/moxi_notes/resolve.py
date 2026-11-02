@@ -24,12 +24,11 @@ The rules, first answer wins (each answer's `rule` is the name in brackets):
    tree's top (for a linked worktree, its main work tree), else `path`. The top comes
    from local reads, never a git process (see `git_top`), because every start row of a
    session's event shares one wait, and the launcher's handoff pointer calls this
-   resolver inside it. An anchor
-   strictly under home, outside the notes root and outside every `exclude` folder gives
-   the base joined with the anchor's parts below home. Home itself is not strictly under
-   home, so a session started there gets None. [reserved] An answer under topics or
-   inbox is refused, None, so a code project never claims a topic's or a one-off's
-   folder.
+   resolver inside it. An anchor strictly under home, outside the notes root and outside
+   every `exclude` folder gives the base joined with the anchor's parts below home. Home
+   itself is not strictly under home, so a session started there gets None. [reserved]
+   An answer under topics or inbox is refused, None, so a code project never claims a
+   topic's or a one-off's folder.
 6. [none] Otherwise None.
 
 One project gives one answer: every path inside it, whichever subfolder, worktree or
