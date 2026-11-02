@@ -127,6 +127,22 @@ def test_update_keeps_a_model_priced_when_litellm_drops_one_the_supplement_adds_
     assert "no longer in LiteLLM: 1: claude-opus-4-8" in capsys.readouterr().out
 
 
+def test_update_names_the_models_litellm_no_longer_lists(fetched, capsys):
+    gone = big_litellm()
+    first = next(key for key in gone if key not in LITELLM)
+    del gone[first]
+    fetched(gone)
+    assert cli.main(["prices", "update", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] == [first]
+    del gone["brand-new-1"]
+    fetched(gone)
+    assert cli.main(["prices", "update", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] == ["brand-new-1"]
+    fetched(gone)
+    assert cli.main(["prices", "update", "--dry-run"]) == 0
+    assert "no longer in LiteLLM 0" in capsys.readouterr().out
+
+
 def test_update_text_and_dry_run_write_nothing(fetched, capsys):
     fetched(big_litellm())
     assert cli.main(["prices", "update", "--dry-run"]) == 0

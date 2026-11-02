@@ -263,8 +263,8 @@ def _update(args: argparse.Namespace, prog: str, *, fetcher: Any = None,
         return codes.OK
     print(f"LiteLLM of {result.snapshot['date']}: {result.rows} models "
           f"(the shipped table has {result.shipped_rows})")
-    for name, ids in (("added", result.added), ("removed", result.removed),
-                      ("repriced", result.repriced)):
+    for name, ids in (("added", result.added), ("repriced", result.repriced),
+                      ("no longer in LiteLLM", result.removed)):
         shown = ", ".join(ids[:SHOWN])
         more = f" and {len(ids) - SHOWN} more" if len(ids) > SHOWN else ""
         print(f"  {name:<9} {len(ids)}{': ' if ids else ''}{shown}{more}")

@@ -3,9 +3,11 @@
 Opt in: nothing else in usage reaches the network. `update` fetches the file from config
 `prices.url`, runs the converter (`moxi_usage.convert`) with the shipped supplement,
 refuses a result with fewer than half the shipped table's rows, works out which models
-the change adds, removes and reprices in the table in effect, and which of the models the
-token index has seen it reprices, prices for the first time or leaves unpriced, and writes
-`DATA/usage/models-snapshot.json` with `moxi.files.atomic_write` unless it is a dry run.
+the change adds and reprices in the table in effect, which models LiteLLM no longer lists
+(against the snapshot it replaces, or the shipped table when there is none), and which
+of the models the token index has seen it reprices, prices for the first time or leaves
+unpriced, and writes `DATA/usage/models-snapshot.json` with `moxi.files.atomic_write`
+unless it is a dry run.
 `revert` removes the snapshot, so the shipped table rules again.
 
 The fetch is a parameter (`fetch(url) -> bytes`), so a test hands in the bytes and never
@@ -143,7 +145,8 @@ def update(*, fetcher: Fetch | None = None, now: float | None = None,
                       f"table's {shipped_rows}; it is not used")
     before = models.table(env)
     after = models.Table(shipped, doc)
-    added, removed, repriced = _changes(before.rows, after.rows)
+    added, _, repriced = _changes(before.rows, after.rows)
+    removed = _gone(before.snapshot or shipped, doc)
     in_index = _in_index(before, models.Table(shipped, doc, before.overrides),
                          index_models(env), at=when)
     path = models.snapshot_path(env)
@@ -224,6 +227,17 @@ def revert(*, dry_run: bool = False, env: Mapping[str, str] | None = None) -> Pa
 
 def _prices(row: Mapping[str, Any]) -> dict[str, Any]:
     return {name: row.get(name) for name in (*PRICE_FIELDS, "tiers")}
+
+
+def _gone(previous: Mapping[str, Any], doc: Mapping[str, Any]) -> list[str]:
+    """The LiteLLM models of `previous` (the snapshot layer this update replaces, or the
+    shipped table when there is none) that the new snapshot `doc` no longer holds. The
+    table in effect may still price them from a lower layer; LiteLLM no longer lists
+    them."""
+    new = doc.get("models", {})
+    return sorted(key for key, row in previous.get("models", {}).items()
+                  if row.get("provenance", {}).get("source") == "litellm"
+                  and key not in new)
 
 
 def _changes(before: Mapping[str, Mapping[str, Any]],

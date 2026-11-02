@@ -254,8 +254,10 @@ it resets, when it fills at the recent rate, and the age of the oldest reading o
 `prices` with a model prints its facts and where each came from; without one, it prints
 the layers in effect. `prices update` is the only thing in usage that reaches the network,
 and only when you run it: it fetches LiteLLM's file from `prices.url`, converts it, refuses
-a result with under half the shipped table's rows, prints which models were added, removed
-or repriced, and which of the models in your token index it reprices, prices for the first
+a result with under half the shipped table's rows, prints which models were added or
+repriced, which models LiteLLM no longer lists (against the snapshot it replaces, or the
+shipped table when there is none; the table may still price them from a lower layer), any
+supplement row it left out because its model is gone from LiteLLM, and which of the models in your token index it reprices, prices for the first
 time or leaves unpriced, and writes the snapshot layer. `--dry-run` prints and writes nothing.
 `--revert` removes the snapshot layer, so the shipped table rules again. A fetch that fails
 exits 75.
