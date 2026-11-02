@@ -15,12 +15,14 @@ upgraded and removes them when loadout is uninstalled.
 `state(folder, on)` is the doctor's reading of the same: one `moxi.doctor.Row`.
 
 What it says goes through `say`; a failure is a line, never an exit code, since the
-reinstall is a convenience the doctor reports on, not part of what install applies.
+reinstall is a convenience the doctor reports on, not part of what install applies. That
+holds for repo's own failures and for its git calls that run out of time or can't run.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 from collections.abc import Callable
 
 #: The repo interface loadout reads.
@@ -93,10 +95,22 @@ def sync(folder: str | os.PathLike, on: bool, *,
                 if pid in have:
                     _report(link.remove(folder, pid), say)
     except link.Failure as exc:
-        verb = "registered" if on else "removed"
-        say(f"the git hook pieces weren't {verb}: {exc.text}")
+        say(f"the git hook pieces weren't {_verb(on)}: {exc.text}")
         for line in exc.lines:
             say(f"  {line}")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        say(f"the git hook pieces weren't {_verb(on)}: {_git_failed(exc)}")
+
+
+def _verb(on: bool) -> str:
+    return "registered" if on else "removed"
+
+
+def _git_failed(exc: BaseException) -> str:
+    """One line for a git call of repo's that ran out of time or couldn't run."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"git did not answer in {exc.timeout:g} s"
+    return f"git couldn't run ({exc})"
 
 
 def _report(report, say) -> None:

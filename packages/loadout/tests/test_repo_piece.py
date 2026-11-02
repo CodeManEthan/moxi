@@ -117,6 +117,8 @@ def remove(path, *ids):
 
 def status(path=None):
     _fail()
+    if os.environ.get("FAKE_REPO_STATUS") == "timeout":
+        raise subprocess.TimeoutExpired(["git", "rev-parse"], 30)
     mine = _state().get(_key(path), {})
     return [{"root": path, "pieces": [{"id": pid, **row} for pid, row in mine.items()]}]
 
@@ -584,6 +586,18 @@ def test_a_repo_failure_is_a_line_not_an_exit_code(repo, folder, monkeypatch):
     assert "the git hook pieces weren't registered: git is too old" in out.lines
     assert "  git said no" in out.lines
     assert setup.setup() == 0
+
+
+def test_a_git_call_of_repos_that_runs_out_of_time_is_a_line_too(repo, folder, monkeypatch,
+                                                                  capsys):
+    kit.configure(in_git(folder))
+    monkeypatch.setenv("FAKE_REPO_STATUS", "timeout")
+    out = install.install()
+    assert out.code == 0
+    assert "the git hook pieces weren't registered: git did not answer in 30 s" in out.lines
+    assert setup.setup() == 0
+    assert ("loadout: the git hook pieces weren't registered: git did not answer in 30 s"
+            in capsys.readouterr().out)
 
 
 # -- the doctor's row ----------------------------------------------------------------------
