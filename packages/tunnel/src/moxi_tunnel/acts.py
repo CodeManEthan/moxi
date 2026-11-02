@@ -439,6 +439,12 @@ def _do_add(plan: _Plan, act: _Act) -> Outcome:
             _fail(act, ts, exc, key=key, ports_=[port], before_serve=d["serve"],
                   restore=old, kind="replace", pending=name)
         left = ts_.parts(now, port)
+        if left == copy["parts"]:
+            # The removal exited 0 but the port is as before it: go back whole.
+            _fail(act, ts, ApplyError(f"the removal of the foreign config on port {port} "
+                                      "exited 0 but removed nothing"),
+                  key=key, ports_=[port], before_serve=d["serve"], restore=old,
+                  kind="replace", pending=name)
         if left:
             detail = (f"the removal left part of the foreign config on port {port}: "
                       f"{ts_.describe(left)}")

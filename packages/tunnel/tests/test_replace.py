@@ -139,6 +139,18 @@ def test_a_failed_foreign_removal_rolls_back_and_deletes_its_pending_copy(foreig
     assert ts.parts(tailscale.serve, 8461) == foreign
 
 
+def test_a_foreign_removal_that_removes_nothing_rolls_back(foreign, tailscale, yes,
+                                                          monkeypatch):
+    monkeypatch.setattr(ts.Tailscale, "remove_copy", lambda self, copy: None)
+    with pytest.raises(ApplyError) as caught:
+        acts.add("alpha/gateway", replace_=True, ask=yes)
+    assert caught.value.fix is None and "removed nothing" in caught.value.reason
+    assert record.read().entries == {} and copies() == []
+    assert ts.parts(tailscale.serve, 8461) == foreign
+    last = json.loads(record.events_path().read_text().splitlines()[-1])
+    assert last["event"] == "rollback"
+
+
 def test_a_removing_entry_that_names_a_pending_copy_is_undone(foreign, tailscale, yes,
                                                               monkeypatch):
     crash_at(monkeypatch, "replace-applying")
