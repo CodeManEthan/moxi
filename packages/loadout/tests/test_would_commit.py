@@ -80,6 +80,23 @@ def test_outside_a_work_tree_nothing_is_written(lo, tmp_path):
     assert ignores.records(ledger.read()) == {}
 
 
+def test_an_ignore_file_whose_header_is_gone_becomes_the_users(tmp_path):
+    folder = tmp_path / "skills"
+    data: dict = {"entries": []}
+    assert ignores.write(str(folder), ["review"], data, "user", say=lambda line: None) \
+        is None
+    path = folder / ".gitignore"
+    mine = "/review\n/notes\n"   # the user folded loadout's line into their own
+    path.write_text(mine)
+    assert ignores.state(path) == "theirs"
+    assert ignores.problems(data) == []
+    said: list[str] = []
+    assert ignores.settle(data, [], None, say=said.append) == []
+    assert ignores.records(data) == {}
+    assert path.read_text() == mine
+    assert len(said) == 1 and "drop loadout's lines" in said[0] and "delete" not in said[0]
+
+
 # -- with real git ------------------------------------------------------------------------
 
 @pytest.mark.slow

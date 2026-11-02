@@ -303,7 +303,8 @@ def settle(data: dict, placements, folders=None, *, say) -> list[str]:
     """Bring each of loadout's ignore files in `folders` (every recorded one when None)
     into line with `placements` (the `moxi.place.Placed` loadout holds now): rewritten,
     or removed once nothing of loadout's is left in its folder. An ignore file edited
-    since loadout wrote it is left as it is, its record kept. Returns the lines to show."""
+    since loadout wrote it is left as it is, its record kept; one whose header is gone is
+    the user's, and its record is dropped. Returns the lines to show."""
     from moxi.place import IN_PLACE
 
     names: dict[str, set[str]] = {}
@@ -319,6 +320,13 @@ def settle(data: dict, placements, folders=None, *, say) -> list[str]:
         found = state(path)
         if found == "absent":
             _drop(data, path)
+            continue
+        if found == "theirs":
+            # Without loadout's header the file is the user's (they may have folded
+            # loadout's lines into their own): loadout forgets it and never removes it.
+            _drop(data, path)
+            say(f"{path} no longer has loadout's header, so loadout leaves it to you; "
+                "put the header back as it was, or drop loadout's lines from it")
             continue
         if found != "ours":
             continue
@@ -339,12 +347,13 @@ def settle(data: dict, placements, folders=None, *, say) -> list[str]:
 
 
 def problems(data: dict) -> list[tuple[str, str | None, str]]:
-    """Each recorded ignore file that is no longer as loadout wrote it: its path, the
-    section it serves, and why."""
+    """Each recorded ignore file that is no longer as loadout wrote it, with loadout's
+    header still on it: its path, the section it serves, and why. (One whose header is
+    gone is the user's; `settle` drops its record.)"""
     out = []
     for path, rec in records(data).items():
         found = state(path)
-        if found in ("edited", "theirs"):
+        if found == "edited":
             out.append((path, rec.get("section"), f"{path} was edited since loadout wrote "
                         "it; restore it, or delete it and run install again"))
     return out
