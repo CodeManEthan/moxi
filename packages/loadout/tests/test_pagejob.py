@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -48,9 +49,20 @@ def manifest_bytes(folder: Path) -> bytes:
 
 # -- the runner -----------------------------------------------------------------------------
 
+GLOBS = ("packages/loadout/src/moxi_loadout/homes.py",
+         "packages/loadout/src/moxi_loadout/pagejob.py",
+         "packages/loadout/tests/test_pagejob.py")
+
+
+def hide_git(monkeypatch):
+    real = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: None if n == "git"
+                        else real(n, *a, **k))
+
+
 @pytest.mark.parametrize("variable, harness_name", [
     ("CLAUDE_CONFIG_DIR", "Claude Code"), ("CODEX_HOME", "Codex"),
-    ("XDG_CONFIG_HOME", "OpenCode")])
+    ("XDG_CONFIG_HOME", "OpenCode"), ("HOME", "the home folder")])
 def test_a_job_under_another_home_is_refused_with_nothing_written(
         lo, monkeypatch, tmp_path, page, variable, harness_name):
     recorded_homes(monkeypatch)
@@ -66,6 +78,54 @@ def test_a_job_under_another_home_is_refused_with_nothing_written(
     assert manifest_bytes(lo) == before
     assert ledger.read() == before_ledger
     assert not (kit.claude() / "review").exists()
+
+
+def test_a_job_whose_path_has_no_git_is_refused_when_the_terminals_had_it(
+        lo, monkeypatch, page):
+    recorded_homes(monkeypatch)
+    assert ledger.read()[homes.GIT] is True
+    before_ledger = ledger.read()
+    before = manifest_bytes(lo)
+    hide_git(monkeypatch)
+    assert pagejob.run("j1", ["add", "skill", "review"]) == 3
+    [line] = end("j1")["lines"]
+    assert "git isn't on PATH here, but the last run in a terminal found it" in line
+    assert "Set PATH, with git's folder on it," in line and "moxi ui stop" in line
+    assert manifest_bytes(lo) == before
+    assert ledger.read() == before_ledger
+    assert not (kit.claude() / "review").exists()
+
+
+def test_a_job_with_git_runs_when_the_terminal_had_none(lo, monkeypatch, page):
+    real = shutil.which
+    hide_git(monkeypatch)
+    recorded_homes(monkeypatch)
+    monkeypatch.setattr(shutil, "which", real)
+    monkeypatch.setenv(homes.MARKER, "test")
+    assert pagejob.run("j1", ["add", "skill", "review"]) == 0
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_a_job_with_no_git_places_nothing_in_a_project_work_tree(
+        lo, monkeypatch, tmp_path, page):
+    root = tmp_path / "app"
+    root.mkdir()
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
+    kit.manifest(lo, f'[user]\n[project."{root}"]\nskills = []\n')
+    recorded_homes(monkeypatch)
+    before = manifest_bytes(lo)
+    before_ledger = ledger.read()
+    # The job's PATH holds the fake CLIs and nothing else: no git.
+    fakes = os.environ["PATH"].split(os.pathsep)[0]
+    assert not (Path(fakes) / "git").exists()
+    monkeypatch.setenv("PATH", fakes)
+    assert pagejob.run("j1", ["add", "skill", "review", f"--project={root}"]) == 3
+    assert "git isn't on PATH here" in end("j1")["lines"][0]
+    assert manifest_bytes(lo) == before
+    assert ledger.read() == before_ledger
+    assert not (root / ".claude").exists() and not (root / ".agents").exists()
+    assert sorted(p.name for p in root.iterdir()) == [".git"]
 
 
 def test_a_job_with_no_record_of_the_homes_is_refused(lo, page):

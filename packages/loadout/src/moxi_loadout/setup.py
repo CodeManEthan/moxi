@@ -8,9 +8,10 @@
    and is left alone.
 2. **The opencode row.** It adds an opencode row to the core's harness table when there
    is none, and records it (`moxi_loadout.harness_row`).
-3. **The harness homes.** It records in the ledger each harness's home as this run
-   resolves it (`moxi_loadout.homes`), under the core lock it already holds, so the
-   homes a page job compares come from the user's own `moxi install loadout`.
+3. **The harness homes.** It records in the ledger each harness's home and the home
+   folder as this run resolves them, and whether it found git (`moxi_loadout.homes`),
+   under the core lock it already holds, so what a page job compares comes from the
+   user's own `moxi install loadout`.
 4. **Adoption.** It lists every installed module's own skill placements in the manifest
    with the harnesses they were placed for, then hands them to loadout, unseeded
    (`moxi_loadout.adoption.take`), so the yes the user gave at each module's question is
@@ -125,7 +126,7 @@ def record_homes() -> bool:
         return False
     with files.lock(paths.core_lock(), nested=True):
         data = ledger.read()
-        if data.get(homes.KEY) == homes.resolved():
+        if homes.same(data):
             return False
         homes.record(data)
         ledger.write(data)

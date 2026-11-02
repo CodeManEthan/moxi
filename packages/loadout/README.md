@@ -96,15 +96,17 @@ a change still running when the service stops, by `moxi ui stop` or because noth
 used the shell for a while, stops with it; run it again.
 
 A change from the page refuses before it writes anything when the shell's
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `XDG_CONFIG_HOME` puts a harness's home somewhere
-other than your last terminal run did. The line names the variable. Set it where the
-shell gets it at every login (a file under `~/.config/environment.d/` on Linux, your
-LaunchAgent environment on macOS, your user environment variables on Windows), then run
-`moxi ui stop`, or run the command in a terminal. Until a terminal run has recorded the
-homes (`moxi install loadout` does, and so does every `moxi loadout` command that
-installs), every change from the page refuses and says so. `moxi loadout status` and the
-home's block show the same line as a note, which changes neither the exit code nor the
-count.
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME` or `HOME` puts a home somewhere
+other than your last terminal run did, or when your last terminal run found git and the
+shell's `PATH` doesn't: without git, nothing could check what git would commit. The
+line names the variable. Set it where the shell gets it at every login (a file under
+`~/.config/environment.d/` on Linux, your LaunchAgent environment on macOS, your user
+environment variables on Windows), then run `moxi ui stop`, or run the command in a
+terminal. Until a terminal run has recorded the homes (`moxi install loadout` does, and
+so does every `moxi loadout` command that installs), every change from the page refuses
+and says so. `moxi loadout status` and the home's block show the same comparison as a
+note, which changes neither the exit code nor the count; in a terminal, the note says
+what the page does.
 
 MCP servers are added through the `claude` and `codex` CLIs, so the page needs them on
 the shell's `PATH`. Without one, a change from the page does what the terminal does

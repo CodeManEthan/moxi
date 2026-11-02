@@ -85,9 +85,10 @@ def _git():
 
 
 def _status():
-    from moxi_loadout import doctor, install
+    from moxi_loadout import doctor, homes, install
 
-    return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)
+    with homes.as_page():
+        return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)
 
 
 def status(call: Any) -> dict[str, Any]:
@@ -173,7 +174,7 @@ def drift(call: Any) -> dict[str, Any]:
 
     try:
         outcome = _status()
-        note = homes.check(ledger.read())
+        note = homes.check(ledger.read(), page=True)
     except Exception as err:  # noqa: BLE001
         return {"problem": _problem(err, "the status"), "count": 0, "note": None}
     return {"problem": None, "count": sum(r.state not in FINE for r in outcome.rows),

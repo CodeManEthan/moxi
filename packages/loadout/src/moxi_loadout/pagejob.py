@@ -8,7 +8,8 @@ manifest or installs (`add`, `remove`, `enable`, `disable`, `global mode`, `glob
 
 The runner first removes job records older than a day. Then it checks the harness homes
 (`moxi_loadout.homes`) before anything is written, and refuses (exit 3) with one line
-when they aren't the ones the user's own last run recorded. Then it runs the verb
+when they aren't the ones the user's own last run recorded, or when that run found git
+and the job's `PATH` finds none. Then it runs the verb
 through the CLI's own code path, `moxi_loadout.cli.main` with `--json`, on its main
 thread, so the CLI's deferred signals and lock waits hold as they do in a terminal. It
 sets loadout's marker, so the run leaves the recorded homes as they are.
@@ -49,7 +50,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi_loadout.homes import MARKER
+from moxi_loadout.homes import MARKER, PAGE_JOB
 
 #: The folder of job records, in loadout's state directory.
 JOBS = "jobs"
@@ -63,7 +64,7 @@ VERBS = frozenset({"install", "add", "remove", "enable", "disable", "global"})
 INTERRUPTED = ("the job stopped before it finished (the browser shell stopped, the "
                "process was killed, or the machine restarted); run it again")
 #: The value of loadout's marker a page job sets.
-CALLER = "page-job"
+CALLER = PAGE_JOB
 
 _ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _END = ".end.json"

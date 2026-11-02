@@ -1,6 +1,7 @@
 """loadout's page in a browser, through a real shell that starts loadout's real page server,
 whose acts run as real page jobs: the contract check; a toggle off and on again; add and
-remove; a page install refused while no terminal run has recorded the harness homes;
+remove; a page install refused while no terminal run has recorded the harness homes, and
+one refused when the shell's `PATH` has no git and the terminal's has;
 Replace and Turn off through the confirm sheet, where Cancel sends nothing and each
 confirmation sends its own key; every control off while a job runs; an interrupted job;
 a refused act; the project picker; and the 360 px width check.
@@ -18,9 +19,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from playwright.sync_api import expect
@@ -224,6 +227,51 @@ def test_a_page_install_is_refused_until_a_terminal_run_records_the_homes(
     assert {row["state"] for row in status(shell)["rows"]} == {"missing"}
     assert not (Path(shell.env["HOME"]) / ".claude" / "skills").exists()
     assert (Path(shell.env["HOME"]) / "my-loadout" / "loadout.toml").read_text() == BASE
+
+
+def test_a_page_install_whose_path_has_no_git_is_refused_where_the_terminal_refuses(
+        ui_shells, ui_shell_options, ui_contexts, tmp_path_factory):
+    # The shell's PATH holds the fake CLIs and a few shell tools, but no git; the
+    # terminal's is the usual one, with git.
+    fakes = ui_shell_options["env"]["PATH"].split(os.pathsep)[0]
+    tools = tmp_path_factory.mktemp("no-git-bin")
+    for name in ("sh", "env", "basename", "dirname", "uname", "cat"):
+        found = shutil.which(name)
+        if found is not None:
+            (tools / name).symlink_to(found)
+    shell = ui_shells(env={**ui_shell_options["env"], "PATH": f"{fakes}{os.pathsep}{tools}"})
+    terminal = SimpleNamespace(env={**shell.env, "PATH": ui_shell_options["env"]["PATH"]})
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(project), *args], env=terminal.env,
+                              capture_output=True, text=True, check=True).stdout
+
+    home = Path(shell.env["HOME"])
+    project = home / "proj"
+    (project / ".claude" / "skills").mkdir(parents=True)
+    git("init", "-q")
+    # An ignore file of the project's own, so loadout can't write its own there.
+    (project / ".claude" / "skills" / ".gitignore").write_text("/scratch\n", encoding="utf-8")
+    (project / "README").write_text("A project.\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "first")
+    folder = make_folder(terminal)
+    manifest = (BASE + f'[project."{project}"]\nskills = ["review-diff"]\n'
+                '[skill.review-diff]\nharnesses = ["claude"]\n')
+    (folder / "loadout.toml").write_text(manifest, encoding="utf-8")
+    target = project / ".claude" / "skills" / "review-diff"
+    done = moxi(terminal, "loadout", "install", check=False)
+    assert done.returncode == 3 and "would-commit" in done.stdout + done.stderr, done
+    assert not os.path.lexists(target)
+
+    panel = open_panel(ui_contexts(shell).pages[0])
+    panel.get_by_role("button", name="Install").click()
+    job = job_done(panel, 3)
+    expect(job.locator('[data-part="job-lines"]')).to_contain_text(
+        "git isn't on PATH here, but the last run in a terminal found it")
+    assert not os.path.lexists(target)
+    assert git("status", "--porcelain", "--untracked-files=all") == ""
+    assert (folder / "loadout.toml").read_text(encoding="utf-8") == manifest
 
 
 def test_replace_goes_through_the_sheet_and_cancel_sends_nothing(installed, ui_shell, ui_page):

@@ -3,7 +3,8 @@
     {"source": "<the loadout folder last installed from>",
      "placed": {<target key>: <record>},
      "entries": [...],
-     "homes": {<harness>: <its home>}}
+     "homes": {<harness>: <its home>, "home": <the home folder>},
+     "git": <whether the run found git>}
 
 - `source` is the folder the last install read. A placement loadout made stays loadout's
   after the folder moves: a link under this old folder is loadout's own.
@@ -18,8 +19,9 @@
   (`moxi_loadout.entries`): `{item, harness, file, kind, key, written, prior}`, and `sent`
   for an MCP server written through its CLI. `prior` marks an entry the user had first,
   which loadout never removes.
-- `homes` holds each harness's home as the user's own last run resolved it
-  (`moxi_loadout.homes`), which a page job compares with its own before it writes.
+- `homes` holds each harness's home and the home folder as the user's own last run
+  resolved them, and `git` whether that run found git (`moxi_loadout.homes`), which a
+  page job compares with its own before it writes.
 
 The file is written whole, through `moxi.files.atomic_write` (0600), under the core
 lock: `install` reads and writes it under `install.lock` and then the core lock, and

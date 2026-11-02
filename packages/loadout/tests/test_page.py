@@ -232,7 +232,13 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
 def test_status_answers_what_status_json_prints(lo):
     body = read("/api/status")
     assert body.pop("problem") is None
-    assert body == printed(["status", "--json"])
+    # The homes note is worded for the page; everything else is what a terminal prints.
+    with homes.as_page():
+        assert body == printed(["status", "--json"])
+    terminal = printed(["status", "--json"])
+    assert {k: v for k, v in body.items() if k != "notes"} == {
+        k: v for k, v in terminal.items() if k != "notes"}
+    assert len(body["notes"]) == len(terminal["notes"])
     assert {(r["name"], r["harness"]) for r in body["rows"]} >= {("review", "claude")}
 
 
@@ -272,6 +278,9 @@ def test_drift_counts_the_items_not_ok_and_notes_other_homes_without_counting_th
     body = read("/api/drift")
     assert "Codex" in body["note"] and "CODEX_HOME" in body["note"]
     assert body["count"] == read("/api/status")["counts"].get("missing", 0)
+    # The page's reads word the note for the page, as a job's refusal is worded.
+    assert body["note"].endswith("then run moxi ui stop, or run the command in a terminal")
+    assert body["note"] in read("/api/status")["notes"]
 
 
 def test_a_manifest_that_does_not_read_is_each_reads_problem(lo):
