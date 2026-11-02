@@ -94,6 +94,10 @@ def test_the_parameters_are_the_designed_ones():
     assert got["send"]["properties"]["posture"]["enum"] == ["none", "optional", "once",
                                                             "open"]
     assert got["reply"]["required"] == ["message_id", "text"]
+    assert got["reply"]["properties"]["posture"] == {
+        "type": "string", "enum": ["none", "optional", "once", "open"],
+        "description": "unset: a reply to a once message asks nothing back; in an open "
+                       "exchange it stays open"}
     assert got["delete"]["required"] == ["message_id"]
     limit = got["history"]["properties"]["limit"]
     assert (limit["minimum"], limit["maximum"], limit["default"]) == (1, 200, 20)
@@ -140,6 +144,11 @@ def test_descriptions_are_the_designed_texts_in_plain_words():
             in mcp_tools.descriptions()["send"])
     assert "Set new_name to message a name that hasn't started yet." in tools["send"]
     assert tools["delete"].endswith("the result says who had it.")
+    # An unset posture on a reply to a once message goes out asking nothing back: the
+    # text must not invite setting once to keep the exchange's posture.
+    assert ("A reply to a once message asks nothing back unless you set a posture; in "
+            "an open exchange it stays open." in tools["reply"])
+    assert "keeps the exchange's posture" not in tools["reply"]
     for name, text in tools.items():
         for word in ("gateway", "lane", "shim", "claim", "custody", "binding"):
             assert word not in text.lower(), (name, word)

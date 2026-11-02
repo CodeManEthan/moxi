@@ -89,8 +89,9 @@ def descriptions(expiry: str = "24h") -> dict[str, str]:
             "hasn't started yet."),
         "reply": (
             "Reply to a message by its id. The reply goes to whoever sent it, or for "
-            "your own message to its recipients. It keeps the exchange's posture unless "
-            "you set one. expires and interrupt work as in send."),
+            "your own message to its recipients. A reply to a once message asks nothing "
+            "back unless you set a posture; in an open exchange it stays open. expires "
+            "and interrupt work as in send."),
         "agents": (
             "List the agents you can message: each name, whether its session is running "
             "now, and its harness."),
@@ -145,7 +146,9 @@ INPUTS: dict[str, dict] = {
     "reply": {"type": "object", "properties": {
         "message_id": _ID,
         "text": _STR,
-        "posture": {"type": "string", "enum": list(POSTURES)},
+        "posture": {"type": "string", "enum": list(POSTURES),
+                    "description": "unset: a reply to a once message asks nothing back; "
+                                   "in an open exchange it stays open"},
         "expires": _EXPIRES,
         "interrupt": _BOOL,
     }, "required": ["message_id", "text"]},
