@@ -65,23 +65,21 @@ GLOBAL_KIND = "global"
 @dataclass(frozen=True)
 class Resolution:
     """A project section's root, or why it can't be used this run: `line` and the exit
-    code (`code`) the refusal gives."""
+    code (`code`) the refusal gives. `every` marks a refusal that holds for every key
+    section (projects unreadable or busy), so no other key is asked this run."""
 
     root: str | None
     line: str = ""
     code: int = REFUSED
+    every: bool = False
 
 
 def resolve_key(key: str) -> Resolution:
-    """A key section's root, through projects. Without projects every key section is
-    refused. The projects link itself is a later piece of this module; until it lands a
-    key section is refused even with projects installed."""
-    from moxi.modules import available, load
+    """A key section's root, through projects (`moxi_loadout.projects_link`). Without
+    projects every key section is refused."""
+    from moxi_loadout import projects_link
 
-    if not available("projects") or not load("projects").ok:
-        return Resolution(None, f"project {key}: a project key needs projects; name it by "
-                                f"path, or moxi install projects")
-    return Resolution(None, f"project {key}: key sections aren't read yet; name it by path")
+    return projects_link.resolve(key)
 
 
 @dataclass
@@ -209,13 +207,17 @@ def build(manifest: Manifest, machine, data: dict, *,
     plan = Plan(manifest, Path(machine.source), data, lines=list(skipped))
     every = list(rows)
     user_skills = set(manifest.user.names("skill"))
+    sticky = None
     for section in manifest.sections():
         root = None
         if section.where == "key":
-            res = resolver(section.name)
+            res = sticky if sticky is not None else resolver(section.name)
+            if res.every:
+                sticky = res
             if res.root is None:
                 plan.refused[section.name] = res
-                plan.lines.append(res.line)
+                if res.line not in plan.lines:
+                    plan.lines.append(res.line)
             root = res.root
         elif section.where == "path":
             root = section.root
