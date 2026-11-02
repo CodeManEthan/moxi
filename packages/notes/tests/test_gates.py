@@ -303,6 +303,32 @@ def test_rebase_continue_at_an_edit_stop_commits_without_the_gate_and_the_push_r
     assert done.returncode != 0 and "c.md:1 credentials/github-pat" in done.stderr
 
 
+def failing_git(event: str, command: str, **kw):
+    """A git hook's context whose `git <command>` fails, as a git that can't read would."""
+    import subprocess
+
+    from moxi_repo.api import HookContext
+
+    class Failing(HookContext):
+        def git(self, *args, **more):
+            if args[:1] == (command,):
+                return subprocess.CompletedProcess(["git", *args], 128, b"",
+                                                   "fatal: could not read")
+            return super().git(*args, **more)
+
+    return Failing(event, **kw)
+
+
+@pytest.mark.parametrize("command", ["diff-index", "cat-file"])
+def test_a_git_read_that_fails_refuses_the_commit(root, monkeypatch, command):
+    write(root, "plan.md", "fine\n")
+    sh(root, "add", "plan.md")
+    monkeypatch.chdir(root)
+    out = gates.pre_commit(failing_git("pre-commit", command))
+    assert out.kind == "refuse", out
+    assert f"git {command} exited 128: fatal: could not read" in out.lines[0]
+
+
 # -- the push gate ------------------------------------------------------------------------
 
 @pytest.fixture
@@ -408,3 +434,18 @@ def test_an_author_allowance_lets_the_push_go(pushing):
     add_commit(root, "clean.md", "fine\n", env={"GIT_AUTHOR_NAME": "Quillon"})
     done = push(root, "origin", "main")
     assert done.returncode == 0 and done.stderr == ""
+
+
+@pytest.mark.parametrize("command", ["rev-list", "diff-tree", "log"])
+def test_a_git_read_that_fails_refuses_the_push(pushing, monkeypatch, command):
+    root, remote = pushing
+    add_commit(root, "plan.md", "fine\n")
+    head = sh(root, "rev-parse", "HEAD").stdout.strip()
+    old = sh(remote, "rev-parse", "main").stdout.strip()
+    monkeypatch.chdir(root)
+    line = f"refs/heads/main {head} refs/heads/main {old}\n".encode("ascii")
+    out = gates.pre_push(failing_git("pre-push", command, args=("origin", str(remote)),
+                                     stdin=line))
+    assert out.kind == "refuse", out
+    assert out.lines[0].startswith("the commits to push could not be read")
+    assert f"git {command} exited 128: fatal: could not read" in out.lines[0]
