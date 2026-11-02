@@ -149,7 +149,8 @@ class Row:
 @dataclass
 class Plan:
     """The whole manifest's plan: `wants`, the `removals` the placer planned, the core
-    harness table's lines and the section refusals (`lines`), and the conversion notes."""
+    harness table's lines, the items the manifest lists where they can't be written and
+    the section refusals (`lines`), and the conversion notes."""
 
     manifest: Manifest
     folder: Path
@@ -210,6 +211,7 @@ def build(manifest: Manifest, machine, data: dict, *,
 
     rows, skipped = place.harnesses()
     plan = Plan(manifest, Path(machine.source), data, lines=list(skipped))
+    plan.lines += [r.line for r in manifest.refused]
     every = list(rows)
     user_skills = set(manifest.user.names("skill"))
     sticky = None

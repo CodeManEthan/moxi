@@ -211,6 +211,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
             "section": USER, "kind": "skill", "item": f"{t.module}/{t.placed.name}",
             "harness": t.placed.harness, "module": t.module, "seeded": False}
     found = manifest_mod.load(machine.source)
+    lines.extend(r.line for r in found.refused)
     claims = _claims(replace)
     written: list[Row] = []
     notes: list[str] = []

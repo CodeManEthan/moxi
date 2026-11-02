@@ -174,6 +174,19 @@ def test_a_project_item_from_the_folder_copied_is_not_the_projects_own(lo, tmp_p
     assert "Changed." in (copied / "SKILL.md").read_text()
 
 
+def test_a_hook_listed_in_a_project_section_is_refused_with_a_line(lo, tmp_path):
+    root = project(tmp_path)
+    kit.manifest(lo, f'[project."{root}"]\nhooks = ["guard"]\npermissions = ["reads"]\n'
+                     'mcp = ["docs"]\n'
+                     '[hook.guard]\nevent = "PreToolUse"\ncommand = "true"\n'
+                     '[permissions.reads]\nallow = [{ shell = ["git", "status"] }]\n'
+                     '[mcp.docs]\ncommand = "docs-mcp"\n')
+    for out in (install.status(), install.install()):
+        said = "\n".join(out.text())
+        for kind, name in (("hook", "guard"), ("permissions", "reads"), ("mcp", "docs")):
+            assert f"{kind} {name} is written at user scope only" in said, said
+
+
 def test_two_project_sections_place_one_name_each(lo, tmp_path):
     a, b = project(tmp_path, "a"), project(tmp_path, "b")
     kit.manifest(lo, f'[project."{a}"]\nskills = ["review"]\n'
