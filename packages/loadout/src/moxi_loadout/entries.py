@@ -797,14 +797,34 @@ def _cli(a: Action, run: Run, keep: int, say) -> None:
     except Exception as exc:  # noqa: BLE001 - one server's failure is its own row
         run.lines.append(f"{harness} mcp {name}: {exc}")
         return
-    if a.op != "remove":
+    try:
         view = _TomlView(file) if harness == "codex" else hz.Doc(file, "json")
-        a.written = _get(view, "mcp", e.key)
+        found = _get(view, "mcp", e.key if e else r.get("key"))
+    except hz.Refused as exc:
+        run.lines.append(f"{harness} mcp {name}: {exc}")
+        return
+    if a.op == "remove":
+        if found is not _MISSING:
+            run.lines.append(f"{harness} mcp {name}: still in {file} after mcp remove")
+            return
+    else:
+        a.written = found
         if a.written is _MISSING:
             run.lines.append(f"{harness} mcp {name}: not found in {file} after the write")
             return
     a.done = True
     say(_said(a))
+
+
+def mcp_there(record: dict) -> bool | None:
+    """Whether the MCP server `record` names is in its file now; None when the file
+    can't be read."""
+    file = Path(record.get("file", ""))
+    try:
+        view = _TomlView(file) if record.get("harness") == "codex" else hz.Doc(file, "json")
+    except hz.Refused:
+        return None
+    return _get(view, "mcp", record.get("key") or []) is not _MISSING
 
 
 def _add_argv(exe, harness, name, sent) -> list[str]:

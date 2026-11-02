@@ -27,6 +27,11 @@ CONFIG_CHECK = "moxi_loadout.settings:check_text"
 #: harness row, every module's own skill placements taken over, and the global mode asked
 #: when the manifest has none (only at a terminal). It places nothing.
 SETUP = "moxi_loadout.setup:setup"
+#: At `moxi uninstall loadout`, before anything is removed: everything loadout placed or
+#: wrote taken out (harness entries, the global part, placements, ignore files, the
+#: opencode row), module skills from a module's own yes handed back to it; or, when
+#: something was changed since loadout wrote it, a refusal that removes nothing.
+TEARDOWN = "moxi_loadout.teardown:teardown"
 SEGMENT = None
 #: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
 #: global file, hook programs, the projects link, Codex's switches, modules gone.
