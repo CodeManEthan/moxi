@@ -11,6 +11,7 @@ The first pass over it is made once too; each test starts from a copy of that in
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import shutil
@@ -18,6 +19,7 @@ import statistics
 import subprocess
 import sys
 import time
+import types
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -450,19 +452,272 @@ def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
     assert taken < 100
 
 
-@pytest.mark.timed
-@pytest.mark.parametrize(("module", "budget"), [("moxi_usage.listeners", 10.0),
-                                                ("moxi_usage.api", 15.0)])
-def test_importing_a_hook_path_module_takes_under_its_budget(module, budget, tmp_path):
+#: turns' guard loader, which is the one importer of usage's guard declarations.
+TURNS_GUARDS = "moxi_turns.guards"
+GUARDS_FRESH = pytest.mark.xfail(
+    strict=True, reason="a known miss: the declarations are turns' own Guard values, so "
+    "importing them imports turns' guard module, which loads logging, dataclasses, re "
+    "and tomllib (about 20-35 ms here); in turns' endpoint, the one importer, that is "
+    "loaded already, and the next test holds the declarations alone to the budget")
+
+
+def import_ms(module: str, cwd: Path, *, before: str = "", times: int = 15) -> float:
+    """The median cost of importing `module` in a fresh interpreter, less the median of
+    the same interpreter without it; `before` is imported first in both."""
     def run(code: str) -> float:
         start = time.perf_counter()
-        subprocess.run([sys.executable, "-c", code], cwd=tmp_path, check=True)
+        subprocess.run([sys.executable, "-c", code], cwd=cwd, check=True)
         return time.perf_counter() - start
 
+    first = f"import {before}; " if before else ""
     bare, loaded = [], []
-    for _ in range(15):
-        bare.append(run("pass"))
-        loaded.append(run(f"import {module}"))
-    taken = (statistics.median(loaded) - statistics.median(bare)) * 1000
+    for _ in range(times):
+        bare.append(run(first + "pass"))
+        loaded.append(run(f"{first}import {module}"))
+    return (statistics.median(loaded) - statistics.median(bare)) * 1000
+
+
+@pytest.mark.timed
+@pytest.mark.parametrize(("module", "budget"), [
+    ("moxi_usage.listeners", 10.0), ("moxi_usage.mark", 10.0),
+    ("moxi_usage.ceiling", 10.0),
+    pytest.param("moxi_usage.guards", 10.0, marks=GUARDS_FRESH),
+    ("moxi_usage.api", 15.0)])
+def test_importing_a_hook_path_module_takes_under_its_budget(module, budget, tmp_path):
+    taken = import_ms(module, tmp_path)
     print(f"\nimport {module}: {taken:.1f} ms over a bare interpreter")
     assert taken < budget
+
+
+@pytest.mark.timed
+def test_importing_the_guard_declarations_beside_turns_loader_takes_under_10_ms(tmp_path):
+    turns = import_ms(TURNS_GUARDS, tmp_path)
+    taken = import_ms("moxi_usage.guards", tmp_path, before=f"{TURNS_GUARDS}, moxi.modules")
+    print(f"\nimport moxi_usage.guards: {taken:.1f} ms over an interpreter that holds "
+          f"turns' guard loader and the core's modules (the loader alone {turns:.1f} ms)")
+    assert taken < 10.0
+
+
+# --- the hook path: the warn-at listener and the worker ceiling's judge -----------------
+#
+# Each is timed as turns calls it, one event or call at a time, over a long session as
+# the hook path meets it: a main transcript of about 35 MB with an agent's file beside it,
+# the measure and the model rows in the test's tmp. The time is the function's own work;
+# turns' round trip to the endpoint is not in it.
+
+HOOK_SESSION = "0190b000-0000-7000-8000-0000000005c1"
+HOOK_AGENT = "a0190b00000005c1"
+HOOK_MODEL = "claude-opus-5-5"
+#: The measure's row for the model, and the price rows that give its `r` (0.05).
+HOOK_PARAMS = {"schema": 1, "measured_at": "2026-10-26T00:00:00+00:00", "w": 2.0,
+               "models": {HOOK_MODEL: {
+                   "main": {"n": 50, "S": 47058, "P": 23171, "g": 1476},
+                   "subagent": {"n": 50, "S": 47058, "P": 23171, "g": 1476,
+                                "fallback": "main"}}}}
+HOOK_PRICES = f"""
+[[model]]
+id = "{HOOK_MODEL}"
+input = 10.0
+output = 50.0
+cache_read = 0.5
+"""
+#: The 1x and 1.5x thresholds those rows give.
+ONE_X, ONE_HALF_X = 100_808, 187_776
+#: The long session: its requests, each with a tool result of about 11 KB.
+HOOK_REQUESTS = 1_200
+HOOK_RESULT = CODE * 13
+#: The agent's requests, with the same results (about 6 MB).
+AGENT_REQUESTS = 200
+#: The ceiling's thresholds, in tokens of an agent's growth.
+CEILING_WARN, CEILING_HARD = 100_000, 150_000
+#: Calls per timed batch, and batches; a measure is the median batch's mean.
+CALLS, BATCHES = 200, 7
+OFF_CALLS = 20_000
+
+
+def per_call_ms(run: Callable[[], object], calls: int = CALLS,
+                batches: int = BATCHES) -> float:
+    means = []
+    for _ in range(batches):
+        start = time.perf_counter()
+        for _ in range(calls):
+            run()
+        means.append((time.perf_counter() - start) / calls)
+    return statistics.median(means) * 1000
+
+
+class LongSession:
+    """A Claude main transcript of `HOOK_REQUESTS` requests whose context climbs to
+    `last`, with one agent whose context climbs from `agent_base` to `agent_last`."""
+
+    def __init__(self, *, last: int, agent_base: int = 20_000, agent_last: int = 60_000,
+                 tail: str = HOOK_RESULT):
+        self.t = ClaudeTranscript(Path(sessions.root("claude")), session_id=HOOK_SESSION,
+                                  start=1793400000.0, step=5.0)
+        self._requests(self.t, HOOK_REQUESTS, 20_000, last, tail)
+        self.child = self.t.subagent(HOOK_AGENT)
+        self._requests(self.child, AGENT_REQUESTS, agent_base, agent_last)
+        self.t.write()
+        self.bytes = self.t.path.stat().st_size
+        self.agent_bytes = self.child.path.stat().st_size
+
+    @staticmethod
+    def _requests(t: ClaudeTranscript, n: int, first: int, last: int,
+                  tail: str = HOOK_RESULT) -> None:
+        for m in range(n):
+            if m % 4 == 0:
+                t.user("Look at the module and say what is left.")
+            context = first + (last - first) * m // max(1, n - 1)
+            req = t.request(model=HOOK_MODEL,
+                            usage_block=usage(input=3, cache_read=context - 1_003,
+                                              cache_write=1_000, output=400))
+            call = req.tool_use("Read", {"file_path": f"/work/project/src/m{m % 50}.py"})
+            t.tool_result(call, tail if m == n - 1 else HOOK_RESULT)
+
+    def event(self, *, env: dict[str, str], agent_id: str | None = None):
+        return types.SimpleNamespace(
+            event="after-tool", harness="claude", session_id=HOOK_SESSION, env=env,
+            agent_id=agent_id, tool="Read", tool_use_id="toolu_1", is_error=False,
+            point="after", record_path=str(self.t.path), cwd="/work/project")
+
+    def call(self, tool: str = "Grep", tool_input: dict | None = None):
+        return types.SimpleNamespace(
+            harness="claude", session_id=HOOK_SESSION, agent_id=HOOK_AGENT, tool=tool,
+            tool_use_id="toolu_1", input=tool_input or {}, cwd="/work/project",
+            record_path=str(self.t.path), env={}, prompts=())
+
+
+@pytest.fixture
+def hook(monkeypatch):
+    """The measure, the price rows and usage's config in the test's tmp; the listener's
+    and the judge's state empty; no crossing handlers."""
+    from moxi_usage import ceiling, mark, thresholds
+
+    from conftest import write_config
+
+    def config(extra: str = "") -> None:
+        write_config(HOOK_PRICES + extra)
+
+    mark.reset()
+    ceiling.reset()
+    config()
+    path = thresholds.params_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(HOOK_PARAMS), encoding="utf-8")
+    monkeypatch.setattr(mark, "handlers", lambda: [])
+    yield config
+    mark.reset()
+    ceiling.reset()
+
+
+@pytest.mark.timed
+def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook):
+    from moxi_usage import mark, thresholds
+
+    below = LongSession(last=90_000)
+    marked = {mark.WARN_AT: "1x", mark.CROSSING_AT: "1.5x"}
+    main, agent = below.event(env=marked), below.event(env=marked, agent_id=HOOK_AGENT)
+    assert mark.on_tool(main) is None and mark.on_tool(agent) is None
+    armed = per_call_ms(lambda: mark.on_tool(main))
+    agents = per_call_ms(lambda: mark.on_tool(agent))
+    floor = per_call_ms(lambda: mark.floor(main))
+    assert mark.floor(main) == ONE_X
+    # Where a call's time goes: the newest request, the thresholds' stamp, the selection.
+    source = sessions.Source("claude", str(below.t.path), HOOK_SESSION)
+    read = per_call_ms(lambda: sessions.last_request(source))
+    stamp = per_call_ms(thresholds.stamp)
+    select = per_call_ms(lambda: mark.selected(marked))
+
+    mark.reset()
+    past = LongSession(last=160_000)
+    main = past.event(env=marked)
+    assert mark.on_tool(main) == mark.notice_line(160_000, "1x", ONE_X, HOOK_MODEL)
+    assert mark.on_tool(main) is None                    # fired: said once per rise
+    fired = per_call_ms(lambda: mark.on_tool(main))
+    fired_floor = per_call_ms(lambda: mark.floor(main))
+    assert mark.floor(main) == 0
+    print(f"\nwarn-at listener over a {below.bytes / 1e6:.0f} MB transcript, both marks "
+          f"stamped: {armed:.3f} ms a call below the mark, {fired:.3f} ms past it "
+          f"(fired); an agent's call over its {below.agent_bytes / 1e6:.0f} MB file "
+          f"{agents:.3f} ms; floor {floor:.3f} ms below, {fired_floor:.4f} ms fired. "
+          f"Of a call: last_request {read:.3f} ms, the thresholds' stamp {stamp:.3f} ms, "
+          f"the selection {select:.4f} ms")
+    assert max(armed, fired, agents, floor, fired_floor) < 1.0
+
+
+#: A large tool result: on a heavy user's machine about one in 160 is over 100 KB.
+LARGE_RESULT_KB = 150
+
+
+@pytest.mark.timed
+@pytest.mark.xfail(strict=True, reason="a known miss: sessions' last_request decodes "
+                   "every line after the newest request, the tool's result among them, "
+                   "at about 11-16 microseconds a KB, so a result of about 70 KB or more "
+                   "takes the call past 1 ms")
+def test_the_warn_at_listener_takes_under_1_ms_a_call_after_a_large_tool_result(hook):
+    from moxi_usage import mark
+
+    large = CODE * (LARGE_RESULT_KB * 1024 // len(CODE))
+    s = LongSession(last=90_000, tail=large)
+    main = s.event(env={mark.WARN_AT: "1x"})
+    assert mark.on_tool(main) is None
+    taken = per_call_ms(lambda: mark.on_tool(main))
+    source = sessions.Source("claude", str(s.t.path), HOOK_SESSION)
+    read = per_call_ms(lambda: sessions.last_request(source))
+    print(f"\nwarn-at listener after a {len(large) // 1024} KB tool result: {taken:.3f} ms "
+          f"a call, of which last_request {read:.3f} ms")
+    assert taken < 1.0
+
+
+@pytest.mark.timed
+def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds(hook):
+    from moxi_usage import mark
+
+    s = LongSession(last=160_000, agent_base=20_000, agent_last=20_000)
+    unstamped, stamped_off = s.event(env={}), s.event(env={mark.WARN_AT: "off"})
+    agent = s.event(env={}, agent_id=HOOK_AGENT)
+    for e in (unstamped, stamped_off, agent):
+        assert mark.on_tool(e) is None
+    assert mark.floor(unstamped) == mark.floor(stamped_off) == mark.NEVER
+    times = {name: per_call_ms(run, OFF_CALLS) for name, run in (
+        ("unstamped", lambda: mark.on_tool(unstamped)),
+        ("stamped off", lambda: mark.on_tool(stamped_off)),
+        ("an agent's", lambda: mark.on_tool(agent)),
+        ("floor", lambda: mark.floor(unstamped)))}
+    assert mark._sessions == {}
+    print("\nwarn-at listener with both purposes off, per call: " + ", ".join(
+        f"{name} {ms * 1000:.1f} us" for name, ms in times.items()))
+    assert max(times.values()) < 0.01
+
+
+@pytest.mark.timed
+def test_the_ceiling_judge_takes_under_2_ms_a_call_below_the_band_and_past_the_hard_mark(
+        hook, tmp_path):
+    from moxi_usage import ceiling
+
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    hook(f"\n[ceiling]\nwarn_tokens = {CEILING_WARN}\nhard_tokens = {CEILING_HARD}\n"
+         f"handoff_roots = [{json.dumps(str(handoff))}]\n")
+    below = LongSession(last=90_000, agent_base=20_000, agent_last=50_000)
+    call = below.call()
+    assert ceiling.judge(call) is None
+    under = per_call_ms(lambda: ceiling.judge(call))
+    returning = below.call("StructuredOutput")
+    returns = per_call_ms(lambda: ceiling.judge(returning))
+
+    ceiling.reset()
+    past = LongSession(last=90_000, agent_base=20_000, agent_last=20_000 + CEILING_HARD)
+    refused, report = past.call(), past.call(
+        "Write", {"file_path": str(handoff / "report.md"), "content": "done"})
+    first = ceiling.judge(refused)
+    assert type(first).__name__ == "Deny", first
+    assert ceiling.judge(report) is None
+    denied = per_call_ms(lambda: ceiling.judge(refused))
+    allowed = per_call_ms(lambda: ceiling.judge(report))
+    print(f"\nceiling judge over a {below.agent_bytes / 1e6:.0f} MB agent file: "
+          f"{under:.3f} ms a call below the band, {returns:.4f} ms for a return tool; "
+          f"past the hard mark {denied:.3f} ms a refused call, {allowed:.3f} ms a "
+          f"hand-off write the allowlist lets through")
+    assert under < 2.0
+    assert max(denied, allowed) < 2.0          # BUDGETS' hook_ms
