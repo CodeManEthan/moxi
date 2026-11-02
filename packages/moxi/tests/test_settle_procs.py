@@ -727,8 +727,10 @@ def test_ctrl_c_during_teardown_abandons_it_and_its_finally_runs(box, job):
     assert box.events("teardown", "ran_finally") != []
     assert box.events("sup") == []
     assert [e["sent"] for e in box.events("parent", "sent")] == [signal.SIGINT]
-    assert b"teardown demo: interrupted; nothing was removed" in j.screen
-    assert b"interrupted in demo's teardown; nothing was removed" in j.screen
+    assert b"teardown demo: interrupted" in j.screen
+    assert (b"interrupted in demo's teardown; the uninstall stopped there and demo stays "
+            b"installed") in j.screen
+    assert b"nothing was removed" not in j.screen and b"--skip-teardown" not in j.screen
     assert box.events("parent", "ran") == []                # no package step
     assert (box.root / SERVICE).exists()                    # nor the units
     assert box.events(key="raised") == []

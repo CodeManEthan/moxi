@@ -272,15 +272,17 @@ def test_a_teardown_that_never_ran_names_skip_teardown(torn, capsys, child):
 
 
 @pytest.mark.parametrize("how", ["code", "signal"])
-def test_an_interrupted_teardown_removes_nothing_and_exits_1(torn, capsys, how):
+def test_an_interrupted_teardown_stops_the_uninstall_and_claims_nothing(torn, capsys, how):
     if how == "code":
         torn.teardown_code = _settle.INTERRUPTED
     else:
         torn.teardown_signals = (2,)
     code, _, err = moxi_uninstall(capsys, "turns")
     assert code == 1
-    assert "interrupted in turns's teardown; nothing was removed" in err
-    assert torn.runs == []
+    assert ("interrupted in turns's teardown; the uninstall stopped there and turns stays "
+            "installed") in err
+    assert "nothing was removed" not in err and "--skip-teardown" not in err
+    assert torn.runs == [] and "moxi-turns" in torn.installed
 
 
 def test_skip_teardown_goes_on_without_it(torn, capsys):

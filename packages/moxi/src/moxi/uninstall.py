@@ -15,8 +15,9 @@
    or the child can't start) removed nothing, and the line names `--skip-teardown` as the
    way past it. Once it ran, the core can't tell what it removed: what the module
    reported stands on its own, and the line names neither. An interrupt abandons the
-   `TEARDOWN` as a failed one: nothing is removed. A broken module has no teardown to
-   run.
+   `TEARDOWN` as a failed one, which may have removed some of its parts by then: the line
+   says the uninstall stopped there and the module stays installed, and names neither. A
+   broken module has no teardown to run.
 3. Every `moxi.installs` listener's `on_uninstall(module)`, the module's own included.
 4. Its units (`moxi.units.remove`, which also unwraps every foreign timer it wrapped and
    drops its `units.json` entries), and its install questions' record.
@@ -215,7 +216,8 @@ class Uninstaller:
         guard_streams()
         outcome = run_teardown(self.env.python, module)
         if outcome.interrupted:
-            raise InstallError(f"interrupted in {module}'s teardown; nothing was removed")
+            raise InstallError(f"interrupted in {module}'s teardown; the uninstall stopped "
+                               f"there and {module} stays installed")
         if outcome.code == REFUSED:
             say(f"{module}'s teardown refused the uninstall; nothing was removed", err=True)
             return REFUSED

@@ -1166,7 +1166,7 @@ def teardown(module: str) -> int:
     finally:
         _state.raising = False
     if _state.request is not None:
-        say(f"teardown {module}: interrupted; nothing was removed", err=True)
+        say(f"teardown {module}: interrupted", err=True)
         return INTERRUPTED
     return code
 
