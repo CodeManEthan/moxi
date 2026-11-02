@@ -64,12 +64,14 @@ SKIPPED = "the would-commit check skipped"
 @dataclass
 class Outcome:
     """What a run came to: its `rows` (every want for `status`, those in scope for
-    `install`), the `lines` said on the way, `notes`, and the exit `code`."""
+    `install`), the `lines` said on the way, `notes`, and the exit `code`. `status` also
+    gives the generated agent files no agent uses (`orphans`, see `orphans`)."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     code: int = 0
+    orphans: list[tuple[str, str]] = field(default_factory=list)
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
@@ -102,7 +104,8 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
             if _shown(scope, r)]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
     return Outcome(rows, list(plan.lines) + run.lines,
-                   list(dict.fromkeys(plan.notes + run.notes + notes)), code)
+                   list(dict.fromkeys(plan.notes + run.notes + notes)), code,
+                   orphans(plan, plan.ledger))
 
 
 def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
@@ -476,25 +479,35 @@ def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
     return out
 
 
-def _drop_generated(plan: planner.Plan, data: dict, say) -> list[str]:
-    """Delete each generated agent file no want names and no placement uses any more,
-    as it was generated; one edited by hand is left, and named in the note returned."""
+def orphans(plan: planner.Plan, data: dict) -> list[tuple[str, str]]:
+    """Each generated agent file no want names and no placement uses any more, with its
+    state: `ok` as it was generated, `modified` when edited by hand."""
     from moxi_loadout import convert, stores
 
     used = generated_in_use(data, [w.generated[0] for w in plan.wants if w.generated])
-    notes = []
+    out = []
     for top, _, names in os.walk(stores.generated_dir()):
         for name in sorted(names):
             path = os.path.join(top, name)
             if os.path.realpath(path) in used:
                 continue
             state = convert.state(path)
-            if state == "ok":
-                os.unlink(path)
-                say(f"deleted {path}, which no agent uses any more")
-            elif state == "modified":
-                notes.append(f"{path} was edited by hand and no agent uses it any more; "
-                             "copy the edit into its source if you want it, then delete it")
+            if state in ("ok", "modified"):
+                out.append((path, state))
+    return out
+
+
+def _drop_generated(plan: planner.Plan, data: dict, say) -> list[str]:
+    """Delete each generated agent file no want names and no placement uses any more,
+    as it was generated; one edited by hand is left, and named in the note returned."""
+    notes = []
+    for path, state in orphans(plan, data):
+        if state == "ok":
+            os.unlink(path)
+            say(f"deleted {path}, which no agent uses any more")
+        else:
+            notes.append(f"{path} was edited by hand and no agent uses it any more; "
+                         "copy the edit into its source if you want it, then delete it")
     return notes
 
 
@@ -531,4 +544,4 @@ def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
 
 
 __all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "install",
-           "generated_in_use"]
+           "generated_in_use", "orphans"]

@@ -8,6 +8,8 @@ The core's own rows already show every loadout placement that isn't ok. These ad
   `would-commit` and the rest, a harness file loadout can't read among them (`warn`).
 - sections: project sections refused this run, and loadout's ignore files edited since
   it wrote them (`warn`).
+- generated: generated agent files no agent uses any more (`warn`): an install deletes
+  one as it was generated, and leaves one edited by hand for the user to delete.
 - global: the global mode, and its state per harness.
 - hooks: each hook's program resolves (`warn` when one doesn't).
 - projects: a section named by key while projects is absent (`warn`); else the link,
@@ -86,6 +88,7 @@ def rows() -> Iterator[Row]:
         yield from _sections(outcome)
         yield _global(found, outcome)
         yield from _skipped(outcome)
+        yield from _orphans(outcome)
     yield _hooks(found, machine.source)
     yield _projects(found, outcome)
     yield from _codex(found)
@@ -172,6 +175,19 @@ def _skipped(outcome) -> Iterator[Row]:
         if note.startswith(SKIPPED):
             yield Row(MODULE, "would-commit", "warn", note + "; the doctor gives git "
                       f"{GIT_BUDGET:.0f} s", "moxi loadout status")
+
+
+def _orphans(outcome) -> Iterator[Row]:
+    if not outcome.orphans:
+        return
+    edited = [p for p, state in outcome.orphans if state == "modified"]
+    n = len(outcome.orphans)
+    detail = (f"{n} generated agent file{'s' * (n != 1)} no agent uses any more: "
+              + ", ".join(p + (" (edited by hand)" if p in edited else "")
+                          for p, _ in outcome.orphans))
+    fix = ("copy each edit into its source if you want it, then delete it" if edited
+           else "moxi loadout install")
+    yield Row(MODULE, "generated", "warn", detail, fix)
 
 
 def _hooks(found, source) -> Row:

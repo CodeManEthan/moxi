@@ -118,6 +118,26 @@ def test_a_key_section_without_projects_warns(lo, site):
     assert by_name(doctor.rows())["projects"].state == "off"
 
 
+def test_a_generated_file_no_agent_uses_warns(lo):
+    from moxi_loadout import stores
+
+    kit.agent(lo / "agents" / "helper.md", "helper")
+    kit.manifest(lo, '[user]\nagents = ["helper"]\n')
+    assert install.install().code == 0
+    assert "generated" not in by_name(doctor.rows())
+    generated = stores.generated_dir() / "codex" / "helper.toml"
+    with open(generated, "a", encoding="utf-8") as f:
+        f.write("# my edit\n")
+    kit.manifest(lo, '[user]\n')
+    assert install.install().code == 0
+    row = by_name(doctor.rows())["generated"]
+    assert row.state == "warn"
+    assert str(generated) in row.detail and "edited by hand" in row.detail
+    assert "delete it" in row.fix
+    os.unlink(generated)
+    assert "generated" not in by_name(doctor.rows())
+
+
 def test_codex_switches_are_noted(lo):
     kit.manifest(lo, '[user]\nhooks = ["guard"]\n[hook.guard]\nevent = "PreToolUse"\n'
                      'command = "true"\n')
