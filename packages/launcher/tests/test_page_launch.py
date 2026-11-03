@@ -455,6 +455,32 @@ def test_a_refusal_before_the_row_is_recorded_under_the_request_id(typed, code, 
     assert harness.runs() == []
 
 
+def test_the_job_reads_the_rows_a_request_file_leaves_out():
+    request = job.launch_request("r1", {"typed": {}, "extra": [],
+                                        "left_out": ["model", "add_dir"]})
+    assert tuple(request.left_out) == ("model", "add_dir")
+    assert tuple(job.launch_request("r1", {"typed": {}, "extra": []}).left_out) == ()
+    with pytest.raises(job.NotHere):
+        job.launch_request("r1", {"typed": {}, "extra": [], "left_out": "model"})
+
+
+@POSIX
+def test_the_job_launches_without_the_rows_its_request_leaves_out(work, harness):
+    write_presets(f'[defaults]\ncwd = "{work}"\nmodel = "opus"\n')
+    request_file(typed={"target": "headless", "brief": BRIEF}, left_out=["model"])
+    assert job.main(["launch", "r1"]) == 0
+    assert row("r1").state == "started" and row("r1").values["model"] == ""
+    assert "opus" not in harness.one()["argv"]
+
+
+def test_a_request_leaving_out_the_only_place_is_refused_no_cwd(work, harness):
+    write_presets(f'[defaults]\ncwd = "{work}"\n')
+    path = request_file(typed={"target": "headless", "brief": BRIEF}, left_out=["cwd"])
+    assert job.run_request("r1") == "refused"
+    assert requested("r1")["refused"]["code"] == "no-cwd"
+    assert row("r1") is None and not path.exists() and harness.runs() == []
+
+
 def test_a_launch_past_its_wait_is_recorded_timed_out(work):
     release = threading.Event()
 

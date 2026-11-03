@@ -1,8 +1,10 @@
 """`moxi launcher`: launch a session, act on the sessions it launched, and read what was
 launched.
 
-    moxi launcher run [--seat NAME | --project-preset NAME] [catalog flags] [-- extra]
-    moxi launcher preview [--seat NAME | --project-preset NAME] [catalog flags] [--json]
+    moxi launcher run [--seat NAME | --project-preset NAME] [--leave-out ROW ...]
+                      [catalog flags] [-- extra]
+    moxi launcher preview [--seat NAME | --project-preset NAME] [--leave-out ROW ...]
+                          [catalog flags] [--json]
     moxi launcher log [--table runs|exits|holds] [--limit N] [--before TIME] [--json]
     moxi launcher presets [list | show NAME | check] [--project KEY] [--json]
     moxi launcher catalog [HARNESS] [--json]
@@ -149,14 +151,17 @@ def _request(args: argparse.Namespace):
     the harness the launch starts. Prints the warning for flags passed on unknown."""
     from . import api, catalog, presets
 
-    asked = presets.Request(seat=args.seat, project_preset=args.project_preset)
+    left_out = tuple(args.leave_out or ())
+    asked = presets.Request(seat=args.seat, project_preset=args.project_preset,
+                            left_out=left_out)
     harness = catalog.typed_harness(args.rest) or presets.harness_of(asked)
     parsed = catalog.parse(args.rest, harness)
     if parsed.warning:
         _warn(parsed.warning)
     return api.LaunchRequest(seat=args.seat, project_preset=args.project_preset,
                              typed=dict(parsed.values), extra=tuple(parsed.extra),
-                             off_posture=args.off_posture, cwd=os.getcwd())
+                             off_posture=args.off_posture, left_out=left_out,
+                             cwd=os.getcwd())
 
 
 def _run(args: argparse.Namespace, prog: str) -> int:
@@ -628,13 +633,17 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
 
 
 def _launch_flags(parser: argparse.ArgumentParser) -> None:
-    """The flags `run` and `preview` share: at most one preset, and the posture override."""
+    """The flags `run` and `preview` share: at most one preset, the posture override, and
+    the rows left out."""
     preset = parser.add_mutually_exclusive_group()
     preset.add_argument("--seat", metavar="NAME", help="launch the seat NAME")
     preset.add_argument("--project-preset", metavar="NAME",
                         help="launch the project preset NAME")
     parser.add_argument("--off-posture", action="store_true",
                         help="allow a permission row that differs from your default")
+    parser.add_argument("--leave-out", action="append", metavar="ROW",
+                        help="leave the catalog row ROW out of this launch, whatever "
+                             "[defaults] or the preset sets; give it once per row")
 
 
 LAUNCH_EPILOG = ("Any flag of the launcher's or the harness's catalog may follow; "

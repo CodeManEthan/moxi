@@ -1078,3 +1078,9 @@ def test_preview_refuses_a_request_id_that_is_not_a_plain_name_as_launch_does(tm
     with pytest.raises(catalog.BadValue) as refused:
         api.preview(scratch_request(tmp_path, "../x"))
     assert refused.value.row == "request_id" and refused.value.exit_code == exits.USAGE
+
+
+def test_a_request_keeps_its_rows_left_out_once_its_ids_are_minted():
+    ids = api._with_ids(api.LaunchRequest(typed={"effort": "high"}, left_out=("model",)),
+                        "claude")
+    assert tuple(ids.left_out) == ("model",) and ids.request_id and ids.session_id

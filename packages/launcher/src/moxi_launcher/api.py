@@ -115,8 +115,10 @@ class ScratchRoot(Refusal):
 class LaunchRequest:
     """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
     typed (`typed`, as `catalog.parse(...).values` gives them) and passed on (`extra`),
-    `--off-posture`, the caller's directory, and the request id, Claude session id and
-    actor, each minted or read from the environment when left None."""
+    `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
+    default whatever `[defaults]` or the preset sets), the caller's directory, and the
+    request id, Claude session id and actor, each minted or read from the environment
+    when left None."""
 
     seat: str | None = None
     project_preset: str | None = None
@@ -127,6 +129,7 @@ class LaunchRequest:
     request_id: str | None = None
     session_id: str | None = None
     actor: str | None = None
+    left_out: Sequence[str] = ()
 
 
 @dataclass(frozen=True)
@@ -552,7 +555,8 @@ def _with_ids(request, harness: str):
         return dataclasses.replace(request,
                                    request_id=request.request_id or str(uuid.uuid4()),
                                    session_id=session_id)
-    names = ("seat", "project_preset", "typed", "extra", "off_posture", "cwd", "actor")
+    names = ("seat", "project_preset", "typed", "extra", "off_posture", "left_out", "cwd",
+             "actor")
     given = {name: getattr(request, name, None) for name in names}
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
     session_id = getattr(request, "session_id", None)
