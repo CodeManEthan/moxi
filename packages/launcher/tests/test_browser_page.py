@@ -11,6 +11,7 @@ the shell's one launch log, so a test never counts on the log being empty.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 
@@ -192,7 +193,11 @@ def test_a_field_typed_as_the_panel_draws_again_is_still_sent(ui_shell, ui_page,
     preview = panel.locator('[data-part="preview"]')
     expect(preview).to_have_attribute("data-target", "terminal")
     expect(preview.locator(".refused")).to_have_count(0)
-    assert sent == [f'{{"values":{{"cwd":"{tmp_path}"}}}}'], sent
+    # The request carries the whole form; the typed cwd is among its values.
+    assert len(sent) == 1, sent
+    body = json.loads(sent[0])
+    assert body["values"]["cwd"] == str(tmp_path), body
+    assert "cwd" not in body["leave_out"], body
 
 
 # --- a launch -------------------------------------------------------------------------------

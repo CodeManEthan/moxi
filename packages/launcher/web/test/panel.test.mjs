@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  commandLine, fieldsFor, followedOf, HARNESS, launchBody, launchesView, markTouched, olderPath,
-  outcomeOf, parseCatalog, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetHarness,
-  presetLines, presetProblems, presetsOf, quote, rebase, refusalLine, requestValues, sentValue,
-  sharedNames, statusOf,
+  choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
+  HARNESS, keepLabel, launchBody, launchesView, leaveOutChoice, NO_PRESET, olderPath, outcomeOf, parseCatalog,
+  parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetLines, presetProblems, presetsOf,
+  quote, refusalLine, requestOf, shownValue, sourceNote, statusOf,
 } from "../src/panel.ts";
 
 const T = "2026-10-31T10:01:02.123456Z";
@@ -28,10 +28,6 @@ const CATALOG = {
   ],
 };
 const catalog = parseCatalog(CATALOG);
-
-/** What `<moxi-ui-form mode="submit">` gives for claude's fields left as they are. */
-const UNTOUCHED = { harness: "claude", cwd: null, target: "terminal", scratch: "false", add_dir: [],
-                    model: null, effort: null, remote_control: null };
 
 // --- the catalog ---------------------------------------------------------------------------
 
@@ -56,83 +52,251 @@ test("a harness's form shows that harness in its harness row, each name once", (
   assert.deepEqual(fieldsFor(null, "claude"), []);
 });
 
-test("the shared names are the rows every harness has", () => {
-  assert.deepEqual([...sharedNames(catalog)].sort(), ["add_dir", "cwd", "harness", "model", "scratch", "target"]);
-  assert.equal(sharedNames(null).size, 0);
+// --- the form, filled from the layers --------------------------------------------------------
+
+const FORM_FIELDS = [
+  field("harness", { type: "enum", default: "claude", values: ["claude", "codex"] }),
+  field("cwd", { type: "path", default: "" }),
+  field("project", { default: "" }),
+  field("scratch", { type: "bool", default: "false" }),
+  field("brief", { default: "" }),
+  field("brief_file", { type: "path", default: "" }),
+  field("target", { type: "enum", default: "terminal", values: ["terminal", "headless", "slot"] }),
+  field("limit_at", { type: "enum", default: "1x", values: ["1x", "2x"] }),
+  field("add_dir", { type: "list", items: "path", default: null, value_items: null }),
+  field("director", { type: "list", repeatable: true, needs_absent: true, note: "works only with the comms module" }),
+  field("model", { default: "" }),
+  field("effort", { type: "enum", default: "", values: ["low", "high"] }),
+  field("remote_control", { optional_value: true }),
+  field("max_turns", { type: "int", default: "" }),
+];
+const row = (name, value, source = "preset", extra = {}) => ({ name, value, items: null, source, withheld: false, ...extra });
+const FORM = {
+  state: "up", detail: null, harness: "claude", refused: null,
+  rows: [row("harness", "claude", "shipped"), row("cwd", null, "shipped"), row("project", "app"),
+         row("scratch", "false", "shipped"), row("brief", null, "preset", { withheld: true }),
+         row("brief_file", null, "shipped"), row("target", "slot", "defaults"), row("limit_at", "1x", "shipped"),
+         row("add_dir", null, "preset", { items: ["/a", "/b"] }), row("model", "opus"),
+         row("effort", null, "shipped"), row("remote_control", "true"), row("max_turns", null, "shipped")],
+};
+const SEAT = { kind: "seat", name: "planner" };
+const filled = (form = FORM, choice = SEAT) => filledFields(FORM_FIELDS, parseForm(form), choice);
+const byName = (fields) => Object.fromEntries(fields.map((f) => [f.name, f]));
+/** What `<moxi-ui-form mode="submit">` gives for `fields` left as they are: a field shown off
+ * sends nothing. */
+const asShown = (fields) => Object.fromEntries(fields.filter((f) => !f.needs_absent).map((f) => [f.name, shownValue(f)]));
+const WITHHELD = new Set(["brief"]);
+
+test("the form's answer reads whole, and an error, a refusal and a bad body are told apart", () => {
+  const form = parseForm({ ...FORM, rows: [...FORM.rows, { name: 7 }, "x"] });
+  assert.equal(form.harness, "claude");
+  assert.equal(form.rows.length, FORM.rows.length);
+  assert.deepEqual(form.rows.find((r) => r.name === "add_dir"), row("add_dir", null, "preset", { items: ["/a", "/b"] }));
+  assert.equal(form.rows.find((r) => r.name === "brief").withheld, true);
+  const refused = parseForm({ ...FORM, rows: [], refused: { code: "bad-preset", row: null, problem: "no", hint: "h", x: 1 } });
+  assert.deepEqual(refused.refused, { code: "bad-preset", row: null, problem: "no", hint: "h" });
+  assert.deepEqual(parseForm({ state: "error", detail: "it broke" }),
+                   { state: "error", detail: "it broke", harness: "", rows: [], refused: null });
+  assert.equal(parseForm({ state: "up", detail: null, rows: [] }), null);
+  assert.equal(parseForm("nope"), null);
 });
 
-// --- only what the user changed is sent ----------------------------------------------------
-
-test("an untouched form sends no value, so the preset and the defaults stand", () => {
-  const touched = markTouched(new Set(), UNTOUCHED, { ...UNTOUCHED });
-  assert.equal(touched.size, 0);
-  const values = requestValues(UNTOUCHED, touched, fieldsFor(catalog, "claude"), "claude", sharedNames(catalog));
-  assert.deepEqual(values, {});
+test("one preset choice: one select value, one query, and a body naming at most one preset", () => {
+  assert.equal(choiceKey(SEAT), "seat:planner");
+  assert.equal(choiceKey(NO_PRESET), "");
+  assert.deepEqual(choiceOf("seat:planner"), SEAT);
+  assert.deepEqual(choiceOf("project:a:b"), { kind: "project", name: "a:b" });
+  for (const bad of ["", "seat:", ":x", "other:x", "planner"]) assert.deepEqual(choiceOf(bad), NO_PRESET);
+  assert.equal(formPath(NO_PRESET), "api/form");
+  assert.equal(formPath(SEAT), "api/form?seat=planner");
+  assert.equal(formPath({ kind: "project", name: "a b" }, "codex"), "api/form?project_preset=a+b&harness=codex");
+  const request = { values: { model: "opus" }, leave_out: ["cwd"] };
+  assert.deepEqual(launchBody(SEAT, request, false), { seat: "planner", values: { model: "opus" }, leave_out: ["cwd"] });
+  assert.deepEqual(launchBody({ kind: "project", name: "app" }, request, true),
+                   { project_preset: "app", values: { model: "opus" }, leave_out: ["cwd"], off_posture: true });
+  assert.deepEqual(launchBody(NO_PRESET, { values: {}, leave_out: [] }, false), { values: {}, leave_out: [] });
+  const presets = parsePresets(PRESETS);
+  assert.equal(chosenPreset(presets, { kind: "project", name: "app" }).name, "app");
+  assert.equal(chosenPreset(presets, { kind: "seat", name: "app" }), null);
+  assert.equal(chosenPreset(presets, NO_PRESET), null);
 });
 
-test("a changed field is sent, and stays sent when set back to its default", () => {
-  let touched = markTouched(new Set(), UNTOUCHED, { ...UNTOUCHED, target: "slot" });
-  assert.deepEqual([...touched], ["target"]);
-  touched = markTouched(touched, UNTOUCHED, { ...UNTOUCHED, target: "terminal" });
-  assert.deepEqual([...touched], ["target"]);
-  const values = requestValues({ ...UNTOUCHED, target: "terminal" }, touched, fieldsFor(catalog, "claude"),
-                               "claude", sharedNames(catalog));
-  assert.deepEqual(values, { target: "terminal" });
+test("a filled field shows its layered value with a note naming the source; the shipped default has none", () => {
+  const f = byName(filled());
+  assert.equal(f.project.value, "app");
+  assert.equal(f.project.note, "set by the seat planner");
+  assert.equal(f.target.value, "slot");
+  assert.equal(f.target.note, "set in your [defaults]");
+  assert.equal(f.cwd.value, "");
+  assert.equal(f.cwd.note, null);
+  assert.equal(f.scratch.value, "false");
+  assert.deepEqual(f.add_dir.value_items, ["/a", "/b"]);
+  assert.equal(f.model.value, "opus");
+  assert.equal(f.remote_control.value, true);
+  assert.equal(f.harness.value, "claude");
+  assert.equal(f.harness.note, null);
+  assert.equal(byName(filled(FORM, { kind: "project", name: "app" })).project.note, "set by the project preset app");
+  assert.equal(sourceNote("shipped", SEAT), null);
+  // The catalog's own descriptors are left as they were.
+  assert.equal(FORM_FIELDS[2].value, undefined);
+  assert.deepEqual(FORM_FIELDS[6].values, ["terminal", "headless", "slot"]);
 });
 
-test("a list's items count as a change", () => {
-  const touched = markTouched(new Set(), UNTOUCHED, { ...UNTOUCHED, add_dir: ["/a"] });
-  assert.deepEqual([...touched], ["add_dir"]);
-  const emptied = markTouched(new Set(), { ...UNTOUCHED, add_dir: ["/a"] }, UNTOUCHED);
-  assert.deepEqual(requestValues(UNTOUCHED, emptied, fieldsFor(catalog, "claude"), "claude", sharedNames(catalog)),
-                   { add_dir: [] });
+test("a switch on with text shows the text, and off shows off", () => {
+  const on = byName(filled({ ...FORM, rows: [row("remote_control", "box")] }));
+  assert.equal(on.remote_control.value, "box");
+  assert.equal(shownValue(on.remote_control), "box");
+  const off = byName(filled({ ...FORM, rows: [row("remote_control", null, "shipped")] }));
+  assert.equal(off.remote_control.value, null);
+  assert.equal(shownValue(off.remote_control), null);
 });
 
-test("each value goes as the page server reads it", () => {
-  const optional = field("remote_control", { optional_value: true });
-  assert.equal(sentValue(optional, null), "false");
-  assert.equal(sentValue(optional, ""), "true");
-  assert.equal(sentValue(optional, "box"), "box");
-  assert.equal(sentValue(field("model"), null), null);
-  assert.equal(sentValue(field("model"), ""), null);
-  assert.equal(sentValue(field("model"), "opus"), "opus");
-  assert.deepEqual(sentValue(field("add_dir", { type: "list" }), ["/a", "/b"]), ["/a", "/b"]);
-  assert.equal(sentValue(undefined, "x"), "x");
+test("each enum gets its empty state: a blank choice, or leave out naming the word that launches", () => {
+  const f = byName(filled());
+  assert.deepEqual(f.effort.values, ["", "low", "high"]);
+  assert.equal(f.effort.value, "");
+  assert.deepEqual(f.target.values, ["terminal", "headless", "slot", "leave out (launches terminal)"]);
+  // A row no layer sets shows its shipped word, not "leave out".
+  assert.equal(f.limit_at.value, "1x");
+  assert.deepEqual(f.limit_at.values, ["1x", "2x", "leave out (launches 1x)"]);
+  assert.deepEqual(f.harness.values, ["claude", "codex"]);
+  assert.equal(leaveOutChoice(field("recycle_at_limit", { type: "enum", default: "off" })), "leave out (launches off)");
+  assert.equal(leaveOutChoice(f.effort), null);
+  assert.equal(leaveOutChoice(f.harness), null);
+  assert.equal(leaveOutChoice(f.model), null);
+  assert.equal(leaveOutChoice(undefined), null);
 });
 
-test("a cleared text field is left out, not sent as empty", () => {
-  const touched = new Set(["cwd"]);
-  assert.deepEqual(requestValues({ ...UNTOUCHED, cwd: null }, touched, fieldsFor(catalog, "claude"), "claude",
-                                 sharedNames(catalog)), {});
+test("a withheld text shows empty with its note, and its keep box names who sets it", () => {
+  const f = byName(filled());
+  assert.equal(f.brief.value, "");
+  assert.equal(f.brief.note, "set by the seat planner; its text is not shown here");
+  assert.equal(keepLabel(row("brief", null, "preset", { withheld: true }), SEAT), "Keep the brief the seat planner sets");
+  assert.equal(keepLabel(row("instructions", null, "defaults", { withheld: true }), SEAT),
+               "Keep the standing instructions your [defaults] set");
+  const fromDefaults = byName(filled({ ...FORM, rows: [row("brief", null, "defaults", { withheld: true })] }, NO_PRESET));
+  assert.equal(fromDefaults.brief.note, "set in your [defaults]; its text is not shown here");
 });
 
-test("the harness goes with a field only some harnesses have, and not with a shared one", () => {
-  const fields = fieldsFor(catalog, "claude");
-  const shared = sharedNames(catalog);
-  assert.deepEqual(requestValues({ ...UNTOUCHED, effort: "high" }, new Set(["effort"]), fields, "claude", shared),
-                   { effort: "high", harness: "claude" });
-  assert.deepEqual(requestValues({ ...UNTOUCHED, model: "opus" }, new Set(["model"]), fields, "claude", shared),
-                   { model: "opus" });
-  // A harness the user chose goes as chosen.
-  assert.deepEqual(requestValues({ ...UNTOUCHED, harness: "codex", sandbox: "x" }, new Set(["harness", "sandbox"]),
-                                 fieldsFor(catalog, "codex"), "codex", shared),
-                   { harness: "codex", sandbox: "x" });
+test("the form is drawn for the answer's harness; the harness row's note only when it names that one", () => {
+  const asked = byName(filled({ ...FORM, harness: "codex", rows: [row("harness", "claude")] }));
+  assert.equal(asked.harness.value, "codex");
+  assert.equal(asked.harness.note, null);
+  const named = byName(filled({ ...FORM, harness: "codex", rows: [row("harness", "codex")] }));
+  assert.equal(named.harness.note, "set by the seat planner");
 });
 
-test("new fields keep a touched field's first value and read the rest afresh", () => {
-  const touched = new Set(["harness"]);
-  const before = { ...UNTOUCHED };
-  const after = rebase(before, { harness: "codex", cwd: null, sandbox: null }, touched);
-  assert.deepEqual(after, { harness: "claude", cwd: null, sandbox: null });
-  // So the harness the presets picked, untouched, doesn't read as changed.
-  const picked = rebase(before, { harness: "codex", sandbox: null }, new Set());
-  assert.equal(markTouched(new Set(), picked, { harness: "codex", sandbox: null }).size, 0);
+test("a field shown off, and every field of a refused answer, keeps the catalog's default", () => {
+  const f = byName(filled());
+  assert.equal(f.director.note, "works only with the comms module");
+  assert.equal(f.director.value_items, null);
+  const refused = byName(filled({ ...FORM, rows: [], refused: { code: "bad-preset", row: null, problem: "no", hint: "" } }));
+  assert.equal(shownValue(refused.target), "terminal");
+  assert.equal(shownValue(refused.model), null);
+  assert.equal(refused.target.note, null);
+  assert.equal(refused.target.values.at(-1), "leave out (launches terminal)");
 });
 
-test("a launch body leaves out what wasn't chosen", () => {
-  assert.deepEqual(launchBody("", "", {}, false), { values: {} });
-  assert.deepEqual(launchBody("reviewer", "app", { model: "opus" }, true),
-                   { seat: "reviewer", project_preset: "app", values: { model: "opus" }, off_posture: true });
+// --- the request, from the whole form --------------------------------------------------------
+
+test("each field kind's value goes in values, as the page server reads it", () => {
+  const fields = filled();
+  const VALUE = { harness: "claude", cwd: "/w", project: "app", scratch: "true", brief: "mine", brief_file: "/b.md",
+                  target: "slot", limit_at: "1x", add_dir: ["/a"], model: "opus", effort: "high",
+                  remote_control: "", max_turns: "5" };
+  assert.deepEqual(requestOf(fields, VALUE, WITHHELD, new Set(["brief"])), {
+    values: { ...VALUE, remote_control: "true" },
+    leave_out: [],
+  });
+  assert.deepEqual(requestOf(fields, { remote_control: "box" }, WITHHELD, new Set()),
+                   { values: { remote_control: "box" }, leave_out: [] });
+});
+
+test("each field kind's empty state goes in leave_out, and the harness never does", () => {
+  const fields = filled();
+  const EMPTY = { harness: "codex", cwd: null, project: null, scratch: "false", brief: null, brief_file: null,
+                  target: "leave out (launches terminal)", limit_at: "leave out (launches 1x)", add_dir: [],
+                  model: null, effort: null, remote_control: null, max_turns: null };
+  assert.deepEqual(requestOf(fields, EMPTY, WITHHELD, new Set()), {
+    values: { harness: "codex" },
+    leave_out: ["cwd", "project", "scratch", "brief", "brief_file", "target", "limit_at", "add_dir", "model",
+                "effort", "remote_control", "max_turns"],
+  });
+  assert.deepEqual(requestOf(fields, { harness: null }, WITHHELD, new Set()), { values: {}, leave_out: [] });
+});
+
+test("a kept withheld text is in neither list; unticked it is left out; typed it is the user's own", () => {
+  const fields = filled();
+  assert.deepEqual(requestOf(fields, { brief: null }, WITHHELD, new Set(["brief"])), { values: {}, leave_out: [] });
+  assert.deepEqual(requestOf(fields, { brief: null }, WITHHELD, new Set()), { values: {}, leave_out: ["brief"] });
+  assert.deepEqual(requestOf(fields, { brief: "mine" }, WITHHELD, new Set(["brief"])),
+                   { values: { brief: "mine" }, leave_out: [] });
+  // The keep box is for a withheld text only: another empty text is left out.
+  assert.deepEqual(requestOf(fields, { brief_file: null }, WITHHELD, new Set(["brief_file"])),
+                   { values: {}, leave_out: ["brief_file"] });
+});
+
+test("the form left as filled sends every row as it shows, and a field shown off in neither list", () => {
+  const fields = filled();
+  const request = requestOf(fields, asShown(fields), WITHHELD, new Set(["brief"]));
+  assert.deepEqual(request.values, { harness: "claude", project: "app", target: "slot", limit_at: "1x",
+                                     add_dir: ["/a", "/b"], model: "opus", remote_control: "true" });
+  assert.deepEqual(request.leave_out, ["cwd", "scratch", "brief_file", "effort", "max_turns"]);
+  assert.ok(!("director" in request.values) && !request.leave_out.includes("director"));
+});
+
+// --- rows that exclude each other ------------------------------------------------------------
+
+test("setting one place row empties the group's rows that still show their filled value", () => {
+  const fields = filled();
+  const out = emptyGroups(fields, { ...asShown(fields), cwd: "/w" }, WITHHELD, new Set(["brief"]));
+  const f = byName(out.fields);
+  assert.equal(f.project.value, "");
+  assert.equal(shownValue(f.project), null);
+  // The note still says who set the value the user replaced.
+  assert.equal(f.project.note, "set by the seat planner");
+  assert.equal(f.scratch, byName(fields).scratch);
+  assert.equal(f.model, byName(fields).model);
+  assert.deepEqual([...out.keep], ["brief"]);
+  // Drawn again with the emptied row, nothing more changes.
+  assert.equal(emptyGroups(out.fields, { ...asShown(out.fields), cwd: "/w" }, WITHHELD, out.keep).fields, out.fields);
+  // Ticking scratch empties the project too.
+  assert.equal(byName(emptyGroups(fields, { ...asShown(fields), scratch: "true" }, WITHHELD, new Set()).fields).project.value, "");
+});
+
+test("a scratch seat's ticked box is unticked when the user names a cwd", () => {
+  const fields = filled({ ...FORM, rows: [row("scratch", "true"), row("cwd", null, "shipped"), row("project", null, "shipped")] });
+  const out = byName(emptyGroups(fields, { ...asShown(fields), cwd: "/w" }, new Set(), new Set()).fields);
+  assert.equal(out.scratch.value, "false");
+  assert.equal(shownValue(out.scratch), "false");
+});
+
+test("a row the user typed himself stays when he sets another of its group", () => {
+  const fields = filled();
+  const now = { ...asShown(fields), project: "mine", cwd: "/w" };
+  assert.equal(emptyGroups(fields, now, WITHHELD, new Set()).fields, fields);
+});
+
+test("emptying a row is not setting it, and a form as filled changes nothing", () => {
+  const fields = filled({ ...FORM, rows: [row("scratch", "true"), row("project", null, "shipped")] });
+  assert.equal(emptyGroups(fields, { ...asShown(fields), scratch: "false" }, new Set(), new Set()).fields, fields);
+  const filledForm = filled();
+  const out = emptyGroups(filledForm, asShown(filledForm), WITHHELD, new Set(["brief"]));
+  assert.equal(out.fields, filledForm);
+  assert.deepEqual([...out.keep], ["brief"]);
+});
+
+test("setting one spelling of a text unticks a withheld sibling's keep box", () => {
+  const fields = filled();
+  const out = emptyGroups(fields, { ...asShown(fields), brief_file: "/b.md" }, WITHHELD, new Set(["brief"]));
+  assert.deepEqual([...out.keep], []);
+  assert.equal(out.fields, fields);
+  // The brief now goes in leave_out, so the file's brief is the one sent.
+  assert.deepEqual(requestOf(fields, { brief: null, brief_file: "/b.md" }, WITHHELD, out.keep),
+                   { values: { brief_file: "/b.md" }, leave_out: ["brief"] });
+  // Typing a brief of his own keeps the file the user typed.
+  const typed = emptyGroups(fields, { ...asShown(fields), brief: "mine", brief_file: "/b.md" }, WITHHELD, new Set(["brief"]));
+  assert.equal(typed.fields, fields);
 });
 
 // --- the presets ---------------------------------------------------------------------------
@@ -160,14 +324,6 @@ test("the presets read by kind, with what each sets", () => {
   assert.deepEqual(parsePresets({ state: "error", detail: "x" }), { state: "error", detail: "x", presets: [], problems: [] });
 });
 
-test("the seat's harness comes first, then the project preset's", () => {
-  const presets = parsePresets(PRESETS);
-  assert.equal(presetHarness(presets, "reviewer", "web"), "codex");
-  assert.equal(presetHarness(presets, "", "web"), "claude");
-  assert.equal(presetHarness(presets, "", "app"), null);
-  assert.equal(presetHarness(null, "reviewer", ""), null);
-});
-
 test("only the chosen presets' problems and the file's are shown", () => {
   const presets = parsePresets(PRESETS);
   assert.deepEqual(presetProblems(presets, "reviewer", "").map((p) => p.where), ["seat.reviewer", "file"]);
@@ -186,6 +342,8 @@ test("a preview reads whole, and a refusal keeps only its four fields", () => {
   assert.deepEqual(preview.refused, [{ code: "no-cwd", row: "cwd", problem: "no place", hint: "set cwd" }]);
   assert.deepEqual(preview.stamps, PREVIEW.stamps);
   assert.equal(preview.ticket, "q1.123.abc");
+  assert.deepEqual(preview.left_out, []);
+  assert.deepEqual(parsePreview({ ...PREVIEW, left_out: ["model", "add_dir", 3] }).left_out, ["model", "add_dir"]);
   assert.equal(parsePreview({ refused: [] }), null);
   assert.equal(parsePreview(null), null);
 });
