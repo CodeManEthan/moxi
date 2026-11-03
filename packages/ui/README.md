@@ -55,6 +55,50 @@ if (outcome.outcome === "accepted") {
 - The shell passes `Idempotency-Key` on to the page server with the other headers it
   forwards, and nothing more.
 
+## The gateway: the UI on your phone
+
+The gateway is a second listener of the shell, reached from a phone through the tunnel
+module's `ui/gateway` target. A phone pairs by scanning a QR code the desktop shows and
+registering a passkey, then signs in with the passkey. It reaches only the routes a module
+marks `gateway=True`, with marked fields redacted, and every request is in an audit log.
+
+To set it up, outside Moxi: a Tailscale account, Tailscale on the computer and the phone,
+MagicDNS and HTTPS certificates on the tailnet, and on Linux `sudo tailscale set
+--operator=$USER` once. A phone already on another VPN can't run Tailscale beside it;
+Cloudflare is the other provider. Then:
+
+```sh
+moxi install ui --with gateway,tunnel
+moxi ui gateway on
+```
+
+and scan the QR code in the desktop's Gateway section. No domain, no key to type.
+
+| `moxi ui gateway` | what it does |
+|---|---|
+| `pair` | prints a one-use pairing URL, good for 2 minutes, whether or not the shell runs |
+| `devices` | lists the paired devices |
+| `revoke <id>` | deletes a device; its sessions end within 2 s |
+| `log [--days N] [--json]` | prints the audit log, today and the N-1 days before |
+| `on` | checks the extras, the tunnel and the runtime directory, sets `gateway.enabled`, starts the shell, and runs `moxi tunnel add ui/gateway` when there is no entry |
+| `off` | clears `gateway.enabled`, ending every phone session, and offers to remove the tunnel entry |
+
+Each verb works on files: none calls the shell, so none needs a browser session.
+
+`gateway.enabled` turns the gateway on. While it is on, the shell starts at login on systemd
+and launchd (on macOS from the next login) and is restarted after a crash; on Windows the
+shell's logon task starts it at every logon either way. Changing it never restarts a running
+shell. `gateway.port` (8461) is the loopback port the tunnel forwards to.
+
+The gateway needs moxi-tunnel 0.2 or later. `moxi install ui --with tunnel` counts the extra
+installed once any tunnel is, so it leaves an older tunnel as it is; `moxi ui gateway on` and
+`moxi doctor ui` name the command that raises it.
+
+`moxi doctor ui` shows three gateway rows: `gateway` (its address, endpoint, devices and
+whether the phone's acts are mounted, or what stops it), `gateway login` (whether the shell
+starts at login while the gateway is on) and `gateway audit` (the audit log's directory 0700
+and its files 0600).
+
 ## Testing a module's pages
 
 `moxi_ui.testing` is a pytest plugin, installed with moxi-ui and loaded in every pytest run

@@ -24,11 +24,14 @@ SETTINGS = "settings.toml"
 SETUP = None
 SEGMENT = None
 #: The shell. A socket holds its port on systemd and launchd, so the shell starts on the
-#: first browser connection; on Windows a logon task starts it and it holds the port from
-#: logon to logout.
+#: first browser connection, and at login too while the gateway is on (`gateway.enabled`),
+#: since a phone may call at any time; turning it on or off restarts nothing. On Windows a
+#: logon task starts it at every logon either way, and it holds the port from logon to
+#: logout.
 DAEMONS = {"shell": {"command": "moxi-ui-serve", "doc": "the UI shell",
                      "platforms": ["linux", "darwin", "win32"],
-                     "socket": {"setting": "port", "addresses": ["127.0.0.1", "::1"]}}}
+                     "socket": {"setting": "port", "addresses": ["127.0.0.1", "::1"],
+                                "start": {"login": "gateway.enabled"}}}}
 HEALTH = {"shell": "moxi_ui.health:check"}
 #: The shell and each page server it started; the shell's budget is compared there, on its
 #: own pid, so the module declares no `BUDGETS` (the core would count its page servers).

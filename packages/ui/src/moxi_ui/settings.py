@@ -51,6 +51,7 @@ __all__ = [
     "change",
     "change_argv",
     "descriptor",
+    "logins_of",
     "read_section",
     "section_modules",
     "show_argv",
@@ -69,6 +70,12 @@ MARK_NEXT_START = "applies at next start"
 MARK_SWITCH = "turns the daemon on or off now"
 MARK_PORT = "applies after `moxi install ui`"
 MARK_PORT_WINDOWS = "applies when the shell next starts"
+MARK_LOGIN = "starts the shell at login"
+MARK_LOGIN_NOW = {"login": "the shell starts at login now",
+                  "connection": "the shell starts at the first connection now"}
+MARK_LOGIN_DARWIN = "from the next login"
+MARK_LOGIN_WINDOWS = ("the shell starts at every logon on Windows; this switch doesn't change "
+                      "that")
 
 _HERE = "moxi_ui.settings"
 _BARE_KEY = re.compile(r"\A[A-Za-z0-9_-]+\Z")
@@ -161,7 +168,41 @@ def switches_of(module: Mapping[str, Any]) -> set[str]:
             if isinstance(entry, Mapping) and isinstance(entry.get("switch"), str)}
 
 
-def _mark(module: str, name: str, read: Any, switches: set[str], platform: str) -> str:
+def logins_of(module: Mapping[str, Any]) -> dict[str, str | None]:
+    """The keys a module's daemons name in a `socket.start` of `{"login": <key>}`, each with
+    what starts that daemon now (`login`, `connection`, or None when unknown), from its
+    entry of `moxi modules --json`."""
+    daemons, starts = module.get("daemons"), module.get("starts")
+    if not isinstance(daemons, Mapping):
+        return {}
+    starts = starts if isinstance(starts, Mapping) else {}
+    out: dict[str, str | None] = {}
+    for name, entry in daemons.items():
+        socket = entry.get("socket") if isinstance(entry, Mapping) else None
+        start = socket.get("start") if isinstance(socket, Mapping) else None
+        key = start.get("login") if isinstance(start, Mapping) else None
+        if isinstance(key, str):
+            now = starts.get(name)
+            out[key] = now if now in MARK_LOGIN_NOW else None
+    return out
+
+
+def _login_mark(now: str | None, platform: str) -> str:
+    """The mark of a key that decides whether a daemon starts at login. Changing it
+    restarts nothing, so it carries no restart warning. On Windows the logon task starts
+    the shell at every logon whatever the key says, so what the plan resolves isn't read."""
+    if platform == "win32":
+        return MARK_LOGIN_WINDOWS
+    if now is None:
+        return MARK_LOGIN
+    mark = f"{MARK_LOGIN}; {MARK_LOGIN_NOW[now]}"
+    return f"{mark}, {MARK_LOGIN_DARWIN}" if platform == "darwin" else mark
+
+
+def _mark(module: str, name: str, read: Any, switches: set[str], platform: str,
+          logins: Mapping[str, str | None] | None = None) -> str:
+    if logins and name in logins:
+        return _login_mark(logins[name], platform)
     if name in switches:
         return MARK_SWITCH
     if read == "use":
@@ -201,11 +242,12 @@ def _entries(table: str, items: Any) -> list[dict[str, Any]]:
 
 
 def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] = (),
-               present: Iterable[str] | None = None,
-               platform: str | None = None) -> dict[str, Any]:
+               present: Iterable[str] | None = None, platform: str | None = None,
+               logins: Mapping[str, str | None] | None = None) -> dict[str, Any]:
     """One key of `moxi config <module> show --json` as the view's field descriptor.
 
-    `switches` are the keys the module's daemons name as their `switch`; `present` the
+    `switches` are the keys the module's daemons name as their `switch`; `logins` those
+    they name in a login-switch `start`, with what starts the daemon now; `present` the
     modules installed and present (None: not known, so no key is marked as needing an
     absent one)."""
     platform = platform or sys.platform
@@ -230,7 +272,7 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "value": spell(item.get("value"), type_),
         "value_items": _strings(item.get("value")) if type_ == "list" else None,
         "source": source,
-        "mark": _mark(module, name, item.get("read"), set(switches), platform),
+        "mark": _mark(module, name, item.get("read"), set(switches), platform, logins),
         "note": note,
         "needs_absent": needs_absent,
         "switch_table": switch_table,
@@ -327,7 +369,7 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     present = ([name for name, entry in listing.items() if entry.get("state") == "present"]
                if listing else None)
     keys = [descriptor(module, item, switches=switches_of(own), present=present,
-                       platform=platform)
+                       platform=platform, logins=logins_of(own))
             for item in data if isinstance(item, Mapping) and isinstance(item.get("name"), str)]
     return _section(module, keys=keys)
 
