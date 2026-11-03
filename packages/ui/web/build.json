@@ -1,5 +1,6 @@
 {
-  "entries": {"client.js": "src/client.ts", "page.js": "src/page.ts", "servers.js": "src/servers.ts"},
-  "copy": ["shell.html", "shell.css"],
+  "entries": {"client.js": "src/client.ts", "page.js": "src/page.ts", "servers.js": "src/servers.ts",
+              "pair.js": "src/pair.ts", "signin.js": "src/signin.ts"},
+  "copy": ["shell.html", "shell.css", "pair.html", "signin.html"],
   "generate": "gen.mjs"
 }

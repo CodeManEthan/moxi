@@ -1,6 +1,7 @@
 // <moxi-ui-page>: the shell's own panel. With `route` "" it is the modules view: every
 // module's home block, then every installed module with its state, its page and its
-// components, and a Check that shows the doctor's rows for it. With `route` "settings"
+// components, and a Check that shows the doctor's rows for it, then the Gateway section
+// that pairs a phone. With `route` "settings"
 // (or "settings/<module>" for one module) it is the settings view: a section per module
 // drawn by <moxi-ui-form>, each change written through `moxi config` by the shell.
 //
@@ -12,6 +13,7 @@ import type { PropertyValues } from "lit";
 import { api, components, installed, navigate, place, setTheme, subscribe } from "/m/ui/client.js";
 import type { FieldDescriptor, FormChange, FormElement, ThemeMode } from "/m/ui/client.js";
 
+import "./gateway-desk.ts";
 import { doctorRows, homeBlocks, moduleLines, moduleOrder, moduleState } from "./views.ts";
 import type { DoctorRow, ModuleView } from "./views.ts";
 
@@ -165,7 +167,8 @@ export class UiPage extends LitElement {
       <h2>Installed</h2>
       ${value === null ? html`<p class="dim">Reading the modules…</p>` : nothing}
       ${value !== null && mods.length === 0 ? html`<p class="dim">No module is listed.</p>` : nothing}
-      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>`;
+      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>
+      <moxi-ui-gateway></moxi-ui-gateway>`;
   }
 
   #moduleCard(mod: ModuleView) {
