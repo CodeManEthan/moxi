@@ -9,6 +9,7 @@ one function, `commit`, so a reader without a lock always sees one whole version
 
     {"format": 1, "id": "<32 hex>", "last_generation": 7,
      "warned_ct": ["box.tail1234.ts.net"], "cloudflared_started": null,
+     "retired": [{"host": "box.tail1234.ts.net", "port": 8461}],
      "entries": {"ui/gateway": {"reach": "own-devices", "provider": "tailscale",
                                 "form": "http", "host": "box.tail1234.ts.net",
                                 "port": 8461, "target": 8461, "state": "on",
@@ -17,6 +18,16 @@ one function, `commit`, so a reader without a lock always sees one whole version
 
 - An entry's state is one of `State`: `applying`, `on` or `removing`. What the live config
   says about an entry is computed by `check`, never written here.
+- An entry's `form` is `http`, whose `target` is a loopback port the provider forwards to
+  as `http://127.0.0.1:<target>`, or `unix`, whose `target` is the absolute path of a Unix
+  socket the provider forwards to as `unix:<target>`.
+- `retired` lists the origins, `{"host", "port"}`, at which a persistent `http` mapping has
+  ever been live: one that forwards to a loopback port whether or not its owner runs, so
+  another program may have answered there. It sits outside every entry and only grows:
+  `commit` adds to it (`retire`) and nothing takes an origin out, not a remove, a forget, a
+  rollback or an uninstall. Growing it moves no entry's generation. A record written
+  before the field existed reads as if it held the origin of every `http` entry, and its
+  next write stores that list (`fill`).
 - `id` is a random 128-bit hex value written once, when the file is created.
   `last_generation` goes up by one on every `commit` that adds, changes or drops an entry,
   and never goes down; each entry that commit adds or changes takes the new value as its
@@ -93,7 +104,7 @@ DISPLACED_DIR = "displaced"
 EVENTS_MAX = 1_000_000
 
 #: The entry forms this version knows.
-FORMS = frozenset({"http"})
+FORMS = frozenset({"http", "unix"})
 PROVIDERS = ("tailscale", "cloudflare")
 REACHES = ("own-devices", "public")
 #: The acts the event log records.
@@ -153,7 +164,7 @@ ENTRY_KEYS = ("reach", "provider", "form", "host", "port", "target", "state", "g
               "from", "displaced", "detail", "applied_at")
 #: The record's top-level keys this version knows, in the order it writes them.
 RECORD_KEYS = ("format", "id", "last_generation", "warned_ct", "cloudflared_started",
-               "entries")
+               "retired", "entries")
 
 
 @dataclass(frozen=True)
@@ -164,7 +175,8 @@ class Entry:
     provider: str
     host: str
     port: int
-    target: int
+    #: The loopback port of an `http` entry, the socket path of a `unix` one.
+    target: int | str
     state: str
     form: str = "http"
     generation: int = 0
@@ -242,11 +254,12 @@ def old_tailscale(entry: Entry) -> Entry | None:
     host, port, target = old.get("host"), old.get("port"), old.get("target")
     if not isinstance(host, str) or not _is_int(port) or not 0 < port < 65536:
         return None
-    if not _is_int(target) or not 0 < target < 65536:
-        target = entry.target
+    form = old.get("form", "http")
+    if form not in FORMS or not target_ok(form, target):
+        form, target = entry.form, entry.target
     reach = old.get("reach") if old.get("reach") in REACHES else entry.reach
     return Entry(reach=reach, provider="tailscale", host=host, port=port, target=target,
-                 state=State.ON)
+                 state=State.ON, form=form)
 
 
 def _unreadable_tailscale_from(entry: Entry) -> bool:
@@ -268,6 +281,15 @@ def _is_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def target_ok(form: str, target: object) -> bool:
+    """True when `target` fits `form`: a port for `http`, an absolute socket path for
+    `unix`."""
+    if form == "unix":
+        return (isinstance(target, str) and target.startswith("/")
+                and not any(ord(ch) < 32 or ord(ch) == 127 for ch in target))
+    return _is_int(target) and 0 < target < 65536
+
+
 def _entry_problem(raw: dict) -> str | None:
     for key in ENTRY_KEYS:
         if key not in raw:
@@ -278,9 +300,11 @@ def _entry_problem(raw: dict) -> str | None:
         return f"has provider {raw['provider']!r}"
     if not isinstance(raw["host"], str):
         return "has a host that is not a string"
-    for key in ("port", "target"):
-        if not _is_int(raw[key]) or not 0 < raw[key] < 65536:
-            return f"has a {key} that is not a port"
+    if not _is_int(raw["port"]) or not 0 < raw["port"] < 65536:
+        return "has a port that is not a port"
+    if not target_ok(raw["form"], raw["target"]):
+        return ("has a target that is not a socket path" if raw["form"] == "unix"
+                else "has a target that is not a port")
     if not _is_int(raw["generation"]) or raw["generation"] < 0:
         return "has a generation that is not a count"
     if raw["from"] is not None and not isinstance(raw["from"], dict):
@@ -305,11 +329,26 @@ class Record:
     entries: Mapping[str, Entry] = field(default=_EMPTY)
     extra: Mapping = field(default=_EMPTY)
     exists: bool = False
+    #: The `retired` list as the file holds it, `(host, port)` each; None when the file
+    #: has no such field yet.
+    stored_retired: tuple[tuple[str, int], ...] | None = None
 
     @property
     def writable(self) -> bool:
         """False for a record of another format: nothing writes it."""
         return self.format == FORMAT and _is_int(self.format)
+
+    @property
+    def retired(self) -> frozenset[tuple[str, int]]:
+        """Every retired origin, `(host, port)` with the host in the one form: the stored
+        list, or for a record without one, the origin of every `http` entry (`fill`)."""
+        if self.stored_retired is None:
+            return frozenset(fill(self.entries))
+        return frozenset(self.stored_retired)
+
+    def is_retired(self, host: str, port: int) -> bool:
+        """True when the origin `https://<host>:<port>` is retired."""
+        return (normal_host(host), port) in self.retired
 
     def token(self, name: str) -> str | None:
         """Entry `name`'s change token, `"<id>.<generation>"`, or None with no entry."""
@@ -347,7 +386,10 @@ class Record:
                 raise _damaged(problem)
         warned = raw.get("warned_ct")
         last = raw.get("last_generation")
+        retired = raw.get("retired")
         return cls(format=fmt, id=raw.get("id"),
+                   stored_retired=tuple(_origins(retired)) if isinstance(retired, list)
+                   else None,
                    last_generation=last if _is_int(last) else 0,
                    warned_ct=tuple(h for h in warned if isinstance(h, str))
                    if isinstance(warned, list) else (),
@@ -373,7 +415,42 @@ def _record_problem(raw: dict) -> str | None:
     started = raw.get("cloudflared_started")
     if started is not None and not isinstance(started, str):
         return "its cloudflared_started is not a digest"
+    if "retired" in raw:
+        retired = raw["retired"]
+        if not isinstance(retired, list) or len(_origins(retired)) != len(retired):
+            return "its retired is not a list of origins"
     return None
+
+
+def _origins(raw: list) -> list[tuple[str, int]]:
+    """The well-formed `{"host", "port"}` items of a stored `retired` list."""
+    out = []
+    for item in raw:
+        if (isinstance(item, dict) and isinstance(item.get("host"), str)
+                and _is_int(item.get("port")) and 0 < item["port"] < 65536):
+            out.append((normal_host(item["host"]), item["port"]))
+    return out
+
+
+def origin(entry: Entry) -> tuple[str, int]:
+    """An entry's origin, `(host, port)` with the host in the one form: for Tailscale the
+    machine's host and the outside port, for Cloudflare the hostname on 443."""
+    return normal_host(entry.host), entry.port
+
+
+def fill(entries: Mapping[str, Entry]) -> list[tuple[str, int]]:
+    """The retired list a record written before the field existed stands for: the origin
+    of every `http` entry, and of the old Tailscale entry a switch has not settled, since
+    every such entry was a persistent mapping to a loopback port."""
+    out: list[tuple[str, int]] = []
+    for entry in entries.values():
+        for one in (entry, old_tailscale(entry)):
+            if (one is not None and one.known and one.form == "http"
+                    and isinstance(one.host, str) and _is_int(one.port)):
+                got = origin(one)
+                if got not in out:
+                    out.append(got)
+    return out
 
 
 def _damaged(problem: str) -> Refused:
@@ -411,7 +488,8 @@ def _loads(data: bytes) -> object:
 # -- commit -------------------------------------------------------------------------------
 
 def commit(entries: Mapping[str, Entry | None] | None = None, *,
-           warned: Iterable[str] = (), cloudflared_started: str | None = _UNSET) -> Record:
+           warned: Iterable[str] = (), cloudflared_started: str | None = _UNSET,
+           retire: Iterable[tuple[str, int]] = ()) -> Record:
     """Write the record once, through `moxi.files.update`, and return what was written.
 
     `entries` maps a target to its new entry, or to None to drop it; the targets it leaves
@@ -419,7 +497,10 @@ def commit(entries: Mapping[str, Entry | None] | None = None, *,
     keeps its generation. When any entry is added, changed or dropped, `last_generation`
     goes up by one and every added or changed entry takes it as its `generation`; the
     `generation` a caller passes is ignored. `warned` adds hosts to `warned_ct`, and
-    `cloudflared_started`, when given, replaces that digest; neither changes a generation.
+    `cloudflared_started`, when given, replaces that digest; `retire` adds origins,
+    `(host, port)`, to `retired`. None of these changes a generation. A record without
+    `retired` gets its `fill` first, so the list a write stores is never smaller than the
+    one the record stood for.
 
     When the Cloudflare set changed, the Cloudflare step runs once the write is done
     (`moxi_tunnel.cloudflare.step`), and its `StepFailed` is raised with the record as
@@ -434,6 +515,7 @@ def commit(entries: Mapping[str, Entry | None] | None = None, *,
         raise RuntimeError("tunnel's record is written only under tunnel.lock")
     changes = dict(entries or {})
     hosts = [normal_host(h) for h in warned]
+    origins = [(normal_host(h), p) for h, p in retire]
     seen: dict[str, Record] = {}
 
     def change(data: bytes | None) -> bytes:
@@ -444,6 +526,7 @@ def commit(entries: Mapping[str, Entry | None] | None = None, *,
                           "upgrade moxi-tunnel")
         raw = _loads(data) if data is not None else _new_record()
         after_raw = _changed(raw, before, changes, hosts, cloudflared_started)
+        after_raw["retired"] = _retired(before, origins)
         after = Record.from_json(after_raw)
         if before.cloudflare_set() != after.cloudflare_set() and not locks.holds_core():
             raise Refused("a change to the Cloudflare targets needs the core lock",
@@ -470,7 +553,16 @@ def _after_commit(before: Record, after: Record) -> Record:
 
 def _new_record() -> dict:
     return {"format": FORMAT, "id": secrets.token_hex(16), "last_generation": 0,
-            "warned_ct": [], "cloudflared_started": None, "entries": {}}
+            "warned_ct": [], "cloudflared_started": None, "retired": [], "entries": {}}
+
+
+def _retired(before: Record, origins: list[tuple[str, int]]) -> list[dict]:
+    """The `retired` list a write stores: the one `before` stood for, then `origins` not
+    already in it."""
+    kept = list(before.stored_retired) if before.stored_retired is not None \
+        else fill(before.entries)
+    out = kept + [o for o in dict.fromkeys(origins) if o not in kept]
+    return [{"host": host, "port": port} for host, port in out]
 
 
 def _changed(raw: dict, before: Record, changes: Mapping[str, Entry | None],
@@ -647,7 +739,7 @@ def _sync_dir(directory: Path) -> None:
 
 
 __all__ = ["FORMAT", "FORMS", "PROVIDERS", "REACHES", "EVENTS", "NEWER", "State", "Entry",
-           "Record", "old_tailscale", "normal_host", "stamp", "record_path", "events_path",
+           "Record", "old_tailscale", "normal_host", "target_ok", "origin", "fill", "stamp", "record_path", "events_path",
            "displaced_dir",
            "read", "commit", "event", "Displaced", "is_copy_name", "pending_path",
            "final_path", "write_pending", "is_pending", "names_pending", "rename_pending",

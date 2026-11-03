@@ -136,7 +136,7 @@ def test_teardown_refuses_on_an_entry_a_newer_tunnel_wrote_pointing_past_it(alph
                                                                             tailscale, yes):
     acts.add("alpha/gateway", ask=yes)
     raw = json.loads(record.record_path().read_text())
-    raw["entries"]["alpha/gateway"]["form"] = "unix"
+    raw["entries"]["alpha/gateway"]["form"] = "tcp"
     record.record_path().write_text(json.dumps(raw))
     with pytest.raises(moxi.modules.Refused) as caught:
         teardown()

@@ -13,6 +13,14 @@ target has no address.
 entry and a Tailscale `public` one, `tailnet` only for a Tailscale `own-devices` entry. A
 caller goes by it, not by the reach it declared.
 
+`Address.form` is `http`, whose `target` is the loopback port, or `unix`, whose `target` is
+the socket path. `Address.retired` is true when the address's origin is in the record's
+retired origins: a persistent mapping to a loopback port was once live there, so another
+program may have answered under it.
+
+Interface 2 is interface 1 plus `NotReady`, `Address.form`, `Address.retired` and the
+reading of declarations in `moxi.tunnel.targets`.
+
 `add` and `remove` fail as the CLI does. An act that completed while a part of it failed
 (the cloudflared unit did not follow a remove, a forget or a switch) exits 1 at the CLI,
 and raises `ApplyError` here, its reason holding the lines the CLI prints: the record
@@ -27,7 +35,7 @@ from dataclasses import dataclass
 from moxi import exit as codes
 
 from . import record
-from .errors import ApplyError, Refused
+from .errors import ApplyError, NotReady, Refused
 
 
 @dataclass(frozen=True)
@@ -42,10 +50,12 @@ class Address:
     url: str
     host: str
     port: int
-    target: int
+    target: int | str
     state: str
     change: str
     applied_at: str | None
+    form: str = "http"
+    retired: bool = False
 
 
 def url(host: str, port: int) -> str:
@@ -63,7 +73,8 @@ def from_entry(rec: record.Record, key: str) -> Address | None:
                    exposure=entry.exposure, url=url(entry.host, entry.port),
                    host=entry.host, port=entry.port, target=entry.target,
                    state=str(entry.state), change=rec.token(key),
-                   applied_at=entry.applied_at)
+                   applied_at=entry.applied_at, form=entry.form,
+                   retired=rec.is_retired(entry.host, entry.port))
 
 
 def address(module: str, name: str) -> Address | None:
@@ -135,5 +146,5 @@ def check(module: str | None = None, name: str | None = None, *,
     return acts.check(module, name, deadline=deadline)
 
 
-__all__ = ["Address", "Target", "address", "targets", "add", "remove", "check", "url",
-           "from_entry"]
+__all__ = ["Address", "Target", "NotReady", "address", "targets", "add", "remove", "check",
+           "url", "from_entry"]

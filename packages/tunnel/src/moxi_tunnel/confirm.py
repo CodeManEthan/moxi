@@ -49,6 +49,10 @@ OWN_DEVICES_LINE = ("This target asked for your own devices only, and over Cloud
                     "on the internet.")
 
 SWITCH_LINE = REPAIR_LINE
+#: Said when a target on a Unix socket is placed, as the user chose, at an origin a
+#: persistent loopback mapping once served.
+RETIRED_LINE = ("The phone's acts stay at the desk at this address: it once served a tunnel "
+                "entry that outlived Moxi.")
 
 
 def replace_line(port: int, copy: Mapping, where: str) -> str:
@@ -77,6 +81,6 @@ def add_lines(*, provider: str, host: str, url: str, module: str, reach: str,
     return lines, ct
 
 
-__all__ = ["ct_line", "PAIR_LINE", "REPAIR_LINE", "SWITCH_LINE", "internet_line",
+__all__ = ["ct_line", "PAIR_LINE", "REPAIR_LINE", "SWITCH_LINE", "RETIRED_LINE", "internet_line",
            "funnel_line", "cloudflare_line", "OWN_DEVICES_LINE", "replace_line",
            "add_lines"]
