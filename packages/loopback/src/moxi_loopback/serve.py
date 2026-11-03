@@ -52,6 +52,7 @@ import math  # noqa: E402
 import os  # noqa: E402
 import signal  # noqa: E402
 import socket  # noqa: E402
+import struct  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import Awaitable, Callable, Iterable  # noqa: E402
@@ -90,6 +91,9 @@ _SLOW = 0.5
 _SIGNALS = ("SIGTERM", "SIGINT", "SIGBREAK")
 _CLOSE = (b"connection", b"close")
 
+#: The scope key `serve(..., peer=True)` gives every request: the peer of its connection.
+PEER = "moxi.peer"
+
 
 # --- serve --------------------------------------------------------------------------
 
@@ -97,7 +101,8 @@ _CLOSE = (b"connection", b"close")
 async def serve(app: Callable[..., Any], sockets: Iterable[Any], *,
                 should_exit: asyncio.Event,
                 drain: Callable[[], Awaitable[None]] | None = None,
-                head_limit: int | None = None) -> None:
+                head_limit: int | None = None, signals: bool = True,
+                peer: bool = False) -> None:
     """Serve the ASGI `app` on the bound, listening `sockets` until `should_exit` is set.
 
     It runs uvicorn in h11 mode (no WebSockets, no lifespan, no proxy headers, no
@@ -106,6 +111,17 @@ async def serve(app: Callable[..., Any], sockets: Iterable[Any], *,
     `should_exit`, and the handlers that were installed before are put back when `serve`
     returns; no signal is raised again, so a signal never ends the process before the
     caller's own stop. Signals are left alone when `serve` runs off the main thread.
+
+    `signals=False` installs no handler and puts none back, so a second listener in a
+    process that already has one `serve` leaves that one's signal handling as it was; the
+    caller then sets `should_exit` itself.
+
+    `peer=True` reads the peer credential of each connection once, when it is made, and
+    gives every request on that connection the scope key `"moxi.peer"`, `{"uid": uid}`.
+    The uid is the peer process's on a Unix socket on Linux and macOS, and None on TCP,
+    on Windows and when the read fails. The key is set for each connection apart, never
+    through state that connections share, and nothing a client sends can set it. With
+    `peer=False`, the default, the scope has no such key.
 
     Every TCP connection it takes has `TCP_NODELAY` on, whatever made its listener.
 
@@ -118,7 +134,8 @@ async def serve(app: Callable[..., Any], sockets: Iterable[Any], *,
     raised limit costs up to that many bytes of memory for every connection holding an
     unfinished head, and up to 128 connections may: 4 MiB is up to 512 MiB.
     """
-    await _serve(app, sockets, should_exit=should_exit, drain=drain, head_limit=head_limit)
+    await _serve(app, sockets, should_exit=should_exit, drain=drain, head_limit=head_limit,
+                 signals=signals, peer=peer)
 
 
 async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
@@ -126,7 +143,8 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
                  drain: Callable[[], Awaitable[None]] | None = None,
                  head_limit: int | None = None, http: Any = "h11",
                  on_signal: Callable[[str], None] | None = None,
-                 on_server: Callable[[Any], None] | None = None) -> None:
+                 on_server: Callable[[Any], None] | None = None,
+                 signals: bool = True, peer: bool = False) -> None:
     """`serve`, with what the runner adds: its own protocol class as `http`, its own
     signal callback, and `on_server(server)`, called with the uvicorn server before it
     starts."""
@@ -135,14 +153,20 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
         raise ValueError(f"head_limit is a number of bytes above 0, not {head_limit!r}")
     if isinstance(http, str) and http != "h11":
         raise ValueError(f"http is \"h11\" or a protocol class, not {http!r}")
+    if not isinstance(signals, bool) or not isinstance(peer, bool):
+        raise ValueError("signals and peer are True or False")
     import uvicorn
 
     if http == "h11":
         from uvicorn.protocols.http.h11_impl import H11Protocol
 
         http = H11Protocol
+    http = _no_delay(http)
+    if peer:
+        http = _with_peer(http)
+        app = _lift_peer(app)
     options: dict[str, Any] = dict(
-        http=_no_delay(http), ws="none", lifespan="off", loop="asyncio", interface="asgi3",
+        http=http, ws="none", lifespan="off", loop="asyncio", interface="asgi3",
         proxy_headers=False, server_header=False, date_header=False, log_config=None,
         access_log=False, timeout_graceful_shutdown=_GRACEFUL,
         limit_concurrency=CONNECTION_CAP,
@@ -157,7 +181,7 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
         def on_signal(name: str) -> None:
             with contextlib.suppress(RuntimeError):  # The loop has closed.
                 loop.call_soon_threadsafe(should_exit.set)
-    saved = _install_signals(on_signal)
+    saved = _install_signals(on_signal) if signals else {}
     try:
         serving = loop.create_task(server.serve(sockets=list(sockets)))
         waiting = loop.create_task(should_exit.wait())
@@ -197,6 +221,71 @@ def _no_delay(protocol: type) -> type:
             super().connection_made(transport)
 
     return NoDelay
+
+
+def _with_peer(protocol: type) -> type:
+    """`protocol`, keeping each connection's peer for the requests on it.
+
+    uvicorn copies a request's `state` from the connection's `app_state`, and hands every
+    connection the same dict, so the peer is never written there: each connection gets a
+    copy of its own, holding its peer, when it is made. `_lift_peer` moves it out of the
+    request's `state`.
+    """
+
+    class Peer(protocol):  # type: ignore[misc, valid-type]
+        def connection_made(self, transport: Any) -> None:
+            uid = _peer_uid(transport.get_extra_info("socket"))
+            self.app_state = {**self.app_state, PEER: uid}
+            super().connection_made(transport)
+
+    return Peer
+
+
+def _lift_peer(app: Callable[..., Any]) -> Callable[..., Any]:
+    """`app`, with the connection's peer moved from `scope["state"]` to `scope["moxi.peer"]`.
+
+    The scope key is always set, from the connection's copy alone, so a request never
+    sees another connection's peer or a value of its own making.
+    """
+
+    async def lifted(scope: dict[str, Any], receive: Callable[..., Any],
+                     send: Callable[..., Any]) -> None:
+        if scope.get("type") == "http":
+            state = dict(scope.get("state") or {})
+            uid = state.pop(PEER, None)
+            scope = {**scope, "state": state, PEER: {"uid": uid}}
+        await app(scope, receive, send)
+
+    return lifted
+
+
+#: `struct xucred`'s head on macOS: `cr_version` and `cr_uid`, then the groups.
+_XUCRED = struct.Struct("=II")
+_XUCRED_SIZE = 76
+
+
+def _peer_uid(sock: Any) -> int | None:
+    """The uid of the process at the other end of the Unix socket `sock`, or None.
+
+    `SO_PEERCRED` on Linux and `LOCAL_PEERCRED` on macOS; None for any other socket, on
+    any other system and when the read fails.
+    """
+    if sock is None or getattr(socket, "AF_UNIX", None) is None or sock.family != socket.AF_UNIX:
+        return None
+    try:
+        if hasattr(socket, "SO_PEERCRED"):
+            creds = struct.Struct("=iII")
+            _pid, uid, _gid = creds.unpack(
+                sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, creds.size))
+            return uid
+        if sys.platform == "darwin" and hasattr(socket, "LOCAL_PEERCRED"):
+            raw = sock.getsockopt(getattr(socket, "SOL_LOCAL", 0), socket.LOCAL_PEERCRED,
+                                  _XUCRED_SIZE)
+            version, uid = _XUCRED.unpack_from(raw)
+            return uid if version == 0 else None
+    except (OSError, struct.error):
+        return None
+    return None
 
 
 def _server_class() -> type:

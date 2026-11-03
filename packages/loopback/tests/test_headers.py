@@ -29,6 +29,51 @@ def test_every_response_carries_the_whole_set_and_no_store():
     }
 
 
+def test_the_gateway_policy_is_the_page_policy_plus_exactly_a_manifest_and_a_worker():
+    got = dict(response_headers(policy="gateway"))
+    policy = got[b"content-security-policy"].decode()
+    assert policy == EXPECTED_CSP + "; manifest-src 'self'; worker-src 'self'"
+    page = {part.strip() for part in EXPECTED_CSP.split(";")}
+    added = {part.strip() for part in policy.split(";")} - page
+    assert added == {"manifest-src 'self'", "worker-src 'self'"}
+    assert page <= {part.strip() for part in policy.split(";")}
+    # Every other header of the set is the page's own.
+    others = dict(response_headers())
+    del got[b"content-security-policy"], others[b"content-security-policy"]
+    assert got == others
+
+
+def test_the_default_policy_is_the_page_policy_and_unchanged():
+    assert response_headers() == response_headers(policy="page")
+    assert dict(response_headers())[b"content-security-policy"] == EXPECTED_CSP.encode()
+
+
+@pytest.mark.parametrize("policy", ["Gateway", "desk", "", None, 1])
+def test_a_policy_name_outside_the_two_is_refused(policy):
+    with pytest.raises(ValueError):
+        response_headers(policy=policy)
+
+
+@pytest.mark.parametrize("policy", ["page", "gateway"])
+def test_a_csp_in_extra_is_refused_under_either_policy(policy):
+    with pytest.raises(ValueError):
+        response_headers(policy=policy, extra=[("Content-Security-Policy", "default-src *")])
+    with pytest.raises(ValueError):
+        response_headers(policy=policy, extra=[("content-security-policy", "manifest-src *")])
+
+
+def test_the_named_policies_cannot_be_changed():
+    with pytest.raises(TypeError):
+        headers.POLICIES["gateway"] = "default-src *"
+
+
+def test_the_gateway_policy_keeps_cache_and_extra_as_the_page_policy_does():
+    got = response_headers(policy="gateway", cache=NO_CACHE,
+                           extra=[("Content-Type", "application/manifest+json")])
+    assert (b"cache-control", b"no-cache") in got
+    assert got[-1] == (b"content-type", b"application/manifest+json")
+
+
 def test_an_asset_gets_no_cache_and_its_own_headers_follow_the_set():
     got = response_headers(cache=NO_CACHE, extra=[("Content-Type", "text/css"), ("ETag", '"ab"')])
     assert (b"cache-control", b"no-cache") in got

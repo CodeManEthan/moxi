@@ -14,14 +14,17 @@ The gates, in order:
 1. Host. On the `browser` profile, a name in the profile's names with any port. On the
    `upstream` profile over TCP, exactly `127.0.0.1:<bound port>`, the gate that holds
    against DNS rebinding even if the token leaks. Not run on a Unix socket, which no
-   browser can open.
+   browser can open. On the `gateway` profile, exactly the tunnel's host name, with no
+   port or the outside port, on either transport.
 2. OPTIONS is refused: no preflight ever passes, so a page can add a header such as
    `X-Moxi-Token` to a cross-origin request only by failing here.
-3. Origin and Fetch Metadata on the `browser` profile. On the `upstream` profile over
-   TCP, any `Origin`, `Cookie` or `Sec-Fetch-*` header is refused: the shell strips them,
-   so a request that still carries one came straight from a browser.
-4. The credential: the `browser` profile's session callable, or `X-Moxi-Token` on the
-   `upstream` profile. `GET /api/prove` alone is exempt.
+3. Origin and Fetch Metadata on the `browser` profile, and on the `gateway` profile
+   with the tunnel's `https` origin, where a request carrying `X-Moxi-Token` is refused
+   too. On the `upstream` profile over TCP, any `Origin`, `Cookie` or `Sec-Fetch-*`
+   header is refused: the shell strips them, so a request that still carries one came
+   straight from a browser.
+4. The credential: the session callable on the `browser` and `gateway` profiles, or
+   `X-Moxi-Token` on the `upstream` profile. `GET /api/prove` alone is exempt.
 5. The table: a path or method it does not hold is an empty 404, and an act without
    `Content-Type: application/json` is a 403.
 
@@ -50,6 +53,7 @@ __all__ = [
     "RequestView",
     "browser",
     "check",
+    "gateway",
     "proof",
     "token_matches",
     "upstream",
@@ -63,6 +67,11 @@ TOKEN_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{43}\Z")
 _PORT = re.compile(r"\A[0-9]{1,5}\Z")
 #: A name under `.localhost`, which RFC 6761 reserves, so no one can rebind it.
 _LOCALHOST_NAME = re.compile(r"\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+localhost\Z")
+#: A DNS host name, folded: labels of letters, digits and inner hyphens, joined by dots.
+_DNS_NAME = re.compile(r"\A(?=.{1,253}\Z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                       r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\Z")
+#: Four dotted numbers: an IPv4 address, never a gateway's host name.
+_DOTTED_NUMBERS = re.compile(r"\A[0-9]+(?:\.[0-9]+){3}\Z")
 
 _PROVE_TEXT = b"moxi-loopback-prove\n"
 _PROVE_RAW = PROVE_PATH.encode("ascii")
@@ -113,7 +122,9 @@ class Refusal:
 class Profile:
     """One listener's check: the credential, the frozen table and the admitted names.
 
-    Build one with `upstream` or `browser`, never directly.
+    Build one with `upstream`, `browser` or `gateway`, never directly. `port` is the
+    module server's bound port on `upstream`, and the outside port on `gateway`; `host`
+    is the gateway's one host name.
     """
 
     kind: str
@@ -123,6 +134,7 @@ class Profile:
     session: Callable[[RequestView, Entry | None], bool] | None = None
     names: frozenset[str] = frozenset()
     fallback: Callable[[RequestView], Entry | None] | None = None
+    host: str | None = None
 
 
 def upstream(table: Table, *, token: str, port: int | None = None) -> Profile:
@@ -184,6 +196,45 @@ def browser(
         raise ValueError("fallback is a callable taking the view, or None")
     folded = _names(names)
     return Profile("browser", table.freeze(), session=session, names=folded, fallback=fallback)
+
+
+def gateway(
+    table: Table,
+    *,
+    session: Callable[[RequestView, Entry | None], bool],
+    host: str,
+    port: int,
+    fallback: Callable[[RequestView], Entry | None] | None = None,
+) -> Profile:
+    """The profile of the listener a tunnel forwards a phone to.
+
+    `host` is the tunnel's host name and `port` the outside port the phone uses. Gate 1
+    admits exactly one `Host` naming `host`, folded to lower case, with no port or with
+    `port`; `127.0.0.1`, `localhost` and every other name are refused, on a Unix socket
+    too. Gate 3 is the `browser` profile's with the origin `https://<host>`, followed by
+    `:<port>` unless the port is 443, and it refuses every request that carries
+    `X-Moxi-Token`, so no token route is reachable here. No header a proxy in front adds,
+    such as `X-Forwarded-For` or a `Tailscale-*` header, is read. `session` and `fallback`
+    are as on `browser`. Raises `ValueError` for a host that is not a DNS name, or is
+    `localhost`, a `.localhost` name or an address, and for a port outside 1 to 65535.
+    Freezes `table`.
+    """
+    if not isinstance(table, Table):
+        raise ValueError("a profile's table is a Table")
+    if not callable(session):
+        raise ValueError("session is a callable taking the view and the entry")
+    if fallback is not None and not callable(fallback):
+        raise ValueError("fallback is a callable taking the view, or None")
+    if not isinstance(host, str) or not host.isascii():
+        raise ValueError("the host is an ASCII DNS name")
+    folded = host.lower()
+    if (not _DNS_NAME.match(folded) or folded in BASE_NAMES or folded.endswith(".localhost")
+            or _DOTTED_NUMBERS.match(folded)):
+        raise ValueError(f"{host!r} is not a host name a tunnel gives")
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise ValueError("the port is 1 to 65535")
+    return Profile("gateway", table.freeze(), session=session, port=port, fallback=fallback,
+                   host=folded)
 
 
 def token_matches(view: RequestView, token: str) -> bool:
@@ -265,9 +316,24 @@ def _browser_host(view: RequestView, names: frozenset[str]) -> bool:
     return name.lower() in names
 
 
+def _gateway_host(view: RequestView, host: str | None, port: int | None) -> bool:
+    values = view.values(_HOST)
+    if host is None or len(values) != 1 or not values[0].isascii():
+        return False
+    name, colon, digits = values[0].decode("ascii").partition(":")
+    if colon and (not _PORT.match(digits) or int(digits) != port):
+        return False
+    return name.lower() == host
+
+
+def _gateway_origin(profile: Profile) -> bytes:
+    suffix = "" if profile.port == 443 else f":{profile.port}"
+    return f"https://{profile.host}{suffix}".encode("ascii")
+
+
 def _lookup(view: RequestView, profile: Profile) -> Entry | None:
     entry = profile.table.find(view.method, view.raw_path)
-    if entry is not None or profile.kind != "browser" or profile.fallback is None:
+    if entry is not None or profile.kind == "upstream" or profile.fallback is None:
         return entry
     if b"%" in view.raw_path or view.method != "GET":
         return None
@@ -290,10 +356,22 @@ def _gate3_browser(view: RequestView, entry: Entry | None) -> bool:
     host = _single(view, _HOST)
     if host is None:
         return False
+    return _origin_rules(view, entry, b"http://" + host.lower())
+
+
+def _gate3_gateway(view: RequestView, entry: Entry | None, profile: Profile) -> bool:
+    # The gateway has no token class: a request carrying the token is never a phone's.
+    if view.has(_TOKEN):
+        return False
+    return _origin_rules(view, entry, _gateway_origin(profile))
+
+
+def _origin_rules(view: RequestView, entry: Entry | None, origin: bytes) -> bool:
+    """Origin and Fetch Metadata for a browser's request, against the listener's `origin`."""
     origins = view.values(_ORIGIN)
     if len(origins) > 1:
         return False
-    origin_ok = not origins or origins[0] == b"http://" + host.lower()
+    origin_ok = not origins or origins[0] == origin
     sites = view.values(b"sec-fetch-site")
     if len(sites) > 1:
         return False
@@ -330,6 +408,9 @@ def check(view: RequestView, profile: Profile) -> Refusal | None:
     elif profile.kind == "browser":
         if not _browser_host(view, profile.names):
             return Refusal(403, 1)
+    elif profile.kind == "gateway":
+        if not _gateway_host(view, profile.host, profile.port):
+            return Refusal(403, 1)
     else:
         return Refusal(403, 1)
 
@@ -340,6 +421,9 @@ def check(view: RequestView, profile: Profile) -> Refusal | None:
 
     if profile.kind == "upstream":
         if not upstream_unix and _carries(view, _UPSTREAM_REFUSED):
+            return Refusal(403, 3)
+    elif profile.kind == "gateway":
+        if not _gate3_gateway(view, entry, profile):
             return Refusal(403, 3)
     elif not _gate3_browser(view, entry):
         return Refusal(403, 3)
