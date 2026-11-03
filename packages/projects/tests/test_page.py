@@ -220,6 +220,11 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert done_.stdout.strip() == "[]"
 
 
+def test_the_export_carries_the_measured_budget():
+    exported = LB.export(page.PAGE)
+    assert exported["budget"] == {"rss": "90M", "fds": 32} == page.BUDGET
+
+
 def test_each_component_is_a_built_asset_of_the_page():
     from moxi_projects import module
 

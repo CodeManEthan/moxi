@@ -129,8 +129,16 @@ def _target(name: str) -> str:
     return f"moxi_projects.pagehandlers:{name}"
 
 
+#: What the page server may hold before ui's doctor warns. Measured in a test shell on
+#: Linux (Python 3.14), with the page opened, reloaded five times, then an edit, an
+#: agent added and removed and an add, then left idle for 30 s: RSS 41-45 MB with 2, 20
+#: or 200 projects, and 8 open fds idle, 12 to 14 just after the page's reads. The budget
+#: is about twice the most that was seen.
+BUDGET = {"rss": "90M", "fds": 32}
+
 PAGE = lb.Page(
     assets="web",
+    budget=BUDGET,
     routes=(
         lb.Route("/api/projects", "read", _target("projects"),
                  query={"kind": _MAYBE_NAME}, returns=PROJECTS),
@@ -151,5 +159,5 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["ADD_BODY", "AGENT_BODY", "BROKEN", "KIND", "KINDS", "ONE", "PAGE", "PROJECT",
-           "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]
+__all__ = ["ADD_BODY", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "ONE", "PAGE",
+           "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]
