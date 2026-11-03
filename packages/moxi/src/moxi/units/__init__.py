@@ -96,7 +96,8 @@ def starts(found, *, env=None) -> dict[str, str | None]:
     now, as `plan` resolves it: `"login"` or `"connection"`, by its announcement's
     `DAEMONS` alone. A switch-form `start` whose key cannot be read, or is no bool
     setting read at use, is None. Reads the config only for a switch form; never runs
-    `UNITS_FROM`."""
+    `UNITS_FROM`. The value is what systemd and launchd do: on Windows the logon task
+    starts every daemon at each logon whatever it says."""
     from .. import config
     from ..modules import login_switch
     from ._declare import switch_value
