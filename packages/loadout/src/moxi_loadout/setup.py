@@ -1,6 +1,6 @@
 """loadout's `SETUP`, which `moxi install loadout` runs on every install and upgrade.
 
-`setup()` does five things, in order, and places nothing:
+`setup()` does six things, in order, and places nothing:
 
 1. **The example.** When the loadout folder is missing or empty, it writes the example
    manifest the package ships (every item commented out) as `loadout.toml`, with empty
@@ -8,18 +8,22 @@
    and is left alone.
 2. **The opencode row.** It adds an opencode row to the core's harness table when there
    is none, and records it (`moxi_loadout.harness_row`).
-3. **Adoption.** It lists every installed module's own skill placements in the manifest
+3. **The harness homes.** It records in the ledger each harness's home and the home
+   folder as this run resolves them, and whether it found git (`moxi_loadout.homes`),
+   under the core lock it already holds, so what a page job compares comes from the
+   user's own `moxi install loadout`.
+4. **Adoption.** It lists every installed module's own skill placements in the manifest
    with the harnesses they were placed for, then hands them to loadout, unseeded
    (`moxi_loadout.adoption.take`), so the yes the user gave at each module's question is
    kept. The next `moxi loadout install` records them in loadout's ledger. A manifest
    that doesn't read, or a write of it that fails, comes before any hand-over, so its
    line says no module skill was taken over, and none was.
-4. **The global mode.** Only when the manifest has no `[global] mode`: with someone at
+5. **The global mode.** Only when the manifest has no `[global] mode`: with someone at
    the keyboard it shows the three modes and writes the answer (default `off`) to the
    manifest; with nobody there it writes nothing, so the mode reads `off`, and prints
    the line that sets one. A manifest that carries a mode, a clone's included, is never
    asked about.
-5. **The git hook pieces.** With repo installed and the folder in a git work tree, it
+6. **The git hook pieces.** With repo installed and the folder in a git work tree, it
    registers the two pieces there while `reinstall_on_commit` is on, or removes them
    while it is off (`moxi_loadout.repo_link`). A failure is a line, and setup still
    returns 0 for it: the doctor's row names what is missing.
@@ -87,6 +91,10 @@ def setup(*, say: Callable[[str], object] = print,
         harness_row.add(say=say)
     except (ConfigError, ledger.LedgerError, LockTimeout) as exc:
         failed.append(f"loadout: the opencode row wasn't added: {exc}")
+    try:
+        record_homes()
+    except (ledger.LedgerError, OSError, LockTimeout) as exc:
+        failed.append(f"loadout: the harness homes weren't recorded: {exc}")
     manifest_ok = True
     try:
         for t in adoption.take(folder=folder, say=say):
@@ -104,6 +112,25 @@ def setup(*, say: Callable[[str], object] = print,
     repo_link.sync(folder, machine.reinstall_on_commit, say=lambda line: say(
         f"loadout: {line}"))
     return "\n".join(failed) if failed else 0
+
+
+def record_homes() -> bool:
+    """Record this run's harness homes in the ledger, under the core lock (`nested`, so
+    it yields under the install's claim). Returns whether it wrote; a run whose caller
+    marked it as not the user's own writes nothing."""
+    from moxi import files, paths
+
+    from moxi_loadout import homes, ledger
+
+    if not homes.users_own():
+        return False
+    with files.lock(paths.core_lock(), nested=True):
+        data = ledger.read()
+        if homes.same(data):
+            return False
+        homes.record(data)
+        ledger.write(data)
+    return True
 
 
 def write_example(folder: str | os.PathLike) -> bool:
@@ -193,5 +220,5 @@ def _one_line(exc: BaseException) -> str:
     return " ".join(str(exc).split())
 
 
-__all__ = ["EXAMPLE", "MODE_QUESTION", "NO_ANSWER", "setup", "write_example", "ask_mode",
-           "interactive"]
+__all__ = ["EXAMPLE", "MODE_QUESTION", "NO_ANSWER", "setup", "record_homes", "write_example",
+           "ask_mode", "interactive"]

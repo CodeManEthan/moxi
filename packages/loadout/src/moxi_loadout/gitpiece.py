@@ -19,6 +19,8 @@ environment, with three minutes before it is stopped with everything it started.
 the child install runs with git's local variables and its four pathspec variables
 removed, so a `GIT_DIR` or `GIT_INDEX_FILE` the git hook was given never reaches the
 placer's git calls or the would-commit check.
+The child also carries loadout's marker (`moxi_loadout.homes.MARKER`): the install is not
+the user's own, so it leaves the recorded harness homes as they are.
 
 A failed install, or one that ran out of time, prints one line naming the command to run
 (repo prints it on stderr), and leaves a doctor record, `loadout`'s `reinstall`, which the
@@ -161,10 +163,14 @@ def _head(link, root: str) -> str | None:
 
 def clean_env() -> dict[str, str]:
     """This process's environment less git's local variables and its four pathspec
-    variables, which a git hook is given and the child install must not see."""
-    from moxi_loadout import ignores
+    variables, which a git hook is given and the child install must not see, with
+    loadout's marker that the install is not the user's own, so it leaves the recorded
+    harness homes as they are."""
+    from moxi_loadout import homes, ignores
 
-    return ignores.Git(timeout=GIT_SECONDS).env()
+    env = dict(ignores.Git(timeout=GIT_SECONDS).env())
+    env[homes.MARKER] = "git-hook"
+    return env
 
 
 def _install() -> str | None:

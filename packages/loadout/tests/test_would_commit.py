@@ -176,6 +176,8 @@ def test_an_edited_ignore_file_of_loadouts_is_left(app, lo):
     out = install.status()
     assert ("ignore", str(path), "*") in states(out)
     assert states(out)[("ignore", str(path), "*")][0] == "modified"
+    # Restoring the file is the fix; --replace doesn't touch it.
+    assert not any(r.replaceable for r in out.rows if r.kind == "ignore")
     kit.skill(lo / "skills", "deploy")
     kit.manifest(lo, f'[project."{app}"]\nskills = ["review", "deploy"]\n')
     out = install.install()
@@ -183,6 +185,9 @@ def test_an_edited_ignore_file_of_loadouts_is_left(app, lo):
     assert states(out)[("skill", "deploy", "claude")][0] == "would-commit"
     assert not os.path.lexists(path.parent / "deploy")
     assert path.read_text().endswith("/notes\n")
+    # Nothing stands in deploy's way, so --replace would place nothing there.
+    [row] = [r for r in install.status().rows if (r.name, r.harness) == ("deploy", "claude")]
+    assert row.state == "would-commit" and not row.replaceable
 
 
 @pytest.mark.slow
@@ -215,6 +220,10 @@ def test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it(lo, t
     out = install.install()
     assert out.code == 3
     assert states(out)[("skill", "review", "codex")][0] == "would-commit"
+    # The page offers Replace on this row from the flag status gives it.
+    [row] = [r for r in install.status().rows if (r.name, r.harness) == ("review", "codex")]
+    assert row.state == "would-commit" and row.replaceable
+    assert row.as_json()["replaceable"] is True
     out = install.install(replace=["skill:review@codex"])
     assert out.code == 0, out.text()
     assert folder.is_symlink()

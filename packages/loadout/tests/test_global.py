@@ -113,6 +113,18 @@ def test_show_prints_what_install_would_make(lo, capsys):
     assert not harness.global_file("claude").exists()
 
 
+@pytest.mark.parametrize("name", ["managed", "if-absent"])
+def test_the_preview_call_is_what_show_prints_as_json(lo, capsys, name):
+    mode(lo, name)
+    harness.global_file("codex").parent.mkdir(parents=True, exist_ok=True)
+    harness.global_file("codex").write_text("# Mine\n")
+    preview = install.global_preview()
+    assert preview["mode"] == name and preview["files"]
+    assert cli.main(["global", "show", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == preview
+    assert not harness.global_file("claude").exists()
+
+
 def test_no_mode_in_the_manifest_reads_off_with_a_line(lo):
     kit.manifest(lo, "[user]\n")
     out = install.install()

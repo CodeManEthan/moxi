@@ -15,11 +15,16 @@ SUMMARY = 'Your own skills, agents and settings, placed for each harness: Claude
 OPTIONAL = {
     "projects": "Name a project section by its project key, not only by its path.",
     "repo": "A commit to your loadout folder reinstalls it.",
+    "ui": "The loadout page in the browser UI shell: items, states, the global file and "
+          "installs.",
 }
 GATED = {}
-#: loadout reads no variable of its own. CLAUDE_CONFIG_DIR and CODEX_HOME are the
-#: harnesses' own, read where the harness homes are found.
-INTERNAL_ENV = {}
+#: CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME are the harnesses' own, read where
+#: the harness homes are found.
+INTERNAL_ENV = {
+    "MOXI_LOADOUT_CALLER": "set by loadout's own callers (the git hook's install, a page "
+                           "job), so the run leaves the recorded harness homes as they are",
+}
 #: The machine settings: the loadout folder, whether a commit to it reinstalls it (with
 #: repo), backups kept, each harness's project folders.
 SETTINGS = "settings.toml"
@@ -36,6 +41,16 @@ SETUP = "moxi_loadout.setup:setup"
 #: something was changed since loadout wrote it, a refusal that removes nothing.
 TEARDOWN = "moxi_loadout.teardown:teardown"
 SEGMENT = None
+#: loadout's page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_loadout.page:PAGE"
+#: The page, and the drift block the shell's home places: how many items aren't ok,
+#: linking to the page.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Loadout", "contract": 1, "place": "page",
+             "doc": "Your items for each harness, their states, the global file and installs"},
+    "drift": {"script": "drift.js", "title": "Loadout drift", "contract": 1, "place": "block",
+              "home": True, "doc": "How many of your items aren't ok, linking to the page"},
+}
 #: loadout's doctor rows: the manifest, each harness's items and entries not ok, the
 #: global file, hook programs, the projects link, the git hook link to repo, Codex's
 #: switches, modules gone.

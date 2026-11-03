@@ -1,0 +1,13 @@
+{
+  "name": "moxi-loadout-web",
+  "private": true,
+  "description": "The loadout module's web sources: its page, and the drift block that counts the items that aren't ok.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

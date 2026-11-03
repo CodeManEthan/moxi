@@ -205,7 +205,10 @@ def test_an_occupant_is_blocked_until_replace_moves_it_aside(lo):
     out = install.install()
     assert out.code == 3
     assert states(out)[("skill", "review", "claude", "user")] == "blocked"
+    [row] = [r for r in install.status().rows if (r.name, r.harness) == ("review", "claude")]
+    assert row.replaceable and row.as_json()["replaceable"] is True
     assert install.install(replace=["skill:review@claude"]).code == 0
+    assert not any(r.replaceable for r in install.status().rows)
     assert (kit.claude() / "review").is_symlink()
     # A --replace that names nothing refused is refused.
     out = install.install(replace=["skill:nothing@claude"])
@@ -220,6 +223,7 @@ def test_a_hand_edited_generated_agent_is_left_until_replaced(lo):
         f.write("# my edit\n")
     out = install.status()
     assert states(out)[("agent", "helper", "codex", "user")] == "modified"
+    assert [r.replaceable for r in out.rows if r.state == "modified"] == [True]
     assert install.install().code == 3
     assert "# my edit" in toml.read_text()
     assert install.install(replace=["agent:helper@codex"]).code == 0

@@ -66,3 +66,54 @@ and `moxi loadout status` says what has drifted.
     each with `--json`, and `moxi doctor` shows loadout's rows: the manifest, entries
     not ok, the global file, hook programs, the projects link, the git hook pieces and
     Codex's switches.
+
+## The page
+
+With the `ui` extra (`moxi-ui`, the browser UI shell), loadout has a page in the shell,
+at `/m/loadout/`, and a block on the shell's home that counts the items that aren't ok
+and links to the page. An item counts once, however many of its harnesses aren't ok.
+
+- **Items.** Each section of the manifest, its own items first and then the module skills
+  it took over, with one cell per harness: the item's state, why, and a switch that runs
+  `moxi loadout enable` or `disable` for that harness. Add and Remove run `moxi loadout
+  add` and `remove`; the add form also offers each project that has no section yet. Rows
+  that belong to no listed item show under "Other rows". The notes `status` gives show
+  above the items.
+- **Install.** Runs `moxi loadout install` for every section, the user section or one
+  project section.
+- **Replace.** A row that `moxi loadout install --replace` would fix offers Replace,
+  which runs that command for the row once you confirm on the shell's sheet. Those are
+  the rows where something else stands in the way and the ones edited by hand since
+  loadout wrote them. A `would-commit` row whose path holds a copy the project's git
+  tracks is one: the copy is moved aside, so git shows it deleted, and the row reads
+  `would-commit` until you commit that.
+- **The global instruction file.** The mode, and what the next install does to each
+  global file, with its diff. Managed and Only where absent run `moxi loadout global
+  mode`. Turn off runs `moxi loadout global off` once you confirm on the sheet.
+
+Each change runs the same `moxi loadout` command you would run in a terminal, in a
+process of its own, and the page shows the command and how it ended under "Last change".
+The page runs one change at a time: every control is off while one runs. Closing or
+reloading the page doesn't stop a change. The tab keeps the change it follows, so after a
+reload, or another page and back, the page follows it again and keeps every control off
+until it ends; a new tab doesn't, and `moxi loadout status` shows where things stand. When the shell runs as a service,
+a change still running when the service stops, by `moxi ui stop` or because nothing has
+used the shell for a while, stops with it; run it again.
+
+A change from the page refuses before it writes anything when the shell's
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME` or `HOME` puts a home somewhere
+other than your last terminal run did, or when your last terminal run found git and the
+shell's `PATH` doesn't: without git, nothing could check what git would commit. The
+line names the variable. Set it where the shell gets it at every login (a file under
+`~/.config/environment.d/` on Linux, your LaunchAgent environment on macOS, your user
+environment variables on Windows), then run `moxi ui stop`, or run the command in a
+terminal. Until a terminal run has recorded the homes (`moxi install loadout` does, and
+so does every `moxi loadout` command that installs), every change from the page refuses
+and says so. `moxi loadout status` and the home's block show the same comparison as a
+note, which changes neither the exit code nor the count; in a terminal, the note says
+what the page does.
+
+MCP servers are added through the `claude` and `codex` CLIs, so the page needs them on
+the shell's `PATH`. Without one, a change from the page does what the terminal does
+without it: the servers that need it stand, each with a note naming the fix, and the
+rest is written.

@@ -152,20 +152,39 @@ def _scope(args, item=None):
     return Scope(user=bool(args.user), projects=tuple(named), item=item)
 
 
-def _emit(outcome, args) -> int:
+def _emit(outcome, args, said: Sequence[str] = ()) -> int:
     if args.json:
         print(json.dumps(outcome.as_json(), indent=1))
     else:
+        shown = list(said)
         for line in outcome.text():
+            if line in shown:
+                shown.remove(line)   # printed on stderr already, as it happened
+                continue
             print(line)
     return outcome.code
 
 
-def _install(args) -> int:
+def _run_install(args, scope, *, written: Sequence[str] = (), **kw) -> int:
+    """Run an install and print its outcome, `written` (what the verb wrote to the
+    manifest first) leading its lines. With `--json` every line is in the outcome alone;
+    without it the core lock's waiting line is printed on stderr as it waits, and not
+    again with the rest."""
     from moxi_loadout import install
 
-    outcome = install.install(_scope(args), replace=args.replace, dry_run=args.dry_run)
-    return _emit(outcome, args)
+    said: list[str] = []
+
+    def live(line: str) -> None:
+        print(line, file=sys.stderr, flush=True)
+        said.append(line)
+
+    outcome = install.install(scope, say=None if args.json else live, **kw)
+    outcome.lines[:0] = list(written)
+    return _emit(outcome, args, said)
+
+
+def _install(args) -> int:
+    return _run_install(args, _scope(args), replace=args.replace, dry_run=args.dry_run)
 
 
 def _status(args) -> int:
@@ -175,12 +194,9 @@ def _status(args) -> int:
 
 
 def _write_then_install(args, written: list[str], item) -> int:
-    from moxi_loadout import install
     from moxi_loadout.planner import Scope
 
-    outcome = install.install(Scope(item=item))
-    outcome.lines[:0] = written
-    return _emit(outcome, args)
+    return _run_install(args, Scope(item=item), written=written)
 
 
 def _add(args) -> int:
@@ -241,7 +257,7 @@ def _list(args) -> int:
 
 
 def _global(args) -> int:
-    from moxi_loadout import install, writes
+    from moxi_loadout import writes
     from moxi_loadout.planner import GLOBAL_KIND, Scope
 
     if args.part == "show":
@@ -249,36 +265,18 @@ def _global(args) -> int:
     mode = "off" if args.part == "off" else args.mode
     changed = writes.set_mode(mode)
     line = f"global mode {mode}" + ("" if changed else " already")
-    outcome = install.install(Scope(item=(GLOBAL_KIND, GLOBAL_KIND)))
-    outcome.lines[:0] = [line]
-    return _emit(outcome, args)
+    return _run_install(args, Scope(item=(GLOBAL_KIND, GLOBAL_KIND)), written=[line])
 
 
 def _global_show(args) -> int:
-    import difflib
+    from moxi_loadout import install
 
-    from moxi_loadout import entries, install
-    from moxi_loadout.planner import GLOBAL_KIND, state_of
-
-    plan, run = install._plan(None, install.planner.resolve_key)
-    shown = entries.preview(run)
-    out = []
-    for path, (now, then) in sorted(shown.items()):
-        a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
-        diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
-                                            path, f"{path} after install"))
-        out.append({"file": path, "changes": a != b, "diff": diff})
-    for w in plan.wants:
-        if w.kind == GLOBAL_KIND:
-            state, reason, _ = state_of(w)
-            out.append({"file": str(w.item.dest if w.item else w.harness),
-                        "changes": state != "ok", "placed": True, "state": state,
-                        "diff": reason})
+    preview = install.global_preview()
     if args.json:
-        print(json.dumps({"mode": plan.manifest.global_mode, "files": out}, indent=1))
+        print(json.dumps(preview, indent=1))
         return codes.OK
-    print(f"global mode {plan.manifest.global_mode}")
-    for f in out:
+    print(f"global mode {preview['mode']}")
+    for f in preview["files"]:
         if f.get("placed"):
             print(f"{f['file']}: {f['state']}" + (f" ({f['diff']})" if f["diff"] else ""))
         elif not f["changes"]:

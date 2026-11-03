@@ -14,6 +14,9 @@ projects = ["moxi-projects>=0.1,<0.2"]
 # A commit or a merge that changes the loadout folder reinstalls it: loadout registers
 # its two git hook pieces with repo, reached only through moxi.modules.load("repo").
 repo = ["moxi-repo>=0.1,<0.2"]
+# The browser UI shell: with it, loadout's page shows there. Loopback, which loadout's
+# page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -37,7 +40,9 @@ loadout = "moxi_loadout.listener"
 "loadout.reinstall-merge" = "moxi_loadout.gitpiece:REINSTALL_MERGE"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs loadout's page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 # Import names that differ from their distribution's name.
 [tool.moxi.imports]
@@ -52,7 +57,8 @@ packages = ["src/moxi_loadout"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_loadout", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_loadout", "tests",
+                "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

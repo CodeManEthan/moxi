@@ -526,9 +526,11 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
                                       run.refused[e.file]))
             continue
         if e.kind == "mcp" and shutil.which(e.harness) is None:
+            from moxi_loadout.homes import path_fix
+
             run.actions.append(Action(e, None if rec is None else records[rec], "stand",
                                       f"no {e.harness} on PATH, so its MCP servers are "
-                                      "not written"))
+                                      f"not written; {path_fix(e.harness)}"))
             continue
         action = _one(e, None if rec is None else records[rec], doc, records,
                       _claimed(claims, e.ident(), e.harness))
@@ -721,16 +723,19 @@ def row(a: Action) -> Row:
     where = a.where
     get = (lambda k: getattr(where, k)) if isinstance(where, Entry) else where.get
     kind, _, name = str(get("item")).partition(":")
+    replaceable = False
     if a.op in ("ok", "end", "stand") or a.done:
         state, code = ("ok", 0)
         if a.op == "stand" and a.reason:
             state, code = "blocked", REFUSED
     else:
         state, code = _PENDING[a.op]
+        replaceable = a.op in ("modified", "blocked")
     reason = a.reason
     if a.entry is None and a.op == "remove" and not a.done:
         reason = reason or "no longer wanted; install removes it"
-    return Row(USER, kind, name, get("harness"), state, reason, get("file"), code)
+    return Row(USER, kind, name, get("harness"), state, reason, get("file"), code,
+               replaceable)
 
 
 def rows(run: Run) -> list[Row]:
