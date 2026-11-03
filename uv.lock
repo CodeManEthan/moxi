@@ -1324,6 +1324,7 @@ gateway = [
     { name = "webauthn" },
 ]
 testing = [
+    { name = "cryptography" },
     { name = "playwright" },
     { name = "pytest" },
 ]
@@ -1341,6 +1342,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", marker = "extra == 'testing'", specifier = ">=46" },
     { name = "h11", specifier = ">=0.16,<1" },
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-loopback", editable = "packages/loopback" },
