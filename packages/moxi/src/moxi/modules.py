@@ -90,8 +90,9 @@ PRESENT = "present"
 ABSENT = "absent"
 BROKEN = "broken"
 
-#: The newest announcement schema this moxi reads.
-ANNOUNCES = 1
+#: The newest announcement schema this moxi reads. Schema 2 adds the switch form of a
+#: socket daemon's `start`.
+ANNOUNCES = 2
 
 _EMPTY: Mapping = MappingProxyType({})
 
@@ -152,8 +153,12 @@ _TIMER_KEYS = frozenset({"command", "args", "doc", "every", "at", "days", "switc
                          "platforms"})
 #: A daemon's `socket` keys, and what may start such a daemon: its sockets at the first
 #: connection (the default), or a login as for any daemon, with the sockets still held.
+#: `start` may also be `{"login": "<key>"}`, naming a bool setting of the module: `login`
+#: while the setting is true, `connection` while it is false (schema 2).
 _SOCKET_KEYS = frozenset({"setting", "addresses", "start"})
 _SOCKET_STARTS = ("connection", "login")
+#: The first schema whose `start` may be the switch form.
+_START_SWITCH_SCHEMA = 2
 #: Keys a run-time declaration (from `UNITS_FROM`) may carry beside the others.
 _RUNTIME_KEYS = frozenset({"argv", "cwd", "enabled"})
 _STORE_KEYS = frozenset({"root", "path", "kind", "private", "retention", "rebuildable",
@@ -829,6 +834,11 @@ def _across(values: Mapping[str, object], fields: dict, module: str | None) -> l
                         "daemons and timers each need their own name")
     for daemon, kind, other in stem_clashes(daemons, timers):
         problems.append(clash_line(daemon, kind, other))
+    announces = values.get("ANNOUNCES", KNOWN["ANNOUNCES"])
+    for name, entry in daemons.items():
+        problem = start_schema_problem(f"DAEMONS[{name!r}]", entry, announces)
+        if problem:
+            problems.append(problem)
     # With UNITS_FROM, a HEALTH key may name a daemon declared only at run time; those
     # are read through `moxi.units.declarations`, never here, so the key is judged there.
     if fields["units_from"] is None:
@@ -1040,10 +1050,11 @@ def _daemon(where: str, entry: Mapping) -> None:
                 or not _KEY.fullmatch(socket["setting"])
                 or not _str_list(socket["addresses"]) or not socket["addresses"]
                 or not all(_ip(a) for a in socket["addresses"])
-                or socket.get("start", "connection") not in _SOCKET_STARTS):
+                or not _start(socket.get("start", "connection"))):
             raise _Bad(f"has {where} socket = {socket!r}; it must be a table of setting (a "
                        "settings key), addresses (a non-empty list of IP addresses) and "
-                       "optionally start ('connection', the default, or 'login')")
+                       "optionally start ('connection', the default, 'login', or "
+                       "{'login': '<a bool settings key>'})")
         # One socket is written per address, so the same address twice (in any spelling
         # of it) would be two sockets on one address.
         seen: dict[object, str] = {}
@@ -1055,6 +1066,39 @@ def _daemon(where: str, entry: Mapping) -> None:
                 raise _Bad(f"has {where} socket addresses {list(socket['addresses'])!r} "
                            f"with {twice} given twice; give each address once")
             seen[ip] = address
+
+
+def _start(value: object) -> bool:
+    """Whether `value` is a socket's `start`: one of `_SOCKET_STARTS`, or the switch form,
+    a table whose one key `login` names a settings key."""
+    if isinstance(value, Mapping):
+        return (set(value) == {"login"} and isinstance(value["login"], str)
+                and bool(_KEY.fullmatch(value["login"])))
+    return value in _SOCKET_STARTS
+
+
+def login_switch(entry: object) -> str | None:
+    """The settings key a daemon entry's `socket.start` names in its switch form, or None
+    for a fixed `start`, no socket, or an entry that is not a table."""
+    socket = entry.get("socket") if isinstance(entry, Mapping) else None
+    start = socket.get("start") if isinstance(socket, Mapping) else None
+    if isinstance(start, Mapping) and isinstance(start.get("login"), str):
+        return start["login"]
+    return None
+
+
+def start_schema_problem(where: str, entry: object, announces: object) -> str | None:
+    """Why a daemon entry's switch-form `start` is refused under schema `announces`: the
+    form came with schema 2, so a module that announces 1 can't mean it. None when the
+    entry has no switch form or the schema reads it."""
+    key = login_switch(entry)
+    if key is None:
+        return None
+    if isinstance(announces, int) and not isinstance(announces, bool) \
+            and announces >= _START_SWITCH_SCHEMA:
+        return None
+    return (f"has {where} socket start {{'login': {key!r}}}, a form that comes with "
+            f"ANNOUNCES = {_START_SWITCH_SCHEMA}; the module announces {announces!r}")
 
 
 def stem_clashes(daemons: Mapping, timers: Mapping) -> list[tuple[str, str, str]]:

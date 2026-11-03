@@ -15,6 +15,7 @@ file it did not mark unless told to move it aside (`replace=True`).
     stop(module, names, record=[]) and resume(record)
                                    stop what runs, with a record, and start exactly that
     status(modules, foreign=())    what the supervisor says (`UnitState` per unit)
+    starts(found)                  what starts each socket daemon now: login or connection
     last_runs(module, timer, n=1)  the gate's newest run lines of a timer
     wrap(ref, module=, key=, name=) and unwrap(ref, module=)
                                    a foreign systemd timer's runs behind a switch
@@ -63,8 +64,10 @@ from ._wrap import unwrap, wrap, wraps
 def switched_daemons(module: str, key: str) -> list[str] | DeclarationError:
     """The daemons of `module` whose switch setting `key` sets (the key itself, or the
     switch table it is an entry of, or the table whose entries it holds), read through
-    `declarations`. When `UNITS_FROM` fails, the `DAEMONS` entries alone are read, and the
-    error is returned if none of them names `key`."""
+    `declarations`. A daemon whose socket `start` names the key in its switch form
+    (`{"login": key}`) counts as well, since the key decides what starts it. When
+    `UNITS_FROM` fails, the `DAEMONS` entries alone are read, and the error is returned if
+    none of them names `key`."""
     from .. import modules
     from ._declare import merge
 
@@ -80,10 +83,46 @@ def switched_daemons(module: str, key: str) -> list[str] | DeclarationError:
 
 
 def _naming(daemons, key: str) -> list[str]:
+    from ..modules import login_switch
     from ._declare import is_switch_of
 
     return [name for name, entry in daemons.items()
-            if entry.get("switch") and is_switch_of(key, entry["switch"])]
+            if any(switch and is_switch_of(key, switch)
+                   for switch in (entry.get("switch"), login_switch(entry)))]
+
+
+def starts(found, *, env=None) -> dict[str, str | None]:
+    """What starts each daemon with a socket in `found` (a present `moxi.modules.Found`)
+    now, as `plan` resolves it: `"login"` or `"connection"`, by its announcement's
+    `DAEMONS` alone. A switch-form `start` whose key cannot be read, or is no bool
+    setting read at use, is None. Reads the config only for a switch form; never runs
+    `UNITS_FROM`."""
+    from .. import config
+    from ..modules import login_switch
+    from ._declare import switch_value
+
+    out: dict[str, str | None] = {}
+    schema: list = []
+    for name, entry in found.daemons.items():
+        socket = entry.get("socket")
+        if not socket:
+            continue
+        key = login_switch(entry)
+        if key is None:
+            out[name] = socket.get("start", "connection")
+            continue
+        try:
+            if not schema:
+                schema.append(config.schema_for(found))
+            if switch_problem(schema[0], key):
+                out[name] = None
+                continue
+            on = switch_value(found.name, schema[0], key, env)
+        except config.ConfigError:
+            out[name] = None
+            continue
+        out[name] = "login" if on else "connection"
+    return out
 
 
 def apply_switch(module: str, key: str, *, runner=None,
@@ -110,5 +149,5 @@ __all__ = [
     "Acted", "Applied", "Backend", "DeclarationError", "Declarations", "Stopped",
     "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped", "apply", "apply_switch",
     "backend", "core_lock", "declarations", "digest", "disable", "enable", "last_runs",
-    "plan", "remove", "restart", "resume", "start", "status", "stop", "switch_problem",
-    "switched_daemons", "unwrap", "wrap", "wraps"]
+    "plan", "remove", "restart", "resume", "start", "starts", "status", "stop",
+    "switch_problem", "switched_daemons", "unwrap", "wrap", "wraps"]

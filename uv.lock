@@ -719,7 +719,7 @@ wheels = [
 
 [[package]]
 name = "moxi"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/moxi" }
 dependencies = [
     { name = "platformdirs", marker = "sys_platform == 'win32'" },

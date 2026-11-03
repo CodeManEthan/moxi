@@ -803,8 +803,9 @@ def unset(module: str, key: str, *, by: str) -> list:
 
 def apply_units(module: str, key: str, *, say=print) -> list:
     """After a `set` or `unset` of `key`: when it is the switch of one or more of the
-    module's daemons (a `DAEMONS` entry, or one `UNITS_FROM` returns), plan and apply
-    those daemons' units and nothing else of the module, under the core lock, and return
+    module's daemons (a `DAEMONS` entry, or one `UNITS_FROM` returns), or the key a socket
+    daemon's `start` names (`{"login": key}`), plan and apply those daemons' units and
+    nothing else of the module, under the core lock, and return
     the `moxi.units.Applied` list. A key that is a switch table counts as each of its
     entries. Called after the config file's lock is let go, so that lock is never held
     while the core lock is awaited. The core's own settings switch no daemon."""

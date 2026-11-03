@@ -26,7 +26,9 @@ service is started after its sockets, so the first `status` after an install sho
 `active` even before any connection, and a socket set that changes under a running
 service stops it and starts it again. An `upgrade = "keep"` daemon whose socket set is
 unchanged is left as it is (only enabled, under `start = "login"`, so its login link is
-made or kept).
+made or kept). So is a change that touches only the service's install section, its
+`start` moving between `login` and `connection`, whatever `upgrade` says: the service is
+enabled or disabled (without `--now`) and a running one goes on.
 
 Every supervisor call goes through the systemd fence (`systemctl --user`, always), so the
 verbs here are the fence's closed set. A wrap of a foreign timer is the one file this
@@ -411,7 +413,7 @@ class SystemdBackend:
         # Read before the files are written: how each socket unit stands to its file, and
         # which socket daemons' services run.
         starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed,
-                              installs=_text_installs)
+                              installs=_text_installs, login_only=_login_only)
         starts.read(fence)
         for change in gone:
             io.delete(change)
@@ -975,14 +977,27 @@ class SocketStarts:
     its `enable` does nothing to an enabled unit, and makes the link again if someone
     took it away.
 
+    A login-only change, a changed daemon whose old and new service texts differ only in
+    that one has the install section and the other none (its `start` moved between
+    `login` and `connection`, its socket set unchanged), is never stopped or restarted,
+    whatever `upgrade` says: it is enabled when the new text has the section and
+    disabled without `--now` (the unlink before the rule) when it doesn't, and the
+    running service goes on. With `restart=True` it is treated as an unchanged daemon,
+    so an upgrade's restart still reaches it. A change with anything else in it follows
+    the rule above.
+
     `installs(text)` says whether a service's text has an install section, in the
-    backend's own text."""
+    backend's own text; `login_only(change)` whether a change is login-only, read from
+    the file on disk, so before the files are written."""
 
     def __init__(self, backend, writes: Sequence[UnitChange], keeps: Sequence[UnitChange],
-                 *, restart: bool, socketed, installs):
+                 *, restart: bool, socketed, installs, login_only):
         self._backend = backend
         self._restart = restart
         self._installs = installs
+        #: The daemons whose change is login-only, read before the files are written.
+        self._login_only = {(c.module, c.name) for c in writes
+                            if c.kind == "daemon" and c.action == "change" and login_only(c)}
         #: (module, name) -> [daemon change or None, socket change or None]
         self._daemons: dict[tuple[str, str], list] = {}
         for change in writes:
@@ -1050,7 +1065,7 @@ class SocketStarts:
             return sockets is not None
         if daemon.action == "add":
             return True
-        if daemon.action == "change":
+        if daemon.action == "change" and key not in self._login_only:
             return not _keeps(daemon) or daemon.enabled_before is False
         return self._restart and daemon.entry.get("upgrade", "restart") == "restart"
 
@@ -1099,19 +1114,25 @@ class SocketStarts:
                 self._run(io, daemon, *(("disable", "--now") if login else ("stop",)),
                           service)
             return
+        login_only = key in self._login_only
         if not self._acted(key):
             if daemon is not None and daemon.action == "change":
                 # Its login link is made or kept even though nothing starts it now.
                 if login and not self._run(io, daemon, "enable", service):
                     return
-                io.say(daemon, f"{service} rewritten; the new code runs from its next start")
+                io.say(daemon, _login_line(service, login) if login_only else
+                       f"{service} rewritten; the new code runs from its next start")
             return
         found = "down" if self._new(key) else (
             "counted" if self._counted
             else "running" if service in self._running else "down")
-        if daemon is not None and daemon.action == "keep" and sockets is None \
-                and found == "down":
-            return  # `restart=True` restarts only a service that runs
+        if daemon is not None and (daemon.action == "keep" or login_only) \
+                and sockets is None and found == "down":
+            # `restart=True` restarts only a service that runs; a login-only change still
+            # gets its login link.
+            if login_only and login:
+                self._run(io, daemon, "enable", service)
+            return
         if found == "running" and sockets is None:
             if not login or self._run(io, owner, "enable", service):
                 self._run(io, owner, "restart", service)
@@ -1188,6 +1209,43 @@ def _socketed(change: UnitChange) -> bool:
     the start rule takes, whatever its `start`."""
     return change.kind == "daemon" and any(
         line.startswith("Sockets=") for line in (change.text or "").splitlines())
+
+
+def _login_only(change: UnitChange) -> bool:
+    """Whether a changed daemon's service file on disk and its new text differ only in
+    that one of them has the install section and the other none. False when the file
+    can't be read."""
+    if change.kind != "daemon" or change.action != "change" or not change.paths:
+        return False
+    try:
+        old = change.paths[0].read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    new = change.text or ""
+    return (_text_installs(old) != _text_installs(new)
+            and _outside_install(old) == _outside_install(new))
+
+
+def _outside_install(text: str) -> list[str]:
+    """A unit text's lines less its `[Install]` section, with trailing blank lines
+    dropped."""
+    out: list[str] = []
+    skip = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            skip = stripped == "[Install]"
+        if not skip:
+            out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    return out
+
+
+def _login_line(unit: str, login: bool) -> str:
+    """The line for a login-only change, which runs no stop or restart."""
+    now = "starts it from now on" if login else "no longer starts it"
+    return f"{unit} rewritten: a login {now}; a running daemon is left as it is"
 
 
 def _keeps(change: UnitChange) -> bool:

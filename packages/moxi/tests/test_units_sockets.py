@@ -57,9 +57,10 @@ def w(site, tmp_path, monkeypatch):
     backend = FakeBackend(root, runner=supervisor)
     lines: list[str] = []
 
-    def module(*daemons):
+    def module(*daemons, **names):
         site.write("moxi_demo/settings.toml", SETTINGS)
-        site.module("demo", SETTINGS="'settings.toml'", DAEMONS="{" + ", ".join(daemons) + "}")
+        site.module("demo", SETTINGS="'settings.toml'", DAEMONS="{" + ", ".join(daemons) + "}",
+                    **names)
         moxi.modules.reset()
         __import__("sys").modules.pop("moxi_demo.module", None)
 
@@ -434,3 +435,78 @@ def test_a_login_daemon_on_the_fake_is_enabled_acted_on_and_read_as_its_service(
     assert w.sup.calls[0] == ("disable", f"{STEM}.service")
     rows = {r.kind: r for r in units.status(["demo"])}
     assert rows["daemon"].enabled is True and not w.sup.units[f"{STEM}.service"]["enabled"]
+
+
+# -- a socket daemon whose start follows a setting, on the fake --------------------------------
+
+def started(start, *addresses, name="shell"):
+    """A daemon with a socket on `addresses` and the given `start` (any form)."""
+    return (f"'{name}': {{'command': 'moxi-demo-shell', 'socket': {{'setting': 'port', "
+            f"'addresses': {list(addresses)!r}, 'start': {start!r}}}}}")
+
+
+def switched(key="shell.enabled"):
+    """The shell with a socket whose `start` is the switch form naming `key`."""
+    return started({"login": key}, "127.0.0.1", "::1")
+
+
+def _restarts(calls) -> list:
+    return [c for c in calls if c[0] in ("stop", "restart") or c[:2] == ("disable", "--now")]
+
+
+def test_a_switch_form_start_follows_its_key_and_config_set_applies_it_without_a_restart(
+        w, capsys):
+    """`login` while the key is true, `connection` while it is false, read when the plan is
+    made; `moxi config set` and `unset` of the key re-apply the daemon's units, enabling
+    or disabling its service and never stopping or restarting it."""
+    w.module(switched(), ANNOUNCES="2")
+    found = moxi.modules.load("demo")
+    plan = w.plan()
+    assert "install = " not in plan[("shell", "daemon")].text
+    assert units.starts(found) == {"shell": "connection"}
+    w.apply(plan.values())
+    assert w.sup.units[f"{STEM}.service"] == {"active": True, "enabled": False}
+    assert units.switched_daemons("demo", "shell.enabled") == ["shell"]
+
+    w.sup.calls.clear()
+    applied = config.set("demo", "shell.enabled", True, by="test")
+    assert "demo: applying units for shell.enabled" in capsys.readouterr().out
+    assert [(a.change.kind, a.change.action, a.ok) for a in applied] == [
+        ("daemon", "change", True), ("socket", "keep", True)]
+    assert "install = default.target" in (w.root / f"{STEM}.service").read_text()
+    assert ("enable", f"{STEM}.service") in w.sup.calls and _restarts(w.sup.calls) == []
+    assert w.sup.units[f"{STEM}.service"] == {"active": True, "enabled": True}
+    assert units.starts(found) == {"shell": "login"}
+    [line] = [line for a in applied for line in a.lines]
+    assert line == (f"{STEM}.service rewritten: a login starts it from now on; a running "
+                    "daemon is left as it is")
+
+    w.sup.calls.clear()
+    applied = config.unset("demo", "shell.enabled", by="test")
+    assert [(a.change.kind, a.change.action) for a in applied] == [
+        ("daemon", "change"), ("socket", "keep")]
+    assert ("disable", f"{STEM}.service") in w.sup.calls and _restarts(w.sup.calls) == []
+    assert w.sup.units[f"{STEM}.service"] == {"active": True, "enabled": False}
+    assert units.starts(found) == {"shell": "connection"}
+    assert {c.action for c in units.plan("demo")} == {"keep"}
+
+
+@pytest.mark.parametrize("key, words", [
+    ("port", "its socket start switch port must be a bool setting read at use, with no "
+             "env and default false"),
+    ("gone.enabled", "its socket start switch gone.enabled is not a setting the module "
+                     "declares"),
+])
+def test_a_switch_form_start_naming_no_switch_setting_is_refused_as_a_switch_is(
+        w, key, words):
+    w.module(switched(key), ANNOUNCES="2")
+    change = w.plan()[("shell", "daemon")]
+    assert (change.action, change.cause) == ("refuse", "socket")
+    assert change.reason == f"demo/shell: {words}"
+    assert units.starts(moxi.modules.load("demo")) == {"shell": None}
+
+
+def test_starts_gives_a_fixed_start_as_declared_and_skips_a_daemon_without_a_socket(w):
+    w.module(shell("127.0.0.1"), started("login", "::1", name="web"),
+             "'plain': {'command': 'moxi-demo-shell'}")
+    assert units.starts(moxi.modules.load("demo")) == {"shell": "connection", "web": "login"}

@@ -918,6 +918,55 @@ def test_a_line_longer_than_the_cap_is_refused(tmp_path):
     assert not log.exists()
 
 
+def test_append_record_with_no_cap_never_rolls_and_takes_any_line(tmp_path):
+    log = tmp_path / "logs" / "r.jsonl"
+    big = {"x": "y" * 1_500_000}
+    files.append_record(log, big, max_bytes=None)
+    files.append_record(log, big, max_bytes=None)
+    files.append_record(log, {"i": 2}, max_bytes=None)
+    assert sorted(p.name for p in log.parent.iterdir()) == ["r.jsonl"]
+    assert files.read_records(log) == [big, big, {"i": 2}]
+
+
+def test_a_durable_append_flushes_the_file_and_the_directory_it_made_the_file_in(
+        tmp_path, monkeypatch):
+    """`durable=True` flushes the file after each write, and its directory only when that
+    write created the file (POSIX); the default flushes nothing."""
+    synced: list[int] = []
+    dirs: list[Path] = []
+    real = os.fsync
+
+    def fsync(fd):
+        synced.append(fd)
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(files, "_fsync_dir", dirs.append)
+    log = tmp_path / "audit" / "day.jsonl"
+    files.append_record(log, {"i": 0})
+    assert (synced, dirs) == ([], [])
+    log.unlink()
+    files.append_record(log, {"i": 1}, durable=True, max_bytes=None)
+    assert len(synced) == 1
+    assert dirs == ([] if sys.platform == "win32" else [log.parent])
+    files.append_record(log, {"i": 2}, durable=True)
+    assert len(synced) == 2 and len(dirs) == (0 if sys.platform == "win32" else 1)
+    if sys.platform != "win32":
+        assert mode_of(log) == 0o600
+    assert files.read_records(log) == [{"i": 1}, {"i": 2}]
+
+
+def test_a_durable_append_that_rolls_flushes_the_new_files_directory(tmp_path, monkeypatch):
+    dirs: list[Path] = []
+    monkeypatch.setattr(files, "_fsync_dir", dirs.append)
+    log = tmp_path / "logs" / "r.jsonl"
+    files.append_record(log, {"i": 0}, max_bytes=10)
+    files.append_record(log, {"i": 1}, max_bytes=10, durable=True)
+    assert log.with_name("r.jsonl.1").exists()
+    assert dirs == ([] if sys.platform == "win32" else [log.parent])
+    assert [r["i"] for r in files.read_records(log)] == [0, 1]
+
+
 APPENDER = textwrap.dedent("""
     import sys
     from moxi import files
