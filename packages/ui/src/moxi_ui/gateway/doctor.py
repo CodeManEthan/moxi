@@ -65,6 +65,7 @@ class Facts:
     tunnel_reason: str | None = None
     address: Any = None
     path_problem: str | None = None
+    retired_problem: str | None = None
     shell_running: bool = False
     acts: dict[str, Any] | None = None
     hold: int | None = None
@@ -177,6 +178,7 @@ def read_facts(*, environ: Any = None) -> Facts:
     from .listener import extra_installed, read_tunnel
     from .mount import read_acts
     from .provider import checks, provider_uid
+    from ..tunnel import read_retired, retired_path
 
     layout = Layout(MODULE)
     system = endpoint.system()
@@ -202,6 +204,10 @@ def read_facts(*, environ: Any = None) -> Facts:
             endpoint.check_socket_path(endpoint.socket_path(layout, environ))
         except endpoint.PathRefused as err:
             facts.path_problem = str(err)
+    try:
+        read_retired(facts.state_dir)
+    except (OSError, ValueError) as err:
+        facts.retired_problem = f"{retired_path(facts.state_dir)} can't be read ({err})"
     facts.shell_running, started = _shell()
     acts = read_acts(facts.runtime_dir)
     facts.acts = acts if acts is not None and _running(acts.get("pid")) else None
@@ -268,6 +274,11 @@ def _fail(facts: Facts) -> tuple[str, str | None] | None:
                     "free the port and run `moxi ui gateway on`")
         return (f"the gateway couldn't hold its socket ({facts.held.get('reason')}); the "
                 "tunnel entry was removed", "moxi ui gateway on")
+    if facts.retired_problem:
+        return (f"the gateway's copy of its retired origins, {facts.retired_problem}, so "
+                "tunnel refuses every ui/gateway add",
+                "move the file aside and run `moxi ui gateway on`; the copy refills from "
+                "tunnel's record, unless tunnel was purged")
     if facts.switch and address is None:
         return "there is no ui/gateway tunnel entry", "moxi ui gateway on"
     if live and address.state != "on":

@@ -380,6 +380,9 @@ def test_the_gateway_row_is_off_then_ok_with_what_it_serves(tmp_path):
      "port 8461 was held by another program; there was no tunnel entry to remove",
      "free the port and run `moxi ui gateway on`"),
     ({"address": None}, "no ui/gateway tunnel entry", "moxi ui gateway on"),
+    ({"address": None, "retired_problem": "/s/retired.json can't be read (not a list)"},
+     "retired origins, /s/retired.json can't be read (not a list), so tunnel refuses",
+     "the copy refills from tunnel's record, unless tunnel was purged"),
     ({"address": Address(state="applying")}, "entry is applying", "moxi tunnel repair"),
     ({"kind": "unix", "acts": {"acts": False, "reason": "target"}},
      "doesn't forward to this Moxi", "moxi tunnel repair"),
@@ -465,6 +468,19 @@ def test_the_doctor_reads_a_current_hold_failure_from_the_audit_log(monkeypatch)
     assert doctor.read_facts().held is None
     names = [row.name for row in doctor.rows()]
     assert names == ["gateway", "gateway login", "gateway audit"]
+
+
+@pytest.mark.parametrize("text", [b"{}", b"not json", b"\xff"])
+def test_the_doctor_names_a_copy_of_the_retired_origins_it_cant_read(monkeypatch, text):
+    monkeypatch.setattr(doctor, "_shell", lambda: (False, None))
+    monkeypatch.setattr(doctor, "tunnel_state", lambda: ("absent", "tunnel isn't installed"))
+    state = Layout("ui").state_dir()
+    assert doctor.read_facts().retired_problem is None
+    path = decl.retired_path(state)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text)
+    problem = doctor.read_facts().retired_problem
+    assert problem is not None and problem.startswith(f"{path} can't be read (")
 
 
 def test_the_command_that_raises_an_installed_tunnel(tmp_path):
