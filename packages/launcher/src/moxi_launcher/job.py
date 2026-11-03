@@ -976,8 +976,9 @@ def write_request(request_id: str, data: Mapping[str, Any],
 
 def launch_request(request_id: str, data: Mapping[str, Any]):
     """The `api.LaunchRequest` a request file holds: its preset, the values the page set,
-    typed as `catalog.parse` gives them, the flags passed on and `off_posture`, under
-    `request_id`. It names no caller's directory: a page launch names its own place."""
+    typed as `catalog.parse` gives them, the flags passed on, the rows left out (none
+    when the file names none) and `off_posture`, under `request_id`. It names no caller's
+    directory: a page launch names its own place."""
     from . import api
 
     def text(key: str) -> str | None:
@@ -986,12 +987,15 @@ def launch_request(request_id: str, data: Mapping[str, Any]):
 
     typed = data.get("typed") or {}
     extra = data.get("extra") or []
-    if not isinstance(typed, dict) or not isinstance(extra, list):
+    left_out = data.get("left_out") or []
+    if not isinstance(typed, dict) or not isinstance(extra, list) \
+            or not isinstance(left_out, list):
         raise NotHere(None, f"the page's request for launch {request_id} is not one the "
                             "launcher wrote", "preview the launch again and launch it")
     return api.LaunchRequest(seat=text("seat"), project_preset=text("project_preset"),
                              typed=typed, extra=tuple(str(word) for word in extra),
                              off_posture=bool(data.get("off_posture")),
+                             left_out=tuple(str(name) for name in left_out),
                              request_id=request_id)
 
 
@@ -1025,12 +1029,13 @@ def resume_request(request_id: str, data: Mapping[str, Any], *,
 
 def placed(request, env: Mapping[str, str] | None = None):
     """`request`'s values resolved (`presets.resolve`), refused `no-cwd` when no layer of
-    them names where the session starts: a page launch has no caller's directory to fall
-    back on. Raises the resolver's own refusals too."""
+    them names where the session starts, the rows left out counted as unnamed: a page
+    launch has no caller's directory to fall back on. Raises the resolver's own refusals
+    too."""
     from . import presets
 
     resolved = presets.resolve(request, env=env)
-    if resolved.sources.get("cwd") == presets.SHIPPED:
+    if resolved.sources.get("cwd") in (presets.SHIPPED, presets.LEFT_OUT):
         raise NoPlace("cwd", "a launch from the page names no directory, project or scratch "
                              "to start in", "choose a directory, a project or scratch, or a "
                                             "preset that names one")

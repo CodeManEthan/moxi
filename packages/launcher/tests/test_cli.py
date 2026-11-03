@@ -99,6 +99,9 @@ PARSES = [
     (["run", "--project", "moxi"], {"project_preset": None, "rest": ["--project", "moxi"]}),
     (["preview", "--off", "--seat", "s"], {"off_posture": False, "rest": ["--off"]}),
     (["preview", "--seat", "planner", "--json"], {"verb": "preview", "json": True}),
+    (["run", "--leave-out", "model", "--model", "x", "--leave-out", "effort"],
+     {"leave_out": ["model", "effort"], "rest": ["--model", "x"]}),
+    (["preview", "--leave-out", "add_dir"], {"leave_out": ["add_dir"]}),
     (["log"], {"verb": "log", "limit": None, "before": None, "json": False}),
     (["log", "--limit", "5", "--before", "2026-10-30T00:00:00Z", "--json"],
      {"limit": 5, "before": "2026-10-30T00:00:00Z", "json": True}),
@@ -395,6 +398,49 @@ def test_preview_refuses_with_the_launchs_code(work, argv, code, short, capsys):
     status, out, err = run(argv, capsys)
     assert status == code, err
     assert err.splitlines()[0].endswith(f"[{short}]") and out == ""
+
+
+# -- rows left out ----------------------------------------------------------------------------
+
+SEAT = '[seat.s]\nmodel = "opus"\neffort = "high"\n[seat.coder]\nharness = "codex"\n'
+
+
+def test_run_hands_launch_each_row_left_out(work, monkeypatch, capsys):
+    write_presets(SEAT)
+    seen = {}
+    monkeypatch.setattr(api, "launch", lambda request, **kw: (
+        seen.setdefault("request", request), result())[1])
+    code, _, _ = run(["run", "--seat", "s", "--leave-out", "model", "--leave-out",
+                      "effort"], capsys)
+    assert code == codes.OK and tuple(seen["request"].left_out) == ("model", "effort")
+    assert dict(seen["request"].typed) == {}
+
+
+def test_preview_drops_a_left_out_rows_flag(work, capsys):
+    write_presets(SEAT)
+    shown = json.loads(run(["preview", "--seat", "s", "--json"], capsys)[1])
+    assert "opus" in shown["argv"] and "high" in shown["argv"]
+    code, out, _ = run(["preview", "--seat", "s", "--leave-out", "model", "--leave-out",
+                        "effort", "--json"], capsys)
+    shown = json.loads(out)
+    assert code == codes.OK and "opus" not in shown["argv"] and "high" not in shown["argv"]
+    assert shown["values"]["model"] == "" and shown["values"]["effort"] == ""
+
+
+@pytest.mark.parametrize("verb", ["run", "preview"])
+@pytest.mark.parametrize("words, row", [
+    (["--leave-out", "nonsense"], "nonsense"),
+    (["--model", "opus", "--leave-out", "model"], "model"),
+    (["--leave-out", "harness"], "harness"),
+    (["--seat", "coder", "--search", "--leave-out", "harness"], "harness"),
+])
+def test_a_row_left_out_that_no_harness_has_harness_or_also_typed_is_refused(
+        work, harness, verb, words, row, capsys):
+    write_presets(SEAT)
+    status, out, err = run([verb, *words], capsys)
+    assert status == codes.USAGE and out == ""
+    assert err.splitlines()[0].endswith("[bad-value]") and row in err.splitlines()[0]
+    assert rows() == [] and harness.runs() == []
 
 
 # -- log ------------------------------------------------------------------------------------

@@ -1,0 +1,13 @@
+{
+  "name": "moxi-projects-web",
+  "private": true,
+  "description": "The projects module's web sources: its page, and the picker, card and add form other pages place.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

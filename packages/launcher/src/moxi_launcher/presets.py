@@ -27,10 +27,11 @@ holding `/` or `\\`, or starting with `~` or `.`, is a path; any other is a proj
 Resolving one launch. Each row's value is, each later one winning: the catalog's shipped
 default; `[defaults]`; the one preset named, if any; the flags typed. A launch names at
 most one preset, a seat or a project preset, and never draws values from a second. Where
-the session starts is taken whole from the latest of those that names a place. A posture
-row whose value, from the preset or typed, differs from its effective default (the
-`[defaults]` value, else the shipped one) needs `--off-posture`, else the launch is
-refused naming both values.
+the session starts is taken whole from the latest of those that names a place. A row the
+launch leaves out (`--leave-out`) is taken out of `[defaults]` and the preset first, so it
+holds its shipped default whatever they set. A posture row whose value, from the preset,
+typed or left out, differs from its effective default (the `[defaults]` value, else the
+shipped one) needs `--off-posture`, else the launch is refused naming both values.
 
 Projects, when installed, are read only here and only when a launch or a check asks:
 `get(key)` for a project key, `for_path(dir)` for a directory's key, `Project.agents` for
@@ -84,6 +85,8 @@ POSTURES = ("operator", "go")
 WITH = "with:"
 
 SHIPPED, DEFAULTS, PRESET, TYPED = "shipped", "defaults", "preset", "typed"
+#: The source of a row the launch leaves out: it holds its shipped default.
+LEFT_OUT = "left-out"
 
 _SCHEMA_TEXT = """
 [defaults]
@@ -142,7 +145,7 @@ class OffPosture(Refused):
 
     def __init__(self, row: str, value: object, default: object, source: str):
         self.value, self.default, self.source = value, default, source
-        whose = "typed" if source == TYPED else "the preset's"
+        whose = {TYPED: "typed", LEFT_OUT: "left out"}.get(source, "the preset's")
         super().__init__(row, f"{row} {_show(value)} ({whose}) is off your default "
                               f"{_show(default)}",
                          "launch with --off-posture to allow it, or set it in [defaults]")
@@ -726,8 +729,9 @@ class Request:
 
     `typed` is the flags typed, as `catalog.parse(...).values` gives them, and `extra`
     the flags passed on (`catalog.parse(...).extra`), which go in as typed
-    `extra_flags`. `cwd` is the caller's directory, the session's when nothing names a
-    place; None reads this process's."""
+    `extra_flags`. `left_out` names the catalog rows the launch leaves out, whatever
+    `[defaults]` or the preset sets. `cwd` is the caller's directory, the session's when
+    nothing names a place; None reads this process's."""
 
     seat: str | None = None
     project_preset: str | None = None
@@ -735,6 +739,7 @@ class Request:
     extra: Sequence[str] = ()
     off_posture: bool = False
     cwd: str | None = None
+    left_out: Sequence[str] = ()
 
 
 @dataclass(frozen=True)
@@ -745,8 +750,10 @@ class Resolved:
     harness's, by name, at its resolved value (a row nothing set holds its shipped
     default). `values["cwd"]` and `values["project"]` hold the resolved directory and
     project key. `sources` says where each value came from: `shipped`, `defaults`,
-    `preset` or `typed`. `chosen` names the rows the preset or the typed flags set, which
-    `catalog.fit` refuses when the mode can't carry them.
+    `preset`, `typed` or `left-out`; the three place rows (`cwd`, `project`, `scratch`)
+    each carry the source of the place the launch starts in, when a layer names one.
+    `chosen` names the rows the preset or the typed flags set, which `catalog.fit`
+    refuses when the mode can't carry them.
 
     The launcher's own: `cwd` (absolute; None only for a scratch launch, whose directory
     the launch makes), `project_key` (projects' spelling) and the project's `agents`,
@@ -785,8 +792,9 @@ class Resolved:
 def harness_of(request, *, presets: Presets | None = None,
                env: Mapping[str, str] | None = None) -> str:
     """The harness a request launches before its flags are parsed: the preset's, else
-    the one `[defaults]` names, else the shipped default. A caller parses the typed flags against it
-    unless `--harness` was typed (`catalog.typed_harness`)."""
+    the one `[defaults]` names, else the shipped default. A caller parses the typed flags
+    against it unless `--harness` was typed (`catalog.typed_harness`). A request that
+    leaves `harness` out is refused when it is laid (`layered`)."""
     found = presets if presets is not None else read(env=env)
     preset = _named(request, found)
     if preset is not None and preset.harness in catalog.HARNESSES:
@@ -796,14 +804,50 @@ def harness_of(request, *, presets: Presets | None = None,
     return str(catalog.launcher()["harness"].default)
 
 
-def resolve(request, *, presets: Presets | None = None,
+@dataclass(frozen=True)
+class Layered:
+    """One launch's rows as the layers lay them, before the place is looked up or any
+    rule between rows is checked: what `resolve` builds on, and what a form filled from a
+    preset shows.
+
+    `harness` is the harness laid for. `values` holds every row offered for it at its
+    layered value, after the place rule and the one-spelling rule: a place row or a
+    spelling that another layer's place or spelling replaced holds its shipped default,
+    as a left-out row does. `sources` says where each value came from: `shipped`,
+    `defaults`, `preset`, `typed` or `left-out`. `place` is the one place named, whole,
+    as the latest layer that names one writes it (`place_source`); empty, with `shipped`,
+    when none does. A seat's `home` can be that place, though it is no row. `chosen`
+    names the rows the preset or the typed flags set. `preset` is the preset named, its
+    left-out rows taken out. `defaults` is `[defaults]` as checked, left-out rows kept,
+    which the posture rule reads. `warnings` are the preset's, one line each."""
+
+    harness: str
+    preset: Preset | None
+    values: Mapping[str, object]
+    sources: Mapping[str, str]
+    chosen: frozenset[str]
+    place: Mapping[str, object]
+    place_source: str
+    defaults: Mapping[str, object]
+    warnings: tuple[str, ...] = ()
+
+
+def layered(request, *, harness: str | None = None, presets: Presets | None = None,
             env: Mapping[str, str] | None = None,
-            available: Callable[[str], bool] | None = None) -> Resolved:
-    """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
-    preset named, then the flags typed. Reads projects when a place needs it. Raises a
-    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `NotYet`,
-    `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
-    catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
+            available: Callable[[str], bool] | None = None) -> Layered:
+    """Lay one launch's rows: the catalog's shipped default, then `[defaults]`, then the
+    one preset named, then the flags typed, each later one winning; then the one-spelling
+    rule and the place rule. A row the request leaves out (`left_out`) is taken out of
+    `[defaults]` and the preset before they are laid, and before the preset is checked
+    against the harness, so it holds its shipped default, is not chosen, and neither rule
+    sees it. `harness`, when given, is the harness laid for in place of the one the
+    layers name; the `harness` row still holds the layers' value.
+
+    Raises `UnknownPreset`, `BadPreset`, the catalog's `NeedsModule` for a typed row this
+    install does not offer, and its `BadValue`: a left-out name that is no catalog row of
+    any harness, a left-out `harness`, a row both typed and left out, a harness no catalog has, two places or
+    two spellings of one text in one layer. A `moxi.config.ConfigError` when the file
+    can't be read."""
     avail = _avail(available)
     found = presets if presets is not None else read(env=env)
     preset = _named(request, found)
@@ -811,22 +855,28 @@ def resolve(request, *, presets: Presets | None = None,
     extra = list(getattr(request, "extra", None) or ())
     if extra:
         typed[catalog.EXTRA] = extra
-    off_posture = bool(getattr(request, "off_posture", False))
-    warnings: list[str] = []
+    left_out = _left_out(getattr(request, "left_out", None) or (), typed)
 
     defaults, problems = _check_defaults(found.defaults, avail)
     errors = [p for p in problems if p.level == ERROR and p.code != "needs-module"]
     if errors:
         raise BadPreset(errors[0])
+    from_defaults = {k: v for k, v in defaults.items() if k not in left_out}
+    if preset is not None and left_out:
+        preset = Preset(preset.kind, preset.name, MappingProxyType(
+            {k: v for k, v in preset.values.items() if k not in left_out}))
 
     shipped_harness = catalog.launcher()["harness"].default
-    harness = typed.get("harness") or (preset.harness if preset is not None else None) \
-        or defaults.get("harness") or shipped_harness
+    if harness is None:
+        harness = typed.get("harness") or (preset.harness if preset is not None
+                                           else None) \
+            or from_defaults.get("harness") or shipped_harness
     if harness not in catalog.HARNESSES:
         raise BadValue("harness", f"harness cannot be {harness!r}",
                        "set it to one of " + ", ".join(map(repr, catalog.HARNESSES)))
 
     chosen_preset: dict = {}
+    warnings: list[str] = []
     if preset is not None:
         chosen_preset, problems = _check_preset(preset, defaults.get("harness")
                                                 or shipped_harness, avail, harness=harness)
@@ -845,7 +895,7 @@ def resolve(request, *, presets: Presets | None = None,
             raise BadValue(key, f"{key} is not a {harness} row or a launcher row",
                            f"moxi launcher catalog {harness} lists them")
 
-    layers = ((DEFAULTS, defaults), (PRESET, chosen_preset), (TYPED, typed))
+    layers = ((DEFAULTS, from_defaults), (PRESET, chosen_preset), (TYPED, typed))
     values: dict = {}
     sources: dict = {}
     for name, row in rows.items():
@@ -853,8 +903,9 @@ def resolve(request, *, presets: Presets | None = None,
         for source, layer in layers:
             if name in layer:
                 values[name], sources[name] = _unset_as_default(row, layer[name]), source
+        if name in left_out:
+            sources[name] = LEFT_OUT
     _one_spelling(layers, rows, values, sources)
-    chosen = frozenset(k for k in (*chosen_preset, *typed) if k in rows)
 
     # Where the session starts: taken whole from the latest layer that names a place.
     place_source, place = SHIPPED, {}
@@ -866,16 +917,64 @@ def resolve(request, *, presets: Presets | None = None,
     if len(place) > 1:
         raise BadValue(next(iter(place)), f"{' and '.join(place)} each name where the "
                        "session starts", "give one of them")
+    for name in PLACE:
+        if name in rows and name not in place and sources[name] != LEFT_OUT:
+            values[name], sources[name] = _fresh(rows[name].default), SHIPPED
+
+    return Layered(
+        harness=harness, preset=preset, values=MappingProxyType(values),
+        sources=MappingProxyType(sources),
+        chosen=frozenset(k for k in (*chosen_preset, *typed) if k in rows),
+        place=MappingProxyType(place), place_source=place_source,
+        defaults=MappingProxyType(defaults), warnings=tuple(warnings))
+
+
+def _left_out(names: Sequence[str], typed: Mapping[str, object]) -> frozenset[str]:
+    """The rows a request leaves out, each a catalog row of some harness, not `harness`
+    (a launch needs one), and not typed too; else the catalog's `BadValue` naming the
+    first that is not."""
+    for name in names:
+        if name == "harness":
+            raise BadValue(name, "harness can't be left out: a launch needs one",
+                           "give the harness to launch, or leave it to the preset")
+        if name not in catalog.launcher() and not any(
+                name in catalog.load(h) for h in catalog.HARNESSES):
+            raise BadValue(name, f"{name} is not a launcher row or a row of any harness, "
+                                 "so it can't be left out",
+                           "moxi launcher catalog lists the rows")
+        if name in typed:
+            raise BadValue(name, f"{name} is both given and left out",
+                           f"give {name} or leave it out, not both")
+    return frozenset(names)
+
+
+def resolve(request, *, presets: Presets | None = None,
+            env: Mapping[str, str] | None = None,
+            available: Callable[[str], bool] | None = None) -> Resolved:
+    """Resolve one launch's values: shipped defaults, then `[defaults]`, then the one
+    preset named, then the flags typed (`layered`), each row the request leaves out
+    holding its shipped default. Reads projects when a place needs it. Raises a
+    `catalog.Refused`: `UnknownPreset`, `BadPreset`, `OffPosture`, `NotYet`,
+    `NeedsProjects`, `UnknownProject`, `ProjectsUnreadable`, `ProjectsBusy`, or the
+    catalog's `BadValue`; a `moxi.config.ConfigError` when the file can't be read."""
+    avail = _avail(available)
+    laid = layered(request, presets=presets, env=env, available=avail)
+    preset, harness, place = laid.preset, laid.harness, laid.place
+    values, sources, chosen = dict(laid.values), dict(laid.sources), laid.chosen
+    off_posture = bool(getattr(request, "off_posture", False))
+    warnings = list(laid.warnings)
+
     caller = getattr(request, "cwd", None) or os.getcwd()
     cwd, scratch, project = _place(place, caller, avail,
                                    preset.where if preset is not None else "the launch")
-    for name in ("cwd", "project", "scratch"):
-        sources[name] = place_source if place else SHIPPED
+    if place:
+        for name in ("cwd", "project", "scratch"):
+            sources[name] = laid.place_source
     values["cwd"] = cwd or ""
     values["scratch"] = scratch
     values["project"] = project.key if project is not None else ""
 
-    _check_posture_rows(harness, values, sources, defaults, off_posture)
+    _check_posture_rows(harness, values, sources, laid.defaults, off_posture)
     catalog.refuse_values(harness, values, chosen=chosen, available=avail)
 
     posture = values.get("posture") or ""
@@ -930,7 +1029,7 @@ def _one_spelling(layers, rows, values: dict, sources: dict) -> None:
                                "give one of them")
             if given:
                 other = from_file if given[0] == inline else inline
-                if other in rows and sources.get(other) != source:
+                if other in rows and sources.get(other) not in (source, LEFT_OUT):
                     values[other], sources[other] = _fresh(rows[other].default), SHIPPED
                 break
 
@@ -1075,7 +1174,7 @@ def _check_posture_rows(harness, values, sources, defaults, off_posture) -> None
     for row in catalog.load(harness):
         if not row.posture or row.name not in values:
             continue
-        if sources[row.name] not in (PRESET, TYPED):
+        if sources[row.name] not in (PRESET, TYPED, LEFT_OUT):
             continue
         default = (_checked(row, defaults[row.name]) if row.name in defaults
                    else row.default)
@@ -1108,9 +1207,9 @@ def _show(value: object) -> str:
 
 __all__ = [
     "Agent", "BadPreset", "CODEX_START_CEILING", "COMMS_INTERFACE", "ERROR", "KINDS",
-    "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets", "Problem",
-    "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "UnknownPreset",
-    "UnknownProject", "WARNING", "check", "comms_api", "comms_codex", "harness_of",
-    "mode_of", "path", "project_agents", "projects_api", "read", "resolve", "roles",
-    "schema",
+    "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
+    "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
+    "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_codex",
+    "harness_of", "layered", "mode_of", "path", "project_agents", "projects_api", "read",
+    "resolve", "roles", "schema",
 ]

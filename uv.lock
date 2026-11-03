@@ -1078,18 +1078,31 @@ dependencies = [
     { name = "moxi" },
 ]
 
+[package.optional-dependencies]
+ui = [
+    { name = "moxi-ui" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "moxi", editable = "packages/moxi" }]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
+]
+provides-extras = ["ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 

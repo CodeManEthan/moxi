@@ -4,6 +4,7 @@ Each is a `moxi_projects.api.ProjectsError`, carrying `reason`, `fix` and `exit_
 
 - `Refused` (exit 3): the act was declined on what it found: a bad or taken key, a taken
   root, an unknown kind, a kind's check, a remove refusal.
+- `NoGit` (exit 3), a `Refused`: `add --create` for a `git` mint found no `git` on PATH.
 - `Broken` (exit 1): a contribution the act depends on won't load, raises, collides or
   answers out of shape. `modules` names the modules at fault.
 - `Usage` (exit 2): the act was asked wrongly, such as an add with no root and nothing to
@@ -27,6 +28,10 @@ class Refused(ProjectsError):
     """The act was declined on what it found."""
 
     exit_code = 3
+
+
+class NoGit(Refused):
+    """`add --create` for a `git` mint found no `git` on PATH. Nothing was made."""
 
 
 class Broken(ProjectsError):
@@ -64,5 +69,5 @@ class MoveFailed(ProjectsError):
     exit_code = 1
 
 
-__all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Refused", "Broken",
-           "Usage", "MintFailed", "MoveFailed"]
+__all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Refused", "NoGit",
+           "Broken", "Usage", "MintFailed", "MoveFailed"]
