@@ -200,7 +200,11 @@ def agents_remove(call: Any) -> dict[str, Any]:
 def remove(call: Any) -> Any:
     """`POST /api/remove`, confirmed: `moxi projects remove KEY` under the request's
     idempotency key. 202 with the status link for a removal and for every refusal the
-    store keeps; the store's own refusals answered at once, keeping nothing."""
+    store keeps; the store's own refusals answered at once, keeping nothing.
+
+    Within one server's life loopback answers a repeat of the key itself, comparing the
+    raw body, so the project's key is compared ignoring case only after a restart, when
+    the kept row answers; the page always resends the same bytes."""
     key, job = call.body["key"], call.key
     link = lb.Accepted(f"{STATUS_ROUTE}?job={job}")
     try:
