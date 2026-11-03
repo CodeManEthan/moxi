@@ -242,13 +242,5 @@ def test_the_testing_extra_needs_a_platformdirs_that_reads_the_windows_overrides
     recent platformdirs reads; with an older one its files would land in the real profile."""
     from importlib.metadata import requires
 
-    from packaging.requirements import Requirement
-
-    wanted = [Requirement(line) for line in requires("moxi-ui") or []
-              if line.startswith("platformdirs")]
-    assert len(wanted) == 1
-    floor = wanted[0]
-    assert str(floor.specifier) == ">=4.11.3"
-    assert floor.marker is not None
-    assert floor.marker.evaluate({"sys_platform": "win32", "extra": "testing"})
-    assert not floor.marker.evaluate({"sys_platform": "linux", "extra": "testing"})
+    wanted = [line for line in requires("moxi-ui") or [] if line.startswith("platformdirs")]
+    assert wanted == ["platformdirs>=4.11.3; (sys_platform == 'win32') and extra == 'testing'"]
