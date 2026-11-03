@@ -10,7 +10,7 @@ import re
 import struct
 from pathlib import Path
 
-from test_gateway_redact import Gate, gateway_policy
+from test_gateway_redact import VALUE, Gate, _rows_body, gateway_policy
 
 from moxi_ui import document as _document
 from moxi_ui.gateway.access import OPEN_PATHS, web_file
@@ -114,6 +114,45 @@ def test_only_one_mark_of_1_on_a_get_makes_a_navigation(tmp_path: Path) -> None:
     posted = gate.phone.request("POST", "/m/ui/", {}, headers=_FORWARDED)
     assert posted.status in (403, 404)
     assert b"data-gateway" not in posted.body
+
+
+#: Every kind of path a marked GET could try for: a module's route and file, the push
+#: stream, the act paths, the shell's files and routes, sign-out, the PWA's files.
+_MARKED_PATHS = ("/m/fixture/api/rows?x=1", "/m/ui/api/push", "/gw/act/prepare",
+                 "/gw/act/commit", "/gw/act/state?act=x", "/m/ui/client.js", "/m/ui/theme.css",
+                 "/m/fixture/page.js", "/m/ui/api/devices", "/api/signout",
+                 "/m/ui/api/modules", "/manifest.webmanifest", "/offline", "/sw.js",
+                 "/nosuch")
+
+
+def test_a_marked_get_on_any_path_gets_only_the_document_or_the_way_to_sign_in(
+        tmp_path: Path) -> None:
+    """The navigation mark relaxes no gate and reaches no route's data: with a live cookie
+    it gets the shell document, without one the redirect to sign in, whatever the path and
+    whether or not the key comes with it."""
+    gate = _gate(tmp_path, paired=True)
+    gate.reads.answers["/api/rows?x=1"] = _rows_body(VALUE)
+    plain = gate.get("/m/fixture/api/rows?x=1")
+    assert plain.status == 200 and b"/plain/text" in plain.body
+    for headers in (_FORWARDED[:1], _FORWARDED):
+        for path in _MARKED_PATHS:
+            for cookie, key in ((True, True), (True, False), (False, True), (False, False)):
+                answer = gate.get(path, headers=headers, cookie=cookie, key=key)
+                where = (path, headers, cookie, key)
+                assert b"/plain/text" not in answer.body, where
+                if cookie:
+                    assert answer.status == 200, where
+                    assert b'data-gateway="on"' in answer.body, where
+                else:
+                    assert answer.status == 303, where
+                    assert answer.header("location")[0].startswith("/signin?n="), where
+
+
+def test_a_marked_cross_site_get_is_refused(tmp_path: Path) -> None:
+    gate = _gate(tmp_path, paired=True)
+    for path in ("/m/ui/", "/m/fixture/api/rows?x=1", "/nosuch"):
+        answer = gate.get(path, headers=(*_FORWARDED[:1], ("sec-fetch-site", "cross-site")))
+        assert answer.status == 403, path
 
 
 def test_the_desktops_document_neither_links_the_manifest_nor_marks_the_gateway() -> None:
