@@ -1,8 +1,9 @@
 """The launcher's page and components in a browser, through a real shell that starts the
 launcher's real page server: the contract check on the panel and both components, a red
 session in the error colour, a session's state followed through a clear, the sessions
-block on the panel, the 360 px width check, a headless launch whose row arrives by push, a
-refusal met before a launch's row, and a past terminal session's command to resume.
+block on the panel, the 360 px width check, the launch form filled from a preset and what
+an emptied field leaves out, a headless launch whose row arrives by push, a refusal met
+before a launch's row, and a past terminal session's command to resume.
 
 The shell runs with a fake `claude` first on its `PATH`, which prints a line and exits, so
 a launch from the panel runs that and nothing else. Every test seeds rows of its own in
@@ -14,13 +15,14 @@ from __future__ import annotations
 import json
 import re
 import sys
+from typing import Any
 
 import pytest
 from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
-from moxi_launcher import targets
+from moxi_launcher import presets, targets
 
 pytestmark = [pytest.mark.browser,
               pytest.mark.skipif(sys.platform == "win32",
@@ -169,8 +171,8 @@ def test_the_panel_with_its_sessions_block_and_the_block_alone_fit_a_phone(
 
 # --- what a preview sends -------------------------------------------------------------------
 
-#: Types `value` into the form's `cwd` and has the panel draw again before the panel's own
-#: look at what changed, which a busy page does when an answer lands just then.
+#: Types `value` into the form's `cwd` and has the panel draw again at once, which a busy
+#: page does when an answer lands just then.
 _TYPE_THEN_DRAW = """async (panel, value) => {
   const form = panel.shadowRoot.querySelector("moxi-ui-form");
   const cwd = form.shadowRoot.querySelector('[data-control="cwd"]');
@@ -198,6 +200,164 @@ def test_a_field_typed_as_the_panel_draws_again_is_still_sent(ui_shell, ui_page,
     body = json.loads(sent[0])
     assert body["values"]["cwd"] == str(tmp_path), body
     assert "cwd" not in body["leave_out"], body
+
+
+# --- the preset form -----------------------------------------------------------------------
+
+#: The shell's presets file for the preset form's tests: a Claude seat that sets a model,
+#: a place, a directory to add and an inline brief, which the form withholds; a Codex seat;
+#: and a seat that launches headless.
+PRESETS_FILE = """\
+[seat.planner]
+model = "opus"
+cwd = "{work}"
+add_dir = ["{work}"]
+brief = "{brief}"
+
+[seat.coder]
+harness = "codex"
+cwd = "{work}"
+profile = "fast"
+
+[seat.runner]
+cwd = "{work}"
+target = "headless"
+brief = "{brief}"
+"""
+
+
+@pytest.fixture
+def seats(ui_shell, tmp_path):
+    """The shell's presets file, holding `PRESETS_FILE`'s seats placed in a directory of
+    this test's; removed when the test ends, so no other test's form is filled from it.
+    Returns the directory."""
+    work = tmp_path / "work"
+    work.mkdir()
+    file = presets.path(env=ui_shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(PRESETS_FILE.format(work=work, brief=BRIEF))
+    yield work
+    file.unlink()
+
+
+def choose(panel, preset: str) -> Any:
+    """Choose `preset` (`seat:<name>`, or "" for none) to start from, and return the form
+    once it is drawn again from the preset's values."""
+    panel.locator('[data-control="preset"]').select_option(preset)
+    form = panel.locator("moxi-ui-form")
+    kit.control(form, "harness").wait_for()
+    return form
+
+
+def preview(panel) -> Any:
+    """Preview the form as it stands, and return the preview once it has answered."""
+    panel.locator("moxi-ui-form button.submit").click()
+    found = panel.locator('[data-part="preview"]')
+    expect(found).to_be_visible()
+    return found
+
+
+def note(form, name: str) -> Any:
+    """The note under the field `name`."""
+    return form.locator(f'.field[data-name="{name}"] .note')
+
+
+def test_choosing_a_seat_fills_its_values_and_its_harness(ui_shell, ui_page, seats):
+    panel = kit.open_panel(ui_page)
+    form = choose(panel, "seat:planner")
+    expect(kit.control(form, "model")).to_have_value("opus")
+    expect(note(form, "model")).to_contain_text("set by the seat planner")
+    expect(kit.control(form, "cwd")).to_have_value(str(seats))
+    expect(kit.control(form, "harness")).to_have_value("claude")
+    # A form left as it was filled previews as the seat alone: nothing is left out.
+    shown = preview(panel)
+    expect(shown.locator(".refused")).to_have_count(0)
+    expect(shown.locator('[data-field="argv"]')).to_contain_text("--model opus")
+    expect(shown.locator('[data-line="left-out"]')).to_have_count(0)
+    expect(shown.locator('[data-copy="preview"]')).to_have_text("moxi launcher run --seat planner")
+    # The Codex seat fills the form for its harness, with its harness's rows.
+    form = choose(panel, "seat:coder")
+    expect(kit.control(form, "harness")).to_have_value("codex")
+    expect(kit.control(form, "profile")).to_have_value("fast")
+    expect(note(form, "profile")).to_contain_text("set by the seat coder")
+    expect(form.locator('[data-control="model"]')).to_have_value("")
+
+
+def test_emptying_a_field_the_seat_sets_leaves_it_out_of_the_launch(ui_shell, ui_page, seats):
+    panel = kit.open_panel(ui_page)
+    form = choose(panel, "seat:planner")
+    kit.control(form, "model").fill("")
+    shown = preview(panel)
+    expect(shown.locator(".refused")).to_have_count(0)
+    expect(shown.locator('[data-field="argv"]')).not_to_contain_text("--model")
+    expect(shown.locator('[data-line="left-out"]')).to_have_text("Left out: model")
+    # A terminal launch's command to copy says so too.
+    expect(shown.locator('[data-copy="preview"]')).to_have_text(
+        "moxi launcher run --seat planner --leave-out model")
+
+
+def test_choosing_another_preset_discards_an_edit(ui_shell, ui_page, seats):
+    panel = kit.open_panel(ui_page)
+    form = choose(panel, "seat:planner")
+    kit.control(form, "model").fill("sonnet")
+    form = choose(panel, "seat:coder")
+    form = choose(panel, "seat:planner")
+    expect(kit.control(form, "model")).to_have_value("opus")
+    form = choose(panel, "")
+    expect(kit.control(form, "model")).to_have_value("")
+    expect(kit.control(form, "cwd")).to_have_value("")
+
+
+def test_changing_the_harness_keeps_an_edit_to_a_launcher_row(ui_shell, ui_page, seats,
+                                                               tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    panel = kit.open_panel(ui_page)
+    form = choose(panel, "seat:planner")
+    kit.control(form, "cwd").fill(str(other))
+    kit.control(form, "harness").select_option("codex")
+    # The form is filled for Codex with the same seat; the edited place stays.
+    expect(form.locator('[data-control="profile"]')).to_be_attached()
+    expect(kit.control(form, "cwd")).to_have_value(str(other))
+    shown = preview(panel)
+    expect(shown.locator(".refused")).to_have_count(0)
+    expect(shown.locator('[data-copy="preview"]')).to_contain_text(f"--cwd={other}")
+    expect(shown.locator('[data-copy="preview"]')).to_contain_text("--harness=codex")
+
+
+def test_a_withheld_brief_shows_its_note_and_keep_box_and_unticked_is_left_out(
+        ui_shell, ui_page, seats):
+    panel = kit.open_panel(ui_page)
+    form = choose(panel, "seat:planner")
+    brief = kit.control(form, "brief")
+    expect(brief).to_have_value("")
+    expect(note(form, "brief")).to_contain_text("set by the seat planner; its text is not shown here")
+    keep = panel.get_by_role("checkbox", name="Keep the brief the seat planner sets")
+    expect(keep).to_have_attribute("data-row", "brief")
+    expect(keep).to_be_checked()
+    # Kept, the seat's brief is the session's first turn.
+    shown = preview(panel)
+    expect(shown.locator("details", has_text="Its first turn")).to_contain_text(BRIEF)
+    expect(shown.locator('[data-line="left-out"]')).to_have_count(0)
+    # Unticked, it is left out.
+    keep.uncheck()
+    shown = preview(panel)
+    expect(shown).not_to_contain_text(BRIEF)
+    expect(shown.locator('[data-line="left-out"]')).to_have_text("Left out: brief")
+
+
+def test_a_word_enum_left_out_launches_its_shipped_word(ui_shell, ui_page, seats):
+    panel = kit.open_panel(ui_page)
+    form = choose(panel, "seat:runner")
+    target = kit.control(form, "target")
+    expect(target).to_have_value("headless")
+    expect(preview(panel)).to_have_attribute("data-target", "headless")
+    target.select_option("leave out (launches terminal)")
+    shown = preview(panel)
+    expect(shown).to_have_attribute("data-target", "terminal")
+    expect(shown.locator('[data-line="left-out"]')).to_have_text("Left out: target")
+    expect(shown.locator('[data-copy="preview"]')).to_have_text(
+        "moxi launcher run --seat runner --leave-out target")
 
 
 # --- a launch -------------------------------------------------------------------------------
