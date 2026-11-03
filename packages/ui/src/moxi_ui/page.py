@@ -126,7 +126,8 @@ _COMPONENT = Out("table", items={
 _MODULE = Out("table", items={
     "name": Out("string"), "state": Out("string"), "reason": Out("string"),
     "version": Out("string"), "summary": Out("string"), "page": Out("bool"),
-    "mounted": Out("bool"), "export_error": _STRING, "budget": _BUDGET,
+    "mounted": Out("bool"), "export_error": Out("string", nullable=True, mark="redact"),
+    "gateway_error": _STRING, "budget": _BUDGET,
     "confirmed": Out("list", items=Out("string")),
     "components": Out("list", items=_COMPONENT),
     "refused": Out("list", items=Out("table", items={"name": Out("string"),
@@ -134,7 +135,7 @@ _MODULE = Out("table", items={
 })
 
 #: The modules view's value: `/m/ui/api/modules` and the topic `ui.modules`.
-MODULES_SHAPE = {"at": _STRING, "error": _STRING, "contracts": Out("list", items=Out("int")),
+MODULES_SHAPE = {"at": _STRING, "error": Out("string", nullable=True, mark="redact"), "contracts": Out("list", items=Out("int")),
                  "modules": Out("list", items=_MODULE)}
 
 _ROW = Out("table", items={"module": Out("string"), "name": Out("string"),
@@ -310,7 +311,7 @@ async def doctor(call: Any) -> dict[str, Any]:
 ROUTES = (
     Route("/api/servers", "read", f"{_HERE}:servers", returns=SERVERS_SHAPE),
     Route("/api/stop", "act", f"{_HERE}:stop", returns={"ok": Out("bool")}),
-    Route("/api/modules", "read", f"{_HERE}:modules", returns=MODULES_SHAPE),
+    Route("/api/modules", "read", f"{_HERE}:modules", returns=MODULES_SHAPE, gateway=True),
     Route("/api/doctor", "read", f"{_HERE}:doctor",
           query={"module": Field("string", required=False, max=64)}, returns=DOCTOR_SHAPE),
 )

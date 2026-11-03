@@ -64,11 +64,15 @@ from moxi_loopback.api import (
 from . import cli, config, listen
 from . import page as shell_page
 from .listen import Listeners
-from .gateway import Gateway
-from .gateway.access import Access
-from .proxy import Proxy
+from .gateway import Gateway, Parts
+from .gateway import audit as _audit
+from .gateway.access import OPEN_PATHS, Access
+from .gateway.acts import Acts
+from .gateway.router import ICONS, GatewayRouter, mark, watch
+from .gateway.mount import Mount
+from .proxy import Client, Proxy
 from .push import Push
-from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
+from .router import ASGIApp, Router, fallback, shell_profile, shell_table, worker_layer
 from .session import (
     HEALTH_PATH,
     PROVE_PATH,
@@ -263,12 +267,67 @@ class Shell:
         self._should_exit: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self.phone = phone
+        self.audit: _audit.Audit | None = None
+        self.gateway_router: GatewayRouter | None = None
+        self.gateway: Gateway | None = None
         if gateway is True:
-            self.phone = Access(
-                state_dir=self.layout.state_dir(), runtime_dir=self.layout.runtime_dir(),
-                kept=lambda: self.gateway.kept if self.gateway is not None else None)
-            gateway = Gateway(self.layout, parts=self.phone.parts(), head_limit=HEAD_LIMIT)
-        self.gateway: Gateway | None = gateway or None
+            gateway = self._gateway()
+        self.gateway = gateway or None
+
+    def _gateway(self) -> Gateway:
+        """The shell's gateway: its sign-in state, audit log, act store and router."""
+        state_dir = self.layout.state_dir()
+        self.audit = audit = _audit.Audit(state_dir)
+
+        def write(kind: str, fields: dict[str, Any]) -> None:
+            if kind == "acts" and self.gateway is not None and self.gateway.kept is not None:
+                fields = {**fields, "change": self.gateway.kept.change}
+            try:
+                audit(kind, fields)
+            except (OSError, ValueError):
+                _log.exception("the gateway's %s row can't be written", kind)
+
+        self.phone = phone = Access(
+            state_dir=state_dir, runtime_dir=self.layout.runtime_dir(), audit=write,
+            kept=lambda: self.gateway.kept if self.gateway is not None else None)
+        phone.open_paths = OPEN_PATHS | ICONS
+
+        def key() -> bytes:
+            return _audit.key(state_dir)
+
+        def mounted() -> bool:
+            return self.gateway is not None and self.gateway.acts_now().mounted
+
+        async def own_page(scope: dict[str, Any], receive: Callable[..., Any],
+                           send: Callable[..., Any]) -> None:
+            page = self.router.page if self.router is not None else None
+            if page is not None:
+                await page(scope, receive, send)
+
+        def table() -> Table:
+            profile = self.gateway.profile if self.gateway is not None else None
+            return profile.table if profile is not None else Table()
+
+        acts = Acts(mounts=lambda: self._mounts, mounted=mounted,
+                    client=getattr(self.push, "client", None) or Client(self.starters),
+                    audit=audit, key=key, device_of=phone.device_of)
+        router = self.gateway_router = GatewayRouter(
+            phone, mounts=lambda: self._mounts, table=table,
+            mount=lambda: self.gateway.mount if self.gateway is not None else Mount(False, "off"),
+            page=own_page, push=self.push, starters=self.starters, acts=acts, key=key)
+        parts = phone.parts(Parts(table=router.build, router=router, fallback=fallback,
+                                  audit=write))
+        parts.router = mark(parts.router)
+        parts.layer = lambda inner, profile: watch(inner, profile, audit,
+                                                   device_of=phone.device_of)
+        phone_tick = parts.tick
+
+        def tick() -> None:
+            phone_tick()
+            audit.flush()
+
+        parts.tick = tick
+        return Gateway(self.layout, parts=parts, head_limit=HEAD_LIMIT)
 
     def start(self) -> RuntimeInfo:
         """Write the runtime file and build the request path. Returns the runtime info."""
@@ -287,6 +346,8 @@ class Shell:
         self.asgi = self.activity.wrap(worker_layer(inner))
         if self.gateway is not None:
             self.gateway.start()
+        if self.audit is not None:
+            self.audit.prune()
         return self.info
 
     @property
@@ -306,6 +367,8 @@ class Shell:
             return
         self._modules, self._mounts = tuple(view.pages), mounts
         self.set_table(table)
+        if self.gateway is not None:
+            self.gateway.refresh()
         self.starters.set_versions(view.versions)
         if isinstance(self.push, Push):
             self.push.set_exports(mounts)
@@ -340,6 +403,8 @@ class Shell:
             self._should_exit.set()
             if gateway is not None:
                 await gateway
+            if self.audit is not None:
+                self.audit.close()
             ending.cancel()
             if idling is not None:
                 idling.cancel()

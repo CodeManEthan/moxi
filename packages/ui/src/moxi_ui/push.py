@@ -28,6 +28,11 @@ loses nothing.
 - **The shell's own topics** are `ui.servers` (the page servers' rows, published from the
   starter set while a stream asks for it) and `ui.modules` (published by the shell's
   snapshot through `publish`).
+- **The gateway's form** (`gateway_app`): a stream from the phone gets only topics of
+  stream routes their module declares `gateway=True`, and the shell's own, so upstream is
+  asked for no other topic on its behalf; and each event it gets is redacted at fan-out
+  against the topic's declared shape. A desktop stream and a phone stream share one
+  upstream; only the phone's events are redacted. Its answers carry the gateway's policy.
 
 A browser stream ends when the browser leaves or the shell stops.
 """
@@ -45,6 +50,7 @@ from typing import Any
 from moxi.names import is_module_name
 from moxi_loopback.api import response_headers
 
+from .gateway.shapes import out_data, redact_value, shape_data
 from .proxy import Client, UpstreamBroken, UpstreamError
 
 __all__ = [
@@ -59,6 +65,8 @@ __all__ = [
     "STAYED_UP",
     "BadTopics",
     "Push",
+    "gateway_topics",
+    "own_shapes",
     "read_topics",
     "stream_routes",
 ]
@@ -158,6 +166,33 @@ def stream_routes(mounts: Mapping[str, Mapping[str, Any]]) -> dict[str, tuple[st
     return routes
 
 
+def gateway_topics(mounts: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Each module's topics the gateway may ask for, topic to its shape (export data):
+    those of a stream route the module declares `gateway=True`."""
+    topics: dict[str, dict[str, Any]] = {}
+    for module, (path, _names) in stream_routes(mounts).items():
+        for route in mounts[module].get("routes") or ():
+            if route.get("path") == path and route.get("gateway") is True:
+                declared = route.get("topics")
+                if isinstance(declared, Mapping):
+                    topics[module] = dict(declared)
+    return topics
+
+
+def own_shapes() -> dict[str, dict[str, Any]]:
+    """The shapes of the shell's own topics (export data): `ui.servers`, its rows without
+    the volatile fields, and `ui.modules`, the modules view."""
+    from moxi_loopback.api import Out
+
+    from .page import MODULES_SHAPE, SERVER_ROW
+
+    assert isinstance(SERVER_ROW.items, Mapping)
+    row = Out("table", items={key: value for key, value in SERVER_ROW.items.items()
+                              if key not in _VOLATILE})
+    return {"servers": out_data(Out("table", items={"servers": Out("list", items=row)})),
+            "modules": out_data(Out("table", items=dict(MODULES_SHAPE)))}
+
+
 def _frame(name: str, data: bytes) -> bytes:
     lines = b"".join(b"data: " + line + b"\n" for line in data.split(b"\n"))
     return b"event: " + name.encode("ascii") + b"\n" + lines + b"\n"
@@ -212,7 +247,10 @@ class _Stream:
     """One browser stream: what it asked for, and its queue of frames, the latest per
     topic, so a slow browser holds one pending frame per topic and never a backlog."""
 
-    def __init__(self, asked: tuple[tuple[str, str], ...]):
+    def __init__(self, asked: tuple[tuple[str, str], ...],
+                 key: Callable[[], bytes] | None = None):
+        #: The gateway's key for a stream from the phone, whose events are redacted.
+        self.key = key
         self.by_module: dict[str, frozenset[str]] = {}
         for module, topic in asked:
             self.by_module[module] = self.by_module.get(module, frozenset()) | {topic}
@@ -306,7 +344,7 @@ class _Upstream:
         if self.values.get(name) == data:
             return
         self.values[name] = data
-        self.push._fan(self.module, name, _frame(f"{self.module}.{name}", data))
+        self.push._fan(self.module, name, data)
 
     # -- the connection -------------------------------------------------------------------
 
@@ -416,6 +454,8 @@ class Push:
         self._upstreams: dict[str, _Upstream] = {}
         self._own: dict[str, bytes] = {}
         self._servers_task: asyncio.Task[None] | None = None
+        self._gateway = gateway_topics(mounts or {})
+        self._own_shapes: dict[str, dict[str, Any]] | None = None
 
     @property
     def streams(self) -> int:
@@ -432,6 +472,7 @@ class Push:
         """Take a new snapshot's exports: from now on a module's topics are those its
         stream route lists here. An upstream whose route moved is opened again."""
         old, self._routes = self._routes, stream_routes(mounts)
+        self._gateway = gateway_topics(mounts)
         for module, upstream in list(self._upstreams.items()):
             if old.get(module, ("",))[0] != self._routes.get(module, ("",))[0]:
                 upstream.reroute = True
@@ -452,7 +493,7 @@ class Push:
         if self._own.get(topic) == data:
             return
         self._own[topic] = data
-        self._fan(OWN_MODULE, topic, _frame(f"{OWN_MODULE}.{topic}", data))
+        self._fan(OWN_MODULE, topic, data)
 
     def servers_value(self) -> dict[str, Any]:
         """`ui.servers`' value: the starter set's rows, without the fields that change
@@ -479,25 +520,28 @@ class Push:
     # -- the browser's request --------------------------------------------------------------
 
     async def __call__(self, scope: dict[str, Any], receive: Callable[..., Any],
-                       send: Callable[..., Any]) -> None:
+                       send: Callable[..., Any], *, key: Callable[[], bytes] | None = None
+                       ) -> None:
         if scope.get("type") != "http":
             return
+        policy = "page" if key is None else "gateway"
         try:
             asked = read_topics(scope.get("query_string") or b"")
         except BadTopics as err:
-            await _answer(send, 400, {"error": str(err)})
+            await _answer(send, 400, {"error": str(err)}, policy=policy)
             return
         if self.closing:
-            await _answer(send, 503, {"error": "stopping"})
+            await _answer(send, 503, {"error": "stopping"}, policy=policy)
             return
         if len(self._streams) >= MAX_STREAMS:
-            await _answer(send, 503, {"error": "busy"}, retry=BUSY_RETRY)
+            await _answer(send, 503, {"error": "busy"}, retry=BUSY_RETRY, policy=policy)
             return
-        stream = _Stream(asked)
+        stream = _Stream(asked, key)
         self._join(stream)
         try:
             await send({"type": "http.response.start", "status": 200,
-                        "headers": response_headers(extra=[("Content-Type", "text/event-stream")])})
+                        "headers": response_headers(extra=[("Content-Type", "text/event-stream")],
+                                                    policy=policy)})
             writing = asyncio.ensure_future(self._write(stream, send))
             watching = asyncio.ensure_future(_disconnected(receive))
             try:
@@ -510,6 +554,16 @@ class Push:
                         _log.error("a push stream failed", exc_info=result)
         finally:
             self._leave(stream)
+
+    def gateway_app(self, key: Callable[[], bytes]) -> Callable[..., Any]:
+        """The push channel as the gateway's router serves it: each stream's topics kept
+        to what the gateway reaches, each event redacted under `key()`."""
+
+        async def app(scope: dict[str, Any], receive: Callable[..., Any],
+                      send: Callable[..., Any]) -> None:
+            await self(scope, receive, send, key=key)
+
+        return app
 
     async def _write(self, stream: _Stream, send: Callable[..., Any]) -> None:
         while not stream.closed:
@@ -529,7 +583,41 @@ class Push:
 
     def _exported(self, stream: _Stream, module: str) -> frozenset[str]:
         route = self._routes.get(module)
-        return stream.by_module.get(module, frozenset()) & route[1] if route else frozenset()
+        if route is None:
+            return frozenset()
+        if stream.key is not None:
+            return stream.by_module.get(module, frozenset()) & frozenset(
+                self._gateway.get(module, ()))
+        return stream.by_module.get(module, frozenset()) & route[1]
+
+    def _shape(self, module: str, topic: str) -> dict[str, Any] | None:
+        if module == OWN_MODULE:
+            if self._own_shapes is None:
+                self._own_shapes = own_shapes()
+            return self._own_shapes.get(topic)
+        return self._gateway.get(module, {}).get(topic)
+
+    def _framed(self, stream: _Stream, module: str, topic: str, data: bytes,
+                cache: dict[bool, bytes | None]) -> bytes | None:
+        """The frame `stream` gets for `data`: as sent upstream on the desktop, redacted on
+        the gateway (None when the event can't be read against its shape)."""
+        phone = stream.key is not None
+        if phone not in cache:
+            cache[phone] = (self._redacted(stream.key, module, topic, data) if phone
+                            else _frame(f"{module}.{topic}", data))
+        return cache[phone]
+
+    def _redacted(self, key: Callable[[], bytes] | None, module: str, topic: str,
+                  data: bytes) -> bytes | None:
+        assert key is not None
+        try:
+            value = json.loads(data)
+            return _frame(f"{module}.{topic}",
+                          _json(redact_value(value, self._shape(module, topic), key())))
+        except (ValueError, OSError):
+            _log.warning("%s.%s's event can't be redacted; the phone doesn't get it",
+                         module, topic, exc_info=True)
+            return None
 
     def _union(self, module: str) -> frozenset[str]:
         union: frozenset[str] = frozenset()
@@ -552,8 +640,7 @@ class Push:
                     self._watch_servers()
                 for topic in sorted(topics & OWN_TOPICS):
                     if topic in self._own:
-                        stream.put((OWN_MODULE, topic),
-                                   _frame(f"{OWN_MODULE}.{topic}", self._own[topic]))
+                        self._put(stream, OWN_MODULE, topic, self._own[topic])
                 self._tell_dropped(stream, module)
                 continue
             exported = self._exported(stream, module)
@@ -561,8 +648,7 @@ class Push:
             if upstream is not None:
                 for topic in sorted(exported):
                     if topic in upstream.values:
-                        stream.put((module, topic),
-                                   _frame(f"{module}.{topic}", upstream.values[topic]))
+                        self._put(stream, module, topic, upstream.values[topic])
                 if upstream.state is not None:
                     stream.put((STATE_EVENT, module), _state_frame(module, *upstream.state))
             self._tell_dropped(stream, module)
@@ -597,10 +683,19 @@ class Push:
 
     # -- fan-out ------------------------------------------------------------------------------
 
-    def _fan(self, module: str, topic: str, frame: bytes) -> None:
+    def _put(self, stream: _Stream, module: str, topic: str, data: bytes) -> None:
+        frame = self._framed(stream, module, topic, data, {})
+        if frame is not None:
+            stream.put((module, topic), frame)
+
+    def _fan(self, module: str, topic: str, data: bytes) -> None:
+        cache: dict[bool, bytes | None] = {}
         for stream in self._streams:
-            if stream.asks(module, topic):
-                stream.put((module, topic), frame)
+            if stream.asks(module, topic) and (
+                    module == OWN_MODULE or topic in self._exported(stream, module)):
+                frame = self._framed(stream, module, topic, data, cache)
+                if frame is not None:
+                    stream.put((module, topic), frame)
 
     def _fan_state(self, module: str, state: str, detail: str | None) -> None:
         frame = _state_frame(module, state, detail)
@@ -628,11 +723,11 @@ async def _disconnected(receive: Callable[..., Any]) -> None:
 
 
 async def _answer(send: Callable[..., Any], status: int, value: Any, *,
-                  retry: int | None = None) -> None:
+                  retry: int | None = None, policy: str = "page") -> None:
     body = _json(value)
     extra = [("Content-Type", "application/json"), ("Content-Length", str(len(body)))]
     if retry is not None:
         extra.append(("Retry-After", str(retry)))
     await send({"type": "http.response.start", "status": status,
-                "headers": response_headers(extra=extra)})
+                "headers": response_headers(extra=extra, policy=policy)})
     await send({"type": "http.response.body", "body": body})

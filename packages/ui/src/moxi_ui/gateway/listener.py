@@ -100,6 +100,10 @@ def _nothing(*args: Any) -> None:
     return None
 
 
+def _same(inner: Any, profile: Any) -> Any:
+    return inner
+
+
 @dataclass
 class Parts:
     """What the gateway's later parts plug in.
@@ -109,7 +113,9 @@ class Parts:
     as on loopback's `gateway` profile; `router` answers what the guard admits.
     `end_sessions()` ends every gateway session; `stale(kept)` marks the devices of the
     address `kept` stale; `audit(code, fields)` writes one audit row (`provider`, `held`,
-    `acts`). `tick()` runs once on every tick, off the event loop.
+    `acts`). `tick()` runs once on every tick, off the event loop. `layer(inner, profile)`
+    wraps the check (`guard` and what it guards) inside the provider check, where the
+    audit sees every request and every refusal.
     """
 
     table: Callable[[Mount], Table] = _empty_table
@@ -120,6 +126,7 @@ class Parts:
     stale: Callable[[Kept], None] = _nothing
     audit: Callable[[str, dict[str, Any]], None] = _nothing
     tick: Callable[[], None] = _nothing
+    layer: Callable[[ASGIApp, Callable[[], Profile | None]], ASGIApp] = _same
 
 
 @dataclass(frozen=True)
@@ -239,7 +246,8 @@ class Gateway:
         self._port_problem: str | None = None
         self._held: _Held | None = None
         self._removing: asyncio.Future[Any] | None = None
-        self._inner = worker_layer(guard(self.parts.router, lambda: self.profile))
+        self._inner = worker_layer(self.parts.layer(
+            guard(self.parts.router, lambda: self.profile), lambda: self.profile))
 
     # --- reading --------------------------------------------------------------------
 
@@ -365,6 +373,12 @@ class Gateway:
                 self._wrote_mount = mount
             except OSError:
                 _log.exception("gateway.acts can't be written")
+
+    def refresh(self) -> None:
+        """Build the profile again from the current table (the shell's module snapshot
+        changed), keeping the address, the sessions and the mount."""
+        if self.kept is not None and self.profile is not None:
+            self._build(self.mount)
 
     def acts_now(self) -> Mount:
         """The mount as the inputs stand now, for a prepare or a commit to check again."""

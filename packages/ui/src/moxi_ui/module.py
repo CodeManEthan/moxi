@@ -15,6 +15,10 @@ OPTIONAL = {"testing": "Playwright and pytest for moxi_ui.testing, the plugin a 
             "gateway": "Passkeys for the gateway, the UI on your phone through the tunnel.",
             "tunnel": "The tunnel, which gives the gateway the address a phone reaches."}
 GATED = {}
+#: The gateway's state: its devices, its key and its audit log (one file per UTC day, kept
+#: 30 days by the gateway itself).
+STORES = {"gateway": {"root": "state", "path": "gateway", "kind": "dir", "private": True,
+                      "retention": "keep", "rebuildable": False, "lazy": True}}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
 SETUP = None
