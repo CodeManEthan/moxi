@@ -15,6 +15,7 @@ import pytest
 from moxi_ui.gateway import endpoint, provider
 from moxi_ui.gateway.address import OFF, REFUSED, Kept, step
 from moxi_ui.gateway.mount import Mount, decide, read_acts, write_acts
+from moxi_ui.gateway.shapes import refusals
 
 UID = 1000
 OTHER = 1001
@@ -337,3 +338,27 @@ def test_gateway_acts_holds_the_pid_the_value_and_the_reason(tmp_path):
     write_acts(tmp_path, Mount(False, "tcp"))
     assert read_acts(tmp_path) == {"pid": os.getpid(), "acts": False, "reason": "tcp"}
     assert stat.S_IMODE(os.stat(tmp_path / "gateway.acts").st_mode) == 0o600
+    write_acts(tmp_path, Mount(False, "tcp"), refusals={"fixture": "why"})
+    assert read_acts(tmp_path)["refusals"] == {"fixture": "why"}
+    write_acts(tmp_path, Mount(False, "tcp"), refusals={})
+    assert "refusals" not in read_acts(tmp_path)
+
+
+def _act(**kw):
+    return {"path": "/api/go", "kind": "act", "gateway": True, "confirmed": True,
+            "status": "/api/job", **kw}
+
+
+STATUS_READ = {"path": "/api/job", "kind": "read", "gateway": True}
+
+
+def test_refusals_names_each_module_the_export_checks_refuse_with_its_route():
+    mounts = {"good": {"routes": [_act(), STATUS_READ]},
+              "plain": {"routes": [{"path": "/api/r", "kind": "read"}]},
+              "unconfirmed": {"routes": [_act(confirmed=False), STATUS_READ]},
+              "unreached": {"routes": [_act(), {**STATUS_READ, "gateway": False}]},
+              "no/name": {"routes": [_act(confirmed=False)]}}
+    assert refusals(mounts) == {
+        "unconfirmed": "the act /api/go reaches the gateway but isn't a confirmed act",
+        "unreached": "the act /api/go reaches the gateway but its status route /api/job "
+                     "doesn't"}

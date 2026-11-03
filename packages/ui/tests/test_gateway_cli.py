@@ -422,6 +422,31 @@ def test_a_stale_device_is_a_warning(tmp_path):
     assert row.state == "warn" and "old phone" in row.detail and "1 device," in row.detail
 
 
+REFUSAL = "the act /api/go reaches the gateway but its status route /api/job doesn't"
+
+
+def test_each_module_the_running_gateway_refuses_is_a_warning_naming_its_route(tmp_path):
+    acts = {"acts": False, "reason": "tcp",
+            "refusals": {"fixture": REFUSAL, "other": "the act /x reaches the gateway but "
+                                                      "isn't a confirmed act"}}
+    row = doctor.gateway_row(_facts(tmp_path, acts=acts))
+    assert row.state == "warn" and row.fix is None
+    assert row.detail.startswith(f"fixture gets no gateway mount: {REFUSAL}; other gets no "
+                                 "gateway mount: the act /x")
+    assert row.detail.endswith(doctor.ACTS_LINES["tcp"]), "what it serves is still said"
+    row = doctor.gateway_row(_facts(tmp_path, acts=acts, address=REFUSED,
+                                    tunnel_reason="applied.json is newer"))
+    assert row.detail.startswith("the tunnel's record can't be read")
+    assert f"fixture gets no gateway mount: {REFUSAL}" in row.detail
+    assert row.fix == "moxi doctor tunnel"
+    # A failure still comes first, and a stopped shell or a malformed list names nothing.
+    assert doctor.gateway_row(_facts(tmp_path, acts=acts, extra=False)).state == "fail"
+    assert doctor.gateway_row(_facts(tmp_path, acts=acts, shell_running=False)).state == "ok"
+    for bad in ([REFUSAL], {"no/name": REFUSAL}, {"fixture": 3}, "fixture"):
+        row = doctor.gateway_row(_facts(tmp_path, acts={**acts, "refusals": bad}))
+        assert row.state == "ok", bad
+
+
 def test_the_login_row_follows_the_resolved_start_and_the_unit(tmp_path):
     unit = SimpleNamespace(state="active", enabled=True)
     assert doctor.login_row(_facts(tmp_path, switch=False)).state == "off"

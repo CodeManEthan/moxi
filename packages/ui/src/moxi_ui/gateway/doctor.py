@@ -2,9 +2,9 @@
 
 Each is read from files, settings and the tunnel's record, never by calling the shell, so a
 doctor run wakes nothing. What the running shell decided comes from what it writes in its
-runtime directory: `gateway.acts` (whether the phone's acts are mounted, and why not) and
-`gateway.hold` (the TCP port it holds); a hold it couldn't take is the latest `held` row of
-its audit log.
+runtime directory: `gateway.acts` (whether the phone's acts are mounted, and why not, and
+the modules whose export the gateway refuses) and `gateway.hold` (the TCP port it holds); a
+hold it couldn't take is the latest `held` row of its audit log.
 
 `read_facts()` gathers everything once; the rows are pure functions of the `Facts`, so a
 test states the facts it means.
@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi.doctor import Row
+from moxi.names import is_module_name
 from moxi.paths import Layout
 
 from . import endpoint
@@ -298,7 +299,22 @@ def _fail(facts: Facts) -> tuple[str, str | None] | None:
     return None
 
 
+def _refusals(facts: Facts) -> list[tuple[str, str | None]]:
+    """A line for each module the running shell's gateway leaves out, naming the route."""
+    found = (facts.acts or {}).get("refusals") if facts.shell_running else None
+    if not isinstance(found, dict):
+        return []
+    return [(f"{name} gets no gateway mount: {why}", None)
+            for name, why in sorted(found.items())
+            if isinstance(name, str) and is_module_name(name) and isinstance(why, str)]
+
+
 def _warns(facts: Facts) -> list[tuple[str, str | None]]:
+    """The gateway's own warnings, then a line for each module it leaves out."""
+    return [*_own_warns(facts), *_refusals(facts)]
+
+
+def _own_warns(facts: Facts) -> list[tuple[str, str | None]]:
     address = facts.address
     out: list[tuple[str, str | None]] = []
     if address == REFUSED:

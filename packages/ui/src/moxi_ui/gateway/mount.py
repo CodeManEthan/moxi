@@ -17,7 +17,9 @@ carries takes part. The reasons, the first that applies:
 
 `gateway.acts` in the runtime directory (0600) records the shell's pid, the value and the
 reason for the doctor, and, where the provider check runs and a profile stands, whether the
-shell has found the provider's uid (`uid_found`); the shell rewrites it whenever one changes.
+shell has found the provider's uid (`uid_found`), and, when there are any, the modules whose
+export the gateway refuses, module to why (`refusals`); the shell rewrites it whenever one
+changes.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -73,12 +76,15 @@ def decide(*, on: bool, kind: str, endpoint: str | int, address: Any,
 
 
 def write_acts(runtime_dir: str | os.PathLike, mount: Mount, *, pid: int | None = None,
-               uid_found: bool | None = None) -> None:
-    """Rewrite `gateway.acts`: this process's pid, the value and the reason, and
-    `uid_found` unless it is None."""
+               uid_found: bool | None = None,
+               refusals: Mapping[str, str] | None = None) -> None:
+    """Rewrite `gateway.acts`: this process's pid, the value and the reason, `uid_found`
+    unless it is None, and `refusals` unless there are none."""
     body: dict[str, Any] = {"pid": os.getpid() if pid is None else pid, **mount.as_dict()}
     if uid_found is not None:
         body["uid_found"] = uid_found
+    if refusals:
+        body["refusals"] = dict(refusals)
     files.atomic_write(Path(runtime_dir) / ACTS_FILE, json.dumps(body) + "\n")
 
 

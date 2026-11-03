@@ -316,7 +316,7 @@ class Shell:
             mount=lambda: self.gateway.mount if self.gateway is not None else Mount(False, "off"),
             page=own_page, push=self.push, starters=self.starters, acts=acts, key=key)
         parts = phone.parts(Parts(table=router.build, router=router, fallback=fallback,
-                                  audit=write))
+                                  audit=write, refusals=router.refusals))
         parts.router = mark(parts.router)
         parts.layer = lambda inner, profile: watch(inner, profile, audit,
                                                    device_of=phone.device_of)

@@ -46,7 +46,7 @@ from .acts import PATHS as ACT_PATHS
 from .acts import Acts
 from .audit import Audit
 from .mount import Mount
-from .shapes import BODY_LIMIT, redact, route_of
+from .shapes import BODY_LIMIT, redact, refusals, route_of
 from .shapes import table as gateway_table
 
 __all__ = ["ERROR_SHAPE", "GATE_CODES", "ICONS", "PWA_FILES", "STRIPPED", "GatewayRouter",
@@ -285,6 +285,10 @@ class GatewayRouter:
     def build(self, mount: Mount) -> Table:
         """The gateway's table for `mount`, from the exports mounted now."""
         return gateway_table(self.mounts(), entries=self.entries(mount), problem=_refused)
+
+    def refusals(self) -> dict[str, str]:
+        """The modules mounted now that the gateway leaves out, module to why."""
+        return refusals(self.mounts())
 
     # --- serving --------------------------------------------------------------------------
 

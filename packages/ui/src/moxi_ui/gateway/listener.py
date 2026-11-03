@@ -100,6 +100,10 @@ def _nothing(*args: Any) -> None:
     return None
 
 
+def _no_refusals() -> Mapping[str, str]:
+    return {}
+
+
 def _same(inner: Any, profile: Any) -> Any:
     return inner
 
@@ -115,7 +119,8 @@ class Parts:
     address `kept` stale; `audit(code, fields)` writes one audit row (`provider`, `held`,
     `acts`). `tick()` runs once on every tick, off the event loop. `layer(inner, profile)`
     wraps the check (`guard` and what it guards) inside the provider check, where the
-    audit sees every request and every refusal.
+    audit sees every request and every refusal. `refusals()` gives the modules whose
+    export the gateway refuses, module to why, for `gateway.acts`.
     """
 
     table: Callable[[Mount], Table] = _empty_table
@@ -127,6 +132,7 @@ class Parts:
     audit: Callable[[str, dict[str, Any]], None] = _nothing
     tick: Callable[[], None] = _nothing
     layer: Callable[[ASGIApp, Callable[[], Profile | None]], ASGIApp] = _same
+    refusals: Callable[[], Mapping[str, str]] = _no_refusals
 
 
 @dataclass(frozen=True)
@@ -240,7 +246,7 @@ class Gateway:
         self.profile: Profile | None = None
         self.uid: int | None = None
         self.mount = Mount(False, "off")
-        self._wrote: tuple[Mount, bool | None] | None = None
+        self._wrote: tuple[Any, ...] | None = None
         #: The text of the hold the shell couldn't take, or of the setting that stops it.
         self.problem: str | None = None
         self._port_problem: str | None = None
@@ -386,10 +392,16 @@ class Gateway:
         return self.uid is not None
 
     def _write_acts(self) -> None:
-        wrote = (self.mount, self.uid_found)
+        try:
+            refusals = dict(self.parts.refusals())
+        except Exception:  # noqa: BLE001 - the mount is still written without them
+            _log.exception("the gateway's refused modules can't be read")
+            refusals = {}
+        wrote = (self.mount, self.uid_found, tuple(sorted(refusals.items())))
         if wrote != self._wrote:
             try:
-                write_acts(self.runtime_dir, self.mount, uid_found=self.uid_found)
+                write_acts(self.runtime_dir, self.mount, uid_found=self.uid_found,
+                           refusals=refusals)
                 self._wrote = wrote
             except OSError:
                 _log.exception("gateway.acts can't be written")

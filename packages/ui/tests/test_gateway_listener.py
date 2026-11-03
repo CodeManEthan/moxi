@@ -93,6 +93,7 @@ class Hooks:
     ended: int = 0
     stale: list = field(default_factory=list)
     tables: list = field(default_factory=list)
+    refused: dict = field(default_factory=dict)
 
     def parts(self) -> Parts:
         def table(mount):
@@ -108,7 +109,8 @@ class Hooks:
 
         return Parts(table=table, session=lambda view, entry: True, router=router,
                      end_sessions=self._end, stale=self.stale.append,
-                     audit=lambda code, fields: self.audit.append((code, fields)))
+                     audit=lambda code, fields: self.audit.append((code, fields)),
+                     refusals=lambda: self.refused)
 
     def _end(self):
         self.ended += 1
@@ -552,6 +554,40 @@ def test_on_tcp_the_acts_are_never_mounted(env, loop):
         assert gw.kind == "tcp"
     finally:
         loop.run(gw.close())
+
+
+UNCONFIRMED = {"routes": [{"path": "/api/go", "kind": "act", "gateway": True,
+                           "confirmed": False, "status": "/api/job"}]}
+WHY = "the act /api/go reaches the gateway but isn't a confirmed act"
+
+
+def test_the_modules_the_gateway_refuses_are_written_for_the_doctor(env, loop):
+    world, hooks = World(), Hooks()
+    gw = _gateway(world, hooks, env)
+    try:
+        _on(world, gw, loop)
+        assert "refusals" not in read_acts(gw.runtime_dir)
+        hooks.refused["fixture"] = WHY
+        loop.run(gw.tick())
+        assert read_acts(gw.runtime_dir)["refusals"] == {"fixture": WHY}
+        assert read_acts(gw.runtime_dir)["reason"] == "tcp"
+        hooks.refused.clear()
+        loop.run(gw.tick())
+        assert "refusals" not in read_acts(gw.runtime_dir)
+    finally:
+        loop.run(gw.close())
+
+
+def test_the_shells_gateway_refuses_from_the_exports_it_mounts(env):
+    bound = listen.bind(0)
+    held = listen.Listeners(bound.sockets, bound.port, bound.names, inherited=True)
+    shell = Shell(held, epoch=None, layout=Layout("ui"), gateway=True)
+    try:
+        assert shell.gateway.parts.refusals() == {}
+        shell._mounts = {**shell.mounts, "fixture": UNCONFIRMED}
+        assert shell.gateway.parts.refusals() == {"fixture": WHY}
+    finally:
+        held.close()
 
 
 # --- the signal owner --------------------------------------------------------------------

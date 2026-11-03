@@ -313,7 +313,8 @@ class Access:
 
         return Parts(table=tables, session=self, fallback=_fallback(base.fallback),
                      router=self.layer(base.router), end_sessions=self.end_sessions,
-                     stale=self.stale, audit=self.audit, tick=self.tick)
+                     stale=self.stale, audit=self.audit, tick=self.tick,
+                     refusals=base.refusals)
 
     def add_entries(self, table: Table) -> Table:
         """Add this layer's entries to `table` and return it."""

@@ -37,7 +37,7 @@ from moxi_loopback.api import Out, Table
 
 __all__ = [
     "BODY_LIMIT", "BadBody", "acts_of", "canonical", "check_body", "gateway_problem",
-    "handle", "out_data", "redact", "redact_value", "route_of", "shape_data", "table",
+    "handle", "out_data", "redact", "redact_value", "refusals", "route_of", "shape_data", "table",
 ]
 
 #: The largest 2xx JSON body the gateway reads to redact; a larger one is a 502.
@@ -70,6 +70,17 @@ def gateway_problem(export: Mapping[str, Any] | None) -> str | None:
             return (f"the act {path} reaches the gateway but its status route "
                     f"{route.get('status')} doesn't")
     return None
+
+
+def refusals(mounts: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
+    """Each module of `mounts` (module to export) that the export checks refuse, module to
+    why: the modules the gateway's table leaves out."""
+    out = {}
+    for name, export in sorted(mounts.items()):
+        refused = gateway_problem(export) if is_module_name(name) else None
+        if refused is not None:
+            out[name] = refused
+    return out
 
 
 def acts_of(export: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
