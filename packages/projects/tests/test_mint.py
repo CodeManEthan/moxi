@@ -12,6 +12,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -130,15 +131,36 @@ def test_a_failing_git_leaves_the_directory_it_made_and_no_row(tmp_path, monkeyp
 
 
 @posix_only
-def test_a_git_that_runs_too_long_is_stopped_and_leaves_no_row(tmp_path, monkeypatch):
+def test_a_git_that_runs_past_the_given_timeout_is_stopped_and_leaves_no_row(
+        tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", fake_git(tmp_path / "bin", "sleep 30"))
-    monkeypatch.setattr(acts, "GIT_TIMEOUT", 0.2)
     root = tmp_path / "slow"
+    started = time.monotonic()
     with pytest.raises(MintFailed) as caught:
-        acts.add("slow", root=str(root), create=True)
-    assert caught.value.exit_code == 1 and "ran past" in caught.value.reason
+        acts.add("slow", root=str(root), create=True, git_timeout=0.3)
+    # Stopped at its own timeout, well before the 30 s git sleeps or the verb's bound.
+    assert time.monotonic() - started < 10
+    assert caught.value.exit_code == 1 and "ran past 0.3 s" in caught.value.reason
     assert caught.value.left == str(root)
-    assert api.list_projects() == []
+    assert f"git init {root}" in caught.value.fix
+    assert f"moxi projects add slow --root {root}" in caught.value.fix
+    assert root.is_dir() and api.list_projects() == []
+
+
+def test_the_verb_gives_git_init_its_own_longer_bound(tmp_path, monkeypatch, capsys):
+    import inspect
+
+    assert acts.GIT_TIMEOUT == 30
+    assert inspect.signature(acts.add).parameters["git_timeout"].default == acts.GIT_TIMEOUT
+    seen = {}
+
+    def add(key, **named):
+        seen.update(named)
+        raise Refused("stop here")
+
+    monkeypatch.setattr(acts, "add", add)
+    run(capsys, "add", "web", "--root", str(tmp_path / "web"), "--create")
+    assert seen["create"] is True and "git_timeout" not in seen
 
 
 @posix_only
@@ -146,8 +168,8 @@ def test_a_row_lost_after_a_git_mint_leaves_the_directory_and_names_the_add(
         tmp_path, git_ok, monkeypatch, capsys):
     mint = acts._mint
 
-    def overtaken(planned, git, command):
-        made = mint(planned, git, command)
+    def overtaken(planned, git, command, **named):
+        made = mint(planned, git, command, **named)
         store.write(lambda conn: store.insert(conn, key="web", root="/srv/elsewhere"))
         return made
 
@@ -274,8 +296,8 @@ def test_a_row_lost_after_a_dir_mint_leaves_the_directory(tmp_path, site, no_git
     site.contribution("notes", KINDS)
     mint = acts._mint
 
-    def overtaken(planned, git, command):
-        made = mint(planned, git, command)
+    def overtaken(planned, git, command, **named):
+        made = mint(planned, git, command, **named)
         store.write(lambda conn: store.insert(conn, key="t", root="/srv/other"))
         return made
 

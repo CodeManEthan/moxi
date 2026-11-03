@@ -45,7 +45,8 @@ from .contributions import Contributions, Planned
 from .errors import Broken, MintFailed, MoveFailed, ProjectsError, Refused, Usage
 from .rules import check_root, same_root
 
-#: How long `git init` may run, in seconds.
+#: How long `git init` may run, in seconds, unless the caller gives another bound. The page
+#: gives a shorter one, so its answer comes inside the shell's deadline for it.
 GIT_TIMEOUT = 30
 
 
@@ -73,13 +74,14 @@ def root_note(root: str) -> str | None:
 
 def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
         lead: str | None = None, notes_root: str | None = None, create: bool = False,
-        contributions: Contributions | None = None, notes: bool | None = None) -> Added:
+        contributions: Contributions | None = None, notes: bool | None = None,
+        git_timeout: float = GIT_TIMEOUT) -> Added:
     """Add project `key`; with `create`, mint its root first.
 
     Paths must already be absolute (`rules.absolutize` makes a command line's so). A root
     left out comes from a contribution's default, or the add stops with `Usage`.
     `contributions` and `notes` stand in for the installed contributions and for whether
-    notes is installed.
+    notes is installed. `git_timeout` bounds a `git` mint's `git init`, in seconds.
     """
     planned = _contributions.plan_add(key, kind=kind, root=root, lead=lead,
                                       notes_root=notes_root,
@@ -91,7 +93,7 @@ def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
     command = _add_command(planned, notes_root)
     git = _check_mint(planned)
     _check_free(planned)
-    made = _mint(planned, git, command)
+    made = _mint(planned, git, command, timeout=git_timeout)
     try:
         project = store.write(planned.insert)
     except ProjectsError as exc:
@@ -160,9 +162,11 @@ def _missing_top(path: str) -> str | None:
     return top
 
 
-def _mint(planned: Planned, git: str | None, command: str) -> str | None:
-    """Make the root (and `git init` it for a `git` mint). Returns the topmost directory
-    made, or None when the root was there already, empty."""
+def _mint(planned: Planned, git: str | None, command: str,
+          timeout: float = GIT_TIMEOUT) -> str | None:
+    """Make the root (and `git init` it for a `git` mint, stopped past `timeout`
+    seconds). Returns the topmost directory made, or None when the root was there already,
+    empty."""
     root = planned.row["root"]
     top = _missing_top(root)
     by_hand = ((f"`git init {_quote(root)}`, then " if git else "") + f"`{command}`")
@@ -180,10 +184,10 @@ def _mint(planned: Planned, git: str | None, command: str) -> str | None:
     import moxi.proc
 
     try:
-        done = moxi.proc.run([git, "init", root], timeout=GIT_TIMEOUT)
+        done = moxi.proc.run([git, "init", root], timeout=timeout)
         why = None if done.returncode == 0 else _git_said(done)
     except subprocess.TimeoutExpired:
-        why = f"it ran past {GIT_TIMEOUT} s and was stopped"
+        why = f"it ran past {timeout:g} s and was stopped"
     except OSError as exc:
         why = f"it could not run: {exc.strerror or exc}"
     if why is None:
