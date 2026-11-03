@@ -82,7 +82,7 @@ def test_a_newer_store_fails_naming_the_upgrade(golden_copy, store_path):
 
 def test_a_store_older_than_the_code_reads_fails_naming_the_install(
         golden_copy, store_path, next_version, monkeypatch):
-    monkeypatch.setattr(api, "_READS", frozenset({2}))
+    monkeypatch.setattr(api, "_READS", frozenset({next_version}))
     row = one(by_name(), "store")
     assert row.state == "fail" and "moxi install projects" in row.fix
 
@@ -149,8 +149,8 @@ def test_a_stale_resolved_root_in_an_older_store_warns_and_writes_nothing(
     store.write(lambda conn: store.insert(conn, key="p", root=str(target)))
     _sql(store_path, "UPDATE projects SET root_real = '/somewhere/else'")
     monkeypatch.setattr(store, "STEPS", (*store.STEPS, "SELECT 1;"))
-    monkeypatch.setattr(api, "_VERSION", 2)
-    monkeypatch.setattr(api, "_READS", frozenset({1, 2}))
+    monkeypatch.setattr(api, "_VERSION", len(store.STEPS))
+    monkeypatch.setattr(api, "_READS", frozenset({*api._READS, len(store.STEPS)}))
     before = store_path.read_bytes()
     row = one(by_name(), "root spelling")
     assert row.state == "warn" and "moxi install projects" in row.fix
@@ -238,7 +238,7 @@ def test_setup_migrates_an_existing_store(golden_copy, store_path, next_version)
     assert store.setup() == 0
     conn = sqlite3.connect(store_path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == next_version
     finally:
         conn.close()
 

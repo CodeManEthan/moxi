@@ -250,6 +250,29 @@ def test_remove_of_an_unknown_key_is_exit_3(capsys, golden_copy):
     assert run(capsys, "remove", "nosuch")[0] == 3
 
 
+def test_a_refused_remove_writes_nothing_to_the_store(capsys, site, v1_copy, store_path):
+    before = store_path.read_bytes()
+    assert run(capsys, "remove", "alpha")[0] == 3
+    assert run(capsys, "remove", "nosuch")[0] == 3
+    site.contribution("svc", holds("services run for it; `moxi services stop` frees it"))
+    assert run(capsys, "remove", "gamma")[0] == 3
+    assert store_path.read_bytes() == before
+
+
+def test_an_unknown_key_with_no_store_is_exit_3_and_makes_no_file(capsys, store_path):
+    assert run(capsys, "remove", "nosuch")[0] == 3
+    assert not store_path.exists()
+
+
+def test_a_remove_by_the_verb_keeps_no_status(capsys, golden_copy, store_path):
+    assert run(capsys, "remove", "gamma")[0] == 0
+    conn = sqlite3.connect(store_path)
+    try:
+        assert conn.execute("SELECT count(*) FROM remove_status").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 # --- list, show, find, kinds -------------------------------------------------------------
 
 def test_list_prints_every_project_by_key(capsys, golden_copy):

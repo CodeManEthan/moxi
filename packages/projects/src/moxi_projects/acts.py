@@ -21,6 +21,10 @@ message names the directory left, the topmost one the mint made, and the command
 finish by hand. If the row write then fails, the directory stays as made and the message
 names the `moxi projects add` that adds its row.
 
+`remove` takes a `record` from the page: what the remove came to is then kept in the
+store under the request's idempotency key, so a repeat of the request gets the same answer
+(`record_status`, `remove_status`). The verb passes none and keeps nothing.
+
 `promote` turns one of notes' inbox one-offs into a project. It reaches notes only through
 `moxi.modules`, and writes the row through `add`'s own steps, putting its move between
 them: every check `add` makes and the defaults; for a kind other than a topic with
@@ -36,11 +40,13 @@ import errno
 import os
 import shlex
 import shutil
+import sqlite3
 import subprocess
+from collections.abc import Callable
 
 from . import api, store
 from . import contributions as _contributions
-from .api import DEFAULT_KIND, Project
+from .api import DEFAULT_KIND, NotFound, Project
 from .contributions import Contributions, Planned
 from .errors import Broken, MintFailed, MoveFailed, ProjectsError, Refused, Usage
 from .rules import check_root, same_root
@@ -463,24 +469,86 @@ def set_fields(key: str, *, contributions: Contributions | None = None,
     return store.write(lambda conn: store.update(conn, key, **changes))
 
 
-def remove(key: str, *, contributions: Contributions | None = None) -> Project:
+#: What `remove` gives its `record`: the connection of the write it runs in, and the
+#: outcome, a dict of plain values (see `remove`).
+Record = Callable[[sqlite3.Connection, dict], None]
+
+
+def remove(key: str, *, contributions: Contributions | None = None,
+           record: Record | None = None) -> Project:
     """Remove project `key` and return the row as it was.
 
     First a read refuses while the project has associated agents. Then every
     contribution is asked whether something it keeps still holds the project, outside
     any write, so a slow one never holds the store's lock; any answer refuses, listing
-    every one. Then one write checks the associated set again and deletes the row."""
-    project = api.get(key)
-    if project.associated:
-        raise store.refuse_held_by_agents(project)
-    found = contributions if contributions is not None else _contributions.load()
-    refusals = found.remove_refusals(project)
-    if refusals:
-        listed = "; ".join(f"{module}: {sentence}" for module, sentence in refusals)
-        raise Refused(f"project {project.key!r} is still held ({listed})",
-                      f"free it as each says, then run `moxi projects remove "
-                      f"{project.key}` again")
-    return store.write(lambda conn: store.delete(conn, project.key))
+    every one. Then one write checks the associated set again and deletes the row.
+
+    With `record`, what the remove came to is kept. `record(conn, outcome)` runs inside
+    the delete's own write, with `{"state": "removed", "key": <the key as stored>}`. A
+    refusal decided about the project (associated agents, a contribution's sentences,
+    the key not found in a store that exists, the check again inside the write) is
+    recorded through a write of its own, after the delete's write has rolled back, with
+    `{"state": "refused", "key", "reason", "fix", "sentences", "exit_code"}`, and then
+    raised as without `record`. `sentences` lists each contribution's sentence, named by
+    its module, or holds the reason alone. A refusal that is the store's own (newer than
+    this code, unreadable, locked past the wait, or no store file yet) and a contribution
+    that won't load or raises are raised and record nothing; nothing is written and no
+    store file is made. If the refusal's own write meets one of those, that is raised in
+    its place. So after a raise, a caller tells a kept refusal from the rest by whether
+    its record was written.
+
+    Without `record` nothing is written on a refusal."""
+    stored, sentences = key, None
+    try:
+        project = api.get(key)
+        stored = project.key
+        if project.associated:
+            raise store.refuse_held_by_agents(project)
+        found = contributions if contributions is not None else _contributions.load()
+        refusals = found.remove_refusals(project)
+        if refusals:
+            sentences = [f"{module}: {sentence}" for module, sentence in refusals]
+            raise Refused(f"project {project.key!r} is still held ({'; '.join(sentences)})",
+                          f"free it as each says, then run `moxi projects remove "
+                          f"{project.key}` again")
+
+        def delete(conn: sqlite3.Connection) -> Project:
+            gone = store.delete(conn, project.key)
+            if record is not None:
+                record(conn, {"state": "removed", "key": gone.key})
+            return gone
+
+        return store.write(delete)
+    except (Refused, NotFound) as exc:
+        if record is None or (isinstance(exc, NotFound) and not _store_exists()):
+            raise
+        outcome = {"state": "refused",
+                   "key": stored,
+                   "reason": exc.reason, "fix": exc.fix,
+                   "sentences": sentences or [exc.reason], "exit_code": exc.exit_code}
+        store.write(lambda conn: record(conn, outcome))
+        raise
+
+
+def _store_exists() -> bool:
+    return os.path.lexists(store.path())
+
+
+def record_status(job: str) -> Record:
+    """A `record` for `remove` that keeps its outcome under the request's idempotency key
+    `job`, for `remove_status` to read back."""
+    def record(conn: sqlite3.Connection, outcome: dict) -> None:
+        store.keep_remove_status(conn, job, outcome["key"], outcome)
+
+    return record
+
+
+def remove_status(job: str) -> dict | None:
+    """What the remove request `job` came to, kept by `record_status`: the outcome `remove`
+    recorded, with `job`, `project` (the key it was for) and `created`; or None for no
+    such request (never kept, older than a day, or a store before the table). A read:
+    it never writes."""
+    return store.remove_status(job)
 
 
 def add_agent(key: str, name: str) -> Project:
@@ -494,5 +562,6 @@ def remove_agent(key: str, name: str) -> Project:
     return store.write(lambda conn: store.remove_agent(conn, key, name))
 
 
-__all__ = ["GIT_TIMEOUT", "TOPIC", "Added", "root_note", "add", "promote", "set_fields",
-           "remove", "add_agent", "remove_agent"]
+__all__ = ["GIT_TIMEOUT", "TOPIC", "Added", "Record", "root_note", "add", "promote",
+           "set_fields", "remove", "record_status", "remove_status", "add_agent",
+           "remove_agent"]

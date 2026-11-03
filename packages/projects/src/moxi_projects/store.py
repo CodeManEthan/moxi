@@ -14,6 +14,11 @@ one sequence in this order:
    store past this code in between;
 4. close.
 
+Step 2 adds `remove_status`, where the page keeps what a confirmed remove came to, keyed
+by the request's idempotency key, so a repeat of the request gets the same answer for a
+day, also after the page's server has restarted. A store at version 1 is still read; its
+status read answers that no such request was kept.
+
 A store newer than this code raises `TooNew` (exit 3); a write still locked out when the
 busy timeout ends raises `Busy` (exit 75); a store that can't be opened or read raises
 `Unreadable` (exit 1).
@@ -27,6 +32,7 @@ contributions (`moxi_projects.contributions`) before they write.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -62,7 +68,21 @@ STEPS: tuple[str, ...] = (
         PRIMARY KEY (project_key, agent)
     );
     """,
+    """
+    CREATE TABLE remove_status (
+        key     TEXT NOT NULL PRIMARY KEY,
+        project TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        created TEXT NOT NULL
+    );
+    """,
 )
+
+#: The schema version whose step made `remove_status`.
+STATUS_VERSION = 2
+
+#: How long a kept remove status answers a repeat, in seconds: a day.
+STATUS_KEPT = 24 * 60 * 60
 
 #: The fields `update` may change. The key is not one: other modules store it, so a
 #: rename would have to rewrite their rows. `created` is a birth time.
@@ -80,6 +100,12 @@ def path() -> str:
 def now() -> str:
     """The time now, UTC, ISO 8601 with `Z`."""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _status_cutoff() -> str:
+    """The birth time before which a kept remove status no longer counts, a day ago, in
+    `now()`'s spelling, which sorts as text in time order."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - STATUS_KEPT))
 
 
 def _version(conn: sqlite3.Connection) -> int:
@@ -291,6 +317,47 @@ def delete(conn: sqlite3.Connection, key: str) -> Project:
     return current
 
 
+def keep_remove_status(conn: sqlite3.Connection, job: str, project: str,
+                       outcome: dict) -> None:
+    """Keep what the remove request `job` (its idempotency key) came to for project
+    `project` (the key as asked): `outcome`, a dict of plain values. Rows older than a day
+    go first, in the same write. A row `job` already has stands: a repeat gets the first
+    answer."""
+    conn.execute("DELETE FROM remove_status WHERE created < ?", (_status_cutoff(),))
+    conn.execute("INSERT OR IGNORE INTO remove_status (key, project, outcome, created) "
+                 "VALUES (?, ?, ?, ?)", (job, project, json.dumps(outcome), now()))
+
+
+def remove_status(job: str, where: str | None = None) -> dict | None:
+    """What the remove request `job` came to, as kept by `keep_remove_status`: its outcome
+    with `job`, `project` and `created` beside it; None when no such request is kept (none
+    was, it is older than a day, the store is missing or at a version before the table).
+
+    A read: it never writes. Raises `Unreadable` (or its `TooNew` and `Busy`)."""
+    where = where or path()
+    opened = api._open(where)
+    if opened is None:
+        return None
+    conn, version = opened
+    try:
+        if version < STATUS_VERSION:
+            return None
+        row = conn.execute("SELECT project, outcome, created FROM remove_status "
+                           "WHERE key = ? AND created >= ?",
+                           (job, _status_cutoff())).fetchone()
+        if row is None:
+            return None
+        project, outcome, created = row
+        kept = json.loads(outcome)
+        if not isinstance(kept, dict):
+            raise ValueError(f"the outcome kept for a remove is {type(kept).__name__}")
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise api._unreadable(where, exc) from exc
+    finally:
+        conn.close()
+    return {**kept, "job": job, "project": project, "created": created}
+
+
 def add_agent(conn: sqlite3.Connection, key: str, name: str) -> Project:
     """Add `name` to project `key`'s associated set and return the project."""
     name = check_agent(name)
@@ -320,6 +387,7 @@ def remove_agent(conn: sqlite3.Connection, key: str, name: str) -> Project:
     return project(conn, current.key)
 
 
-__all__ = ["STEPS", "FIELDS", "TIMEOUT", "path", "now", "writing", "write", "project",
-           "refuse_root", "refuse_key", "refuse_held_by_agents", "insert", "update",
-           "delete", "add_agent", "remove_agent", "setup"]
+__all__ = ["STEPS", "STATUS_VERSION", "STATUS_KEPT", "FIELDS", "TIMEOUT", "path", "now",
+           "writing", "write", "project", "refuse_root", "refuse_key",
+           "refuse_held_by_agents", "insert", "update", "delete", "keep_remove_status",
+           "remove_status", "add_agent", "remove_agent", "setup"]
