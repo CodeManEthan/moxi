@@ -278,7 +278,7 @@ def test_an_address_says_who_can_reach_it():
         module="ui", name="gateway", reach="own-devices", provider="tailscale",
         exposure="tailnet", url="https://box.tail1234.ts.net:8461/",
         host="box.tail1234.ts.net", port=8461, target=8461, state="on",
-        change=rec.token("ui/gateway"), applied_at="2026-10-30T12:00:00Z")
+        change=rec.token("ui/gateway"), applied_at="2026-10-30T12:00:00Z", retired=True)
     connector = api.address("comms", "connector")
     assert connector.exposure == "internet" and connector.url == "https://box.tail1234.ts.net/"
     site = api.address("web", "site")

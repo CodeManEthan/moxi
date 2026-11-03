@@ -203,7 +203,7 @@ def test_retire_first_with_a_crash_before_a_reapply(alpha, tailscale, yes, monke
     with pytest.raises(Crash):
         acts.repair(ask=yes)
     want = ("laptop.tail1234.ts.net" if rename else HOST, 8461)
-    assert retired() == {want} and len(tailscale.changes()) == 1
+    assert retired() == {want, (HOST, 8461)} and len(tailscale.changes()) == 1
 
 
 def test_retire_first_with_a_crash_in_a_switch(alpha, cf, units, tailscale, yes,
@@ -234,6 +234,22 @@ def test_a_record_without_the_list_reads_every_http_origin_and_stores_it(alpha, 
     acts.add("alpha/connector", ask=yes)
     stored = json.loads(record.record_path().read_text())["retired"]
     assert {(o["host"], o["port"]) for o in stored} == {(HOST, 8461), (HOST, 443)}
+
+
+def test_an_http_entry_missing_from_the_list_is_retired_and_stored_at_the_next_write(
+        alpha, tailscale, yes):
+    """An older tunnel keeps the list as it is and adds its own entries to none, so an
+    `http` entry it made live is read as retired anyway, and stays so once removed."""
+    acts.add("alpha/gateway", ask=yes)
+    raw = json.loads(record.record_path().read_text())
+    raw["retired"] = [{"host": "a.example.com", "port": 443}]
+    record.record_path().write_text(json.dumps(raw))
+    assert retired() == {("a.example.com", 443), (HOST, 8461)}
+    assert record.read().is_retired(HOST, 8461)
+    acts.remove("alpha/gateway", ask=yes)
+    assert record.read().entries == {}
+    stored = json.loads(record.record_path().read_text())["retired"]
+    assert [(o["host"], o["port"]) for o in stored] == [("a.example.com", 443), (HOST, 8461)]
 
 
 def test_the_list_survives_every_act_and_moves_no_token(alpha, tailscale, units, yes):

@@ -341,10 +341,9 @@ class Record:
     @property
     def retired(self) -> frozenset[tuple[str, int]]:
         """Every retired origin, `(host, port)` with the host in the one form: the stored
-        list, or for a record without one, the origin of every `http` entry (`fill`)."""
-        if self.stored_retired is None:
-            return frozenset(fill(self.entries))
-        return frozenset(self.stored_retired)
+        list and the origin of every `http` entry (`fill`). An `http` entry an older tunnel
+        wrote after the list existed is in no list, and is retired all the same."""
+        return frozenset((*(self.stored_retired or ()), *fill(self.entries)))
 
     def is_retired(self, host: str, port: int) -> bool:
         """True when the origin `https://<host>:<port>` is retired."""
@@ -557,11 +556,10 @@ def _new_record() -> dict:
 
 
 def _retired(before: Record, origins: list[tuple[str, int]]) -> list[dict]:
-    """The `retired` list a write stores: the one `before` stood for, then `origins` not
-    already in it."""
-    kept = list(before.stored_retired) if before.stored_retired is not None \
-        else fill(before.entries)
-    out = kept + [o for o in dict.fromkeys(origins) if o not in kept]
+    """The `retired` list a write stores: the stored one, then each origin of `before`'s
+    `http` entries (`fill`) and of `origins` not already in it."""
+    kept = list(before.stored_retired or ())
+    out = kept + [o for o in dict.fromkeys([*fill(before.entries), *origins]) if o not in kept]
     return [{"host": host, "port": port} for host, port in out]
 
 
