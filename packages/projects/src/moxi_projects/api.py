@@ -38,10 +38,10 @@ import sqlite3
 import moxi.store
 
 #: The store's schema version this code writes.
-_VERSION = 1
+_VERSION = 2
 #: The schema versions this code reads as they are. A store at an older version than
 #: these is refused until `moxi install projects` (or any write) migrates it.
-_READS = frozenset({1})
+_READS = frozenset({1, 2})
 #: The store's file name in projects' data directory.
 _FILE = "projects.db"
 #: The built-in kind every row takes unless told otherwise.
@@ -228,39 +228,59 @@ def _unreadable(path: str, exc: BaseException) -> Unreadable:
                       "a backup", path)
 
 
-def _rows(path: str | None = None) -> list[tuple]:
-    """Every project row with its associated agents, by key: tuples of the `Project`
-    fields followed by `root_real`. A missing store, or one no write has finished
-    setting up, has none."""
-    path = path or _store_path()
+def _open(path: str) -> tuple[sqlite3.Connection, int] | None:
+    """The store at `path` opened for a read, with its schema version, or None when there
+    is no store yet: a missing file, or one no write has finished setting up. Opening
+    writes nothing. Raises `Unreadable` (or its `TooNew` and `Busy`) for a store this code
+    can't read. The caller closes the connection."""
     try:
         if os.path.getsize(path) == 0:
             # Created a moment ago by a write that hasn't set it up yet. `connect` would
             # switch an empty file to WAL, which is a write.
-            return []
+            return None
     except FileNotFoundError:
-        return []
+        return None
     except OSError as exc:
         raise _unreadable(path, exc) from exc
     try:
         conn = moxi.store.connect(path, create=False)
     except moxi.store.StoreError as exc:
         if not os.path.exists(path):
-            return []
+            return None
         raise _unreadable(path, exc) from exc
     except (sqlite3.Error, OSError) as exc:
         raise _unreadable(path, exc) from exc
     try:
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-        if version == 0:
-            # Created and not yet set up: a write is between `connect` and its migration.
-            return []
         if version > _VERSION:
             raise TooNew(path, version, _VERSION)
-        if version not in _READS:
+        if version and version not in _READS:
             raise Unreadable(f"the projects store {path} is at schema version {version}, "
                              "older than this version of moxi-projects reads",
                              _INSTALL, path)
+    except Unreadable:
+        conn.close()
+        raise
+    except (sqlite3.Error, OSError) as exc:
+        conn.close()
+        raise _unreadable(path, exc) from exc
+    if version == 0:
+        # Created and not yet set up: a write is between `connect` and its migration.
+        conn.close()
+        return None
+    return conn, version
+
+
+def _rows(path: str | None = None) -> list[tuple]:
+    """Every project row with its associated agents, by key: tuples of the `Project`
+    fields followed by `root_real`. A missing store, or one no write has finished
+    setting up, has none."""
+    path = path or _store_path()
+    opened = _open(path)
+    if opened is None:
+        return []
+    conn, _version = opened
+    try:
         associated: dict[str, list[str]] = {}
         for project_key, agent in conn.execute(
                 "SELECT project_key, agent FROM project_agents ORDER BY project_key, agent"):
@@ -270,8 +290,6 @@ def _rows(path: str | None = None) -> list[tuple]:
                 for key, root, kind, lead, notes_root, created, root_real in conn.execute(
                     "SELECT key, root, kind, lead, notes_root, created, root_real "
                     "FROM projects ORDER BY key")]
-    except Unreadable:
-        raise
     except (sqlite3.Error, OSError) as exc:
         raise _unreadable(path, exc) from exc
     finally:
