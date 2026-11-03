@@ -354,10 +354,7 @@ def test_the_offline_page_for_a_stopped_shell_the_off_answer_and_no_answer(
 
 
 def test_a_planted_worker_is_replaced_at_the_next_update_check(
-        ui_browser, tmp_path_factory, fixture_site, phones):
-    if _engine(ui_browser) == "webkit":
-        pytest.skip("WebKit sends no cookie on an update check; its replacement is in the "
-                    "by-hand check")
+        tmp_path_factory, fixture_site, phones):
     port = phone_kit.free_port()
     home = tmp_path_factory.mktemp("gw")
     bridge = PhoneBridge(home, port).start()
@@ -385,15 +382,12 @@ def test_a_planted_worker_is_replaced_at_the_next_update_check(
 
 
 def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_after(
-        ui_browser, tmp_path_factory, fixture_site, phones):
+        tmp_path_factory, fixture_site, phones):
     """A squatter's start document and `client.js`, cached for a year while no worker
     controls the phone, run from the cache until the real worker takes the origin, and never
     after. The phone keeps a live session throughout, so no sign-in page clears the cache:
     the bridge sends the phone to the squatter while the shell runs, which the phone can't
     tell from a squatter holding the port."""
-    if _engine(ui_browser) == "webkit":
-        pytest.skip("WebKit sends no cookie on an update check; its replacement is in the "
-                    "by-hand check")
     shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     squat = CachingSquatter().start()
