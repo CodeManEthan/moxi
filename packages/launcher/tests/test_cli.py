@@ -427,20 +427,16 @@ def test_preview_drops_a_left_out_rows_flag(work, capsys):
     assert shown["values"]["model"] == "" and shown["values"]["effort"] == ""
 
 
-def test_a_left_out_harness_reads_the_flags_against_the_shipped_one(work, capsys):
-    write_presets(SEAT)
-    code, out, _ = run(["preview", "--seat", "coder", "--leave-out", "harness", "--json"],
-                       capsys)
-    assert code == codes.OK and json.loads(out)["harness"] == "claude"
-
-
 @pytest.mark.parametrize("verb", ["run", "preview"])
 @pytest.mark.parametrize("words, row", [
     (["--leave-out", "nonsense"], "nonsense"),
     (["--model", "opus", "--leave-out", "model"], "model"),
+    (["--leave-out", "harness"], "harness"),
+    (["--seat", "coder", "--search", "--leave-out", "harness"], "harness"),
 ])
-def test_a_row_left_out_that_no_harness_has_or_also_typed_is_refused(work, harness, verb,
-                                                                      words, row, capsys):
+def test_a_row_left_out_that_no_harness_has_harness_or_also_typed_is_refused(
+        work, harness, verb, words, row, capsys):
+    write_presets(SEAT)
     status, out, err = run([verb, *words], capsys)
     assert status == codes.USAGE and out == ""
     assert err.splitlines()[0].endswith("[bad-value]") and row in err.splitlines()[0]

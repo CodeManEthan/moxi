@@ -1039,10 +1039,12 @@ def test_the_one_spelling_rule_sees_a_left_out_spelling_gone():
 @pytest.mark.parametrize("left_out, typed, row", [
     (("nonsense",), {}, "nonsense"),
     (("home",), {}, "home"),
+    (("harness",), {}, "harness"),
     (("model",), {"model": "opus"}, "model"),
     (("extra_flags",), {"extra_flags": ["--verbose"]}, "extra_flags"),
 ])
-def test_a_left_out_name_no_harness_has_or_one_also_given_is_refused(left_out, typed, row):
+def test_a_left_out_name_no_harness_has_harness_or_one_also_given_is_refused(left_out, typed,
+                                                                              row):
     with pytest.raises(catalog.BadValue) as caught:
         resolve(typed=typed, left_out=left_out)
     assert caught.value.code == "bad-value" and caught.value.row == row
@@ -1063,12 +1065,14 @@ def test_a_codex_seats_approval_left_out_launches_under_claude():
     assert got.harness == "claude" and "approval" not in got.values
 
 
-def test_leaving_out_the_harness_takes_the_shipped_one():
+def test_leaving_out_the_harness_is_refused_since_a_launch_needs_one():
     found = presets.read(write('[defaults]\nharness = "codex"\n[seat.c]\nharness = "codex"\n'))
     request = Request(seat="c", left_out=("harness",), cwd="/work")
-    assert presets.harness_of(request, presets=found) == "claude"
-    got = presets.resolve(request, presets=found, available=NONE)
-    assert got.harness == "claude" and got.sources["harness"] == presets.LEFT_OUT
+    assert presets.harness_of(request, presets=found) == "codex"
+    for lay in (presets.resolve, presets.layered):
+        with pytest.raises(catalog.BadValue) as caught:
+            lay(request, presets=found, available=NONE)
+        assert caught.value.row == "harness" and "a launch needs one" in caught.value.problem
 
 
 def test_a_word_enum_left_out_ends_a_seats_recycling():

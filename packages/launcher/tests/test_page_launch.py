@@ -390,6 +390,42 @@ def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
     assert (resolved.values["limit_at"], resolved.sources["limit_at"]) == ("1x", "left-out")
 
 
+def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(
+        work, monkeypatch, tmp_path, fixed_ids):
+    # The seat chose limit_at even though "1x" is the shipped word, so leaving it out
+    # removes that choice, as --leave-out does on the command line.
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
+    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
+                  'limit_at = "1x"\n')
+    body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
+    said = previewed(body)
+    assert said["refused"] == [] and said["left_out"] == ["limit_at"]
+    line = ["--seat", "lead", "--recycle-at-limit=off", "--leave-out", "limit_at"]
+    request, composition = command_line_preview(line)
+    assert page_shown(said) == shown(composition)
+    assert said["left_out"] == list(request.left_out)
+    assert said["command"] == cli.command_line(["moxi", "launcher", "run", *line])
+    # Kept, the seat's limit_at needs the recycling the form turned off.
+    kept = previewed(edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, []))
+    assert codes(kept) == ["needs-module"] and kept["refused"][0]["row"] == "limit_at"
+
+
+@POSIX
+def test_a_codex_seats_approval_at_its_shipped_word_left_out_is_not_refused(
+        work, harness, fixed_ids):
+    write_presets(f'[seat.coder]\nharness = "codex"\ncwd = "{work}"\ntarget = "headless"\n'
+                  f'brief = "{BRIEF}"\napproval = "on-request"\n')
+    assert codes(previewed(filled(CODER))) == ["not-taken"]
+    said = previewed(edited(filled(CODER), {}, ["approval"]))
+    assert said["refused"] == [] and said["left_out"] == ["approval"]
+    line = ["--seat", "coder", "--leave-out", "approval"]
+    request, composition = command_line_preview(line)
+    assert page_shown(said) == shown(composition)
+    _, command = pagehandlers.launch_request(edited(filled(CODER), {}, ["approval"]), "r1")
+    assert command == ["moxi", "launcher", "run", *line]
+
+
 @POSIX
 def test_a_codex_seats_approval_left_out_on_a_mode_without_it_is_not_refused(work, harness):
     write_presets(f'[seat.coder]\nharness = "codex"\ncwd = "{work}"\ntarget = "headless"\n'
@@ -433,8 +469,11 @@ def test_leaving_out_the_only_place_is_refused_no_cwd(rule_file):
     ({"values": {"model": "opus"}, "leave_out": ["model"]}, "model"),
     ({"values": {"add_dir": []}, "leave_out": ["add_dir"]}, "add_dir"),
     ({"values": {}, "leave_out": ["nonsense"]}, "nonsense"),
+    ({"values": {}, "leave_out": ["harness"]}, "harness"),
+    ({"seat": "coder", "values": {"harness": "codex"}, "leave_out": ["harness"]}, "harness"),
 ])
-def test_a_row_in_both_lists_or_no_row_at_all_is_refused_bad_value(rule_file, body, row):
+def test_a_row_in_both_lists_harness_or_no_row_at_all_is_refused_bad_value(rule_file, body,
+                                                                            row):
     said = previewed(body)
     assert codes(said) == ["bad-value"] and said["refused"][0]["row"] == row
 
@@ -482,6 +521,101 @@ def test_the_harness_is_typed_only_when_it_is_not_the_layers(rule_file):
         {**body, "values": {"harness": "codex", "cwd": body["values"]["cwd"]},
          "leave_out": []}, "r1")
     assert request.typed["harness"] == "codex" and "--harness=codex" in command
+
+
+def test_an_unchanged_form_types_nothing_and_leaves_nothing_out_over_every_preset(work,
+                                                                                  monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
+    there = work / "there"
+    there.mkdir()
+    write_presets(RULE_FILE.format(work=work, there=there) + f"""
+[seat.lead]
+cwd = "{work}"
+recycle_at_limit = "compact"
+limit_at = "1x"
+
+[seat.headless]
+harness = "codex"
+target = "headless"
+approval = "on-request"
+brief = "{BRIEF}"
+
+[seat.blank]
+model = ""
+add_dir = []
+remote_control = false
+""")
+    # A row a layer sets to an empty value shows empty, and leaving it out removes nothing.
+    for preset in (NONE, PLANNER, SCRATCHY, CODER, THERE, {"seat": "lead"},
+                   {"seat": "headless"}, {"seat": "blank"}):
+        request, command = pagehandlers.launch_request(filled(preset), "r1")
+        assert dict(request.typed) == {} and tuple(request.extra) == (), preset
+        assert tuple(request.left_out) == () and "--leave-out" not in command, preset
+
+
+# --- every row, set by one layer: as filled, and emptied ---
+
+def _sample(row: catalog.Row, work: Path) -> tuple[object, dict]:
+    """A value of `row` other than its shipped default, and the rows it needs beside it."""
+    if row.name == "limit_at":
+        return "2x", {"recycle_at_limit": "compact"}
+    if row.name == "slot":
+        return "3", {"target": "slot"}
+    if row.optional_value or row.type == "bool":
+        return True, {}
+    if row.values:
+        return next(v for v in row.values if v != row.default), {}
+    if row.name == catalog.EXTRA:
+        return ["--verbose"], {}
+    if row.type == "list" or row.repeatable:
+        return [str(work), str(work / "b")], {}
+    if row.type == "path":
+        return str(work), {}
+    return f"x-{row.name}", {}
+
+
+def _every_module_but_projects(name: str) -> bool:
+    return name != "projects"
+
+
+EVERY_ROW = [(harness, name, layer)
+             for harness in catalog.HARNESSES
+             for name in catalog.offered(harness, _every_module_but_projects)
+             if name not in ("harness", "project")
+             for layer in ("defaults", "seat")]
+
+
+def _resolved(request) -> tuple:
+    try:
+        found = presets.resolve(request, available=slots.links)
+    except catalog.Refused as refused:
+        return ("refused", type(refused).__name__, str(refused))
+    return dict(found.values), dict(found.sources), sorted(found.chosen)
+
+
+@pytest.mark.parametrize("harness,name,layer", EVERY_ROW,
+                         ids=["-".join(case) for case in EVERY_ROW])
+def test_every_row_a_layer_sets_is_kept_as_filled_and_left_out_when_emptied(
+        work, monkeypatch, harness, name, layer):
+    monkeypatch.setattr(slots, "links", _every_module_but_projects)
+    (work / "b").mkdir()
+    value, beside = _sample(catalog.row(harness, name), work)
+    rows = {name: value, **beside}
+    defaults = {} if {"cwd", "scratch"} & set(rows) else {"cwd": str(work)}
+    seat = {"harness": harness}
+    (defaults if layer == "defaults" else seat).update(rows)
+    write_presets("[defaults]\n" + "".join(f"{k} = {catalog.toml_literal(v)}\n" for k, v in defaults.items())
+                  + "[seat.s]\n" + "".join(f"{k} = {catalog.toml_literal(v)}\n" for k, v in seat.items()))
+    body = {**filled({"seat": "s"}), "off_posture": True}
+    request, command = pagehandlers.launch_request(body, "r1")
+    assert dict(request.typed) == {} and tuple(request.left_out) == ()
+    assert "--leave-out" not in command
+    # Emptied as the panel empties it (a withheld text: its keep box unticked).
+    request, command = pagehandlers.launch_request(edited(body, {}, [name]), "r2")
+    assert dict(request.typed) == {} and tuple(request.left_out) == (name,)
+    assert command[-2:] == ["--leave-out", name]
+    line = api.LaunchRequest(seat="s", off_posture=True, left_out=(name,), request_id="r3")
+    assert _resolved(request) == _resolved(line)
 
 
 # --- groups of rows that exclude each other ---

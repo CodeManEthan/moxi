@@ -29,8 +29,8 @@ draws values from a second.
 your `[defaults]` or the preset sets: the row launches at its shipped default, as if no
 layer had set it. Leave out the preset's place and the place in your `[defaults]` stands.
 `moxi launcher run --seat planner --leave-out model` starts the planner seat with the
-harness's own model. A row both typed and left out, and a name that is no row of any
-harness, are refused. A row the harness doesn't offer can be left out too, so a seat that
+harness's own model. A row both typed and left out, `harness` (a launch needs one), and a
+name that is no row of any harness, are refused. A row the harness doesn't offer can be left out too, so a seat that
 sets a Codex row can still be launched under Claude.
 
 The flags are the catalog's rows: the launcher's own (`--harness`, `--cwd`, `--project`,

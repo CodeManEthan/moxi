@@ -869,13 +869,17 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     words of its `moxi launcher run` command.
 
     `body` carries the whole form: `values`, each field showing a value, and `leave_out`,
-    each field shown empty. A row in both is refused `bad-value`. An emptied list, and a
-    switch with an optional value set off, read as left out. Each value is read as typed,
-    as the command line reads it: its words go through `catalog.parse` for the launch's
-    harness (`values["harness"]`, else the layers'). Then each row is compared, by value,
-    with what `presets.layered` gives it for the same preset and harness: a value equal to
-    it is dropped, and so is a leave-out of a row it leaves at its shipped default; the
-    rest are typed, or left out. A row the harness doesn't offer that `body` leaves out is
+    each field shown empty. A row in both, and `harness` left out, are refused
+    `bad-value`. An emptied list, and a switch with an optional value set off, read as
+    left out. Each value is read as typed, as the command line reads it: its words go
+    through `catalog.parse` for the launch's harness (`values["harness"]`, else the
+    layers'). Then each row is compared with what `presets.layered` gives it for the same
+    preset and harness: a value equal to it is dropped, and the rest are typed. A
+    leave-out is kept when `[defaults]` or the preset names the row itself, the place and
+    one-spelling rules kept that layer's value, and the value is set; else it is dropped,
+    since no layer's choice is there to remove. Who set the row counts, not its value: a
+    preset's `limit_at = "1x"` is the shipped word and still chosen, so leaving it out
+    removes it. A row the harness doesn't offer that `body` leaves out is
     taken out of the layers before the preset is laid, and stays left out when a layer
     names it. A typed row of a group (`_GROUPS`) makes every other value of that group in
     `body` typed too, so the resolver refuses two. The harness is typed only when it is
@@ -885,6 +889,9 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     values = dict(body.get("values") or {})
     asked_out = list(dict.fromkeys(body.get("leave_out") or ()))
     for name in asked_out:
+        if name == "harness":
+            raise catalog.BadValue(name, "harness can't be left out: a launch needs one",
+                                   "give the harness to launch, or leave it to the preset")
         if name in values:
             raise _both(name)
     available = _available()
@@ -924,7 +931,9 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     named = {*found.defaults, *(preset.values if preset is not None else ())}
     left_out = tuple(
         name for name in asked_out
-        if (name in named if name not in offered else layered[name] != offered[name].default))
+        if (name in named if name not in offered
+            else laid.sources[name] in (presets.DEFAULTS, presets.PRESET)
+            and catalog.is_set(layered[name])))
 
     extra = typed.pop(catalog.EXTRA, ())
     off_posture = bool(body.get("off_posture", False))

@@ -792,16 +792,15 @@ class Resolved:
 def harness_of(request, *, presets: Presets | None = None,
                env: Mapping[str, str] | None = None) -> str:
     """The harness a request launches before its flags are parsed: the preset's, else
-    the one `[defaults]` names, else the shipped default; the shipped default when the
-    request leaves `harness` out. A caller parses the typed flags against it unless
-    `--harness` was typed (`catalog.typed_harness`)."""
+    the one `[defaults]` names, else the shipped default. A caller parses the typed flags
+    against it unless `--harness` was typed (`catalog.typed_harness`). A request that
+    leaves `harness` out is refused when it is laid (`layered`)."""
     found = presets if presets is not None else read(env=env)
     preset = _named(request, found)
-    if "harness" not in (getattr(request, "left_out", None) or ()):
-        if preset is not None and preset.harness in catalog.HARNESSES:
-            return str(preset.harness)
-        if found.defaults.get("harness") in catalog.HARNESSES:
-            return str(found.defaults["harness"])
+    if preset is not None and preset.harness in catalog.HARNESSES:
+        return str(preset.harness)
+    if found.defaults.get("harness") in catalog.HARNESSES:
+        return str(found.defaults["harness"])
     return str(catalog.launcher()["harness"].default)
 
 
@@ -846,7 +845,7 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
 
     Raises `UnknownPreset`, `BadPreset`, the catalog's `NeedsModule` for a typed row this
     install does not offer, and its `BadValue`: a left-out name that is no catalog row of
-    any harness, a row both typed and left out, a harness no catalog has, two places or
+    any harness, a left-out `harness`, a row both typed and left out, a harness no catalog has, two places or
     two spellings of one text in one layer. A `moxi.config.ConfigError` when the file
     can't be read."""
     avail = _avail(available)
@@ -931,9 +930,13 @@ def layered(request, *, harness: str | None = None, presets: Presets | None = No
 
 
 def _left_out(names: Sequence[str], typed: Mapping[str, object]) -> frozenset[str]:
-    """The rows a request leaves out, each a catalog row of some harness and not typed
-    too; else the catalog's `BadValue` naming the first that is not."""
+    """The rows a request leaves out, each a catalog row of some harness, not `harness`
+    (a launch needs one), and not typed too; else the catalog's `BadValue` naming the
+    first that is not."""
     for name in names:
+        if name == "harness":
+            raise BadValue(name, "harness can't be left out: a launch needs one",
+                           "give the harness to launch, or leave it to the preset")
         if name not in catalog.launcher() and not any(
                 name in catalog.load(h) for h in catalog.HARNESSES):
             raise BadValue(name, f"{name} is not a launcher row or a row of any harness, "
