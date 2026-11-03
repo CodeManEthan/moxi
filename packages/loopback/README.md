@@ -32,12 +32,39 @@ profile:
 Gates 1 and 3 don't run on a Unix socket, which no browser can open and which lives in a
 directory only you can enter. Every listener binds loopback only.
 
+### The gateway profile
+
+The UI shell's second listener, the one a tunnel forwards a phone to, runs a third
+profile: `gateway(table, *, session, host, port, fallback=None)`. `host` is the name the
+tunnel gives the box and `port` the outside port the phone uses.
+
+- **Host.** Exactly one `Host` naming `host`, in any case, with no port or with `port`.
+  `127.0.0.1`, `localhost` and every other name are refused, on a Unix socket too, since
+  the tunnel forwards a browser's request there.
+- **Origin.** An act needs `Origin: https://<host>:<port>` (no `:<port>` when it is 443)
+  and, when it is sent, `Sec-Fetch-Site: same-origin`. Reads, files and navigations follow
+  the shell profile's rules with that origin.
+- **No token.** A request that carries `X-Moxi-Token` is refused, so no route meant for the
+  CLI or the doctor answers on this listener.
+- **No proxy headers.** The check reads no `X-Forwarded-*`, `Forwarded` or `Tailscale-*`
+  header: any local process can send those straight to the listener.
+- The session callable and the fallback work as on the shell's profile.
+
+A host that is not a DNS name, or is `localhost`, a `.localhost` name or an address, and
+a port outside 1 to 65535 raise `ValueError` when the profile is built.
+
 Every answer the base sends, refusals and 500s included, carries one fixed header set: a
 strict Content-Security-Policy, `nosniff`, `no-referrer`, same-origin opener and resource
 policies, a Permissions-Policy that turns off the camera, microphone, location, USB and
 payment, and `Cache-Control`. Two answers uvicorn sends on its own carry none of it: its
 400 for a request it can't parse, and its 503 when all 128 of a server's connections are
 open. The shell adds whatever header of the set an answer lacks before the browser sees it.
+
+`response_headers(..., policy="gateway")` gives the same set with the policy the phone's
+listener uses: the fixed policy plus `manifest-src 'self'` and `worker-src 'self'`, and
+nothing else, so the phone can install the app and register its worker. `policy="page"`,
+the default, is the fixed policy. A `Content-Security-Policy` in `extra` is refused under
+either, so no caller writes or rewrites a policy of its own.
 
 ## Declaring a page
 
@@ -215,6 +242,27 @@ uvicorn on sockets the caller bound. `app` answers 403 to any request `guard` di
 buffers (h11's 16 KiB by default). The shell's browser listener raises it to 4 MiB, and
 each connection holding an unfinished head may then cost that much memory: 128
 connections at 4 MiB is up to 512 MiB.
+
+A process with two listeners has one signal owner. `serve` points SIGTERM, SIGINT and
+SIGBREAK at its own `should_exit` and puts the old handlers back when it returns; a
+second listener's `serve(..., signals=False)` installs no handler and restores none, so
+starting or stopping it leaves the first listener's signal handling as it was. Its caller
+sets that listener's `should_exit` itself.
+
+`serve(..., peer=True)` tells each request which process is at the other end of its
+connection. The peer credential is read once, when the connection is made, and every
+request on that connection gets the scope key `"moxi.peer"`, `{"uid": <int or None>}`. The
+uid is the peer process's on a Unix socket on Linux (`SO_PEERCRED`) and macOS
+(`LOCAL_PEERCRED`); it is None on TCP, on Windows and when the read fails. Each connection
+keeps its own copy, apart from the state uvicorn shares between connections, so no
+request sees another connection's peer, and nothing a client sends sets the key. Without
+`peer=True` the scope has no such key.
+
+A listener's socket comes from `bind_unix(path)`, which first checks the socket's own
+directory with `check_private_dir(path)` (owned by you, no group or other bits, not a
+link; `NotPrivate` otherwise) and unlinks a stale socket, or from `bind_tcp(port)` on
+`127.0.0.1`, with `SO_EXCLUSIVEADDRUSE` on Windows and `SO_REUSEADDR`, never
+`SO_REUSEPORT`, elsewhere, so no second socket can hold its port.
 
 ## The export command
 

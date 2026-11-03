@@ -29,21 +29,26 @@ read a page as data without importing handler code.
   declaration.
 * The route table: `Table`, `Entry`, `build_table(page)`, `export(page)`.
 * The request check: `check(view, profile)` over a `RequestView`, with a `Profile` from
-  `upstream(...)` (a module server) or `browser(...)` (the shell's listener); a refusal
-  is a `Refusal`. `token_matches(view, token)` is gate 4's compare, and `proof(token,
+  `upstream(...)` (a module server), `browser(...)` (the shell's listener) or
+  `gateway(...)` (the listener a tunnel forwards a phone to); a refusal is a `Refusal`. `token_matches(view, token)` is gate 4's compare, and `proof(token,
   server_id, nonce)` the answer a server gives `GET /api/prove`.
 * Listeners and connections: `bind_browser(port)` and `BrowserSockets`,
-  `browser_names(sockets)` and `NotLoopback`; `open_connection(info)` and `call(info,
-  ...)`, which prove the server first and raise `NotOurServer` when it fails.
+  `browser_names(sockets)` and `NotLoopback`; `bind_unix(path)` in a directory
+  `check_private_dir(path)` passes, which raises `NotPrivate`, and `bind_tcp(port)` on
+  `127.0.0.1`; `open_connection(info)` and `call(info, ...)`, which prove the server first
+  and raise `NotOurServer` when it fails.
 * The runtime file: `RuntimeInfo`, `write_runtime`, `remove_runtime`, `read_runtime`.
 * The base: `app(page, ...)`, `guard(inner, profile)`, `prove(inner, ...)` and
-  `serve(app, sockets, ...)`. Handlers get a `Call` and may return `Accepted(...)` or
+  `serve(app, sockets, ...)`, which with `signals=False` leaves the process's signal
+  handling alone and with `peer=True` gives each request its connection's peer uid as
+  the scope key `"moxi.peer"`. Handlers get a `Call` and may return `Accepted(...)` or
   raise `Conflict(...)` or `Refused(...)`; `busy(name)` holds the idle exit; `Topics` and
   `Snapshot` feed the page's one stream route. A confirmed act (`Route(...,
   confirmed=True, status=...)`) needs an `Idempotency-Key`, runs at most once per key,
   gets the key as `call.key` and returns `Accepted(...)`.
-* The fixed header set: `response_headers(...)` for a response of the caller's own, and
-  `complete(headers)` to add whatever is missing from it.
+* The fixed header set: `response_headers(...)` for a response of the caller's own, with
+  `policy="gateway"` on the phone's listener, and `complete(headers)` to add whatever is
+  missing from it.
 * Tests: `gate_matrix(page)`.
 
 Importing this module imports neither uvicorn nor Starlette: they load only inside `app`
@@ -59,7 +64,17 @@ import json
 import secrets
 from typing import Any
 
-from .check import Profile, Refusal, RequestView, browser, check, proof, token_matches, upstream
+from .check import (
+    Profile,
+    Refusal,
+    RequestView,
+    browser,
+    check,
+    gateway,
+    proof,
+    token_matches,
+    upstream,
+)
 from .headers import complete, response_headers
 from .routes import (
     Entry,
@@ -90,9 +105,13 @@ from .transport import (
     BrowserSockets,
     NotLoopback,
     NotOurServer,
+    NotPrivate,
     bind_browser,
+    bind_tcp,
+    bind_unix,
     browser_names,
     call,
+    check_private_dir,
     open_connection,
 )
 
@@ -114,6 +133,7 @@ __all__ = [
     "RequestView",
     "browser",
     "check",
+    "gateway",
     "proof",
     "token_matches",
     "upstream",
@@ -121,9 +141,13 @@ __all__ = [
     "BrowserSockets",
     "NotLoopback",
     "NotOurServer",
+    "NotPrivate",
     "bind_browser",
+    "bind_tcp",
+    "bind_unix",
     "browser_names",
     "call",
+    "check_private_dir",
     "open_connection",
     # The runtime file.
     "RuntimeInfo",

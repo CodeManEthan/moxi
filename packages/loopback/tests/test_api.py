@@ -27,10 +27,11 @@ THREAT_MODEL = (
 SURFACE = {
     routes: {"Field", "Out", "Page", "PageError", "Route", "Entry", "Table", "build_table",
              "export"},
-    check: {"Profile", "Refusal", "RequestView", "browser", "check", "proof", "token_matches",
-            "upstream"},
-    transport: {"BrowserSockets", "NotLoopback", "NotOurServer", "bind_browser",
-                "browser_names", "call", "open_connection"},
+    check: {"Profile", "Refusal", "RequestView", "browser", "check", "gateway", "proof",
+            "token_matches", "upstream"},
+    transport: {"BrowserSockets", "NotLoopback", "NotOurServer", "NotPrivate", "bind_browser",
+                "bind_tcp", "bind_unix", "browser_names", "call", "check_private_dir",
+                "open_connection"},
     runtime: {"RuntimeInfo", "read_runtime", "remove_runtime", "write_runtime"},
     server: {"Accepted", "Call", "Conflict", "Refused", "Snapshot", "Topics", "app", "busy",
              "guard", "prove"},
@@ -104,9 +105,16 @@ def _shape(fn):
     ("upstream", [("table", "pos", None), ("token", "kw", None), ("port", "kw", None)]),
     ("browser", [("table", "pos", None), ("session", "kw", None), ("names", "kw", None),
                  ("fallback", "kw", None)]),
+    ("gateway", [("table", "pos", None), ("session", "kw", None), ("host", "kw", None),
+                 ("port", "kw", None), ("fallback", "kw", None)]),
     ("check", [("view", "pos", None), ("profile", "pos", None)]),
     ("token_matches", [("view", "pos", None), ("token", "pos", None)]),
     ("bind_browser", [("port", "pos", 0)]),
+    ("bind_unix", [("path", "pos", None)]),
+    ("bind_tcp", [("port", "pos", 0)]),
+    ("check_private_dir", [("path", "pos", None)]),
+    ("response_headers", [("cache", "kw", "no-store"), ("extra", "kw", ()),
+                          ("policy", "kw", "page")]),
     ("browser_names", [("sockets", "pos", None)]),
     ("write_runtime", [("module", "pos", None), ("transport", "kw", None),
                        ("address", "kw", None), ("port", "kw", None),
@@ -127,12 +135,14 @@ def test_the_signatures_are_fixed(name, shape):
 
 
 def test_app_and_serve_keep_the_in_process_signatures():
-    # app adds `version` and `strict`, serve adds `head_limit`; both after the fixed ones.
+    # app adds `version` and `strict`, serve adds `head_limit`, `signals` and `peer`; all
+    # after the fixed ones, with defaults that keep every earlier caller as it was.
     assert _shape(api.app)[:4] == [("page", "pos", None), ("module", "kw", None),
                                    ("server_id", "kw", None), ("prefix", "kw", "")]
     assert _shape(api.serve)[:4] == [("app", "pos", None), ("sockets", "pos", None),
                                      ("should_exit", "kw", None), ("drain", "kw", None)]
-    assert _shape(api.serve)[4] == ("head_limit", "kw", None)
+    assert _shape(api.serve)[4:] == [("head_limit", "kw", None), ("signals", "kw", True),
+                                     ("peer", "kw", False)]
     assert inspect.iscoroutinefunction(api.serve)
     assert inspect.iscoroutinefunction(api.open_connection)
 

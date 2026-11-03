@@ -584,3 +584,242 @@ def test_after_the_decision_a_proof_is_answered_503_with_connection_close(pages)
         assert closed(conn, 1)
         proto.served.thread.join(5)
         assert not proto.served.thread.is_alive()
+
+
+# --- serve's signals=False: a second listener in a process that has one --------------------
+
+
+@posix
+def test_serve_with_signals_off_installs_no_handler_and_puts_none_back():
+    seen = []
+
+    def mine(signum, frame):
+        seen.append(signum)
+
+    before = signal.signal(signal.SIGTERM, mine)
+    try:
+        with short_dir() as directory:
+            sock, _ = unix_listener(directory)
+
+            async def main():
+                should_exit = asyncio.Event()
+                serving = asyncio.create_task(
+                    serve(reaching_app([]), [sock], should_exit=should_exit, signals=False))
+                await asyncio.sleep(0.2)
+                during = signal.getsignal(signal.SIGTERM)
+                should_exit.set()
+                await asyncio.wait_for(serving, 5)
+                return during
+
+            assert asyncio.run(main()) is mine
+            assert signal.getsignal(signal.SIGTERM) is mine
+            assert seen == []
+    finally:
+        signal.signal(signal.SIGTERM, before)
+
+
+@posix
+def test_a_second_serve_with_signals_off_leaves_the_first_ones_signal_handling():
+    with short_dir() as directory:
+        first, _ = unix_listener(directory)
+        second = bind_unix(os.path.join(directory, "gateway.sock"))
+        before = signal.getsignal(signal.SIGTERM)
+
+        async def main():
+            first_exit, second_exit = asyncio.Event(), asyncio.Event()
+            one = asyncio.create_task(serve(reaching_app([]), [first], should_exit=first_exit))
+            await asyncio.sleep(0.2)
+            installed = signal.getsignal(signal.SIGTERM)
+            two = asyncio.create_task(serve(reaching_app([]), [second],
+                                            should_exit=second_exit, signals=False))
+            await asyncio.sleep(0.2)
+            assert signal.getsignal(signal.SIGTERM) is installed
+            # The signal reaches the first serve's handler, not the second's.
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(first_exit.wait(), 5)
+            assert not second_exit.is_set()
+            await asyncio.wait_for(one, 5)
+            second_exit.set()
+            await asyncio.wait_for(two, 5)
+            # Closing the second listener changed nothing either.
+            return installed
+
+        installed = asyncio.run(main())
+        assert installed is not before
+        assert signal.getsignal(signal.SIGTERM) is before
+
+
+@pytest.mark.parametrize(("signals", "peer"), [(None, False), (1, False), (True, "yes")])
+def test_signals_and_peer_take_only_true_or_false(signals, peer):
+    async def main():
+        await serve(reaching_app([]), [], should_exit=asyncio.Event(), signals=signals,
+                    peer=peer)
+
+    with pytest.raises(ValueError, match="signals and peer"):
+        asyncio.run(main())
+
+
+# --- serve's peer=True: each connection's peer in its requests' scope -----------------------
+
+
+def peer_app(states=None):
+    """Answers each request with its scope's peer, or `"absent"` when it has none."""
+    import json
+
+    async def asgi(scope, receive, send):
+        if states is not None:
+            states.append(dict(scope.get("state") or {}))
+        body = json.dumps(scope.get("moxi.peer", "absent")).encode()
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+    return asgi
+
+
+def ask(sock, extra=b""):
+    """One keep-alive GET on `sock`; the JSON body of its answer."""
+    import json
+
+    sock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n" + extra + b"\r\n")
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = sock.recv(65536)
+        assert chunk, "the server closed the connection"
+        data += chunk
+    head, _, body = data.partition(b"\r\n\r\n")
+    length = int(next(line.split(b":", 1)[1] for line in head.split(b"\r\n")
+                      if line.lower().startswith(b"content-length:")))
+    while len(body) < length:
+        body += sock.recv(65536)
+    return json.loads(body)
+
+
+def counted_reads(monkeypatch, answers=None):
+    """Replace the peer read with one that counts its calls, and answers from `answers`
+    in turn when given (the real read otherwise)."""
+    real = serve_mod._peer_uid
+    reads = []
+
+    def read(sock):
+        reads.append(sock)
+        return real(sock) if answers is None else answers[len(reads) - 1]
+
+    monkeypatch.setattr(serve_mod, "_peer_uid", read)
+    return reads
+
+
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="a peer uid on Unix sockets")
+def test_peer_gives_every_request_on_a_unix_connection_this_processs_uid(monkeypatch):
+    reads = counted_reads(monkeypatch)
+    with short_dir() as directory:
+        sock, path = unix_listener(directory)
+        served = Served(peer_app(), [sock], peer=True)
+        try:
+            conn = raw_connect(path)
+            try:
+                assert ask(conn) == {"uid": os.getuid()}
+                # A header of the same name is a header, never the scope key.
+                assert ask(conn, b"Moxi-Peer: {\"uid\": 0}\r\n") == {"uid": os.getuid()}
+                assert ask(conn) == {"uid": os.getuid()}
+            finally:
+                conn.close()
+        finally:
+            served.stop()
+    assert len(reads) == 1, "the peer is read once, when the connection is made"
+
+
+def test_peer_gives_none_on_tcp():
+    sock = bind_tcp(0)
+    served = Served(peer_app(), [sock], peer=True)
+    try:
+        conn = raw_connect(sock.getsockname())
+        try:
+            assert ask(conn) == {"uid": None}
+        finally:
+            conn.close()
+    finally:
+        served.stop()
+
+
+@pytest.mark.parametrize("transport", [
+    pytest.param("unix", marks=posix),
+    "tcp",
+])
+def test_without_peer_the_scope_has_no_peer_key(transport, monkeypatch):
+    reads = counted_reads(monkeypatch)
+    with short_dir() as directory:
+        if transport == "unix":
+            sock, address = unix_listener(directory)
+        else:
+            sock = bind_tcp(0)
+            address = sock.getsockname()
+        served = Served(peer_app(), [sock])
+        try:
+            conn = raw_connect(address)
+            try:
+                assert ask(conn) == "absent"
+            finally:
+                conn.close()
+        finally:
+            served.stop()
+    assert reads == []
+
+
+@posix
+def test_two_connections_at_once_each_see_only_their_own_peer(monkeypatch):
+    # This process can't connect as two users; the read is stubbed to give the first
+    # connection one uid and the second another, and the requests interleave.
+    counted_reads(monkeypatch, answers=[1001, 1002])
+    servers = []
+    states = []
+    with short_dir() as directory:
+        sock, path = unix_listener(directory)
+        served = Served(peer_app(states), [sock], inner=True, peer=True,
+                        on_server=servers.append)
+        try:
+            one = raw_connect(path)
+            assert ask(one) == {"uid": 1001}
+            two = raw_connect(path)
+            try:
+                assert ask(two) == {"uid": 1002}
+                assert ask(one) == {"uid": 1001}
+                assert ask(two) == {"uid": 1002}
+                assert ask(one) == {"uid": 1001}
+            finally:
+                one.close()
+                two.close()
+            shared = servers[0].lifespan.state
+            assert "moxi.peer" not in shared
+        finally:
+            served.stop()
+    assert "moxi.peer" not in servers[0].lifespan.state
+    # The peer is lifted out of each request's state, so the app reads it in one place.
+    assert len(states) == 5 and all("moxi.peer" not in state for state in states)
+
+
+def test_the_peer_read_gives_none_for_tcp_no_socket_and_a_failed_read():
+    assert serve_mod._peer_uid(None) is None
+    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        assert serve_mod._peer_uid(tcp) is None
+    finally:
+        tcp.close()
+
+    if hasattr(socket, "AF_UNIX"):
+        class Failing:
+            family = socket.AF_UNIX
+
+            def getsockopt(self, *args):
+                raise OSError("no peer")
+
+        assert serve_mod._peer_uid(Failing()) is None
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="SO_PEERCRED")
+def test_the_peer_read_is_the_connected_processs_uid_on_linux():
+    left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        assert serve_mod._peer_uid(left) == os.getuid()
+    finally:
+        left.close()
+        right.close()
