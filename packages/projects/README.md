@@ -46,9 +46,9 @@ would run in a terminal, and refuses where that command refuses, before it makes
   projects list --kind` filters it. A contribution that won't load, or a kind that is
   blocked, is named beside the filter; until it is repaired or uninstalled, every add is
   refused. Open a project to see its fields and edit its root, its kind and, while the
-  notes module is installed, its notes root (`moxi projects set`), set or clear its lead, and add or remove associated agents
-  (`moxi projects agents add` and `remove`). A root must be an absolute path; the page
-  refuses a relative one or one starting with `~`.
+  notes module is installed, its notes root (`moxi projects set`), set or clear its lead,
+  and add or remove associated agents (`moxi projects agents add` and `remove`). A root
+  must be an absolute path; the page refuses a relative one or one starting with `~`.
 - **Add.** The form `moxi projects add` takes: key, root (leave it empty when the kind's
   module gives one), kind, lead, the notes root while the notes module is installed, and
   create for a kind that makes its root. Create is hidden for a kind that refuses it. The
@@ -56,7 +56,7 @@ would run in a terminal, and refuses where that command refuses, before it makes
   terminal's add gives it 30. If the shell's `PATH` has no git, a create is refused and the
   answer says how to fix it for good: set `PATH` in the service manager's environment and
   run `moxi ui stop`, or run the add in a terminal. When an add's answer is lost, the page
-  reads its list again and says the directory may exist.
+  reads its list again and, after a create, says the directory may exist.
 - **Remove.** Remove opens the shell's sheet, which shows the command, the key and the
   root, and says the files stay. Nothing is sent until you confirm; Cancel sends nothing.
   The page then shows how it ended: removed, or refused with each reason and the fix. The
