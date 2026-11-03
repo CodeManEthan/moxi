@@ -4,6 +4,7 @@ the gateway never reaches them.
     POST /m/ui/api/gateway/pair      mint a pairing code; answers the pairing URL
     GET  /m/ui/api/gateway/devices   the paired devices
     POST /m/ui/api/gateway/revoke    {"id"}: delete a device and end its sessions at once
+    GET  /m/ui/api/gateway/log       the audit log's last rows and each device's sign-ins
 
 The handlers reach the shell they serve through `moxi_ui.page.current()`.
 """
@@ -15,10 +16,11 @@ from typing import Any
 
 from moxi_loopback.api import Field, Out, Refused, Route
 
-from . import pairing
+from . import audit, pairing
 from .devices import Device, Devices
 
-__all__ = ["DEVICE_ROW", "DEVICES_SHAPE", "ROUTES", "device_row", "devices", "pair", "revoke"]
+__all__ = ["DEVICES_SHAPE", "DEVICE_ROW", "LOG_SHAPE", "ROUTES", "device_row", "devices", "log",
+           "pair", "revoke"]
 
 _HERE = "moxi_ui.gateway.desk"
 
@@ -28,6 +30,15 @@ DEVICE_ROW = Out("table", items={
     "used": Out("float"), "passkey": Out("bool"), "stale": Out("bool"),
     "host": Out("string"), "provider": Out("string")})
 DEVICES_SHAPE = {"devices": Out("list", items=DEVICE_ROW)}
+#: The audit log as the desktop shows it: rows newest first, `detail` their other fields as
+#: `moxi ui gateway log` prints them, and each device's sign-in times, newest first.
+LOG_SHAPE = {
+    "rows": Out("list", items=Out("table", items={
+        "at": Out("string"), "kind": Out("string"), "device": Out("string", nullable=True),
+        "detail": Out("string")})),
+    "signins": Out("list", items=Out("table", items={
+        "device": Out("string"), "at": Out("list", items=Out("string"))})),
+}
 
 
 def device_row(device: Device) -> dict[str, Any]:
@@ -84,10 +95,23 @@ async def revoke(call: Any) -> dict[str, Any]:
     return {"ok": True}
 
 
+async def log(call: Any) -> dict[str, Any]:
+    """The audit log's last rows, from today and yesterday, and each device's sign-ins in
+    them."""
+    rows, signins = await asyncio.to_thread(audit.latest, _shell().layout.state_dir())
+    return {
+        "rows": [{"at": str(row.get("at", "")), "kind": str(row.get("kind", "")),
+                  "device": row["device"] if isinstance(row.get("device"), str) else None,
+                  "detail": audit.detail(row)} for row in rows],
+        "signins": [{"device": device, "at": at} for device, at in signins.items()],
+    }
+
+
 #: The routes, joined to the shell's page.
 ROUTES = (
     Route("/api/gateway/pair", "act", f"{_HERE}:pair", returns={"url": Out("string")}),
     Route("/api/gateway/devices", "read", f"{_HERE}:devices", returns=DEVICES_SHAPE),
     Route("/api/gateway/revoke", "act", f"{_HERE}:revoke",
           body={"id": Field("string", max=64)}, returns={"ok": Out("bool")}),
+    Route("/api/gateway/log", "read", f"{_HERE}:log", returns=LOG_SHAPE),
 )

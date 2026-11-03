@@ -1,7 +1,8 @@
 // <moxi-ui-gateway>: the modules view's Gateway section, at the desk. It pairs a phone,
-// drawing the pairing URL the shell mints as a QR code with the URL as text, and lists the
-// paired devices with a revoke for each. Its routes are desk-only: the phone never reaches
-// them, so the view leaves this section out there.
+// drawing the pairing URL the shell mints as a QR code with the URL as text, lists the
+// paired devices with each one's sign-ins and a revoke, and shows the audit log's last rows.
+// Its routes are desk-only: the phone never reaches them, so the view leaves this section
+// out there.
 
 import { css, html, LitElement, nothing } from "lit";
 import { api } from "/m/ui/client.js";
@@ -26,6 +27,14 @@ export interface DeviceRow {
   provider: string;
 }
 
+/** One audit row, as `api/gateway/log` lists it: `detail` is its other fields. */
+export interface LogRow {
+  at: string;
+  kind: string;
+  device: string | null;
+  detail: string;
+}
+
 interface Code {
   url: string;
   path: string;
@@ -36,6 +45,13 @@ interface Code {
 function when(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "never";
   return new Date(seconds * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** An audit row's UTC time, in this browser's own. */
+function stamp(at: string): string {
+  const time = Date.parse(at);
+  if (!Number.isFinite(time)) return at;
+  return new Date(time).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
 }
 
 function said(status: number, data: any, what: string): string {
@@ -71,6 +87,9 @@ export class UiGateway extends LitElement {
     li.stale { border-left-color: var(--moxi-warn); }
     .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--moxi-gap); }
     .head .grow { flex: 1; }
+    details.log summary { cursor: pointer; }
+    details.log ul { margin-top: 6px; gap: 2px; }
+    details.log li { display: block; padding: 0; border-left: none; }
   `;
 
   static properties = {
@@ -79,6 +98,9 @@ export class UiGateway extends LitElement {
     code: { state: true },
     note: { state: true },
     busy: { state: true },
+    rows: { state: true },
+    signins: { state: true },
+    logError: { state: true },
   };
 
   devices: DeviceRow[] | null = null;
@@ -86,12 +108,16 @@ export class UiGateway extends LitElement {
   code: Code | null = null;
   note: { text: string; tone: string } | null = null;
   busy = false;
+  rows: LogRow[] | null = null;
+  signins = new Map<string, string[]>();
+  logError: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #known = new Set<string>();
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.#read();
+    void this.#readLog();
   }
 
   disconnectedCallback(): void {
@@ -114,7 +140,21 @@ export class UiGateway extends LitElement {
       ${this.listError ? html`<p class="small fail">${this.listError}</p>` : nothing}
       ${this.devices !== null && devices.length === 0 ? html`<p class="dim small">No phone is paired.</p>` : nothing}
       ${devices.length ? html`<ul>${devices.map((row) => this.#device(row))}</ul>` : nothing}
+      ${this.#log()}
     </section>`;
+  }
+
+  #log() {
+    if (this.logError) return html`<p class="small fail">${this.logError}</p>`;
+    if (this.rows === null) return nothing;
+    return html`<details class="log" @toggle=${(e: Event) => {
+      if ((e.target as HTMLDetailsElement).open) void this.#readLog();
+    }}>
+      <summary class="small">Activity: the audit log's last ${this.rows.length} rows, from today and yesterday</summary>
+      ${this.rows.length ? html`<ul class="small">${this.rows.map((row) => html`<li>
+          <span class="dim">${stamp(row.at)}</span> <strong>${row.kind}</strong> <code>${row.detail}</code></li>`)}</ul>`
+        : html`<p class="dim small">Nothing yet.</p>`}
+    </details>`;
   }
 
   #qr(code: Code) {
@@ -134,11 +174,29 @@ export class UiGateway extends LitElement {
       <div class="head"><strong>${row.name}</strong><span class="grow"></span>
         <button type="button" ?disabled=${this.busy} @click=${() => this.#revoke(row)}>Revoke</button></div>
       <p class="small dim">Paired ${when(row.created)}; last signed in ${when(row.used)}.</p>
+      ${this.#signins(row.id)}
       ${row.passkey ? nothing
         : html`<p class="small dim">No passkey: it signs in again only by a new QR pairing.</p>`}
       ${row.stale ? html`<p class="small warn">The gateway's address changed since it paired, so it
         signs in to nothing. Pair it again, then revoke this entry.</p>` : nothing}
     </li>`;
+  }
+
+  #signins(id: string) {
+    const times = this.signins.get(id) ?? [];
+    if (!times.length) return nothing;
+    return html`<p class="small dim">Sign-ins: ${times.map(stamp).join(", ")}.</p>`;
+  }
+
+  async #readLog(): Promise<void> {
+    const answer = await api("ui", "api/gateway/log");
+    if (answer.status === 200 && Array.isArray(answer.data?.rows) && Array.isArray(answer.data?.signins)) {
+      this.rows = answer.data.rows;
+      this.signins = new Map(answer.data.signins.map((entry: { device: string; at: string[] }) => [entry.device, entry.at]));
+      this.logError = null;
+    } else {
+      this.logError = said(answer.status, answer.data, "reading the audit log");
+    }
   }
 
   async #read(): Promise<void> {
@@ -209,6 +267,7 @@ export class UiGateway extends LitElement {
       this.note = { text: said(answer.status, answer.data, "revoking"), tone: "fail" };
     }
     await this.#read();
+    await this.#readLog();
   }
 
   #stopWatching(): void {

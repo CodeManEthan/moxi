@@ -12,6 +12,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -25,7 +26,7 @@ from gateway_kit import HOST, ORIGIN, Authenticator  # noqa: E402
 from moxi.paths import Layout  # noqa: E402
 from moxi_loopback.api import Refused, Table  # noqa: E402
 from moxi_ui import page  # noqa: E402
-from moxi_ui.gateway import Gateway, Parts, desk, pairing  # noqa: E402
+from moxi_ui.gateway import Gateway, Parts, audit, desk, pairing  # noqa: E402
 from moxi_ui.gateway.access import COOKIE, Access  # noqa: E402
 from moxi_ui.gateway.devices import Devices  # noqa: E402
 from moxi_ui.gateway.listener import TunnelRead  # noqa: E402
@@ -280,7 +281,41 @@ def test_the_desktop_pairing_refuses_with_no_address_or_no_gateway(served):
 
 def test_the_desktop_routes_are_the_shells_and_never_the_gateways():
     routes = {route.path: route for route in page.PAGE.routes}
-    for path in ("/api/gateway/pair", "/api/gateway/devices", "/api/gateway/revoke"):
+    for path in ("/api/gateway/pair", "/api/gateway/devices", "/api/gateway/revoke",
+                 "/api/gateway/log"):
         assert routes[path].gateway is False
     assert routes["/api/gateway/pair"].kind == "act"
     assert routes["/api/gateway/devices"].kind == "read"
+    assert routes["/api/gateway/log"].kind == "read"
+
+
+def test_the_desktop_log_shows_the_last_rows_and_each_devices_sign_ins(tmp_path):
+    now = time.time()
+    old = audit.Audit(tmp_path, clock=lambda: now - 3 * 86400)
+    old("signin", {"device": "d-old", "session": "s" * 12})
+    old.close()
+    stamps = iter(now - 100 + i for i in range(100))
+    writer = audit.Audit(tmp_path, clock=lambda: next(stamps))
+    for _ in range(12):
+        writer("signin", {"device": "d1", "session": "a" * 12})
+    writer("signin", {"device": "d2", "session": "b" * 12})
+    for i in range(50):
+        writer.request({"id": f"r{i}", "method": "GET", "path": "/m/ui/api/read",
+                        "status": 200, "device": "d1"}, signed_in=True)
+    writer.close()
+    shell = SimpleNamespace(layout=SimpleNamespace(state_dir=lambda: tmp_path))
+    got = _at_desk(shell, desk.log)
+    rows = got["rows"]
+    assert len(rows) == audit.DESK_ROWS
+    assert rows[0]["kind"] == "request" and "id=r49" in rows[0]["detail"]
+    assert rows[-1]["detail"].startswith("device=d1 id=r0 method=GET")
+    assert rows[0]["at"] > rows[-1]["at"] and rows[0]["device"] == "d1"
+    signins = {entry["device"]: entry["at"] for entry in got["signins"]}
+    assert set(signins) == {"d1", "d2"}, "a sign-in older than the days read isn't shown"
+    assert len(signins["d1"]) == audit.DESK_SIGNINS and signins["d1"] == sorted(
+        signins["d1"], reverse=True)
+    assert len(signins["d2"]) == 1
+    # The shape the route declares keeps every field the handler gives.
+    route = {r.path: r for r in page.PAGE.routes}["/api/gateway/log"]
+    assert set(route.returns) == set(got) == {"rows", "signins"}
+    assert set(route.returns["rows"].items.items) == set(rows[0])

@@ -29,6 +29,7 @@ new one at the next use, which changes every handle.
 
 from __future__ import annotations
 
+import collections
 import datetime as _dt
 import json
 import logging
@@ -45,8 +46,9 @@ from moxi import files
 from .devices import gateway_dir
 
 __all__ = [
-    "AUDIT_DIR", "CODES", "COLLAPSE_AFTER", "DAY_CAP", "DURABLE", "FORBIDDEN", "KEY_FILE",
-    "RETAIN_DAYS", "Audit", "audit_dir", "key", "last_held", "read_rows",
+    "AUDIT_DIR", "CODES", "COLLAPSE_AFTER", "DAY_CAP", "DESK_DAYS", "DESK_ROWS", "DESK_SIGNINS",
+    "DURABLE", "FORBIDDEN", "KEY_FILE", "RETAIN_DAYS", "Audit", "audit_dir", "detail", "key",
+    "last_held", "latest", "read_rows",
 ]
 
 _log = logging.getLogger("moxi.ui.gateway")
@@ -75,6 +77,11 @@ FORBIDDEN = frozenset({
 })
 #: The class of requests to the open entries that no session made.
 OPEN = "open"
+#: What the desktop's Gateway section shows: the last rows, read from this many days, and
+#: at most this many sign-ins of each device.
+DESK_ROWS = 50
+DESK_DAYS = 2
+DESK_SIGNINS = 10
 
 
 def audit_dir(state_dir: str | os.PathLike) -> Path:
@@ -276,6 +283,27 @@ def read_rows(state_dir: str | os.PathLike, *, days: int = 1,
                     continue
                 if isinstance(row, dict):
                     yield row
+
+
+def detail(row: Mapping[str, Any]) -> str:
+    """A row's fields but `at` and `kind`, as `key=value` in key order."""
+    return " ".join(f"{key}={row[key]}" for key in sorted(row) if key not in ("at", "kind"))
+
+
+def latest(state_dir: str | os.PathLike, *, days: int = DESK_DAYS, rows: int = DESK_ROWS,
+           signins: int = DESK_SIGNINS, now: float | None = None
+           ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    """The last `rows` rows of `days` days, newest first, and the times of each device's
+    last `signins` sign-ins in them, newest first."""
+    kept: collections.deque[dict[str, Any]] = collections.deque(maxlen=rows)
+    times: dict[str, collections.deque[str]] = {}
+    for row in read_rows(state_dir, days=days, now=now):
+        kept.append(row)
+        device = row.get("device")
+        if row.get("kind") == "signin" and isinstance(device, str):
+            times.setdefault(device, collections.deque(maxlen=signins)).append(
+                str(row.get("at", "")))
+    return list(reversed(kept)), {device: list(reversed(at)) for device, at in times.items()}
 
 
 def last_held(state_dir: str | os.PathLike, *, now: float | None = None) -> dict[str, Any] | None:

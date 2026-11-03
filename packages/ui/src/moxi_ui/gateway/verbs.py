@@ -166,7 +166,7 @@ def cmd_revoke(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 
 
 def cmd_log(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
-    from .audit import read_rows
+    from .audit import detail, read_rows
 
     if args.days < 1:
         raise Refused("--days takes a whole number of days, 1 or more")
@@ -174,8 +174,7 @@ def cmd_log(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
         if args.json:
             say(json.dumps(row, sort_keys=True))
             continue
-        rest = " ".join(f"{key}={row[key]}" for key in sorted(row) if key not in ("at", "kind"))
-        say(f"{row.get('at', '?')} {row.get('kind', '?')} {rest}".rstrip())
+        say(f"{row.get('at', '?')} {row.get('kind', '?')} {detail(row)}".rstrip())
     return 0
 
 
