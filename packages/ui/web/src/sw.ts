@@ -1,15 +1,21 @@
-// The gateway's worker, /sw.js, scope `/`. It keeps the app shell and the offline page on
-// the phone and shows the offline page when a navigation can't reach the gateway.
+// The gateway's worker, /sw.js, scope `/`. It shows the offline page when a navigation
+// can't reach the gateway, and sends every other same-origin GET on.
 //
-// No answer the browser's HTTP cache holds runs here: the worker fills its cache and sends
-// on every same-origin GET it answers with `cache: "reload"`, navigations included, so a
-// page or script another server left in that cache under this origin is never read.
+// Nothing it answers comes from storage a page under this origin can write, a page another
+// server left there included: it answers from the network or from its own bytes. Every GET
+// it sends on goes with `cache: "reload"`, navigations included, so the browser's HTTP
+// cache doesn't answer for it either. The offline page and its script are built into this
+// file. The one value it keeps, when the gateway last answered, it reads only as a number.
 
 import type { Reach } from "./gateway-model.ts";
 import {
-  ANSWERED, answerReach, CACHE, handling, KEPT, NAVIGATION_HEADER, navigationReach, OFFLINE,
-  offlineDocument, useKept,
+  ANSWERED, answerReach, answeredAt, CACHE, handling, NAVIGATION_HEADER, navigationReach,
+  OFFLINE_SCRIPT, offlineDocument, ownHeaders,
 } from "./worker-model.ts";
+
+// The offline page and its built script, put into this file by the UI module's build.
+declare const OFFLINE_HTML: string;
+declare const OFFLINE_JS: string;
 
 // The worker's own globals, which the page's DOM types don't hold.
 interface ExtendableEvent extends Event {
@@ -31,33 +37,11 @@ interface WorkerScope {
 
 const scope = self as unknown as WorkerScope;
 
-/** How long the kept files go before a navigation that reached the gateway fetches them
- * again; the ones a page loads are fetched again each time it loads them. */
-const REFRESH_MS = 60 * 60 * 1000;
 /** How often, at most, the time the gateway last answered is written to the cache. */
 const NOTE_MS = 10_000;
 
 let answered: number | null = null;
 let noted = 0;
-let refreshed = 0;
-
-function fresh(path: string): Request {
-  return new Request(path, { cache: "reload", credentials: "same-origin" });
-}
-
-/** Keeps the files of the app shell, fetched past the HTTP cache. A file the gateway
- * refuses is left out and kept once a signed-in page loads it: the shell's own files need
- * a session, and a phone may hold none when this worker installs, as when it replaces a
- * worker another server left, whose install must not fail for that. Fails, and so fails
- * the install, when the gateway can't be reached. */
-async function keep(): Promise<void> {
-  const cache = await caches.open(CACHE);
-  await Promise.all(KEPT.map(async (path) => {
-    const answer = await fetch(fresh(path));
-    if (answer.ok) await cache.put(path, answer);
-  }));
-  refreshed = Date.now();
-}
 
 /** Notes that the gateway answered now. */
 async function heard(): Promise<void> {
@@ -69,24 +53,31 @@ async function heard(): Promise<void> {
   await cache.put(ANSWERED, new Response(String(now)));
 }
 
-/** When the gateway last answered: this worker's note, else the one it kept. */
+/** When the gateway last answered: this worker's note, else the one it kept, read only as
+ * a time in range; null when neither says. */
 async function lastAnswered(): Promise<number | null> {
   if (answered !== null) return answered;
-  const kept = await (await caches.open(CACHE)).match(ANSWERED);
-  if (kept === undefined) return null;
-  const ms = Number(await kept.text());
-  return Number.isFinite(ms) ? ms : null;
+  try {
+    const kept = await (await caches.open(CACHE)).match(ANSWERED);
+    return kept === undefined ? null : answeredAt(await kept.text(), Date.now());
+  } catch {
+    return null;
+  }
 }
 
-/** The offline page for `reach`, made from the kept one, its headers as the gateway sent
- * them. A network error when the page isn't kept. */
+/** The offline page for `reach`, from this file's own copy. */
 async function offline(reach: Reach): Promise<Response> {
-  const kept = await (await caches.open(CACHE)).match(OFFLINE);
-  if (kept === undefined) return Response.error();
-  const headers = new Headers(kept.headers);
-  headers.delete("Content-Length");
-  const html = offlineDocument(await kept.text(), reach, await lastAnswered());
-  return new Response(html, { status: 200, headers });
+  const html = offlineDocument(OFFLINE_HTML, reach, await lastAnswered());
+  return new Response(html, { status: 200, headers: ownHeaders("text/html; charset=utf-8") });
+}
+
+/** One of the worker's own files: the offline page, read as the computer out of reach,
+ * or its script. */
+async function own(path: string): Promise<Response> {
+  if (path === OFFLINE_SCRIPT) {
+    return new Response(OFFLINE_JS, { status: 200, headers: ownHeaders("text/javascript; charset=utf-8") });
+  }
+  return await offline("away");
 }
 
 /** A navigation: sent on past the HTTP cache, marked as a navigation, its redirect left to
@@ -103,53 +94,42 @@ async function navigation(event: FetchEvent): Promise<Response> {
   const reach = navigationReach(answer.status, answer.type);
   if (reach !== "up") return await offline(reach);
   event.waitUntil(heard());
-  if (Date.now() - refreshed > REFRESH_MS) event.waitUntil(keep().catch(() => undefined));
   return answer;
 }
 
-/** Any other same-origin GET: sent on past the HTTP cache. A kept file is kept fresh while
- * the gateway answers, and answered from the cache when it doesn't. */
+/** Any other same-origin GET: sent on past the HTTP cache. The network's answer, or its
+ * failure. */
 async function get(event: FetchEvent): Promise<Response> {
   const request = event.request;
-  const path = new URL(request.url).pathname;
-  const isKept = KEPT.includes(path);
-  let answer: Response | null = null;
-  try {
-    answer = await fetch(new Request(request, { cache: request.cache === "no-store" ? "no-store" : "reload" }));
-  } catch {
-    answer = null;
-  }
-  if (answer !== null && answerReach(answer.status, answer.headers.get("Content-Type")) === "up") {
-    event.waitUntil(heard());
-  }
-  if (isKept && useKept(answer?.status ?? null)) {
-    const kept = await (await caches.open(CACHE)).match(path);
-    if (kept !== undefined) return kept;
-  }
-  if (answer === null) return Response.error();
-  if (isKept && answer.ok) {
-    const copy = answer.clone();
-    event.waitUntil(caches.open(CACHE).then((cache) => cache.put(path, copy)));
-  }
+  const answer = await fetch(new Request(request, { cache: request.cache === "no-store" ? "no-store" : "reload" }));
+  if (answerReach(answer.status, answer.headers.get("Content-Type")) === "up") event.waitUntil(heard());
   return answer;
 }
 
 scope.addEventListener("install", (event) => {
-  event.waitUntil(keep().then(() => scope.skipWaiting()));
+  event.waitUntil(scope.skipWaiting());
 });
 
+/** Deletes every cache but the worker's, and in it every entry but the time it keeps. */
+async function tidy(): Promise<void> {
+  for (const name of await caches.keys()) {
+    if (name !== CACHE) await caches.delete(name);
+  }
+  const cache = await caches.open(CACHE);
+  for (const request of await cache.keys()) {
+    if (new URL(request.url).pathname !== ANSWERED) await cache.delete(request);
+  }
+}
+
 scope.addEventListener("activate", (event) => {
-  event.waitUntil((async () => {
-    for (const name of await caches.keys()) {
-      if (name !== CACHE) await caches.delete(name);
-    }
-    await scope.clients.claim();
-  })());
+  event.waitUntil(tidy().catch(() => undefined).then(() => scope.clients.claim()));
 });
 
 scope.addEventListener("fetch", (event) => {
   const request = event.request;
-  const how = handling(request.method, new URL(request.url), scope.location.origin, request.mode);
+  const url = new URL(request.url);
+  const how = handling(request.method, url, scope.location.origin, request.mode);
   if (how === "pass") return;
-  event.respondWith(how === "navigation" ? navigation(event) : get(event));
+  if (how === "own") event.respondWith(own(url.pathname));
+  else event.respondWith(how === "navigation" ? navigation(event) : get(event));
 });

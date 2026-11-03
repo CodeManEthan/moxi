@@ -16,6 +16,7 @@ import pytest
 from playwright.sync_api import expect
 
 import phone_kit
+from moxi_loopback.headers import response_headers
 from moxi_ui.testing.phone import HOST, ORIGIN, PhoneBridge, set_gateway
 from squatter import Squatter
 
@@ -43,30 +44,17 @@ WORKER = """async () => {
   }
   return null;
 }"""
-CACHED = """async () => {
+#: Waits until the gateway's worker answers this page: only it answers `/offline` with the
+#: page made from its own bytes, whose root says the case it saw.
+OWN_OFFLINE = """async () => {
   const until = Date.now() + 15000;
   while (Date.now() < until) {
-    if (await caches.has("moxi-gateway")) return true;
+    try {
+      if ((await (await fetch("/offline")).text()).includes("data-reach=")) return true;
+    } catch {}
     await new Promise((done) => setTimeout(done, 100));
   }
   return false;
-}"""
-KEPT_OFFLINE = """async () => {
-  const until = Date.now() + 15000;
-  while (Date.now() < until) {
-    if (await caches.match("/offline", {cacheName: "moxi-gateway"})) return true;
-    await new Promise((done) => setTimeout(done, 100));
-  }
-  return false;
-}"""
-KEPT_CLIENT = """async () => {
-  const until = Date.now() + 15000;
-  while (Date.now() < until) {
-    const kept = await caches.match("/m/ui/client.js", {cacheName: "moxi-gateway"});
-    if (kept) return (await kept.text()).includes("__planted");
-    await new Promise((done) => setTimeout(done, 100));
-  }
-  return null;
 }"""
 #: Takes the real worker and its cache off the phone, as a phone that never had them.
 UNREGISTER = """async () => {
@@ -128,6 +116,56 @@ class CachingSquatter(Squatter):
                 return "200 OK", "text/html; charset=utf-8", PLANTED_START.encode(), [YEAR]
             if page == "/m/ui/client.js":
                 return "200 OK", "text/javascript", PLANTED_CLIENT.encode(), [YEAR]
+        return super()._answer(target, headers)
+
+
+#: A squatter's page that writes its own offline page, offline script and `client.js` into
+#: Cache Storage, under the worker's cache name and another. Each would set the title and
+#: `window.__planted`, and the page would read the phone's stored key.
+STORE_IN_CACHES = """<!doctype html><title>storing</title><script>
+const page = '<!doctype html><title>planted offline</title><main id="moxi-offline"></main>'
+  + '<script>window.__planted = true; document.title = "planted offline";<' + '/script>';
+const script = 'window.__planted = true; document.title = "planted script";';
+const html = {"Content-Type": "text/html"};
+const js = {"Content-Type": "text/javascript"};
+(async () => {
+  for (const name of ["moxi-gateway", "planted"]) {
+    const cache = await caches.open(name);
+    await cache.put("/offline", new Response(page, {headers: html}));
+    await cache.put("/offline.js", new Response(script, {headers: js}));
+    await cache.put("/m/ui/client.js", new Response(script, {headers: js}));
+  }
+  document.title = "stored in caches";
+})();
+</script>"""
+NOT_PLANTED = "() => window.__planted === undefined && !document.title.startsWith('planted')"
+#: What `client.js` gets now: the network's status, 0 when nothing answers.
+CLIENT_STATUS = """async () => {
+  try {
+    return (await fetch("/m/ui/client.js")).status;
+  } catch {
+    return 0;
+  }
+}"""
+#: The headers the worker sends with the offline page's script.
+OWN_HEADERS = """async () => Object.fromEntries((await fetch("/offline.js")).headers)"""
+STILL_PLANTED = """async () => {
+  for (const name of ["moxi-gateway", "planted"]) {
+    for (const path of ["/offline", "/offline.js", "/m/ui/client.js"]) {
+      const kept = await caches.match(path, {cacheName: name});
+      if (!kept || !(await kept.text()).includes("planted")) return false;
+    }
+  }
+  return true;
+}"""
+
+
+class StoringSquatter(Squatter):
+    """The squatter, serving at the shell's URL a page that writes into Cache Storage."""
+
+    def _answer(self, target: str, headers: dict) -> tuple[str, str, bytes, list[str]]:
+        if headers.get("service-worker") != "script" and urlsplit(target).path == "/m/ui/":
+            return "200 OK", "text/html; charset=utf-8", STORE_IN_CACHES.encode(), []
         return super()._answer(target, headers)
 
 
@@ -298,7 +336,6 @@ def test_the_offline_page_for_a_stopped_shell_the_off_answer_and_no_answer(
         context = phones(bridge)
         page = _pair(context, shell)
         assert page.evaluate(WORKER) == ORIGIN + "/sw.js"
-        assert page.evaluate(CACHED) is True
         set_gateway(shell, enabled=False)  # the entry stays: the off answer
         assert page.evaluate(OFF) == 503  # the shell's next tick turns the gateway off
         page.goto("/m/ui/")
@@ -336,9 +373,9 @@ def test_a_planted_worker_is_replaced_at_the_next_update_check(
     try:
         page.goto("/m/ui/")
         expect(page).to_have_title("squatter")  # the planted worker takes this one
-        # The update check installs the gateway's worker, with no session on the phone:
-        # only its install keeps the offline page, and then it takes the registration.
-        assert page.evaluate(KEPT_OFFLINE) is True
+        # The update check installs the gateway's worker, with no session on the phone, and
+        # it takes the registration.
+        assert page.evaluate(OWN_OFFLINE) is True
         assert page.evaluate(SETTLED) is True
         page.goto("/m/ui/")
         expect(page).to_have_title("Moxi: sign in")
@@ -383,14 +420,63 @@ def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_a
         answer(shell.gateway_port)
         page.goto("/m/ui/")
         expect(page).to_have_title("squatter")  # the planted worker takes this one
-        # The update check installs the real worker, which keeps the gateway's client.js.
-        assert page.evaluate(KEPT_CLIENT) is False
+        # The update check installs the real worker, which sends client.js on past the cache.
+        assert page.evaluate(OWN_OFFLINE) is True
         assert page.evaluate(SETTLED) is True
         page.goto("/m/ui/")
         page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
         assert page.title() != "planted client"
         assert page.evaluate("() => window.__planted === undefined") is True
         assert page.evaluate("async () => (await import('/m/ui/client.js')).gateway()") is True
+    finally:
+        squat.stop()
+        bridge.stop()
+        shell.stop()
+
+
+def test_an_offline_page_and_client_js_planted_in_cache_storage_never_run(
+        tmp_path_factory, fixture_site, phones):
+    """A squatter's page, served while the real worker controls the phone, writes its own
+    `/offline`, `/offline.js` and `client.js` into Cache Storage, under the worker's cache
+    name and another. None of them runs on the real gateway, on its off answer, or with
+    nothing answering; the offline page and its script come from the worker's own bytes,
+    with the gateway's headers."""
+    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    bridge = PhoneBridge(shell.home, shell.gateway_port).start()
+    squat = StoringSquatter().start()
+
+    def answer(target):
+        bridge.target = target
+        bridge.cut()
+
+    try:
+        page = _pair(phones(bridge), shell)
+        assert page.evaluate(WORKER) == ORIGIN + "/sw.js"
+        answer(squat.port)
+        page.goto("/m/ui/")
+        expect(page).to_have_title("stored in caches")
+        answer(shell.gateway_port)
+        page.goto("/m/ui/")
+        page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
+        assert page.evaluate(NOT_PLANTED) is True
+        set_gateway(shell, enabled=False)
+        assert page.evaluate(OFF) == 503
+        page.goto("/m/ui/")
+        expect(page.locator("main#moxi-offline")).to_contain_text(DOWN)
+        expect(page).to_have_title("Moxi: offline")
+        assert page.evaluate(NOT_PLANTED) is True
+        assert page.evaluate(CLIENT_STATUS) == 503
+        assert page.evaluate(OWN_HEADERS) == {
+            **{name.decode(): value.decode()
+               for name, value in response_headers(policy="gateway")},
+            "content-type": "text/javascript; charset=utf-8"}
+        bridge.stop()  # nothing answers
+        page.goto("/m/ui/")
+        expect(page.locator("main#moxi-offline")).to_contain_text(AWAY)
+        expect(page).to_have_title("Moxi: offline")
+        assert page.evaluate(NOT_PLANTED) is True
+        assert page.evaluate(CLIENT_STATUS) == 0
+        assert page.evaluate(STILL_PLANTED) is True  # the copies were there all along
     finally:
         squat.stop()
         bridge.stop()

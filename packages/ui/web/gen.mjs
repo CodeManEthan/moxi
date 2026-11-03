@@ -5,8 +5,12 @@
 // - manifest.json, the gateway's web app manifest, which it serves at
 //   /manifest.webmanifest, its colours tokens.json's;
 // - tools/web/client.d.ts, the types of /m/ui/client.js, from src/client.ts by tsc's
-//   declaration output. Every page's tsc resolves the client's URL to that file.
+//   declaration output. Every page's tsc resolves the client's URL to that file;
+// - offline.js, the offline page's script, and sw.js, the gateway's worker, with the
+//   offline page and that script built into it as OFFLINE_HTML and OFFLINE_JS: the worker
+//   answers both from its own bytes, so it keeps no copy a page could write.
 
+import * as esbuild from "esbuild";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
@@ -124,9 +128,51 @@ export function declarations(root, web) {
   }
 }
 
+/** tools/web/build.mjs's esbuild options, which this script can't import: the build is
+ * still loading when it runs this one. A test holds the two the same. */
+export const OPTIONS = Object.freeze({
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  minify: true,
+  charset: "utf8",
+  legalComments: "eof",
+  sourcemap: false,
+  external: ["/m/ui/client.js"],
+  logLevel: "warning",
+});
+
+/** One script bundled from `source` under web/, with the build's options and `define`. */
+async function bundle(root, web, source, define = {}) {
+  const result = await esbuild.build({
+    ...OPTIONS,
+    absWorkingDir: root,
+    entryPoints: [path.join(web, source)],
+    tsconfig: path.join(web, "tsconfig.json"),
+    define,
+    write: false,
+  });
+  if (result.outputFiles.length !== 1) throw new Error(`${source} bundled into more than one file`);
+  return result.outputFiles[0].text;
+}
+
+/** offline.js's and sw.js's text: the worker carries the offline page and its script. */
+export async function worker(root, web) {
+  const script = await bundle(root, web, "src/offline.ts");
+  const html = fs.readFileSync(path.join(web, "offline.html"), "utf8");
+  const sw = await bundle(root, web, "src/sw.ts", {
+    OFFLINE_HTML: JSON.stringify(html), OFFLINE_JS: JSON.stringify(script),
+  });
+  return { script, sw };
+}
+
 export default async function generate({ root, web, emit }) {
   const tokens = JSON.parse(fs.readFileSync(path.join(web, "tokens.json"), "utf8"));
   emit(`${OUT}/theme.css`, themeCss(tokens));
   emit(`${OUT}/manifest.json`, manifest(tokens));
   emit(DECL, declarations(root, web));
+  const { script, sw } = await worker(root, web);
+  emit(`${OUT}/offline.js`, script);
+  emit(`${OUT}/sw.js`, sw);
 }
