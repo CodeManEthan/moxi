@@ -375,6 +375,8 @@ def test_the_gateway_row_is_off_then_ok_with_what_it_serves(tmp_path):
      "doesn't forward to this Moxi", "moxi tunnel repair"),
     ({"uid_found": False}, "can't tell which user tailscaled runs as", None),
     ({"uid_found": False, "system": "wsl"}, "outside this VM", None),
+    ({"acts": {"acts": False, "reason": "tcp", "uid_found": False}},
+     "the running Moxi hasn't yet found which user tailscaled runs as", None),
 ])
 def test_each_failure_is_named_with_its_fix(tmp_path, change, detail, fix):
     row = doctor.gateway_row(_facts(tmp_path, **change))

@@ -400,6 +400,26 @@ def test_the_provider_check_reads_the_sockets_peer(env, loop, monkeypatch):
         loop.run(gw.close())
 
 
+def test_a_uid_not_found_at_the_build_is_looked_up_again_at_each_tick_until_found(env, loop):
+    world, hooks = World(uid=None), Hooks()
+    gw = _gateway(world, hooks, env)
+    asked = []
+    gw._find_uid = lambda name: asked.append(name) or world.uid
+    try:
+        _on(world, gw, loop)
+        assert _request(gw)[0] == 403 and read_acts(gw.runtime_dir)["uid_found"] is False
+        loop.run(gw.tick())  # The same change token: the lookup runs again all the same.
+        assert len(asked) == 2 and gw.uid is None
+        world.uid = os.getuid()  # The provider answers now.
+        loop.run(gw.tick())
+        assert gw.uid == os.getuid() and _request(gw)[0] == 200
+        assert read_acts(gw.runtime_dir)["uid_found"] is True
+        loop.run(gw.tick())
+        assert len(asked) == 3, "a uid found isn't looked up again on the same token"
+    finally:
+        loop.run(gw.close())
+
+
 @pytest.mark.parametrize("system", ["darwin", "win32"])
 def test_macos_and_windows_run_no_provider_check(env, loop, system):
     world, hooks = World(uid=None), Hooks()
@@ -484,7 +504,8 @@ def test_the_mount_on_a_socket_and_its_reasons_at_each_tick(env, loop, monkeypat
     try:
         _on(world, gw, loop)
         assert gw.mount == Mount(True, None) and hooks.tables[-1] == Mount(True, None)
-        assert read_acts(gw.runtime_dir) == {"pid": os.getpid(), "acts": True, "reason": None}
+        assert read_acts(gw.runtime_dir) == {"pid": os.getpid(), "acts": True, "reason": None,
+                                             "uid_found": True}
         assert hooks.audit[-1] == ("acts", {"acts": True, "reason": None})
         # Nothing a request carries changes it.
         _request(gw, "/gw/act/prepare", ("Cookie: a=b", "X-Moxi-Key: k"))

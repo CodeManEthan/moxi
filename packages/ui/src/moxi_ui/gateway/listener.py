@@ -240,7 +240,7 @@ class Gateway:
         self.profile: Profile | None = None
         self.uid: int | None = None
         self.mount = Mount(False, "off")
-        self._wrote_mount: Mount | None = None
+        self._wrote: tuple[Mount, bool | None] | None = None
         #: The text of the hold the shell couldn't take, or of the setting that stops it.
         self.problem: str | None = None
         self._port_problem: str | None = None
@@ -316,8 +316,13 @@ class Gateway:
             return
         reading = await asyncio.to_thread(self._read)
         find = self.apply(reading)
+        if find is None and self._uid_missing():
+            # Not found at the build (the provider wasn't answering yet): every request
+            # would be refused until the address changed, so look again at each tick.
+            find = self.kept.provider if self.kept is not None else None
         if find is not None:
             self.uid = await asyncio.to_thread(self._find_uid, find)
+            self._write_acts()
         await self._hold()
         await asyncio.to_thread(self.parts.tick)
 
@@ -367,10 +372,25 @@ class Gateway:
         self.mount = mount
         if changed:
             self.parts.audit("acts", mount.as_dict())
-        if mount != self._wrote_mount:
+        self._write_acts()
+
+    def _uid_missing(self) -> bool:
+        return self.kept is not None and self.uid is None and provider.checks(self.system)
+
+    @property
+    def uid_found(self) -> bool | None:
+        """Whether this shell has found the provider's uid: None where no check runs or no
+        profile stands."""
+        if self.kept is None or not provider.checks(self.system):
+            return None
+        return self.uid is not None
+
+    def _write_acts(self) -> None:
+        wrote = (self.mount, self.uid_found)
+        if wrote != self._wrote:
             try:
-                write_acts(self.runtime_dir, mount)
-                self._wrote_mount = mount
+                write_acts(self.runtime_dir, self.mount, uid_found=self.uid_found)
+                self._wrote = wrote
             except OSError:
                 _log.exception("gateway.acts can't be written")
 

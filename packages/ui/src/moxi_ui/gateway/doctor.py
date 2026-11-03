@@ -279,6 +279,9 @@ def _fail(facts: Facts) -> tuple[str, str | None] | None:
             detail += ("; a Tailscale that runs in Windows, outside this VM, can't serve the "
                        "gateway")
         return detail, None
+    if live and (facts.acts or {}).get("uid_found") is False:
+        return ("the running Moxi hasn't yet found which user tailscaled runs as, so the "
+                "phone is refused; it looks again every 2 s"), None
     return None
 
 
