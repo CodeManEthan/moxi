@@ -739,7 +739,8 @@ def _sync_dir(directory: Path) -> None:
 
 
 __all__ = ["FORMAT", "FORMS", "PROVIDERS", "REACHES", "EVENTS", "NEWER", "State", "Entry",
-           "Record", "old_tailscale", "normal_host", "target_ok", "origin", "fill", "stamp", "record_path", "events_path",
+           "Record", "old_tailscale", "normal_host", "target_ok", "origin", "fill", "stamp",
+           "record_path", "events_path",
            "displaced_dir",
            "read", "commit", "event", "Displaced", "is_copy_name", "pending_path",
            "final_path", "write_pending", "is_pending", "names_pending", "rename_pending",

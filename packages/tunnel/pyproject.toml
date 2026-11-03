@@ -1,6 +1,6 @@
 [project]
 name = "moxi-tunnel"
-version = "0.1.0"
+version = "0.2.0"
 description = "An address that something off the box can reach, for a loopback service: Tailscale Serve, Tailscale Funnel or a Cloudflare named tunnel, recording only what it applied."
 readme = "README.md"
 requires-python = ">=3.12"
