@@ -15,6 +15,18 @@ A test reaches it three ways:
 - a signed-in session with no browser: `session()`, for routes and streams;
 - the token routes the shell gives only the runtime file's holder: `call()`,
   `servers()`, `server()`, `wait_server()` and `kill()`.
+
+**Gateway mode.** `TestShell(home, gateway=True)` runs the shell with its gateway, under
+an environment that sets no Moxi locator variable: no `MOXI_HOME` and no `MOXI_<MODULE>_*`.
+`HOME`, the XDG homes, `XDG_RUNTIME_DIR` and the temp directories still put every file
+under `home`, so the shell, `moxi ui gateway pair` and `on`, and the doctor find one
+runtime directory, as they do for a user. On Windows, where the roots come from the known
+folders and not from those variables, platformdirs' `WIN_PD_OVERRIDE_APPDATA` and
+`WIN_PD_OVERRIDE_LOCAL_APPDATA` point them under `home`. Two guards keep that environment
+off the user's own system: `PYTEST_CURRENT_TEST` is set, so the core refuses every real
+`systemctl`, `launchctl` or `schtasks` call a process under the shell asks for, and stand-ins
+for `tailscale` and `cloudflared` come first on `PATH`, so no tunnel provider runs.
+`moxi_ui.testing.phone` reaches such a shell's gateway from a browser.
 """
 
 from __future__ import annotations
@@ -23,6 +35,7 @@ import collections
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -43,7 +56,14 @@ _KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT
 #: The variables that keep a test shell under its home; a test's `env` can't set them.
 _OWNED = frozenset({"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
                     "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "MOXI_HOME", "TMPDIR", "TEMP", "TMP",
-                    "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PYTHONPATH"})
+                    "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PYTHONPATH",
+                    "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
+                    "PYTEST_CURRENT_TEST"})
+#: A Moxi locator variable: `MOXI_HOME`, `MOXI_<M>_HOME`, `MOXI_<M>_<KIND>_HOME` or
+#: `MOXI_<M>_RUNTIME_DIR`. Gateway mode sets none.
+_LOCATOR = re.compile(r"MOXI_(?:HOME|[A-Z0-9_]+_(?:HOME|RUNTIME_DIR))")
+#: The tunnel providers gateway mode puts stand-ins for, first on `PATH`.
+STAND_INS = ("tailscale", "cloudflared")
 _BROWSER = (("Sec-Fetch-Site", "same-origin"), ("Sec-Fetch-Mode", "cors"),
             ("Sec-Fetch-Dest", "empty"))
 
@@ -53,13 +73,15 @@ class ShellError(RuntimeError):
 
 
 def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
-              extra: Mapping[str, str] | None = None) -> dict[str, str]:
+              extra: Mapping[str, str] | None = None, *,
+              gateway: bool = False) -> dict[str, str]:
     """The whole environment a test shell under `home` runs with (see the module doc).
 
     `extra` adds variables of a test's own, or replaces a kept one such as `PATH`. Raises
     `ValueError` for a variable that keeps the shell under `home` (`HOME`, the XDG homes,
     `XDG_RUNTIME_DIR`, `MOXI_HOME`, the temp directories, `PYTHONPATH` and their Windows
-    forms), or a name or value that isn't a string.
+    forms), or a name or value that isn't a string. With `gateway`, the gateway mode's
+    environment (see the module doc), which also refuses any Moxi locator variable.
     """
     home = Path(home)
     extra = dict(extra or {})
@@ -69,6 +91,10 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         if key.upper() in _OWNED:
             raise ValueError(f"a test shell's env can't set {key}: the shell sets it to keep "
                              "its files under its home")
+        if gateway and _LOCATOR.fullmatch(key.upper()):
+            raise ValueError(f"a gateway-mode test shell's env can't set {key}: a locator "
+                             "variable moves the runtime directory, and the gateway takes "
+                             "no hold under one")
     env = {key: value for key, value in os.environ.items()
            if key in _KEPT or key.startswith("LC_")}
     env["HOME"] = str(home)
@@ -76,17 +102,40 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
                      ("XDG_STATE_HOME", ".local/state"), ("XDG_CACHE_HOME", ".cache")):
         env[key] = str(home / rel)
     env["XDG_RUNTIME_DIR"] = str(home / "run")
-    env["MOXI_HOME"] = str(home / "moxi")
+    if not gateway:
+        env["MOXI_HOME"] = str(home / "moxi")
     for key in ("TMPDIR", "TEMP", "TMP"):
         env[key] = str(home / "tmp")
     if sys.platform == "win32":
         env["USERPROFILE"] = str(home)
         env["APPDATA"] = str(home / "AppData" / "Roaming")
         env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+        if gateway:
+            env["WIN_PD_OVERRIDE_APPDATA"] = env["APPDATA"]
+            env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = env["LOCALAPPDATA"]
     if site:
         env["PYTHONPATH"] = os.pathsep.join(str(Path(path)) for path in site)
     env.update(extra)
+    if gateway:
+        env["PYTEST_CURRENT_TEST"] = os.environ.get("PYTEST_CURRENT_TEST") or "moxi_ui.testing"
+        env["PATH"] = os.pathsep.join(filter(None, (str(home / "bin"), env.get("PATH"))))
     return env
+
+
+def write_stand_ins(home: str | os.PathLike) -> Path:
+    """Write gateway mode's stand-ins for the tunnel providers into `<home>/bin`: each
+    says on stderr that no real provider runs under the test kit, and exits 1."""
+    from moxi import files
+
+    where = Path(home) / "bin"
+    for name in STAND_INS:
+        said = f"{name}: a stand-in; no real {name} runs under the test kit"
+        if sys.platform == "win32":
+            files.atomic_write(where / f"{name}.cmd", f"@echo {said} 1>&2\r\n@exit /b 1\r\n")
+        else:
+            files.atomic_write(where / name, f"#!/bin/sh\necho '{said}' >&2\nexit 1\n",
+                               mode=0o700)
+    return where
 
 
 class TestShell:
@@ -102,6 +151,7 @@ class TestShell:
     127.0.0.1, 0 (the default) for one the system picks. `env` adds variables to the
     shell's environment, which its page servers and the `moxi` commands it runs inherit
     (for example `{"GIT_CONFIG_NOSYSTEM": "1"}`); see `shell_env` for the ones it can't set.
+    `gateway` runs the shell with its gateway, in gateway mode (see the module doc).
     """
 
     __test__ = False  # pytest: not a test class
@@ -110,7 +160,7 @@ class TestShell:
                  child_args: Sequence[str] = (), leave_out: Sequence[str] = (),
                  failed_for: float | None = None, port: int = 0,
                  env: Mapping[str, str] | None = None,
-                 start_timeout: float = START_TIMEOUT):
+                 start_timeout: float = START_TIMEOUT, gateway: bool = False):
         self.home = Path(home)
         self.site = tuple(Path(path) for path in site)
         self.child_args = tuple(str(arg) for arg in child_args)
@@ -118,7 +168,8 @@ class TestShell:
         self.failed_for = None if failed_for is None else float(failed_for)
         self.bind_port = int(port)
         self.start_timeout = start_timeout
-        self.env = shell_env(self.home, self.site, env)
+        self.gateway = bool(gateway)
+        self.env = shell_env(self.home, self.site, env, gateway=self.gateway)
         self.port: int | None = None
         self.info: Any = None
         self._process: subprocess.Popen | None = None
@@ -152,9 +203,12 @@ class TestShell:
         for sub in ("tmp", "run"):
             (self.home / sub).mkdir(parents=True, exist_ok=True)
         os.chmod(self.home / "run", 0o700)
+        if self.gateway:
+            write_stand_ins(self.home)
         cwd = Layout("ui").runtime_dir(self.env, create=True)
         given: dict[str, Any] = {"child_args": list(self.child_args),
-                                 "leave_out": list(self.leave_out), "port": self.bind_port}
+                                 "leave_out": list(self.leave_out), "port": self.bind_port,
+                                 "gateway": self.gateway}
         if self.failed_for is not None:
             given["failed_for"] = self.failed_for
         options = json.dumps(given)
@@ -266,6 +320,16 @@ class TestShell:
         from moxi.paths import Layout
 
         return Layout(module).config_file(self.env)
+
+    def moxi(self, *args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
+        """Run `moxi <args>` as a user would beside this shell: in its environment, its
+        output kept as text. Never in a terminal, so a command that asks a question takes
+        its no-terminal path."""
+        from moxi.paths import python
+
+        return subprocess.run([python(), "-P", "-m", "moxi", *args], env=self.env,
+                              cwd=self.home, stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=timeout, check=False)
 
     def log_path(self) -> Path:
         """The shell's log file, where each page server's stderr goes."""

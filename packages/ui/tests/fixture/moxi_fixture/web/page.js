@@ -1,7 +1,8 @@
 // The fixture's panel, <moxi-fixture-page>: its count and note from its topics, a read,
-// an act, a confirmed act, its own inline tag, and a link back to the modules view. Plain
-// DOM, so it needs no build.
-import { api, confirm, navigate, place, subscribe } from "/m/ui/client.js";
+// an act, a confirmed act, its own inline tag, and a link back to the modules view. On the
+// gateway it hides the two desk-only acts and shows the phone's confirmed act instead.
+// Plain DOM, so it needs no build.
+import { api, confirm, gateway, navigate, place, subscribe } from "/m/ui/client.js";
 
 const sheet = new CSSStyleSheet();
 sheet.replaceSync(`
@@ -60,15 +61,25 @@ class FixturePage extends HTMLElement {
     const row = document.createElement("div");
     row.className = "row";
     root.append(row);
-    button(row, "Add one", async () => {
-      const answer = await api("fixture", "api/add", { by: 1 });
-      this.status.textContent = `add: ${answer.status}`;
-    });
-    button(row, "Confirmed add", async () => {
-      const outcome = await confirm("fixture", "api/confirm", { by: 1 },
-                                    ["Adds one to the fixture's count."]);
-      this.status.textContent = `confirm: ${outcome.outcome} ${outcome.status ?? outcome.text ?? ""}`.trim();
-    });
+    const said = (outcome) =>
+      `confirm: ${outcome.outcome} ${outcome.status ?? outcome.text ?? ""}`.trim();
+    if (gateway()) {
+      button(row, "Phone add", async () => {
+        const outcome = await confirm("fixture", "api/phone-act", { by: 1 },
+                                      ["Adds one to the fixture's count, from the phone."]);
+        this.status.textContent = said(outcome);
+      });
+    } else {
+      button(row, "Add one", async () => {
+        const answer = await api("fixture", "api/add", { by: 1 });
+        this.status.textContent = `add: ${answer.status}`;
+      });
+      button(row, "Confirmed add", async () => {
+        const outcome = await confirm("fixture", "api/confirm", { by: 1 },
+                                      ["Adds one to the fixture's count."]);
+        this.status.textContent = said(outcome);
+      });
+    }
     button(row, "Read", async () => {
       const answer = await api("fixture", "api/summary");
       this.status.textContent = `summary: ${answer.status}`;

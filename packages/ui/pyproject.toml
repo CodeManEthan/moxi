@@ -14,9 +14,10 @@ dependencies = ["moxi>=0.1.2,<0.2", "moxi-loopback>=0.1,<0.2", "psutil>=5.9", "h
 moxi-ui-serve = "moxi_ui.serve:main"
 
 # The browser half of `moxi_ui.testing`, the pytest plugin a module's own tests use; the
-# plugin loads without it, and only its fixtures need it.
+# plugin loads without it, and only its fixtures need it; `cryptography` makes the phone
+# bridge's certificates.
 [project.optional-dependencies]
-testing = ["pytest>=8", "playwright>=1.56,<2"]
+testing = ["pytest>=8", "playwright>=1.56,<2", "cryptography>=46"]
 # The gateway, the UI on a phone: passkeys need `webauthn`, which a shell user without a
 # phone shouldn't install.
 gateway = ["webauthn>=2.5,<3"]
