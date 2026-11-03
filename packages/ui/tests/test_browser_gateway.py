@@ -16,7 +16,7 @@ import pytest
 from playwright.sync_api import expect
 
 import phone_kit
-from moxi_loopback.headers import response_headers
+from moxi_loopback.api import response_headers
 from moxi_ui.testing.phone import HOST, ORIGIN, PhoneBridge, set_gateway
 from squatter import Squatter
 
