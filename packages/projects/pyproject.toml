@@ -7,6 +7,11 @@ license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2"]
 
+[project.optional-dependencies]
+# The browser UI shell: with it, projects' page shows there. Loopback, which projects'
+# page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
+
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
 Repository = "https://github.com/CodeManEthan/moxi"
@@ -17,7 +22,9 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 projects = "moxi_projects.module"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs projects' page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -28,7 +35,8 @@ packages = ["src/moxi_projects"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_projects", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_projects", "tests",
+                "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

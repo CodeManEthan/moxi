@@ -48,7 +48,7 @@ from . import api, store
 from . import contributions as _contributions
 from .api import DEFAULT_KIND, NotFound, Project
 from .contributions import Contributions, Planned
-from .errors import Broken, MintFailed, MoveFailed, ProjectsError, Refused, Usage
+from .errors import Broken, MintFailed, MoveFailed, NoGit, ProjectsError, Refused, Usage
 from .rules import check_root, same_root
 
 #: How long `git init` may run, in seconds, unless the caller gives another bound. The page
@@ -139,9 +139,9 @@ def _check_mint(planned: Planned) -> str | None:
         return None
     git = shutil.which("git")
     if git is None:
-        raise Refused(f"--create for kind {kind.name!r} runs `git init`, and git is not "
-                      "on PATH", "install git, or make the directory yourself and add it "
-                                 "without --create")
+        raise NoGit(f"--create for kind {kind.name!r} runs `git init`, and git is not "
+                    "on PATH", "install git, or make the directory yourself and add it "
+                               "without --create")
     return git
 
 
