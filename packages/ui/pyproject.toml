@@ -15,9 +15,12 @@ moxi-ui-serve = "moxi_ui.serve:main"
 
 # The browser half of `moxi_ui.testing`, the pytest plugin a module's own tests use; the
 # plugin loads without it, and only its fixtures need it; `cryptography` makes the phone
-# bridge's certificates.
+# bridge's certificates. On Windows a gateway-mode test shell keeps its files out of the
+# real profile through platformdirs' `WIN_PD_OVERRIDE_*` variables, which older releases
+# don't read.
 [project.optional-dependencies]
-testing = ["pytest>=8", "playwright>=1.56,<2", "cryptography>=46"]
+testing = ["pytest>=8", "playwright>=1.56,<2", "cryptography>=46",
+           "platformdirs>=4.11.3; sys_platform == 'win32'"]
 # The gateway, the UI on a phone: passkeys need `webauthn`, which a shell user without a
 # phone shouldn't install.
 gateway = ["webauthn>=2.5,<3"]

@@ -235,3 +235,20 @@ def test_each_context_is_fresh_from_one_stored_sign_in_and_a_refused_one_signs_i
                                      "{headers: {'X-Moxi-Key': localStorage.getItem("
                                      "'moxi-ui-key')}})).status")
     assert status == 200
+
+
+def test_the_testing_extra_needs_a_platformdirs_that_reads_the_windows_overrides():
+    """A gateway-mode test shell on Windows relies on `WIN_PD_OVERRIDE_*`, which only a
+    recent platformdirs reads; with an older one its files would land in the real profile."""
+    from importlib.metadata import requires
+
+    from packaging.requirements import Requirement
+
+    wanted = [Requirement(line) for line in requires("moxi-ui") or []
+              if line.startswith("platformdirs")]
+    assert len(wanted) == 1
+    floor = wanted[0]
+    assert str(floor.specifier) == ">=4.11.3"
+    assert floor.marker is not None
+    assert floor.marker.evaluate({"sys_platform": "win32", "extra": "testing"})
+    assert not floor.marker.evaluate({"sys_platform": "linux", "extra": "testing"})
