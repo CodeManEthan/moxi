@@ -122,11 +122,17 @@ def remove_status(call: Any) -> dict[str, Any]:
 # -- acts -----------------------------------------------------------------------------------
 
 def _no_git_fix(body: dict) -> str:
-    """The lasting fix for a create refused for want of git on this server's PATH."""
+    """The lasting fix for a create refused for want of git on this server's PATH: the
+    terminal command for the same add, with every flag the body sent, each value quoted
+    for the shell."""
     words = ["moxi projects add", acts._quote(body["key"]), "--root",
              acts._quote(body["root"]) if body.get("root") is not None else "DIR"]
     if body.get("kind") not in (None, DEFAULT_KIND):
         words += ["--kind", acts._quote(body["kind"])]
+    if body.get("lead") is not None:
+        words += ["--lead", acts._quote(body["lead"])]
+    if body.get("notes_root") is not None:
+        words += ["--notes-root", acts._quote(body["notes_root"])]
     return ("this page's server looks git up on the PATH the browser shell was started "
             "with, not your terminal's: set PATH in the service manager's environment and "
             "restart the shell with `moxi ui stop`, or run "

@@ -437,6 +437,24 @@ def test_create_with_no_git_names_the_lasting_fix(tmp_path, monkeypatch, store_p
     assert not root.exists() and not store_path.exists()
 
 
+@posix_only
+def test_the_lasting_fix_for_no_git_carries_the_lead_and_notes_root(site, tmp_path,
+                                                                    monkeypatch, store_path):
+    site.module("notes")
+    empty = tmp_path / "nothing-here"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    root = tmp_path / "web site"
+    notes = tmp_path / "web notes"
+    said = refused(post("/api/add", {"key": "web", "root": str(root), "kind": "agent",
+                                     "lead": "o'neil", "notes_root": str(notes),
+                                     "create": True}))
+    command = (f"moxi projects add web --root '{root}' --kind agent "
+               f"--lead 'o'\"'\"'neil' --notes-root '{notes}' --create")
+    assert f"`{command}` in a terminal" in said
+    assert not root.exists() and not store_path.exists()
+
+
 def test_create_for_a_refuse_kind_is_refused_before_anything_is_made(site, tmp_path):
     site.contribution("remote", 'INTERFACE = 2\nKINDS = {"remote": ("made elsewhere", '
                                 'lambda fields: None, "refuse")}\n')
