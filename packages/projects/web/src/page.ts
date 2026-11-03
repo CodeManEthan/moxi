@@ -238,6 +238,8 @@ export class ProjectsPage extends LitElement {
         this.#told = { key: project.key, said: { tone: "error", lines: [outcome.text] } };
         return;
       }
+      // Nothing was sent, and confirm() has already shown where to take the act.
+      if (outcome.outcome === "desk") return;
       if (outcome.outcome === "unknown") {
         this.#told = { key: project.key, said: { tone: "warn", lines: [MAY_HAVE_ACTED] } };
         this.#changed();
