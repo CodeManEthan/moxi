@@ -2,6 +2,7 @@
 
 The reads answer from the launcher's own calls: the catalog (`catalog.offered`'s rows, as
 the UI shell's form reads them), the presets file checked (`presets.check`), the launch
+form's values (`presets.layered`), the launch
 log (`store.log`), the runs with their events (`store.runs`, `store.run_events`), the
 past-sessions list (`resume.sessions`) and a session's state (`state.state`, or
 `state.of_launch` for every live launch). Each holds `busy("read")` for its own length
@@ -25,10 +26,24 @@ nothing to the log, nor does a spawning row turning stale. The poller is not a r
 stream or a busy hold, so it never delays the server's idle exit. It survives every
 exception: a failure is logged once per class and the next tick reads again.
 
-**A launch from the page** goes in two steps. `/api/preview` reads the form's values as
-typed, as the command line reads them: each becomes its row's option and goes through
-`catalog.parse` for the launch's harness, so a value the page sends overrides the preset
-and `[defaults]`, as one typed does. It answers `api.preview`'s composition beside every
+**The launch form** is filled from `/api/form`: the value each row offered for a harness
+takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
+lays them for `resolve`, so the form and the launch can't disagree. A brief or standing
+instructions that `[defaults]` or the preset writes inline is named `withheld`, and its
+text is not sent. A preset that can't be laid for the harness is answered with no rows and
+the resolver's refusal.
+
+**A launch from the page** goes in two steps. The request carries the whole form: each
+field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
+typed, as the command line reads it: it becomes its row's option and goes through
+`catalog.parse` for the launch's harness. Then each row is compared, by value, with what the
+layers give it (`presets.layered`): a value equal to it is dropped, so the row keeps its
+layer as its source, and a leave-out of a row the layers leave at its shipped default is
+dropped, since nothing is there to remove. What is left is typed, or left out, as on the
+command line with `--leave-out`. A row typed in a group of rows that exclude each other
+(the place rows, a text's two spellings) makes the group's other values typed too, so two
+of them are refused. Nothing here writes the presets file. `/api/preview` answers
+`api.preview`'s composition and the rows left out beside every
 refusal `api.check` finds, and, for a launch not in a terminal, whether the command is on
 the PATH the launch job would start it with, which is this server's (a refusal
 `not-found` naming that PATH). A launch that names no directory, project or scratch is
@@ -37,10 +52,12 @@ refuses it and its target isn't `terminal`, the preview issues a ticket: `<reque
 id>.<expiry>.<hmac>`, an HMAC-SHA256 over the request as sent, its request id and its
 expiry, with a 32-byte key kept in `STATE/page.key` (0600, made at first use), living
 `page.launch_wait_s` seconds. A terminal launch gets the `moxi launcher run` command to
-copy instead: the page never runs one, since it would take the server's place.
+copy instead, with `--leave-out ROW` for each row left out: the page never runs one, since
+it would take the server's place.
 
 `/api/launch` takes the request and its ticket. A ticket not issued for exactly this
-request is refused `bad-ticket`, an old one `expired`. It writes the request file
+request is refused `bad-ticket`, an old one `expired`. It compares the rows with the layers
+again, as the presets file is now, and writes the request file
 (`STATE/runs/<request id>.request.json`, 0600, made only if it is not there) and spawns
 `moxi-launcher-job launch <request id>` detached, then answers 202 with the status path
 `/api/launches?request=<request id>`, which shows the launch's row once it is written, or
@@ -284,6 +301,66 @@ def read_presets(call: Any) -> dict[str, Any]:
                        problems=[p.as_json() for p in problems])
         except Exception as err:
             return _failed(err, "reading the presets failed", presets=[], problems=[])
+
+
+# -- /api/form ------------------------------------------------------------------------------
+
+
+def form_rows(laid: presets.Layered) -> list[dict[str, Any]]:
+    """Each row offered for the harness `laid` was laid for, the launcher's then the
+    harness's, in catalog order, at its layered value spelled as a preset's value is, with
+    its source. A brief or standing instructions that `[defaults]` or the preset writes
+    inline is withheld: no text."""
+    out = []
+    for row in (*catalog.launcher(), *catalog.load(laid.harness)):
+        if not row.settable or row.name not in laid.values:
+            continue
+        value, source = laid.values[row.name], laid.sources[row.name]
+        withheld = (row.name in WITHHELD and source in (presets.DEFAULTS, presets.PRESET)
+                    and catalog.is_set(value))
+        shown, items = (None, None) if withheld else _value_of(row, value)
+        out.append({"name": row.name, "value": shown, "items": items, "source": source,
+                    "withheld": withheld})
+    return out
+
+
+def _form_harness(request: presets.Request, asked: str | None) -> str:
+    """The harness a refused form is drawn for: the one asked, else the layers', else the
+    shipped default when even that can't be read."""
+    if asked is not None:
+        return asked
+    try:
+        return presets.harness_of(request)
+    except REFUSALS:
+        return _shipped_harness()
+
+
+def form(seat: str | None = None, project_preset: str | None = None,
+         harness: str | None = None) -> dict[str, Any]:
+    """`/api/form`'s answer: the harness the form is drawn for (`harness`, else the one the
+    layers give) and each of its rows as the shipped defaults, `[defaults]` and the one
+    preset named lay them. A request the resolver refuses (both presets named, a preset
+    unknown or not laid for `harness`, a presets file that can't be read) is answered
+    with no rows and its refusal. The `harness` row holds the layers' harness, which is
+    `harness` only when none is asked or the layers name the one asked."""
+    request = presets.Request(seat=seat or None, project_preset=project_preset or None)
+    try:
+        laid = presets.layered(request, harness=harness, available=_available())
+    except REFUSALS as error:
+        return _up(harness=_form_harness(request, harness), rows=[],
+                   refused=_refusal(error))
+    return _up(harness=laid.harness, rows=form_rows(laid), refused=None)
+
+
+def read_form(call: Any) -> dict[str, Any]:
+    """`GET /api/form`: the launch form's values for at most one preset and one harness."""
+    query = call.query
+    with call.busy("read"):
+        try:
+            return form(query.get("seat"), query.get("project_preset"), query.get("harness"))
+        except Exception as err:
+            return _failed(err, "reading the launch form failed",
+                           harness=_shipped_harness(), rows=[], refused=None)
 
 
 # -- the launch log -------------------------------------------------------------------------
@@ -653,10 +730,12 @@ def page_key(env: Mapping[str, str] | None = None) -> bytes:
 
 
 def canonical(body: Mapping[str, Any], request_id: str, expires: int) -> bytes:
-    """The request a ticket is issued for, as the bytes it signs: the preset, the values
-    and `off_posture` as the page sent them, the request id and the expiry."""
+    """The request a ticket is issued for, as the bytes it signs: the preset, the values,
+    the rows left out (sorted) and `off_posture` as the page sent them, the request id and
+    the expiry."""
     asked = {"seat": body.get("seat"), "project_preset": body.get("project_preset"),
              "values": body.get("values") or {},
+             "leave_out": sorted(body.get("leave_out") or []),
              "off_posture": bool(body.get("off_posture", False)),
              "request_id": request_id, "expires": expires}
     return json.dumps(asked, sort_keys=True, separators=(",", ":"),
@@ -761,27 +840,97 @@ def tokens(values: Mapping[str, Any], harness: str,
     return words + (["--", *extra] if extra else []), typed
 
 
+#: The rows that exclude each other: the place rows, and each text's two spellings. The
+#: resolver takes one place, and one spelling of a text, from the latest layer that names
+#: one.
+_GROUPS = (("cwd", "project", "scratch"), *presets.TWO_SPELLINGS)
+
+
+def _both(name: str) -> catalog.BadValue:
+    return catalog.BadValue(name, f"{name} is both given and left out",
+                            f"give {name} or leave it out, not both")
+
+
+def _shipped_harness() -> str:
+    return str(catalog.launcher()["harness"].default)
+
+
+def _named_preset(found: presets.Presets, seat: str | None,
+                  project_preset: str | None) -> presets.Preset | None:
+    if seat:
+        return found.get("seat", seat)
+    if project_preset:
+        return found.get("project", project_preset)
+    return None
+
+
 def launch_request(body: Mapping[str, Any], request_id: str):
     """The `api.LaunchRequest` the page's `body` asks for, under `request_id`, and the
-    words of its `moxi launcher run` command. Each value is read as typed, as the command
-    line reads it: its words go through `catalog.parse` for `harness`'s rows (the value
-    set, else the preset's, else `[defaults]`'s), so a value the page sends overrides the
-    preset even when it is the shipped default. Raises a refusal."""
+    words of its `moxi launcher run` command.
+
+    `body` carries the whole form: `values`, each field showing a value, and `leave_out`,
+    each field shown empty. A row in both is refused `bad-value`. An emptied list, and a
+    switch with an optional value set off, read as left out. Each value is read as typed,
+    as the command line reads it: its words go through `catalog.parse` for the launch's
+    harness (`values["harness"]`, else the layers'). Then each row is compared, by value,
+    with what `presets.layered` gives it for the same preset and harness: a value equal to
+    it is dropped, and so is a leave-out of a row it leaves at its shipped default; the
+    rest are typed, or left out. A row the harness doesn't offer that `body` leaves out is
+    taken out of the layers before the preset is laid, and stays left out when a layer
+    names it. A typed row of a group (`_GROUPS`) makes every other value of that group in
+    `body` typed too, so the resolver refuses two. The harness is typed only when it is
+    not the layers'. Raises a refusal."""
     seat = body.get("seat") or None
     project_preset = body.get("project_preset") or None
     values = dict(body.get("values") or {})
+    asked_out = list(dict.fromkeys(body.get("leave_out") or ()))
+    for name in asked_out:
+        if name in values:
+            raise _both(name)
     available = _available()
+    found = presets.read()
+    asked = presets.Request(seat=seat, project_preset=project_preset)
     harness = values.get("harness") or presets.harness_of(
-        presets.Request(seat=seat, project_preset=project_preset))
+        replace(asked, left_out=tuple(asked_out)), presets=found)
     if harness not in catalog.HARNESSES:
         raise catalog.BadValue("harness", f"harness cannot be {harness!r}",
                                f"set it to one of {', '.join(catalog.HARNESSES)}")
+    # A row's empty state is a leave-out, however the form spells it.
+    for name, value in list(values.items()):
+        row = catalog.row(harness, name)
+        if value == [] or (row is not None and row.optional_value and value == "false"):
+            del values[name]
+            asked_out.append(name)
+
     words, direct = tokens(values, harness, available)
     parsed = catalog.parse(words, harness, available=available)
+    sent: dict[str, object] = {**parsed.values, **direct}
+    if parsed.extra:
+        sent[catalog.EXTRA] = list(parsed.extra)
+
+    offered = catalog.offered(harness, available)
+    unoffered = tuple(name for name in asked_out if name not in offered)
+    laid = presets.layered(replace(asked, left_out=unoffered), harness=harness,
+                           presets=found, available=available)
+    layered = laid.values
+
+    typed = {name: value for name, value in sent.items() if value != layered[name]}
+    for group in _GROUPS:
+        if any(name in typed for name in group):
+            typed.update({name: sent[name] for name in group if name in sent})
+    preset = _named_preset(found, seat, project_preset)
+    # A row this harness doesn't offer has no layered value: its leave-out stays while a
+    # layer names it, since the preset is laid for this harness only without it.
+    named = {*found.defaults, *(preset.values if preset is not None else ())}
+    left_out = tuple(
+        name for name in asked_out
+        if (name in named if name not in offered else layered[name] != offered[name].default))
+
+    extra = typed.pop(catalog.EXTRA, ())
     off_posture = bool(body.get("off_posture", False))
-    request = api.LaunchRequest(seat=seat, project_preset=project_preset,
-                                typed={**parsed.values, **direct}, extra=parsed.extra,
-                                off_posture=off_posture, request_id=request_id)
+    request = api.LaunchRequest(seat=seat, project_preset=project_preset, typed=typed,
+                                extra=tuple(extra), off_posture=off_posture,
+                                left_out=left_out, request_id=request_id)
     command = ["moxi", "launcher", "run"]
     if seat:
         command += ["--seat", seat]
@@ -789,7 +938,12 @@ def launch_request(body: Mapping[str, Any], request_id: str):
         command += ["--project-preset", project_preset]
     if off_posture:
         command.append("--off-posture")
-    return request, command + words
+    kept, _ = tokens({name: values[name] for name in values
+                      if name in typed and name != catalog.EXTRA}, harness, available)
+    command += kept
+    for name in left_out:
+        command += ["--leave-out", name]
+    return request, command + (["--", *extra] if extra else [])
 
 
 def _command(words: list[str]) -> str:
@@ -811,7 +965,7 @@ NOT_ON_PATH_HINT = ("install it in a folder on that PATH, or give the UI shell a
 def _previewed(**answer: Any) -> dict[str, Any]:
     empty = {"refused": [], "harness": None, "mode": None, "target": None, "argv": [],
              "stamps": [], "first_turn": None, "not_applied": [], "warnings": [],
-             "command": None, "request_id": None, "ticket": None, "expires_at": None}
+             "left_out": [], "command": None, "request_id": None, "ticket": None, "expires_at": None}
     return {**empty, **answer}
 
 
@@ -832,8 +986,8 @@ def on_path(composition: Any) -> dict[str, Any] | None:
 
 def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
     """What `/api/preview` answers for the page's `body`: what the launch would start,
-    every refusal `check` finds, and, when there is none and the target isn't
-    `terminal`, a ticket to launch it. A terminal launch is answered with the command to
+    the rows it leaves out, every refusal `check` finds, and, when there is none and the
+    target isn't `terminal`, a ticket to launch it. A terminal launch is answered with the command to
     copy instead."""
     request_id = str(uuid.uuid4())
     try:
@@ -854,7 +1008,7 @@ def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
         target=composition.target, argv=list(composition.argv),
         stamps=[{"name": str(k), "value": str(v)} for k, v in composition.env.items()],
         first_turn=composition.first, not_applied=list(composition.not_applied),
-        warnings=list(composition.warnings),
+        warnings=list(composition.warnings), left_out=list(request.left_out),
         command=_command(words) if terminal else None,
         request_id=None if issued is None else request_id, ticket=issued,
         expires_at=expires_at)
@@ -929,7 +1083,8 @@ def launched(body: Mapping[str, Any]) -> Any:
     return _run_job(request_id, {
         "act": "launch", "request_id": request_id, "seat": request.seat,
         "project_preset": request.project_preset, "typed": dict(request.typed),
-        "extra": list(request.extra), "off_posture": request.off_posture})
+        "extra": list(request.extra), "left_out": list(request.left_out),
+        "off_posture": request.off_posture})
 
 
 def _run_job(request_id: str, data: Mapping[str, Any], used: str = USED) -> Any:
@@ -1030,9 +1185,10 @@ def resume(call: Any) -> Any:
 
 __all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER",
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
-           "WITHHELD", "alive", "canonical", "events", "field", "fields", "gather_launches",
-           "gather_sessions", "launch", "launch_request", "launch_row", "launched", "launches",
-           "live", "live_states", "on_path", "page_key", "preview", "previewed",
-           "read_catalog", "read_launches", "read_presets", "read_runs", "read_sessions",
-           "read_state", "refusal", "resumable", "resume", "resumed", "run_entry",
-           "session_state", "spelled", "ticket", "tokens", "unreadable", "verify"]
+           "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
+           "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
+           "launched", "launches", "live", "live_states", "on_path", "page_key", "preview",
+           "previewed", "read_catalog", "read_form", "read_launches", "read_presets",
+           "read_runs", "read_sessions", "read_state", "refusal", "resumable", "resume",
+           "resumed", "run_entry", "session_state", "spelled", "ticket", "tokens",
+           "unreadable", "verify"]
