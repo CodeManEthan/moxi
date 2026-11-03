@@ -109,7 +109,7 @@ class Parts:
     as on loopback's `gateway` profile; `router` answers what the guard admits.
     `end_sessions()` ends every gateway session; `stale(kept)` marks the devices of the
     address `kept` stale; `audit(code, fields)` writes one audit row (`provider`, `held`,
-    `acts`).
+    `acts`). `tick()` runs once on every tick, off the event loop.
     """
 
     table: Callable[[Mount], Table] = _empty_table
@@ -119,6 +119,7 @@ class Parts:
     end_sessions: Callable[[], None] = _nothing
     stale: Callable[[Kept], None] = _nothing
     audit: Callable[[str, dict[str, Any]], None] = _nothing
+    tick: Callable[[], None] = _nothing
 
 
 @dataclass(frozen=True)
@@ -301,7 +302,8 @@ class Gateway:
             await self.close()
 
     async def tick(self) -> None:
-        """One tick: read, apply the address rule and the mount, then the hold."""
+        """One tick: read, apply the address rule and the mount, then the hold, then the
+        later parts' own tick."""
         if self.moved:
             return
         reading = await asyncio.to_thread(self._read)
@@ -309,6 +311,7 @@ class Gateway:
         if find is not None:
             self.uid = await asyncio.to_thread(self._find_uid, find)
         await self._hold()
+        await asyncio.to_thread(self.parts.tick)
 
     def apply(self, reading: Reading) -> str | None:
         """Apply one reading to the profile and the mount. Returns the provider whose uid

@@ -38,7 +38,7 @@ ui = "moxi_ui.module"
 moxi_ui = "moxi_ui.testing"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev", "moxi-ui[testing]"]
+dev = ["pytest", "moxi-dev", "moxi-ui[testing,gateway]", "cryptography>=46"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

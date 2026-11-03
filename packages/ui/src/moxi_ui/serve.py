@@ -65,6 +65,7 @@ from . import cli, config, listen
 from . import page as shell_page
 from .listen import Listeners
 from .gateway import Gateway
+from .gateway.access import Access
 from .proxy import Proxy
 from .push import Push
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
@@ -213,8 +214,9 @@ class Shell:
     exits idle whatever `idle_s` says, and never while the gateway holds its endpoint.
     `idled` is True once it has.
 
-    `gateway` is the shell's `Gateway`, or True to build one; without it (the default,
-    which tests take) the shell runs no gateway.
+    `gateway` is the shell's `Gateway`, or True to build one, with the gateway's sign-in
+    state as `phone`; without it (the default, which tests take) the shell runs no
+    gateway. `phone` is that sign-in state when a test passes its own gateway.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -224,7 +226,7 @@ class Shell:
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
                  child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
                  leave_out: Sequence[str] = (), idle_s: float | None = None,
-                 gateway: Gateway | bool = False):
+                 gateway: Gateway | bool = False, phone: Access | None = None):
         self.listeners = listeners
         self.epoch = epoch
         self.idle_s = idle_s
@@ -260,8 +262,12 @@ class Shell:
         self.profile = None
         self._should_exit: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.phone = phone
         if gateway is True:
-            gateway = Gateway(self.layout, head_limit=HEAD_LIMIT)
+            self.phone = Access(
+                state_dir=self.layout.state_dir(), runtime_dir=self.layout.runtime_dir(),
+                kept=lambda: self.gateway.kept if self.gateway is not None else None)
+            gateway = Gateway(self.layout, parts=self.phone.parts(), head_limit=HEAD_LIMIT)
         self.gateway: Gateway | None = gateway or None
 
     def start(self) -> RuntimeInfo:

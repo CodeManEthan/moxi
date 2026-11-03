@@ -139,8 +139,8 @@ def is_navigation(method: str, headers: Iterable[tuple[bytes, bytes]]) -> bool:
             and _single(headers, b"sec-fetch-dest") == b"document")
 
 
-def cookie_ids(headers: Iterable[tuple[bytes, bytes]]) -> list[str]:
-    """Every value of the session cookie the request carries, in order.
+def cookie_ids(headers: Iterable[tuple[bytes, bytes]], name: str = COOKIE) -> list[str]:
+    """Every value of the session cookie `name` the request carries, in order.
 
     Cookies ignore ports, so another server on 127.0.0.1 can add a `moxi-ui` cookie of
     its own beside ours; each is tried, and one that names no session is ignored.
@@ -152,10 +152,15 @@ def cookie_ids(headers: Iterable[tuple[bytes, bytes]]) -> list[str]:
         except UnicodeDecodeError:
             continue
         for part in text.split(";"):
-            name, sep, item = part.strip().partition("=")
-            if sep and name == COOKIE and _TOKEN_SHAPE.match(item):
+            found_name, sep, item = part.strip().partition("=")
+            if sep and found_name == name and _TOKEN_SHAPE.match(item):
                 found.append(item)
     return found
+
+
+def key_of(headers: Iterable[tuple[bytes, bytes]]) -> str | None:
+    """The request's one well-formed `X-Moxi-Key`, or None."""
+    return _key(headers)
 
 
 def _key(headers: Iterable[tuple[bytes, bytes]]) -> str | None:
@@ -350,6 +355,7 @@ class _Record:
     created: float
     used: float
     saved_used: float
+    owner: str | None = None
 
 
 class SessionStore:
@@ -361,13 +367,19 @@ class SessionStore:
 
     `watch` calls back when a session ends, however it ends: signed out, ended by a
     worker's update check, evicted past the limit, or found expired.
+
+    `max_age`, `idle` and `limit` are the shell's unless given. A session may have an
+    `owner` (the gateway's device), kept in memory only; with `per_owner`, minting past
+    that many sessions of one owner evicts that owner's oldest first.
     """
 
     def __init__(self, *, epoch: str | None, path: Path | None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, max_age: float = MAX_AGE,
+                 idle: float = IDLE, limit: int = LIMIT, per_owner: int | None = None):
         self.epoch = epoch
         self.path = path if epoch is not None else None
         self.clock = clock
+        self.max_age, self.idle, self.limit, self.per_owner = max_age, idle, limit, per_owner
         self._sessions: dict[str, _Record] = {}
         self._watches: dict[str, list[Callable[[], None]]] = {}
         self._ending: list[Callable[[], None]] = []
@@ -406,7 +418,7 @@ class SessionStore:
     def _prune(self) -> bool:
         now = self.clock()
         gone = [h for h, r in self._sessions.items()
-                if now - r.created >= MAX_AGE or now - r.used >= IDLE]
+                if now - r.created >= self.max_age or now - r.used >= self.idle]
         for id_hash in gone:
             self._drop(id_hash)
         return bool(gone)
@@ -449,18 +461,44 @@ class SessionStore:
         on_end()
         return lambda: None
 
-    def mint(self) -> tuple[str, str]:
-        """A new session: `(session id, key)`. The oldest is evicted past the limit."""
+    def mint(self, owner: str | None = None) -> tuple[str, str]:
+        """A new session: `(session id, key)`, of `owner` when given. The oldest is evicted
+        past the limit, and past `per_owner` the owner's oldest."""
         session_id, key = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = self.clock()
+
+        def oldest(hashes: list[str]) -> str:
+            return min(hashes, key=lambda h: self._sessions[h].created)
+
         with self._lock:
             self._prune()
-            while len(self._sessions) >= LIMIT:
-                self._drop(min(self._sessions, key=lambda h: self._sessions[h].created))
-            self._sessions[_hash(session_id)] = _Record(_hash(key), now, now, now)
+            if owner is not None and self.per_owner is not None:
+                while len(own := [h for h, r in self._sessions.items()
+                                  if r.owner == owner]) >= self.per_owner:
+                    self._drop(oldest(own))
+            while len(self._sessions) >= self.limit:
+                self._drop(oldest(list(self._sessions)))
+            self._sessions[_hash(session_id)] = _Record(_hash(key), now, now, now, owner)
             self._save()
         self._ended()
         return session_id, key
+
+    def owner_of(self, id_hash: str) -> str | None:
+        """The owner of the live session `id_hash`, or None."""
+        with self._lock:
+            record = self._sessions.get(id_hash)
+            return record.owner if record is not None else None
+
+    def end_owners(self, which: Callable[[str | None], bool]) -> int:
+        """End every session whose owner `which` picks; returns how many there were."""
+        with self._lock:
+            gone = [h for h, r in self._sessions.items() if which(r.owner)]
+            for id_hash in gone:
+                self._drop(id_hash)
+            if gone:
+                self._save()
+        self._ended()
+        return len(gone)
 
     def find(self, session_ids: Sequence[str], key: str | None = None, *,
              need_key: bool) -> str | None:
@@ -494,6 +532,15 @@ class SessionStore:
             for session_id in session_ids:
                 if self._drop(_hash(session_id)):
                     gone += 1
+            if gone:
+                self._save()
+        self._ended()
+        return gone
+
+    def end_hash(self, id_hash: str) -> bool:
+        """End the session whose id hashes to `id_hash`; False when none is live."""
+        with self._lock:
+            gone = self._drop(id_hash)
             if gone:
                 self._save()
         self._ended()
