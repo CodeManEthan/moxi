@@ -473,7 +473,9 @@ class Gateway:
     async def _failed(self, text: str) -> None:
         if text != self.problem:
             _log.warning("the gateway can't hold its endpoint: %s", text)
-            self.parts.audit("held", {"reason": text})
+            where = self.path if self.kind == "unix" else f"127.0.0.1:{self.port}"
+            self.parts.audit("held", {"reason": text, "endpoint": where,
+                                      "removed": None if self.address is None else "ui/gateway"})
         self.problem = text
         if self.address is not None and (self._removing is None or self._removing.done()):
             self._removing = asyncio.ensure_future(asyncio.to_thread(self._remove_quietly))

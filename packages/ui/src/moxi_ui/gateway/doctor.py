@@ -262,8 +262,10 @@ def _fail(facts: Facts) -> tuple[str, str | None] | None:
         return facts.path_problem, None
     if facts.held is not None:
         if facts.kind == "tcp":
-            return (f"port {facts.gateway_port} was held by another program; the tunnel entry "
-                    "was removed", "free the port and run `moxi ui gateway on`")
+            removed = ("the tunnel entry was removed" if facts.held.get("removed", True)
+                       else "there was no tunnel entry to remove")
+            return (f"port {facts.gateway_port} was held by another program; {removed}",
+                    "free the port and run `moxi ui gateway on`")
         return (f"the gateway couldn't hold its socket ({facts.held.get('reason')}); the "
                 "tunnel entry was removed", "moxi ui gateway on")
     if facts.switch and address is None:

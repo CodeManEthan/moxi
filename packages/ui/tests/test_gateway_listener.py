@@ -259,6 +259,9 @@ def test_a_tcp_port_another_socket_holds_removes_the_entry_and_writes_a_held_row
         assert not gw.holding and world.removed == 1
         assert hooks.codes().count("held") == 1
         assert f"port {world.port} was held by another program" in gw.problem
+        (row,) = [fields for code, fields in hooks.audit if code == "held"]
+        assert row == {"reason": gw.problem, "endpoint": f"127.0.0.1:{world.port}",
+                       "removed": "ui/gateway"}
         loop.run(gw.tick())  # The removal failed, so it is tried again; one row is enough.
         assert world.removed == 2 and hooks.codes().count("held") == 1
         world.remove_fails = False
