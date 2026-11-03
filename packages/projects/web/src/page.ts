@@ -33,7 +33,7 @@ import type { Kinds, Project, Projects, RemoveStatus, Where } from "./feed.ts";
 import { BASE } from "./styles.ts";
 import {
   actedOf, actSaid, agentBody, brokenLines, clearLeadBody, editBody, editing, filterChoices, kindChoices,
-  leadBody, listView, NO_GIT, pickerPath, projectFields, removedSaid, removeSheet, removeStatusPath,
+  leadBody, listView, MAY_HAVE_ACTED, NO_GIT, pickerPath, projectFields, removedSaid, removeSheet, removeStatusPath,
   reread, STALE_LINE, WHERE_LINE, whereView,
 } from "./views.ts";
 import type { EditForm, Editing, Said } from "./views.ts";
@@ -239,7 +239,7 @@ export class ProjectsPage extends LitElement {
         return;
       }
       if (outcome.outcome === "unknown") {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [outcome.text] } };
+        this.#told = { key: project.key, said: { tone: "warn", lines: [MAY_HAVE_ACTED] } };
         this.#changed();
         return;
       }

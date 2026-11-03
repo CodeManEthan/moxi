@@ -7,7 +7,8 @@ list again and says the directory may exist; the edit form, which sends only wha
 user changed when a terminal has changed the project since it was opened; the lead and
 the associated agents; remove through the confirm sheet, where Cancel sends nothing, a
 refusal gives each sentence, a removal takes the row off, and each confirmation sends its
-own key; and the 360 px width check.
+own key; a remove whose answer is lost, which says projects may have acted; and the 360
+px width check.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
 store is the one the page server reads, under the shell's home, and every check reads it
@@ -487,6 +488,29 @@ def test_remove_goes_through_the_sheet_refuses_with_its_sentences_then_removes(
     assert len(keys) == 3 and len(set(keys)) == 3 and all(KEY.match(k) for k in keys), keys
     for key in keys:
         assert any(url.endswith(f"/m/projects/api/remove-status?job={key}") for url in statuses), statuses
+
+
+def test_a_lost_remove_answer_says_projects_may_have_acted(seeded, ui_shell, ui_page):
+    add(ui_shell, "lost-remove")
+    panel = open_panel(ui_page)
+
+    def lost(route) -> None:
+        route.fetch()               # the remove is made, and its answer never arrives
+        route.fulfill(status=504, json={"error": "timeout"})
+
+    ui_page.route("**/m/projects/api/remove", lost)
+    item = open_row(panel, "lost-remove")
+    item.get_by_role("button", name="Remove…").click()
+    ui_page.locator("moxi-ui-confirm").get_by_role("dialog").get_by_role(
+        "button", name="Confirm").click()
+    # The page read its list again, which no longer holds it, and says so in its own words.
+    expect(row(panel, "lost-remove")).to_have_count(0)
+    told = panel.locator('section[data-part="list"] > [data-line="said"]')
+    expect(told).to_have_attribute("data-tone", "warn")
+    expect(told).to_have_text(
+        "No answer came back, so projects may have acted; the list has been read again.")
+    ui_page.unroute("**/m/projects/api/remove")
+    assert shown(ui_shell, "lost-remove") is None
 
 
 # --- width --------------------------------------------------------------------------------------
