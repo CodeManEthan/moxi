@@ -41,7 +41,8 @@ export interface ApiResult {
  * What `confirm` resolves with. `accepted` carries the status path the module gave,
  * relative to its own page (`/api/status?job=...`); `refused` the answer's status and a
  * line of text; `unknown` a line of text. `cancelled` means the sheet was closed and
- * nothing was sent.
+ * nothing was sent. `desk` means the phone can't run the act here, so the sheet pointed at
+ * the desk and nothing reached the module; `text` is what it said.
  */
 export type ConfirmOutcome = {
     outcome: "accepted";
@@ -55,6 +56,9 @@ export type ConfirmOutcome = {
     text: string;
 } | {
     outcome: "cancelled";
+} | {
+    outcome: "desk";
+    text: string;
 };
 /** The theme modes: `system` follows the browser's colour scheme. */
 export type ThemeMode = "system" | "light" | "dark";
@@ -174,6 +178,13 @@ declare global {
         "moxi-ui-form": FormElement;
     }
 }
+/** Whether this page came through the gateway, on the phone. A component hides there what
+ * the phone can't reach, such as a desk-only act. */
+export declare function gateway(): boolean;
+/** Whether the phone runs confirmed acts here: true on the gateway only while the shell
+ * mounts them, as it stood when the page loaded. Where it is false a component may label
+ * an act "at the desk"; `confirm` then shows where to do it. */
+export declare function gatewayActs(): boolean;
 /** Whether `module` is installed and present. */
 export declare function installed(module: string): boolean;
 /** The components `module` declares that the shell can place; empty when it is not
@@ -200,6 +211,12 @@ export declare function api(module: string, path: string, body?: object): Promis
  * answer. It throws a TypeError for a path that leaves `/m/<module>/` or is not one of
  * the module's confirmed acts, a body that is not an object, or lines that are not
  * strings.
+ *
+ * On the phone, where `gatewayActs` is true, the gateway first stores the act and the
+ * sheet shows the body it stored; Confirm has the gateway send it, once. Where
+ * `gatewayActs` is false, or the gateway answers that acts are no longer mounted, the
+ * sheet has no Confirm: it says to do the act at the desk and why, sends nothing further,
+ * and its Close resolves `{outcome: "desk", text}`.
  */
 export declare function confirm(module: string, path: string, body: object, sheet?: readonly string[]): Promise<ConfirmOutcome>;
 /**

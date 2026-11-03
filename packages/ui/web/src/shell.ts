@@ -2,8 +2,11 @@
 // the panel for the URL. For `/m/<module>/<route>` it places `<moxi-<module>-page
 // route="<route>">`. Moving between panels is `history.pushState`; the push stream and
 // the menu stay. Everything is built with DOM calls and text nodes, never HTML strings.
+// On the phone it leaves out Settings, which only the desk reaches, and its signed-out
+// notice links to the gateway's sign-in page.
 
 import type { ComponentInfo } from "./client.ts";
+import { freshN } from "./passkey.ts";
 import type { UpstreamState } from "./push.ts";
 import { NAME } from "./rules.ts";
 import { failurePanel } from "./views.ts";
@@ -19,6 +22,8 @@ export interface PanelModule {
 
 /** What the shell takes from client.js. */
 export interface ShellDeps {
+  /** The page came through the gateway, on the phone. */
+  gateway: boolean;
   installed(module: string): boolean;
   known(module: string): boolean;
   place(host: Element, module: string, name: string, attrs?: Record<string, string>): Promise<Element | null>;
@@ -37,12 +42,13 @@ export function where(pathname: string): { module: string; route: string } | nul
   return { module: match[1], route: match[2] };
 }
 
-/** The menu's entries: each module with a page, the shell's own first, then Settings. */
-export function menuEntries(modules: PanelModule[]): Array<{ module: string; route: string; title: string }> {
+/** The menu's entries: each module with a page, the shell's own first, then Settings, at
+ * the desk only (`desk` false leaves it out). */
+export function menuEntries(modules: PanelModule[], desk = true): Array<{ module: string; route: string; title: string }> {
   const pages = modules.filter((item) => item.page !== null)
     .sort((a, b) => (a.name === "ui" ? -1 : b.name === "ui" ? 1 : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const entries = pages.map((item) => ({ module: item.name, route: "", title: (item.page as ComponentInfo).title }));
-  if (modules.some((item) => item.name === "ui" && item.page !== null)) {
+  if (desk && modules.some((item) => item.name === "ui" && item.page !== null)) {
     entries.push({ module: "ui", route: "settings", title: "Settings" });
   }
   return entries;
@@ -161,7 +167,7 @@ export function boot(deps: ShellDeps): void {
 
   const renderMenu = (): void => {
     const at = where(location.pathname);
-    const items = menuEntries(deps.modules()).map((entry) => {
+    const items = menuEntries(deps.modules(), !deps.gateway).map((entry) => {
       const link = el("a", entry.title);
       link.href = `/m/${entry.module}/${entry.route}`;
       link.dataset.module = entry.module;
@@ -203,7 +209,16 @@ export function boot(deps: ShellDeps): void {
     if (signature() !== shown) void renderPanel();
   });
   deps.onState(showStatus);
+  // On the phone the way back in is the gateway's sign-in page, with a new `n` each time
+  // so no cached answer serves it.
+  const signIn = el("a", "Sign in");
+  if (deps.gateway) {
+    signIn.href = `/signin?n=${freshN()}`;
+    signIn.addEventListener("click", () => { signIn.href = `/signin?n=${freshN()}`; });
+    notice.replaceChildren("This phone is signed out of Moxi. ", signIn);
+  }
   deps.onSession((signedIn) => {
+    if (deps.gateway) signIn.href = `/signin?n=${freshN()}`;
     notice.hidden = signedIn;
     if (signedIn) void renderPanel();
   });

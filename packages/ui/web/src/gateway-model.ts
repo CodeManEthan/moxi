@@ -5,6 +5,7 @@
 
 import type { ConfirmOutcome } from "./client.ts";
 import { MAY_HAVE_ACTED, NOT_SENT, SIGNED_OUT } from "./confirm-model.ts";
+import type { Ending } from "./push.ts";
 
 /** What the gateway's shell document carries, as it stood when the shell sent it. */
 export interface GatewayInfo {
@@ -134,4 +135,69 @@ export function bandText(reach: Reach, host: string, last: Date | null): string 
   }
   if (reach === "down") return `The computer (${host}) answered, but Moxi isn't running or the gateway is off.${when}`;
   return "";
+}
+
+/** What one end of the push stream says about reaching the gateway, or null when it says
+ * nothing: a stream the shell closed is answered again at the next open. A refusal with no
+ * JSON reason is read as `reachOf` reads any answer. */
+export function endingReach(ending: Ending): Reach | null {
+  if (ending.kind === "network" || ending.kind === "stalled") return "away";
+  if (ending.kind === "status") return reachOf(ending.status, ending.error !== null);
+  return null;
+}
+
+// --- the gateway's confirm() -----------------------------------------------------------------
+
+/** An answer that turns the open sheet into the desk pointer, with these lines. */
+export interface DeskPointer {
+  desk: string[];
+}
+
+/** One run of a line: plain text, or a command between backticks. */
+export interface Span {
+  text: string;
+  code: boolean;
+}
+
+/** `line` cut at its backticks, so a command shows as code. An unpaired backtick is text. */
+export function spans(line: string): Span[] {
+  const parts = line.split("`");
+  if (parts.length % 2 === 0) return [{ text: line, code: false }];
+  return parts.map((text, at) => ({ text, code: at % 2 === 1 })).filter((part) => part.text !== "");
+}
+
+/** The outcome the desk pointer resolves with. */
+export function deskOutcome(lines: readonly string[]): ConfirmOutcome {
+  return { outcome: "desk", text: lines.join(" ") };
+}
+
+/** What the gateway's `confirm()` needs from the page. */
+export interface GatewaySteps {
+  /** POSTs `body` as JSON to the gateway's `path` with the session key, once. */
+  post(path: string, body: object): Promise<{ status: number; data: unknown }>;
+  /** Shows the sheet with `body`; Confirm runs `send` once. */
+  ask(body: object, send: () => Promise<ConfirmOutcome | DeskPointer>): Promise<ConfirmOutcome>;
+  /** Shows the sheet with `lines` in place of Confirm. */
+  desk(lines: string[]): Promise<ConfirmOutcome>;
+}
+
+/**
+ * `confirm()` on the gateway, for the act at `path` on `module`'s page. Where the acts
+ * aren't mounted it shows the desk pointer and sends nothing. Where they are, it prepares
+ * the act, shows the body the gateway stored, and on Confirm commits it: one prepare and at
+ * most one commit, never retried. A 404 from either means the acts were unmounted after the
+ * page loaded, and gives the desk pointer.
+ */
+export async function gatewayConfirm(info: GatewayInfo, host: string, module: string, path: string,
+                                     body: object, steps: GatewaySteps): Promise<ConfirmOutcome> {
+  if (!info.acts) return await steps.desk(deskLines(host, module, info.reason));
+  const answer = await steps.post("/gw/act/prepare", { module, path, body });
+  const got = prepared(answer.status, answer.data);
+  if (got === LAPSED) return await steps.desk(deskLines(host, module, LAPSED));
+  if ("outcome" in got) return got;
+  return await steps.ask(got.body, async () => {
+    const sent = await steps.post("/gw/act/commit", { act: got.act });
+    const outcome = committed(sent.status, sent.data);
+    return outcome === LAPSED ? { desk: deskLines(host, module, LAPSED) } : outcome;
+  });
 }

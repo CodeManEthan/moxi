@@ -73,7 +73,7 @@ a:focus-visible, button:focus-visible {
   outline-offset: 2px;
 }
 
-.moxi-notice, .moxi-status {
+.moxi-notice, .moxi-status, .moxi-band {
   margin: 0;
   padding: 8px 16px;
   border-bottom: 1px solid var(--moxi-border);
@@ -81,6 +81,9 @@ a:focus-visible, button:focus-visible {
 
 .moxi-notice { background: var(--moxi-error-soft); color: var(--moxi-error); }
 .moxi-status { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
+.moxi-notice a { color: inherit; font-weight: 600; }
+/* The band: on the phone, while the computer or Moxi doesn't answer. */
+.moxi-band { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
 [hidden] { display: none !important; }
 
 .moxi-panel {
