@@ -3,12 +3,17 @@
 #: The component contract this module's shell places, and its own components are written
 #: for.
 INTERFACES = frozenset({1})
+#: The announcement schema this file is written to: 2 lets a socket daemon's `start` follow
+#: a bool setting.
+ANNOUNCES = 2
 API = None
 CLI = "moxi_ui.cli:main"
 SUMMARY = "The browser shell: one origin for every module's page"
 #: The `testing` extra brings only what moxi_ui.testing's browser fixtures need.
 OPTIONAL = {"testing": "Playwright and pytest for moxi_ui.testing, the plugin a module's "
-                       "own tests use to run its pages in a test shell and a browser."}
+                       "own tests use to run its pages in a test shell and a browser.",
+            "gateway": "Passkeys for the gateway, the UI on your phone through the tunnel.",
+            "tunnel": "The tunnel, which gives the gateway the address a phone reaches."}
 GATED = {}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"

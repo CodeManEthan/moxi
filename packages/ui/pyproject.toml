@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1.1,<0.2", "moxi-loopback>=0.1,<0.2", "psutil>=5.9", "h11>=0.16,<1"]
+dependencies = ["moxi>=0.1.2,<0.2", "moxi-loopback>=0.1,<0.2", "psutil>=5.9", "h11>=0.16,<1"]
 
 # Only the core declares the `moxi` script; this is the shell's own entry point, the
 # command its unit runs.
@@ -17,6 +17,11 @@ moxi-ui-serve = "moxi_ui.serve:main"
 # plugin loads without it, and only its fixtures need it.
 [project.optional-dependencies]
 testing = ["pytest>=8", "playwright>=1.56,<2"]
+# The gateway, the UI on a phone: passkeys need `webauthn`, which a shell user without a
+# phone shouldn't install.
+gateway = ["webauthn>=2.5,<3"]
+# The tunnel gives the gateway its address; 0.2 is the first that offers interface 2.
+tunnel = ["moxi-tunnel>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
