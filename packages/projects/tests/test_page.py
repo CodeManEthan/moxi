@@ -220,6 +220,21 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert done_.stdout.strip() == "[]"
 
 
+def test_each_component_is_a_built_asset_of_the_page():
+    from moxi_projects import module
+
+    assets = set(LB.export(page.PAGE)["assets"])
+    assert set(module.COMPONENTS) == {"page", "picker", "card", "add"}
+    for name, decl in module.COMPONENTS.items():
+        assert decl["script"] == f"{name}.js"
+        assert decl["script"] in assets
+        assert decl["contract"] == 1
+        assert (decl["place"] == "page") == (name == "page")
+    assert module.COMPONENTS["card"]["attributes"]["key"]["required"] is True
+    assert "{key}" in module.COMPONENTS["picker"]["doc"]
+    assert "moxi-change" in module.COMPONENTS["picker"]["doc"]
+
+
 # -- reads ----------------------------------------------------------------------------------
 
 def test_projects_lists_every_project_by_key_as_the_read_api_does(golden_copy):

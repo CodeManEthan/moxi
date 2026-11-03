@@ -28,6 +28,10 @@ Every root is marked `path`, and every refusal sentence, note and broken reason,
 name a path, `redact`. Only the gateway acts on a mark, and no route here is the
 gateway's.
 
+The page's assets are what the repository's web build writes from `packages/projects/web/`
+into this package's `web/`: `page.js`, the page, and `picker.js`, `card.js` and `add.js`,
+the components other pages may place.
+
 The browser UI shell starts the page server on the first request for projects' page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in projects' announcement, read
@@ -126,6 +130,7 @@ def _target(name: str) -> str:
 
 
 PAGE = lb.Page(
+    assets="web",
     routes=(
         lb.Route("/api/projects", "read", _target("projects"),
                  query={"kind": _MAYBE_NAME}, returns=PROJECTS),
