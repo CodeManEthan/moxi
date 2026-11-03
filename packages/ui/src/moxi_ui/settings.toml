@@ -19,3 +19,15 @@ values = ["system", "light", "dark"]
 default = "system"
 doc = "The pages' colours: system follows the browser's light or dark scheme; light and dark fix one. Each page the shell opens reads it."
 read = "use"
+
+[gateway.enabled]
+type = "bool"
+default = false
+doc = "The gateway: the UI on your phone through the tunnel. The shell starts at login while it is on (on Windows it starts at every logon either way)."
+read = "use"
+
+[gateway.port]
+type = "int"
+default = 8461
+doc = "The loopback port the tunnel forwards the gateway to, on 127.0.0.1 only, where the gateway listens on TCP (always on Windows). A system whose gateway uses a socket in the runtime directory ignores it."
+read = "start"

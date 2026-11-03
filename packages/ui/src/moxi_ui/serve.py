@@ -21,6 +21,10 @@ It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 The shell's own page (`moxi_ui.page`) is served in process at `/m/ui/`, its export
 mounted there in the table like any module's.
 
+It also runs the gateway (`moxi_ui.gateway`), the listener a tunnel forwards a phone to,
+in the same process and on the same loop; the shell's stop closes it, and a shell that
+holds the gateway's endpoint never exits idle.
+
 A shell on inherited sockets exits 0 once it has been idle for `idle_s` (no open request
 or stream and no page server running), when that loses no session: it has an epoch, so
 its sessions are on disk, or it holds none. The socket keeps the port, and the next
@@ -60,6 +64,7 @@ from moxi_loopback.api import (
 from . import cli, config, listen
 from . import page as shell_page
 from .listen import Listeners
+from .gateway import Gateway
 from .proxy import Proxy
 from .push import Push
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
@@ -205,7 +210,11 @@ class Shell:
 
     `idle_s` is the idle exit's wait, None for none. The shell exits idle only on
     inherited listeners and only as `may_exit_idle` allows, so a bound listener never
-    exits idle whatever `idle_s` says. `idled` is True once it has.
+    exits idle whatever `idle_s` says, and never while the gateway holds its endpoint.
+    `idled` is True once it has.
+
+    `gateway` is the shell's `Gateway`, or True to build one; without it (the default,
+    which tests take) the shell runs no gateway.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -214,7 +223,8 @@ class Shell:
                  page: Page | None = None, push: ASGIApp | None = None,
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
                  child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
-                 leave_out: Sequence[str] = (), idle_s: float | None = None):
+                 leave_out: Sequence[str] = (), idle_s: float | None = None,
+                 gateway: Gateway | bool = False):
         self.listeners = listeners
         self.epoch = epoch
         self.idle_s = idle_s
@@ -250,6 +260,9 @@ class Shell:
         self.profile = None
         self._should_exit: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        if gateway is True:
+            gateway = Gateway(self.layout, head_limit=HEAD_LIMIT)
+        self.gateway: Gateway | None = gateway or None
 
     def start(self) -> RuntimeInfo:
         """Write the runtime file and build the request path. Returns the runtime info."""
@@ -266,6 +279,8 @@ class Shell:
         if self.snapshot is not None:
             inner = _needing(self.snapshot, inner)
         self.asgi = self.activity.wrap(worker_layer(inner))
+        if self.gateway is not None:
+            self.gateway.start()
         return self.info
 
     @property
@@ -309,10 +324,16 @@ class Shell:
                   if self.idle_s is not None and self.listeners.inherited else None)
         if self.snapshot is not None:
             self.snapshot.start()
+        gateway = (asyncio.ensure_future(self.gateway.run(self._should_exit))
+                   if self.gateway is not None else None)
         try:
             await serve(self.asgi, self.listeners.sockets, should_exit=self._should_exit,
                         head_limit=HEAD_LIMIT)
         finally:
+            # The shell's stop closes the gateway's listener with it.
+            self._should_exit.set()
+            if gateway is not None:
+                await gateway
             ending.cancel()
             if idling is not None:
                 idling.cancel()
@@ -335,6 +356,8 @@ class Shell:
         if self.idle_s is None or quiet is None or quiet < self.idle_s:
             return False
         if self.starters.children():
+            return False
+        if self.gateway is not None and self.gateway.holding:
             return False
         return may_exit_idle(inherited=self.listeners.inherited, epoch=self.epoch,
                              live_sessions=self.sessions.store.live())
@@ -440,7 +463,7 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
         except Exception as err:  # noqa: BLE001 - a bad setting keeps the shell running
             say(f"moxi ui: {err}; the shell won't exit idle")
     shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True,
-                  idle_s=idle_s)
+                  idle_s=idle_s, gateway=True)
     try:
         shell.start()
         from moxi import aio
