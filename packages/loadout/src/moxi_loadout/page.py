@@ -82,7 +82,9 @@ _PROBLEM = _MAYBE_SAYS
 #: One item for one harness, or a placement no longer wanted: `state` one of `ok`,
 #: `missing`, `stale`, `modified`, `blocked`, `would-commit`, `bad-source` and `off`.
 #: `scope` is `user` or a project section's name, null for a placement whose record
-#: names none; `name` can be a path (an ignore file's row).
+#: names none; `name` can be a path (an ignore file's row). `replaceable` says that
+#: `install --replace` places over what stands in the row's way: an occupant, one git
+#: tracks among them, or a file edited by hand.
 ROW = lb.Out("table", items={
     "scope": _MAYBE_SAYS,
     "kind": _MAYBE,
@@ -91,6 +93,7 @@ ROW = lb.Out("table", items={
     "state": _TEXT,
     "reason": _SAYS,
     "target": _MAYBE_PATH,
+    "replaceable": lb.Out("bool"),
 })
 
 #: How many rows are in each state; a state no row is in is left out.
@@ -157,7 +160,8 @@ GLOBAL = {
 }
 #: `reason` says why there is no list: projects absent, busy or unreadable.
 PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS}
-#: `count` is the items not `ok` or `off`; `note` the line that the page's harness homes
+#: `count` is the items not `ok` or `off`, each once however many of its harnesses
+#: aren't; `note` the line that the page's harness homes
 #: aren't the ones the user's own last run used, when they aren't.
 DRIFT = {"problem": _PROBLEM, "count": lb.Out("int"), "note": _MAYBE_SAYS}
 #: A page job: `state` is `running`, `done` or `interrupted`; `argv` the verb it runs;

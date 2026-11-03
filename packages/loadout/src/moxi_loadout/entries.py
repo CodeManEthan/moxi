@@ -723,16 +723,19 @@ def row(a: Action) -> Row:
     where = a.where
     get = (lambda k: getattr(where, k)) if isinstance(where, Entry) else where.get
     kind, _, name = str(get("item")).partition(":")
+    replaceable = False
     if a.op in ("ok", "end", "stand") or a.done:
         state, code = ("ok", 0)
         if a.op == "stand" and a.reason:
             state, code = "blocked", REFUSED
     else:
         state, code = _PENDING[a.op]
+        replaceable = a.op in ("modified", "blocked")
     reason = a.reason
     if a.entry is None and a.op == "remove" and not a.done:
         reason = reason or "no longer wanted; install removes it"
-    return Row(USER, kind, name, get("harness"), state, reason, get("file"), code)
+    return Row(USER, kind, name, get("harness"), state, reason, get("file"), code,
+               replaceable)
 
 
 def rows(run: Run) -> list[Row]:

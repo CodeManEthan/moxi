@@ -367,6 +367,8 @@ def test_another_value_under_the_key_is_blocked_then_taken_over(lo):
               'harnesses = ["opencode"]\n')
     out = install.install()
     assert out.code == 3 and states(out)[("mcp", "docs", "opencode")] == "blocked"
+    [row] = [r for r in install.status().rows if (r.kind, r.harness) == ("mcp", "opencode")]
+    assert row.replaceable and row.as_json()["replaceable"] is True
     out = install.install(replace=["mcp:docs@opencode"])
     assert out.code == 0
     assert read(path)["mcp"]["docs"]["url"] == "https://example.invalid/m"

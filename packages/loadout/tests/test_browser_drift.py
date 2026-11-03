@@ -114,11 +114,14 @@ def test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs(folder, u
         '[user]\nskills = ["tidy-notes", "review-diff", "fresh-skill"]\n', encoding="utf-8")
     rows = not_ok(ui_shell)
     assert rows and {row["state"] for row in rows} == {"missing"}, rows
+    # Three skills, each missing for every harness: the block counts each item once.
+    items = {(row["scope"], row["kind"], row["name"]) for row in rows}
+    assert len(items) == 3 and len(rows) > len(items), rows
     ui_page.goto("/m/ui/")
     block = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift")
     drift = block.locator(".drift")
-    expect(drift).to_have_attribute("data-count", str(len(rows)))
-    expect(block.locator('[data-line="count"]')).to_have_text(count_line(len(rows)))
+    expect(drift).to_have_attribute("data-count", "3")
+    expect(block.locator('[data-line="count"]')).to_have_text(count_line(3))
     # No terminal run has recorded the harness homes yet, so the block says so, and the
     # line is never counted.
     expect(block.locator('[data-line="note"]')).to_contain_text(

@@ -126,7 +126,9 @@ class Want:
 @dataclass(frozen=True)
 class Row:
     """One line of the run's report: an item for one harness, or a placement no longer
-    wanted (`kind` and `name` from its record, when it has one)."""
+    wanted (`kind` and `name` from its record, when it has one). `replaceable` says that
+    `install --replace` places over what stands in its way: an occupant (one git tracks
+    among them) or a file edited by hand."""
 
     scope: str | None
     kind: str
@@ -136,6 +138,7 @@ class Row:
     reason: str = ""
     target: str | None = None
     code: int = 0
+    replaceable: bool = False
 
     def line(self) -> str:
         where = "" if self.scope in (None, USER) else f" in project {self.scope}"
@@ -145,7 +148,7 @@ class Row:
     def as_json(self) -> dict:
         return {"scope": self.scope, "kind": self.kind, "name": self.name,
                 "harness": self.harness, "state": self.state, "reason": self.reason,
-                "target": self.target}
+                "target": self.target, "replaceable": self.replaceable}
 
 
 @dataclass
@@ -569,6 +572,19 @@ def places(want: Want, *, forced: bool = False) -> bool:
     return forced and step.action == "refuse" and step.cause in ("occupant", "tracked")
 
 
+def replaceable(want: Want) -> bool:
+    """Whether `install --replace` places over what stands at `want`'s target as the plan
+    reads it: an occupant in the way, one git tracks among them, or a generated file edited
+    by hand. A target git would commit for want of an ignore rule is no such case."""
+    step = want.step
+    if step is None or want.state is not None or want.adoptable or want.commit is not None \
+            or want.kind == GLOBAL_KIND:
+        return False
+    if want.generated is not None and want.generated[2] == "modified":
+        return True
+    return step.action == "refuse" and step.cause in ("occupant", "tracked")
+
+
 def target_of(want: Want) -> str | None:
     return None if want.step is None or want.step.target is None else str(want.step.target)
 
@@ -577,7 +593,8 @@ def row(want: Want, state: str | None = None, reason: str | None = None,
         code: int | None = None) -> Row:
     s, r, c = state_of(want)
     return Row(want.scope, want.kind, want.name, want.harness, state or s,
-               r if reason is None else reason, target_of(want), c if code is None else code)
+               r if reason is None else reason, target_of(want), c if code is None else code,
+               state is None and replaceable(want))
 
 
 def removal_row(plan: Plan, step) -> Row:
@@ -615,4 +632,4 @@ def exit_code(codes: Iterable[int]) -> int:
 
 __all__ = ["OWNER", "STATES", "FINE", "Resolution", "resolve_key", "Want", "Row", "Plan",
            "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "exit_code",
-           "places", "target_of"]
+           "places", "replaceable", "target_of"]

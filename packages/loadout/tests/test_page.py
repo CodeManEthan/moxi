@@ -271,13 +271,17 @@ def test_global_answers_what_global_show_json_prints_and_whether_the_mode_is_cho
 
 def test_drift_counts_the_items_not_ok_and_notes_other_homes_without_counting_them(
         lo, monkeypatch, tmp_path):
-    assert read("/api/drift")["count"] == 2      # review for claude and for codex, missing
+    # review is missing for claude and for codex: one item, however many harnesses.
+    assert read("/api/status")["counts"] == {"missing": 2}
+    assert read("/api/drift")["count"] == 1
     assert install.install().code == 0
     assert read("/api/drift") == {"problem": None, "count": 0, "note": None}
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "elsewhere"))
     body = read("/api/drift")
     assert "Codex" in body["note"] and "CODEX_HOME" in body["note"]
-    assert body["count"] == read("/api/status")["counts"].get("missing", 0)
+    assert body["count"] == len({(r["scope"], r["kind"], r["name"])
+                                 for r in read("/api/status")["rows"]
+                                 if r["state"] not in ("ok", "off")})
     # The page's reads word the note for the page, as a job's refusal is worded.
     assert body["note"].endswith("then run moxi ui stop, or run the command in a terminal")
     assert body["note"] in read("/api/status")["notes"]

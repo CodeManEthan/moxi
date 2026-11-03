@@ -145,6 +145,8 @@ def test_the_missing_cli_note_names_the_lasting_path_fix(lo, monkeypatch):
     kit.manifest(lo, '[user]\nmcp = ["docs"]\n[mcp.docs]\ncommand = "uvx"\n')
     [row] = [r for r in install.status().rows if (r.kind, r.harness) == ("mcp", "codex")]
     assert row.state == "blocked"
+    # --replace doesn't bring codex back, so the page offers no Replace for it.
+    assert not row.replaceable
     assert "no codex on PATH" in row.reason and "put codex's folder on PATH" in row.reason
     assert "the browser page does the same" in row.reason and "moxi ui stop" in row.reason
     with homes.as_page():
