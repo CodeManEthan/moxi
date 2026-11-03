@@ -330,6 +330,13 @@ def test_off_clears_the_switch_and_asks_about_the_entry(env, monkeypatch):
     verbs.cmd_off(_ns(), said.append)
     assert world.asked == [] and said[-1].endswith("To remove it: moxi tunnel remove ui/gateway")
     assert verbs.OFF_PERSIST in said[-1]
+    world = World(monkeypatch, env, address=REFUSED)
+    monkeypatch.setattr("moxi_ui.gateway.listener.read_tunnel",
+                        lambda: SimpleNamespace(address=REFUSED, reason="applied.json is newer"))
+    assert verbs.cmd_off(_ns(), said.append) == 0
+    assert world.asked == [] and "applied.json is newer" in said[-1]
+    assert "moxi doctor tunnel" in said[-1]
+    assert said[-1].endswith("To remove it: moxi tunnel remove ui/gateway")
 
 
 # --- the doctor's rows --------------------------------------------------------------------------

@@ -253,8 +253,13 @@ def cmd_off(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 
     _set_switch(False)
     say("the gateway is off; every phone session ends within 2 s")
-    address = read_tunnel().address
-    if address is None or address == REFUSED:
+    read = read_tunnel()
+    address = read.address
+    if address == REFUSED:
+        say(f"the tunnel's record can't be read ({read.reason}), so a ui/gateway entry may "
+            "remain; see `moxi doctor tunnel`. To remove it: moxi tunnel remove ui/gateway")
+        return 0
+    if address is None:
         return 0
     question = OFF_QUESTION
     if endpoint.resolve_kind(endpoint.system()) == "tcp" and getattr(address, "form",
