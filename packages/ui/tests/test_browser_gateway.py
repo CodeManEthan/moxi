@@ -45,9 +45,10 @@ WORKER = """async () => {
   return null;
 }"""
 #: Waits until the gateway's worker answers this page: only it answers `/offline` with the
-#: page made from its own bytes, whose root says the case it saw.
+#: page made from its own bytes, whose root says the case it saw. It waits on the update
+#: check, the install and the claim, so it allows more than the other polls.
 OWN_OFFLINE = """async () => {
-  const until = Date.now() + 15000;
+  const until = Date.now() + 30000;
   while (Date.now() < until) {
     try {
       if ((await (await fetch("/offline")).text()).includes("data-reach=")) return true;
