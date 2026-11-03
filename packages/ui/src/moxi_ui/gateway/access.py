@@ -35,7 +35,9 @@ The credential each request needs, after the provider check, by its one entry:
 
     the worker entry          nothing while `Service-Worker: script` is present
     a navigation              nothing; the router answers with the shell document or the
-                              303 to `/signin`
+                              303 to `/signin`. The gateway's worker sends a navigation on
+                              as a plain GET past the browser's cache, marked with
+                              `X-Moxi-Navigation: 1`, and it counts as one
     the open entries          nothing
     an asset, no entry        the cookie
     routes, acts, the push,   the cookie and the key
@@ -62,14 +64,16 @@ from typing import Any
 from moxi_loopback.api import Entry, RequestView, Table, response_headers
 
 from .. import session as _session
+from ..router import NAVIGATION
 from ..session import SessionStore, Static, admitted, cookie_ids, key_of
 from . import pairing, passkeys
 from .address import Kept
 from .devices import Device, Devices, Full
 from .listener import Parts
 
-__all__ = ["COOKIE", "DURABLE", "EVENTS", "IDLE", "LIMIT", "MAX_AGE", "OPEN_PATHS", "PAGES",
-           "PER_DEVICE", "REFUSALS", "Access", "origin", "session_hash", "signin_redirect"]
+__all__ = ["COOKIE", "DURABLE", "EVENTS", "IDLE", "LIMIT", "MAX_AGE", "NAVIGATION_HEADER",
+           "OPEN_PATHS", "PAGES", "PER_DEVICE", "REFUSALS", "Access", "is_navigation", "origin",
+           "session_hash", "signin_redirect"]
 
 _log = logging.getLogger("moxi.ui.gateway")
 
@@ -97,8 +101,14 @@ SIGNOUT = "/api/signout"
 #: the PWA's own files, which the phone loads before it can sign in.
 OPEN_PATHS = frozenset({
     PAIR_PAGE, SIGNIN_PAGE, PAIR_SCRIPT, SIGNIN_SCRIPT, PAIR_BEGIN, PAIR_FINISH,
-    SIGNIN_BEGIN, SIGNIN_FINISH, "/manifest.webmanifest", "/sw.js", "/offline",
+    SIGNIN_BEGIN, SIGNIN_FINISH, "/manifest.webmanifest", "/sw.js", "/offline", "/offline.js",
 })
+
+#: The header the gateway's worker adds to a navigation it sends on. A browser sends a
+#: worker's fetch as a plain same-origin GET, whatever it was, and the worker must fetch
+#: past the HTTP cache, so the header is how the navigation still reads as one.
+NAVIGATION_HEADER = b"x-moxi-navigation"
+
 
 #: The pages and scripts this layer sends, by path: the file in the ui's built web
 #: directory, and its content type.
@@ -135,6 +145,28 @@ def session_hash(id_hash: str) -> str:
 def origin(kept: Kept) -> str:
     """The gateway's origin for an address: `https://<host>`, with `:<port>` unless 443."""
     return f"https://{kept.host}" if kept.port == 443 else f"https://{kept.host}:{kept.port}"
+
+
+def is_navigation(method: str, headers: Iterable[tuple[bytes, bytes]]) -> bool:
+    """Whether the request loads a document: a browser's navigation, or a GET the gateway's
+    worker sent on for one, marked `X-Moxi-Navigation: 1`. Either gets only the shell
+    document or the 303 to `/signin`."""
+    headers = list(headers)
+    if _session.is_navigation(method, headers):
+        return True
+    marks = [value for name, value in headers if name.lower() == NAVIGATION_HEADER]
+    return method == "GET" and marks == [b"1"]
+
+
+def _fallback(base: Callable[[RequestView], Entry | None] | None
+              ) -> Callable[[RequestView], Entry | None]:
+    """`base`, the navigation fallback, also giving the navigation entry to a navigation
+    the worker sent on."""
+    def fallback(view: RequestView) -> Entry | None:
+        if is_navigation(view.method, view.headers):
+            return NAVIGATION
+        return base(view) if base is not None else None
+    return fallback
 
 
 def web_file(name: str) -> bytes | None:
@@ -279,7 +311,7 @@ class Access:
         def tables(mount: Any) -> Table:
             return self.add_entries(table(mount))
 
-        return Parts(table=tables, session=self, fallback=base.fallback,
+        return Parts(table=tables, session=self, fallback=_fallback(base.fallback),
                      router=self.layer(base.router), end_sessions=self.end_sessions,
                      stale=self.stale, audit=self.audit, tick=self.tick)
 
@@ -322,7 +354,7 @@ class Access:
         headers = view.headers
         if entry is not None and entry.raw_path == _session.WORKER_PATH:
             return entry.method == "GET" and _session.is_worker_request(headers)
-        if _session.is_navigation(view.method, headers):
+        if is_navigation(view.method, headers):
             return True
         if entry is not None and entry.raw_path in self.open_paths:
             return True

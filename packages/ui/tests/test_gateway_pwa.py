@@ -1,0 +1,121 @@
+"""The PWA as the gateway serves it: the worker at `/sw.js` and as the answer to every
+worker script request, the manifest, the icons, the offline page and its script, each with
+the gateway's policy; and a navigation the worker sends on, which still gets the shell
+document or the way to sign in."""
+
+from __future__ import annotations
+
+import json
+import re
+import struct
+from pathlib import Path
+
+from test_gateway_redact import Gate, gateway_policy
+
+from moxi_ui import document as _document
+from moxi_ui.gateway.access import OPEN_PATHS, web_file
+from moxi_ui.gateway.router import ICONS, PWA_FILES
+
+_TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
+_SCRIPT = re.compile(rb"<script\b([^>]*)>(.*?)</script>", re.S)
+_FORWARDED = (("x-moxi-navigation", "1"), ("sec-fetch-mode", "same-origin"),
+              ("sec-fetch-dest", "empty"), ("cache-control", "no-cache"))
+
+
+def _gate(tmp_path: Path, *, paired: bool = False) -> Gate:
+    gate = Gate(tmp_path)
+    gate.router.files = web_file
+    return gate.paired() if paired else gate
+
+
+def _png_size(data: bytes) -> tuple[int, int]:
+    assert data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR"
+    return struct.unpack(">II", data[16:24])
+
+
+def test_every_pwa_file_ships_in_the_ui_web_files_and_is_open() -> None:
+    for path, (name, _kind) in PWA_FILES.items():
+        assert web_file(name), path
+        assert path in OPEN_PATHS | ICONS, path
+
+
+def test_the_manifest_starts_the_shell_with_the_themes_colour_and_two_maskable_icons() -> None:
+    manifest = json.loads(web_file("manifest.json"))
+    background = json.loads(_TOKENS.read_text())["bg"]["$value"]
+    assert manifest["name"] == "Moxi"
+    assert (manifest["start_url"], manifest["scope"], manifest["display"]) == (
+        "/m/ui/", "/", "standalone")
+    assert manifest["background_color"] == manifest["theme_color"] == background
+    sizes = []
+    for icon in manifest["icons"]:
+        assert icon["type"] == "image/png" and "maskable" in icon["purpose"].split()
+        assert icon["src"] in ICONS and icon["src"] in PWA_FILES
+        width, height = _png_size(web_file(PWA_FILES[icon["src"]][0]))
+        assert icon["sizes"] == f"{width}x{height}"
+        sizes.append(width)
+    assert sorted(sizes) == [192, 512]
+
+
+def test_the_offline_page_loads_only_its_own_script_and_holds_no_inline_script_or_style() -> None:
+    body = web_file("offline.html")
+    scripts = _SCRIPT.findall(body)
+    assert len(scripts) == 1
+    attrs, inline = scripts[0]
+    assert b'src="/offline.js"' in attrs and inline.strip() == b""
+    assert not re.search(rb"<style|\sstyle=|\son[a-z]+=", body, re.I)
+
+
+def test_before_sign_in_each_pwa_file_is_sent_as_shipped_with_the_gateway_policy(
+        tmp_path: Path) -> None:
+    gate = _gate(tmp_path)
+    for path, (name, kind) in PWA_FILES.items():
+        answer = gate.get(path)
+        assert answer.status == 200, path
+        assert answer.body == web_file(name), path
+        assert answer.header("content-type") == [kind], path
+        assert answer.header("cache-control") == ["no-store"], path
+        assert gateway_policy(answer), path
+
+
+def test_every_worker_script_request_gets_sw_js_whatever_its_url(tmp_path: Path) -> None:
+    for paired in (False, True):
+        gate = _gate(tmp_path / str(paired), paired=paired)
+        for path in ("/sw.js", "/planted/worker.js", "/m/ui/client.js", "/m/fixture/x.js?v=2"):
+            answer = gate.get(path, headers=(("service-worker", "script"),))
+            assert answer.status == 200, path
+            assert answer.body == web_file("sw.js"), path
+            assert answer.header("service-worker-allowed") == ["/"], path
+            assert answer.header("cache-control") == ["no-store"], path
+            assert answer.header("content-type") == ["text/javascript; charset=utf-8"], path
+            assert gateway_policy(answer), path
+
+
+def test_a_navigation_the_worker_sent_on_gets_the_document_or_the_way_to_sign_in(
+        tmp_path: Path) -> None:
+    gate = _gate(tmp_path, paired=True)
+    for path in ("/", "/m/ui/", "/m/fixture/rows?x=1"):
+        answer = gate.get(path, headers=_FORWARDED)
+        assert answer.status == 200, path
+        assert b'data-gateway="on"' in answer.body, path
+        assert b'<link rel="manifest" href="/manifest.webmanifest">' in answer.body, path
+        assert gateway_policy(answer), path
+    assert gate.get("/m/ui/", headers=_FORWARDED, cookie=False).status == 303
+    signed_out = _gate(tmp_path / "out")
+    answer = signed_out.get("/m/ui/", headers=_FORWARDED)
+    assert answer.status == 303 and answer.header("location")[0].startswith("/signin?n=")
+
+
+def test_only_one_mark_of_1_on_a_get_makes_a_navigation(tmp_path: Path) -> None:
+    gate = _gate(tmp_path, paired=True)
+    plain = _FORWARDED[1:]
+    assert gate.get("/m/ui/", headers=plain).status == 404
+    assert gate.get("/m/ui/", headers=(("x-moxi-navigation", "yes"), *plain)).status == 404
+    assert gate.get("/m/ui/", headers=(*_FORWARDED, ("x-moxi-navigation", "1"))).status == 404
+    posted = gate.phone.request("POST", "/m/ui/", {}, headers=_FORWARDED)
+    assert posted.status in (403, 404)
+    assert b"data-gateway" not in posted.body
+
+
+def test_the_desktops_document_neither_links_the_manifest_nor_marks_the_gateway() -> None:
+    body = _document.body("system")
+    assert b"manifest" not in body and b"data-gateway" not in body

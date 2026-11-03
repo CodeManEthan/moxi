@@ -10,9 +10,10 @@
 
   1. the worker path: the gateway's worker, `/sw.js`'s bytes, whatever URL the update check
      asked for;
-  2. a navigation: the gateway's shell document with a valid session, else the 303 to
-     `/signin`;
-  3. the PWA's files (`/manifest.webmanifest`, `/sw.js`, `/offline`, the icons);
+  2. a navigation, the browser's or one the gateway's worker sent on: the gateway's shell
+     document with a valid session, else the 303 to `/signin`;
+  3. the PWA's files (`/manifest.webmanifest`, `/sw.js`, `/offline` and its script, the
+     icons);
   4. the act paths (`/gw/act/...`), present in the table only while the acts mount;
   5. the push channel, in its gateway form;
   6. `/m/ui/<file>`: the shell's own files; `/m/ui/<route>`: the shell's own page, in
@@ -37,7 +38,6 @@ from moxi_loopback.api import RequestView, Table, check, response_headers
 
 from .. import config
 from .. import document as _document
-from .. import session as _session
 from ..proxy import Client, Proxy, UpstreamError, downstream
 from ..router import Router, forwarded
 from ..session import PUSH_PATH, WORKER_PATH, Static, admitted
@@ -60,6 +60,7 @@ PWA_FILES = {
     "/manifest.webmanifest": ("manifest.json", "application/manifest+json"),
     "/sw.js": ("sw.js", "text/javascript; charset=utf-8"),
     "/offline": ("offline.html", "text/html; charset=utf-8"),
+    "/offline.js": ("offline.js", "text/javascript; charset=utf-8"),
     "/icon-192.png": ("icon-192.png", "image/png"),
     "/icon-512.png": ("icon-512.png", "image/png"),
 }
@@ -282,7 +283,7 @@ class GatewayRouter:
         if raw == WORKER_PATH:
             await _send(send, self._file(PWA_FILES["/sw.js"], extra=[("Service-Worker-Allowed", "/")]))
             return
-        if _session.is_navigation(method, headers):
+        if _access.is_navigation(method, headers):
             if self.phone.signed_in(headers) is not None:
                 await _send(send, document(self.mount()))
             else:
