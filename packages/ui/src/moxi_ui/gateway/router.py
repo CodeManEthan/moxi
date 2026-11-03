@@ -235,6 +235,22 @@ def document(mount: Mount, mode: str | None = None) -> Static:
 # --- the router ---------------------------------------------------------------------------
 
 
+class _Proxy(Proxy):
+    """The shell's proxy for a module's files on the gateway: a module's answer passes as
+    its server sent it, and the proxy's own answers carry the gateway's policy, an error's
+    `log` sent as a handle."""
+
+    def __init__(self, starters: Any, *, table: Callable[[], Table], key: Callable[[], bytes]):
+        super().__init__(starters, table=table)
+        self.key = key
+
+    def refused(self, status: int) -> Static:
+        return _empty(status)
+
+    def failed(self, err: UpstreamError) -> Static:
+        return _json(err.status, redact(err.body, ERROR_SHAPE, self.key()))
+
+
 class GatewayRouter:
     """The gateway's router, behind the check.
 
@@ -253,7 +269,7 @@ class GatewayRouter:
         self.phone, self.mounts, self.table, self.mount = phone, mounts, table, mount
         self.page, self.push, self.acts, self.key, self.files = page, push, acts, key, files
         self.client = Client(starters)
-        self.proxy = Proxy(starters, table=table)
+        self.proxy = _Proxy(starters, table=table, key=key)
         self._holder = Router(phone)
         self._push = push.gateway_app(key) if hasattr(push, "gateway_app") else None
 

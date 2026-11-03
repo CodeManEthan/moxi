@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from moxi_loopback.api import Field, Out, Page, Route, export, gateway, guard
 
 from gateway_kit import HOST, Authenticator, Phone
@@ -191,6 +192,27 @@ def test_the_proxys_502_answers_with_its_log_as_a_handle(tmp_path: Path) -> None
     assert answer.status == 502 and gateway_policy(answer)
     assert answer.json() == {"error": "start", "module": "fixture", "exit": 1,
                              "log": handle(LOG, KEY)}
+
+
+def test_a_module_files_proxy_502_is_redacted_and_carries_the_gateway_policy(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(MOUNTS, "fixture", {**MOUNTS["fixture"], "assets": ["app.js"]})
+    gate = Gate(tmp_path).paired()
+    failing = Reads()
+    failing.answers["/app.js"] = UpstreamError(
+        502, {"error": "start", "module": "fixture", "exit": 1, "log": LOG})
+    gate.router.proxy.client = failing
+    answer = gate.get("/m/fixture/app.js")
+    assert answer.status == 502 and gateway_policy(answer)
+    assert answer.json() == {"error": "start", "module": "fixture", "exit": 1,
+                             "log": handle(LOG, KEY)}
+    assert LOG.encode() not in answer.body
+    # The module's own file still passes with the headers its server set.
+    failing.answers["/app.js"] = (200, [(b"content-type", b"text/javascript"),
+                                        (b"content-security-policy", FIXTURE_POLICY)], b"//")
+    served = gate.get("/m/fixture/app.js")
+    assert served.status == 200 and served.body == b"//"
+    assert served.header("content-security-policy") == [FIXTURE_POLICY.decode()]
 
 
 def test_the_shells_own_read_is_redacted_and_its_desk_routes_are_unreached(
