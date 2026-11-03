@@ -140,10 +140,13 @@ class Acts:
         try:
             if not self.mounted():
                 raise Refused(_empty(404), "route")
-            if method == "POST" and raw == PREPARE:
-                return await self.prepare(await _read(receive, _PREPARE_CAP)), None
-            if method == "POST" and raw == COMMIT:
-                return await self.commit(await _read(receive, _COMMIT_CAP)), None
+            if method == "POST" and raw in (PREPARE, COMMIT):
+                body = await _read(receive, _PREPARE_CAP if raw == PREPARE else _COMMIT_CAP)
+                # The acts may have come down while the body arrived: nothing passes then.
+                if not self.mounted():
+                    raise Refused(_empty(404), "route")
+                handler = self.prepare if raw == PREPARE else self.commit
+                return await handler(body), None
             if method == "GET" and raw == STATE:
                 return await self.state(scope.get("query_string") or b""), None
             raise Refused(_empty(404), "route")

@@ -406,6 +406,28 @@ def test_an_act_unmounted_between_prepare_and_commit_is_a_404_and_stays_unspent(
     run(body)
 
 
+@pytest.mark.parametrize("path", ["/gw/act/prepare", "/gw/act/commit"])
+def test_acts_unmounted_while_the_body_arrives_send_nothing(tmp_path: Path, path: str) -> None:
+    async def body():
+        store = Store(tmp_path)
+        act = await store.prepare()
+        rows = store.rows()
+        data = json.dumps(GOOD if path.endswith("prepare") else {"act": act}).encode()
+
+        async def receive():
+            store.on = False  # the mount ends while the body is on its way
+            return {"type": "http.request", "body": data}
+
+        admitted.set("s1")
+        scope = {"type": "http", "method": "POST", "raw_path": path.encode(),
+                 "query_string": b""}
+        (status, _headers, _raw), code = await store.acts(scope, receive)
+        assert (status, code) == (404, "route")
+        assert store.client.sent == [] and store.rows() == rows
+
+    run(body)
+
+
 READER = """
 import json, pathlib, sys
 rows = []
