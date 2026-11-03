@@ -6,11 +6,14 @@ Tunnel drives the `tailscale` CLI through `moxi.proc.run`, each call with a 30 s
 and the first line of `tailscale version`.
 
     apply   tailscale serve  --bg --yes --https=<port> http://127.0.0.1:<target>
+            tailscale serve  --bg --yes --https=<port> unix:<path>
             tailscale funnel --bg --yes --https=<port> http://127.0.0.1:<target>
     remove  tailscale serve  --https=<port> off
             tailscale funnel --https=<port> off
 
-`--bg` makes the config persist across reboots. Tunnel changes only config it applied, or
+A `unix` entry forwards Serve to a Unix socket, which the CLI offers on Linux, macOS and BSD;
+Funnel takes only the `http://127.0.0.1` form. `--bg` makes the config persist across
+reboots. Tunnel changes only config it applied, or
 foreign config the user named with a confirmed `--replace`, and never runs `serve reset`,
 which clears every entry.
 
@@ -19,7 +22,8 @@ and every host read from Tailscale is put in that form before it is compared.
 
 A live entry matches a record entry when, in `serve status --json`, `TCP["<port>"]` has
 `HTTPS: true`; `Web["<host>:<port>"].Handlers` has exactly one key, `/`, whose handler has
-exactly one field, `Proxy`, equal to `http://127.0.0.1:<target>`; and
+exactly one field, `Proxy`, equal to the entry's upstream (`http://127.0.0.1:<target>`,
+or `unix:<path>` for a `unix` entry); and
 `AllowFunnel["<host>:<port>"]` is true exactly when the reach is `public`. An entry matches
 only when its whole handler set is Moxi's: a mount added beside it outside Moxi would be
 served (for a Funnel, published) under Moxi's entry, so the entry reads `changed`.
@@ -58,8 +62,14 @@ _UNSET = object()
 
 
 def upstream(target: int) -> str:
-    """The one upstream form: `http://127.0.0.1:<target>`."""
+    """The loopback upstream form: `http://127.0.0.1:<target>`."""
     return f"http://127.0.0.1:{target}"
+
+
+def proxy(target: int | str) -> str:
+    """What the provider forwards to for a record target: `http://127.0.0.1:<port>` for a
+    port, `unix:<path>` for a socket path."""
+    return f"unix:{target}" if isinstance(target, str) else upstream(target)
 
 
 def verb(reach: str) -> str:
@@ -111,24 +121,24 @@ def tcp_ports(serve: Mapping) -> list[int]:
     return sorted(int(p) for p in _section(serve, "TCP") if str(p).isdigit())
 
 
-def handler_ok(web: object, target: int | Iterable[int]) -> bool:
+def handler_ok(web: object, target: int | str | Iterable[int | str]) -> bool:
     """True when `web` (one `Web` value) has exactly Moxi's handler set: `/` alone, with
-    `Proxy` alone, to one of `target`."""
-    targets = {target} if isinstance(target, int) else set(target)
+    `Proxy` alone, to one of `target` (ports or socket paths)."""
+    targets = {target} if isinstance(target, (int, str)) else set(target)
     handlers = web.get("Handlers") if isinstance(web, dict) else None
     if not isinstance(handlers, dict) or list(handlers) != ["/"]:
         return False
     one = handlers["/"]
     return (isinstance(one, dict) and list(one) == ["Proxy"]
-            and one["Proxy"] in {upstream(t) for t in targets})
+            and one["Proxy"] in {proxy(t) for t in targets})
 
 
-def matches(serve: Mapping, entry: Entry, *, target: int | None = None,
+def matches(serve: Mapping, entry: Entry, *, target: int | str | None = None,
             host: str | None = None) -> bool:
     """True when the live config holds exactly `entry` (with `target` and `host` in place
     of the entry's own, when given). An entry of a form this version doesn't know never
     matches."""
-    if entry.form != "http":
+    if not entry.known:
         return False
     key = f"{normal_host(host or entry.host)}:{entry.port}"
     tcp = _section(serve, "TCP").get(str(entry.port))
@@ -142,7 +152,7 @@ def matches(serve: Mapping, entry: Entry, *, target: int | None = None,
 
 
 def only_ours(serve: Mapping, entry: Entry, *, hosts: Iterable[str],
-              targets: Iterable[int]) -> bool:
+              targets: Iterable[int | str]) -> bool:
     """True when `entry`'s port holds nothing, or only Moxi's own config for it: under
     `hosts`, with its handler to one of `targets`, Funnel on exactly when it is public.
     An apply over anything else would take config Moxi has no copy of."""
@@ -475,9 +485,13 @@ class Tailscale:
 
     def apply(self, entry: Entry) -> None:
         """Put `entry` live on this machine's host: Serve or Funnel on its port, proxying
-        to its loopback port."""
+        to its loopback port, or Serve to its socket. Refuses (exit 3) a Funnel to a
+        socket."""
+        if entry.reach == "public" and isinstance(entry.target, str):
+            raise Refused("Funnel forwards only to http://127.0.0.1:<port>, not to a "
+                          "Unix socket", "declare the target own-devices")
         self._change(verb(entry.reach), "--bg", "--yes", f"--https={entry.port}",
-                     upstream(entry.target))
+                     proxy(entry.target))
 
     def remove(self, entry: Entry) -> None:
         """Take `entry` out of the live config, only when the live config matches it.
@@ -515,6 +529,7 @@ def _text(data: object) -> str:
     return data or ""
 
 
-__all__ = ["TIMEOUT", "FUNNEL_PORTS_CAP", "PLATFORM_PATHS", "Tailscale", "upstream", "verb",
+__all__ = ["TIMEOUT", "FUNNEL_PORTS_CAP", "PLATFORM_PATHS", "Tailscale", "upstream", "proxy",
+           "verb",
            "parts", "tcp_ports", "handler_ok", "matches", "only_ours", "describe", "copy_of",
            "live_state", "find_binary", "version_tuple"]

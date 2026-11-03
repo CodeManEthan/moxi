@@ -36,8 +36,12 @@ def test_the_exact_file(tmp_path):
             "ingress:\n"
             '  - hostname: "a.example.com"\n'
             '    service: "http://127.0.0.1:8461"\n'
+            "    originRequest:\n"
+            '      httpHostHeader: "a.example.com"\n'
             '  - hostname: "b.example.com"\n'
             '    service: "http://127.0.0.1:9000"\n'
+            "    originRequest:\n"
+            '      httpHostHeader: "b.example.com"\n'
             '  - service: "http_status:404"\n')
     assert text == f"# moxi-tunnel sha256:{hashlib.sha256(rest.encode()).hexdigest()}\n{rest}"
     assert text.rstrip().splitlines()[-1] == '  - service: "http_status:404"'
