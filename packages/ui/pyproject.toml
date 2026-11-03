@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1.1,<0.2", "moxi-loopback>=0.1,<0.2", "psutil>=5.9", "h11>=0.16,<1"]
+dependencies = ["moxi>=0.1.2,<0.2", "moxi-loopback>=0.1,<0.2", "psutil>=5.9", "h11>=0.16,<1"]
 
 # Only the core declares the `moxi` script; this is the shell's own entry point, the
 # command its unit runs.
@@ -14,9 +14,18 @@ dependencies = ["moxi>=0.1.1,<0.2", "moxi-loopback>=0.1,<0.2", "psutil>=5.9", "h
 moxi-ui-serve = "moxi_ui.serve:main"
 
 # The browser half of `moxi_ui.testing`, the pytest plugin a module's own tests use; the
-# plugin loads without it, and only its fixtures need it.
+# plugin loads without it, and only its fixtures need it; `cryptography` makes the phone
+# bridge's certificates. On Windows a gateway-mode test shell keeps its files out of the
+# real profile through platformdirs' `WIN_PD_OVERRIDE_*` variables, which older releases
+# don't read.
 [project.optional-dependencies]
-testing = ["pytest>=8", "playwright>=1.56,<2"]
+testing = ["pytest>=8", "playwright>=1.56,<2", "cryptography>=46",
+           "platformdirs>=4.11.3; sys_platform == 'win32'"]
+# The gateway, the UI on a phone: passkeys need `webauthn`, which a shell user without a
+# phone shouldn't install.
+gateway = ["webauthn>=2.5,<3"]
+# The tunnel gives the gateway its address; 0.2 is the first that offers interface 2.
+tunnel = ["moxi-tunnel>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -27,13 +36,21 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 ui = "moxi_ui.module"
 
+# The gateway's tunnel target, in the group only a tunnel that asks `upstream()` reads.
+[project.entry-points."moxi.tunnel.targets"]
+"ui.gateway" = "moxi_ui.tunnel:GATEWAY"
+
+# Told when a tunnel address changes: marks devices stale, keeps the copy of retired origins.
+[project.entry-points."moxi.tunnel.changes"]
+ui = "moxi_ui.tunnel:on_change"
+
 # `moxi_ui.testing`, loaded in every pytest run where moxi-ui is installed; loading it
 # imports only the standard library and pytest.
 [project.entry-points.pytest11]
 moxi_ui = "moxi_ui.testing"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev", "moxi-ui[testing]"]
+dev = ["pytest", "moxi-dev", "moxi-ui[testing,gateway]", "cryptography>=46"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

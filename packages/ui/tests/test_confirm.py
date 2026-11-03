@@ -80,7 +80,7 @@ def test_the_modules_value_lists_each_modules_confirmed_acts():
 def test_the_shell_lists_the_fixtures_confirmed_act(ui_shell):
     status, view = ui_shell.session().get("/m/ui/api/modules")
     rows = {row["name"]: row for row in view["modules"]}
-    assert status == 200 and rows["fixture"]["confirmed"] == ["/api/confirm"]
+    assert status == 200 and rows["fixture"]["confirmed"] == ["/api/confirm", "/api/phone-act"]
     assert rows["ui"]["confirmed"] == []
 
 

@@ -2,9 +2,15 @@
 //
 // - theme.css, from tokens.json: every token as `--moxi-<name>` on `:root`, each colour
 //   written once as `light-dark(<light>, <dark>)`;
+// - manifest.json, the gateway's web app manifest, which it serves at
+//   /manifest.webmanifest, its colours tokens.json's;
 // - tools/web/client.d.ts, the types of /m/ui/client.js, from src/client.ts by tsc's
-//   declaration output. Every page's tsc resolves the client's URL to that file.
+//   declaration output. Every page's tsc resolves the client's URL to that file;
+// - offline.js, the offline page's script, and sw.js, the gateway's worker, with the
+//   offline page and that script built into it as OFFLINE_HTML and OFFLINE_JS: the worker
+//   answers both from its own bytes, so it keeps no copy a page could write.
 
+import * as esbuild from "esbuild";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
@@ -65,6 +71,30 @@ export function themeCss(tokens) {
   return lines.join("\n");
 }
 
+/** The icon sizes, each a PNG under web/ that the build copies: icon-<size>.png. */
+export const ICON_SIZES = [192, 512];
+
+/** manifest.json's text: the installed app's name, where it starts, its colours (the
+ * light theme's background) and its icons. Each icon fills its square and keeps its mark
+ * in the middle, so the phone may crop it to any shape. */
+export function manifest(tokens) {
+  const background = tokens.bg?.$value;
+  if (!COLOR.test(background ?? "")) throw new Error("tokens.json: bg is the manifest's colour and must be #rrggbb");
+  const value = {
+    name: "Moxi",
+    short_name: "Moxi",
+    start_url: "/m/ui/",
+    scope: "/",
+    display: "standalone",
+    background_color: background,
+    theme_color: background,
+    icons: ICON_SIZES.map((size) => ({
+      src: `/icon-${size}.png`, sizes: `${size}x${size}`, type: "image/png", purpose: "any maskable",
+    })),
+  };
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 const HEADER = `// The types of the UI module's shared script, /m/ui/client.js, which every page imports
 // by that absolute URL and every build leaves external. tools/web/tsconfig.base.json maps
 // the URL to this file. Written by \`npm run build\` from packages/ui/web/src/client.ts;
@@ -98,8 +128,51 @@ export function declarations(root, web) {
   }
 }
 
+/** tools/web/build.mjs's esbuild options, which this script can't import: the build is
+ * still loading when it runs this one. A test holds the two the same. */
+export const OPTIONS = Object.freeze({
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  minify: true,
+  charset: "utf8",
+  legalComments: "eof",
+  sourcemap: false,
+  external: ["/m/ui/client.js"],
+  logLevel: "warning",
+});
+
+/** One script bundled from `source` under web/, with the build's options and `define`. */
+async function bundle(root, web, source, define = {}) {
+  const result = await esbuild.build({
+    ...OPTIONS,
+    absWorkingDir: root,
+    entryPoints: [path.join(web, source)],
+    tsconfig: path.join(web, "tsconfig.json"),
+    define,
+    write: false,
+  });
+  if (result.outputFiles.length !== 1) throw new Error(`${source} bundled into more than one file`);
+  return result.outputFiles[0].text;
+}
+
+/** offline.js's and sw.js's text: the worker carries the offline page and its script. */
+export async function worker(root, web) {
+  const script = await bundle(root, web, "src/offline.ts");
+  const html = fs.readFileSync(path.join(web, "offline.html"), "utf8");
+  const sw = await bundle(root, web, "src/sw.ts", {
+    OFFLINE_HTML: JSON.stringify(html), OFFLINE_JS: JSON.stringify(script),
+  });
+  return { script, sw };
+}
+
 export default async function generate({ root, web, emit }) {
   const tokens = JSON.parse(fs.readFileSync(path.join(web, "tokens.json"), "utf8"));
   emit(`${OUT}/theme.css`, themeCss(tokens));
+  emit(`${OUT}/manifest.json`, manifest(tokens));
   emit(DECL, declarations(root, web));
+  const { script, sw } = await worker(root, web);
+  emit(`${OUT}/offline.js`, script);
+  emit(`${OUT}/sw.js`, sw);
 }

@@ -52,7 +52,8 @@ def test_the_first_commit_writes_format_1_with_a_random_id_privately():
     got = commit({"ui/gateway": entry()})
     data = raw()
     assert list(data) == ["format", "id", "last_generation", "warned_ct",
-                          "cloudflared_started", "entries"]
+                          "cloudflared_started", "retired", "entries"]
+    assert data["retired"] == []
     assert data["format"] == 1 and len(data["id"]) == 32 and int(data["id"], 16) >= 0
     assert data["last_generation"] == 1
     assert data["entries"]["ui/gateway"] == {
@@ -101,16 +102,16 @@ def test_generations_rise_on_every_entry_change_and_only_then():
 def test_keys_this_version_does_not_know_are_kept_and_written_back():
     commit({"a/x": entry()})
     data = raw()
-    data["retired"] = [{"host": "old.ts.net"}]
+    data["later"] = [{"host": "old.ts.net"}]
     data["entries"]["a/x"]["asks"] = {"upstream": "unix"}
     record.record_path().write_text(json.dumps(data))
     rec = record.read()
-    assert rec.extra == {"retired": [{"host": "old.ts.net"}]}
+    assert rec.extra == {"later": [{"host": "old.ts.net"}]}
     assert rec.entries["a/x"].extra == {"asks": {"upstream": "unix"}}
     commit({"a/x": replace(rec.entries["a/x"], state=State.REMOVING),
             "b/y": entry(port=9000)})
     data = raw()
-    assert data["retired"] == [{"host": "old.ts.net"}]
+    assert data["later"] == [{"host": "old.ts.net"}]
     assert data["entries"]["a/x"]["asks"] == {"upstream": "unix"}
     assert data["entries"]["a/x"]["state"] == "removing"
 
@@ -118,7 +119,7 @@ def test_keys_this_version_does_not_know_are_kept_and_written_back():
 def test_an_entry_a_newer_tunnel_wrote_is_kept_and_never_changed():
     commit({"a/x": entry()})
     data = raw()
-    newer = {"reach": "own-devices", "provider": "tailscale", "form": "unix",
+    newer = {"reach": "own-devices", "provider": "tailscale", "form": "tcp",
              "socket": "/run/x.sock", "state": "on", "generation": 1}
     data["entries"]["n/w"] = newer
     record.record_path().write_text(json.dumps(data))
@@ -132,7 +133,7 @@ def test_an_entry_a_newer_tunnel_wrote_is_kept_and_never_changed():
     commit({"b/y": entry(port=9000)})
     assert raw()["entries"]["n/w"] == newer
     with pytest.raises(Refused, match="doesn't know"):
-        commit({"c/z": entry(form="unix")})
+        commit({"c/z": entry(form="tcp")})
 
 
 def test_a_record_of_another_format_is_read_as_it_can_be_and_never_written():
@@ -277,7 +278,7 @@ def test_an_address_says_who_can_reach_it():
         module="ui", name="gateway", reach="own-devices", provider="tailscale",
         exposure="tailnet", url="https://box.tail1234.ts.net:8461/",
         host="box.tail1234.ts.net", port=8461, target=8461, state="on",
-        change=rec.token("ui/gateway"), applied_at="2026-10-30T12:00:00Z")
+        change=rec.token("ui/gateway"), applied_at="2026-10-30T12:00:00Z", retired=True)
     connector = api.address("comms", "connector")
     assert connector.exposure == "internet" and connector.url == "https://box.tail1234.ts.net/"
     site = api.address("web", "site")

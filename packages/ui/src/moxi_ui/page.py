@@ -15,7 +15,8 @@ the handlers find the shell they serve through `current()`, which `serving(shell
 sets for each request.
 
 The settings view's routes are declared by `settings.py` and joined here as
-`SETTINGS_ROUTES`; its handlers reach the shell the same way.
+`SETTINGS_ROUTES`, and the desktop's gateway routes (`/m/ui/api/gateway/...`) by
+`moxi_ui.gateway.desk` as `GATEWAY_ROUTES`; their handlers reach the shell the same way.
 """
 
 from __future__ import annotations
@@ -35,10 +36,12 @@ from typing import Any
 from moxi_loopback.api import Field, Out, Page, Route
 
 from . import settings as _settings
+from .gateway import desk as _desk
 
 __all__ = [
     "DOCTOR_AT_ONCE",
     "DOCTOR_TIMEOUT",
+    "GATEWAY_ROUTES",
     "MODULES_SHAPE",
     "PAGE",
     "ROUTES",
@@ -121,9 +124,10 @@ _COMPONENT = Out("table", items={
     "contract": Out("int"), "place": Out("string"), "home": Out("bool"),
     "attributes": Out("list", items=_ATTRIBUTE)})
 _MODULE = Out("table", items={
-    "name": Out("string"), "state": Out("string"), "reason": Out("string"),
-    "version": Out("string"), "summary": Out("string"), "page": Out("bool"),
-    "mounted": Out("bool"), "export_error": _STRING, "budget": _BUDGET,
+    "name": Out("string"), "state": Out("string"),
+    "reason": Out("string", nullable=True, mark="redact"), "version": Out("string"), "summary": Out("string"), "page": Out("bool"),
+    "mounted": Out("bool"), "export_error": Out("string", nullable=True, mark="redact"),
+    "gateway_error": _STRING, "budget": _BUDGET,
     "confirmed": Out("list", items=Out("string")),
     "components": Out("list", items=_COMPONENT),
     "refused": Out("list", items=Out("table", items={"name": Out("string"),
@@ -131,7 +135,7 @@ _MODULE = Out("table", items={
 })
 
 #: The modules view's value: `/m/ui/api/modules` and the topic `ui.modules`.
-MODULES_SHAPE = {"at": _STRING, "error": _STRING, "contracts": Out("list", items=Out("int")),
+MODULES_SHAPE = {"at": _STRING, "error": Out("string", nullable=True, mark="redact"), "contracts": Out("list", items=Out("int")),
                  "modules": Out("list", items=_MODULE)}
 
 _ROW = Out("table", items={"module": Out("string"), "name": Out("string"),
@@ -307,7 +311,7 @@ async def doctor(call: Any) -> dict[str, Any]:
 ROUTES = (
     Route("/api/servers", "read", f"{_HERE}:servers", returns=SERVERS_SHAPE),
     Route("/api/stop", "act", f"{_HERE}:stop", returns={"ok": Out("bool")}),
-    Route("/api/modules", "read", f"{_HERE}:modules", returns=MODULES_SHAPE),
+    Route("/api/modules", "read", f"{_HERE}:modules", returns=MODULES_SHAPE, gateway=True),
     Route("/api/doctor", "read", f"{_HERE}:doctor",
           query={"module": Field("string", required=False, max=64)}, returns=DOCTOR_SHAPE),
 )
@@ -315,7 +319,11 @@ ROUTES = (
 #: The settings view's routes, declared by `settings.py`.
 SETTINGS_ROUTES: tuple[Route, ...] = _settings.ROUTES
 
+#: The desktop's gateway routes, declared by `moxi_ui.gateway.desk`.
+GATEWAY_ROUTES: tuple[Route, ...] = _desk.ROUTES
+
 
 #: The shell's page, served in process at `/m/ui/`. Its assets are the web build's
 #: output, `web/`: client.js, the theme, the document and the shell's components.
-PAGE = Page(routes=(*ROUTES, *SETTINGS_ROUTES), assets="web", package="moxi_ui")
+PAGE = Page(routes=(*ROUTES, *SETTINGS_ROUTES, *GATEWAY_ROUTES), assets="web",
+            package="moxi_ui")

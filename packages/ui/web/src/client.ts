@@ -8,14 +8,19 @@
 // A component reaches data only through `api` and `subscribe`, for its own module, and
 // links to another module only through `navigate` or `place`, and only while
 // `installed` says that module is there. It runs a confirmed act only through `confirm`.
+// On the phone, through the gateway, `gateway` is true, and a component hides what the
+// phone can't reach.
 //
 // It also defines `<moxi-ui-form>`, the one form renderer, and `<moxi-ui-confirm>`, the
 // confirm sheet, so every page can use them.
 
 import { defineConfirm } from "./confirm.ts";
-import { isConfirmed, mintKey, outcomeOf, SIGNED_OUT } from "./confirm-model.ts";
+import { isConfirmed, mintKey, outcomeOf, pagePath, SIGNED_OUT } from "./confirm-model.ts";
 import { defineForm } from "./form.ts";
+import { bandText, endingReach, gatewayConfirm, gatewayInfo, reachOf } from "./gateway-model.ts";
+import type { Reach } from "./gateway-model.ts";
 import { fetchOpener, TabPush } from "./push.ts";
+import type { Opener } from "./push.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
 import { boot } from "./shell.ts";
 
@@ -61,13 +66,15 @@ export interface ApiResult {
  * What `confirm` resolves with. `accepted` carries the status path the module gave,
  * relative to its own page (`/api/status?job=...`); `refused` the answer's status and a
  * line of text; `unknown` a line of text. `cancelled` means the sheet was closed and
- * nothing was sent.
+ * nothing was sent. `desk` means the phone can't run the act here, so the sheet pointed at
+ * the desk and nothing reached the module; `text` is what it said.
  */
 export type ConfirmOutcome =
   | { outcome: "accepted"; status: string }
   | { outcome: "refused"; code: number; text: string }
   | { outcome: "unknown"; text: string }
-  | { outcome: "cancelled" };
+  | { outcome: "cancelled" }
+  | { outcome: "desk"; text: string };
 
 /** The theme modes: `system` follows the browser's colour scheme. */
 export type ThemeMode = "system" | "light" | "dark";
@@ -215,6 +222,9 @@ interface ModulesValue {
   modules: ModuleRow[];
 }
 
+/** What the gateway's shell document said when it was sent; the desktop's says nothing. */
+const here = gatewayInfo(document.documentElement.dataset);
+
 let view: ModulesValue = { contracts: [CONTRACT], modules: [] };
 let signedOut = false;
 const watchers = new Set<() => void>();
@@ -253,9 +263,54 @@ function take(value: unknown): void {
   for (const fn of [...watchers]) fn();
 }
 
-const push = new TabPush(fetchOpener(key), markSignedOut);
+// --- the band: on the phone, whether the computer answers --------------------------------
+
+let reach: Reach = "up";
+let lastAnswered: Date | null = null;
+
+/** Notes what one answer, or the lack of one, says about reaching the gateway. */
+function heard(next: Reach): void {
+  if (!here.gateway) return;
+  if (next === "up") lastAnswered = new Date();
+  reach = next;
+  const band = document.getElementById("moxi-band");
+  if (band === null) return;
+  const text = bandText(reach, location.hostname, lastAnswered);
+  band.textContent = text;
+  band.hidden = text === "";
+}
+
+/** `open`, telling the band what the push stream hears: any event is an answer. */
+function watched(open: Opener): Opener {
+  return (topics, handlers) => open(topics, {
+    event(name, raw) {
+      heard("up");
+      handlers.event(name, raw);
+    },
+    end(ending) {
+      const next = endingReach(ending);
+      if (next !== null) heard(next);
+      handlers.end(ending);
+    },
+  });
+}
+
+const push = new TabPush(here.gateway ? watched(fetchOpener(key)) : fetchOpener(key), markSignedOut);
 
 // --- the contract -----------------------------------------------------------------------
+
+/** Whether this page came through the gateway, on the phone. A component hides there what
+ * the phone can't reach, such as a desk-only act. */
+export function gateway(): boolean {
+  return here.gateway;
+}
+
+/** Whether the phone runs confirmed acts here: true on the gateway only while the shell
+ * mounts them, as it stood when the page loaded. Where it is false a component may label
+ * an act "at the desk"; `confirm` then shows where to do it. */
+export function gatewayActs(): boolean {
+  return here.acts;
+}
 
 /** Whether `module` is installed and present. */
 export function installed(module: string): boolean {
@@ -314,8 +369,10 @@ async function fetched(target: string, init: RequestInit): Promise<ApiResult> {
     answer = await fetch(target, init);
     text = await answer.text();
   } catch {
+    heard("away");
     return { status: 0, data: null };
   }
+  heard(reachOf(answer.status, (answer.headers.get("Content-Type") ?? "").includes("json")));
   // The shell's refusal of the cookie or the key is an empty 403.
   if (answer.status === 403 && text === "") markSignedOut();
   let data: any = null;
@@ -341,6 +398,12 @@ async function fetched(target: string, init: RequestInit): Promise<ApiResult> {
  * answer. It throws a TypeError for a path that leaves `/m/<module>/` or is not one of
  * the module's confirmed acts, a body that is not an object, or lines that are not
  * strings.
+ *
+ * On the phone, where `gatewayActs` is true, the gateway first stores the act and the
+ * sheet shows the body it stored; Confirm has the gateway send it, once. Where
+ * `gatewayActs` is false, or the gateway answers that acts are no longer mounted, the
+ * sheet has no Confirm: it says to do the act at the desk and why, sends nothing further,
+ * and its Close resolves `{outcome: "desk", text}`.
  */
 export async function confirm(module: string, path: string, body: object,
                               sheet: readonly string[] = []): Promise<ConfirmOutcome> {
@@ -355,9 +418,20 @@ export async function confirm(module: string, path: string, body: object,
   // The bytes are fixed now: what the sheet shows is what is sent, once.
   const data = JSON.stringify(body);
   const title = components(module).find((item) => item.name === "page")?.title ?? module;
-  const element = document.createElement("moxi-ui-confirm");
-  document.body.append(element);
-  return await element.ask({ title, lines: [...sheet], body }, async () => {
+  const lines = [...sheet];
+  const sheetFor = (): HTMLElementTagNameMap["moxi-ui-confirm"] => {
+    const element = document.createElement("moxi-ui-confirm");
+    document.body.append(element);
+    return element;
+  };
+  if (here.gateway) {
+    return await gatewayConfirm(here, location.hostname, module, pagePath(module, target), body, {
+      post: (path, sent) => gatewayPost(path, sent),
+      ask: (shown, send) => sheetFor().ask({ title, lines, body: shown }, send),
+      desk: (pointer) => sheetFor().ask({ title, lines, body, desk: pointer }),
+    });
+  }
+  return await sheetFor().ask({ title, lines, body }, async () => {
     const value = key();
     if (!value) {
       markSignedOut();
@@ -371,6 +445,18 @@ export async function confirm(module: string, path: string, body: object,
                                            credentials: "same-origin", cache: "no-store" });
     return outcomeOf(answer.status, answer.data);
   });
+}
+
+/** One POST of `body` to the gateway's own `path`, with the session key. */
+async function gatewayPost(path: string, body: object): Promise<ApiResult> {
+  const value = key();
+  if (!value) {
+    markSignedOut();
+    return { status: 403, data: null };
+  }
+  const headers = { "X-Moxi-Key": value, Accept: "application/json", "Content-Type": "application/json" };
+  return await fetched(path, { method: "POST", headers, body: JSON.stringify(body),
+                               credentials: "same-origin", cache: "no-store" });
 }
 
 /**
@@ -442,11 +528,43 @@ export function setTheme(mode: ThemeMode): void {
   document.documentElement.dataset.theme = mode;
 }
 
+// --- the gateway's worker ------------------------------------------------------------------
+
+const WORKER_URL = "/sw.js";
+
+interface ScriptUrlPolicies {
+  createPolicy(name: string, rules: { createScriptURL(url: string): string }): { createScriptURL(url: string): unknown };
+}
+
+/** Registers the gateway's worker, on every load, so a sign-in that cleared the origin's
+ * storage gets it back. The gateway's policy requires Trusted Types for scripts, so the
+ * URL goes through `moxi-worker`, a policy of this file's own that passes `/sw.js` and
+ * throws for any other URL; a browser without Trusted Types takes the string. No
+ * component sees the policy. */
+function registerWorker(): void {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const types = (globalThis as { trustedTypes?: ScriptUrlPolicies }).trustedTypes;
+    const url = types === undefined ? WORKER_URL : types.createPolicy("moxi-worker", {
+      createScriptURL(given: string): string {
+        if (given !== WORKER_URL) throw new TypeError(`moxi-worker passes only ${WORKER_URL}, not ${given}`);
+        return given;
+      },
+    }).createScriptURL(WORKER_URL);
+    navigator.serviceWorker.register(url as string, { scope: "/" }).catch((err: unknown) => {
+      console.warn("moxi: the gateway's worker didn't register", err);
+    });
+  } catch (err) {
+    console.warn("moxi: the gateway's worker didn't register", err);
+  }
+}
+
 // --- start ------------------------------------------------------------------------------
 
 defineForm(installed);
 defineConfirm();
 push.start();
+if (here.gateway) registerWorker();
 addEventListener("storage", (event) => {
   // A sign-in in another tab of this browser stores a new key.
   if (event.key === KEY_STORAGE && event.newValue) {
@@ -464,6 +582,7 @@ addEventListener("storage", (event) => {
 
 if (document.getElementById("moxi-shell") !== null) {
   boot({
+    gateway: here.gateway,
     installed,
     place,
     modules: () => view.modules.filter((item) => item.state === "present").map((item) => ({

@@ -27,6 +27,11 @@ class Refused(TunnelError):
     exit_code = codes.REFUSED
 
 
+class NotReady(Refused):
+    """A declaration's `upstream()` says its target can't be applied yet: the act that
+    asked applies nothing. `reason` is the text the callable gave."""
+
+
 class ApplyError(TunnelError):
     """A provider command failed. `reason` is its stderr, unchanged."""
 
@@ -56,4 +61,4 @@ class Busy(TunnelError):
     exit_code = codes.TEMPFAIL
 
 
-__all__ = ["TunnelError", "Refused", "ApplyError", "ReadError", "UsageError", "Busy"]
+__all__ = ["TunnelError", "Refused", "NotReady", "ApplyError", "ReadError", "UsageError", "Busy"]

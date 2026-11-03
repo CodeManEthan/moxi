@@ -89,7 +89,7 @@ with `moxi tunnel status --json` from outside Python. It uses the URL only while
 `moxi tunnel status --json` prints one object, `{"targets": [...], "displaced": [...]}`.
 Each item of `targets` is one declared or recorded target, with `module`, `name`, `reach`,
 `exposure`, `provider`, `state` (`applying`, `on` or `removing`), `url`, `host`, `port`,
-`target`, `change`, `displaced`, `applied_at` and `detail`, each null but the first three
+`form`, `target`, `retired`, `change`, `displaced`, `applied_at` and `detail`, each null but the first three
 while the target is not recorded; with `--check` it also has `check`, the live
 comparison, and `check_detail` and `fix` when that is not `ok`. Each item
 of `displaced` is one file in `displaced/`: `name`, `port`, `pending`, `path`, `target` and
@@ -107,6 +107,53 @@ The module behind the address must itself:
 - send a keepalive on long streams;
 - keep the `Address.change` it built its Host check from, and rebuild when it reads a
   different one. A changed host or provider means its paired devices pair again.
+
+### A target on a Unix socket, or one that needs its owner ready
+
+A declaration in the group `moxi.tunnel.targets`, read the same way, may also name two
+callables, each as `"<python module>:<callable>"`:
+
+```toml
+[project.entry-points."moxi.tunnel.targets"]
+"ui.gateway" = "moxi_ui.tunnel:GATEWAY"
+```
+
+```python
+GATEWAY = {"reach": "own-devices", "port_setting": "gateway.port",
+           "upstream": "moxi_ui.tunnel:upstream",   # -> "unix:<path>" or "http://127.0.0.1:<port>"
+           "retired": "moxi_ui.tunnel:retired"}     # -> [{"host": ..., "port": ...}, ...]
+```
+
+- `upstream()` gives what the provider forwards to, or raises `moxi_tunnel.NotReady(text)`.
+  Tunnel calls it before every apply (an add, a repair's re-apply, a provider switch) and
+  refuses the act with the text, applying nothing, when it raises. `check` compares the
+  live entry with what it gives, so a new value reads `moved`. A `unix:` target is
+  forwarded by Serve (Linux, macOS and BSD) and by `cloudflared`; Funnel takes only the
+  loopback form. Such an entry has `Address.form` `unix` and its path as `Address.target`,
+  and holds no loopback port.
+- `retired()` gives origins the module keeps a copy of; tunnel adds them to its own list
+  before it places the target, which refills the list after a `--purge`.
+
+These keys are refused in `moxi.tunnel`, and so is a target declared in both groups, since
+moxi-tunnel 0.1 reads only `moxi.tunnel` and would apply such a target as a plain loopback
+port. A caller that relies on them loads tunnel with interface 2. `lifetime` is refused in
+either group by this version.
+
+**Retired origins.** An origin is `https://<host>:<port>`. Tunnel's record keeps a list,
+which only grows, of every origin at which a persistent loopback mapping has been live:
+such a mapping forwards whether or not its owner runs, so another program may have
+answered under it. Tunnel adds the origin before any command that can make such a mapping
+live, and the origin of foreign config a `--replace` takes over; nothing takes one out, not
+a remove, a forget, a switch or an uninstall without `--purge`. `Address.retired` is true
+for an entry whose origin is on the list. A Unix socket target retires nothing, and its
+port skips every retired one, starting from its port setting's value; a repair that puts
+an entry onto a socket picks a new port when the one it would keep is retired. A
+`--port` or a Cloudflare hostname you name is taken as given, with one line saying so.
+
+Each Cloudflare rule carries `originRequest: httpHostHeader: <hostname>`, so the target
+sees its own hostname as the Host. After upgrading from moxi-tunnel 0.1, the doctor's
+`cloudflare in step` row fails, `cloudflared.yml` being behind the record, until you run
+`moxi tunnel repair`.
 
 A module may also declare `on_change(target, old, new)` in the group
 `moxi.tunnel.changes`, named by the module. Tunnel calls it in the process that made the

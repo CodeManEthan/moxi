@@ -1,11 +1,13 @@
 """The announcement of Moxi's tunnel module, which moxi.modules reads.
 
-It offers interface 1, the API in `moxi_tunnel.api`: a declared target's address, read
-from the record tunnel keeps of what it applied.
+It offers interfaces 1 and 2, the API in `moxi_tunnel.api`: a declared target's address,
+read from the record tunnel keeps of what it applied. Interface 2 adds `NotReady`,
+`Address.form`, `Address.retired` and the declarations in `moxi.tunnel.targets`, whose
+`upstream` and `retired` tunnel honours.
 """
 
 ANNOUNCES = 1
-INTERFACES = frozenset({1})
+INTERFACES = frozenset({1, 2})
 API = "moxi_tunnel.api"
 #: `moxi tunnel`: status, add, remove and repair.
 CLI = "moxi_tunnel.cli:main"

@@ -146,7 +146,8 @@ def test_the_shells_own_components_are_placed_from_its_build():
         text = _built(item["script"])
         # Each imports only the shared client, by its absolute URL, and defines its
         # element once.
-        assert re.findall(r'from"([^"]+)"', text) == ["/m/ui/client.js"]
+        # (esbuild keeps one import statement per source file that names it).
+        assert set(re.findall(r'from"([^"]+)"', text)) == {"/m/ui/client.js"}
         assert re.search(r"\bimport\s*\(", text) is None
         assert f'"{item["element"]}"' in text and "customElements.get(" in text
         # Its own Lit, with Lit's licence kept at the end.

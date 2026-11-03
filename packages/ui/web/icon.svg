@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- The installed app's icon. icon-192.png and icon-512.png are this drawing at those
+     sizes. The colour fills the square and the mark stays inside the middle 80%, so the
+     phone may crop it to any shape. The colours are tokens.json's accent and bg. -->
+<rect width="512" height="512" fill="#2f6fd0"/>
+<path d="M152 356V156l104 124 104-124v200" fill="none" stroke="#ffffff" stroke-width="56"
+      stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

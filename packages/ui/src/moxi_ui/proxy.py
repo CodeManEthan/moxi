@@ -427,10 +427,11 @@ async def _disconnected(receive: Callable[..., Any]) -> None:
             return
 
 
-async def _plain(send: Callable[..., Any], status: int) -> None:
-    await send({"type": "http.response.start", "status": status,
-                "headers": response_headers(extra=[("Content-Length", "0")])})
-    await send({"type": "http.response.body", "body": b""})
+async def _answer(send: Callable[..., Any],
+                  answer: tuple[int, list[tuple[bytes, bytes]], bytes]) -> None:
+    status, headers, body = answer
+    await send({"type": "http.response.start", "status": status, "headers": headers})
+    await send({"type": "http.response.body", "body": body})
 
 
 class Proxy:
@@ -439,11 +440,22 @@ class Proxy:
     `starters` is the shell's `Starters`; `table()` gives the shell's current route
     table, in which the request's entry says whether it is an act or a stream. A request
     the table no longer holds (the snapshot changed since `check`) is an empty 404.
+
+    The proxy's own answers, those no module sent, come from `refused` and `failed`; a
+    caller that serves another origin overrides both.
     """
 
     def __init__(self, starters: Any, *, table: Callable[[], Table]):
         self.client = Client(starters)
         self.table = table
+
+    def refused(self, status: int) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
+        """The proxy's own empty answer, with loopback's fixed header set."""
+        return status, response_headers(extra=[("Content-Length", "0")]), b""
+
+    def failed(self, err: UpstreamError) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
+        """The browser's answer when the module's server gave none."""
+        return err.answer()
 
     async def __call__(self, scope: dict[str, Any], receive: Callable[..., Any],
                        send: Callable[..., Any]) -> None:
@@ -454,13 +466,13 @@ class Proxy:
         parts = raw.split(b"/", 3)
         entry = self.table().find(method, raw)
         if entry is None or len(parts) < 4 or parts[1] != b"m":
-            await _plain(send, 404)
+            await _answer(send, self.refused(404))
             return
         module = parts[2].decode("ascii")
         target = b"/" + parts[3]
         query = scope.get("query_string") or b""
         if not query.isascii():
-            await _plain(send, 400)
+            await _answer(send, self.refused(400))
             return
         if query:
             target += b"?" + query
@@ -469,7 +481,7 @@ class Proxy:
             if method == "GET":
                 body: bytes | AsyncIterable[bytes] | None = await _read_all(receive, BODY_CAP_GET)
                 if body is None:
-                    await _plain(send, 413)
+                    await _answer(send, self.refused(413))
                     return
             else:
                 body = _streamed(receive)
@@ -479,9 +491,7 @@ class Proxy:
         except BrowserGone:
             return
         except UpstreamError as err:
-            status, pairs, data = err.answer()
-            await send({"type": "http.response.start", "status": status, "headers": pairs})
-            await send({"type": "http.response.body", "body": data})
+            await _answer(send, self.failed(err))
             return
         async with response:
             await _relay(response, receive, send)

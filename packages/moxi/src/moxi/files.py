@@ -14,7 +14,8 @@ imports nothing heavy at module level, so a hook can import `moxi.files` cheaply
 - `edit_toml` does the same for a TOML file, keeping its comments and order (it imports
   the core's vendored tomlkit inside the call).
 - `append_record` and `read_records` keep a log of JSON lines that rolls to one older
-  generation at a size cap.
+  generation at a size cap (or never, with no cap); a durable append is on disk when it
+  returns.
 - `private_dir` makes a directory only its owner can enter.
 """
 
@@ -503,7 +504,7 @@ def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
 # -- records -----------------------------------------------------------------------------
 
 def append_record(path: str | os.PathLike, record: dict, *,
-                  max_bytes: int = 1_000_000) -> None:
+                  max_bytes: int | None = 1_000_000, durable: bool = False) -> None:
     """Append `record` to the log `path` as one JSON line.
 
     The line is written with one `write` on a descriptor opened for appending (the file
@@ -511,17 +512,25 @@ def append_record(path: str | os.PathLike, record: dict, *,
     the line together would pass `max_bytes`, the file first moves to `<path>.1` (one
     older generation is kept; on Windows a move that meets a sharing violation is tried
     again for up to a second, as `atomic_write`'s replace is) and the line starts a new
-    file. A line longer than `max_bytes` raises `ValueError`.
+    file. A line longer than `max_bytes` raises `ValueError`. With `max_bytes=None` the
+    file never rolls and a line of any length is written.
+
+    With `durable=True` the file is flushed to disk after the write, and so is its
+    directory (POSIX) when this write created the file, so the line survives a power loss
+    once the call returns.
     """
     import json
 
     path = Path(path)
     line = (json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+    if max_bytes is None:
+        _append(path, line, durable=durable)
+        return
     if len(line) > max_bytes:
         raise ValueError(f"a record of {len(line)} bytes is longer than the log's cap "
                          f"of {max_bytes} bytes")
     if _size(path) + len(line) <= max_bytes:
-        _append(path, line)
+        _append(path, line, durable=durable)
         return
     with _gated_lock(_lock_path(path)):
         # Another writer may have rolled the file while this one waited for the lock.
@@ -530,7 +539,7 @@ def append_record(path: str | os.PathLike, record: dict, *,
                 _replace(path, _older(path))
             except FileNotFoundError:
                 pass
-        _append(path, line)
+        _append(path, line, durable=durable)
 
 
 def _size(path: Path) -> int:
@@ -540,13 +549,28 @@ def _size(path: Path) -> int:
         return 0
 
 
-def _append(path: Path, line: bytes) -> None:
+def _append(path: Path, line: bytes, *, durable: bool = False) -> None:
     _parent(path)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | _BINARY, 0o600)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | _BINARY
+    made = False
+    if durable:
+        # A first try with O_EXCL tells whether this write makes the file, so its
+        # directory entry is flushed too.
+        try:
+            fd = os.open(path, flags | os.O_EXCL, 0o600)
+            made = True
+        except FileExistsError:
+            fd = os.open(path, flags, 0o600)
+    else:
+        fd = os.open(path, flags, 0o600)
     try:
         os.write(fd, line)
+        if durable:
+            os.fsync(fd)
     finally:
         os.close(fd)
+    if made and not _WINDOWS:
+        _fsync_dir(path.parent)
 
 
 def _older(path: Path) -> Path:

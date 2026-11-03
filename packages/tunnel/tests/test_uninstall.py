@@ -136,7 +136,7 @@ def test_teardown_refuses_on_an_entry_a_newer_tunnel_wrote_pointing_past_it(alph
                                                                             tailscale, yes):
     acts.add("alpha/gateway", ask=yes)
     raw = json.loads(record.record_path().read_text())
-    raw["entries"]["alpha/gateway"]["form"] = "unix"
+    raw["entries"]["alpha/gateway"]["form"] = "tcp"
     record.record_path().write_text(json.dumps(raw))
     with pytest.raises(moxi.modules.Refused) as caught:
         teardown()
@@ -358,15 +358,17 @@ def test_tunnels_own_listener_names_every_address_and_removes_nothing(three, tai
     assert (f"tunnel: alpha/connector stays live at https://{HOST}/; remove it by hand "
             "with: tailscale funnel --https=443 off") in out
     assert f"tunnel: beta/page (https://{A}/) stays in tunnel's record" in out
+    assert out.rstrip("\n").endswith(uninstall.RETIRED_PURGE_LINE)
     assert tailscale.serve == serve and len(entries()) == 3
     assert units.unit == "active"
 
 
-def test_tunnels_own_listener_after_a_teardown_that_accepted_says_nothing(three, capsys):
+def test_tunnels_own_listener_after_a_teardown_that_accepted_names_only_the_retired(
+        three, capsys):
     teardown()
     capsys.readouterr()
     on_uninstall("tunnel")
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == uninstall.RETIRED_PURGE_LINE + "\n"
 
 
 # -- the reinstall claims -------------------------------------------------------------------

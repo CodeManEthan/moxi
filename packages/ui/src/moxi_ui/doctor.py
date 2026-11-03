@@ -16,6 +16,9 @@ to a port only a socket holds, so a doctor run never starts the shell:
   not running is off, with its counts. One or two failed starts in a row are no warn of
   their own: the next start tries again, and a third makes the fail.
 
+- `gateway`, `gateway login`, `gateway audit`: the gateway's, from `moxi_ui.gateway.doctor`,
+  read from files, settings and the tunnel's record.
+
 The UI module declares no `BUDGETS`: the core would count every page server as the
 shell's, so the shell's own budget is compared here, on its own pid only.
 """
@@ -147,7 +150,10 @@ def page_rows(found: health.Probe, *, now: float | None = None) -> list[Row]:
 
 def rows() -> Iterator[Row]:
     """The `DOCTOR` target: the `shell` row (and the logon task's, where it applies),
-    then one `page:<module>` row per page server."""
+    one `page:<module>` row per page server, then the gateway's three rows."""
     found = health.probe(wait=health.WAIT)
     yield from shell_rows(found)
     yield from page_rows(found)
+    from .gateway import doctor as gateway
+
+    yield from gateway.rows()

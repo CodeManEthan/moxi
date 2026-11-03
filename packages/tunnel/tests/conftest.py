@@ -56,10 +56,12 @@ class Site:
 
     def module(self, name: str, targets: dict[str, str] | None = None, *,
                values: str = "", dist: str | None = None,
-               settings: str | None = SETTINGS) -> str:
+               settings: str | None = SETTINGS,
+               targets_group: dict[str, str] | None = None) -> str:
         """A fake module `name` with a `settings.toml` and a `tunnel_decl.py` holding
         `values` (Python source); `targets` maps each `moxi.tunnel` entry name to the
-        attribute of `tunnel_decl` it points at."""
+        attribute of `tunnel_decl` it points at; `targets_group` the same for
+        `moxi.tunnel.targets`."""
         package = f"moxi_{name}"
         self.write(f"{package}/__init__.py", "")
         announce = "SUMMARY = 'A module made for a test.'\n"
@@ -74,6 +76,10 @@ class Site:
         lines = f"[moxi.modules]\n{name} = {package}.module\n\n[moxi.tunnel]\n"
         lines += "".join(f'{entry} = {package}.tunnel_decl:{attr}\n'
                          for entry, attr in (targets or {}).items())
+        if targets_group:
+            lines += "\n[moxi.tunnel.targets]\n" + "".join(
+                f"{entry} = {package}.tunnel_decl:{attr}\n"
+                for entry, attr in targets_group.items())
         self.write(f"{info}/entry_points.txt", lines)
         return package
 

@@ -181,7 +181,7 @@ def test_a_record_that_is_not_one_is_a_failure_and_the_rest_still_runs(alpha, ta
 def test_an_entry_a_newer_tunnel_wrote_is_a_failure(alpha, tailscale, yes):
     acts.add("alpha/gateway", ask=yes)
     raw = json.loads(record.record_path().read_text())
-    raw["entries"]["alpha/gateway"]["form"] = "unix"
+    raw["entries"]["alpha/gateway"]["form"] = "tcp"
     record.record_path().write_text(json.dumps(raw))
     row = by_name(quick())["alpha/gateway"]
     assert row.state == "fail" and record.NEWER in row.detail

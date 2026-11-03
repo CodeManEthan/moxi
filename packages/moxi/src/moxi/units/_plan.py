@@ -1,9 +1,9 @@
 """`plan`: what writing a module's declared units would change, unit by unit.
 
 `plan` reads the module's merged declarations, resolves each unit for writing (its command
-in this environment, its switch, its socket's port), renders it through the backend, and
-compares the new text with what is on disk. It writes nothing and makes no supervisor
-call, so it takes no lock.
+in this environment, its switch, its socket's port and what starts it), renders it through
+the backend, and compares the new text with what is on disk. It writes nothing and makes
+no supervisor call, so it takes no lock.
 
 A daemon's sockets. On a backend that writes them as units of their own (systemd), they
 are one `socket` change over the whole set: `add` when none is written, `keep` when the
@@ -47,8 +47,8 @@ def plan(module: str, *, only: Iterable[str] | None = None,
 
     `only` names daemons and timers: only those are planned (each with its socket), and
     no unit outside them is planned `remove`. `env` is the environment the module's
-    settings (a daemon's switch, a socket's port) are read in. Raises `ValueError` for a
-    module that is not present.
+    settings (a daemon's switch, a socket's port, the switch a socket's `start` names) are
+    read in. Raises `ValueError` for a module that is not present.
     """
     from .. import modules
 
@@ -235,14 +235,33 @@ class _Planner:
             return f"its socket setting {setting} cannot be read: {exc}"
         if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
             return f"its socket setting {setting} is {port!r}, not a port from 1 to 65535"
+        start = declared.get("start", "connection")
+        if isinstance(start, Mapping):
+            start = self._start(start["login"])
+            if start not in ("login", "connection"):
+                return start
         addresses = tuple(declared["addresses"])
         left_out: tuple[str, ...] = ()
         if self.impl.sockets != "none":
             six = tuple(a for a in addresses if _is_ipv6(a))
             if six and not self.ipv6():
                 left_out = six
-        return Socket(setting, addresses, port, left_out,
-                      declared.get("start", "connection"))
+        return Socket(setting, addresses, port, left_out, start)
+
+    def _start(self, key: str) -> str:
+        """A switch-form `start` read now: `login` while the bool setting `key` is true,
+        `connection` while it is false; else the reason the socket is refused. The key is
+        checked as a daemon's switch is."""
+        problem = self._switch_problem(key)
+        if problem:
+            return f"its socket start {problem.removeprefix('its ')}"
+        from .. import config
+
+        try:
+            on = switch_value(self.module, self.schema(), key, self.env)
+        except config.ConfigError as exc:
+            return f"its socket start's switch {key} cannot be read: {exc}"
+        return "login" if on else "connection"
 
     def _compare(self, name: str, group, entry: Mapping, stamp: str | None,
                  written: UnitRef | None = None) -> UnitChange:

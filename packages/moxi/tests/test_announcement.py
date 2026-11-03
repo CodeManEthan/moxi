@@ -154,12 +154,35 @@ def test_units_from_is_kept_as_a_string_and_never_called(site):
 # --- ANNOUNCES ---------------------------------------------------------------------------
 
 def test_a_newer_schema_is_broken_and_says_to_upgrade(site):
-    site.module("alpha", ANNOUNCES="2",
-                DAEMONS="{'relay': {'command': 'x', 'a_key_from_schema_two': 1}}")
+    site.module("alpha", ANNOUNCES="3",
+                DAEMONS="{'relay': {'command': 'x', 'a_key_from_schema_three': 1}}")
     found = modules.load("alpha")
     assert found.state == BROKEN
-    assert found.reason == "announces schema 2; this moxi knows up to 1; upgrade moxi"
-    assert modules.ANNOUNCES == 1
+    assert found.reason == "announces schema 3; this moxi knows up to 2; upgrade moxi"
+    assert modules.ANNOUNCES == 2
+
+
+SWITCHED = ("{'relay': {'command': 'moxi-alpha-relay', 'socket': {'setting': 'port', "
+            "'addresses': ['127.0.0.1'], 'start': {'login': 'gate.on'}}}}")
+
+
+def test_a_switch_form_start_is_refused_under_schema_one_and_read_under_two(site):
+    """The table form came with schema 2: a module that announces 1 can't mean it, so it
+    is broken with the reason, never read as a fixed start."""
+    site.module("alpha", DAEMONS=SWITCHED)
+    found = modules.load("alpha")
+    assert found.state == BROKEN
+    assert found.reason == (
+        "its announcement moxi_alpha.module has DAEMONS['relay'] socket start "
+        "{'login': 'gate.on'}, a form that comes with ANNOUNCES = 2; the module "
+        "announces 1")
+    site.module("alpha", ANNOUNCES="2", DAEMONS=SWITCHED)
+    sys.modules.pop("moxi_alpha.module", None)
+    modules.reset()
+    found = modules.load("alpha")
+    assert found.state == PRESENT and found.announces == 2
+    assert found.daemons["relay"]["socket"]["start"] == {"login": "gate.on"}
+    assert modules.login_switch(found.daemons["relay"]) == "gate.on"
 
 
 @pytest.mark.parametrize("value", ["0", "True", "'1'", "1.0", "-3"])
@@ -205,11 +228,19 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
     # a socket's start is what starts the daemon: its sockets, or a login
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['127.0.0.1'], 'start': 'boot'}}}" % DAEMON},
-     "optionally start ('connection', the default, or 'login')"),
+     "optionally start ('connection', the default, 'login', or {'login': '<a bool "
+     "settings key>'})"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['127.0.0.1'], 'start': None}}}" % DAEMON}, "socket"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['127.0.0.1'], 'start': ['login']}}}" % DAEMON}, "socket"),
+    # the switch form is a table of one key, login, naming a settings key
+    *[({"ANNOUNCES": "2", "DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', "
+                                     "'addresses': ['127.0.0.1'], 'start': %s}}}"
+        % (DAEMON, start)}, "optionally start")
+      for start in ("{}", "{'login': 5}", "{'login': ''}", "{'login': 'a b'}",
+                    "{'boot': 'gate.on'}", "{'login': 'gate.on', 'more': 1}",
+                    "{'connection': 'gate.on'}")],
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['::1', '127.0.0.1', '::1']}}}" % DAEMON}, "with ::1 given twice"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "

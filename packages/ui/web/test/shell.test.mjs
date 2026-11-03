@@ -22,3 +22,8 @@ test("the menu: the shell's panel first, the others by name, then Settings", () 
   assert.deepEqual(entries.map((e) => `${e.module}/${e.route}:${e.title}`),
                    ["ui/:Modules", "alpha/:Alpha", "zeta/:Zeta", "ui/settings:Settings"]);
 });
+
+test("on the phone the menu leaves out Settings, which only the desk reaches", () => {
+  const entries = menuEntries([{ name: "ui", page: { title: "Modules" }, refused: null }], false);
+  assert.deepEqual(entries.map((e) => `${e.module}/${e.route}`), ["ui/"]);
+});

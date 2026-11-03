@@ -4,8 +4,9 @@
 with three differences a test needs: it binds the port its options name, or one the
 system picks, it takes the test-only options (`child_args` for every page server it
 starts, `leave_out` for the modules its snapshot leaves out, `failed_for` for the seconds
-a failed start answers with its failure) from its one argument, never from a setting or a
-variable, and it stops when its lifeline closes (`moxi.proc.spawn(..., lifeline="fd")`).
+a failed start answers with its failure, `gateway` to run the shell's gateway as
+`moxi-ui-serve` does) from its one argument, never from a setting or a variable, and it
+stops when its lifeline closes (`moxi.proc.spawn(..., lifeline="fd")`).
 
 Once it serves, it prints one line, `ready <JSON>`, holding its runtime file's fields
 (the token among them), to stdout, which is a pipe to the test only.
@@ -32,6 +33,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     leave_out = [str(name) for name in options.get("leave_out", ())]
     port = int(options.get("port", 0))
     failed_for = float(options.get("failed_for", FAILED_FOR))
+    gateway = bool(options.get("gateway", False))
     log.setup(serve.MODULE, "info")
     layout = Layout(serve.MODULE)
     runtime_dir = layout.runtime_dir(create=True)
@@ -41,7 +43,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 log=cli.log_path(), child_args=child_args,
                                 failed_for=failed_for)
             shell = Shell(listen.bind(port), epoch=None, layout=layout, snapshot=True,
-                          starters=starters, leave_out=leave_out)
+                          starters=starters, leave_out=leave_out, gateway=gateway)
             try:
                 info = shell.start()
                 proc.lifeline(on_close=shell.stop)

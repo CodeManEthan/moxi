@@ -12,8 +12,11 @@ The writer
 - The credential is referenced by path and never copied or opened: tunnel checks only that
   the file exists, is a regular file and belongs to the user.
 - The file is written 0600 and atomically, through `moxi.files.atomic_write`.
-- The ingress list has one `hostname` and `service: http://127.0.0.1:<target>` rule per
-  target, then the catch-all `service: http_status:404`, last.
+- The ingress list has one rule per target: its `hostname`, its `service`
+  (`http://127.0.0.1:<target>`, or `unix:<path>` for a `unix` entry), and
+  `originRequest: httpHostHeader: <hostname>`, so the target sees its own hostname as the
+  Host whatever cloudflared's default is; then the catch-all `service: http_status:404`,
+  last.
 - It refuses a tunnel id that is not a UUID, a hostname that fails the label check (each
   label `[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?`, two labels at least, 253 characters
   at most) and a path that holds a control character.
@@ -168,13 +171,23 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def rules(rec: Record) -> list[tuple[str, int]]:
-    """The record's Cloudflare set as ingress rules, (hostname, loopback port), sorted."""
-    return sorted({(normal_host(host), target) for _, host, target in rec.cloudflare_set()})
+def rules(rec: Record) -> list[tuple[str, int | str]]:
+    """The record's Cloudflare set as ingress rules, (hostname, loopback port or socket
+    path), sorted."""
+    return sorted({(normal_host(host), target) for _, host, target in rec.cloudflare_set()},
+                  key=lambda pair: (pair[0], str(pair[1])))
 
 
-def render(pairs: Iterable[tuple[str, int]], *, tunnel_id: object, credentials: object,
-           metrics_port: int) -> str:
+def service(target: int | str) -> str:
+    """A rule's `service` for a record target: `http://127.0.0.1:<port>` for a port,
+    `unix:<path>` for a socket path."""
+    if isinstance(target, str):
+        return f"unix:{target}"
+    return f"http://127.0.0.1:{int(target)}"
+
+
+def render(pairs: Iterable[tuple[str, int | str]], *, tunnel_id: object,
+           credentials: object, metrics_port: int) -> str:
     """The whole `cloudflared.yml` for `pairs`, its digest line first. Refuses (exit 3) a
     bad tunnel id, hostname or path. The credentials path is checked for its form only:
     whether the file is there and the user's is for `ready` and the doctor, so a remove
@@ -188,8 +201,11 @@ def render(pairs: Iterable[tuple[str, int]], *, tunnel_id: object, credentials: 
     lines = [f"tunnel: {q(tid)}", f"credentials-file: {q(cred)}",
              f"metrics: {q(f'127.0.0.1:{int(metrics_port)}')}", "ingress:"]
     for host, target in pairs:
-        lines.append(f"  - hostname: {q(check_hostname(host))}")
-        lines.append(f"    service: {q(f'http://127.0.0.1:{int(target)}')}")
+        name = check_hostname(host)
+        lines.append(f"  - hostname: {q(name)}")
+        lines.append(f"    service: {q(service(target))}")
+        lines.append("    originRequest:")
+        lines.append(f"      httpHostHeader: {q(name)}")
     lines.append(f"  - service: {q(CATCH_ALL)}")
     rest = "\n".join(lines) + "\n"
     return f"{DIGEST_PREFIX}{digest(rest)}\n{rest}"
@@ -630,7 +646,7 @@ class Cloudflare:
         whoever changed the file; else `changed` when the file was edited by hand; None
         when it matches."""
         on_disk = read_file()
-        want = f"http://127.0.0.1:{entry.target}"
+        want = service(entry.target)
         if on_disk.rules().get(normal_host(entry.host)) != want or not switch_on():
             return "missing"
         if on_disk.text is not None and on_disk.by_hand:
@@ -640,7 +656,7 @@ class Cloudflare:
 
 __all__ = ["DAEMON", "SWITCH", "PORT", "StepFailed", "Cloudflare", "check_tunnel_id",
            "check_hostname", "check_path", "credentials_problem", "config_path", "digest",
-           "rules", "render", "render_record", "OnDisk", "read_file", "parse_rules",
+           "rules", "service", "render", "render_record", "OnDisk", "read_file", "parse_rules",
            "write_file", "delete_file", "switch_on", "unit_state", "newer", "newer_text",
            "step", "agreement",
            "in_step_row", "setup_problems", "setup_row", "find_binary", "health"]

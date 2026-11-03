@@ -6,7 +6,7 @@ deadline, `BUDGET` seconds from its start, and every wait in it is cut to what i
 
 - the local rows come first: the record, the declarations, the Cloudflare rows (files,
   and the core's unit status, waited for at most `READ_WAIT`) and a connect to each
-  recorded target's loopback port, each waiting at most `CONNECT_WAIT`;
+  recorded target's loopback port or socket, each waiting at most `CONNECT_WAIT`;
 - then the `tailscale` reads, each run once and shared by every row and by the entries'
   comparison: `version`, `status --json`, `serve status --json` and `debug prefs`, each
   waiting at most `READ_WAIT`;
@@ -253,15 +253,19 @@ def _answer_rows(entries: Mapping[str, Entry], *, connect_wait: float, deadline:
             continue
         name = f"{key} answers"
         module = key.partition("/")[0]
-        where = f"127.0.0.1:{entry.target}"
+        unix = entry.form == "unix"
+        where = str(entry.target) if unix else f"127.0.0.1:{entry.target}"
         left = deadline - clock()
         if left <= 0:
             out.append(Row(MODULE, name, "warn", f"not checked: {_ran_out(budget)}"))
             continue
         try:
-            with socket.create_connection(("127.0.0.1", entry.target),
-                                          timeout=min(connect_wait, left)):
-                pass
+            if unix:
+                _connect_unix(str(entry.target), min(connect_wait, left))
+            else:
+                with socket.create_connection(("127.0.0.1", entry.target),
+                                              timeout=min(connect_wait, left)):
+                    pass
         except OSError:
             out.append(Row(MODULE, name, "warn",
                            f"nothing answers on {where}: {module} is not serving it, so "
@@ -269,6 +273,17 @@ def _answer_rows(entries: Mapping[str, Entry], *, connect_wait: float, deadline:
             continue
         out.append(Row(MODULE, name, "ok", f"{where} answers"))
     return out
+
+
+def _connect_unix(path: str, timeout: float) -> None:
+    """Connect to the Unix socket `path` and close; raises `OSError` when nothing answers
+    there, or the system has no Unix sockets."""
+    family = getattr(socket, "AF_UNIX", None)
+    if family is None:
+        raise OSError("this system has no Unix sockets")
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        sock.connect(path)
 
 
 # -- Tailscale -----------------------------------------------------------------------------
@@ -472,8 +487,8 @@ class _NotChecked(Exception):
 
 def _entry_rows(rec: Record, decls: declare.Declarations, tailscale_keys: list[str],
                 reads: _Reads | None) -> list[Row]:
-    ports_now = acts._ports_now(rec, decls)
-    clash = declare.clashes(ports_now)
+    now = acts._now(rec, decls)
+    clash = declare.clashes(acts._ports(now))
     bad = acts._bad_keys(decls)
     cloud = acts._Live()
     owner = tailscale_keys[0] if tailscale_keys else None
@@ -487,7 +502,7 @@ def _entry_rows(rec: Record, decls: declare.Declarations, tailscale_keys: list[s
             return _tailscale_live(e, reads, owner=key == owner, name=key)
 
         try:
-            state = acts._state(key, entry, decls, bad, ports_now, clash, live)
+            state = acts._state(key, entry, decls, bad, now, clash, live)
         except _NotChecked as exc:
             out.append(exc.row)
             continue

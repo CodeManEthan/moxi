@@ -529,10 +529,10 @@ def test_every_new_name_that_keeps_the_contract_passes(repo):
 
 
 def test_a_newer_schema_is_one_finding(repo):
-    repo.src("module.py", announcement(ANNOUNCES="2", DAEMONS="{'x': {'later': 1}}"))
+    repo.src("module.py", announcement(ANNOUNCES="3", DAEMONS="{'x': {'later': 1}}"))
     assert repo.findings("7") == [
-        "src/moxi_alpha/module.py:0: the announcement announces schema 2; this moxi "
-        "knows up to 1; upgrade moxi"]
+        "src/moxi_alpha/module.py:0: the announcement announces schema 3; this moxi "
+        "knows up to 2; upgrade moxi"]
 
 
 @pytest.mark.parametrize("name", ["installs", "runtime", "set", "unset"])

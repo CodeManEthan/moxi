@@ -217,3 +217,30 @@ def test_at_360_px_nothing_scrolls_sideways_and_the_menu_is_one_button(ui_page, 
     ui_page.set_viewport_size({"width": 1024, "height": 800})
     expect(ui_page.locator("#moxi-menu-button")).to_be_hidden()
     expect(ui_page.locator("#moxi-menu")).to_be_visible()
+
+
+def test_the_gateway_section_shows_the_audit_log_and_each_devices_sign_ins(ui_shell, ui_page):
+    from moxi_ui.gateway.audit import Audit
+    from moxi_ui.gateway.devices import Devices
+
+    state = ui_shell.state_dir("ui")
+    devices = Devices.of(state)
+    device = devices.add(name="Test phone", credential=None, public_key=None, sign_count=0,
+                         host="gw.example.test", provider="tailscale", change="r1.1")
+    writer = Audit(state)
+    writer("signin", {"device": device.id, "session": "a" * 12})
+    writer.request({"id": "r1", "method": "GET", "path": "/m/fixture/api/read", "status": 200,
+                    "device": device.id}, signed_in=True)
+    writer.close()
+    try:
+        ui_page.goto("/m/ui/")
+        section = _modules(ui_page).locator("moxi-ui-gateway section[data-section=gateway]")
+        expect(section.locator(f"li[data-device='{device.id}']")).to_contain_text("Sign-ins:")
+        log = section.locator("details.log")
+        log.locator("summary").click()
+        newest = log.locator("li").first
+        expect(newest).to_contain_text("request")
+        expect(newest).to_contain_text("path=/m/fixture/api/read")
+        expect(log.locator("li")).to_have_count(2)
+    finally:
+        devices.revoke(device.id)

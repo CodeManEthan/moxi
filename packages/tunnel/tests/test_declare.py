@@ -10,7 +10,7 @@ from moxi_tunnel.errors import Refused
 
 GOOD = """
 GATEWAY = {"reach": "own-devices", "port_setting": "port", "doc": "the page",
-           "asks": ["later"], "upstream": "x"}
+           "asks": ["later"], "socket": "x"}
 CONNECTOR = {"reach": "public", "port_setting": "other.port"}
 """
 

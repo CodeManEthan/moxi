@@ -25,6 +25,16 @@ finishes it. Either way the act exits 1 with the provider's stderr unchanged.
 
 A `--replace` is finished or undone as one unit, and the foreign config it takes over is
 never lost: at every moment it is live or a copy of it is in `displaced/`.
+
+A target whose declaration names `upstream` is applied to what `upstream()` gives, called
+before every apply; when it raises `NotReady` the act applies nothing (an add or a switch
+is refused with its text, a repair leaves that entry and lists it). Before any provider
+command that can make a persistent `http` mapping live at an origin, the act commits that
+origin into the record's `retired` list, in its `applying` commit where it has one, else
+in a commit of its own; a `--replace` retires the origin of the config it takes over too.
+An entry placed on a Unix socket takes a fresh placement: its port skips every retired
+origin, and a repair that moves an entry onto a socket, or renames one, chooses a new port
+when the origin it would keep is retired.
 """
 
 from __future__ import annotations
@@ -94,21 +104,36 @@ def _bad_keys(decls: declare.Declarations) -> dict[str, declare.Bad]:
     return out
 
 
-def _ports_now(rec: Record, decls: declare.Declarations) -> dict[str, int]:
-    """Each recorded target's loopback port now: its setting, else the record's."""
+Upstream = tuple[str, "int | str"]
+
+
+def _now(rec: Record, decls: declare.Declarations) -> dict[str, Upstream]:
+    """Each recorded target's upstream now, `(form, target)`: what its declaration gives
+    (its `upstream()`, else its port setting), else the record's. A declaration whose
+    `upstream()` raises keeps the record's, so `check` compares the live entry with it."""
     out = {}
     for key, entry in rec.entries.items():
         if not entry.known:
             continue
+        now = (entry.form, entry.target)
         target = decls.targets.get(key)
-        port = entry.target
         if target is not None:
             try:
-                port = declare.loopback_port(target)
+                now = declare.upstream(target)
             except Refused:
                 pass
-        out[key] = port
+        out[key] = now
     return out
+
+
+def _ports(now: Mapping[str, Upstream]) -> dict[str, int]:
+    """The loopback ports among `now`: a target on a socket holds none."""
+    return {key: target for key, (form, target) in now.items() if form == "http"}
+
+
+def _ports_now(rec: Record, decls: declare.Declarations) -> dict[str, int]:
+    """Each recorded target's loopback port now, for the targets whose upstream is one."""
+    return _ports(_now(rec, decls))
 
 
 def _hand_off(entry: Entry) -> str:
@@ -126,17 +151,17 @@ def _hostport_present(serve: Mapping, entry: Entry) -> bool:
 
 
 def _states(rec: Record, decls: declare.Declarations, keys, live: Callable) -> list[EntryState]:
-    ports_now = _ports_now(rec, decls)
-    clash = declare.clashes(ports_now)
+    now = _now(rec, decls)
+    clash = declare.clashes(_ports(now))
     bad = _bad_keys(decls)
     out = []
     for key in sorted(keys):
         entry = rec.entries[key]
-        out.append(_state(key, entry, decls, bad, ports_now, clash, live))
+        out.append(_state(key, entry, decls, bad, now, clash, live))
     return out
 
 
-def _state(key, entry, decls, bad, ports_now, clash, live) -> EntryState:
+def _state(key, entry, decls, bad, now, clash, live) -> EntryState:
     if not entry.known:
         return EntryState(key, "changed", entry, NEWER, "upgrade moxi-tunnel")
     if key not in decls.targets and key not in bad:
@@ -160,12 +185,18 @@ def _state(key, entry, decls, bad, ports_now, clash, live) -> EntryState:
                           f"{_hand_off(entry)}, then moxi tunnel remove {key} --forget"
                           if entry.provider == "tailscale" else "moxi tunnel repair")
     if key in clash:
-        return EntryState(key, "clash", entry, f"its loopback port {ports_now[key]} is also "
+        return EntryState(key, "clash", entry, f"its loopback port {now[key][1]} is also "
                           f"{', '.join(clash[key])}'s", _clash_fix(key, clash[key], decls))
-    if ports_now.get(key, entry.target) != entry.target:
-        return EntryState(key, "moved", entry, f"its loopback port moved from {entry.target} "
-                          f"to {ports_now[key]}", "moxi tunnel repair")
+    want = now.get(key, (entry.form, entry.target))
+    if want != (entry.form, entry.target):
+        return EntryState(key, "moved", entry, _moved(entry, want), "moxi tunnel repair")
     return EntryState(key, "ok", entry)
+
+
+def _moved(entry: Entry, want: Upstream) -> str:
+    if entry.form == want[0] == "http":
+        return f"its loopback port moved from {entry.target} to {want[1]}"
+    return f"its upstream moved from {ts_.proxy(entry.target)} to {ts_.proxy(want[1])}"
 
 
 def _clash_fix(key: str, others: list[str], decls: declare.Declarations) -> str:
@@ -368,17 +399,23 @@ def add(text: str, *, provider_name: str | None = None, port: int | None = None,
                           "undoes it")
         name = provider_name or (old.provider if old else provider.DEFAULT)
         prov = provider.get(name)
-        loop = declare.loopback_port(target)
-        others = {k: p for k, p in _ports_now(rec, decls).items() if k != key}
-        same = declare.same_port(loop, others, exclude=key)
-        if same:
-            raise Refused(f"{key}'s loopback port {loop} is also {same[0]}'s",
-                          f"moxi config set {target.module} {target.port_setting} <port>")
+        form, loop = declare.upstream(target)
+        if form == "unix" and name == "tailscale" and target.reach == "public":
+            raise Refused(f"{key} is public and its upstream is a Unix socket, which Funnel "
+                          "doesn't forward to", "use --provider cloudflare")
+        if form == "http":
+            others = {k: p for k, p in _ports_now(rec, decls).items() if k != key}
+            same = declare.same_port(loop, others, exclude=key)
+            if same:
+                raise Refused(f"{key}'s loopback port {loop} is also {same[0]}'s",
+                              f"moxi config set {target.module} {target.port_setting} "
+                              "<port>")
+        place = _Place(rec, target, form, loop)
         if old is not None and old.provider != name:
-            return _plan_switch(rec, key, target, old, prov, loop, port=port,
+            return _plan_switch(rec, key, target, old, prov, place, port=port,
                                 hostname=hostname)
         if name == "cloudflare":
-            return _plan_cloudflare(rec, key, target, old, prov, loop, hostname)
+            return _plan_cloudflare(rec, key, target, old, prov, place, hostname)
         problems = prov.ready(target.reach)
         if problems:
             _refuse_problems(problems, "Tailscale")
@@ -386,7 +423,7 @@ def add(text: str, *, provider_name: str | None = None, port: int | None = None,
         serve = prov.serve_config()
         if old is not None:
             if (old.state == State.ON and normal_host(old.host) == host
-                    and ts_.matches(serve, old, target=loop)):
+                    and old.form == form and ts_.matches(serve, old, target=loop)):
                 if port is not None and port != old.port:
                     raise Refused(f"{key} is already on port {old.port}",
                                   f"moxi tunnel remove {key}, then add it with --port "
@@ -400,29 +437,90 @@ def add(text: str, *, provider_name: str | None = None, port: int | None = None,
         foreign = {p: ts_.describe(ts_.parts(serve, p)) for p in ts_.tcp_ports(serve)
                    if p not in moxi}
         funnel = prov.funnel_ports() if target.reach == "public" else None
-        choice = ports.choose(target.reach, target=loop, port=port, moxi=moxi,
-                              foreign=foreign, funnel_ports=funnel, replace=replace_)
+        choice = place.choose(host, port=port, moxi=moxi, foreign=foreign,
+                              funnel_ports=funnel, replace=replace_)
         entry = Entry(reach=target.reach, provider=name, host=host, port=choice.port,
-                      target=loop, state=State.APPLYING)
+                      target=loop, state=State.APPLYING, form=form)
         url = api.url(host, choice.port)
-        lines = [f"{key}: {ts_.verb(target.reach)} {url} to {ts_.upstream(loop)} "
-                 f"({entry.exposure})", *choice.lines]
+        lines = [f"{key}: {ts_.verb(target.reach)} {url} to {ts_.proxy(loop)} "
+                 f"({entry.exposure})", *choice.lines, *place.lines(host, choice.port,
+                                                                    replaced=choice.replace)]
         more, ct = warn.add_lines(provider=name, host=host, url=url, module=target.module,
                                   reach=target.reach, exposure=entry.exposure,
                                   warned=rec.warned_ct)
         lines += more
         copy = None
+        retire = place.retire(entry)
         if choice.replace:
             copy = ts_.copy_of(serve, choice.port, host)
             lines.append(warn.replace_line(choice.port, copy,
                                        f"a new file in {record.displaced_dir()}"))
+            retire += _foreign_origins(copy)
         signature = ("add", key, json.dumps(entry.to_json(), sort_keys=True),
-                     json.dumps(copy, sort_keys=True), tuple(lines))
+                     json.dumps(copy, sort_keys=True), tuple(lines), tuple(retire))
         return _Plan(lines, signature, core=False,
                      data=dict(rec=rec, key=key, entry=entry, ct=ct, copy=copy, ts=prov,
-                               serve=serve, kind="tailscale"))
+                               serve=serve, kind="tailscale", retire=retire))
 
     return _run(plan, _do_add, ask)
+
+
+class _Place:
+    """Where an act that places `target` puts it: its upstream now, `(form, loop)`, and the
+    retired origins it goes by, the record's with the copy the declaration keeps."""
+
+    def __init__(self, rec: Record, target: declare.Target, form: str, loop: int | str):
+        self.target = target
+        self.form = form
+        self.loop = loop
+        #: The declaration's own copy of retired origins, committed by the act's first
+        #: write.
+        self.copy = declare.retired(target)
+        self.retired = rec.retired | frozenset(self.copy)
+
+    @property
+    def fresh(self) -> bool:
+        """True for an entry on a Unix socket: its port skips every retired origin."""
+        return self.form == "unix"
+
+    def choose(self, host: str, *, port: int | None, moxi: Mapping[int, str],
+               foreign: Mapping[int, str], funnel_ports, replace: bool) -> ports.Choice:
+        """The outside port on `host`. A fresh placement starts from the port setting's
+        value and skips every retired port of `host` and every port that holds foreign
+        config, since taking that over would retire its origin."""
+        if not self.fresh:
+            return ports.choose(self.target.reach, target=int(self.loop), port=port,
+                                moxi=moxi, foreign=foreign, funnel_ports=funnel_ports,
+                                replace=replace)
+        skip = {p for h, p in self.retired if h == normal_host(host)} | set(foreign)
+        return ports.choose(self.target.reach, target=declare.loopback_port(self.target),
+                            port=port, moxi=moxi, foreign=foreign,
+                            funnel_ports=funnel_ports, replace=replace, retired=skip)
+
+    def lines(self, host: str, port: int, *, replaced: bool = False) -> list[str]:
+        """The plan line for a socket entry placed, as the user chose, at a retired
+        origin."""
+        if self.fresh and (replaced or (normal_host(host), port) in self.retired):
+            return [warn.RETIRED_LINE]
+        return []
+
+    def retire(self, entry: Entry) -> list[tuple[str, int]]:
+        """What the act's first commit adds to `retired`: the declaration's copy, and the
+        entry's own origin when it is a persistent `http` mapping."""
+        out = list(self.copy)
+        if entry.form == "http":
+            out.append(record.origin(entry))
+        return out
+
+
+def _foreign_origins(copy: Mapping) -> list[tuple[str, int]]:
+    """The origins of the foreign config a `--replace` takes over: tunnel can't vouch for
+    what it forwarded to."""
+    port = int(copy["port"])
+    hosts = [str(copy["host"])]
+    for name in ("Web", "AllowFunnel"):
+        hosts += [key.rpartition(":")[0] for key in copy["parts"].get(name, {})]
+    return [(normal_host(h), port) for h in dict.fromkeys(hosts)]
 
 
 def _do_add(plan: _Plan, act: _Act) -> Outcome:
@@ -441,7 +539,7 @@ def _do_add(plan: _Plan, act: _Act) -> Outcome:
         name = record.write_pending(port, copy)
         _step("replace-copy")
         entry = replace(entry, displaced=name)
-        act.commit({key: entry}, warned=warned)
+        act.commit({key: entry}, warned=warned, retire=d["retire"])
         _step("replace-applying")
         try:
             now = ts.serve_config(fresh=True)
@@ -478,7 +576,7 @@ def _do_add(plan: _Plan, act: _Act) -> Outcome:
         notes.append(f"the foreign config on port {port} is kept in "
                      f"{record.final_path(name)}")
     else:
-        act.commit({key: entry}, warned=warned)
+        act.commit({key: entry}, warned=warned, retire=d["retire"])
         _step("add-applying")
     try:
         ts.apply(entry)
@@ -507,33 +605,38 @@ def _refuse_newer_cloudflare(rec: Record) -> None:
 
 
 def _plan_cloudflare(rec: Record, key: str, target: declare.Target, old: Entry | None,
-                     prov: provider.Provider, loop: int, hostname: str | None) -> _Plan:
+                     prov: provider.Provider, place: _Place, hostname: str | None) -> _Plan:
     _refuse_newer_cloudflare(rec)
+    loop = place.loop
     if old is not None:
         same = hostname is None or cf_.check_hostname(hostname) == normal_host(old.host)
         if not same:
             raise Refused(f"{key} is already on {old.host}",
                           f"moxi tunnel remove {key}, then add it with --hostname {hostname}")
-        if old.state == State.ON and old.target == loop and prov.live_state(old) is None:
+        if (old.state == State.ON and old.form == place.form and old.target == loop
+                and prov.live_state(old) is None):
             return _Plan(done=Outcome(api.from_entry(rec, key),
                                       [f"{key} is already on: "
                                        f"{api.url(old.host, old.port)}"]))
         raise Refused(f"{key} is recorded but not ok as it is",
                       f"moxi tunnel repair, or moxi tunnel remove {key}")
-    entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, old=None)
+    entry = _cloudflare_entry(rec, key, target, prov, place, hostname, old=None)
     url = api.url(entry.host, entry.port)
-    lines = [f"{key}: Cloudflare {url} to {ts_.upstream(loop)} ({entry.exposure})"]
+    lines = [f"{key}: Cloudflare {url} to {cf_.service(loop)} ({entry.exposure})",
+             *place.lines(entry.host, entry.port)]
     more, _ = warn.add_lines(provider="cloudflare", host=entry.host, url=url,
                              module=target.module, reach=target.reach,
                              exposure=entry.exposure, warned=rec.warned_ct)
     lines += more
-    signature = ("add", key, json.dumps(entry.to_json(), sort_keys=True), tuple(lines))
+    retire = place.retire(entry)
+    signature = ("add", key, json.dumps(entry.to_json(), sort_keys=True), tuple(lines),
+                 tuple(retire))
     return _Plan(lines, signature, core=True,
-                 data=dict(rec=rec, key=key, entry=entry, kind="cloudflare"))
+                 data=dict(rec=rec, key=key, entry=entry, kind="cloudflare", retire=retire))
 
 
 def _cloudflare_entry(rec: Record, key: str, target: declare.Target, prov: provider.Provider,
-                      loop: int, hostname: str | None, *, old: Entry | None) -> Entry:
+                      place: _Place, hostname: str | None, *, old: Entry | None) -> Entry:
     """The entry an act puts onto Cloudflare, once its hostname and the provider's
     prerequisites pass. A switch passes the `old` entry, which is rewritten in place."""
     if hostname is None:
@@ -548,7 +651,7 @@ def _cloudflare_entry(rec: Record, key: str, target: declare.Target, prov: provi
     if problems:
         _refuse_problems(problems, "Cloudflare")
     return _switched(old, reach=target.reach, provider="cloudflare", host=host,
-                     port=cf_.PORT, target=loop)
+                     port=cf_.PORT, target=place.loop, form=place.form)
 
 
 def _switched(old: Entry | None, **values) -> Entry:
@@ -563,11 +666,11 @@ def _switched(old: Entry | None, **values) -> Entry:
 def _from(old: Entry) -> dict:
     """What a provider switch keeps of the old address while it is under way."""
     return {"provider": old.provider, "host": old.host, "port": old.port,
-            "target": old.target, "reach": old.reach}
+            "target": old.target, "reach": old.reach, "form": old.form}
 
 
 def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
-                 prov: provider.Provider, loop: int, *, port: int | None,
+                 prov: provider.Provider, place: _Place, *, port: int | None,
                  hostname: str | None) -> _Plan:
     """A provider switch: a remove and an add under one confirmation, the entry rewritten
     in place with `from` holding the old address until it ends."""
@@ -586,7 +689,8 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
                           f"Moxi applied: {ts_.describe(ts_.parts(serve, old.port))}",
                           f"remove it by hand with {_hand_off(old)}, then moxi tunnel "
                           f"remove {key} --forget")
-        entry = _cloudflare_entry(rec, key, target, prov, loop, hostname, old=old)
+        entry = _cloudflare_entry(rec, key, target, prov, place, hostname, old=old)
+        lines += place.lines(entry.host, entry.port)
         data.update(ts=ts, serve=serve, gone=gone)
     else:
         problems = prov.ready(target.reach)
@@ -598,11 +702,11 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
         foreign = {p: ts_.describe(ts_.parts(serve, p)) for p in ts_.tcp_ports(serve)
                    if p not in moxi}
         funnel = prov.funnel_ports() if target.reach == "public" else None
-        choice = ports.choose(target.reach, target=loop, port=port, moxi=moxi,
-                              foreign=foreign, funnel_ports=funnel)
+        choice = place.choose(host, port=port, moxi=moxi, foreign=foreign,
+                              funnel_ports=funnel, replace=False)
         entry = _switched(old, reach=target.reach, provider="tailscale", host=host,
-                          port=choice.port, target=loop)
-        lines += choice.lines
+                          port=choice.port, target=place.loop, form=place.form)
+        lines += [*choice.lines, *place.lines(host, choice.port)]
         data.update(ts=prov, serve=serve, gone=True)
     url = api.url(entry.host, entry.port)
     lines.insert(0, f"{key}: switch {api.url(old.host, old.port)} ({old.provider}) to {url} "
@@ -611,8 +715,10 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
                               module=target.module, reach=target.reach,
                               exposure=entry.exposure, warned=rec.warned_ct)
     lines += [*more, warn.SWITCH_LINE]
-    data.update(entry=entry, ct=ct)
-    signature = ("switch", key, json.dumps(entry.to_json(), sort_keys=True), tuple(lines))
+    retire = place.retire(entry)
+    data.update(entry=entry, ct=ct, retire=retire)
+    signature = ("switch", key, json.dumps(entry.to_json(), sort_keys=True), tuple(lines),
+                 tuple(retire))
     return _Plan(lines, signature, core=True, data=data)
 
 
@@ -658,7 +764,7 @@ def _do_add_cloudflare(plan: _Plan, act: _Act) -> Outcome:
     old = d["rec"].entries.get(key)
     entry = replace(d["entry"], applied_at=record.stamp())
     try:
-        act.commit({key: entry})
+        act.commit({key: entry}, retire=d["retire"])
         _step("cloudflare-applying")
         cf_.Cloudflare().apply(entry)
     except Exception as exc:  # noqa: BLE001 - every failure goes back whole
@@ -678,7 +784,7 @@ def _do_switch(plan: _Plan, act: _Act) -> Outcome:
     ts_port = old.port if to_cloudflare else entry.port
     unit = None
     try:
-        act.commit({key: entry}, warned=[entry.host] if d["ct"] else [])
+        act.commit({key: entry}, warned=[entry.host] if d["ct"] else [], retire=d["retire"])
     except StepFailed as exc:
         # Onto Cloudflare, the unit must be up before the entry can be on: go back. Off
         # Cloudflare, the rule has left the file and the switch follows the record; only
@@ -1008,8 +1114,10 @@ def repair(*, ask: Confirm) -> Outcome:
     """Bring every recorded entry back to `ok` where tunnel can: settle every pending copy
     first, then re-apply `missing` and `moved` entries on their port and host, move
     `renamed` ones to the machine's new host on their port, and finish `half` ones. Each
-    re-apply uses the target's loopback port now, unless that clashes with another
-    entry's. A `changed` Tailscale entry, a `clash`, an `orphan` and a replace held for the
+    re-apply uses the target's upstream now, unless that clashes with another entry's
+    loopback port; an entry it puts on a Unix socket, from `http` or onto a new host, takes
+    a new port when the origin it would keep is retired. A target whose `upstream()`
+    raises, a `changed` Tailscale entry, a `clash`, an `orphan` and a replace held for the
     user are left and listed. Exits 1 when a provider act failed, 3 when something is left
     for the user, else 0."""
 
@@ -1061,7 +1169,30 @@ def repair(*, ask: Confirm) -> Outcome:
                       and normal_host(e.host) != host_now
                       and (s.check == "renamed" or (s.check == "half"
                                                     and e.state == State.APPLYING)))
-            if moving:
+            acting = moving or s.check in ("half", "missing", "moved") or (
+                s.check == "changed" and e.known and e.provider == "cloudflare")
+            spot = None
+            if acting and e.state != State.REMOVING:
+                try:
+                    spot = _placement(rec, s.target, e, decls, host=host_now, serve=serve)
+                except Refused as exc:
+                    held.append(f"{s.target}: left as it is: {exc.reason}" +
+                                (f" (fix: {exc.fix})" if exc.fix else ""))
+                    continue
+            if spot is not None and spot.port != e.port:
+                new_url = api.url(spot.host, spot.port)
+                lines.append(f"{s.target}: move {url} to {new_url}, on {ts_.proxy(spot.target)}")
+                lines += spot.lines
+                if spot.host != normal_host(e.host):
+                    more, ct = warn.add_lines(provider=e.provider, host=spot.host,
+                                              url=new_url, module=s.target.split("/")[0],
+                                              reach=e.reach, exposure=e.exposure,
+                                              warned=rec.warned_ct)
+                    lines += [*more, warn.REPAIR_LINE]
+                    if ct:
+                        ct_hosts.append(spot.host)
+                acts.append(("act", s.target, s.check, spot.host, spot.port))
+            elif moving:
                 new_url = api.url(host_now, e.port)
                 lines.append(f"{s.target}: move {url} to {new_url}")
                 more, ct = warn.add_lines(provider=e.provider, host=host_now, url=new_url,
@@ -1112,8 +1243,8 @@ def _do_repair(plan: _Plan, act: _Act) -> Outcome:
                             "--replace then asks again)")
     rec = record.read()
     decls = declare.read()
-    ports_now = _ports_now(rec, decls)
-    clash = declare.clashes(ports_now)
+    now = _now(rec, decls)
+    clash = declare.clashes(_ports(now))
     if ts is not None:
         serve = ts.serve_config(fresh=True)
         host_now = ts.host()
@@ -1125,16 +1256,21 @@ def _do_repair(plan: _Plan, act: _Act) -> Outcome:
             continue
         if record.names_pending(e):
             continue
-        state = _state(key, e, decls, _bad_keys(decls), ports_now, clash,
+        state = _state(key, e, decls, _bad_keys(decls), now, clash,
                        lambda entry: ts_.live_state(serve, entry, host_now))
         if state.check not in ("half", "missing", "moved", "renamed"):
             continue
-        target = e.target if key in clash else ports_now.get(key, e.target)
         if e.state == State.REMOVING:
             got = _finish_remove(act, ts, key, e)
         else:
-            got = _reapply(act, ts, key, e, host=host_now, target=target,
-                           ct=host_now in d["ct"])
+            try:
+                spot = _placement(record.read(), key, e, decls, host=host_now, serve=serve,
+                                  keep=key in clash)
+            except Refused as exc:
+                got = f"held: left as it is: {exc.reason}" + (
+                    f" (fix: {exc.fix})" if exc.fix else "")
+            else:
+                got = _reapply(act, ts, key, e, spot, ct=spot.host in d["ct"])
         notes.append(f"{key}: {got}")
         failed |= got.startswith("failed")
         if got.startswith("held"):
@@ -1166,8 +1302,8 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
     rec = record.read()
     if cf_.newer(rec):
         return False  # cloudflared.yml is kept as it is; the plan held it
-    ports_now = _ports_now(rec, decls)
-    clash = declare.clashes(ports_now)
+    now = _now(rec, decls)
+    clash = declare.clashes(_ports(now))
     bad = _bad_keys(decls)
     live = _Live()
     fixes: dict[str, Entry] = {}
@@ -1179,7 +1315,7 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
             continue
         if key not in decls.targets and key not in bad:
             continue
-        state = _state(key, e, decls, bad, ports_now, clash, live)
+        state = _state(key, e, decls, bad, now, clash, live)
         if state.check not in ("half", "missing", "moved", "changed"):
             continue
         if ts is None and _from_tailscale(e):
@@ -1194,12 +1330,21 @@ def _repair_cloudflare(act: _Act, ts: ts_.Tailscale | None, decls: declare.Decla
                 continue
             drops[key] = None
             continue
-        target = e.target if key in clash else ports_now.get(key, e.target)
-        fixes[key] = replace(e, target=target, state=State.APPLYING, detail=None)
+        try:
+            spot = _placement(rec, key, e, decls, host=None, serve={}, keep=key in clash)
+        except Refused as exc:
+            line = f"{key}: held: left as it is: {exc.reason}" + (
+                f" (fix: {exc.fix})" if exc.fix else "")
+            notes.append(line)
+            held.append(line)
+            continue
+        fixes[key] = replace(e, form=spot.form, target=spot.target, state=State.APPLYING,
+                             detail=None)
     failure = None
     if fixes or drops:
+        retire = [record.origin(f) for f in fixes.values() if f.form == "http"]
         try:
-            act.commit({**fixes, **drops})
+            act.commit({**fixes, **drops}, retire=retire)
         except StepFailed as exc:
             failure = exc
     _step("repair-cloudflare")
@@ -1285,25 +1430,73 @@ def _finish_remove(act: _Act, ts: ts_.Tailscale, key: str, e: Entry) -> str:
     return "removed"
 
 
-def _reapply(act: _Act, ts: ts_.Tailscale, key: str, e: Entry, *, host: str, target: int,
+@dataclass(frozen=True)
+class _Spot:
+    """Where a re-apply puts an entry: its host, port and upstream, the origins its first
+    commit retires (the declaration's copy, when the port is chosen), and its plan lines."""
+
+    host: str
+    port: int
+    form: str
+    target: int | str
+    copy: tuple[tuple[str, int], ...] = ()
+    lines: tuple[str, ...] = ()
+
+
+def _placement(rec: Record, key: str, e: Entry, decls: declare.Declarations, *,
+               host: str | None, serve: Mapping, keep: bool = False) -> _Spot:
+    """Where a re-apply of `e` puts it: on `host` (the record's for Cloudflare, or None),
+    with its declaration's upstream now (the record's with `keep`, for a clash), on its
+    port. A Tailscale entry that goes onto a Unix socket from another form, or onto a new
+    host, takes a fresh placement when the origin it would keep is retired. Raises
+    `NotReady` or `Refused` when the upstream can't be had."""
+    host = normal_host(host or e.host)
+    target = decls.targets.get(key)
+    form, value = (e.form, e.target) if keep or target is None else declare.upstream(target)
+    if form == "unix" and e.provider == "tailscale" and e.reach == "public":
+        raise Refused(f"{key} is public and its upstream is a Unix socket, which Funnel "
+                      "doesn't forward to", f"moxi tunnel remove {key}")
+    spot = _Spot(host=host, port=e.port, form=form, target=value)
+    onto = e.form != "unix" or host != normal_host(e.host)
+    if e.provider != "tailscale" or form != "unix" or not onto or target is None:
+        return spot
+    place = _Place(rec, target, form, value)
+    if (host, e.port) not in place.retired:
+        return spot
+    moxi = ports.moxi_ports(rec, exclude=key)
+    foreign = {p: ts_.describe(ts_.parts(serve, p)) for p in ts_.tcp_ports(serve)
+               if p not in moxi}
+    foreign.setdefault(e.port, "this entry's own config")
+    choice = place.choose(host, port=None, moxi=moxi, foreign=foreign, funnel_ports=None,
+                          replace=False)
+    return replace(spot, port=choice.port, copy=tuple(place.copy),
+                   lines=tuple(choice.lines))
+
+
+def _reapply(act: _Act, ts: ts_.Tailscale, key: str, e: Entry, spot: _Spot, *,
              ct: bool) -> str:
-    """Apply `e` again on its port, on `host` with loopback port `target`, and commit it
-    `on`. It applies only over a port that holds nothing or Moxi's own config for it, so
-    no config Moxi has no copy of is overwritten."""
+    """Apply `e` again at `spot`, and commit it `on`. On its own port it applies only over
+    a port that holds nothing or Moxi's own config for it, so no config Moxi has no copy
+    of is overwritten; onto a new port it moves (`_move`). An `http` upstream's origin is
+    committed into `retired` before the apply."""
+    host, target = spot.host, spot.target
     serve = ts.serve_config(fresh=True)
-    new = replace(e, host=host, target=target, state=State.ON, detail=None, from_=None,
-                  applied_at=record.stamp())
+    new = replace(e, host=host, form=spot.form, target=target, port=spot.port,
+                  state=State.ON, detail=None, from_=None, applied_at=record.stamp())
     renamed = normal_host(e.host) != normal_host(host)
+    warned = [host] if ct and renamed else []
+    retire = [*spot.copy, *([record.origin(new)] if new.form == "http" else [])]
+    if spot.port != e.port:
+        return _move(act, ts, key, e, new, retire=retire, warned=warned)
     if not ts_.only_ours(serve, e, hosts=[e.host, host], targets=[e.target, target]):
         detail = (f"port {e.port} holds config Moxi did not apply: "
                   f"{ts_.describe(ts_.parts(serve, e.port))}")
         act.commit({key: replace(e, state=State.APPLYING, detail=detail)})
         return (f"held: {detail} (fix: remove that config by hand, or moxi tunnel remove "
                 f"{key})")
-    warned = [host] if ct and renamed else []
     if not ts_.matches(serve, new):
-        if e.state != State.APPLYING:
-            act.commit({key: replace(e, state=State.APPLYING)}, warned=warned)
+        if e.state != State.APPLYING or retire or warned:
+            act.commit({key: replace(e, state=State.APPLYING)}, warned=warned, retire=retire)
             warned = []
         _step("repair-applying")
         try:
@@ -1331,6 +1524,44 @@ def _reapply(act: _Act, ts: ts_.Tailscale, key: str, e: Entry, *, host: str, tar
     return f"ok on {api.url(host, e.port)}"
 
 
+def _move(act: _Act, ts: ts_.Tailscale, key: str, e: Entry, new: Entry, *,
+          retire: list[tuple[str, int]], warned: list[str]) -> str:
+    """Move `e` to `new`'s port: commit it `applying`, take its old config out, commit it
+    `applying` on the new port, apply, then commit it `on`. A crash or a failure at any
+    point leaves an `applying` entry that the next repair moves again."""
+    serve = ts.serve_config(fresh=True)
+    if ts_.parts(serve, new.port):
+        return (f"held: port {new.port} is no longer free: "
+                f"{ts_.describe(ts_.parts(serve, new.port))} (fix: moxi tunnel repair)")
+    live = _hostport_present(serve, e)
+    if live and not ts_.matches(serve, e):
+        return (f"held: its live config no longer matches what Moxi applied (fix: "
+                f"{_hand_off(e)}, then moxi tunnel repair)")
+    act.commit({key: replace(e, state=State.APPLYING, detail=None)}, warned=warned,
+               retire=retire)
+    _step("repair-moving")
+    try:
+        if live:
+            ts.remove(e)
+            if _hostport_present(ts.serve_config(fresh=True), e):
+                raise ApplyError(f"port {e.port} still holds it after the removal")
+        act.commit({key: replace(new, state=State.APPLYING, applied_at=None)})
+        _step("repair-moved")
+        ts.apply(new)
+        serve = ts.serve_config(fresh=True)
+        if not ts_.matches(serve, new):
+            raise ApplyError(f"after the apply, port {new.port} does not hold what Moxi "
+                             f"applied: {ts_.describe(ts_.parts(serve, new.port))}")
+    except Exception as exc:  # noqa: BLE001 - the entry keeps the failure
+        cur = act.current(key) or e
+        act.commit({key: replace(cur, detail=_reason(exc))})
+        return f"failed: {_reason(exc)}"
+    act.commit({key: new})
+    record.event("repair", key, provider=e.provider, port=new.port, old_port=e.port,
+                 old_host=e.host, new_host=new.host)
+    return f"moved to {api.url(new.host, new.port)}"
+
+
 # -- status -------------------------------------------------------------------------------
 
 def status(*, live: bool = False) -> dict:
@@ -1349,13 +1580,17 @@ def status(*, live: bool = False) -> dict:
         row = {"module": module, "name": name,
                "reach": entry.reach if entry else target.reach if target else None,
                "exposure": None, "provider": None, "state": None, "url": None,
-               "host": None, "port": None, "target": None, "change": None,
-               "displaced": None, "applied_at": None, "detail": None}
+               "host": None, "port": None, "form": None, "target": None,
+               "retired": None, "change": None, "displaced": None, "applied_at": None,
+               "detail": None}
         if entry is not None:
             row.update(exposure=entry.exposure if entry.known else None,
                        provider=entry.provider, state=str(entry.state),
                        url=api.url(entry.host, entry.port) if entry.known else None,
-                       host=entry.host, port=entry.port, target=entry.target,
+                       host=entry.host, port=entry.port, form=entry.form,
+                       target=entry.target,
+                       retired=rec.is_retired(entry.host, entry.port) if entry.known
+                       else None,
                        change=rec.token(key), displaced=entry.displaced,
                        applied_at=entry.applied_at,
                        detail=entry.detail if entry.known else NEWER)

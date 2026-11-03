@@ -6,9 +6,16 @@
 // Cancel and Confirm. Confirm runs the send it was given once: a second click, or a click
 // while the answer is awaited, does nothing. Cancel and Escape close it before anything is
 // sent; once sent it stays open until the answer comes, then closes and removes itself.
+//
+// In its desk mode, on the phone where the act can't run, it shows the same title, lines
+// and body, then the desk pointer's lines, with one Close button in place of the two. It
+// opens in that mode, or switches to it when the answer is a desk pointer; Close and
+// Escape then resolve the `desk` outcome.
 
 import { MAY_HAVE_ACTED } from "./confirm-model.ts";
 import type { ConfirmOutcome } from "./client.ts";
+import { deskOutcome, spans } from "./gateway-model.ts";
+import type { DeskPointer } from "./gateway-model.ts";
 
 const TAG = "moxi-ui-confirm";
 
@@ -24,6 +31,8 @@ dialog {
 dialog::backdrop { background: rgb(0 0 0 / 0.4); }
 h2 { margin: 0 0 var(--moxi-gap); font-size: 1.1rem; color: var(--moxi-accent); overflow-wrap: anywhere; }
 p { margin: 0 0 var(--moxi-gap); overflow-wrap: anywhere; }
+code { font-family: var(--moxi-font-mono); font-size: var(--moxi-font-size-sm); }
+.desk { color: var(--moxi-warn); }
 pre {
   margin: 0 0 var(--moxi-gap); padding: var(--moxi-gap); border: 1px solid var(--moxi-border);
   border-radius: var(--moxi-radius); background: var(--moxi-bg); font-family: var(--moxi-font-mono);
@@ -49,12 +58,14 @@ export interface SheetInfo {
   lines: readonly string[];
   /** The body to be sent, shown as indented JSON. */
   body: object;
+  /** The desk pointer's lines: the sheet opens in its desk mode and sends nothing. */
+  desk?: readonly string[];
 }
 
 /** The sheet: `ask` shows it and resolves once the user cancels, or confirms and `send`
- * resolves. */
+ * resolves, or closes the desk pointer. */
 export interface ConfirmElement extends HTMLElement {
-  ask(info: SheetInfo, send: () => Promise<ConfirmOutcome>): Promise<ConfirmOutcome>;
+  ask(info: SheetInfo, send?: () => Promise<ConfirmOutcome | DeskPointer>): Promise<ConfirmOutcome>;
 }
 
 declare global {
@@ -79,7 +90,7 @@ export function defineConfirm(): void {
   class MoxiConfirm extends HTMLElement implements ConfirmElement {
     #asked = false;
 
-    ask(info: SheetInfo, send: () => Promise<ConfirmOutcome>): Promise<ConfirmOutcome> {
+    ask(info: SheetInfo, send?: () => Promise<ConfirmOutcome | DeskPointer>): Promise<ConfirmOutcome> {
       if (this.#asked) throw new TypeError("a confirm sheet is asked once");
       this.#asked = true;
       const root = this.attachShadow({ mode: "open" });
@@ -108,27 +119,50 @@ export function defineConfirm(): void {
 
       return new Promise<ConfirmOutcome>((resolve) => {
         let sent = false;
+        let desk: ConfirmOutcome | null = null;
         const finish = (outcome: ConfirmOutcome): void => {
           if (dialog.open) dialog.close();
           this.remove();
           resolve(outcome);
         };
+        // The desk pointer: its lines before the status line, and Close alone.
+        const toDesk = (lines: readonly string[]): void => {
+          desk = deskOutcome(lines);
+          const pointer = lines.map((line) => {
+            const para = el("p", undefined, "desk");
+            for (const part of spans(line)) para.append(part.code ? el("code", part.text) : part.text);
+            return para;
+          });
+          say.before(...pointer);
+          say.textContent = "";
+          const close = el("button", "Close", "go");
+          close.type = "button";
+          close.addEventListener("click", () => finish(desk as ConfirmOutcome));
+          buttons.replaceChildren(close);
+          close.focus();
+        };
         cancel.addEventListener("click", () => {
           if (!sent) finish({ outcome: "cancelled" });
         });
-        // Escape: closes the sheet before anything is sent, and is ignored after.
+        // Escape: closes the sheet before anything is sent, and is ignored after, except
+        // that it closes the desk pointer.
         dialog.addEventListener("cancel", (event) => {
           event.preventDefault();
-          if (!sent) finish({ outcome: "cancelled" });
+          if (desk !== null) finish(desk);
+          else if (!sent) finish({ outcome: "cancelled" });
         });
         go.addEventListener("click", () => {
-          if (sent) return;
+          if (sent || send === undefined) return;
           sent = true;
           go.disabled = cancel.disabled = true;
           say.textContent = "Sending…";
-          send().then(finish, () => finish({ outcome: "unknown", text: MAY_HAVE_ACTED }));
+          send().then((answer) => {
+            if ("desk" in answer) toDesk(answer.desk);
+            else finish(answer);
+          }, () => finish({ outcome: "unknown", text: MAY_HAVE_ACTED }));
         });
         dialog.showModal();
+        if (info.desk !== undefined || send === undefined) toDesk(info.desk ?? []);
       });
     }
   }

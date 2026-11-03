@@ -1797,17 +1797,72 @@ def test_a_start_change_under_keep_with_its_sockets_unchanged_waits_for_the_next
     mac.ctl.calls.clear()
     [done] = mac.apply(units.plan("demo"))
     assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
-    assert done.lines == (f"{RELAY} rewritten; the new code runs from its next start",)
+    now = "starts it" if start == "login" else "no longer starts it"
+    assert done.lines == (f"{RELAY} rewritten: from the next login, a login {now}; the "
+                          "loaded job is left as it is",)
     assert ("RunAtLoad" in mac.plist(RELAY)) is (start == "login")
 
 
-def test_a_start_change_under_restart_reloads_the_job(mac):
+# -- a socket daemon whose start follows a setting ----------------------------------------------
+
+def switched_shell(*addresses, upgrade="restart", more=""):
+    """The relay with a socket on `addresses` whose `start` follows `snapshot.enabled`."""
+    return ("{'relay': {'command': 'moxi-demo-relay', "
+            f"'upgrade': {upgrade!r}, 'socket': {{'setting': 'port', "
+            f"'addresses': {list(addresses)!r}, 'start': {{'login': 'snapshot.enabled'}}}}"
+            + more + "}}")
+
+
+@pytest.mark.parametrize("upgrade", ["restart", "keep"])
+def test_a_login_only_change_is_rewritten_and_the_loaded_job_left_as_it_is(mac, upgrade):
+    """`moxi config set` of the key rewrites the plist with or without RunAtLoad and
+    KeepAlive and boots nothing out, whatever `upgrade` says: launchd reads the new keys
+    at the job's next load."""
+    from moxi import config
+
     mac.script("moxi-demo-relay")
-    mac.module(DAEMONS=login_shell("127.0.0.1", start="connection"))
+    mac.module(ANNOUNCES="2", DAEMONS=switched_shell("127.0.0.1", upgrade=upgrade))
+    assert all(a.ok for a in mac.apply(units.plan("demo")))
+    assert "RunAtLoad" not in mac.plist(RELAY)
+    for value, now in ((True, "starts it"), (None, "no longer starts it")):
+        mac.ctl.calls.clear()
+        if value is None:
+            applied = config.unset("demo", "snapshot.enabled", by="test")
+        else:
+            applied = config.set("demo", "snapshot.enabled", value, by="test")
+        [done] = applied
+        assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
+        assert done.lines == (f"{RELAY} rewritten: from the next login, a login {now}; "
+                              "the loaded job is left as it is",)
+        body = mac.plist(RELAY)
+        assert ("RunAtLoad" in body) is (value is True)
+        assert ("KeepAlive" in body) is (value is True)
+        assert mac.ctl.loaded[RELAY][0] is None        # still idle under its sockets
+
+
+def test_a_change_with_another_key_beside_the_login_ones_reloads_as_before(mac):
+    from moxi import config
+
+    mac.script("moxi-demo-relay")
+    mac.module(ANNOUNCES="2", DAEMONS=switched_shell("127.0.0.1"))
     mac.apply(units.plan("demo"))
-    assert mac.ctl.loaded[RELAY][0] is None            # idle under its sockets
-    mac.module(DAEMONS=login_shell("127.0.0.1"))
+    mac.module(ANNOUNCES="2", DAEMONS=switched_shell("127.0.0.1", more=", 'args': ['-v']"))
     mac.ctl.calls.clear()
-    [done] = mac.apply(units.plan("demo"))
+    [done] = config.set("demo", "snapshot.enabled", True, by="test")
     assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
     assert mac.ctl.loaded[RELAY][0]                    # RunAtLoad started it
+
+
+def test_restart_after_an_upgrade_kickstarts_a_running_daemon_with_a_login_only_change(
+        mac, monkeypatch):
+    from moxi import config
+
+    mac.script("moxi-demo-relay")
+    mac.module(ANNOUNCES="2", DAEMONS=switched_shell("127.0.0.1"))
+    mac.apply(units.plan("demo"))
+    mac.ctl.loaded[RELAY][0] = 4242                    # a connection started it
+    monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
+    config.set("demo", "snapshot.enabled", True, by="test")
+    mac.ctl.calls.clear()
+    assert all(a.ok for a in mac.apply(units.plan("demo"), restart=True))
+    assert [c[0] for c in mac.ctl.verbs()] == ["kickstart"]

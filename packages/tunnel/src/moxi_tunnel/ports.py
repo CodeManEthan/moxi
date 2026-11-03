@@ -12,6 +12,10 @@ port can't be both, and Funnel has only three, 443, 8443 and 10000.
   Funnel port.
 - Cloudflare: every target is on 443 under its own hostname, and two targets may not share
   a hostname.
+- A fresh placement, the default choice for an entry on a Unix socket, also skips every
+  retired port of the machine's host (an origin a persistent loopback mapping once
+  served), starting from the port the declaration's port setting holds. An explicit
+  `--port` is the user's, retired or not.
 
 Free means no Tailscale entry of the record holds the port and the live config has no
 `TCP` key for it. The old Tailscale entry a switch onto Cloudflare has not yet removed (the
@@ -76,15 +80,17 @@ def _is_port(value: object) -> bool:
 
 def choose(reach: str, *, target: int, port: int | None = None,
            moxi: Mapping[int, str], foreign: Mapping[int, str],
-           funnel_ports: Iterable[int] | None = None, replace: bool = False) -> Choice:
-    """The outside port for an add of a target whose loopback port is `target`.
+           funnel_ports: Iterable[int] | None = None, replace: bool = False,
+           retired: Iterable[int] = ()) -> Choice:
+    """The outside port for an add of a target whose loopback port is `target` (for a
+    fresh placement, the port its port setting holds).
 
     `moxi` maps each port another Moxi target holds to that target (`moxi_ports`);
     `foreign` each port the live config holds that no record entry does to a short
     description of what is there. `funnel_ports` are the ports the tailnet's grant lists,
     or None when it lists none. With `replace`, a foreign port counts as free and the
-    `Choice` says when the port chosen is one. Raises `Refused` (exit 3) when no port can
-    be taken.
+    `Choice` says when the port chosen is one. With no `port`, an own-devices choice
+    skips `retired` too. Raises `Refused` (exit 3) when no port can be taken.
     """
     if reach == "public":
         return _public(port, moxi, foreign, funnel_ports, replace)
@@ -97,7 +103,7 @@ def choose(reach: str, *, target: int, port: int | None = None,
             return Choice(choice.port, choice.replace, (*choice.lines, line))
         return choice
     taken = {} if replace else foreign
-    chosen = _serve_default(target, moxi, taken)
+    chosen = _serve_default(target, moxi, taken, frozenset(retired))
     return Choice(chosen, replace=chosen in foreign)
 
 
@@ -145,9 +151,11 @@ def _public(port: int | None, moxi: Mapping[int, str], foreign: Mapping[int, str
                   "remove one of those targets, or take one over with --replace")
 
 
-def _serve_default(target: int, moxi: Mapping[int, str], foreign: Mapping[int, str]) -> int:
+def _serve_default(target: int, moxi: Mapping[int, str], foreign: Mapping[int, str],
+                   retired: frozenset[int] = frozenset()) -> int:
     def free(p: int) -> bool:
-        return p not in moxi and p not in foreign and p not in FUNNEL_PORTS
+        return (p not in moxi and p not in foreign and p not in FUNNEL_PORTS
+                and p not in retired)
 
     if 0 < target <= HIGHEST and free(target):
         return target

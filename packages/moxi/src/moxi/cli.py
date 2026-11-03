@@ -418,7 +418,11 @@ def describe() -> dict:
     It reads every module by the full scan, so a name two distributions claim, or a module
     whose distribution is not named for it, shows as broken. Each module's object carries
     every field of its `Found` but the imported API module, under the field's name;
-    `optional` is the richer list of its extras.
+    `optional` is the richer list of its extras; `starts` names, for each daemon with a
+    socket, what starts it now as the plan resolves it (`login` or `connection`, null
+    when a switch-form `start` can't be read), beside the declared form in `daemons`.
+    It is what systemd and launchd do: on Windows the logon task starts every daemon at
+    each logon whatever it says.
     """
     from . import modules
 
@@ -443,6 +447,7 @@ def describe() -> dict:
                 _shortcut_path(shortcut_dir, found.name), found.name),
             "requires": required_modules(dist, by_dist) if dist else [],
             "optional": optional,
+            "starts": _starts(found),
         })
         listed.append(item)
     return {
@@ -451,6 +456,18 @@ def describe() -> dict:
         "prefix": sys.prefix,
         "modules": listed,
     }
+
+
+def _starts(found) -> dict:
+    """What starts each socket daemon of a present module now; empty for any other."""
+    from . import modules
+
+    if found.state != modules.PRESENT or not any(
+            "socket" in entry for entry in found.daemons.values()):
+        return {}
+    from . import units
+
+    return units.starts(found)
 
 
 def _found_json(found) -> dict:

@@ -203,7 +203,8 @@ def _get(port, path, lines=()):
     return status, data.split(b"\r\n\r\n", 1)[1]
 
 
-def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_routes(site):
+def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_routes(
+        site, monkeypatch):
     shell, thread = _serve(snapshot=ModuleSnapshot(cwd=Layout("ui").runtime_dir(),
                                                    dirs=[str(site)], every=0.05))
     try:
@@ -243,6 +244,9 @@ def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_rout
         shell.stop()
         thread.join(15)
         shell.close()
+    # The probe's last step connects to the port setting: point it at this shell's own
+    # port, so another shell on the default port can't answer in its place.
+    monkeypatch.setattr(health.config, "port", lambda settings=None: port)
     assert health.probe(wait=0.2).state == "down"
 
 

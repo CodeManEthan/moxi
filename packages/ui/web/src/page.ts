@@ -1,17 +1,22 @@
 // <moxi-ui-page>: the shell's own panel. With `route` "" it is the modules view: every
 // module's home block, then every installed module with its state, its page and its
-// components, and a Check that shows the doctor's rows for it. With `route` "settings"
+// components, and a Check that shows the doctor's rows for it, then the Gateway section
+// that pairs a phone. With `route` "settings"
 // (or "settings/<module>" for one module) it is the settings view: a section per module
 // drawn by <moxi-ui-form>, each change written through `moxi config` by the shell.
+//
+// On the phone it leaves out what only the desk reaches: Check, the Gateway section and
+// the settings, whose routes the gateway doesn't serve.
 //
 // It reads only the shell's own routes and topics, through client.js. The shell places a
 // new element for each navigation, so `route` is read once.
 
 import { css, html, LitElement, nothing } from "lit";
 import type { PropertyValues } from "lit";
-import { api, components, installed, navigate, place, setTheme, subscribe } from "/m/ui/client.js";
+import { api, components, gateway, installed, navigate, place, setTheme, subscribe } from "/m/ui/client.js";
 import type { FieldDescriptor, FormChange, FormElement, ThemeMode } from "/m/ui/client.js";
 
+import "./gateway-desk.ts";
 import { doctorRows, homeBlocks, moduleLines, moduleOrder, moduleState } from "./views.ts";
 import type { DoctorRow, ModuleView } from "./views.ts";
 
@@ -121,7 +126,7 @@ export class UiPage extends LitElement {
       this.#view = "settings";
       const only = route.slice("settings/".length);
       this.#only = NAME.test(only) ? only : null;
-      void this.#readSettings();
+      if (!gateway()) void this.#readSettings();
     } else {
       this.#view = "none";
     }
@@ -159,13 +164,14 @@ export class UiPage extends LitElement {
     const value = this.modules;
     const mods = value === null ? [] : moduleOrder(value.modules);
     return html`
-      <div class="bar"><h1>Modules</h1>${this.#link("ui", "settings", "Settings")}</div>
+      <div class="bar"><h1>Modules</h1>${gateway() ? nothing : this.#link("ui", "settings", "Settings")}</div>
       ${value?.error ? html`<p class="problem">${value.error}</p>` : nothing}
       <div class="grid" id="home"></div>
       <h2>Installed</h2>
       ${value === null ? html`<p class="dim">Reading the modules…</p>` : nothing}
       ${value !== null && mods.length === 0 ? html`<p class="dim">No module is listed.</p>` : nothing}
-      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>`;
+      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>
+      ${gateway() ? nothing : html`<moxi-ui-gateway></moxi-ui-gateway>`}`;
   }
 
   #moduleCard(mod: ModuleView) {
@@ -184,8 +190,8 @@ export class UiPage extends LitElement {
       ${moduleLines(mod).map((line) => html`<p class="small ${line.tone ?? ""}">${line.text}</p>`)}
       <div class="actions">
         ${panel ? this.#link(mod.name, "", "Open its panel") : nothing}
-        <button type="button" ?disabled=${check?.busy === true} @click=${() => this.#check(mod.name)}>
-          ${check?.busy ? "Checking…" : "Check"}</button>
+        ${gateway() ? nothing : html`<button type="button" ?disabled=${check?.busy === true}
+          @click=${() => this.#check(mod.name)}>${check?.busy ? "Checking…" : "Check"}</button>`}
       </div>
       ${check !== undefined && !check.busy ? this.#checkRows(check) : nothing}
     </div>`;
@@ -249,6 +255,10 @@ export class UiPage extends LitElement {
 
   #settingsView() {
     const title = this.#only ? `Settings: ${this.#only}` : "Settings";
+    if (gateway()) {
+      return html`<div class="bar"><h1>${title}</h1>${this.#link("ui", "", "Modules")}</div>
+        <p class="dim">Settings are changed at the desk, on the computer's Moxi page.</p>`;
+    }
     return html`
       <div class="bar"><h1>${title}</h1>
         ${this.#only ? this.#link("ui", "settings", "Every module's settings") : nothing}

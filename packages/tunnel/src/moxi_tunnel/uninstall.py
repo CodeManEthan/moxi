@@ -336,6 +336,13 @@ def on_uninstall(module: str) -> None:
               f"{hand}")
 
 
+#: What a purge of store `applied` takes with it besides the addresses.
+RETIRED_PURGE_LINE = (
+    "tunnel: its record also holds the retired origins, each port or hostname a mapping "
+    "to a loopback port once served, which no new address takes; removing store applied "
+    "with --purge forgets them, and only the UI's gateway keeps a copy, of its own")
+
+
 def _name_what_stays() -> None:
     """tunnel's own `on_uninstall`: one line for each address still in the record."""
     try:
@@ -365,6 +372,8 @@ def _name_what_stays() -> None:
     if rec.entries:
         print("tunnel: its record is kept, so reinstalling moxi-tunnel takes these "
               "addresses back as they are")
+    if rec.retired:
+        print(RETIRED_PURGE_LINE)
 
 
 __all__ = ["teardown", "on_uninstall"]

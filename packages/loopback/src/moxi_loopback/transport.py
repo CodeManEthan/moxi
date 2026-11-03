@@ -43,9 +43,13 @@ __all__ = [
     "BrowserSockets",
     "NotLoopback",
     "NotOurServer",
+    "NotPrivate",
     "bind_browser",
+    "bind_tcp",
+    "bind_unix",
     "browser_names",
     "call",
+    "check_private_dir",
     "open_connection",
 ]
 

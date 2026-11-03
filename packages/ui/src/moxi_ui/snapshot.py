@@ -46,6 +46,7 @@ from moxi import proc
 from moxi.names import is_module_name
 from moxi.paths import python
 
+from .gateway.shapes import gateway_problem
 from .starter import Exports, export_tables
 
 __all__ = [
@@ -258,6 +259,7 @@ def modules_value(listing: Sequence[Mapping[str, Any]], mounts: Mapping[str, Map
             "page": page,
             "mounted": export is not None,
             "export_error": _text(errors[name]) if name in errors else None,
+            "gateway_error": gateway_problem(export) if export is not None else None,
             "budget": budget_of(export),
             "confirmed": confirmed_paths(export),
             "components": placed,

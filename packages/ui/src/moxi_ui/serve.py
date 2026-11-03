@@ -21,6 +21,10 @@ It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 The shell's own page (`moxi_ui.page`) is served in process at `/m/ui/`, its export
 mounted there in the table like any module's.
 
+It also runs the gateway (`moxi_ui.gateway`), the listener a tunnel forwards a phone to,
+in the same process and on the same loop; the shell's stop closes it, and a shell that
+holds the gateway's endpoint never exits idle.
+
 A shell on inherited sockets exits 0 once it has been idle for `idle_s` (no open request
 or stream and no page server running), when that loses no session: it has an epoch, so
 its sessions are on disk, or it holds none. The socket keeps the port, and the next
@@ -60,9 +64,15 @@ from moxi_loopback.api import (
 from . import cli, config, listen
 from . import page as shell_page
 from .listen import Listeners
-from .proxy import Proxy
+from .gateway import Gateway, Parts
+from .gateway import audit as _audit
+from .gateway.access import OPEN_PATHS, Access
+from .gateway.acts import Acts
+from .gateway.router import ICONS, GatewayRouter, mark, watch
+from .gateway.mount import Mount
+from .proxy import Client, Proxy
 from .push import Push
-from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
+from .router import ASGIApp, Router, fallback, shell_profile, shell_table, worker_layer
 from .session import (
     HEALTH_PATH,
     PROVE_PATH,
@@ -205,7 +215,12 @@ class Shell:
 
     `idle_s` is the idle exit's wait, None for none. The shell exits idle only on
     inherited listeners and only as `may_exit_idle` allows, so a bound listener never
-    exits idle whatever `idle_s` says. `idled` is True once it has.
+    exits idle whatever `idle_s` says, and never while the gateway holds its endpoint.
+    `idled` is True once it has.
+
+    `gateway` is the shell's `Gateway`, or True to build one, with the gateway's sign-in
+    state as `phone`; without it (the default, which tests take) the shell runs no
+    gateway. `phone` is that sign-in state when a test passes its own gateway.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -214,7 +229,8 @@ class Shell:
                  page: Page | None = None, push: ASGIApp | None = None,
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
                  child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
-                 leave_out: Sequence[str] = (), idle_s: float | None = None):
+                 leave_out: Sequence[str] = (), idle_s: float | None = None,
+                 gateway: Gateway | bool = False, phone: Access | None = None):
         self.listeners = listeners
         self.epoch = epoch
         self.idle_s = idle_s
@@ -250,6 +266,68 @@ class Shell:
         self.profile = None
         self._should_exit: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.phone = phone
+        self.audit: _audit.Audit | None = None
+        self.gateway_router: GatewayRouter | None = None
+        self.gateway: Gateway | None = None
+        if gateway is True:
+            gateway = self._gateway()
+        self.gateway = gateway or None
+
+    def _gateway(self) -> Gateway:
+        """The shell's gateway: its sign-in state, audit log, act store and router."""
+        state_dir = self.layout.state_dir()
+        self.audit = audit = _audit.Audit(state_dir)
+
+        def write(kind: str, fields: dict[str, Any]) -> None:
+            if kind == "acts" and self.gateway is not None and self.gateway.kept is not None:
+                fields = {**fields, "change": self.gateway.kept.change}
+            try:
+                audit(kind, fields)
+            except (OSError, ValueError):
+                _log.exception("the gateway's %s row can't be written", kind)
+
+        self.phone = phone = Access(
+            state_dir=state_dir, runtime_dir=self.layout.runtime_dir(), audit=write,
+            kept=lambda: self.gateway.kept if self.gateway is not None else None)
+        phone.open_paths = OPEN_PATHS | ICONS
+
+        def key() -> bytes:
+            return _audit.key(state_dir)
+
+        def mounted() -> bool:
+            return self.gateway is not None and self.gateway.acts_now().mounted
+
+        async def own_page(scope: dict[str, Any], receive: Callable[..., Any],
+                           send: Callable[..., Any]) -> None:
+            page = self.router.page if self.router is not None else None
+            if page is not None:
+                await page(scope, receive, send)
+
+        def table() -> Table:
+            profile = self.gateway.profile if self.gateway is not None else None
+            return profile.table if profile is not None else Table()
+
+        acts = Acts(mounts=lambda: self._mounts, mounted=mounted,
+                    client=getattr(self.push, "client", None) or Client(self.starters),
+                    audit=audit, key=key, device_of=phone.device_of)
+        router = self.gateway_router = GatewayRouter(
+            phone, mounts=lambda: self._mounts, table=table,
+            mount=lambda: self.gateway.mount if self.gateway is not None else Mount(False, "off"),
+            page=own_page, push=self.push, starters=self.starters, acts=acts, key=key)
+        parts = phone.parts(Parts(table=router.build, router=router, fallback=fallback,
+                                  audit=write, refusals=router.refusals))
+        parts.router = mark(parts.router)
+        parts.layer = lambda inner, profile: watch(inner, profile, audit,
+                                                   device_of=phone.device_of)
+        phone_tick = parts.tick
+
+        def tick() -> None:
+            phone_tick()
+            audit.flush()
+
+        parts.tick = tick
+        return Gateway(self.layout, parts=parts, head_limit=HEAD_LIMIT)
 
     def start(self) -> RuntimeInfo:
         """Write the runtime file and build the request path. Returns the runtime info."""
@@ -266,6 +344,10 @@ class Shell:
         if self.snapshot is not None:
             inner = _needing(self.snapshot, inner)
         self.asgi = self.activity.wrap(worker_layer(inner))
+        if self.gateway is not None:
+            self.gateway.start()
+        if self.audit is not None:
+            self.audit.prune()
         return self.info
 
     @property
@@ -285,6 +367,8 @@ class Shell:
             return
         self._modules, self._mounts = tuple(view.pages), mounts
         self.set_table(table)
+        if self.gateway is not None:
+            self.gateway.refresh()
         self.starters.set_versions(view.versions)
         if isinstance(self.push, Push):
             self.push.set_exports(mounts)
@@ -309,10 +393,18 @@ class Shell:
                   if self.idle_s is not None and self.listeners.inherited else None)
         if self.snapshot is not None:
             self.snapshot.start()
+        gateway = (asyncio.ensure_future(self.gateway.run(self._should_exit))
+                   if self.gateway is not None else None)
         try:
             await serve(self.asgi, self.listeners.sockets, should_exit=self._should_exit,
                         head_limit=HEAD_LIMIT)
         finally:
+            # The shell's stop closes the gateway's listener with it.
+            self._should_exit.set()
+            if gateway is not None:
+                await gateway
+            if self.audit is not None:
+                self.audit.close()
             ending.cancel()
             if idling is not None:
                 idling.cancel()
@@ -335,6 +427,8 @@ class Shell:
         if self.idle_s is None or quiet is None or quiet < self.idle_s:
             return False
         if self.starters.children():
+            return False
+        if self.gateway is not None and self.gateway.holding:
             return False
         return may_exit_idle(inherited=self.listeners.inherited, epoch=self.epoch,
                              live_sessions=self.sessions.store.live())
@@ -440,7 +534,7 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
         except Exception as err:  # noqa: BLE001 - a bad setting keeps the shell running
             say(f"moxi ui: {err}; the shell won't exit idle")
     shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True,
-                  idle_s=idle_s)
+                  idle_s=idle_s, gateway=True)
     try:
         shell.start()
         from moxi import aio

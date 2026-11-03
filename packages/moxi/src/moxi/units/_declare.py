@@ -10,8 +10,10 @@ that raises, overruns or returns anything but a table of `daemons` and `timers` 
 `DeclarationError`; a thread that overran is left to finish on its own (a daemon thread,
 its result dropped). Each entry it returns is checked as an announcement's entry is, with
 four forms allowed only here: `argv` in place of `command`, `cwd`, `enabled` and a timer
-with no `switch`. An entry that fails, or whose name is also in `DAEMONS` or `TIMERS`, is
-kept out of the merged tables and listed in `Declarations.rejected` with the reason. So is a run-time entry that would share a systemd file name with another
+with no `switch`; a daemon's switch-form socket `start` needs the module's `ANNOUNCES` to
+read it, as in the announcement. An entry that fails, or whose name is also in `DAEMONS`
+or `TIMERS`, is kept out of the merged tables and listed in `Declarations.rejected` with
+the reason. So is a run-time entry that would share a systemd file name with another
 unit (a daemon's socket unit for its k-th address is named for `<daemon>-<k>`): the
 run-time one of the pair, or the one named `<daemon>-<k>` when both are run-time.
 """
@@ -79,6 +81,11 @@ def merge(found) -> Declarations:
                     modules._unit(kind, name, entry, runtime=True, label=key)
                 except modules._Bad as exc:
                     rejected[(kind, name)] = f"UNITS_FROM ({found.units_from}) {exc}"
+                    continue
+                problem = modules.start_schema_problem(f"{key}[{name!r}]", entry,
+                                                       found.announces)
+                if kind == "daemon" and problem:
+                    rejected[(kind, name)] = f"UNITS_FROM ({found.units_from}) {problem}"
                     continue
                 (daemons if kind == "daemon" else timers)[name] = modules._freeze(entry)
                 runtime.add(name)

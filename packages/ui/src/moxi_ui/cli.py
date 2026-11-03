@@ -1,4 +1,4 @@
-"""`moxi ui`: open, serve, status, stop, signout.
+"""`moxi ui`: open, serve, status, stop, signout, and `gateway` (`moxi_ui.gateway.verbs`).
 
 Every call `moxi ui` makes to the shell goes through loopback's `call` on the runtime
 file it read, which proves the shell before it sends the token. A shell that fails the
@@ -673,10 +673,44 @@ def _clear_stored() -> None:
         session.clear_stored(layout().state_dir())
 
 
+def cmd_gateway(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
+    from .gateway import verbs
+
+    return verbs.dispatch(args, say)
+
+
 def cmd_serve(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
     from . import serve
 
     return serve.main([])
+
+
+def _gateway_parser(verbs: Any) -> None:
+    """Add `gateway` and its verbs to `moxi ui`'s verbs; their code loads only when one runs."""
+    gateway = verbs.add_parser(
+        "gateway", help="the UI on your phone, through the tunnel",
+        description="The gateway: pair a phone, list or revoke devices, read the audit log, "
+                    "turn it on or off.")
+    inner = gateway.add_subparsers(dest="gateway_verb", metavar="VERB")
+    inner.required = True
+    inner.add_parser("pair", help="print a one-use pairing URL for a phone",
+                     description="Mint a pairing code, good for 2 minutes, and print its URL.")
+    inner.add_parser("devices", help="list the paired devices",
+                     description="Every paired device, from the device file.")
+    revoke = inner.add_parser("revoke", help="revoke a paired device",
+                              description="Delete a device; its sessions end within 2 s.")
+    revoke.add_argument("id", help="the device's id, as `devices` lists it")
+    log = inner.add_parser("log", help="print the audit log",
+                           description="The audit log's rows, oldest first.")
+    log.add_argument("--days", type=int, default=1, metavar="N",
+                     help="today and the N-1 days before (default 1)")
+    log.add_argument("--json", action="store_true", help="one JSON object per row")
+    inner.add_parser("on", help="turn the gateway on",
+                     description="Check what the gateway needs, turn it on, start the shell "
+                                 "and add the tunnel entry when there is none.")
+    inner.add_parser("off", help="turn the gateway off",
+                     description="Turn the gateway off, ending every phone session, and "
+                                 "offer to remove the tunnel entry.")
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi ui") -> int:
@@ -704,10 +738,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi ui") -> int:
                                  "starts it again.")
     verbs.add_parser("signout", help="sign every browser out",
                      description="End every browser session the shell holds.")
+    _gateway_parser(verbs)
     args = parser.parse_args(argv)
     say = print
     handlers = {"open": cmd_open, "serve": cmd_serve, "status": cmd_status, "stop": cmd_stop,
-                "signout": cmd_signout}
+                "signout": cmd_signout, "gateway": cmd_gateway}
     try:
         return handlers[args.verb](args, say)
     except Refused as err:
