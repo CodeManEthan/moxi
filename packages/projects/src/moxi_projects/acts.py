@@ -494,7 +494,8 @@ def remove(key: str, *, contributions: Contributions | None = None,
     and that too is an answer about this project's remove. `sentences` lists each
     contribution's sentence, named by its module, or holds the reason alone. A refusal
     that is the store's own (newer than this code, unreadable, locked past the wait, or
-    no store file yet) is raised and records nothing; nothing is written and no store
+    no store yet, as the read API counts it: no file, an empty one, or one no write has
+    finished setting up) is raised and records nothing; nothing is written and no store
     file is made. If the refusal's own write meets one of those, that is raised in its
     place. So after a raise, a caller tells a kept refusal from the rest by whether its
     record was written.
@@ -533,7 +534,17 @@ def remove(key: str, *, contributions: Contributions | None = None,
 
 
 def _store_exists() -> bool:
-    return os.path.lexists(store.path())
+    """Whether there is a store to keep a refusal in, as the read API decides it: a
+    missing file, an empty one or one at schema version 0 is none. A store that can't be
+    read counts as none too, so the refusal is answered and nothing is written."""
+    try:
+        opened = api._open(store.path())
+    except api.ProjectsError:
+        return False
+    if opened is None:
+        return False
+    opened[0].close()
+    return True
 
 
 def record_status(job: str) -> Record:

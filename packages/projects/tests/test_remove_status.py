@@ -168,6 +168,33 @@ def test_an_unknown_key_with_no_store_file_keeps_nothing_and_makes_no_file(store
     assert acts.remove_status(job("a")) is None
 
 
+def test_an_unknown_key_in_an_empty_store_file_keeps_nothing(store_path):
+    # Another process's first write has made the file and not yet set it up: the read
+    # API counts that as no store, and so does the remove.
+    store_path.parent.mkdir(parents=True)
+    store_path.write_bytes(b"")
+    with pytest.raises(api.NotFound):
+        remove("nosuch", job("a"))
+    assert store_path.read_bytes() == b""
+    assert acts.remove_status(job("a")) is None
+
+
+def test_an_unknown_key_in_a_store_at_version_0_keeps_nothing(store_path):
+    store_path.parent.mkdir(parents=True)
+    sqlite3.connect(store_path).close()
+    conn = sqlite3.connect(store_path)
+    try:
+        conn.execute("CREATE TABLE half_made (x)")
+        conn.commit()
+    finally:
+        conn.close()
+    before = store_path.read_bytes()
+    with pytest.raises(api.NotFound):
+        remove("nosuch", job("a"))
+    assert _user_version(store_path) == 0
+    assert store_path.read_bytes() == before
+
+
 def test_a_newer_store_keeps_nothing(golden_copy, store_path):
     _set_user_version(store_path, api._VERSION + 1)
     before = store_path.read_bytes()
