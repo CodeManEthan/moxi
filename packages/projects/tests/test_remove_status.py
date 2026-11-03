@@ -1,7 +1,7 @@
 """What a remove came to, kept for the page under the request's idempotency key: removed,
-or refused with its sentences, read back through `remove_status`; the store's own
-refusals answered directly, keeping nothing and making no file; a row past a day ignored
-and pruned; the verb's remove keeping nothing."""
+or refused with its sentences (a broken contribution's too), read back through
+`remove_status`; the store's own refusals answered directly, keeping nothing and making no
+file; a row past a day ignored and pruned; the verb's remove keeping nothing."""
 
 from __future__ import annotations
 
@@ -138,6 +138,27 @@ def test_the_check_again_inside_the_write_is_kept_after_its_rollback(golden_copy
     assert status["state"] == "refused" and "helper scout" in status["sentences"][0]
 
 
+def test_a_contribution_that_wont_load_is_kept_as_a_refusal(site, golden_copy):
+    site.contribution("broken", "raise ImportError('gone')\n")
+    with pytest.raises(Broken) as caught:
+        remove("gamma", job("a"))
+    status = acts.remove_status(job("a"))
+    assert status["state"] == "refused" and status["key"] == "gamma"
+    assert status["exit_code"] == 1 and status["sentences"] == [caught.value.reason]
+    assert "won't load" in status["reason"] and "moxi uninstall broken" in status["fix"]
+    assert api.get("gamma")
+
+
+def test_a_refusal_that_raises_is_kept_as_a_refusal(site, golden_copy):
+    site.contribution("svc", "INTERFACE = 1\n\ndef refuse_remove(project):\n"
+                             "    raise RuntimeError('no answer')\n")
+    with pytest.raises(Broken):
+        remove("gamma", job("a"))
+    status = acts.remove_status(job("a"))
+    assert status["state"] == "refused" and "refuse_remove raised" in status["reason"]
+    assert api.get("gamma")
+
+
 # --- the store's own refusals --------------------------------------------------------------
 
 def test_an_unknown_key_with_no_store_file_keeps_nothing_and_makes_no_file(store_path):
@@ -183,15 +204,6 @@ def test_a_store_locked_past_the_wait_keeps_nothing(golden_copy, store_path, mon
     assert api.get("gamma") and api.get("alpha")
     assert acts.remove_status(job("a")) is None and acts.remove_status(job("b")) is None
     assert _rows(store_path) == []
-
-
-def test_a_contribution_that_wont_load_keeps_nothing(site, golden_copy, store_path):
-    site.contribution("broken", "raise ImportError('gone')\n")
-    before = store_path.read_bytes()
-    with pytest.raises(Broken):
-        remove("gamma", job("a"))
-    assert store_path.read_bytes() == before
-    assert acts.remove_status(job("a")) is None
 
 
 # --- the repeat and the day's window ------------------------------------------------------

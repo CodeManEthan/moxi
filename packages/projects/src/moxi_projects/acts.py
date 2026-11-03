@@ -489,13 +489,15 @@ def remove(key: str, *, contributions: Contributions | None = None,
     the key not found in a store that exists, the check again inside the write) is
     recorded through a write of its own, after the delete's write has rolled back, with
     `{"state": "refused", "key", "reason", "fix", "sentences", "exit_code"}`, and then
-    raised as without `record`. `sentences` lists each contribution's sentence, named by
-    its module, or holds the reason alone. A refusal that is the store's own (newer than
-    this code, unreadable, locked past the wait, or no store file yet) and a contribution
-    that won't load or raises are raised and record nothing; nothing is written and no
-    store file is made. If the refusal's own write meets one of those, that is raised in
-    its place. So after a raise, a caller tells a kept refusal from the rest by whether
-    its record was written.
+    raised as without `record`. So is a contribution that won't load, raises or answers
+    out of shape (`Broken`): the remove can't say whether that module holds the project,
+    and that too is an answer about this project's remove. `sentences` lists each
+    contribution's sentence, named by its module, or holds the reason alone. A refusal
+    that is the store's own (newer than this code, unreadable, locked past the wait, or
+    no store file yet) is raised and records nothing; nothing is written and no store
+    file is made. If the refusal's own write meets one of those, that is raised in its
+    place. So after a raise, a caller tells a kept refusal from the rest by whether its
+    record was written.
 
     Without `record` nothing is written on a refusal."""
     stored, sentences = key, None
@@ -519,7 +521,7 @@ def remove(key: str, *, contributions: Contributions | None = None,
             return gone
 
         return store.write(delete)
-    except (Refused, NotFound) as exc:
+    except (Refused, NotFound, Broken) as exc:
         if record is None or (isinstance(exc, NotFound) and not _store_exists()):
             raise
         outcome = {"state": "refused",
