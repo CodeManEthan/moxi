@@ -15,6 +15,9 @@ export interface Row {
   state: string;
   reason: string;
   target: string | null;
+  /** `install --replace` places over what stands in its way: an occupant, one git tracks
+   * among them, or a file edited by hand. */
+  replaceable: boolean;
 }
 
 /** What a run came to, as `--json` prints it. */
@@ -132,6 +135,8 @@ export interface Failure {
   status: number;
   /** One line saying what went wrong. */
   why: string;
+  /** The answer's own line (its `refused`, `conflict` or `error`), when it gave one. */
+  said: string | null;
 }
 
 /** How many times a 503 (the page server's in-flight cap) is read again, 1 s apart. */
@@ -154,7 +159,8 @@ const isListOf = <T>(value: unknown, check: (item: unknown) => item is T): value
 function isRow(value: unknown): value is Row {
   return isObj(value) && isStr(value.state) && isStr(value.reason)
     && isStrOrNull(value.scope) && isStrOrNull(value.kind) && isStrOrNull(value.name)
-    && isStrOrNull(value.harness) && isStrOrNull(value.target);
+    && isStrOrNull(value.harness) && isStrOrNull(value.target)
+    && typeof value.replaceable === "boolean";
 }
 
 function isCounts(value: unknown): value is Record<string, number> {
@@ -229,6 +235,16 @@ export function parseJob(data: unknown): Job | null {
   if (outcome !== null && !isOutcome(outcome)) return null;
   if (argv !== null && !isStrings(argv)) return null;
   return { job: data.job, argv, state, exit, outcome, lines: data.lines };
+}
+
+/** The text an answer gives: its `refused`, `conflict` or `error`. */
+export function saidOf(data: unknown): string | null {
+  if (!isObj(data)) return null;
+  for (const name of ["refused", "conflict", "error"]) {
+    const value = data[name];
+    if (isStr(value) && value !== "") return value;
+  }
+  return null;
 }
 
 // -- reading ------------------------------------------------------------------------------
@@ -325,7 +341,8 @@ export class Feed<V> {
       this.gone = true;
       this.failure = null;
     } else {
-      this.failure = { status: answer.status, why: failureWhy(answer.status) };
+      this.failure = { status: answer.status, why: failureWhy(answer.status),
+                       said: saidOf(answer.data) };
     }
   }
 }

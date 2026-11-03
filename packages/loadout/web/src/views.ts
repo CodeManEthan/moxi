@@ -2,7 +2,7 @@
 // act sends, worked out with no DOM so the Node tests can read it. Every string here goes
 // into the page as text.
 
-import { FINE } from "./feed.ts";
+import { FINE, saidOf } from "./feed.ts";
 import type {
   Drift, Failure, Global, GlobalFile, Item, Job, Listing, Outcome, Projects, Row, Section, Status,
 } from "./feed.ts";
@@ -184,10 +184,10 @@ export function replaceValue(row: Row): string | null {
   return row.target;
 }
 
-/** Whether a row's occupant can be replaced from the page: a blocked or modified row
- * that names what to replace. */
+/** Whether a row's occupant can be replaced from the page: one that `install --replace`
+ * places over, as status says, and that names what to replace. */
 export function canReplace(row: Row): boolean {
-  return (row.state === "blocked" || row.state === "modified") && replaceValue(row) !== null;
+  return row.replaceable && replaceValue(row) !== null;
 }
 
 /** The confirmed replace act for one row, and the lines its sheet shows. */
@@ -196,14 +196,16 @@ export function replaceAct(row: Row): Act & { sheet: string[] } {
   const scope = row.scope === null ? {} : row.scope === "user" ? { user: true }
     : { projects: [row.scope] };
   const where = row.target ?? value;
-  return {
-    path: "api/replace",
-    body: { replace: [value], ...scope },
-    sheet: [
-      `Runs moxi loadout install --replace ${value}.`,
-      `What stands at ${where} now moves to Moxi's displaced folder, and loadout places its own there.`,
-    ],
-  };
+  const sheet = [
+    `Runs moxi loadout install --replace ${value}.`,
+    `What stands at ${where} now moves to Moxi's displaced folder, and loadout places its own there.`,
+  ];
+  // A would-commit row that can be replaced has an occupant git tracks.
+  if (row.state === "would-commit") {
+    sheet.push("git tracks the project's copy there. It is moved aside like the rest, so git "
+               + "will show it deleted, and the row reads would-commit until you commit that.");
+  }
+  return { path: "api/replace", body: { replace: [value], ...scope }, sheet };
 }
 
 /** The lines the sheet shows before `global off`: what comes out of each global file. */
@@ -223,15 +225,7 @@ export function globalOffSheet(global: Global | null): string[] {
 
 type Obj = Record<string, unknown>;
 
-/** The text an answer gives: its `refused`, `conflict` or `error`. */
-export function saidOf(data: unknown): string | null {
-  if (typeof data !== "object" || data === null) return null;
-  for (const name of ["refused", "conflict", "error"]) {
-    const value = (data as Obj)[name];
-    if (typeof value === "string" && value !== "") return value;
-  }
-  return null;
-}
+export { saidOf };
 
 /** The job's status path a 202 gives, relative to loadout's page (`api/job?job=...`), or
  * null when the answer names none. */
@@ -257,6 +251,40 @@ export function startedOf(status: number, data: unknown): Started {
 
 // -- a job ----------------------------------------------------------------------------------
 
+/** The job the page follows, as it keeps it for the tab: its status path and its label. */
+export interface Kept {
+  path: string;
+  label: string;
+}
+
+/** The job kept for the tab in `raw`, or null when there is none or it can't be read. */
+export function parseKept(raw: string | null): Kept | null {
+  if (raw === null) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof data !== "object" || data === null) return null;
+  const path = jobPathOf((data as Obj).path);
+  if (path === null) return null;
+  const label = (data as Obj).label;
+  return { path, label: typeof label === "string" && label !== "" ? label : "A change" };
+}
+
+/**
+ * The line that ends a job the page follows when its read is refused: a 4xx other than a
+ * 404 (which means loadout went away) says the job is no more to be read, with the
+ * answer's own line. Null for any other failure, or none.
+ */
+export function jobRefusal(failure: Failure | null): string | null {
+  if (failure === null || failure.status < 400 || failure.status >= 500 || failure.status === 404) {
+    return null;
+  }
+  return failure.said ?? failure.why;
+}
+
 /** The command a job runs, as the user would type it. */
 export function commandLine(argv: readonly string[] | null): string {
   const words = (argv ?? []).filter((word) => word !== "--json");
@@ -277,7 +305,8 @@ export function exitLine(exit: number | null): string {
 }
 
 export interface JobView {
-  /** `running`, `done`, `interrupted`, or `failed` (the job can't be read). */
+  /** `running`, `done`, `interrupted`, or `failed` (the job can't be read, or its read
+   * was refused). */
   state: "running" | "done" | "interrupted" | "failed";
   /** `ok`, `warn`, `error` or `muted`. */
   tone: "ok" | "warn" | "error" | "muted";
@@ -303,6 +332,10 @@ function outcomeLines(outcome: Outcome | null): string[] {
 export function jobView(data: FeedState<Job>, lost = false): JobView {
   const job = data.value;
   const command = commandLine(job?.argv ?? null);
+  const refused = jobRefusal(data.failure);
+  if (refused !== null && (job === null || job.state === "running")) {
+    return { state: "failed", tone: "error", command, title: refused, lines: [], rows: [] };
+  }
   if (job === null || job.state === "running") {
     if (lost || data.gone) {
       const why = data.failure?.why ?? (data.gone ? "loadout went away" : "no answer");

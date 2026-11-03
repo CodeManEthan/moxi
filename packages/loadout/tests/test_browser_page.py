@@ -3,8 +3,9 @@ whose acts run as real page jobs: the contract check; a toggle off and on again;
 remove; a page install refused while no terminal run has recorded the harness homes, and
 one refused when the shell's `PATH` has no git and the terminal's has;
 Replace and Turn off through the confirm sheet, where Cancel sends nothing and each
-confirmation sends its own key; every control off while a job runs; an interrupted job;
-a refused act; the project picker; and the 360 px width check.
+confirmation sends its own key; Replace over a project's copy that git tracks; every
+control off while a job runs, and still off after a reload; an interrupted job; a job
+whose read is refused; a refused act; the project picker; and the 360 px width check.
 
 The loadout folder, its manifest and every `moxi` command here use the shell's own
 environment, so loadout's config, ledger, jobs and every harness file are under the
@@ -297,6 +298,16 @@ def test_replace_goes_through_the_sheet_and_cancel_sends_nothing(installed, ui_s
     assert posts == []
     expect(claude).to_have_attribute("data-state", "blocked")
 
+    # The first confirmation is answered with a refusal, so Replace is still there.
+    refusal = "the page server is busy; try again"
+    ui_page.route("**/m/loadout/api/replace",
+                  lambda route: route.fulfill(status=409, json={"conflict": refusal}))
+    claude.get_by_role("button", name="Replace…").click()
+    ui_page.locator("moxi-ui-confirm").get_by_role("button", name="Confirm").click()
+    expect(panel.locator('[data-line="said"]')).to_have_text(refusal)
+    ui_page.unroute("**/m/loadout/api/replace")
+    expect(claude).to_have_attribute("data-state", "blocked")
+
     claude.get_by_role("button", name="Replace…").click()
     ui_page.locator("moxi-ui-confirm").get_by_role("button", name="Confirm").click()
     job = job_done(panel)
@@ -304,11 +315,65 @@ def test_replace_goes_through_the_sheet_and_cancel_sends_nothing(installed, ui_s
         "moxi loadout install --replace=skill:review-diff@claude --user")
     expect(claude).to_have_attribute("data-state", "ok")
     expect(panel.locator("moxi-loadout-drift .drift")).to_have_attribute("data-count", "0")
-    assert len(posts) == 1 and KEY.match(posts[0].headers["idempotency-key"])
+    # Each confirmation sent once, with a key of its own.
+    keys = [request.headers["idempotency-key"] for request in posts]
+    assert len(keys) == 2 and keys[0] != keys[1] and all(KEY.match(k) for k in keys)
     # The user's own copy was kept, under the shell's home.
     kept = [p for p in home.rglob("SKILL.md") if "the user's own" in p.read_text()]
     assert kept and all(p.resolve().is_relative_to(home.resolve()) for p in kept)
     written_under_home(ui_shell)
+
+
+def test_replace_over_a_copy_the_projects_git_tracks_says_git_will_show_it_deleted(
+        ui_shells, ui_shell_options, ui_contexts):
+    shell = ui_shells(**ui_shell_options)
+    home = Path(shell.env["HOME"])
+    project = home / "app"
+    occupant = project / ".agents" / "skills" / "review-diff"
+    occupant.mkdir(parents=True)
+    (occupant / "SKILL.md").write_text("the project's own review-diff\n", encoding="utf-8")
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(project), *args], env=shell.env,
+                              capture_output=True, text=True, check=True).stdout
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-qm", "a skill")
+    folder = make_folder(shell)
+    (folder / "loadout.toml").write_text(
+        BASE + f'[project."{project}"]\nskills = ["review-diff"]\n'
+        '[skill.review-diff]\nharnesses = ["codex"]\n', encoding="utf-8")
+    assert moxi(shell, "loadout", "install", check=False).returncode == 3
+    [row] = [r for r in status(shell)["rows"] if r["name"] == "review-diff"]
+    assert (row["state"], row["replaceable"]) == ("would-commit", True), row
+
+    page = ui_contexts(shell).pages[0]
+    panel = open_panel(page)
+    codex = cell(panel, "review-diff", "codex", section=str(project))
+    expect(codex).to_have_attribute("data-state", "would-commit")
+    codex.get_by_role("button", name="Replace…").click()
+    sheet = page.locator("moxi-ui-confirm").get_by_role("dialog")
+    expect(sheet).to_contain_text("moxi loadout install --replace skill:review-diff@codex")
+    expect(sheet).to_contain_text(str(occupant))
+    expect(sheet).to_contain_text("git tracks the project's copy there. It is moved aside like "
+                                  "the rest, so git will show it deleted, and the row reads "
+                                  "would-commit until you commit that.")
+    sheet.get_by_role("button", name="Confirm").click()
+    job = job_done(panel)
+    expect(job.locator('[data-line="command"]')).to_have_text(
+        f"moxi loadout install --replace=skill:review-diff@codex --project={project}")
+    assert occupant.is_symlink()
+    written_under_home(shell)
+    # What the sheet said: git shows the project's copy deleted, and the row reads
+    # would-commit, with no Replace now, until the deletion is committed.
+    assert " D .agents/skills/review-diff/SKILL.md" in git("status", "--porcelain")
+    expect(codex).to_have_attribute("data-state", "would-commit")
+    expect(codex.get_by_role("button", name="Replace…")).to_have_count(0)
+    git("rm", "-r", "-q", "--cached", ".agents/skills/review-diff")
+    git("commit", "-qm", "the skill is loadout's now")
+    panel.get_by_role("button", name="Read again").click()
+    expect(codex).to_have_attribute("data-state", "ok")
 
 
 def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
@@ -351,23 +416,108 @@ def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
     expect(glob.get_by_role("button", name="Turn off…")).to_have_count(0)
 
 
-def test_every_control_is_off_while_a_job_runs(installed, ui_page):
+#: Every act's control on the panel: each button that starts an act, and the form fields.
+ACTS = ('button[data-action]:not([data-action="read"]), button.switch, '
+        'form select, form input')
+
+
+def controls(panel) -> dict:
+    """Each act's control, by what it does: its action and mode, or its label."""
+    found = {}
+    for control in panel.locator(ACTS).all():
+        name = (control.get_attribute("data-action") or control.get_attribute("aria-label")
+                or control.get_attribute("title"))
+        found[f"{name}:{control.get_attribute('data-mode') or ''}"] = control
+    return found
+
+
+def every_control(panel, enabled: bool) -> None:
+    found = controls(panel)
+    # Install, Remove, a switch, Add with its fields, both mode buttons, Turn off and
+    # Replace are all on the panel.
+    for name in ("install:", "remove:", "add:", "Kind:", "Name:", "Section:",
+                 "Sections to install:", "mode:managed", "mode:if-absent", "global-off:",
+                 "replace:"):
+        assert name in found, (name, sorted(found))
+    assert any(name.startswith("Turn ") for name in found), sorted(found)
+    for control in found.values():
+        if enabled:
+            expect(control).to_be_enabled()
+        else:
+            expect(control).to_be_disabled()
+
+
+@pytest.fixture
+def with_replace(installed, ui_shell):
+    """`installed`, with `review-diff` listed and a folder of the user's own in its way,
+    so its row offers Replace. The folder goes when the test ends."""
+    occupant = Path(ui_shell.env["HOME"]) / ".claude" / "skills" / "review-diff"
+    occupant.mkdir(parents=True)
+    (occupant / "SKILL.md").write_text("the user's own review-diff\n", encoding="utf-8")
+    (installed / "loadout.toml").write_text(
+        '[user]\nskills = ["tidy-notes", "review-diff"]\n', encoding="utf-8")
+    assert moxi(ui_shell, "loadout", "install", check=False).returncode == 3
+    yield installed
+    shutil.rmtree(occupant)
+
+
+def test_every_control_is_off_while_a_job_runs(with_replace, ui_page):
     panel = open_panel(ui_page)
-    install = panel.get_by_role("button", name="Install")
+    expect(cell(panel, "review-diff", "claude")).to_have_attribute("data-state", "blocked")
+    panel.locator('[data-part="add"]').get_by_label("Name").fill("fresh-skill")
+    every_control(panel, enabled=True)
     held = {"job": "held", "argv": ["install"], "state": "running", "exit": None,
             "outcome": None, "lines": []}
     ui_page.route(JOB, lambda route: route.fulfill(json=held))
-    install.click()
+    panel.get_by_role("button", name="Install").click()
     job = panel.locator('section[data-part="job"]')
     expect(job.locator('[data-line="job"]')).to_have_text("Running…")
-    expect(install).to_be_disabled()
-    expect(cell(panel, "tidy-notes", "claude").get_by_role("switch")).to_be_disabled()
-    expect(item(panel, "tidy-notes").get_by_role("button", name="Remove")).to_be_disabled()
     expect(panel.get_by_text("A change is running.")).to_be_visible()
+    every_control(panel, enabled=False)
     ui_page.unroute(JOB)
-    job_done(panel)
-    expect(install).to_be_enabled()
-    expect(cell(panel, "tidy-notes", "claude").get_by_role("switch")).to_be_enabled()
+    job_done(panel, 3)          # review-diff is still blocked
+    every_control(panel, enabled=True)
+
+
+def test_a_reload_while_a_job_runs_follows_it_again_with_every_control_off(
+        with_replace, ui_page):
+    panel = open_panel(ui_page)
+    panel.locator('[data-part="add"]').get_by_label("Name").fill("fresh-skill")
+    held = {"job": "held", "argv": ["install"], "state": "running", "exit": None,
+            "outcome": None, "lines": []}
+    ui_page.route(JOB, lambda route: route.fulfill(json=held))
+    panel.get_by_role("button", name="Install").click()
+    expect(panel.locator('[data-line="job"]')).to_have_text("Running…")
+
+    def reload() -> None:
+        ui_page.reload()
+
+    def away_and_back() -> None:
+        # The shell's home, then back through the drift block's link, in the same document.
+        ui_page.goto("/m/ui/")
+        ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift h2 a").click()
+        expect(ui_page).to_have_url(re.compile(r"/m/loadout/$"))
+
+    # Each builds a new panel.
+    for again in (reload, away_and_back):
+        again()
+        panel = ui_page.locator("#moxi-panel > moxi-loadout-page")
+        expect(panel.locator('section[data-part="items"]')).to_have_attribute("data-state", "up")
+        job = panel.locator('section[data-part="job"]')
+        expect(job).to_have_attribute("data-state", "running")
+        expect(job.locator('[data-line="command"]')).to_have_text("moxi loadout install")
+        expect(job).to_contain_text("Install:")
+        every_control(panel, enabled=False)
+
+    ui_page.unroute(JOB)
+    job_done(panel, 3)
+    panel.locator('[data-part="add"]').get_by_label("Name").fill("fresh-skill")
+    every_control(panel, enabled=True)
+    # Once the job has ended, a reload no longer shows it.
+    ui_page.reload()
+    panel = open_panel(ui_page)
+    expect(panel.locator('section[data-part="job"]')).to_have_count(0)
+    expect(panel.get_by_role("button", name="Install")).to_be_enabled()
 
 
 def test_an_interrupted_job_says_to_run_it_again(installed, ui_page):
@@ -384,6 +534,20 @@ def test_an_interrupted_job_says_to_run_it_again(installed, ui_page):
         "the job stopped before it ended; run it again")
     expect(panel.get_by_role("button", name="Install")).to_be_enabled()
     assert ui_page.evaluate("window.__changed") >= 1
+
+
+def test_a_job_whose_read_is_refused_ends_with_the_refusals_line(installed, ui_page):
+    panel = open_panel(ui_page)
+    count_changes(ui_page)
+    line = "there is no page job held; a job's record is kept for a day"
+    ui_page.route(JOB, lambda route: route.fulfill(status=422, json={"refused": line}))
+    panel.get_by_role("button", name="Install").click()
+    job = panel.locator('section[data-part="job"]')
+    expect(job).to_have_attribute("data-state", "failed")
+    expect(job.locator('[data-line="job"]')).to_have_text(line)
+    expect(panel.get_by_role("button", name="Install")).to_be_enabled()
+    assert ui_page.evaluate("window.__changed") >= 1
+    ui_page.unroute(JOB)
 
 
 def test_a_refused_act_starts_no_job_and_says_why(installed, ui_page):

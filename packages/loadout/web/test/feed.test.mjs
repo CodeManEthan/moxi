@@ -7,7 +7,8 @@ import {
 } from "../src/feed.ts";
 
 const ROW = { scope: "user", kind: "skill", name: "tidy-notes", harness: "claude",
-              state: "missing", reason: "not placed yet", target: "/h/.claude/skills/tidy-notes" };
+              state: "missing", reason: "not placed yet", target: "/h/.claude/skills/tidy-notes",
+              replaceable: false };
 const OUTCOME = { rows: [ROW], lines: [], notes: [], counts: { missing: 1 }, exit: 1 };
 const DRIFT = { problem: null, count: 2, note: null };
 
@@ -44,13 +45,15 @@ test("a 503 is read again after 1 s, and four are a failure", async () => {
   const { feed, reads } = feedOf([busy, busy, busy, busy, { status: 200, data: DRIFT }]);
   await feed.refresh();
   assert.equal(reads.length, RETRIES + 1);
-  assert.deepEqual(feed.failure, { status: 503, why: "loadout's page server answered 503" });
+  assert.deepEqual(feed.failure, { status: 503, why: "loadout's page server answered 503", said: null });
 });
 
 test("every other answer is a failure, and the last value is kept", async () => {
-  for (const [answer, why] of [
+  for (const [answer, why, said = null] of [
     [{ status: 500, data: null }, "loadout's page server answered 500"],
-    [{ status: 401, data: { error: "x" } }, "loadout's page server answered 401"],
+    [{ status: 401, data: { error: "x" } }, "loadout's page server answered 401", "x"],
+    [{ status: 422, data: { refused: "there is no page job j1" } }, "loadout's page server answered 422",
+     "there is no page job j1"],
     [{ status: 0, data: null }, "no answer from the shell"],
     [{ status: 200, data: null }, "loadout's page server sent an answer that can't be read"],
     [{ status: 200, data: { problem: null, count: "2", note: null } }, "loadout's page server sent an answer that can't be read"],
@@ -58,7 +61,7 @@ test("every other answer is a failure, and the last value is kept", async () => 
     const { feed } = feedOf([{ status: 200, data: DRIFT }, answer]);
     await feed.refresh();
     await feed.refresh();
-    assert.deepEqual(feed.failure, { status: answer.status, why });
+    assert.deepEqual(feed.failure, { status: answer.status, why, said });
     assert.deepEqual(feed.value, DRIFT);
   }
 });
@@ -104,6 +107,9 @@ test("drift reads its count and note, and refuses a count that isn't a whole num
 test("status reads an outcome with its problem", () => {
   assert.deepEqual(parseStatus({ problem: null, ...OUTCOME }), { problem: null, ...OUTCOME });
   assert.equal(parseStatus({ problem: null, ...OUTCOME, rows: [{ ...ROW, state: 3 }] }), null);
+  const { replaceable, ...unflagged } = ROW;
+  assert.equal(replaceable, false);
+  assert.equal(parseStatus({ problem: null, ...OUTCOME, rows: [unflagged] }), null);
   assert.equal(parseStatus({ problem: null, ...OUTCOME, counts: { ok: "1" } }), null);
   assert.equal(parseStatus(OUTCOME), null);
 });

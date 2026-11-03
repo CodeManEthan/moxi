@@ -13,7 +13,9 @@
 //   the next install makes of each global file, with its diff.
 //
 // Every act runs as a page job: the page sends it, follows the job's status path, and
-// keeps every act's control off while one runs. Replace and Turn off are confirmed acts:
+// keeps every act's control off while one runs. It keeps that path in the tab's
+// `sessionStorage` until the job ends, so after a reload, or another panel and back, it
+// follows the job again. Replace and Turn off are confirmed acts:
 // the page's button opens the shell's confirm sheet, which mints a new key at each
 // confirmation and sends the act once. When a job ends the page reads its routes again
 // and sends `CHANGED` on the document, so the drift block reads again too. The page reads
@@ -29,10 +31,10 @@ import {
 import type { Global, Job, Listing, Projects, Row, Status } from "./feed.ts";
 import {
   addChoices, canReplace, cellLine, choiceScope, globalOffSheet, globalView, installAct,
-  installChoices, itemAct, itemsView, jobPathOf, jobView, KINDS, readState, replaceAct,
-  startedOf, stateTone,
+  installChoices, itemAct, itemsView, jobPathOf, jobRefusal, jobView, KINDS, parseKept, readState,
+  replaceAct, startedOf, stateTone,
 } from "./views.ts";
-import type { Act, Cell, ItemView, SectionView } from "./views.ts";
+import type { Act, Cell, ItemView, Kept, SectionView } from "./views.ts";
 
 const TAG = "moxi-loadout-page";
 
@@ -40,6 +42,28 @@ const TAG = "moxi-loadout-page";
 const JOB_POLL_MS = 1000;
 /** After this many failed reads in a row the page stops reading a job. */
 const JOB_TRIES = 5;
+/** The `sessionStorage` key of the job the page follows. */
+const KEPT = "moxi-loadout-job";
+
+/** Keeps `job` as the one the tab follows, or forgets it. Without storage, the page
+ * follows a job only while it stays open. */
+function keep(job: Kept | null): void {
+  try {
+    if (job === null) sessionStorage.removeItem(KEPT);
+    else sessionStorage.setItem(KEPT, JSON.stringify(job));
+  } catch {
+    // Storage is off or full.
+  }
+}
+
+/** The job the tab follows, if one is kept. */
+function kept(): Kept | null {
+  try {
+    return parseKept(sessionStorage.getItem(KEPT));
+  } catch {
+    return null;
+  }
+}
 
 const STYLES = css`
   :host { display: block; min-width: 0; color: var(--moxi-text); font-family: var(--moxi-font-sans); }
@@ -148,6 +172,8 @@ export class LoadoutPage extends LitElement {
     this.#readAll();
     void this.#projects.refresh();
     document.addEventListener("visibilitychange", this.#shown);
+    const job = kept();
+    if (job !== null) this.#follow(job.path, job.label);
   }
 
   disconnectedCallback(): void {
@@ -219,6 +245,7 @@ export class LoadoutPage extends LitElement {
     this.#jobEnded = false;
     this.#jobLost = false;
     this.#jobFails = 0;
+    keep({ path, label });
     const feed: Feed<Job> = new Feed<Job>(() => api("loadout", path), parseJob, () => this.#jobRead(feed));
     this.#job = feed;
     void feed.refresh();
@@ -228,12 +255,16 @@ export class LoadoutPage extends LitElement {
     if (feed !== this.#job || this.#jobEnded) return;
     this.#jobFails = feed.failure !== null ? this.#jobFails + 1 : 0;
     const state = feed.value?.state ?? "running";
+    // A refused read (no such job) ends it; one that gave no answer may not have.
+    const refused = jobRefusal(feed.failure) !== null;
     const lost = feed.gone || this.#jobFails >= JOB_TRIES;
-    if (state === "running" && !lost) {
+    if (state === "running" && !lost && !refused) {
       this.#jobTimer = setTimeout(() => { void feed.refresh(); }, JOB_POLL_MS);
     } else {
-      this.#jobLost = state === "running";
+      this.#jobLost = state === "running" && !refused;
       this.#jobEnded = true;
+      // A job that may still run stays kept, so a reload tries it again.
+      if (!this.#jobLost) keep(null);
       this.#ended();
     }
     this.requestUpdate();

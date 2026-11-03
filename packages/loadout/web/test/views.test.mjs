@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   addChoices, canReplace, cellLine, choiceScope, commandLine, countLine, driftView, exitLine,
   globalOffSheet, globalView, installAct, installChoices, itemAct, itemsView, jobPathOf, jobView,
-  readState, replaceAct, replaceValue, saidOf, startedOf, toggleAct,
+  jobRefusal, parseKept, readState, replaceAct, replaceValue, saidOf, startedOf, toggleAct,
 } from "../src/views.ts";
 
 const state = (over) => ({ loading: false, gone: false, failure: null, value: null, ...over });
@@ -61,7 +61,8 @@ const USER = { name: "user", where: "user", root: null };
 const PROJ = { name: "/w/app", where: "path", root: "/w/app" };
 const KEYED = { name: "site", where: "key", root: null };
 const row = (over) => ({ scope: "user", kind: "skill", name: "tidy", harness: "claude",
-                         state: "ok", reason: "", target: "/h/.claude/skills/tidy", ...over });
+                         state: "ok", reason: "", target: "/h/.claude/skills/tidy", replaceable: false,
+                         ...over });
 const item = (over) => ({ kind: "skill", name: "tidy", scope: "user", harnesses: null,
                           source: "/f/skills/tidy", disabled: [], ...over });
 const outcome = (over) => ({ rows: [], lines: [], notes: [], counts: {}, exit: 0, ...over });
@@ -109,7 +110,8 @@ test("items by section with each harness's state, the switched-off harness among
   const status = { problem: null, ...outcome({ rows: [
     row({ state: "missing" }),
     row({ harness: "codex", state: "off", reason: "disabled", target: null }),
-    row({ scope: "/w/app", state: "blocked", reason: "a file is there", target: "/w/app/.claude/skills/tidy" }),
+    row({ scope: "/w/app", state: "blocked", reason: "a file is there", target: "/w/app/.claude/skills/tidy",
+          replaceable: true }),
     row({ scope: "/w/app", harness: "codex", target: "/w/app/.agents/skills/tidy" }),
     row({ name: "ext/helper", harness: "codex" }),
     row({ scope: null, kind: null, name: "/h/.gitignore", harness: null, state: "stale" }),
@@ -148,19 +150,39 @@ test("an item off for every harness turns on only with @*", () => {
 });
 
 test("replace names the item for its harness, or the target, in the row's section", () => {
-  const blocked = row({ scope: "/w/app", state: "blocked", target: "/w/app/.claude/skills/tidy" });
+  const blocked = row({ scope: "/w/app", state: "blocked", target: "/w/app/.claude/skills/tidy",
+                        replaceable: true });
   assert.equal(replaceValue(blocked), "skill:tidy@claude");
   const act = replaceAct(blocked);
   assert.deepEqual(act.body, { replace: ["skill:tidy@claude"], projects: ["/w/app"] });
   assert.equal(act.path, "api/replace");
   assert.match(act.sheet[0], /--replace skill:tidy@claude/);
   assert.match(act.sheet[1], /\/w\/app\/\.claude\/skills\/tidy/);
+  assert.equal(act.sheet.length, 2);
   const ignore = row({ scope: null, kind: null, name: null, harness: null, state: "modified",
                        target: "/h/.gitignore" });
   assert.deepEqual(replaceAct(ignore).body, { replace: ["/h/.gitignore"] });
   assert.deepEqual(replaceAct(row({ state: "modified" })).body, { replace: ["skill:tidy@claude"], user: true });
   assert.equal(canReplace(row({ state: "missing" })), false);
   assert.equal(canReplace(row({ state: "would-commit" })), false);
+});
+
+test("Replace is offered where status says --replace places over the row, and only there", () => {
+  // A blocked row --replace doesn't fix (another module's placement, a CLI not found).
+  assert.equal(canReplace(row({ state: "blocked", reason: "it is ext's placement" })), false);
+  // An ignore file edited by hand: restoring it is the fix, not --replace.
+  assert.equal(canReplace(row({ kind: "ignore", name: "/w/app/.gitignore", harness: "*",
+                                state: "modified", target: "/w/app/.gitignore" })), false);
+  assert.equal(canReplace(row({ state: "modified", replaceable: true })), true);
+  // A project's copy that git tracks: replaced, and the sheet says git shows it deleted.
+  const tracked = row({ scope: "/w/app", harness: "codex", state: "would-commit",
+                        reason: "git tracks it", target: "/w/app/.agents/skills/tidy",
+                        replaceable: true });
+  assert.equal(canReplace(tracked), true);
+  const act = replaceAct(tracked);
+  assert.deepEqual(act.body, { replace: ["skill:tidy@codex"], projects: ["/w/app"] });
+  assert.match(act.sheet[1], /\/w\/app\/\.agents\/skills\/tidy now moves to Moxi's displaced folder/);
+  assert.match(act.sheet[2], /git tracks the project's copy there.*git will show it deleted, .*until you commit that/);
 });
 
 test("the global view offers the modes not in force, and off unless chosen off", () => {
@@ -219,6 +241,38 @@ test("a job running, done by its exit code, interrupted, or lost", () => {
   assert.equal(jobView(at(job(), { failure }), true).state, "failed");
   assert.equal(jobView(at(job(), { failure })).state, "running");
   assert.equal(commandLine(["install", "--json"]), "moxi loadout install");
+});
+
+test("a refused job read ends the job with the refusal's own line", () => {
+  const job = { job: "j1", argv: ["install"], state: "running", exit: null, outcome: null, lines: [] };
+  const at = (value, failure) => ({ loading: false, gone: false, failure, value });
+  const gone = { status: 422, why: "loadout's page server answered 422",
+                 said: "there is no page job j1; a job's record is kept for a day" };
+  assert.equal(jobRefusal(gone), "there is no page job j1; a job's record is kept for a day");
+  assert.equal(jobRefusal({ ...gone, said: null }), "loadout's page server answered 422");
+  for (const status of [0, 404, 500, 503]) {
+    assert.equal(jobRefusal({ status, why: "w", said: null }), null);
+  }
+  assert.equal(jobRefusal(null), null);
+  for (const value of [null, job]) {
+    const view = jobView(at(value, gone));
+    assert.equal(view.state, "failed");
+    assert.equal(view.title, "there is no page job j1; a job's record is kept for a day");
+    assert.doesNotMatch(view.title, /may still be running/);
+  }
+  // A job read done before keeps its outcome.
+  assert.equal(jobView(at({ ...job, state: "done", exit: 0 }, gone)).state, "done");
+});
+
+test("the job a tab keeps is its status path and label, or nothing", () => {
+  assert.deepEqual(parseKept(JSON.stringify({ path: "api/job?job=a_B-1", label: "Install" })),
+                   { path: "api/job?job=a_B-1", label: "Install" });
+  assert.deepEqual(parseKept(JSON.stringify({ path: "/api/job?job=a1" })),
+                   { path: "api/job?job=a1", label: "A change" });
+  for (const raw of [null, "", "{", "null", "[]", JSON.stringify({ path: "api/other" }),
+                     JSON.stringify({ path: "https://elsewhere/api/job?job=x" })]) {
+    assert.equal(parseKept(raw), null, raw);
+  }
 });
 
 test("a read's state", () => {
