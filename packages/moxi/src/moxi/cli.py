@@ -421,6 +421,8 @@ def describe() -> dict:
     `optional` is the richer list of its extras; `starts` names, for each daemon with a
     socket, what starts it now as the plan resolves it (`login` or `connection`, null
     when a switch-form `start` can't be read), beside the declared form in `daemons`.
+    It is what systemd and launchd do: on Windows the logon task starts every daemon at
+    each logon whatever it says.
     """
     from . import modules
 

@@ -30,6 +30,11 @@ Every module runs as `moxi <module> <verb>`, for example `moxi comms send`. The 
 commands:
 
 - `moxi modules` lists the modules this environment holds, their state and their extras.
+  `moxi modules --json` prints the same as one JSON object. In it each module's `starts`
+  names, for each daemon that listens on a socket, what starts it now: `login`, or
+  `connection` for the first connection to its socket, or `null` when the setting that
+  chooses can't be read. It is what systemd and launchd do; on Windows every daemon starts
+  at each logon. Python code gets the same value from `moxi.units.starts(found)`.
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
   `--without`, `--all` and `--none` answer ahead.
