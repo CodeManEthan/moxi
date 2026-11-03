@@ -47,7 +47,11 @@ if (outcome.outcome === "accepted") {
     a page server that ended before answering, no answer in 30 s, or no answer from the
     shell at all). The module may have acted, so the component points the user at the
     job, not at a retry;
-  - `{outcome: "cancelled"}`: the user closed the sheet and nothing was sent.
+  - `{outcome: "cancelled"}`: the user closed the sheet and nothing was sent;
+  - `{outcome: "desk", text}`: on a phone where the act can't be done, the sheet told the
+    user to do it at the desk, with `text` saying why, and nothing was sent. This outcome
+    came with the gateway: a component that matches the outcomes exhaustively, such as a
+    `switch` TypeScript checks for `never`, needs a branch for it.
 - The component shows the outcome itself; the sheet closes once the answer is in.
 - `api()` on a confirmed act's path throws a `TypeError`, so a component can't skip the
   sheet. `confirm()` on any other path throws one too. The shell reads which paths are
