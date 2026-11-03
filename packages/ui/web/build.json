@@ -1,6 +1,8 @@
 {
   "entries": {"client.js": "src/client.ts", "page.js": "src/page.ts", "servers.js": "src/servers.ts",
-              "pair.js": "src/pair.ts", "signin.js": "src/signin.ts"},
-  "copy": ["shell.html", "shell.css", "pair.html", "signin.html"],
+              "pair.js": "src/pair.ts", "signin.js": "src/signin.ts", "offline.js": "src/offline.ts",
+              "sw.js": "src/sw.ts"},
+  "copy": ["shell.html", "shell.css", "pair.html", "signin.html", "offline.html", "icon-192.png",
+           "icon-512.png"],
   "generate": "gen.mjs"
 }

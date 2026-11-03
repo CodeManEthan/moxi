@@ -528,11 +528,43 @@ export function setTheme(mode: ThemeMode): void {
   document.documentElement.dataset.theme = mode;
 }
 
+// --- the gateway's worker ------------------------------------------------------------------
+
+const WORKER_URL = "/sw.js";
+
+interface ScriptUrlPolicies {
+  createPolicy(name: string, rules: { createScriptURL(url: string): string }): { createScriptURL(url: string): unknown };
+}
+
+/** Registers the gateway's worker, on every load, so a sign-in that cleared the origin's
+ * storage gets it back. The gateway's policy requires Trusted Types for scripts, so the
+ * URL goes through `moxi-worker`, a policy of this file's own that passes `/sw.js` and
+ * throws for any other URL; a browser without Trusted Types takes the string. No
+ * component sees the policy. */
+function registerWorker(): void {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const types = (globalThis as { trustedTypes?: ScriptUrlPolicies }).trustedTypes;
+    const url = types === undefined ? WORKER_URL : types.createPolicy("moxi-worker", {
+      createScriptURL(given: string): string {
+        if (given !== WORKER_URL) throw new TypeError(`moxi-worker passes only ${WORKER_URL}, not ${given}`);
+        return given;
+      },
+    }).createScriptURL(WORKER_URL);
+    navigator.serviceWorker.register(url as string, { scope: "/" }).catch((err: unknown) => {
+      console.warn("moxi: the gateway's worker didn't register", err);
+    });
+  } catch (err) {
+    console.warn("moxi: the gateway's worker didn't register", err);
+  }
+}
+
 // --- start ------------------------------------------------------------------------------
 
 defineForm(installed);
 defineConfirm();
 push.start();
+if (here.gateway) registerWorker();
 addEventListener("storage", (event) => {
   // A sign-in in another tab of this browser stores a new key.
   if (event.key === KEY_STORAGE && event.newValue) {

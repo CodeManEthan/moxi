@@ -2,6 +2,8 @@
 //
 // - theme.css, from tokens.json: every token as `--moxi-<name>` on `:root`, each colour
 //   written once as `light-dark(<light>, <dark>)`;
+// - manifest.json, the gateway's web app manifest, which it serves at
+//   /manifest.webmanifest, its colours tokens.json's;
 // - tools/web/client.d.ts, the types of /m/ui/client.js, from src/client.ts by tsc's
 //   declaration output. Every page's tsc resolves the client's URL to that file.
 
@@ -65,6 +67,30 @@ export function themeCss(tokens) {
   return lines.join("\n");
 }
 
+/** The icon sizes, each a PNG under web/ that the build copies: icon-<size>.png. */
+export const ICON_SIZES = [192, 512];
+
+/** manifest.json's text: the installed app's name, where it starts, its colours (the
+ * light theme's background) and its icons. Each icon fills its square and keeps its mark
+ * in the middle, so the phone may crop it to any shape. */
+export function manifest(tokens) {
+  const background = tokens.bg?.$value;
+  if (!COLOR.test(background ?? "")) throw new Error("tokens.json: bg is the manifest's colour and must be #rrggbb");
+  const value = {
+    name: "Moxi",
+    short_name: "Moxi",
+    start_url: "/m/ui/",
+    scope: "/",
+    display: "standalone",
+    background_color: background,
+    theme_color: background,
+    icons: ICON_SIZES.map((size) => ({
+      src: `/icon-${size}.png`, sizes: `${size}x${size}`, type: "image/png", purpose: "any maskable",
+    })),
+  };
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 const HEADER = `// The types of the UI module's shared script, /m/ui/client.js, which every page imports
 // by that absolute URL and every build leaves external. tools/web/tsconfig.base.json maps
 // the URL to this file. Written by \`npm run build\` from packages/ui/web/src/client.ts;
@@ -101,5 +127,6 @@ export function declarations(root, web) {
 export default async function generate({ root, web, emit }) {
   const tokens = JSON.parse(fs.readFileSync(path.join(web, "tokens.json"), "utf8"));
   emit(`${OUT}/theme.css`, themeCss(tokens));
+  emit(`${OUT}/manifest.json`, manifest(tokens));
   emit(DECL, declarations(root, web));
 }
