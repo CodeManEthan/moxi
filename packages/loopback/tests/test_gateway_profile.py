@@ -208,9 +208,10 @@ def test_the_session_gets_the_one_entry_and_none_for_a_404():
     assert seen[1] is None
 
 
-def test_only_true_from_the_session_admits_and_prove_is_exempt():
+def test_only_true_from_the_session_admits_and_prove_is_not_exempt():
     assert check(req(), phone(session=lambda v, e: 1)) == Refusal(403, 4)
-    assert check(req(path=b"/api/prove", signed_in=False), phone()) is None
+    assert check(req(path=b"/api/prove", signed_in=False), phone()) == Refusal(403, 4)
+    assert check(req(path=b"/api/prove"), phone()) is None
 
 
 def test_an_act_without_json_is_a_403_at_the_route_gate():

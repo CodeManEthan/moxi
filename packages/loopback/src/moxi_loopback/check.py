@@ -428,8 +428,10 @@ def check(view: RequestView, profile: Profile) -> Refusal | None:
     elif not _gate3_browser(view, entry):
         return Refusal(403, 3)
 
-    # Only the table's own `GET /api/prove` is exempt, never an entry a fallback made.
-    exempt = (view.method == "GET" and view.raw_path == _PROVE_RAW
+    # Only the table's own `GET /api/prove` is exempt, never an entry a fallback made, and
+    # never on the gateway, which answers no token route and so has no server to prove.
+    exempt = (profile.kind != "gateway" and view.method == "GET"
+              and view.raw_path == _PROVE_RAW
               and profile.table.find("GET", _PROVE_RAW) is not None)
     if not exempt:
         if profile.kind == "upstream":
