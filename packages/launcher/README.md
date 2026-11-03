@@ -25,6 +25,14 @@ your `[defaults]`; the one preset you name; the flags you type. A launch names a
 preset, a seat (`--seat NAME`) or a project preset (`--project-preset NAME`), and never
 draws values from a second.
 
+`--leave-out ROW`, given once per row, leaves a catalog row out of this launch whatever
+your `[defaults]` or the preset sets: the row launches at its shipped default, as if no
+layer had set it. Leave out the preset's place and the place in your `[defaults]` stands.
+`moxi launcher run --seat planner --leave-out model` starts the planner seat with the
+harness's own model. A row both typed and left out, and a name that is no row of any
+harness, are refused. A row the harness doesn't offer can be left out too, so a seat that
+sets a Codex row can still be launched under Claude.
+
 The flags are the catalog's rows: the launcher's own (`--harness`, `--cwd`, `--project`,
 `--scratch`, `--brief`, `--brief-file`, `--handoff`, `--target`, `--slot`,
 `--instructions`, `--identity` and the rest) and the harness's (`--model`,
@@ -233,9 +241,16 @@ session with its state.
 
 The page has four parts.
 
-- **Launch.** Pick a seat or a project preset, then change what you want in the form,
-  which shows the same flag rows as `moxi launcher catalog`. Only the fields you change
-  are sent, so the rest come from the preset and your defaults. "Preview" shows the
+- **Launch.** Pick a seat or a project preset to start from: its values and your
+  defaults fill the form, which shows the same flag rows as `moxi launcher catalog`, each
+  with a note saying who set its value. Change what you want. An emptied field is left
+  out of this launch, as `--leave-out` leaves it out: a word field offers a "leave out"
+  choice naming the word that then launches, and a switch or box turned off is left out.
+  A brief or standing instructions that the preset or your `[defaults]` writes inline is
+  not shown; a ticked box beside the form keeps it, and unticking the box leaves it out.
+  Choosing another preset fills the form afresh and drops your edits; changing the
+  harness keeps your edits to the rows both harnesses have. The page only reads the
+  presets file: nothing you do in the form changes a preset. "Preview" shows the
   command, the environment stamps, the first turn and every warning, and every reason the
   launch would be refused, each beside its field. A launch from the page needs a
   directory, a project or scratch to start in. A launch in a slot or headless then starts
@@ -243,7 +258,8 @@ The page has four parts.
   closing the page doesn't stop it. A preview can be launched once, within
   `page.launch_wait_s` seconds (600), and only as it was previewed. The page never runs a
   launch in a terminal: it gives the `moxi launcher run` command to copy into a terminal
-  of your own.
+  of your own, with the preset, the fields you changed and a `--leave-out` for each field
+  left out. The preview lists the left-out rows on a "Left out" line.
 - **Sessions.** The block the shell's home shows: each running launched session, whether
   it needs a look, and its relaunch, recycle and keep-warm lines.
 - **Launches.** The newest launches, updated as they happen. A running session shows its
@@ -263,8 +279,9 @@ starts when the page is first opened and stops once nothing has used it for a wh
 
 | Command | Does |
 |---|---|
-| `moxi launcher run [--seat N \| --project-preset N] [flags] [-- extra]` | launch a session |
+| `moxi launcher run [--seat N \| --project-preset N] [flags] [--leave-out ROW ...] [-- extra]` | launch a session |
 | `moxi launcher preview ... [--json]` | print the command and environment a launch would use |
+| `--leave-out ROW`, on `run` and `preview`, repeatable | leave a catalog row out of this launch, whatever `[defaults]` or the preset sets |
 | `moxi launcher log [--limit N] [--before TIME] [--json]` | the launch log, newest first; `--json` prints one row per line |
 | `moxi launcher log --table runs\|exits\|holds [...]` | the runs (with their events), the exit log, or every hold, newest first |
 | `moxi launcher presets [list \| show NAME \| check] [--json]` | list, show or check the presets |
