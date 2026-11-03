@@ -10,6 +10,8 @@ with the reason, and the TCP tests show what the phone gets instead: the desk po
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 from playwright.sync_api import expect
 
@@ -49,6 +51,29 @@ CACHED = """async () => {
   }
   return false;
 }"""
+KEPT_OFFLINE = """async () => {
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    if (await caches.match("/offline", {cacheName: "moxi-gateway"})) return true;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  return false;
+}"""
+KEPT_CLIENT = """async () => {
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    const kept = await caches.match("/m/ui/client.js", {cacheName: "moxi-gateway"});
+    if (kept) return (await kept.text()).includes("__planted");
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  return null;
+}"""
+#: Takes the real worker and its cache off the phone, as a phone that never had them.
+UNREGISTER = """async () => {
+  for (const name of await caches.keys()) await caches.delete(name);
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? await reg.unregister() : false;
+}"""
 SETTLED = """async () => {
   const until = Date.now() + 15000;
   while (Date.now() < until) {
@@ -82,6 +107,28 @@ ACT_PATHS = """async () => {
     (await post("/m/fixture/api/confirm", {by: 1})).status,
   ];
 }"""
+
+
+#: A year, the longest a squatter's answer could ask to be cached.
+YEAR = "Cache-Control: max-age=31536000"
+PLANTED_START = ('<!doctype html><title>planted start</title>'
+                 '<script type="module" src="/m/ui/client.js"></script>')
+PLANTED_CLIENT = ('window.__planted = true; document.title = "planted client";'
+                  'export const gateway = () => "planted";')
+
+
+class CachingSquatter(Squatter):
+    """The squatter, also serving a start document and a `client.js` of its own, each
+    cached for a year, at the shell's URLs."""
+
+    def _answer(self, target: str, headers: dict) -> tuple[str, str, bytes, list[str]]:
+        page = urlsplit(target).path
+        if headers.get("service-worker") != "script":
+            if page == "/m/ui/":
+                return "200 OK", "text/html; charset=utf-8", PLANTED_START.encode(), [YEAR]
+            if page == "/m/ui/client.js":
+                return "200 OK", "text/javascript", PLANTED_CLIENT.encode(), [YEAR]
+        return super()._answer(target, headers)
 
 
 def _engine(ui_browser) -> str:
@@ -259,19 +306,16 @@ def test_the_offline_page_for_a_stopped_shell_the_off_answer_and_no_answer(
         shell.stop()
         page.goto("/m/ui/")
         expect(page.locator("main#moxi-offline")).to_contain_text(DOWN)
-        if context.browser.browser_type.name == "chromium":
-            # Firefox shows the page offline with no text yet; left to the by-hand check.
-            context.set_offline(True)
-            page.goto("/m/ui/")
-            expect(page.locator("main#moxi-offline")).to_contain_text(AWAY)
+        # Nothing answers: the bridge, the phone's way to the computer, is gone. Firefox's
+        # offline mode leaves a worker's own fetches on the network, so it can't stand in.
+        bridge.stop()
+        page.goto("/m/ui/")
+        expect(page.locator("main#moxi-offline")).to_contain_text(AWAY)
     finally:
         bridge.stop()
         shell.stop()
 
 
-@pytest.mark.xfail(strict=True, reason="in Chromium the gateway's worker installs at the "
-                   "update check (its cache appears), yet the planted worker still answers "
-                   "the next navigation; not yet explained")
 def test_a_planted_worker_is_replaced_at_the_next_update_check(
         ui_browser, tmp_path_factory, fixture_site, phones):
     if _engine(ui_browser) == "webkit":
@@ -292,11 +336,63 @@ def test_a_planted_worker_is_replaced_at_the_next_update_check(
     try:
         page.goto("/m/ui/")
         expect(page).to_have_title("squatter")  # the planted worker takes this one
-        assert page.evaluate(CACHED) is True  # the update check installed the real worker
+        # The update check installs the gateway's worker, with no session on the phone:
+        # only its install keeps the offline page, and then it takes the registration.
+        assert page.evaluate(KEPT_OFFLINE) is True
         assert page.evaluate(SETTLED) is True
         page.goto("/m/ui/")
         expect(page).to_have_title("Moxi: sign in")
     finally:
+        bridge.stop()
+        shell.stop()
+
+
+def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_after(
+        ui_browser, tmp_path_factory, fixture_site, phones):
+    """A squatter's start document and `client.js`, cached for a year while no worker
+    controls the phone, run from the cache until the real worker takes the origin, and never
+    after. The phone keeps a live session throughout, so no sign-in page clears the cache:
+    the bridge sends the phone to the squatter while the shell runs, which the phone can't
+    tell from a squatter holding the port."""
+    if _engine(ui_browser) == "webkit":
+        pytest.skip("WebKit sends no cookie on an update check; its replacement is in the "
+                    "by-hand check")
+    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    bridge = PhoneBridge(shell.home, shell.gateway_port).start()
+    squat = CachingSquatter().start()
+
+    def answer(target):
+        bridge.target = target
+        bridge.cut()
+
+    try:
+        context = phones(bridge)
+        page = _pair(context, shell)
+        assert page.evaluate(UNREGISTER) is True
+        page.goto("about:blank")
+        answer(squat.port)
+        page.goto("/m/ui/")
+        expect(page).to_have_title("planted client")
+        answer(None)  # no gateway, only the bridge's 502: the copies run from the cache
+        page.goto("about:blank")
+        page.goto("/m/ui/")
+        expect(page).to_have_title("planted client")
+        answer(squat.port)
+        page.goto("/plant?kind=deep")
+        expect(page).to_have_title("planted", timeout=30_000)
+        answer(shell.gateway_port)
+        page.goto("/m/ui/")
+        expect(page).to_have_title("squatter")  # the planted worker takes this one
+        # The update check installs the real worker, which keeps the gateway's client.js.
+        assert page.evaluate(KEPT_CLIENT) is False
+        assert page.evaluate(SETTLED) is True
+        page.goto("/m/ui/")
+        page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
+        assert page.title() != "planted client"
+        assert page.evaluate("() => window.__planted === undefined") is True
+        assert page.evaluate("async () => (await import('/m/ui/client.js')).gateway()") is True
+    finally:
+        squat.stop()
         bridge.stop()
         shell.stop()
 

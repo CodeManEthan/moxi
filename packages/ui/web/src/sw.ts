@@ -45,11 +45,17 @@ function fresh(path: string): Request {
   return new Request(path, { cache: "reload", credentials: "same-origin" });
 }
 
-/** Keeps the files of the app shell, fetched past the HTTP cache. Fails, and so fails the
- * install, when any of them can't be fetched. */
+/** Keeps the files of the app shell, fetched past the HTTP cache. A file the gateway
+ * refuses is left out and kept once a signed-in page loads it: the shell's own files need
+ * a session, and a phone may hold none when this worker installs, as when it replaces a
+ * worker another server left, whose install must not fail for that. Fails, and so fails
+ * the install, when the gateway can't be reached. */
 async function keep(): Promise<void> {
   const cache = await caches.open(CACHE);
-  await cache.addAll(KEPT.map(fresh));
+  await Promise.all(KEPT.map(async (path) => {
+    const answer = await fetch(fresh(path));
+    if (answer.ok) await cache.put(path, answer);
+  }));
   refreshed = Date.now();
 }
 
