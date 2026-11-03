@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 
 from moxi_loopback.api import response_headers
+from test_gateway_redact import Gate
 
 from moxi_ui.gateway.access import PAGES, Access, web_file
 
@@ -49,3 +50,40 @@ def test_the_pages_are_sent_with_the_gateway_policy_and_clear_the_origin_first(t
             assert found[b"clear-site-data"] == b'"cache", "storage"', path
         else:
             assert b"clear-site-data" not in found, path
+
+
+#: The ways a phone can ask for a page at its bare path: no fragment reaches the server, and
+#: any query may come with it, the sign-in redirect's `n` included.
+_QUERIES = ("", "?", "?n=0123456789abcdef", "?x=1&x=2", "?c=abc")
+_HOW = {
+    "fetch": (),
+    "navigation": (("sec-fetch-mode", "navigate"), ("sec-fetch-dest", "document")),
+    "the worker's navigation": (("x-moxi-navigation", "1"), ("sec-fetch-mode", "same-origin"),
+                                ("sec-fetch-dest", "empty"), ("cache-control", "no-cache")),
+    "cross-site": (("sec-fetch-site", "cross-site"),),
+}
+_METHODS = ("GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
+
+
+def test_no_answer_for_a_bare_page_can_be_kept_by_the_http_cache(tmp_path):
+    """A history entry left at a bare `/pair` or `/signin` loads again from the network:
+    whatever the method, query, headers or session, every answer through the gateway's
+    request path is sent `no-store`, so the browser's HTTP cache keeps none of them. The
+    worker passes their navigations to the browser and stores no answer, and the off answer
+    in front of the router is `no-store` too."""
+    signed_out = Gate(tmp_path / "out")
+    signed_in = Gate(tmp_path / "in").paired()
+    missing = Gate(tmp_path / "missing")
+    missing.phone.access.pages = {}.get
+    statuses = set()
+    for who, gate in (("signed out", signed_out), ("signed in", signed_in),
+                      ("no page file", missing)):
+        for page in ("/pair", "/signin"):
+            for query in _QUERIES:
+                for how, headers in _HOW.items():
+                    for method in _METHODS:
+                        answer = gate.phone.request(method, page + query, headers=headers)
+                        where = (who, method, page + query, how, answer.status)
+                        assert answer.header("cache-control") == ["no-store"], where
+                        statuses.add(answer.status)
+    assert {200, 403, 404} <= statuses
