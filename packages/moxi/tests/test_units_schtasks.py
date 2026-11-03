@@ -912,6 +912,35 @@ def test_status_through_the_core_adds_the_run_line(w):
     assert daily.last == {"supervisor": {"last_run": None, "last_result": 0}}
 
 
+# -- a socket daemon whose start follows a setting -------------------------------------------
+
+def test_a_switch_form_start_changes_no_task_and_its_key_writes_and_restarts_nothing(
+        w, monkeypatch):
+    """A daemon's logon task starts it at every logon whatever its `start` says, so the
+    task text is the same with the key true and false, and `moxi config set` of the key
+    writes nothing and runs nothing."""
+    from moxi import config
+
+    w.module(ANNOUNCES="2", DAEMONS=(
+        "{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+        "'addresses': ['127.0.0.1'], 'start': {'login': 'snap.enabled'}}}}"))
+    off = w.plan()["relay"]
+    assert off.action == "add"
+    assert all(a.ok for a in w.apply([off]))
+    monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
+    for value in (True, None):
+        if value is None:
+            config.unset("demo", "snap.enabled", by="test")
+        else:
+            config.set("demo", "snap.enabled", value, by="test")
+        on = w.plan()["relay"]
+        assert (on.action, on.text) == ("keep", off.text)
+        w.sup.calls.clear()
+        applied = units.apply_switch("demo", "snap.enabled", runner=w.sup, say=w.lines.append)
+        assert [(a.change.action, a.ok) for a in applied] == [("keep", True)]
+        assert w.sup.calls == []
+
+
 # -- python -m moxi ----------------------------------------------------------------------
 
 def test_python_dash_m_moxi_is_the_moxi_command():

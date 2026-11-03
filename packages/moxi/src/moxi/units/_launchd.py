@@ -25,8 +25,10 @@ included, the next connection starts it again, with ThrottleInterval still spaci
 starts. Under `start = "login"` the daemon keeps RunAtLoad and KeepAlive {SuccessfulExit:
 false} beside Sockets: launchd runs it at load, holds its sockets from the load and
 restarts it after a crash, and it still takes each socket with `launch_activate_socket`.
-A change of `start` alone leaves Sockets as they were, so it is an ordinary change: under
-`upgrade = "keep"` it waits for the job's next load. Its sockets are the job's, so
+A change of `start` alone leaves Sockets as they were and touches only RunAtLoad and
+KeepAlive, so whatever `upgrade` says it is handled as a `keep` change is: the plist is
+rewritten, a loaded job is not booted out, and launchd reads the new keys at the job's
+next load, the next login. Its sockets are the job's, so
 there is no `socket` change in a plan, and `status` reads the socket from the job (see
 `status`): launchd never reports a socket it could not bind, so the socket is never
 `failed` here.
@@ -220,16 +222,24 @@ class LaunchdBackend:
         enabled and bootstrapped whatever `upgrade` says: a changed socket set reaches
         launchd at once. An old plist that can't be parsed counts as differing, since the
         two can't be shown equal. With `upgrade = "keep"`, only a change outside
-        `Sockets` waits for the job's next load."""
+        `Sockets` waits for the job's next load.
+
+        A login-only change, a changed daemon whose old and new plists differ only in
+        `RunAtLoad` and `KeepAlive` (its `start` moved between `login` and
+        `connection`), is handled as a `keep` change whatever `upgrade` says: a loaded
+        job is rewritten and not booted out, and runs with its old keys until its next
+        load. With `restart=True` it is restarted as an unchanged daemon is."""
         fence = io.fence
         removes = [c for c in changes if c.action == "remove"]
         writes = [c for c in changes if c.action in ("add", "change")]
         # Read before the plists are replaced.
-        kept = [c for c in writes if c.action == "change" and _keeps(c)
-                and not _sockets_differ(c)]
+        login_only = {id(c) for c in writes if _login_only(c)}
+        kept = [c for c in writes if c.action == "change"
+                and (_keeps(c) or id(c) in login_only) and not _sockets_differ(c)]
         reloads = {id(c) for c in writes if c.action == "change" and _keeps(c)} - {
             id(c) for c in kept}
-        restarts = [c for c in changes if restart and c.action == "keep"
+        restarts = [c for c in changes if restart
+                    and (c.action == "keep" or id(c) in login_only)
                     and c.kind == "daemon" and c.enabled
                     and c.entry.get("upgrade", "restart") == "restart"]
         # One read of the domain serves every unit that needs one.
@@ -240,7 +250,8 @@ class LaunchdBackend:
                              f"`moxi install {change.module}` again"):
                 io.delete(change)
         for change in writes:
-            self._write(change, io, read, reload=id(change) in reloads)
+            self._write(change, io, read, reload=id(change) in reloads,
+                        login_only=id(change) in login_only)
         for change in restarts:
             label = self._label_of(change)
             if isinstance(read, Ran):
@@ -250,13 +261,19 @@ class LaunchdBackend:
             if read.get(label, (None, None))[0]:
                 self._run(io, change, "kickstart", self.target(label))
 
-    def _write(self, change: UnitChange, io: ApplyIO, read, *, reload: bool) -> None:
+    def _write(self, change: UnitChange, io: ApplyIO, read, *, reload: bool,
+               login_only: bool = False) -> None:
         fence = io.fence
         label = self._label_of(change)
-        if change.action == "change" and _keeps(change) and not reload and (
-                isinstance(read, Ran) or label in read):
+        if change.action == "change" and (_keeps(change) or login_only) and not reload \
+                and (isinstance(read, Ran) or label in read):
             io.write(change)
-            io.say(change, f"{label} rewritten; the new code runs from its next start")
+            if login_only:
+                now = ("starts it" if _runs_at_load(change) else "no longer starts it")
+                io.say(change, f"{label} rewritten: from the next login, a login {now}; "
+                               "the loaded job is left as it is")
+            else:
+                io.say(change, f"{label} rewritten; the new code runs from its next start")
             return
         if change.action == "change" and not self._bootout(
                 label, fence, io, change, "the unit is left as it was; fix the cause and "
@@ -704,6 +721,46 @@ def _started(pid: int) -> float | None:
         return psutil.Process(pid).create_time()
     except psutil.Error:
         return None
+
+
+#: The plist keys a daemon's `start` decides; a change in these alone is login-only.
+_LOGIN_KEYS = ("RunAtLoad", "KeepAlive")
+
+
+def _login_only(change: UnitChange) -> bool:
+    """Whether a changed daemon that stays enabled has an old plist on disk and a new
+    text that differ, as parsed values, only in `_LOGIN_KEYS`. False when either can't
+    be parsed."""
+    import plistlib
+    from xml.parsers.expat import ExpatError
+
+    if change.kind != "daemon" or change.action != "change" or not change.paths \
+            or not change.enabled or change.enabled_before is False:
+        return False
+    old = _load(change.paths[0])
+    try:
+        new = plistlib.loads((change.text or "").encode("utf-8"))
+    except (ValueError, ExpatError):
+        return False
+    if old is None or not isinstance(new, dict):
+        return False
+
+    def rest(body: dict) -> dict:
+        return {k: v for k, v in body.items() if k not in _LOGIN_KEYS}
+
+    return old != new and rest(old) == rest(new)
+
+
+def _runs_at_load(change: UnitChange) -> bool:
+    """Whether a daemon's new plist text has `RunAtLoad` true."""
+    import plistlib
+    from xml.parsers.expat import ExpatError
+
+    try:
+        body = plistlib.loads((change.text or "").encode("utf-8"))
+    except (ValueError, ExpatError):
+        return False
+    return isinstance(body, dict) and body.get("RunAtLoad") is True
 
 
 def _keeps(change: UnitChange) -> bool:

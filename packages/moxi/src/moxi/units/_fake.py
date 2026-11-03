@@ -311,7 +311,7 @@ class FakeBackend:
                     and _installs(_read(change.paths[0])) and not _installs(change.text)):
                 self._run(io, change, "disable", self._enable_id(change))
         starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed,
-                              installs=_installs)
+                              installs=_installs, login_only=_login_only)
         starts.read(fence)
         for change in removes:
             io.delete(change)
@@ -658,6 +658,20 @@ def _installs(text: str | None) -> bool:
     """Whether a fake service's text has its `install = ` line, where systemd's would have
     an install section."""
     return any(line.startswith("install = ") for line in (text or "").splitlines())
+
+
+def _login_only(change: UnitChange) -> bool:
+    """Whether a changed fake daemon's file and its new text differ only in that one has
+    its `install = ` line and the other none, where systemd's would differ only in the
+    install section's presence."""
+    if change.kind != "daemon" or change.action != "change" or not change.paths:
+        return False
+    old, new = _read(change.paths[0]), change.text or ""
+
+    def rest(text: str) -> list[str]:
+        return [line for line in text.splitlines() if not line.startswith("install = ")]
+
+    return bool(old) and _installs(old) != _installs(new) and rest(old) == rest(new)
 
 
 def _read(path: Path) -> str:

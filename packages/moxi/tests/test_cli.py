@@ -8,6 +8,7 @@ import re
 import stat
 import subprocess
 import sys
+import textwrap
 import types
 
 import pytest
@@ -234,6 +235,43 @@ def test_modules_with_nothing_installed(site, capsys):
     assert code == 0 and "No Moxi module is installed" in out
 
 
+def test_modules_json_shows_what_starts_each_socket_daemon_now(site, capsys, monkeypatch):
+    """`starts` gives the start the plan resolves now, beside the declared form in
+    `daemons`: a switch form follows its key, a fixed one is as declared."""
+    from moxi import config
+
+    site.write("moxi_demo/settings.toml", textwrap.dedent("""\
+        [port]
+        type = "int"
+        default = 8470
+        doc = "The port."
+        read = "start"
+
+        [door.enabled]
+        type = "bool"
+        default = false
+        doc = "The door."
+        read = "use"
+        """))
+    site.module("demo", ANNOUNCES="2", SETTINGS="'settings.toml'", DAEMONS=(
+        "{'shell': {'command': 'moxi-demo-shell', 'socket': {'setting': 'port', "
+        "'addresses': ['127.0.0.1'], 'start': {'login': 'door.enabled'}}}, "
+        "'web': {'command': 'moxi-demo-web', 'socket': {'setting': 'port', "
+        "'addresses': ['::1'], 'start': 'login'}}, "
+        "'plain': {'command': 'moxi-demo-plain'}}"))
+
+    def demo():
+        info = json.loads(run(capsys, "modules", "--json")[1])
+        return next(m for m in info["modules"] if m["name"] == "demo")
+
+    item = demo()
+    assert item["daemons"]["shell"]["socket"]["start"] == {"login": "door.enabled"}
+    assert item["starts"] == {"shell": "connection", "web": "login"}
+    monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
+    config.set("demo", "door.enabled", True, by="test")
+    assert demo()["starts"] == {"shell": "login", "web": "login"}
+
+
 def test_modules_json_describes_each_module(site, capsys):
     site.write("moxi_comms/cli.py", CLI_SOURCE)
     site.module("turns", extras={"codex": ["websockets>=13"]},
@@ -261,6 +299,7 @@ def test_modules_json_describes_each_module(site, capsys):
         "units_from": None, "health": {}, "doctor": None, "stores": {}, "budgets": {},
         "skills": None, "page": None, "components": {}, "reserved_names": [],
         "teardown": None, "session_env": {}, "config_check": None, "questions": {},
+        "starts": {},
         "optional": [
             {"extra": "cache", "sentence": "Holds a cold send.", "installed": False,
              "add": "moxi install comms --with cache"},

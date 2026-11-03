@@ -1136,10 +1136,9 @@ def test_a_reinstall_from_connection_to_login_enables_the_service(w, upgrade):
                                                                  ("socket", "keep")}
     w.sup.calls.clear()
     assert all(a.ok for a in w.apply(units.plan("demo")))
-    assert w.sup.calls == {
-        "restart": [RUNNING, ("daemon-reload",), ("enable", SERVICE), ("restart", SERVICE)],
-        "keep": [("daemon-reload",), ("enable", SERVICE)]}[upgrade]
-    assert w.sup.units[SERVICE]["enabled"]
+    # A change of `start` alone is enabled and never restarted, whatever `upgrade` says.
+    assert w.sup.calls == [("daemon-reload",), ("enable", SERVICE)]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": True}
 
 
 def test_a_reinstall_from_login_to_connection_unlinks_the_service_and_keeps_its_units(w):
@@ -1149,8 +1148,7 @@ def test_a_reinstall_from_login_to_connection_unlinks_the_service_and_keeps_its_
     w.module(DAEMONS=shell("127.0.0.1"))
     w.sup.calls.clear()
     assert all(a.ok for a in w.apply(units.plan("demo")))
-    assert w.sup.calls == [("disable", SERVICE), RUNNING, ("daemon-reload",),
-                           ("restart", SERVICE)]
+    assert w.sup.calls == [("disable", SERVICE), ("daemon-reload",)]
     assert w.sup.units[SERVICE] == {"active": True, "enabled": False}
     assert w.sup.units[SOCK]["enabled"]
 
@@ -1168,6 +1166,97 @@ def test_a_plain_daemon_that_gains_a_socket_keeps_its_link_only_under_login(w, s
         "login": steps + [("enable", "--now", SERVICE)],
         "connection": [("disable", SERVICE), *steps, ("start", SERVICE)]}[start]
     assert w.sup.units[SERVICE] == {"active": True, "enabled": start == "login"}
+
+
+# A socket daemon whose start follows a setting: a login-only change restarts nothing.
+
+def switched(*addresses, more=""):
+    """The `relay` daemon with a socket on `addresses` whose `start` follows the setting
+    `relay.enabled`."""
+    return ("{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+            f"'addresses': {list(addresses)!r}, 'start': {{'login': 'relay.enabled'}}}}"
+            + more + "}}")
+
+
+def flip(w, monkeypatch, value):
+    """Set or unset `relay.enabled` as `moxi config set` does, applying the units through
+    `apply_switch` with the fake supervisor; the `Applied` list."""
+    from moxi import config
+
+    monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
+    if value is None:
+        config.unset("demo", "relay.enabled", by="test")
+    else:
+        config.set("demo", "relay.enabled", value, by="test")
+    w.sup.reload()
+    w.sup.calls.clear()
+    return units.apply_switch("demo", "relay.enabled", runner=w.sup, say=w.lines.append)
+
+
+@pytest.mark.parametrize("upgrade", ["restart", "keep"])
+def test_a_login_only_change_enables_or_disables_the_running_service_and_restarts_nothing(
+        w, v6, monkeypatch, upgrade):
+    """Turning the key on enables the running service, turning it off disables it without
+    `--now`; no `stop`, `restart` or `disable --now` runs, whatever `upgrade` says."""
+    w.script("moxi-demo-relay")
+    w.module(ANNOUNCES="2", DAEMONS=switched("127.0.0.1", "::1",
+                                             more=f", 'upgrade': '{upgrade}'"))
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": False}
+    done = flip(w, monkeypatch, True)
+    assert all(a.ok for a in done)
+    assert w.sup.calls == [("daemon-reload",), ("enable", SERVICE)]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": True}
+    assert "\n[Install]\nWantedBy=default.target\n" in (w.root / SERVICE).read_text()
+    assert [line for a in done for line in a.lines] == [
+        f"{SERVICE} rewritten: a login starts it from now on; a running daemon is left as "
+        "it is"]
+    done = flip(w, monkeypatch, None)
+    assert all(a.ok for a in done)
+    assert w.sup.calls == [("disable", SERVICE), ("daemon-reload",)]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": False}
+    assert "[Install]" not in (w.root / SERVICE).read_text()
+    assert w.sup.units[SOCK]["enabled"] and w.sup.units[SOCK_1]["enabled"]
+
+
+def test_a_login_only_change_to_a_stopped_service_enables_it_and_starts_nothing(
+        w, v6, monkeypatch):
+    w.script("moxi-demo-relay")
+    w.module(ANNOUNCES="2", DAEMONS=switched("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = False
+    assert all(a.ok for a in flip(w, monkeypatch, True))
+    assert w.sup.calls == [("daemon-reload",), ("enable", SERVICE)]
+    assert w.sup.units[SERVICE] == {"active": False, "enabled": True}
+
+
+def test_a_change_with_another_line_beside_the_login_one_restarts_as_before(
+        w, v6, monkeypatch):
+    """The key turned on together with a changed command: not login-only, so `upgrade =
+    "restart"` restarts the running service as it does today."""
+    w.script("moxi-demo-relay")
+    w.module(ANNOUNCES="2", DAEMONS=switched("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.module(ANNOUNCES="2", DAEMONS=switched("127.0.0.1", "::1", more=", 'args': ['-v']"))
+    done = flip(w, monkeypatch, True)
+    assert all(a.ok for a in done)
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("enable", SERVICE),
+                           ("restart", SERVICE)]
+
+
+def test_restart_after_an_upgrade_still_restarts_a_running_daemon_with_a_login_only_change(
+        w, v6, monkeypatch):
+    w.script("moxi-demo-relay")
+    w.module(ANNOUNCES="2", DAEMONS=switched("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    from moxi import config
+
+    monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
+    config.set("demo", "relay.enabled", True, by="test")
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo"), restart=True))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("enable", SERVICE),
+                           ("restart", SERVICE)]
 
 
 def test_restart_after_an_upgrade_enables_then_restarts_a_running_login_daemon(w, v6):

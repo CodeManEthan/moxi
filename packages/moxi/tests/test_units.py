@@ -123,6 +123,44 @@ def test_declarations_merge_units_from_and_reject_bad_entries(w, tmp_path):
     assert "absolute path" in decl.rejected[("daemon", "rel")]
 
 
+@pytest.mark.parametrize("announces", [1, 2])
+def test_a_run_time_switch_form_start_needs_the_schema_that_reads_it(w, announces):
+    """A run-time daemon's `start = {"login": key}` is read only when the module's
+    `ANNOUNCES` reads it, as in the announcement; under 1 it is kept out with the reason.
+    `switched_daemons` names it for its key once it is read."""
+    w.module(ANNOUNCES=str(announces), units_from="""
+             def units():
+                 return {"daemons": {"web": {"command": "moxi-demo-web", "socket": {
+                     "setting": "port", "addresses": ["127.0.0.1"],
+                     "start": {"login": "snapshot.enabled"}}}}}
+             """)
+    decl = units.declarations("demo")
+    if announces == 1:
+        assert set(decl.daemons) == set()
+        assert decl.rejected[("daemon", "web")] == (
+            "UNITS_FROM (moxi_demo.runtime:units) has daemons['web'] socket start "
+            "{'login': 'snapshot.enabled'}, a form that comes with ANNOUNCES = 2; the "
+            "module announces 1")
+        assert units.switched_daemons("demo", "snapshot.enabled") == []
+    else:
+        assert set(decl.daemons) == {"web"} and not decl.rejected
+        assert units.switched_daemons("demo", "snapshot.enabled") == ["web"]
+
+
+def test_switched_daemons_names_a_daemon_by_its_switch_or_its_login_key(w):
+    w.module(ANNOUNCES="2", DAEMONS=(
+        "{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'}, "
+        "'shell': {'command': 'moxi-demo-shell', 'socket': {'setting': 'port', "
+        "'addresses': ['127.0.0.1'], 'start': {'login': 'snapshot.enabled'}}}, "
+        "'both': {'command': 'moxi-demo-both', 'switch': 'relay.enabled', 'socket': {"
+        "'setting': 'port', 'addresses': ['::1'], 'start': {'login': 'snapshot.enabled'}}}, "
+        "'fixed': {'command': 'moxi-demo-fixed', 'socket': {'setting': 'port', "
+        "'addresses': ['127.0.0.1'], 'start': 'login'}}}"))
+    assert units.switched_daemons("demo", "relay.enabled") == ["relay", "both"]
+    assert units.switched_daemons("demo", "snapshot.enabled") == ["shell", "both"]
+    assert units.switched_daemons("demo", "loud") == []
+
+
 def test_a_run_time_unit_sharing_a_socket_unit_name_is_rejected(w):
     """A daemon's socket for its k-th address is a unit named for `<daemon>-<k>`, so a
     run-time unit of that name is kept out: the run-time one of the pair, or the
