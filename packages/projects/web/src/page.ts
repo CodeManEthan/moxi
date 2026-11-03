@@ -7,7 +7,10 @@
 //   it, every contribution or kind that can't be used, which blocks an add until it is
 //   fixed. Each project opens to its fields, an edit form (root, kind, and the notes root
 //   while notes is installed), its lead and associated agents (set or clear the lead, add
-//   or remove an agent), and Remove.
+//   or remove an agent), and Remove. A save sends only what the user changed from the
+//   project as the form was opened. When a read again finds the open project changed, a
+//   form not typed in starts again from it, and one typed in keeps the user's values and
+//   says the project has changed.
 // - Remove is a confirmed act: the page's button opens the shell's confirm sheet, which
 //   names the key and root and mints a new key at each confirmation. The page then reads
 //   the status link once: removed, or refused with each sentence and the fix.
@@ -29,11 +32,11 @@ import { CHANGED, Feed, parseKinds, parseOne, parseProjects, parseRemoveStatus, 
 import type { Kinds, Project, Projects, RemoveStatus, Where } from "./feed.ts";
 import { BASE } from "./styles.ts";
 import {
-  actedOf, actSaid, agentBody, brokenLines, clearLeadBody, editBody, editForm, filterChoices, kindChoices,
-  leadBody, listView, NO_GIT, pickerPath, projectFields, removedSaid, removeSheet, removeStatusPath, WHERE_LINE,
-  whereView,
+  actedOf, actSaid, agentBody, brokenLines, clearLeadBody, editBody, editing, filterChoices, kindChoices,
+  leadBody, listView, NO_GIT, pickerPath, projectFields, removedSaid, removeSheet, removeStatusPath,
+  reread, STALE_LINE, WHERE_LINE, whereView,
 } from "./views.ts";
-import type { EditForm, Said } from "./views.ts";
+import type { EditForm, Editing, Said } from "./views.ts";
 
 const TAG = "moxi-projects-page";
 
@@ -99,7 +102,7 @@ export class ProjectsPage extends LitElement {
   #kind = "";
   /** The key of the project that is open, as stored. */
   #open: string | null = null;
-  #edit: EditForm | null = null;
+  #edit: Editing | null = null;
   #lead = "";
   #agent = "";
   /** An act is being sent, or the confirm sheet is open. */
@@ -141,12 +144,18 @@ export class ProjectsPage extends LitElement {
     void this.#where?.refresh();
   }
 
-  /** The list was read: an open project that is no longer listed closes. */
+  /** The list was read: an open project that is no longer listed closes, and the open
+   * project's edit form takes in what was read. */
   #listed(): void {
     const projects = this.#list?.value?.projects ?? [];
-    if (this.#open !== null && this.#list?.failure === null && !projects.some((p) => p.key === this.#open)) {
-      this.#open = null;
-      this.#edit = null;
+    if (this.#open !== null && this.#list?.failure === null) {
+      const open = projects.find((p) => p.key === this.#open) ?? null;
+      if (open === null) {
+        this.#open = null;
+        this.#edit = null;
+      } else if (this.#edit !== null) {
+        this.#edit = reread(this.#edit, open);
+      }
     }
     this.requestUpdate();
   }
@@ -165,7 +174,7 @@ export class ProjectsPage extends LitElement {
   }
 
   async #act(key: string, path: string, body: object, parse: (data: unknown) => { project: Project; notes?: string[] } | null,
-             line: string, done: () => void = () => {}): Promise<void> {
+             line: string, done: (project: Project) => void = () => {}): Promise<void> {
     if (this.#sending) return;
     this.#sending = true;
     this.#told = null;
@@ -175,8 +184,8 @@ export class ProjectsPage extends LitElement {
       const acted = actedOf(answer.status, answer.data, parse);
       this.#told = { key, said: actSaid(acted, line) };
       if (acted.outcome === "done") {
-        if (this.#open === key) this.#edit = editForm(acted.value.project);
-        done();
+        if (this.#open === key && this.#edit !== null) this.#edit = reread(this.#edit, acted.value.project);
+        done(acted.value.project);
       }
       if (acted.outcome !== "refused") this.#changed();
     } finally {
@@ -186,9 +195,11 @@ export class ProjectsPage extends LitElement {
   }
 
   #save(project: Project): void {
-    const body = this.#edit ? editBody(project, this.#edit, { notes: installed("notes") }) : null;
+    const edit = this.#edit;
+    const body = edit !== null ? editBody(edit.base, edit.form, { notes: installed("notes") }) : null;
     if (body === null) return;
-    void this.#act(project.key, "api/set", body, parseWritten, `Saved ${project.key}.`);
+    void this.#act(project.key, "api/set", body, parseWritten, `Saved ${project.key}.`,
+                   (saved) => { if (this.#open === project.key) this.#edit = editing(saved); });
   }
 
   #setLead(project: Project): void {
@@ -339,7 +350,7 @@ export class ProjectsPage extends LitElement {
       this.#edit = null;
     } else {
       this.#open = project.key;
-      this.#edit = editForm(project);
+      this.#edit = editing(project);
       this.#lead = "";
       this.#agent = "";
     }
@@ -349,10 +360,11 @@ export class ProjectsPage extends LitElement {
 
   #detail(project: Project) {
     const busy = this.#sending;
-    const edit = this.#edit ?? editForm(project);
+    const edit = this.#edit ?? editing(project);
+    const form = edit.form;
     const notes = installed("notes");
     const kinds = this.#kinds?.value ?? null;
-    const changes = editBody(project, edit, { notes });
+    const changes = editBody(edit.base, form, { notes });
     const told = this.#told?.key === project.key ? this.#told.said : null;
     return html`<div class="detail">
       <dl>${projectFields(project).map((field) => html`<dt>${field.label}</dt><dd data-field=${field.name}>${
@@ -362,15 +374,16 @@ export class ProjectsPage extends LitElement {
         <h3>Change</h3>
         <label><span>Root, an absolute path</span>
           <input type="text" name="root" autocomplete="off" spellcheck="false" ?disabled=${busy}
-            .value=${live(edit.root)} @input=${this.#editField("root")}></label>
+            .value=${live(form.root)} @input=${this.#editField("root")}></label>
         <label><span>Kind</span>
-          <select name="kind" ?disabled=${busy || kinds === null} .value=${live(edit.kind)} @change=${this.#editField("kind")}>
-            ${kindChoices(kinds, project.kind).map((choice) => html`<option value=${choice.value}
-              ?selected=${choice.value === edit.kind}>${choice.label}</option>`)}
+          <select name="kind" ?disabled=${busy || kinds === null} .value=${live(form.kind)} @change=${this.#editField("kind")}>
+            ${kindChoices(kinds, edit.base.kind).map((choice) => html`<option value=${choice.value}
+              ?selected=${choice.value === form.kind}>${choice.label}</option>`)}
           </select></label>
         ${notes ? html`<label><span>Notes root, an absolute path (empty it to clear it)</span>
           <input type="text" name="notes_root" autocomplete="off" spellcheck="false" ?disabled=${busy}
-            .value=${live(edit.notesRoot)} @input=${this.#editField("notesRoot")}></label>` : nothing}
+            .value=${live(form.notesRoot)} @input=${this.#editField("notesRoot")}></label>` : nothing}
+        ${edit.stale ? html`<p class="warn" data-line="stale" role="status">${STALE_LINE}</p>` : nothing}
         <div class="bar"><button type="submit" class="go" data-action="save" ?disabled=${busy || changes === null}>Save</button></div>
       </form>
       <div class="part" data-part="agents">
@@ -406,7 +419,7 @@ export class ProjectsPage extends LitElement {
   #editField(name: keyof EditForm) {
     return (event: Event): void => {
       const value = (event.target as HTMLInputElement | HTMLSelectElement).value;
-      if (this.#edit !== null) this.#edit = { ...this.#edit, [name]: value };
+      if (this.#edit !== null) this.#edit = { ...this.#edit, form: { ...this.#edit.form, [name]: value } };
       this.requestUpdate();
     };
   }

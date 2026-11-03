@@ -3,10 +3,11 @@ server: the contract check; the store file and the git the page acts with, and a
 whose PATH has no git; the list and its kind filter; a contribution that won't load,
 named beside the filter and in the add form, refusing every add; an add with create in a
 real git; a topic added with no root, whose answer is lost, after which the page reads its
-list again and says the directory may exist; the edit form; the lead and the associated
-agents; remove through the confirm sheet, where Cancel sends nothing, a refusal gives each
-sentence, a removal takes the row off, and each confirmation sends its own key; and the
-360 px width check.
+list again and says the directory may exist; the edit form, which sends only what the
+user changed when a terminal has changed the project since it was opened; the lead and
+the associated agents; remove through the confirm sheet, where Cancel sends nothing, a
+refusal gives each sentence, a removal takes the row off, and each confirmation sends its
+own key; and the 360 px width check.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
 store is the one the page server reads, under the shell's home, and every check reads it
@@ -337,6 +338,55 @@ def test_the_edit_form_changes_the_root_and_kind_and_refuses_a_relative_root(
     expect(said).to_have_attribute("data-tone", "error")
     expect(said).to_contain_text("fix:")
     assert shown(ui_shell, "editable")["root"] == moved
+
+
+def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
+        seeded, ui_shell, ui_page):
+    first = add(ui_shell, "edited")
+    second = root(ui_shell, "edited-moved")
+    Path(second).mkdir(parents=True)
+    panel = open_panel(ui_page)
+    sets = posts_to(ui_page, "api/set")
+    item = open_row(panel, "edited")
+    edit = item.locator('form[data-part="edit"]')
+    save = edit.get_by_role("button", name="Save")
+    root_field = edit.get_by_label(re.compile(r"^Root"))
+    stale = edit.locator('[data-line="stale"]')
+    expect(root_field).to_have_value(first)
+
+    # A terminal moves the root while the form is open, and the page reads again. The form
+    # wasn't typed in, so it starts again from what is stored, with nothing to save.
+    moxi(ui_shell, "projects", "set", "edited", "--root", second)
+    panel.get_by_role("button", name="Read again").click()
+    expect(item.locator('[data-field="root"]')).to_have_text(second)
+    expect(root_field).to_have_value(second)
+    expect(save).to_be_disabled()
+    expect(stale).to_have_count(0)
+
+    # Only the kind is changed, so only the kind is sent, and the terminal's root stands.
+    edit.get_by_role("combobox", name="Kind").select_option("agent")
+    save.click()
+    expect(item.locator('[data-field="kind"]')).to_have_text("agent")
+    assert [json.loads(request.post_data) for request in sets] == [
+        {"key": "edited", "kind": "agent"}]
+    after = shown(ui_shell, "edited")
+    assert (after["root"], after["kind"]) == (second, "agent"), after
+
+    # Typed in, the form keeps the user's root when the terminal changes the kind, and
+    # says the project has changed; the save sends the root alone.
+    third = root(ui_shell, "edited-typed")
+    root_field.fill(third)
+    moxi(ui_shell, "projects", "set", "edited", "--kind", "project")
+    panel.get_by_role("button", name="Read again").click()
+    expect(item.locator('[data-field="kind"]')).to_have_text("project")
+    expect(stale).to_contain_text("This project has changed since you opened the form.")
+    expect(root_field).to_have_value(third)
+    save.click()
+    expect(item.locator('[data-field="root"]')).to_have_text(third)
+    expect(stale).to_have_count(0)
+    assert json.loads(sets[-1].post_data) == {"key": "edited", "root": third}
+    after = shown(ui_shell, "edited")
+    assert (after["root"], after["kind"]) == (third, "project"), after
 
 
 # --- lead and agents ----------------------------------------------------------------------------
