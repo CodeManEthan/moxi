@@ -863,3 +863,221 @@ def test_a_text_given_both_ways_at_once_is_refused(typed):
     inline = next(iter(typed))
     assert raised.value.row == inline
     assert raised.value.problem == f"both {inline} and {inline}_file are given"
+
+
+# -- the layered values -------------------------------------------------------------------
+
+#: A presets file of many shapes: a place and a text in `[defaults]`, a seat with each
+#: kind of place, both spellings of a text, a Codex seat, and a project key.
+LAYERED = """\
+[defaults]
+model = "sonnet"
+cwd = "/srv/default"
+brief = "the default brief"
+
+[seat.plain]
+effort = "high"
+
+[seat.home]
+home = "~/work/x"
+instructions_file = "/seat.md"
+
+[seat.scratchy]
+scratch = true
+brief_file = "/b.md"
+
+[seat.coder]
+harness = "codex"
+approval = "never"
+sandbox = "workspace-write"
+
+[project.moxi]
+project = "moxi"
+extra_flags = ["--verbose"]
+
+[project.there]
+cwd = "/srv/there"
+instructions = "inline"
+"""
+
+PLACE_ROWS = ("cwd", "project", "scratch")
+
+
+def laid_or_refused(call):
+    try:
+        return call(), None
+    except catalog.Refused as refused:
+        return None, refused
+
+
+@pytest.mark.parametrize("harness", [None, "claude", "codex"])
+@pytest.mark.parametrize("preset", [{}, {"seat": "plain"}, {"seat": "home"},
+                                    {"seat": "scratchy"}, {"seat": "coder"},
+                                    {"project_preset": "moxi"},
+                                    {"project_preset": "there"}])
+def test_layered_gives_resolves_values_and_sources_with_nothing_typed(projects, preset,
+                                                                      harness):
+    found = presets.read(write(LAYERED))
+    laid, refused = laid_or_refused(lambda: presets.layered(
+        Request(**preset), harness=harness, presets=found, available=WITH_PROJECTS))
+    typed = {"harness": harness} if harness else {}
+    got, also = laid_or_refused(lambda: presets.resolve(
+        Request(**preset, typed=typed, off_posture=True, cwd="/work"), presets=found,
+        available=WITH_PROJECTS))
+    if refused is not None or also is not None:
+        assert type(refused) is type(also) and refused.problem == also.problem
+        return
+    assert laid.harness == got.harness and set(laid.values) == set(got.values)
+    for name in laid.values:
+        if name in PLACE_ROWS or (harness and name == "harness"):
+            continue
+        assert (laid.values[name], laid.sources[name]) == (got.values[name],
+                                                           got.sources[name]), name
+    asked = {"harness"} if harness else set()
+    assert laid.chosen - asked == got.chosen - asked
+    # The place rows show the latest layer's place whole; the others are at their default.
+    for name in PLACE_ROWS:
+        if name in laid.place:
+            assert laid.values[name] == laid.place[name]
+            assert laid.sources[name] == got.sources[name] == laid.place_source
+        else:
+            assert laid.values[name] == catalog.launcher()[name].default
+            assert laid.sources[name] == presets.SHIPPED
+
+
+def test_layered_shows_a_place_whole_and_one_spelling_per_text():
+    found = presets.read(write(LAYERED))
+    laid = presets.layered(Request(seat="scratchy"), presets=found, available=NONE)
+    assert laid.place == {"scratch": True} and laid.place_source == presets.PRESET
+    assert (laid.values["cwd"], laid.sources["cwd"]) == ("", presets.SHIPPED)
+    assert (laid.values["brief_file"], laid.sources["brief_file"]) == ("/b.md",
+                                                                       presets.PRESET)
+    assert (laid.values["brief"], laid.sources["brief"]) == ("", presets.SHIPPED)
+    laid = presets.layered(Request(seat="home"), presets=found, available=NONE)
+    assert laid.place == {"home": "~/work/x"}
+    assert all(laid.sources[name] == presets.SHIPPED for name in PLACE_ROWS)
+    laid = presets.layered(Request(seat="plain"), presets=found, available=NONE)
+    assert laid.place == {"cwd": "/srv/default"} and laid.place_source == "defaults"
+    assert laid.values["brief"] == "the default brief"
+
+
+def test_layered_for_another_harness_keeps_the_layers_harness_row():
+    found = presets.read(write('[seat.c]\nharness = "codex"\nmodel = "o3"\n'))
+    laid = presets.layered(Request(seat="c"), harness="claude", presets=found,
+                           available=NONE)
+    assert laid.harness == "claude" and "sandbox" not in laid.values
+    assert (laid.values["harness"], laid.sources["harness"]) == ("codex", presets.PRESET)
+    assert laid.values["model"] == "o3"
+
+
+# -- rows left out --------------------------------------------------------------------------
+
+
+def test_a_left_out_row_holds_its_shipped_default_and_is_not_chosen():
+    text = '[defaults]\nmodel = "sonnet"\n[seat.s]\neffort = "high"\nnative_name = "n"\n'
+    got = resolve(text, seat="s", left_out=("effort", "model"))
+    assert (got.values["effort"], got.sources["effort"]) == ("", presets.LEFT_OUT)
+    assert (got.values["model"], got.sources["model"]) == ("", presets.LEFT_OUT)
+    assert got.chosen == {"native_name"}
+    laid = presets.layered(Request(seat="s", left_out=("effort",)),
+                           presets=presets.read(write(text)), available=NONE)
+    assert laid.sources["effort"] == presets.LEFT_OUT and "effort" not in laid.chosen
+    assert laid.preset.values == {"native_name": "n"}
+
+
+def test_leaving_out_extra_flags_removes_the_presets():
+    text = '[seat.s]\nextra_flags = ["--verbose"]\n'
+    assert resolve(text, seat="s").values["extra_flags"] == ["--verbose"]
+    got = resolve(text, seat="s", left_out=("extra_flags",))
+    assert got.values["extra_flags"] == [] and "extra_flags" not in got.chosen
+
+
+def test_a_left_out_posture_row_that_defaults_set_needs_off_posture():
+    text = ('[defaults]\npermission_mode = "bypassPermissions"\n'
+            '[seat.s]\npermission_mode = "bypassPermissions"\n')
+    with pytest.raises(presets.OffPosture) as caught:
+        resolve(text, seat="s", left_out=("permission_mode",))
+    assert caught.value.source == presets.LEFT_OUT
+    assert caught.value.problem == ("permission_mode 'default' (left out) is off your "
+                                    "default 'bypassPermissions'")
+    got = resolve(text, seat="s", left_out=("permission_mode",), off_posture=True)
+    assert got.values["permission_mode"] == "default"
+    # A posture row only the preset sets goes back to the shipped default: no box needed.
+    got = resolve('[seat.s]\npermission_mode = "plan"\n', seat="s",
+                  left_out=("permission_mode",))
+    assert got.values["permission_mode"] == "default"
+
+
+def test_the_place_rule_sees_a_left_out_place_gone(projects):
+    text = '[defaults]\ncwd = "/srv/default"\n[seat.s]\nproject = "moxi"\n'
+    got = resolve(text, available=WITH_PROJECTS, seat="s", left_out=("project",))
+    assert got.cwd == "/srv/default" and got.project_key is None
+    assert got.sources["cwd"] == "defaults"
+    # Leaving out the only place falls to the caller's directory on the command line.
+    got = resolve(text, available=WITH_PROJECTS, seat="s", left_out=("project", "cwd"))
+    assert got.cwd == "/work" and got.sources["cwd"] == presets.LEFT_OUT
+
+
+def test_a_seat_with_scratch_left_out_launches_in_the_typed_cwd():
+    text = '[seat.s]\nscratch = true\n'
+    got = resolve(text, seat="s", typed={"cwd": "/typed"}, left_out=("scratch",))
+    assert got.cwd == "/typed" and not got.scratch
+    laid = presets.layered(Request(seat="s", left_out=("scratch",)),
+                           presets=presets.read(write(text)), available=NONE)
+    assert laid.place == {} and laid.sources["scratch"] == presets.LEFT_OUT
+
+
+def test_the_one_spelling_rule_sees_a_left_out_spelling_gone():
+    text = '[defaults]\nbrief = "the default"\n[seat.s]\nbrief_file = "/b.md"\n'
+    got = resolve(text, seat="s", left_out=("brief_file",))
+    assert got.values["brief"] == "the default" and got.sources["brief"] == "defaults"
+    assert got.sources["brief_file"] == presets.LEFT_OUT
+    got = resolve(text, seat="s", typed={"brief": "typed"}, left_out=("brief_file",))
+    assert got.sources["brief_file"] == presets.LEFT_OUT
+
+
+@pytest.mark.parametrize("left_out, typed, row", [
+    (("nonsense",), {}, "nonsense"),
+    (("home",), {}, "home"),
+    (("model",), {"model": "opus"}, "model"),
+    (("extra_flags",), {"extra_flags": ["--verbose"]}, "extra_flags"),
+])
+def test_a_left_out_name_no_harness_has_or_one_also_given_is_refused(left_out, typed, row):
+    with pytest.raises(catalog.BadValue) as caught:
+        resolve(typed=typed, left_out=left_out)
+    assert caught.value.code == "bad-value" and caught.value.row == row
+    assert caught.value.exit_code == codes.USAGE
+    assert row in caught.value.problem
+
+
+def test_a_row_of_another_harness_may_be_left_out():
+    got = resolve(left_out=("sandbox", "approval"))
+    assert got.harness == "claude" and "sandbox" not in got.values
+
+
+def test_a_codex_seats_approval_left_out_launches_under_claude():
+    text = '[seat.c]\nharness = "codex"\napproval = "never"\n'
+    with pytest.raises(presets.BadPreset, match="approval is not a claude row"):
+        resolve(text, seat="c", typed={"harness": "claude"})
+    got = resolve(text, seat="c", typed={"harness": "claude"}, left_out=("approval",))
+    assert got.harness == "claude" and "approval" not in got.values
+
+
+def test_leaving_out_the_harness_takes_the_shipped_one():
+    found = presets.read(write('[defaults]\nharness = "codex"\n[seat.c]\nharness = "codex"\n'))
+    request = Request(seat="c", left_out=("harness",), cwd="/work")
+    assert presets.harness_of(request, presets=found) == "claude"
+    got = presets.resolve(request, presets=found, available=NONE)
+    assert got.harness == "claude" and got.sources["harness"] == presets.LEFT_OUT
+
+
+def test_a_word_enum_left_out_ends_a_seats_recycling():
+    available = only("turns", "usage")
+    text = '[seat.s]\nrecycle_at_limit = "compact"\nlimit_at = "2x"\n'
+    assert resolve(text, available, seat="s").values["limit_at"] == "2x"
+    with pytest.raises(catalog.NeedsModule, match="limit_at needs recycle_at_limit"):
+        resolve(text, available, seat="s", typed={"recycle_at_limit": "off"})
+    got = resolve(text, available, seat="s", typed={"recycle_at_limit": "off"},
+                  left_out=("limit_at",))
+    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == "1x"
+    assert got.sources["limit_at"] == presets.LEFT_OUT and "limit_at" not in got.chosen
