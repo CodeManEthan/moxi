@@ -655,6 +655,24 @@ def test_a_remove_without_its_key_is_refused_before_the_handler(golden_copy):
     assert api.get("gamma")
 
 
+@pytest.mark.parametrize("outcome", [{"key": "gamma"}, {"state": "removed"}, {}])
+def test_a_kept_outcome_without_its_state_or_key_is_unreadable(outcome, golden_copy,
+                                                               store_path):
+    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+    conn = sqlite3.connect(store_path)
+    try:
+        conn.execute("UPDATE remove_status SET outcome = ? WHERE key = ?",
+                     (json.dumps(outcome), KEY))
+        conn.commit()
+    finally:
+        conn.close()
+    for answer in (get("/api/remove-status", f"job={KEY}"),
+                   post("/api/remove", {"key": "gamma"}, key=KEY)):
+        said = refused(answer)
+        assert f"the projects store {store_path} can't be read" in said
+        assert "fix: move the file aside" in said
+
+
 def test_a_status_read_of_a_version_1_store_answers_no_such_request(v1_copy, store_path):
     before = store_path.read_bytes()
     assert "no remove request" in refused(get("/api/remove-status", f"job={KEY}"))

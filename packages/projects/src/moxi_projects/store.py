@@ -333,7 +333,9 @@ def remove_status(job: str, where: str | None = None) -> dict | None:
     with `job`, `project` and `created` beside it; None when no such request is kept (none
     was, it is older than a day, the store is missing or at a version before the table).
 
-    A read: it never writes. Raises `Unreadable` (or its `TooNew` and `Busy`)."""
+    A read: it never writes. Raises `Unreadable` (or its `TooNew` and `Busy`), also for a
+    kept outcome that isn't a mapping with `state` and `key`, as a hand-edited or damaged
+    row may be."""
     where = where or path()
     opened = api._open(where)
     if opened is None:
@@ -351,6 +353,9 @@ def remove_status(job: str, where: str | None = None) -> dict | None:
         kept = json.loads(outcome)
         if not isinstance(kept, dict):
             raise ValueError(f"the outcome kept for a remove is {type(kept).__name__}")
+        missing = [name for name in ("state", "key") if name not in kept]
+        if missing:
+            raise ValueError(f"the outcome kept for a remove has no {' or '.join(missing)}")
     except (sqlite3.Error, OSError, ValueError) as exc:
         raise api._unreadable(where, exc) from exc
     finally:
