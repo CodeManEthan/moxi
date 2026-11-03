@@ -434,13 +434,18 @@ def test_an_act_through_the_whole_path_writes_its_rows_and_a_routed_refusal_its_
 def test_the_phones_ui_modules_has_its_marked_fields_redacted() -> None:
     async def body():
         push = Push(FakeStarters([]), mounts=MOUNTS, client=FakeClient())
+        broken = {"name": "beta", "state": "broken",
+                  "reason": "importing its announcement failed: /var/lib/someone/beta.py",
+                  "export_error": "/var/lib/someone/export", "refused": []}
         value = {"at": "now", "error": "/var/lib/someone/broken", "contracts": [1],
-                 "modules": []}
+                 "modules": [broken]}
         push.publish("modules", value)
         desk = Reader(push, ask("ui.modules")).start()
         phone = Reader(push.gateway_app(lambda: KEY), ask("ui.modules")).start()
         assert (await _seen(desk, "ui.modules"))["ui.modules"] == value
-        assert (await _seen(phone, "ui.modules"))["ui.modules"] == {**value, "error": None}
+        assert (await _seen(phone, "ui.modules"))["ui.modules"] == {
+            **value, "error": None,
+            "modules": [{**broken, "reason": None, "export_error": None}]}
         for reader in (desk, phone):
             reader.leave()
             await reader.task

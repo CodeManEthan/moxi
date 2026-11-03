@@ -124,8 +124,8 @@ _COMPONENT = Out("table", items={
     "contract": Out("int"), "place": Out("string"), "home": Out("bool"),
     "attributes": Out("list", items=_ATTRIBUTE)})
 _MODULE = Out("table", items={
-    "name": Out("string"), "state": Out("string"), "reason": Out("string"),
-    "version": Out("string"), "summary": Out("string"), "page": Out("bool"),
+    "name": Out("string"), "state": Out("string"),
+    "reason": Out("string", nullable=True, mark="redact"), "version": Out("string"), "summary": Out("string"), "page": Out("bool"),
     "mounted": Out("bool"), "export_error": Out("string", nullable=True, mark="redact"),
     "gateway_error": _STRING, "budget": _BUDGET,
     "confirmed": Out("list", items=Out("string")),
