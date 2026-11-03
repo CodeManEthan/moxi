@@ -3,6 +3,9 @@
     GET  /api/catalog   the rows a launch may set on this install, per harness, as the
                         UI shell's form reads them
     GET  /api/presets   the seats and project presets, checked
+    GET  /api/form      the value of each row a launch takes from the shipped defaults,
+                        `[defaults]` and at most one preset, for one harness: what the
+                        launch form shows when a preset is chosen
     GET  /api/launches  the launch log, newest first, paged by `limit` and `before`; with
                         `request`, the one launch a page launch's 202 points to
     GET  /api/sessions  the past-sessions list, as `moxi launcher sessions` gives it
@@ -16,8 +19,10 @@
 
 **The page server only translates requests.** Every key a body may carry and every key an
 answer sends is declared here at every depth, so loopback refuses an undeclared key coming
-in and cuts one going out. A launch request's `values` are catalog keys only: the table is
-built from the launcher's catalog and both harnesses' when this module is imported. A map
+in and cuts one going out. A launch request's `values` and `leave_out` are catalog keys
+only: the table is built from the launcher's catalog and both harnesses' when this module
+is imported. A request carries the whole form: each field showing a value in `values`,
+each field shown empty in `leave_out`, since a body holds no null. A map
 whose keys aren't fixed (a preset's values, an event's detail) goes as rows or as JSON
 text. No answer carries a value from an environment, a launch's recorded environment or
 its brief; a preview's argv and first turn may hold the brief, and are marked `redact`, and
@@ -107,6 +112,17 @@ PROBLEM = _table(where=_text(), key=_text(nullable=True), problem=_text(), hint=
                  code=_text(), level=_text())
 PRESETS = {**STANDING, "presets": Out("list", items=PRESET),
            "problems": Out("list", items=PROBLEM)}
+
+#: One row of the launch form as the layers fill it, spelled as a preset's value is:
+#: `source` is `shipped`, `defaults` or `preset`. A brief or standing instructions that
+#: `[defaults]` or the preset writes inline is `withheld`, its text not sent.
+FORM_ROW = _table(name=_text(), value=_text(nullable=True),
+                  items=Out("list", items=Out("string"), nullable=True),
+                  source=_text(), withheld=Out("bool"))
+#: The launch form for one harness: the harness drawn, the value of each row offered for
+#: it, or, when the preset can't be laid for that harness, no rows and the refusal.
+FORM = {**STANDING, "harness": _text(), "rows": Out("list", items=FORM_ROW),
+        "refused": Out("table", items=REFUSAL.items, nullable=True)}
 
 #: One launch log row, cut to what the page shows: none of its recorded values, argv,
 #: environment or brief, and none of its process facts.
@@ -200,17 +216,21 @@ def _values_table() -> dict[str, Field]:
 #: Every catalog key a launch request may set.
 VALUES = _values_table()
 
-#: A launch as the page asks for it: at most one preset, the values set in the form, and
-#: whether a posture off its default is meant.
+#: A launch as the page asks for it: at most one preset, the value of each field the form
+#: shows filled, the name of each it shows empty, and whether a posture off its default is
+#: meant.
 REQUEST = {
     "seat": Field("string", required=False, max=QUERY_MAX),
     "project_preset": Field("string", required=False, max=QUERY_MAX),
     "values": Field("table", required=False, items=VALUES),
+    "leave_out": Field("list", required=False, max=len(VALUES),
+                       items=Field("string", max=QUERY_MAX)),
     "off_posture": Field("bool", required=False),
 }
 
 #: What a launch would start. `refused` lists what stops it; `ticket` is issued only when
 #: nothing does and the target is not `terminal`, whose `command` the page shows to copy.
+#: `left_out` names the rows the launch leaves out that a layer set.
 PREVIEW = {
     "refused": Out("list", items=REFUSAL),
     "harness": _text(nullable=True), "mode": _text(nullable=True),
@@ -218,7 +238,7 @@ PREVIEW = {
     "argv": Out("list", items=Out("string", mark="redact")),
     "stamps": Out("list", items=_table(name=_text(), value=_text())),
     "first_turn": _text(nullable=True, mark="redact"),
-    "not_applied": _texts(), "warnings": _texts(),
+    "not_applied": _texts(), "warnings": _texts(), "left_out": _texts(),
     "command": _text(nullable=True, mark="redact"),
     "request_id": _text(nullable=True), "ticket": _text(nullable=True),
     "expires_at": _text(nullable=True),
@@ -243,6 +263,12 @@ PAGE = lb.Page(
     routes=(
         lb.Route("/api/catalog", "read", _target("read_catalog"), returns=CATALOG),
         lb.Route("/api/presets", "read", _target("read_presets"), returns=PRESETS),
+        lb.Route("/api/form", "read", _target("read_form"),
+                 query={"seat": Field("string", required=False, max=QUERY_MAX),
+                        "project_preset": Field("string", required=False, max=QUERY_MAX),
+                        "harness": Field("enum", required=False,
+                                         values=catalog.HARNESSES)},
+                 returns=FORM),
         lb.Route("/api/launches", "read", _target("read_launches"),
                  query={**_PAGED, "request": Field("string", required=False, max=QUERY_MAX)},
                  returns=LAUNCHES),
@@ -271,7 +297,7 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["ACTED", "CATALOG", "FIELD", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
+__all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
            "PAGE", "PAST", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
            "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "STANDING", "STATE",
            "VALUES"]

@@ -1,9 +1,12 @@
 // <moxi-launcher-page route="...">: the launcher's panel. Three parts:
 //
-// - Launch: a seat and a project preset to start from, and the launch form, the UI shell's
-//   form renderer over `/api/catalog`. "Preview" sends only the fields the user changed
-//   to `/api/preview`, which answers with the argv, the environment stamps, the warnings
-//   and every refusal the launch's check finds. A launch in a slot or headless is then
+// - Launch: one preset to start from (a seat, a project preset or none), and the launch
+//   form, the UI shell's form renderer over `/api/catalog`, filled from `/api/form` with
+//   the values the preset and the user's defaults give. Choosing a preset draws a new form;
+//   changing the harness keeps the form and fills the new harness's rows. "Preview" sends
+//   the whole form to `/api/preview`: each field with a value, and each field left empty
+//   as a row to leave out. It answers with the argv, the environment stamps, the warnings,
+//   the rows left out and every refusal the launch's check finds. A launch in a slot or headless is then
 //   launched with the preview's ticket (`/api/launch`, 202); its row arrives by the
 //   stream's topic `launches`, and a refusal met before the row was written is read from
 //   the 202's status path. A launch in a terminal is never run by the page: the preview
@@ -17,6 +20,7 @@
 //   is answered with the `moxi launcher resume` command to copy.
 
 import { css, html, LitElement, nothing } from "lit";
+import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, place, subscribe } from "/m/ui/client.js";
 import type { FieldDescriptor, FormElement, FormSubmit, FormValue } from "/m/ui/client.js";
@@ -25,13 +29,13 @@ import { Feed, parseLaunches, parseStates } from "./feed.ts";
 import type { Launches, Refusal, States } from "./feed.ts";
 import { when } from "./views.ts";
 import {
-  commandLine, fieldsFor, FOLLOW_FOR_MS, FOLLOW_MS, followedOf, HARNESS, launchBody, launchesView, markTouched,
-  olderPath, outcomeOf, parseCatalog, parsePasts, parsePresets, parsePreview, pastView,
-  presetHarness, presetLines, presetProblems, presetsOf, rebase, refusalLine, requestValues,
-  sharedNames,
+  choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS,
+  followedOf, formPath, HARNESS, keepLabel, launchBody, launchesView, NO_PRESET, olderPath, outcomeOf,
+  parseCatalog, parseForm, parsePasts, parsePresets, parsePreview, pastView, presetLines, presetProblems,
+  presetsOf, refusalLine, requestOf,
 } from "./panel.ts";
 import type {
-  Catalog, Followed, LaunchBody, LaunchItem, Outcome, Past, PastItem, Pasts, Presets, Preview,
+  Catalog, Choice, Followed, Form, LaunchBody, LaunchItem, Outcome, Past, PastItem, Pasts, Presets, Preview,
 } from "./panel.ts";
 
 const TAG = "moxi-launcher-page";
@@ -127,16 +131,23 @@ export class LauncherPage extends LitElement {
   #pastTimer: ReturnType<typeof setTimeout> | undefined;
   #followTimer: ReturnType<typeof setInterval> | undefined;
 
-  // The form: the harness it shows, what it showed first and the fields the user changed.
+  // The form: the preset chosen, the `/api/form` answer it is filled from, the harness it
+  // is drawn for, its fields, and the withheld texts with the ones whose keep box is ticked.
+  #choice: Choice = NO_PRESET;
+  #filled: Form | null = null;
+  #formFailure: string | null = null;
+  /** Counts `/api/form` reads, so only the latest one's answer is drawn. */
+  #asked = 0;
+  /** The harness a read in flight asks for, or "". */
+  #asking = "";
+  /** Counts the form elements drawn: a new preset choice draws a new one. */
+  #element = 0;
   #harness = "";
   #fields: FieldDescriptor[] = [];
-  #fieldsOf = "";
   #drawn: FieldDescriptor[] | null = null;
-  #baseline: Record<string, FormValue> | null = null;
-  #touched = new Set<string>();
+  #withheld = new Set<string>();
+  #keep = new Set<string>();
   #errored = new Set<string>();
-  #seat = "";
-  #project = "";
   #offPosture = false;
 
   // The preview, the body it was made for, and what launching it answered.
@@ -176,6 +187,7 @@ export class LauncherPage extends LitElement {
     this.#pasts = pasts;
     void catalog.refresh();
     void presets.refresh();
+    void this.#readForm(true);
     void pasts.refresh();
     void launches.refresh().then(() => {
       if (this.#launches !== launches) return;
@@ -213,13 +225,51 @@ export class LauncherPage extends LitElement {
   // --- reading --------------------------------------------------------------------------
 
   #catalogRead(): void {
-    const catalog = this.#catalog?.value ?? null;
-    if (catalog !== null && catalog.state === "up" && this.#harness === "") {
-      const first = catalog.harnesses[0];
-      const row = first?.fields.find((field) => field.name === HARNESS);
-      this.#harness = (typeof row?.default === "string" && row.default) || first?.name || "";
-    }
+    this.#refill();
     this.requestUpdate();
+  }
+
+  /**
+   * Reads `/api/form` for the chosen preset, for `harness` when one is asked. A new choice
+   * (`fresh`) draws a new form element from the answer, each withheld text's keep box
+   * ticked; a harness change keeps the element, so the user's edits to the rows both
+   * harnesses have stay, and fills the new harness's rows.
+   */
+  async #readForm(fresh: boolean, harness = ""): Promise<void> {
+    const asked = (this.#asked += 1);
+    this.#asking = harness;
+    if (fresh) {
+      this.#filled = null;
+      this.#formFailure = null;
+      this.#refill();
+      this.requestUpdate();
+    }
+    const result = await api("launcher", formPath(this.#choice, harness));
+    if (asked !== this.#asked || !this.isConnected) return;
+    this.#asking = "";
+    const form = result.status === 200 ? parseForm(result.data) : null;
+    if (form === null || form.state === "error") {
+      this.#formFailure = form?.detail
+        ?? (result.status === 0 ? "no answer from the shell" : `the launcher's page server answered ${result.status}`);
+      this.requestUpdate();
+      return;
+    }
+    this.#formFailure = null;
+    const withheld = new Set(form.rows.filter((row) => row.withheld).map((row) => row.name));
+    this.#keep = new Set([...withheld].filter((name) => fresh || !this.#withheld.has(name) || this.#keep.has(name)));
+    this.#withheld = withheld;
+    if (fresh) this.#element += 1;
+    this.#filled = form;
+    this.#harness = form.harness;
+    this.#refill();
+    this.requestUpdate();
+  }
+
+  /** The form's fields from the catalog and the `/api/form` answer, a new array each time;
+   * the form keeps what the user left in each row that stays. */
+  #refill(): void {
+    const catalog = this.#catalog?.value ?? null;
+    this.#fields = this.#filled === null ? [] : filledFields(fieldsFor(catalog, this.#harness), this.#filled, this.#choice);
   }
 
   #launchesRead(): void {
@@ -239,17 +289,6 @@ export class LauncherPage extends LitElement {
     this.#pastTimer = setTimeout(() => { void this.#pasts?.refresh(); }, PAST_DELAY_MS);
   }
 
-  /** The fields the form draws for the harness it shows, the same array until that changes,
-   * so the form keeps what the user left in it. */
-  #formFields(): FieldDescriptor[] {
-    const catalog = this.#catalog?.value ?? null;
-    if (this.#fieldsOf !== this.#harness || this.#fields.length === 0) {
-      this.#fields = fieldsFor(catalog, this.#harness);
-      this.#fieldsOf = this.#harness;
-    }
-    return this.#fields;
-  }
-
   #form(): FormElement | null {
     return this.renderRoot.querySelector("moxi-ui-form");
   }
@@ -261,48 +300,55 @@ export class LauncherPage extends LitElement {
     setTimeout(() => this.#mark(), 0);
   };
 
+  /** After the user changed the form: a new harness is filled from `/api/form`, a group's
+   * other rows are emptied, and the request is worked out again. */
   #mark(values?: Record<string, FormValue>): void {
     const form = this.#form();
-    if (form === null || this.#baseline === null) return;
+    if (form === null) return;
     const now = values ?? form.values();
-    this.#touched = markTouched(this.#touched, this.#baseline, now);
     const chosen = now[HARNESS];
-    if (this.#touched.has(HARNESS) && typeof chosen === "string" && chosen !== this.#harness) {
-      this.#show(chosen);
+    const catalog = this.#catalog?.value ?? null;
+    if (typeof chosen === "string" && chosen === this.#harness && this.#asking !== "") {
+      // Set back before the other harness's rows came: that read is no longer wanted.
+      this.#asked += 1;
+      this.#asking = "";
+    } else if (typeof chosen === "string" && chosen !== this.#harness && chosen !== this.#asking
+               && catalog?.harnesses.some((item) => item.name === chosen)) {
+      void this.#readForm(false, chosen);
     }
-    this.#current = JSON.stringify(this.#body(now));
-    this.requestUpdate();
+    this.#settle(now);
   }
 
-  /** Shows the form for `harness`, when the catalog has it. */
-  #show(harness: string): void {
-    const catalog = this.#catalog?.value ?? null;
-    if (harness === this.#harness || !catalog?.harnesses.some((item) => item.name === harness)) return;
-    this.#harness = harness;
-    this.requestUpdate();
-  }
-
-  /** The harness the presets name, for a form whose harness the user left alone. */
-  #followPresets(): void {
-    if (this.#touched.has(HARNESS)) return;
-    const named = presetHarness(this.#presets?.value ?? null, this.#seat, this.#project);
-    const catalog = this.#catalog?.value ?? null;
-    const first = catalog?.harnesses[0]?.fields.find((field) => field.name === HARNESS)?.default;
-    const harness = named ?? (typeof first === "string" ? first : null);
-    if (harness) this.#show(harness);
+  /** Applies the group rule to what the form holds now and works out the request again. */
+  #settle(now: Record<string, FormValue>): void {
+    const grouped = emptyGroups(this.#fields, now, this.#withheld, this.#keep);
+    const keepChanged = grouped.keep.size !== this.#keep.size;
+    this.#keep = grouped.keep;
+    if (grouped.fields !== this.#fields) {
+      // Drawn next; `updated` then works the request out from the emptied rows.
+      this.#fields = grouped.fields;
+      this.requestUpdate();
+      return;
+    }
+    const current = JSON.stringify(this.#body(now));
+    if (current !== this.#current || keepChanged) {
+      this.#current = current;
+      this.requestUpdate();
+    }
   }
 
   #body(values: Record<string, FormValue>): LaunchBody {
-    const catalog = this.#catalog?.value ?? null;
-    const sent = requestValues(values, this.#touched, this.#formFields(), this.#harness, sharedNames(catalog));
-    return launchBody(this.#seat, this.#project, sent, this.#offPosture);
+    return launchBody(this.#choice, requestOf(this.#fields, values, this.#withheld, this.#keep), this.#offPosture);
   }
 
-  #choose(kind: "seat" | "project", event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
-    if (kind === "seat") this.#seat = value;
-    else this.#project = value;
-    this.#followPresets();
+  #choose(event: Event): void {
+    this.#choice = choiceOf((event.target as HTMLSelectElement).value);
+    void this.#readForm(true);
+  }
+
+  #keepChanged(name: string, event: Event): void {
+    if ((event.target as HTMLInputElement).checked) this.#keep.add(name);
+    else this.#keep.delete(name);
     this.#mark();
     this.requestUpdate();
   }
@@ -332,8 +378,6 @@ export class LauncherPage extends LitElement {
       this.#preview = preview;
       this.#previewed = body;
       this.#current = JSON.stringify(body);
-      // The launch runs the harness the server read; show its rows.
-      if (preview.harness && !this.#touched.has(HARNESS)) this.#show(preview.harness);
     }
     this.#markFields(preview?.refused ?? []);
     this.requestUpdate();
@@ -345,7 +389,7 @@ export class LauncherPage extends LitElement {
     if (form === null) return;
     for (const name of this.#errored) form.setMessage(name, []);
     this.#errored.clear();
-    const names = new Set(this.#formFields().map((field) => field.name));
+    const names = new Set(this.#fields.map((field) => field.name));
     for (const found of refused) {
       if (found.row === null || !names.has(found.row)) continue;
       form.setError(found.row, refusalLine(found));
@@ -470,15 +514,25 @@ export class LauncherPage extends LitElement {
     else if (feed.gone) status = html`<p class="problem">The launcher is no longer installed.</p>`;
     else if (feed.failure !== null) status = html`<p class="problem" data-line="failed">The catalog could not be read: ${feed.failure.why}.</p>`;
     else if (catalog?.state === "error") status = html`<p class="problem" data-line="error">The catalog could not be read: ${catalog.detail}</p>`;
-    const fields = this.#formFields();
+    const fields = this.#fields;
+    const filled = this.#filled;
+    let form: unknown = nothing;
+    if (this.#formFailure !== null) {
+      form = html`<p class="problem" data-line="form-failed">The form could not be filled: ${this.#formFailure}.</p>`;
+    } else if (filled === null && catalog?.state === "up") {
+      form = html`<p class="dim">Filling the form…</p>`;
+    }
     return html`<section class="launch" data-part="launch">
       <h2>Launch</h2>
-      <p class="help lede">Start from a seat or a project preset, change what you want, and preview the launch before you start it. Only the fields you change are sent: the rest come from the preset and your defaults.</p>
+      <p class="help lede">Start from a seat or a project preset: its values and your defaults fill the form. Change what you want, empty a field to leave it out of this launch, and preview the launch before you start it. Nothing here changes the preset.</p>
       ${status}
       ${this.#choosePart()}
-      ${fields.length ? html`<moxi-ui-form mode="submit" submit-label="Preview" .fields=${fields}
+      ${form}
+      ${filled?.refused ? html`<p class="problem" data-line="form-refused" data-code=${filled.refused.code}>${refusalLine(filled.refused)}. The form shows the catalog's defaults.</p>` : nothing}
+      ${filled !== null ? this.#keepPart(filled) : nothing}
+      ${filled !== null && fields.length ? keyed(this.#element, html`<moxi-ui-form mode="submit" submit-label="Preview" .fields=${fields}
           @moxi-submit=${(event: CustomEvent<FormSubmit>) => void this.#submitted(event)}
-          @input=${this.#poke} @click=${this.#poke} @keydown=${this.#poke}></moxi-ui-form>` : nothing}
+          @input=${this.#poke} @click=${this.#poke} @keydown=${this.#poke}></moxi-ui-form>`) : nothing}
       ${this.#previewPart()}
     </section>`;
   }
@@ -487,21 +541,21 @@ export class LauncherPage extends LitElement {
     const presets = this.#presets?.value ?? null;
     const seats = presetsOf(presets, "seat");
     const projects = presetsOf(presets, "project");
-    const chosen = [...seats.filter((item) => item.name === this.#seat),
-                    ...projects.filter((item) => item.name === this.#project)];
-    const problems = presetProblems(presets, this.#seat, this.#project);
+    const key = choiceKey(this.#choice);
+    const chosen = chosenPreset(presets, this.#choice);
+    const problems = presetProblems(presets, this.#choice.kind === "seat" ? this.#choice.name : "",
+                                    this.#choice.kind === "project" ? this.#choice.name : "");
     const failed = this.#presets?.failure ?? null;
+    const option = (kind: "seat" | "project", name: string) => {
+      const value = choiceKey({ kind, name });
+      return html`<option value=${value} ?selected=${value === key}>${name}</option>`;
+    };
     return html`<div class="choose">
-        <label>Seat
-          <select data-control="seat" @change=${(event: Event) => this.#choose("seat", event)}>
-            <option value="" ?selected=${this.#seat === ""}>none</option>
-            ${seats.map((item) => html`<option value=${item.name} ?selected=${item.name === this.#seat}>${item.name}</option>`)}
-          </select>
-        </label>
-        <label>Project preset
-          <select data-control="project_preset" @change=${(event: Event) => this.#choose("project", event)}>
-            <option value="" ?selected=${this.#project === ""}>none</option>
-            ${projects.map((item) => html`<option value=${item.name} ?selected=${item.name === this.#project}>${item.name}</option>`)}
+        <label>Start from
+          <select data-control="preset" @change=${(event: Event) => this.#choose(event)}>
+            <option value="" ?selected=${key === ""}>no preset</option>
+            ${seats.length ? html`<optgroup label="Seats">${seats.map((item) => option("seat", item.name))}</optgroup>` : nothing}
+            ${projects.length ? html`<optgroup label="Project presets">${projects.map((item) => option("project", item.name))}</optgroup>` : nothing}
           </select>
         </label>
         <label class="check"><input type="checkbox" data-control="off_posture" .checked=${this.#offPosture}
@@ -509,12 +563,23 @@ export class LauncherPage extends LitElement {
       </div>
       ${failed !== null ? html`<p class="warn">The presets could not be read: ${failed.why}.</p>` : nothing}
       ${presets?.state === "error" ? html`<p class="warn">The presets could not be read: ${presets.detail}</p>` : nothing}
-      ${chosen.map((preset) => html`<details data-preset=${`${preset.kind}.${preset.name}`}>
-        <summary>What ${preset.kind === "seat" ? "the seat" : "the project preset"} ${preset.name} sets${preset.harness ? ` (${preset.harness})` : ""}</summary>
-        <ul class="dim">${presetLines(preset).map((line) => html`<li><code>${line}</code></li>`)}</ul>
-      </details>`)}
+      ${chosen !== null ? html`<details data-preset=${`${chosen.kind}.${chosen.name}`}>
+        <summary>What ${chosen.kind === "seat" ? "the seat" : "the project preset"} ${chosen.name} sets${chosen.harness ? ` (${chosen.harness})` : ""}</summary>
+        <ul class="dim">${presetLines(chosen).map((line) => html`<li><code>${line}</code></li>`)}</ul>
+      </details>` : nothing}
       ${problems.length ? html`<ul>${problems.map((item) => html`<li class=${item.level === "error" ? "problem" : "warn"}>
         ${item.where === "file" ? "presets file" : item.where}${item.key ? ` ${item.key}` : ""}: ${item.problem}. ${item.hint}</li>`)}</ul>` : nothing}`;
+  }
+
+  /** A keep box for each withheld text: ticked, an empty field keeps the preset's text;
+   * unticked, the text is left out. */
+  #keepPart(filled: Form) {
+    const shown = new Set(this.#fields.map((field) => field.name));
+    const rows = filled.rows.filter((row) => row.withheld && shown.has(row.name));
+    if (rows.length === 0) return nothing;
+    return html`<div class="choose keeps">${rows.map((row) => html`<label class="check">
+      <input type="checkbox" data-control="keep" data-row=${row.name} .checked=${this.#keep.has(row.name)}
+        @change=${(event: Event) => this.#keepChanged(row.name, event)}>${keepLabel(row, this.#choice)}</label>`)}</div>`;
   }
 
   #previewPart() {
@@ -534,6 +599,7 @@ export class LauncherPage extends LitElement {
           <ul class="stamps">${preview.stamps.map((stamp) => html`<li><code>${stamp.name}=${stamp.value}</code></li>`)}</ul>` : nothing}
         ${preview.first_turn ? html`<details><summary>Its first turn</summary><code class="block">${preview.first_turn}</code></details>` : nothing}
         ${preview.not_applied.length ? html`<p class="dim">Not applied: ${preview.not_applied.join(", ")}</p>` : nothing}
+        ${preview.left_out.length ? html`<p class="dim" data-line="left-out">Left out: ${preview.left_out.join(", ")}</p>` : nothing}
         ${preview.warnings.length ? html`<ul class="warnings">${preview.warnings.map((line) => html`<li class="warn">${line}</li>`)}</ul>` : nothing}
         ${preview.command ? html`<div class="copy" data-field="command">
           <p>A launch in a terminal runs in a terminal of your own, not from this page. Copy the command and run it there:</p>
@@ -677,21 +743,20 @@ export class LauncherPage extends LitElement {
     </li>`;
   }
 
-  /** After each draw: the form's first values once it has fields, the `sessions` block
-   * placed once, and a `state` component placed in each new live row's cell. A cell holds
+  /** After each draw: the request worked out again once the form has new fields, the
+   * `sessions` block placed once, and a `state` component placed in each new live row's
+   * cell. A cell holds
    * the id its launch row was first known by, which a clear or a compact doesn't change;
    * the component follows the launch through the session's later ids, so a cell is placed
    * once. */
   protected updated(changed: Map<PropertyKey, unknown>): void {
     super.updated(changed);
     const form = this.#form();
-    // Lit sets `fields` again on every draw and the form keeps a copy, so the page's own
-    // array says when the fields really changed. A value the user just typed, not yet
-    // marked touched, must not be taken for what the form first showed.
+    // Lit sets `fields` again on every draw, so the page's own array says when the fields
+    // really changed: newly filled rows may need a group's other rows emptied again.
     if (form !== null && this.#fields !== this.#drawn) {
       this.#drawn = this.#fields;
-      this.#baseline = rebase(this.#baseline ?? {}, form.values(), this.#touched);
-      this.#current = JSON.stringify(this.#body(form.values()));
+      this.#settle(form.values());
     }
     const host = this.renderRoot.querySelector(".sessions");
     if (host !== null && !this.#sessionsPlaced) {

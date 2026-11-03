@@ -1,11 +1,12 @@
 // What the launcher's panel sends and what it shows, worked out with no DOM so the Node
 // tests can drive it. page.ts draws it.
 //
-// The launch form is the UI shell's one form renderer over `/api/catalog`. The form sends
-// a value for every field it offers, but the panel sends only the fields the user changed:
-// a default left as it was must not override the user's `[defaults]` or the preset. A
-// field counts as changed once its value has differed from what the form first showed,
-// and stays so even when the user sets it back, since that is a value chosen on purpose.
+// The launch form is the UI shell's one form renderer over `/api/catalog`, filled from
+// `/api/form`: each field shows the value the shipped defaults, the user's `[defaults]` and
+// the one preset chosen give it. Every field is in one of two states, a value or empty, and
+// the request carries the whole form: a field with a value goes in `values`, an empty one
+// in `leave_out`, and the page server compares each with what the layers give. Nothing the
+// form sends is saved back to the preset.
 //
 // Every string here goes into the page as text.
 
@@ -99,16 +100,6 @@ export function fieldsFor(catalog: Catalog | null, harness: string): FieldDescri
   return out;
 }
 
-/** The names every harness's form has: the launcher's own rows, which mean the same
- * whatever the harness. */
-export function sharedNames(catalog: Catalog | null): Set<string> {
-  const all = catalog?.harnesses ?? [];
-  if (all.length === 0) return new Set();
-  const [first, ...rest] = all;
-  return new Set(first.fields.map((field) => field.name)
-    .filter((name) => rest.every((item) => item.fields.some((field) => field.name === name))));
-}
-
 /** One value a preset sets: a list row's in `items`, any other's in `value`. An inline
  * brief or instructions is named with both null. */
 export interface PresetValue {
@@ -177,84 +168,220 @@ export function presetLines(preset: Preset): string[] {
   });
 }
 
-/** The harness the chosen presets name: the seat's, else the project preset's; null
- * when neither names one. */
-export function presetHarness(presets: Presets | null, seat: string, project: string): string | null {
-  const all = presets?.presets ?? [];
-  const named = [all.find((item) => item.kind === "seat" && item.name === seat),
-                 all.find((item) => item.kind === "project" && item.name === project)];
-  for (const preset of named) if (preset?.harness) return preset.harness;
-  return null;
-}
-
 /** The problems a choice of presets meets: the file's, and each chosen preset's. */
 export function presetProblems(presets: Presets | null, seat: string, project: string): PresetProblem[] {
   const chosen = new Set([seat ? `seat.${seat}` : "", project ? `project.${project}` : ""]);
   return (presets?.problems ?? []).filter((item) => item.where === "file" || chosen.has(item.where));
 }
 
-// --- which fields the user changed -----------------------------------------------------
+// --- the preset choice ---------------------------------------------------------------------
 
-function same(a: FormValue | undefined, b: FormValue | undefined): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** The one preset a launch starts from: a seat, a project preset, or none (`kind` ""). */
+export interface Choice {
+  kind: "seat" | "project" | "";
+  name: string;
 }
 
-/** `touched` with every field whose value in `now` differs from `baseline` added. */
-export function markTouched(touched: ReadonlySet<string>, baseline: Record<string, FormValue>,
-                            now: Record<string, FormValue>): Set<string> {
-  const out = new Set(touched);
-  for (const name of Object.keys(now)) if (!same(now[name], baseline[name])) out.add(name);
-  return out;
+export const NO_PRESET: Choice = { kind: "", name: "" };
+
+/** The choice as one select's value: `seat:<name>`, `project:<name>`, or "" for none. */
+export function choiceKey(choice: Choice): string {
+  return choice.kind && choice.name ? `${choice.kind}:${choice.name}` : "";
 }
 
-/** What the form showed first, after it drew new fields: a field already touched keeps
- * its first value, and every other reads as the form now shows it. */
-export function rebase(baseline: Record<string, FormValue>, now: Record<string, FormValue>,
-                       touched: ReadonlySet<string>): Record<string, FormValue> {
-  const out: Record<string, FormValue> = {};
-  for (const name of Object.keys(now)) out[name] = touched.has(name) && name in baseline ? baseline[name] : now[name];
-  return out;
+/** The choice a select's value names; anything else reads as none. */
+export function choiceOf(key: string): Choice {
+  const at = key.indexOf(":");
+  const kind = key.slice(0, at);
+  const name = key.slice(at + 1);
+  return at > 0 && name && (kind === "seat" || kind === "project") ? { kind, name } : NO_PRESET;
 }
+
+/** The chosen preset, when the presets list it. */
+export function chosenPreset(presets: Presets | null, choice: Choice): Preset | null {
+  return (presets?.presets ?? []).find((item) => item.kind === choice.kind && item.name === choice.name) ?? null;
+}
+
+/** "the seat planner", "the project preset app". */
+function named(choice: Choice): string {
+  return `${choice.kind === "seat" ? "the seat" : "the project preset"} ${choice.name}`;
+}
+
+// --- filling the form ------------------------------------------------------------------------
+
+/** One row of `/api/form`: its value after the shipped defaults, `[defaults]` and the
+ * preset, spelled as a preset's value is. A withheld text comes with no text. */
+export interface FormRow {
+  name: string;
+  value: string | null;
+  items: string[] | null;
+  /** `shipped`, `defaults` or `preset`. */
+  source: string;
+  withheld: boolean;
+}
+
+/** The value of `/api/form`: the harness the form is drawn for and its rows, or the
+ * resolver's refusal with no rows. */
+export interface Form {
+  state: "up" | "error";
+  detail: string | null;
+  harness: string;
+  rows: FormRow[];
+  refused: Refusal | null;
+}
+
+export function parseForm(data: unknown): Form | null {
+  const read = standing(data);
+  if (read === null) return null;
+  if (read.state === "error") return { state: "error", detail: read.detail, harness: "", rows: [], refused: null };
+  const { harness, rows, refused } = read.fields;
+  if (typeof harness !== "string" || !Array.isArray(rows)) return null;
+  const kept = rows.filter((row): row is Fields => isTable(row) && typeof row.name === "string")
+    .map((row) => ({ name: row.name as string, value: text(row.value),
+                     items: Array.isArray(row.items) ? texts(row.items) : null,
+                     source: text(row.source) ?? "shipped", withheld: row.withheld === true }));
+  return { state: "up", detail: null, harness, rows: kept, refused: isRefusal(refused) ? refusal(refused) : null };
+}
+
+/** The `/api/form` path for a choice, for `harness` when one is asked. */
+export function formPath(choice: Choice, harness = ""): string {
+  const query = new URLSearchParams();
+  if (choice.kind === "seat" && choice.name) query.set("seat", choice.name);
+  if (choice.kind === "project" && choice.name) query.set("project_preset", choice.name);
+  if (harness) query.set(HARNESS, harness);
+  const said = query.toString();
+  return said ? `api/form?${said}` : "api/form";
+}
+
+/** Where a row's value came from, as a line under its field; null at the shipped default. */
+export function sourceNote(source: string, choice: Choice): string | null {
+  if (source === "preset" && choice.kind) return `set by ${named(choice)}`;
+  if (source === "defaults") return "set in your [defaults]";
+  return null;
+}
+
+/** What a withheld text is called. */
+function textName(name: string): string {
+  return name === "instructions" ? "standing instructions" : "brief";
+}
+
+/** The line under a withheld text's field. */
+export function withheldNote(row: FormRow, choice: Choice): string {
+  return `${sourceNote(row.source, choice) ?? "set"}; its text is not shown here`;
+}
+
+/** The keep box beside the form for a withheld text: "Keep the brief the seat planner sets". */
+export function keepLabel(row: FormRow, choice: Choice): string {
+  const what = textName(row.name);
+  return row.source === "defaults" ? `Keep the ${what} your [defaults] set`
+    : `Keep the ${what} ${choice.kind ? named(choice) : "the preset"} sets`;
+}
+
+/**
+ * The choice a word enum adds for its empty state, labelled with the word that then
+ * launches: "leave out (launches off)". Null for any other field: `harness` has no empty
+ * state, and an enum whose shipped default sets nothing gets a blank choice instead.
+ */
+export function leaveOutChoice(field: FieldDescriptor | undefined): string | null {
+  if (field?.type !== "enum" || field.name === HARNESS || field.repeatable === true || field.optional_value === true) {
+    return null;
+  }
+  return typeof field.default === "string" && field.default !== "" ? `leave out (launches ${field.default})` : null;
+}
+
+/** Whether a field is shown off: its module or condition is absent here. */
+function isOff(field: FieldDescriptor): boolean {
+  return field.needs_absent === true;
+}
+
+function isListField(field: FieldDescriptor): boolean {
+  return field.type === "list" || field.repeatable === true;
+}
+
+/** `note` with `line` in front, when the field takes input; an off field's note says why. */
+function noted(field: FieldDescriptor, line: string | null): string | null | undefined {
+  if (line === null || isOff(field)) return field.note;
+  return field.note ? `${line}; ${field.note}` : line;
+}
+
+/**
+ * The fields for `harness` filled from `/api/form`: each field's `value` (`value_items`
+ * for a list) is the row's layered value, with a note naming its source. An enum gets its
+ * empty state: a blank choice when its shipped default sets nothing, else the "leave out"
+ * choice. A withheld text shows empty with its note. A field the answer has no row for
+ * (shown off, or every row of a refused answer) keeps the catalog's default.
+ */
+export function filledFields(fields: readonly FieldDescriptor[], form: Form | null,
+                             choice: Choice): FieldDescriptor[] {
+  const rows = new Map((form?.rows ?? []).map((row) => [row.name, row]));
+  return fields.map((field) => {
+    const out: FieldDescriptor = { ...field };
+    if (field.type === "enum" && field.name !== HARNESS && Array.isArray(field.values)) {
+      const leave = leaveOutChoice(field);
+      out.values = leave !== null ? [...field.values, leave]
+        : field.values.includes("") ? [...field.values] : ["", ...field.values];
+    }
+    if (field.name === HARNESS && form !== null) out.value = form.harness;
+    const row = rows.get(field.name);
+    if (row === undefined) return out;
+    if (field.name === HARNESS) {
+      // The row holds the preset's harness, which is the one shown unless another is asked.
+      if (row.value === form?.harness) out.note = noted(field, sourceNote(row.source, choice));
+      return out;
+    }
+    if (row.withheld) {
+      out.value = "";
+      out.note = noted(field, withheldNote(row, choice));
+      return out;
+    }
+    if (isListField(field)) out.value_items = row.items ?? [];
+    else if (field.optional_value === true) out.value = row.value === null ? null : row.value === "true" ? true : row.value;
+    else out.value = row.value ?? "";
+    out.note = noted(field, sourceNote(row.source, choice));
+    return out;
+  });
+}
+
+// --- the request, from the whole form -----------------------------------------------------
 
 /** A value a launch request may carry: one string, or a list's items. */
 export type Sent = string | string[];
 
-/**
- * One form value as the page server reads it, or null to leave the field out. A switch
- * with an optional value is `false` when off and `true` when on with no value. An empty
- * text field is left out: the request has no spelling for "unset", so the preset's value
- * or the default stands.
- */
-export function sentValue(field: FieldDescriptor | undefined, value: FormValue): Sent | null {
-  if (Array.isArray(value)) return [...value];
-  if (field?.optional_value === true) {
-    if (value === null) return "false";
-    return value === "" ? "true" : value;
-  }
-  return value === null || value === "" ? null : value;
+/** What a launch request carries from the form: each field with a value in `values`, each
+ * empty one in `leave_out`, both by catalog key. */
+export interface FormRequest {
+  values: Record<string, Sent>;
+  leave_out: string[];
 }
 
 /**
- * The `values` a launch request sends: only the fields the user changed, each as the
- * page server reads it. `harness` is sent too when the user chose it, or when a changed
- * field is one only some harnesses have, so the server reads that field against the
- * harness the form showed; otherwise the server takes the preset's harness or the
- * user's default.
+ * The request from every field the form sends (`<moxi-ui-form>`'s values; a field shown
+ * off sends none and is in neither list). Each kind's empty state goes in `leave_out`: an
+ * empty text, a list with no items, a switch off, a bool unticked, the blank or "leave
+ * out" choice. A switch on is `"true"` with no text, else its text. `harness` always has a
+ * value. A withheld text left empty with its keep box ticked is in neither list, so the
+ * launch takes the preset's text.
  */
-export function requestValues(values: Record<string, FormValue>, touched: ReadonlySet<string>,
-                              fields: readonly FieldDescriptor[], harness: string,
-                              shared: ReadonlySet<string>): Record<string, Sent> {
+export function requestOf(fields: readonly FieldDescriptor[], values: Record<string, FormValue>,
+                          withheld: ReadonlySet<string>, keep: ReadonlySet<string>): FormRequest {
   const byName = new Map(fields.map((field) => [field.name, field]));
-  const out: Record<string, Sent> = {};
-  let own = false;
-  for (const name of Object.keys(values)) {
-    if (!touched.has(name)) continue;
-    const sent = sentValue(byName.get(name), values[name]);
-    if (sent === null) continue;
-    out[name] = sent;
-    if (!shared.has(name)) own = true;
+  const out: FormRequest = { values: {}, leave_out: [] };
+  for (const [name, value] of Object.entries(values)) {
+    const field = byName.get(name);
+    if (Array.isArray(value)) {
+      if (value.length) out.values[name] = [...value];
+      else out.leave_out.push(name);
+    } else if (field?.optional_value === true) {
+      if (value === null) out.leave_out.push(name);
+      else out.values[name] = value === "" ? "true" : value;
+    } else if (value === null || (field?.type === "bool" && value === "false") || value === leaveOutChoice(field)) {
+      if (name === HARNESS) continue;
+      if (value === null && withheld.has(name) && keep.has(name)) continue;
+      out.leave_out.push(name);
+    } else {
+      out.values[name] = value;
+    }
   }
-  if (own && !(HARNESS in out)) out[HARNESS] = harness;
   return out;
 }
 
@@ -263,16 +390,88 @@ export interface LaunchBody {
   seat?: string;
   project_preset?: string;
   values: Record<string, Sent>;
+  leave_out: string[];
   off_posture?: boolean;
 }
 
-export function launchBody(seat: string, project: string, values: Record<string, Sent>,
-                           offPosture: boolean): LaunchBody {
-  const body: LaunchBody = { values };
-  if (seat) body.seat = seat;
-  if (project) body.project_preset = project;
+export function launchBody(choice: Choice, request: FormRequest, offPosture: boolean): LaunchBody {
+  const body: LaunchBody = { values: request.values, leave_out: request.leave_out };
+  if (choice.kind === "seat" && choice.name) body.seat = choice.name;
+  if (choice.kind === "project" && choice.name) body.project_preset = choice.name;
   if (offPosture) body.off_posture = true;
   return body;
+}
+
+// --- rows that exclude each other ----------------------------------------------------------
+
+/** The rows of which a launch takes one: the place rows, and each text's two spellings. */
+export const GROUPS: readonly (readonly string[])[] = [
+  ["cwd", "project", "scratch"], ["brief", "brief_file"], ["instructions", "instructions_file"],
+];
+
+/** What a field shows before the user touches it, as the form would send it. */
+export function shownValue(field: FieldDescriptor): FormValue {
+  if (field.optional_value === true) return field.value === true ? "" : typeof field.value === "string" ? field.value : null;
+  if (isListField(field)) {
+    const items = Array.isArray(field.value_items) ? field.value_items : Array.isArray(field.value) ? field.value : [];
+    return texts(items);
+  }
+  const said = typeof field.value === "string" ? field.value
+    : field.value == null && typeof field.default === "string" ? field.default : "";
+  if (field.type === "bool") return said === "true" ? "true" : "false";
+  return said === "" ? null : said;
+}
+
+/** Whether a value is a field's value state rather than its empty state. */
+function isSet(field: FieldDescriptor, value: FormValue | undefined): boolean {
+  if (value === undefined || value === null) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (field.optional_value === true) return true;
+  if (field.type === "bool") return value === "true";
+  return value !== "" && value !== leaveOutChoice(field);
+}
+
+function same(a: FormValue | undefined, b: FormValue | undefined): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** The field showing its empty state. */
+function emptied(field: FieldDescriptor): FieldDescriptor {
+  if (isListField(field)) return { ...field, value: null, value_items: [] };
+  if (field.optional_value === true) return { ...field, value: null };
+  return { ...field, value: field.type === "bool" ? "false" : "" };
+}
+
+/**
+ * When the user has set one row of a group (its value differs from what its field shows,
+ * and is a value), every other row of the group that still shows its filled value is
+ * emptied, and a withheld sibling's keep box is unticked, so the form shows what will
+ * launch. A row the user changed himself stays as he left it. `fields` comes back as the
+ * same array when nothing changed.
+ */
+export function emptyGroups(fields: FieldDescriptor[], now: Record<string, FormValue>,
+                            withheld: ReadonlySet<string>, keep: ReadonlySet<string>):
+    { fields: FieldDescriptor[]; keep: Set<string> } {
+  const byName = new Map(fields.map((field) => [field.name, field]));
+  const replaced = new Map<string, FieldDescriptor>();
+  const kept = new Set(keep);
+  for (const group of GROUPS) {
+    const present = group.filter((name) => byName.has(name) && name in now);
+    const set = present.filter((name) => {
+      const field = byName.get(name) as FieldDescriptor;
+      return isSet(field, now[name]) && !same(now[name], shownValue(field));
+    });
+    if (set.length === 0) continue;
+    for (const name of present) {
+      if (set.includes(name)) continue;
+      const field = byName.get(name) as FieldDescriptor;
+      const shown = shownValue(field);
+      if (same(now[name], shown) && isSet(field, shown)) replaced.set(name, emptied(field));
+      if (withheld.has(name) && !isSet(field, now[name])) kept.delete(name);
+    }
+  }
+  if (replaced.size === 0) return { fields, keep: kept };
+  return { fields: fields.map((field) => replaced.get(field.name) ?? field), keep: kept };
 }
 
 // --- the preview ------------------------------------------------------------------------
@@ -289,6 +488,8 @@ export interface Preview {
   first_turn: string | null;
   not_applied: string[];
   warnings: string[];
+  /** The rows the request leaves out. */
+  left_out: string[];
   /** The `moxi launcher run` command to copy, for a launch in a terminal. */
   command: string | null;
   request_id: string | null;
@@ -305,7 +506,7 @@ export function parsePreview(data: unknown): Preview | null {
     refused: data.refused.filter(isRefusal).map(refusal),
     harness: text(data.harness), mode: text(data.mode), target: text(data.target),
     argv: texts(data.argv), stamps, first_turn: text(data.first_turn),
-    not_applied: texts(data.not_applied), warnings: texts(data.warnings),
+    not_applied: texts(data.not_applied), warnings: texts(data.warnings), left_out: texts(data.left_out),
     command: text(data.command), request_id: text(data.request_id), ticket: text(data.ticket),
     expires_at: text(data.expires_at),
   };

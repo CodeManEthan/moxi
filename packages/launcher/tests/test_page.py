@@ -33,8 +33,9 @@ TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
-ROUTES = ["/api/catalog", "/api/presets", "/api/launches", "/api/sessions", "/api/state",
-          "/api/runs", "/api/preview", "/api/launch", "/api/resume", "/api/events"]
+ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
+          "/api/state", "/api/runs", "/api/preview", "/api/launch", "/api/resume",
+          "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
 NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",
@@ -304,6 +305,157 @@ def test_no_presets_file_reads_empty():
     status, said, _ = get("/api/presets")
     assert (status, said) == (200, {"state": "up", "detail": None, "presets": [],
                                     "problems": []})
+
+
+# --- /api/form ----------------------------------------------------------------------------
+
+FORM_FILE = """\
+[defaults]
+model = "sonnet"
+cwd = "/srv/default"
+instructions = "the default instructions, kept off the page"
+
+[seat.planner]
+harness = "claude"
+effort = "high"
+scratch = true
+add_dir = ["/a", "/b"]
+brief = "the planner's brief, kept off the page"
+
+[seat.filed]
+instructions_file = "/seat.md"
+
+[seat.coder]
+harness = "codex"
+approval = "never"
+search = true
+
+[project.there]
+cwd = "/srv/there"
+"""
+
+
+def form(query: str = "") -> dict:
+    status, said, raw = get("/api/form", query)
+    assert status == 200 and said["state"] == "up" and said["detail"] is None, said
+    assert b"kept off the page" not in raw
+    return said
+
+
+def form_rows(said: dict) -> dict[str, dict]:
+    return {r["name"]: r for r in said["rows"]}
+
+
+def test_the_form_gives_each_offered_row_in_catalog_order():
+    write_presets(FORM_FILE)
+    said = form("seat=planner")
+    assert said["harness"] == "claude" and said["refused"] is None
+    want = [row.name for row in (*catalog.launcher(), *catalog.load("claude"))
+            if row.settable and row.offered(slots.links, "claude")]
+    assert [r["name"] for r in said["rows"]] == want
+    # A row this install doesn't offer has no entry: the form shows it off.
+    assert "director" not in form_rows(said)
+
+
+def test_the_form_spells_each_value_as_a_presets_value_with_its_source():
+    write_presets(FORM_FILE)
+    rows = form_rows(form("seat=planner"))
+    assert rows["effort"] == {"name": "effort", "value": "high", "items": None,
+                              "source": "preset", "withheld": False}
+    assert rows["add_dir"] == {"name": "add_dir", "value": None, "items": ["/a", "/b"],
+                               "source": "preset", "withheld": False}
+    assert rows["scratch"]["value"] == "true" and rows["scratch"]["source"] == "preset"
+    assert rows["model"] == {"name": "model", "value": "sonnet", "items": None,
+                             "source": "defaults", "withheld": False}
+    # A row no layer sets holds its shipped default: a word for a word enum, else nothing.
+    assert (rows["target"]["value"], rows["target"]["source"]) == ("terminal", "shipped")
+    assert (rows["agent"]["value"], rows["agent"]["items"]) == (None, None)
+    assert rows["harness"] == {"name": "harness", "value": "claude", "items": None,
+                               "source": "preset", "withheld": False}
+
+
+def test_the_form_shows_one_place_whole_from_the_latest_layer():
+    write_presets(FORM_FILE)
+    rows = form_rows(form("seat=planner"))
+    assert [(rows[n]["value"], rows[n]["source"]) for n in ("cwd", "project", "scratch")] == [
+        (None, "shipped"), (None, "shipped"), ("true", "preset")]
+    rows = form_rows(form("project_preset=there"))
+    assert (rows["cwd"]["value"], rows["cwd"]["source"]) == ("/srv/there", "preset")
+    rows = form_rows(form())
+    assert (rows["cwd"]["value"], rows["cwd"]["source"]) == ("/srv/default", "defaults")
+    assert (rows["scratch"]["value"], rows["scratch"]["source"]) == ("false", "shipped")
+
+
+def test_a_text_written_inline_comes_withheld_from_either_layer():
+    write_presets(FORM_FILE)
+    rows = form_rows(form("seat=planner"))
+    assert rows["brief"] == {"name": "brief", "value": None, "items": None,
+                             "source": "preset", "withheld": True}
+    assert rows["instructions"] == {"name": "instructions", "value": None, "items": None,
+                                    "source": "defaults", "withheld": True}
+    # A spelling another layer's replaced is at its default, and nothing is withheld.
+    rows = form_rows(form("seat=filed"))
+    assert rows["instructions"] == {"name": "instructions", "value": None, "items": None,
+                                    "source": "shipped", "withheld": False}
+    assert (rows["instructions_file"]["value"], rows["instructions_file"]["withheld"]) == (
+        "/seat.md", False)
+
+
+def test_the_form_is_drawn_for_the_presets_harness_or_the_one_asked():
+    write_presets(FORM_FILE)
+    said = form("seat=coder")
+    assert said["harness"] == "codex"
+    rows = form_rows(said)
+    assert rows["approval"]["value"] == "never" and rows["search"]["value"] == "true"
+    assert "permission_mode" not in rows
+    said = form("project_preset=there&harness=codex")
+    assert said["harness"] == "codex" and "sandbox" in form_rows(said)
+    # The harness row holds the layers' harness; the form is drawn for the one asked.
+    assert form_rows(said)["harness"]["value"] == "claude"
+
+
+def test_both_presets_named_are_refused_in_the_resolvers_words():
+    write_presets(FORM_FILE)
+    said = form("seat=planner&project_preset=there")
+    assert said["rows"] == [] and said["harness"] == "claude"
+    assert said["refused"] == {"code": "bad-value", "row": None,
+                               "problem": "a launch names at most one preset",
+                               "hint": "give --seat or --project-preset, not both"}
+
+
+def test_a_harness_the_preset_cant_be_laid_for_answers_refused():
+    write_presets(FORM_FILE)
+    said = form("seat=coder&harness=claude")
+    assert said["harness"] == "claude" and said["rows"] == []
+    assert said["refused"]["code"] == "bad-preset" and said["refused"]["row"] == "approval"
+
+
+def test_an_unknown_preset_or_an_unreadable_file_answers_refused():
+    write_presets(FORM_FILE)
+    said = form("seat=nobody")
+    assert said["refused"]["code"] == "no-preset" and said["rows"] == []
+    write_presets("[seat.planner\n")
+    said = form("seat=planner")
+    assert said["refused"]["code"] == "bad-config" and said["harness"] == "claude"
+    status, _, _ = get("/api/form", "harness=gemini")
+    assert status in (400, 422)
+
+
+def test_no_presets_file_gives_the_shipped_defaults():
+    said = form()
+    assert said["harness"] == "claude" and said["refused"] is None
+    assert {r["source"] for r in said["rows"]} == {"shipped"}
+
+
+def test_a_failed_form_read_says_only_the_class(monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("/home/someone/private/presets.toml")
+
+    monkeypatch.setattr(presets, "layered", broken)
+    status, said, raw = get("/api/form", "seat=planner")
+    assert status == 200 and said["state"] == "error" and said["rows"] == []
+    assert said["detail"] == pagehandlers.UNEXPECTED.format("RuntimeError")
+    assert b"someone" not in raw
 
 
 # --- /api/launches ------------------------------------------------------------------------
