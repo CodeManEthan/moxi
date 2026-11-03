@@ -1,0 +1,3 @@
+{
+  "entries": {"page.js": "src/page.ts", "limits.js": "src/limits.ts", "cost.js": "src/cost.ts"}
+}

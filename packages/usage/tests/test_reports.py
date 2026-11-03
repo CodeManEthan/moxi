@@ -407,7 +407,7 @@ def test_no_report_reads_projects(conn, monkeypatch):
     source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"))], cwd="/w/app")
     monkeypatch.delitem(sys.modules, "moxi_projects", raising=False)
     for kind, fn in reports.REPORTS.items():
-        fn(conn, table=table())
+        fn(conn, table=table(), **({"session": "s1"} if kind == "session" else {}))
     assert "moxi_projects" not in sys.modules
     text = open(reports.__file__, encoding="utf-8").read()
     assert "for_path" not in text.replace("calls `for_path`", "")
@@ -416,7 +416,7 @@ def test_no_report_reads_projects(conn, monkeypatch):
 
 def test_an_empty_index_gives_an_empty_report(conn):
     for kind, fn in reports.REPORTS.items():
-        report = fn(conn, table=table())
+        report = fn(conn, table=table(), **({"session": "s1"} if kind == "session" else {}))
         assert report.rows == [] and report.total["requests"] == 0 and report.complete
         if kind != "status":
             assert report.total["cost"] == 0
@@ -428,6 +428,188 @@ def test_a_range_read_uses_the_won_and_time_index(conn):
     assert "requests_won_ts" in plan, plan
     plan = " | ".join(reports.explain(conn, since="2026-10-01", tz="America/New_York"))
     assert "requests_won_ts" in plan, plan
+
+
+# --- one session ---------------------------------------------------------------------------
+
+#: The sums a `session` report's total and a `sessions` row share.
+SESSION_SUMS = ("requests", "input", "fresh_input", "cache_read", "cache_write",
+                "cache_write_1h", "output", "tokens", "unpriced_tokens", "unknown_rows",
+                "complete")
+
+
+def one_session_index(conn):
+    """A Claude session with its main file, a subagent and a workflow agent over three
+    days; an OpenCode parent with a child session; and a second Claude session whose
+    earlier copy of one request holds that request's claim."""
+    day1, day2, day3 = (at(f"2026-10-0{d}T12:00") for d in (1, 2, 3))
+    source(conn, "/p/s1.jsonl", [request("r1", day1), request("r2", day2, model="m-b"),
+                                 request("r3", day3, output=UNKNOWN)],
+           session_id="s1", title="Tidy the parser", cwd="/w/app", size=900)
+    source(conn, "/p/s1/subagents/agent-a.jsonl",
+           [request("a1", day1 + 60), request("a2", day2 + 60, model="mystery-9"),
+            request("shared", day2 + 120)],
+           session_id="s1", kind="subagent", agent_id="a", title="Read the tests",
+           cwd="/w/app")
+    source(conn, "/p/s1/subagents/workflows/w1/agent-b.jsonl",
+           [request("b1", day3 + 60, model="m-b", cache_read=400, cache_write=200)],
+           session_id="s1", kind="workflow", agent_id="b", cwd="/w/app")
+    # a later session holding an earlier copy of `shared`: its copy is the claimed one
+    source(conn, "/p/s2.jsonl", [request("shared", day2 + 120), request("s2r", day1 - 60)],
+           session_id="s2", title="Another task", cwd="/w/app")
+    db = "/oc/opencode.db"
+    source(conn, db, [request("o1", day1 + 5, harness="opencode"),
+                      request("o2", day2 + 5, harness="opencode", model="m-b")],
+           lane="opencode", harness="opencode", part="ses_p", session_id="ses_p",
+           title="Parent", cwd="/w/oc", rank=2)
+    source(conn, db, [request("o3", day2 + 7, harness="opencode"),
+                      request("o4", day3 + 7, harness="opencode")],
+           lane="opencode", harness="opencode", part="ses_c", session_id="ses_c",
+           parent_session="ses_p", agent_id="ses_c", kind="subagent", title="Child",
+           cwd="/w/oc", rank=2)
+
+
+def assert_session_matches(conn, harness, session_id, **filters):
+    """The `session` report's total equals its `sessions` row under the same filters."""
+    report = reports.session(conn, session=session_id, harness=harness, tz="UTC",
+                             table=table(), **filters)
+    found = [row for row in reports.sessions(conn, harness=harness, tz="UTC", table=table(),
+                                             **filters).rows
+             if row["session_id"] == session_id]
+    if not found:
+        assert report.rows == [] and report.total["requests"] == 0
+        return report
+    (whole,) = found
+    for name in SESSION_SUMS:
+        assert report.total[name] == whole[name], name
+    assert report.total["cost"] == pytest.approx(whole["cost"])
+    assert sum(r["requests"] for r in report.rows) == whole["requests"]
+    assert min(r["first_ts"] for r in report.rows) == whole["first_ts"]
+    assert max(r["last_ts"] for r in report.rows) == whole["last_ts"]
+    return report
+
+
+def test_the_session_report_splits_one_session_by_agent_and_model(conn):
+    one_session_index(conn)
+    report = reports.session(conn, session="s1", tz="UTC", table=table())
+    assert report.kind == "session" and report.filters == {"session": "s1"}
+    assert [(r["agent"], r["kind"], r["model"], r["requests"]) for r in report.rows] == [
+        ("main", "main", "m-a", 2), ("main", "main", "m-b", 1),
+        ("a", "subagent", "m-a", 1), ("a", "subagent", "mystery-9", 1),
+        ("b", "workflow", "m-b", 1)]
+    main = one(report, agent="main", model="m-a")
+    assert main["title"] == "Tidy the parser" and main["unknown_rows"] == 1
+    assert not main["complete"]
+    assert (main["first_ts"], main["last_ts"]) == (at("2026-10-01T12:00"),
+                                                   at("2026-10-03T12:00"))
+    agent = one(report, agent="a", model="mystery-9")
+    assert agent["title"] == "Read the tests" and agent["cost"] is UNKNOWN
+    assert agent["unpriced_tokens"] == 1100
+    workflow = one(report, agent="b")
+    assert workflow["title"] is None and workflow["cache_read"] == 400
+    assert workflow["cost"] == pytest.approx(
+        (400 * 1 + 400 * 0.1 + 200 * 1.25 + 100 * 5) / 1e6)
+    assert report.unpriced_models == ["mystery-9"]
+    json.dumps(report.as_dict())
+
+
+def test_the_session_report_equals_its_sessions_row(conn):
+    one_session_index(conn)
+    for harness, sid in (("claude", "s1"), ("claude", "s2"), ("opencode", "ses_p")):
+        assert_session_matches(conn, harness, sid)
+        assert_session_matches(conn, harness, sid, since="2026-10-02", until="2026-10-02")
+        assert_session_matches(conn, harness, sid, since="2026-10-02")
+        assert_session_matches(conn, harness, sid, model="m-b")
+
+
+def test_the_session_report_counts_a_child_session_under_its_parent(conn):
+    one_session_index(conn)
+    report = assert_session_matches(conn, "opencode", "ses_p")
+    assert [(r["agent"], r["kind"], r["title"], r["requests"]) for r in report.rows] == [
+        ("main", "main", "Parent", 1), ("main", "main", "Parent", 1),
+        ("ses_c", "subagent", "Child", 2)]
+    # the child's own id is no session of its own
+    assert reports.session(conn, session="ses_c", table=table()).rows == []
+    narrow = reports.session(conn, session="ses_p", since="2026-10-03", until="2026-10-03",
+                             tz="UTC", table=table())
+    assert [(r["agent"], r["requests"]) for r in narrow.rows] == [("ses_c", 1)]
+
+
+def test_an_agent_of_several_titled_files_takes_the_title_of_its_earliest(conn):
+    day1, day2 = at("2026-10-01T12:00"), at("2026-10-02T12:00")
+    source(conn, "/p/s9.jsonl", [request("m1", day1)], session_id="s9", title="Main")
+    # agent x's later file is written first, agent y's earlier one first
+    source(conn, "/p/s9/x-2.jsonl", [request("x2", day2)], session_id="s9",
+           kind="subagent", agent_id="x", title="Applied the plan")
+    source(conn, "/p/s9/x-1.jsonl", [request("x1", day1 + 60, model="m-b")],
+           session_id="s9", kind="subagent", agent_id="x", title="Wrote the plan")
+    source(conn, "/p/s9/y-1.jsonl", [request("y1", day1 + 90)], session_id="s9",
+           kind="subagent", agent_id="y", title="Begun")
+    source(conn, "/p/s9/y-2.jsonl", [request("y2", day2 + 90)], session_id="s9",
+           kind="subagent", agent_id="y", title="Carried on")
+    report = reports.session(conn, session="s9", tz="UTC", table=table())
+    assert {(r["agent"], r["title"]) for r in report.rows} == {
+        ("main", "Main"), ("x", "Wrote the plan"), ("y", "Begun")}
+    # over a range that leaves out the earlier files, the later titles stand
+    later = reports.session(conn, session="s9", since="2026-10-02", tz="UTC", table=table())
+    assert {(r["agent"], r["title"]) for r in later.rows} == {
+        ("x", "Applied the plan"), ("y", "Carried on")}
+
+
+def test_a_key_another_sessions_copy_claims_is_counted_once(conn):
+    one_session_index(conn)
+    s1 = reports.session(conn, session="s1", tz="UTC", table=table())
+    s2 = reports.session(conn, session="s2", tz="UTC", table=table())
+    assert one(s1, agent="a", model="m-a")["requests"] == 1        # a1 only
+    assert one(s2, agent="main", model="m-a")["requests"] == 2      # shared and s2r
+    daily = reports.daily(conn, harness="claude", tz="UTC", table=table())
+    assert s1.total["requests"] == 6 and s2.total["requests"] == 2
+    assert s1.total["requests"] + s2.total["requests"] == daily.total["requests"] == 8
+
+
+def test_one_sessions_read_goes_by_its_files(conn):
+    for since, until in ((None, None), ("2026-10-01", "2026-10-30")):
+        query = reports._query(since, until, None, None, None, "UTC", "s1")
+        sql, args = reports._grouped_sql(query, {"agent": reports._AGENT_SQL}, [], [])
+        plan = " | ".join(row[-1] for row in conn.execute("EXPLAIN QUERY PLAN " + sql, args))
+        assert "SEARCH r USING PRIMARY KEY (file_id=?)" in plan, plan
+        assert "requests_won_ts" not in plan, plan
+
+
+def test_the_session_report_needs_a_session(conn):
+    one_session_index(conn)
+    with pytest.raises(ValueError):
+        reports.session(conn, table=table())
+    with pytest.raises(ValueError):
+        reports.session(conn, session="", table=table())
+    assert reports.session(conn, session="s1", harness="codex", table=table()).rows == []
+
+
+def test_report_takes_a_session_for_the_session_kind_only(conn, passes):
+    one_session_index(conn)
+    report = api.report("session", session="s1", harness="claude", fresh=False)
+    assert report.total["requests"] == 6 and report.filters == {"harness": "claude",
+                                                                "session": "s1"}
+    with pytest.raises(ValueError):
+        api.report("session", fresh=False)
+    for kind in api.KINDS:
+        if kind != "session":
+            with pytest.raises(ValueError):
+                api.report(kind, session="s1", fresh=False)
+            with pytest.raises(ValueError):
+                reports.read(kind, session="s1")
+    # the refusal comes before the pass
+    with pytest.raises(ValueError):
+        api.report("daily", session="s1")
+    assert passes == []
+
+
+def test_the_session_report_refuses_without_a_session_on_no_index(monkeypatch):
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    with pytest.raises(ValueError):
+        api.report("session", fresh=False)
+    report = api.report("session", session="s1", fresh=False)
+    assert report.rows == [] and "no index yet" in report.index["note"]
 
 
 # --- the API -----------------------------------------------------------------------------
@@ -485,8 +667,10 @@ def test_report_with_no_index_is_empty_and_says_so(monkeypatch):
         api.report("weekly", fresh=False)
 
 
-def test_report_kinds_are_the_designed_six():
-    assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects", "status")
+def test_report_kinds_are_the_designed_seven():
+    assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects", "session",
+                         "status")
+    assert tuple(reports.REPORTS) == api.KINDS
 
 
 # --- the verbs ---------------------------------------------------------------------------

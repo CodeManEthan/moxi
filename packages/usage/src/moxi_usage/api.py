@@ -50,13 +50,16 @@ The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
 Reports (`moxi_usage.reports`):
 
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
-  tz=None, fresh=True)`: tokens and cost from the token index, `kind` one of `KINDS`
-  (`daily`, `monthly`, `sessions`, `models`, `projects`), as a `Report`. With `fresh` the
-  index's pass runs first. `tz` is the zone days are cut in, local time when None.
-  Cost is worked out when the report runs; tokens the table cannot price are counted in
-  `unpriced_tokens`, never as $0. The sixth kind, `status`, is the index itself: one
-  row per lane with its state, files, excluded, held and duplicate counts, and the
-  last pass and schema version in `total`; it takes only `harness`.
+  tz=None, fresh=True, session=None)`: tokens and cost from the token index, `kind`
+  one of `KINDS` (`daily`, `monthly`, `sessions`, `models`, `projects`, `session`), as a
+  `Report`. With `fresh` the index's pass runs first. `tz` is the zone days are cut in,
+  local time when None. Cost is worked out when the report runs; tokens the table cannot
+  price are counted in `unpriced_tokens`, never as $0. The `session` kind is one
+  session, the one `session` names (an id a `sessions` row gives, with `harness` to
+  tell two harnesses apart), by agent and model; it needs `session`, and every other
+  kind refuses it. The last kind, `status`, is the index itself: one row per lane with
+  its state, files, excluded, held and duplicate counts, and the last pass and schema
+  version in `total`; it takes only `harness`.
 
 `UNKNOWN` is sessions' sentinel: a fact the table does not know. It is neither None nor
 0, and refuses to be read as true or false, so an unknown price never turns into $0.

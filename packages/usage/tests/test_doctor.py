@@ -420,7 +420,7 @@ def test_the_announcement_loads_with_its_stores_doctor_and_stamps():
                                  "restart_point", "snapshot"}
     assert all(entry["private"] and entry["lazy"] for entry in found.stores.values())
     assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}
-    assert set(found.optional) == {"turns", "projects"}
+    assert set(found.optional) == {"turns", "projects", "ui"}
     assert dict(found.budgets) == {"hook_ms": 2.0}
     assert set(found.timers) == {"measure"}
     # each store's path is the one the code writes
