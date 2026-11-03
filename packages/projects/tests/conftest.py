@@ -1,5 +1,5 @@
-"""Fixtures: projects' store in the test's own Moxi home, a golden store built once, and a
-site of fake distributions that contribute to projects.
+"""Fixtures: projects' store in the test's own Moxi home, a golden store built once (and
+one at schema version 1), and a site of fake distributions that contribute to projects.
 
 The test kit points `MOXI_PROJECTS_HOME` into each test's tmp, so the store every call
 reads and writes is the test's own. The golden store is built once per session and
@@ -45,6 +45,25 @@ def golden(tmp_path_factory) -> tuple[Path, str]:
     return db, base
 
 
+@pytest.fixture(scope="session")
+def golden_v1(tmp_path_factory) -> tuple[Path, str]:
+    """The golden rows in a store at schema version 1, as the first release wrote it,
+    built once: its file and the base its roots sit under."""
+    import moxi.store
+
+    where = tmp_path_factory.mktemp("golden-v1")
+    base = os.path.join(str(where), "roots")
+    db = where / "projects.db"
+    conn = moxi.store.connect(str(db), timeout=store.TIMEOUT)
+    try:
+        moxi.store.migrate(conn, store.STEPS[:1])
+        with moxi.store.transaction(conn):
+            fill(conn, base)
+    finally:
+        conn.close()
+    return db, base
+
+
 @pytest.fixture
 def store_path() -> Path:
     """The test's own store file (not yet created)."""
@@ -61,13 +80,25 @@ def golden_copy(golden, store_path) -> str:
 
 
 @pytest.fixture
+def v1_copy(golden_v1, store_path) -> str:
+    """The version 1 golden store copied in as the test's store; returns the roots'
+    base."""
+    db, base = golden_v1
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(db, store_path)
+    return base
+
+
+@pytest.fixture
 def next_version(monkeypatch):
-    """This code as if it were one schema version on: a second step it reads and writes,
-    and version 1 still read as it is."""
+    """This code as if it were one schema version on: one more step it reads and writes,
+    and the current version still read as it is. Returns the version it moved to."""
+    version = len(store.STEPS) + 1
     monkeypatch.setattr(store, "STEPS", (*store.STEPS,
                                          "ALTER TABLE projects ADD COLUMN extra TEXT;"))
-    monkeypatch.setattr(api, "_VERSION", 2)
-    monkeypatch.setattr(api, "_READS", frozenset({1, 2}))
+    monkeypatch.setattr(api, "_VERSION", version)
+    monkeypatch.setattr(api, "_READS", frozenset({*api._READS, version}))
+    return version
 
 
 # --- fake distributions ------------------------------------------------------------------

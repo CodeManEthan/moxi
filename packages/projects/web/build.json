@@ -1,0 +1,4 @@
+{
+  "entries": {"page.js": "src/page.ts", "picker.js": "src/picker.ts", "card.js": "src/card.ts",
+              "add.js": "src/add.ts"}
+}

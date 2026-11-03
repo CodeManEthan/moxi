@@ -95,18 +95,68 @@ def test_a_read_of_an_older_store_answers_and_leaves_it_as_it_was(golden_copy, s
     before = _bytes(store_path)
     assert [p.key for p in api.list_projects()] == ["alpha", "Beta", "delta.web", "gamma"]
     assert _bytes(store_path) == before
-    assert _user_version(store_path) == 1
+    assert _user_version(store_path) == next_version - 1
 
 
 def test_a_write_migrates_an_older_store(golden_copy, store_path, next_version):
     store.write(lambda conn: store.add_agent(conn, "gamma", "new-agent"))
-    assert _user_version(store_path) == 2
+    assert _user_version(store_path) == next_version
     assert api.get("gamma").associated == ("new-agent",)
+
+
+def _tables(path) -> set[str]:
+    conn = sqlite3.connect(path)
+    try:
+        return {name for (name,) in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        conn.close()
+
+
+def test_a_version_1_store_still_reads_and_is_left_as_it_was(v1_copy, store_path):
+    before = _bytes(store_path)
+    assert [p.key for p in api.list_projects()] == ["alpha", "Beta", "delta.web", "gamma"]
+    assert api.get("alpha").associated == ("helper", "scout")
+    assert api.for_path(os.path.join(v1_copy, "work", "delta", "x")).key == "delta.web"
+    assert store.remove_status("a" * 43) is None
+    assert _bytes(store_path) == before
+    assert _user_version(store_path) == 1
+    assert "remove_status" not in _tables(store_path)
+
+
+def test_a_write_migrates_a_version_1_store_to_2(v1_copy, store_path):
+    store.write(lambda conn: store.add_agent(conn, "gamma", "new-agent"))
+    assert _user_version(store_path) == 2 == api._VERSION
+    assert "remove_status" in _tables(store_path)
+    assert api.get("gamma").associated == ("new-agent",)
+    assert [p.key for p in api.list_projects()] == ["alpha", "Beta", "delta.web", "gamma"]
+
+
+def test_the_status_read_never_writes(golden_copy, store_path):
+    store.write(lambda conn: store.keep_remove_status(conn, "j" * 43, "gamma",
+                                                      {"state": "removed", "key": "gamma"}))
+    before = _bytes(store_path)
+    assert store.remove_status("j" * 43)["state"] == "removed"
+    assert store.remove_status("k" * 43) is None
+    assert _bytes(store_path) == before
+
+
+def test_the_status_read_of_a_missing_store_makes_no_file(store_path):
+    assert store.remove_status("j" * 43) is None
+    assert not store_path.exists() and not store_path.parent.exists()
+
+
+def test_the_status_read_of_a_newer_store_is_too_new(golden_copy, store_path):
+    _set_user_version(store_path, api._VERSION + 1)
+    before = _bytes(store_path)
+    with pytest.raises(api.TooNew):
+        store.remove_status("j" * 43)
+    assert _bytes(store_path) == before
 
 
 def test_a_store_older_than_the_code_reads_is_unreadable_naming_the_install(
         golden_copy, store_path, next_version, monkeypatch):
-    monkeypatch.setattr(api, "_READS", frozenset({2}))
+    monkeypatch.setattr(api, "_READS", frozenset({next_version}))
     before = _bytes(store_path)
     with pytest.raises(api.Unreadable) as caught:
         api.list_projects()
