@@ -1,5 +1,6 @@
 """projects' three components and its page in a browser, through a real shell that starts
-projects' real page server: the contract check on all four; the picker listing every
+projects' real page server: the contract check on all four (the page placing the add
+form; the page in full is test_browser_page.py's); the picker listing every
 project with its root, or only those of a kind, and sending its host a bubbling, composed
 `moxi-change` whose detail is the key and nothing else; the card for a key and for a key
 that names no project; and the add form hiding "create" for a kind whose mint is
@@ -99,12 +100,11 @@ def shown(shell, key: str) -> dict | None:
 
 # --- the contract --------------------------------------------------------------------------
 
-def test_the_page_keeps_the_contract_and_holds_the_picker_and_the_add_form(
-        seeded, ui_page, ui_component_check):
+def test_the_page_keeps_the_contract_and_holds_the_add_form(seeded, ui_page,
+                                                            ui_component_check):
     check = ui_component_check(ui_page, "projects", "page", keep=True)
     assert check.element == "moxi-projects-page"
     expect(check.locator.locator("h1")).to_have_text("Projects")
-    expect(check.locator.locator("moxi-projects-picker .picker")).to_have_attribute("data-state", "up")
     expect(check.locator.locator("moxi-projects-add form")).to_have_attribute("data-state", "up")
 
 
