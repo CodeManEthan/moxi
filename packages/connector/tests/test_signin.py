@@ -16,8 +16,8 @@ from kit import HTTPX, initialize, modern, request, rpc
 from signin_kit import CALLBACK, CALLBACKS, pending_of, pkce, query_of
 
 from moxi_connector import grants
-from moxi_connector.oauth import (AUTH_METHODS, CAPS, PENDING_MAX, PENDING_MISSES,
-                                  PageError, RedirectError, TooMany, UNKNOWN_CLIENT)
+from moxi_connector.oauth import (AUTH_METHODS, BAD_REDIRECT, PageError, RedirectError,
+                                  TooMany, UNKNOWN_CLIENT)
 from moxi_connector.origin import ASM_PATH, PRM_PATH, Origin
 from moxi_connector.signin import GRANT
 
@@ -333,8 +333,8 @@ def test_the_65th_unfinished_client_is_refused_and_one_is_dropped_after_24_h(doo
     async def main():
         d = await door()
         first = None
-        for n in range(grants.UNFINISHED_MAX):
-            if n and n % CAPS["register"] == 0:
+        for n in range(64):
+            if n and n % 10 == 0:
                 clock.advance(60)
             got = await d.register()
             assert got.status == 201, (n, got.body)
@@ -379,8 +379,8 @@ def test_held_clients_do_not_count_against_the_64(door, clock):
             clock.advance(60)
         store = d.oauth.store
         assert sum(1 for c in store.view()["clients"].values() if c["held"]) == 3
-        for n in range(grants.UNFINISHED_MAX):
-            if n and n % CAPS["register"] == 0:
+        for n in range(64):
+            if n and n % 10 == 0:
                 clock.advance(60)
             assert (await d.register()).status == 201
         await d.close()
@@ -486,7 +486,7 @@ def test_reuse_of_a_token_retired_more_than_10_minutes_ago_revokes(door, clock):
         d = await door()
         client, first = await d.sign_in()
         new = (await d.refresh(client, first["refresh_token"])).json()
-        clock.advance(grants.GRACE + 1)
+        clock.advance(601)
         assert (await d.refresh(client, first["refresh_token"])).status == 400
         assert (await d.mcp(new["access_token"])).status == 401
         await d.close()
@@ -574,14 +574,14 @@ def test_last_use_is_written_at_most_once_a_minute_and_at_the_stop(door, clock):
 
 # -- the limits on callers without a token --------------------------------------------------
 
-@pytest.mark.parametrize("kind,method,path", [("register", "POST", "/register"),
-                                              ("authorize-get", "GET", "/authorize"),
-                                              ("authorize-post", "POST", "/authorize"),
-                                              ("token", "POST", "/token")])
-def test_past_its_cap_in_a_minute_a_route_answers_429(door, clock, kind, method, path):
+@pytest.mark.parametrize("cap,method,path", [(10, "POST", "/register"),
+                                             (20, "GET", "/authorize"),
+                                             (20, "POST", "/authorize"),
+                                             (60, "POST", "/token")])
+def test_past_its_cap_in_a_minute_a_route_answers_429(door, clock, cap, method, path):
     async def main():
         d = await door()
-        for _ in range(CAPS[kind]):
+        for _ in range(cap):
             got = await request(d.front, method, path, raw=b"{}")
             assert got.status != 429
         got = await request(d.front, method, path, raw=b"{}")
@@ -614,7 +614,7 @@ def test_every_request_row_without_a_grant_is_collapsed_by_route_and_status(door
         assert (await request(d.front, "GET", "/authorize")).status == 400
         assert (await d.token(client, "a-code-nobody-made", verifier)).status == 400
         assert (await d.mcp("nothing")).status == 401
-        for _ in range(CAPS["authorize-get"]):
+        for _ in range(20):
             await d.authorize(params)
         clock.advance(601)                      # the page loads' pending requests expire
         _, tokens = await d.sign_in(client)
@@ -676,16 +676,54 @@ def test_pending_requests_are_bounded_and_dropped_after_their_misses(door, clock
         req = under.check({"client_id": client["client_id"], "redirect_uri": CALLBACK,
                            "response_type": "code", "code_challenge": pkce()[1],
                            "code_challenge_method": "S256", "state": "s"})
-        ids = [under.open(req) for _ in range(PENDING_MAX)]
+        ids = [under.open(req) for _ in range(8)]
         with pytest.raises(TooMany):
             under.open(req)
         assert all(under.waiting(i) for i in ids)
-        for left in range(PENDING_MISSES - 1, -1, -1):
+        for left in range(4, -1, -1):
             assert under.miss(ids[0]) == left
         assert under.waiting(ids[0]) is None
         under.open(req)
         clock.advance(601)
         assert under.waiting(ids[1]) is None
+        await d.close()
+    run(main())
+
+
+def test_the_page_refuses_a_callback_no_longer_allowed_that_the_client_registered(door):
+    """`redirect_uris` shrank after the client registered both callbacks: the page checks
+    the allowlist again, and the dropped callback gets a plain 400 and no redirect."""
+    async def main():
+        d = await door()
+        client = await d.client(redirect_uris=list(CALLBACKS))
+        d.oauth.redirect_uris = (CALLBACK,)
+        dropped = CALLBACKS[1]
+        got = await d.authorize(d.params(client, redirect_uri=dropped)[1])
+        assert got.status == 400 and BAD_REDIRECT.encode() in got.body
+        assert got.header("location") is None
+        with pytest.raises(PageError):
+            d.oauth.current.check(d.params(client, redirect_uri=dropped)[1])
+        assert (await d.authorize(d.params(client)[1])).status == 200
+        await d.close()
+    run(main())
+
+
+def test_an_oauth_code_is_bound_to_the_client_it_was_made_for(door):
+    """The code's own lookup refuses another client, not only the SDK's check after it;
+    and another client's try doesn't spend the code."""
+    async def main():
+        d = await door()
+        owner = await d.client()
+        other = await d.client()
+        verifier, query = d.page(owner)
+        provider = d.oauth.current.provider
+        assert await provider.load_authorization_code(
+            await provider.get_client(other["client_id"]), query["code"]) is None
+        assert await provider.load_authorization_code(
+            await provider.get_client(owner["client_id"]), query["code"]) is not None
+        got = await d.token(other, query["code"], verifier)
+        assert got.status == 400 and got.json()["error"] == "invalid_grant"
+        assert (await d.token(owner, query["code"], verifier)).status == 200
         await d.close()
     run(main())
 

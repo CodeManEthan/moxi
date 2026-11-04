@@ -17,8 +17,7 @@ from kit import CLAUDE, HTTPX, Running, echo_tool, http, initialize, provider, r
 from signin_kit import CALLBACK, CALLBACKS, Clock, pending_of, pkce, query_of
 
 from moxi_connector import cli, codes, grants
-from moxi_connector.oauth import (CAPS, OAuth, PENDING_MAX, PENDING_MISSES,
-                                  TOO_MANY_PENDING, UNKNOWN_CLIENT)
+from moxi_connector.oauth import OAuth, TOO_MANY_PENDING, UNKNOWN_CLIENT
 from moxi_connector.page import DROPPED, FORBIDDEN_POST, GET_A_CODE, GONE, SLOW_DOWN
 from moxi_connector.provider import Gate
 
@@ -154,7 +153,7 @@ def test_a_ninth_pending_request_is_refused_while_the_eight_stay(door):
         d = await door()
         client = await d.client()
         ids = []
-        for _ in range(PENDING_MAX):
+        for _ in range(8):
             got = await d.authorize(d.params(client)[1])
             assert got.status == 200
             ids.append(pending_of(got.body))
@@ -172,7 +171,7 @@ def test_a_ninth_pending_request_is_refused_while_the_eight_stay(door):
 def test_get_authorize_is_capped_per_minute(door, clock):
     async def main():
         d = await door()
-        cap = CAPS["authorize-get"]
+        cap = 20
         for _ in range(cap):
             assert (await d.authorize({"client_id": "nobody"})).status == 400
         over = await d.authorize({"client_id": "nobody"})
@@ -270,7 +269,7 @@ def test_five_misses_drop_a_pending_request(door):
         d = await door()
         _, _, _, pid = await opened(d)
         typed = d.mint()
-        for left in range(PENDING_MISSES - 1, 0, -1):
+        for left in range(4, 0, -1):
             got = await d.finish(pid, "WRONG-CODE")
             assert got.status == 400
             tries = "1 try" if left == 1 else f"{left} tries"
@@ -295,11 +294,11 @@ def test_twenty_misses_burn_every_live_code(door, clock):
         typed = [d.mint(), d.mint()]
         pids = [(await opened(d, client))[3] for _ in range(5)]
         for pid in pids:
-            for _ in range(PENDING_MISSES - 1):
+            for _ in range(4):
                 assert (await d.finish(pid, "WRONG-CODE")).status == 400
         assert d.oauth.codes.count() == 0
         assert len(kinds(d.rows, "code-burned")) == 1
-        assert kinds(d.rows, "code-burned")[0]["misses"] == codes.BURN_AFTER
+        assert kinds(d.rows, "code-burned")[0]["misses"] == 20
         clock.advance(60)                        # past the minute's cap on posts
         _, _, _, pid = await opened(d, client)
         for code in typed:
@@ -368,7 +367,7 @@ def test_a_post_without_a_live_pending_request_or_too_large_is_refused(door):
 def test_post_authorize_is_capped_per_minute(door, clock):
     async def main():
         d = await door()
-        for _ in range(CAPS["authorize-post"]):
+        for _ in range(20):
             assert (await d.finish("none", "x")).status == 400
         over = await d.finish("none", "x")
         assert over.status == 429 and over.header("retry-after") == "60"
@@ -388,7 +387,7 @@ def test_codes_are_crockford_kept_as_hashes_three_at_most_five_minutes():
     # Only hashes are kept, and the fourth dropped the oldest.
     kept = repr(box.__dict__)
     assert not any(m.code in kept or m.code.replace("-", "") in kept for m in minted)
-    assert box.count() == codes.LIVE_MAX
+    assert box.count() == 3
     assert box.take(minted[0].code) is None
     assert box.take(minted[1].code).label == "l1"
     assert box.take(minted[1].code) is None          # spent
@@ -405,12 +404,12 @@ def test_misses_burn_only_within_ten_minutes():
     clock = Clock()
     box = codes.Codes(clock)
     box.mint()
-    for _ in range(codes.BURN_AFTER - 1):
+    for _ in range(19):
         assert box.miss() is False
     clock.advance(codes.BURN_WINDOW)
     box.mint()
     assert box.miss() is False and box.count() == 1  # the old misses fell out
-    for _ in range(codes.BURN_AFTER - 2):
+    for _ in range(18):
         assert box.miss() is False
     assert box.miss() is True and box.count() == 0
 

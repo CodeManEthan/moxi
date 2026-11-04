@@ -51,6 +51,26 @@ def made(store: grants.Store, *, resource=ORIGIN.resource, label="phone") -> str
                            refresh_hash=grants.digest(grants.new_token()))
 
 
+def test_a_grant_keeps_its_last_2000_retired_refresh_tokens(config_file):
+    """Past 2000, a rotation forgets the oldest: presented again it is unknown, while the
+    next oldest is still reuse."""
+    config_file("")
+    store = grants.Store()
+    gid = made(store)
+    grant = store.grant(gid)
+    old = [grants.digest(f"retired-{n}") for n in range(2000)]
+    store.change(lambda data: data["grants"][gid].update(retired=list(old)))
+    acted = store.refresh(grant["refresh"], grant["client"],
+                          access_hash=grants.digest(grants.new_token()),
+                          refresh_hash=grants.digest(grants.new_token()))
+    assert acted.kind == "live"
+    retired = store.grant(gid)["retired"]
+    assert len(retired) == 2000
+    assert retired[0] == old[1] and retired[-1] == grant["refresh"]
+    assert store.judge(old[0], grant["client"]).kind == "unknown"
+    assert store.judge(old[1], grant["client"]).kind == "reuse"
+
+
 # -- revoke from the command line -------------------------------------------------------------
 
 def test_revoke_with_the_process_up_takes_effect_on_the_next_call(door, config_file, capsys):
