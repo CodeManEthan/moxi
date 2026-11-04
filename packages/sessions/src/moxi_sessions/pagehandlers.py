@@ -13,9 +13,11 @@ entry of its session's subagent listing with that id.
 
 **Refusals.** A session no root holds, a root that cannot be read, a subagent the listing
 does not hold, an `agent` for a harness whose subagents are sessions of their own, a
-`before` that is not a position of the session, and a source a read cannot open are each a
-422 whose text is the reason. The route's own checks (an unknown key, a harness that is not
-one of the three, an id over its length) are loopback's 400.
+`before` that does not parse for its harness, and a source a read cannot open are each a
+422 whose text is the reason; that text can name a root or a file. A well-formed `before`
+is not checked against the session (a file's size or line starts, OpenCode's ids). The
+route's own checks (an unknown key, a harness that is not one of the three, an id over its
+length) are loopback's 400.
 
 **The view rows** follow `moxi_sessions.page.RECORD`: each record's fields go out under
 their own names, typed as the row declares them. A field the harness did not say is left

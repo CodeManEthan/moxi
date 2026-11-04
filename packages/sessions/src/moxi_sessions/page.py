@@ -14,9 +14,12 @@ subagent thread are sessions of their own, so each is named by its own id and ta
 
 `before` is a string because a position differs by harness: a byte offset in a Claude
 Code transcript or a Codex rollout, a message id in OpenCode's database. One that does
-not parse for its harness, or names no position of the session, is refused with the
-reason. So is a session `find()` cannot find or read, and a source a read cannot open:
-each answer says why, never a bare server error.
+not parse for its harness (a whole-number offset, or a non-empty OpenCode message id) is
+refused with the reason. A well-formed one is not checked against the session: an offset
+past the end reads from the end, and one inside a line answers that line as undecodable.
+The page sends back only the `before` an answer gave it. A session `find()` cannot find or
+read, and a source a read cannot open, are refused too: each answer says why, never a bare
+server error.
 
 **Every shape is fixed.** A record goes out as one view row whose keys are those its kind
 carries (`RECORD`), never as the record's JSON: no `extra`, no `raw`, no tool call's
@@ -29,7 +32,9 @@ the row does not carry. `"shape"` at the top is the shape version.
 
 Message text, tool call summaries, titles, subagent descriptions and every reason are
 marked `redact`; the cwd and every source path are marked `path`. Only the gateway acts on
-a mark, and no route here is the gateway's.
+a mark, and no route here is the gateway's. A refusal's reason is not marked: it can name
+a root or a file, which is useful at the desk, so a route opened to the gateway would need
+its reasons kept free of paths first.
 
 The page's assets are what the repository's web build writes from `packages/sessions/web/`
 into this package's `web/`: `page.js`, the page, and `window.js`, the block other pages
