@@ -1,9 +1,12 @@
-"""The sign-in page in a real browser: Playwright's Chromium, headless, on loopback.
+"""The sign-in page in a real browser: Playwright's Chromium, or Firefox when the run names
+it with `--ui-browser firefox` (moxi-ui's option, as CI's browser job passes it), headless,
+on loopback.
 
 The door runs as a daemon on loopback. Its origin is `https://door.example.net:<port>`, so a
 TLS relay with a certificate made here sits in front of it, and a stand-in for Claude's
-callback answers on `https://callback.example.net:<port>/cb`. Chromium maps both names to
-127.0.0.1 and accepts the certificate. The test opens the page, posts a wrong code and then
+callback answers on `https://callback.example.net:<port>/cb`. The browser sends both names
+to 127.0.0.1 (Chromium by its host resolver rules, Firefox by its forced-resolve setting)
+and accepts the certificate. WebKit has no such setting, so the test skips there. The test opens the page, posts a wrong code and then
 a right one through the form, and follows the 303 to the callback. A header the browser
 enforces (the CSP's `form-action` on the redirect, `Origin` on the form's POST) fails here
 when a fake client can't see it.
@@ -15,6 +18,7 @@ import asyncio
 import datetime
 import json
 import os
+import re
 import ssl
 import threading
 from pathlib import Path
@@ -134,9 +138,30 @@ class Edge:
         self.thread.join(10)
 
 
-def test_a_real_browser_signs_in_through_the_page(make_host, fake, tmp_path, monkeypatch):
+def launch(pw, engine: str):
+    """`engine`'s browser, headless, sending both names to 127.0.0.1. A Firefox that can't
+    start on this machine skips, as moxi-ui's browser fixture does; a Chromium that can't
+    is an error."""
+    from playwright.sync_api import Error
+
+    if engine == "chromium":
+        return pw.chromium.launch(args=[
+            f"--host-resolver-rules=MAP {DOOR} 127.0.0.1, MAP {BACK} 127.0.0.1"])
+    if engine != "firefox":
+        pytest.skip(f"{engine} has no setting that sends a name to 127.0.0.1, which the "
+                    "door's https origin needs")
+    try:
+        return pw.firefox.launch(firefox_user_prefs={"network.dns.forceResolve": "127.0.0.1"})
+    except Error as err:
+        pytest.skip(f"firefox can't start on this machine: {str(err).splitlines()[0]}")
+
+
+def test_a_real_browser_signs_in_through_the_page(make_host, fake, tmp_path, monkeypatch,
+                                                  request):
     from moxi_connector import checks
     from playwright.sync_api import expect, sync_playwright
+
+    engine = request.config.getoption("--ui-browser", default="chromium")
 
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", BROWSERS)
 
@@ -167,15 +192,18 @@ def test_a_real_browser_signs_in_through_the_page(make_host, fake, tmp_path, mon
             typed = checks.ask("mint_code", {"label": "browser"})["code"]
 
             with sync_playwright() as pw:
-                browser = pw.chromium.launch(args=[
-                    f"--host-resolver-rules=MAP {DOOR} 127.0.0.1, MAP {BACK} 127.0.0.1"])
+                browser = launch(pw, engine)
                 try:
                     context = browser.new_context(ignore_https_errors=True)
                     page = context.new_page()
                     page.set_default_timeout(5_000)
                     blocked = []
+                    # A CSP report of the page's own loads. Firefox's favicon loader
+                    # asks for an icon the page never names, which the page's
+                    # `default-src 'none'` blocks: the browser's request, not the page's.
                     page.on("console", lambda m: blocked.append(m.text)
-                            if "Content Security Policy" in m.text else None)
+                            if re.search("content.security.policy", m.text, re.I)
+                            and "FaviconLoader" not in m.text else None)
                     posts = []
                     page.on("request", lambda r: posts.append(r.all_headers())
                             if r.method == "POST" else None)
