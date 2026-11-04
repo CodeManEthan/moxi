@@ -26,7 +26,10 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     setting or variable reaches these.
 `ui_shells` (module scope)
     `ui_shells(**options)` starts one more test shell with those options; each is stopped
-    when the test module ends.
+    when the test module ends. It also takes `home`, the directory the shell keeps its
+    files in (a new one under pytest's temp root unless given): a test whose own sockets go
+    under the shell's runtime root gives a short one, since pytest's root can make a
+    socket's path too long. A test that gives `home` removes it after stopping the shell.
 `ui_browser` (session scope)
     The Playwright browser, headless: Chromium, or the one `--ui-browser` names
     (`chromium`, `firefox` or `webkit`). One per pytest process, so under pytest-xdist
@@ -152,7 +155,9 @@ def ui_shells(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[...
     started: list[TestShell] = []
 
     def start(**options: Any) -> TestShell:
-        shell = TestShell(tmp_path_factory.mktemp("ui-shell"), **options)
+        home = options.pop("home", None)
+        shell = TestShell(tmp_path_factory.mktemp("ui-shell") if home is None else home,
+                          **options)
         started.append(shell)
         return shell.start()
 

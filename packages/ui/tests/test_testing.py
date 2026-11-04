@@ -10,7 +10,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import short_dir, wait_for
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -117,6 +117,17 @@ def test_a_shells_env_cant_move_it_out_of_its_home(tmp_path):
             TestShell(tmp_path, env={key: str(tmp_path / "elsewhere")})
     with pytest.raises(ValueError, match="strings"):
         TestShell(tmp_path, env={"GIT_CONFIG_NOSYSTEM": 1})
+
+
+def test_a_shell_given_a_home_keeps_its_files_there(ui_shells, fixture_site):
+    with short_dir("th-") as home:
+        shell = ui_shells(site=[fixture_site], home=home)
+        try:
+            assert shell.home == home
+            assert shell.runtime_dir("fixture").is_relative_to(home)
+            assert shell.session().get("/m/fixture/api/summary")[0] == 200
+        finally:
+            shell.stop()
 
 
 def test_a_left_out_module_is_not_in_the_snapshot(ui_shells, fixture_site):
