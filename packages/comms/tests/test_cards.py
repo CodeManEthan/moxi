@@ -302,7 +302,13 @@ def test_a_symlink_at_a_card_path_is_refused_not_followed():
     secret.write_text("SECRET-NOT-A-CARD\n")
     path = cards.card_path("planner@proj-a")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(secret)
+    try:
+        path.symlink_to(secret)
+    except OSError as error:
+        if getattr(error, "winerror", None) != 1314:   # a required privilege is not held
+            raise
+        pytest.skip("this account can't make symlinks (on Windows: Developer Mode is off "
+                    "and the shell is not elevated)")
     code, out = run(["whois", "planner@proj-a"])
     assert code == 1
     assert "SECRET-NOT-A-CARD" not in out

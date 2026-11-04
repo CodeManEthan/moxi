@@ -175,6 +175,74 @@ def drop_modules(packages: set[str]) -> None:
             del sys.modules[mod]
 
 
+# -- links on every system --------------------------------------------------------------------
+#
+# On Windows the placer links a skill folder as a directory junction (under `skills.form =
+# link`; `auto` copies a folder there), and links a single file or a held item's folder
+# only where this account can make symlinks (Developer Mode on, or an elevated shell),
+# copying it otherwise. A junction needs no privilege, so a test that needs a folder
+# reached through a link makes a junction there; a test that needs a symlink itself skips
+# where the account can't make one.
+
+WINDOWS = sys.platform == "win32"
+
+#: The form a skill folder takes under `skills.form = link`.
+FOLDER_LINK = "junction" if WINDOWS else "link"
+
+NO_SYMLINKS = ("this account can't make symlinks (on Windows: Developer Mode is off and "
+               "the shell is not elevated)")
+
+
+def can_symlink(folder: Path) -> bool:
+    """Whether this account can make a symlink in `folder`: makes one and removes it.
+    Only Windows' "a required privilege is not held" reads as no; any other error is
+    raised."""
+    import os
+
+    probe = Path(folder) / f".symlink-probe-{os.getpid()}"
+    try:
+        os.symlink(f"{probe}-target", probe)
+    except OSError as error:
+        if getattr(error, "winerror", None) != 1314:
+            raise
+        return False
+    os.unlink(probe)
+    return True
+
+
+def need_symlinks(folder: Path) -> None:
+    """Skip the test here when this account can't make a symlink in `folder`."""
+    if not can_symlink(folder):
+        pytest.skip(NO_SYMLINKS)
+
+
+def link_folder(link: Path, target: Path) -> None:
+    """Make `link` a link to the folder `target`: a symlink, or on Windows a directory
+    junction, which needs no privilege there."""
+    if WINDOWS:
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        Path(link).symlink_to(target)
+
+
+def link_text(path: Path) -> str:
+    """What the link at `path` says, as `os.readlink` reads it, less the `\\\\?\\` a
+    junction's target starts with on Windows."""
+    import os
+
+    text = os.readlink(path)
+    return text[4:] if text.startswith("\\\\?\\") else text
+
+
+def is_link(path: Path) -> bool:
+    """Whether `path` is a symlink or a directory junction."""
+    import os
+
+    return os.path.islink(path) or os.path.isjunction(path)
+
+
 # -- local wheels and an offline uv, for the uv tests ---------------------------------------
 
 def build_wheel(out: Path, name: str, version: str, files: dict[str, str], *,

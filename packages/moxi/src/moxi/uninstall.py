@@ -405,6 +405,8 @@ def _remove_store(module: str, label: str, path: Path, kind: str, what: str) -> 
     try:
         if os.path.islink(path) or _is_junction(path):
             pointed = os.readlink(path)
+            if pointed.startswith("\\\\?\\"):   # a junction's target, as Windows keeps it
+                pointed = pointed[4:]
             try:
                 os.unlink(path)
             except (IsADirectoryError, PermissionError):
