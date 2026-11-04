@@ -244,9 +244,15 @@ def _confirmed(path: str, name: str, body: dict, *, gateway: bool) -> lb.Route:
                     status=STATUS_ROUTE, gateway=gateway)
 
 
-#: What the page server may hold before ui's doctor warns. For now loopback's default,
-#: until an idle server with the page open is measured.
-BUDGET = {"rss": "120M", "fds": 64}
+#: What the page server may hold before ui's doctor warns. Measured in a test shell on
+#: Linux (Python 3.14) over a fake supervisor, with 5 and with 50 rows each running a
+#: health command: the page opened, reloaded five times, a stop and an add, then 35 s
+#: with the page open (its stream held, the poller reading every 5 s and one health pass)
+#: and 35 s after it closed (the poller still running until the idle exit), sampled each
+#: second: RSS 52-53 MB at both sizes, and 9 to 13 open fds with the page open, 8 after.
+#: A real supervisor read and each health command add a child's pipes while they run.
+#: The budget is about twice the most that was seen.
+BUDGET = {"rss": "110M", "fds": 32}
 
 PAGE = lb.Page(
     assets="web",
