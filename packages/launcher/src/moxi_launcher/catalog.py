@@ -126,7 +126,8 @@ POSTURE_FLAGS = {
               "--not-so-yolo": "approval"},
 }
 #: Flags of turns' Codex host that a launch never passes on, though the host takes them,
-#: each with what to do instead. Resuming a thread isn't offered yet; a launch always
+#: each with what to do instead. A thread is resumed only through the launcher's own
+#: resume, which adds `--resume` itself; a launch always
 #: runs the Codex window; an options file can set the sandbox where the posture check
 #: can't see it; and the launcher gives the seat's instructions itself.
 HELD_FLAGS = {
