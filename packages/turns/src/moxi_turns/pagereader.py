@@ -184,8 +184,9 @@ class _Held:
         self._reader.start()
 
     def stop(self) -> None:
-        """Stop both threads and close the watch and the session. Never blocks on the
-        endpoint: closing a connection is local."""
+        """Stop both threads and close the watch and the session. Waits at most the
+        library's connect bound: closing a connection is local, but the session's close
+        waits for a reads thread that is opening its connection."""
         self.stopped.set()
         self.dirty.set()
         with self.reader._lock:
