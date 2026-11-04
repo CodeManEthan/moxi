@@ -102,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [ui, cache, comms, launcher, usage, loadout, projects, sessions]
+        package: [ui, cache, comms, launcher, usage, loadout, projects, sessions, turns]
         engine: [chromium, firefox]
     runs-on: ubuntu-latest
     timeout-minutes: 30

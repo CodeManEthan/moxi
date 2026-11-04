@@ -1,0 +1,13 @@
+{
+  "name": "moxi-turns-web",
+  "private": true,
+  "description": "The turns module's web sources: its panel, the live list of the sessions turns can reach.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

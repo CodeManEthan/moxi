@@ -46,10 +46,26 @@ uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/m
 moxi install turns --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns'
 ```
 
+## The panel
+
+With the `ui` extra (`moxi-ui`), turns has a panel in the browser UI shell at `/m/turns/`:
+the live list of every running session turns can reach. Each row shows the session's
+harness, the start of its session id, its working directory, when it started, its turn
+number and whether a turn is open, how many agents are busy, a draft in the prompt box,
+its last ready and its versions; a reading taken while the turn moved is marked stale. A
+session's trouble, and any session turns can't watch or read, are said on its row, and
+its agents are listed under it with their state and whether it is final. The list follows
+the sessions as they start, turn and end, through the shell's push channel.
+
+The panel only reads: nothing on it puts input into a session or acts on one. Its page
+server finds sessions by rescanning turns' runtime directory every 2 s and holds one watch
+per session; turns adds no daemon for it.
+
 ## Requirements
 
 - Linux and Python 3.12 or later.
 - `moxi` (0.1).
+- The `ui` extra adds `moxi-ui`, the browser UI shell, for the panel.
 - The `codex` extra adds `websockets`, which the Codex host needs; it also needs `codex`
   on PATH. The host's entry is installed either way; `turns.codex_host_available()` says
   whether the extra is there.
