@@ -211,7 +211,8 @@ def test_a_health_pass_due_while_a_gather_runs_is_run_at_the_next_tick_that_gath
     asyncio.run(go())
 
 
-def test_the_health_pass_runs_each_check_under_services_own_limit(monkeypatch):
+def test_the_health_pass_runs_each_check_under_services_own_limit_a_few_at_a_time(
+        monkeypatch):
     seen = {}
     real = pagehandlers.verdict.views
 
@@ -222,7 +223,8 @@ def test_the_health_pass_runs_each_check_under_services_own_limit(monkeypatch):
     monkeypatch.setattr(pagehandlers.verdict, "views", views)
     pagehandlers.gather(health=True)
     assert seen == {"health": True, "status_seconds": pagehandlers.STATUS_SECONDS,
-                    "health_seconds": pagehandlers.state.HEALTH_SECONDS}
+                    "health_seconds": pagehandlers.state.HEALTH_SECONDS,
+                    "health_at_once": pagehandlers.HEALTH_AT_ONCE}
 
 
 # -- failures ---------------------------------------------------------------------------------

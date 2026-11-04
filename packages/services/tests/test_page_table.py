@@ -134,7 +134,7 @@ def test_the_page_spells_kinds_and_days_as_the_rows_do():
 
 
 def test_the_export_carries_the_budget():
-    assert LB.export(page.PAGE)["budget"] == page.BUDGET == {"rss": "110M", "fds": 32}
+    assert LB.export(page.PAGE)["budget"] == page.BUDGET == {"rss": "110M", "fds": 48}
 
 
 def test_the_announcement_offers_the_page_and_imports_none_of_it():

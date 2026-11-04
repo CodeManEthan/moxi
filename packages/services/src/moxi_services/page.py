@@ -245,14 +245,15 @@ def _confirmed(path: str, name: str, body: dict, *, gateway: bool) -> lb.Route:
 
 
 #: What the page server may hold before ui's doctor warns. Measured in a test shell on
-#: Linux (Python 3.14) over a fake supervisor, with 5 and with 50 rows each running a
-#: health command: the page opened, reloaded five times, a stop and an add, then 35 s
-#: with the page open (its stream held, the poller reading every 5 s and one health pass)
-#: and 35 s after it closed (the poller still running until the idle exit), sampled each
-#: second: RSS 52-53 MB at both sizes, and 9 to 13 open fds with the page open, 8 after.
-#: A real supervisor read and each health command add a child's pipes while they run.
-#: The budget is about twice the most that was seen.
-BUDGET = {"rss": "110M", "fds": 32}
+#: Linux (Python 3.14) over a fake supervisor, with 5 and with 50 running rows, each with
+#: a health command that sleeps 2 s: the page open for 40 s (its stream held, the poller
+#: reading every 5 s, two health passes), sampled every 20 ms. RSS 52-54 MB at both sizes.
+#: Open fds: 9 between passes; at the peak of a pass, 21 with 5 checks and 30 with 50.
+#: Each running check holds its pipes, so the poller runs at most `HEALTH_AT_ONCE` (8)
+#: checks at a time, and the peak stays about 30 however many rows have one; without
+#: the bound, 50 checks at once peaked at 111. A real supervisor read adds a child's
+#: pipes while it runs. `fds` is about one and a half times the peak; `rss` about twice.
+BUDGET = {"rss": "110M", "fds": 48}
 
 PAGE = lb.Page(
     assets="web",

@@ -372,16 +372,23 @@ def flags(rows: Sequence[Row]) -> dict[str, bool | None]:
 
 
 def healths(pairs: Sequence[tuple[Row, units.UnitState | None]],
-            seconds: float | None = None) -> dict[str, tuple[str, str]]:
-    """Every health check that applies, all started at once, each under its own limit;
-    by row id. A check still running after `seconds` (default: the health limit and a
-    second) is `fail`, "did not finish"."""
+            seconds: float | None = None, *,
+            at_once: int | None = None) -> dict[str, tuple[str, str]]:
+    """Every health check that applies, each under its own limit; by row id. They all
+    start at once, or with `at_once`, no more than that many run at a time, the rest
+    waiting their turn. A check still running, or still waiting, after `seconds`
+    (default: the health limit and a second) for each turn the checks need is `fail`:
+    "did not finish", or "did not get its turn" for one still waiting, which then never
+    runs."""
     limit = (state.HEALTH_SECONDS + 1.0) if seconds is None else seconds
     out: dict[str, tuple[str, str]] = {}
     threads: list[tuple[str, threading.Thread]] = []
     lock = threading.Lock()
+    turns = threading.BoundedSemaphore(at_once) if at_once else None
+    over = threading.Event()
+    started: set[str] = set()
 
-    def run(row: Row, st) -> None:
+    def check(row: Row, st) -> None:
         try:
             found = state.health(row, st)
         except Exception as exc:  # noqa: BLE001 - a check that breaks is a failing check
@@ -389,6 +396,17 @@ def healths(pairs: Sequence[tuple[Row, units.UnitState | None]],
         if found is not None:
             with lock:
                 out[row.id] = found
+
+    def run(row: Row, st) -> None:
+        if turns is None:
+            check(row, st)
+            return
+        with turns:
+            with lock:
+                if over.is_set():
+                    return
+                started.add(row.id)
+            check(row, st)
 
     for row, st in pairs:
         if row.kind != "daemon" or st is None or st.state != "active":
@@ -399,12 +417,19 @@ def healths(pairs: Sequence[tuple[Row, units.UnitState | None]],
                                   name=f"services health {row.id}")
         thread.start()
         threads.append((row.id, thread))
-    deadline = time.monotonic() + limit
+    rounds = 1 if not at_once else max(1, -(-len(threads) // at_once))
+    deadline = time.monotonic() + limit * rounds
     for ident, thread in threads:
         thread.join(max(0.0, deadline - time.monotonic()))
     with lock:
+        over.set()
         for ident, thread in threads:
-            if thread.is_alive() and ident not in out:
+            if not thread.is_alive() or ident in out:
+                continue
+            if turns is not None and ident not in started:
+                out[ident] = ("fail", "did not get its turn: the other checks took the "
+                                      "health pass's time")
+            else:
                 out[ident] = ("fail", f"did not finish in {state.HEALTH_SECONDS:g} s")
         return dict(out)
 
@@ -434,10 +459,11 @@ def within(fn: Callable[[], object], seconds: float):
 
 def views(rows: Sequence[Row], *, health: bool = False,
           status_seconds: float | None = None,
-          health_seconds: float | None = None,
+          health_seconds: float | None = None, health_at_once: int | None = None,
           known_health: Mapping[str, tuple[str, str]] | None = None) -> list[View]:
     """Every row's view, from one supervisor read. With `health`, every running
-    daemon's check runs, all at once, waited on for `health_seconds` (see `healths`);
+    daemon's check runs, all at once or `health_at_once` at a time, waited on for
+    `health_seconds` a turn (see `healths`);
     `known_health` gives results of an earlier run to judge with instead. With
     `status_seconds`, the read gets that long in a worker thread; past it every row read
     is `unknown` and no health runs."""
@@ -456,7 +482,8 @@ def views(rows: Sequence[Row], *, health: bool = False,
             health = False
     on = flags(rows)
     if health:
-        checked = healths([(r, states.get(r.id)) for r in rows], health_seconds)
+        checked = healths([(r, states.get(r.id)) for r in rows], health_seconds,
+                          at_once=health_at_once)
     elif known_health is not None and unread is None:
         checked = {r.id: known_health[r.id] for r in rows if r.id in known_health
                    and (st := states.get(r.id)) is not None and st.state == "active"}

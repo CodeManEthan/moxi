@@ -46,8 +46,10 @@ row's state shows the outcome".
 
 **The topic.** The stream route's first call starts one poller, an asyncio task, which
 runs for the rest of the process's life. Every `PERIOD` seconds it starts a gather: the
-supervisor read, and every `HEALTH_PERIOD` seconds a health pass too, every running
-daemon's check at once, each under services' own health limit. A gather runs in a thread
+supervisor read, and every `HEALTH_PERIOD` seconds a health pass too: every running
+daemon's check, `HEALTH_AT_ONCE` at a time, each under services' own health limit. The
+bound keeps the server's open files within its budget however many rows have a check;
+each running check holds its pipes. A gather runs in a thread
 of its own, never on the base's threads, and only one runs at a time: a tick that finds
 the last one still running is skipped, and a skipped health pass runs at the next tick
 that gathers. The topic is published only when its value changed. The poller is not a
@@ -84,6 +86,8 @@ from .rows import MODULE, ModuleRow, UserRow
 PERIOD = 5.0
 #: Seconds between the poller's health passes.
 HEALTH_PERIOD = 30.0
+#: The most health checks the poller runs at once.
+HEALTH_AT_ONCE = 8
 #: Seconds a page read, or the poller, waits for the supervisor.
 STATUS_SECONDS = 10.0
 #: Who a change from the page is recorded as made by.
@@ -233,7 +237,8 @@ def gather(*, health: bool = False) -> dict[str, Any]:
         found, problems = every_row()
         if health:
             seen = verdict.views(found, health=True, status_seconds=STATUS_SECONDS,
-                                 health_seconds=state.HEALTH_SECONDS)
+                                 health_seconds=state.HEALTH_SECONDS,
+                                 health_at_once=HEALTH_AT_ONCE)
             _remember(seen)
         else:
             seen = verdict.views(found, status_seconds=STATUS_SECONDS,
