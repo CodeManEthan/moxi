@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
 import pwd
 import shutil
@@ -12,7 +13,7 @@ import subprocess
 import tempfile
 import threading
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -48,8 +49,12 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
     assert modules, "the workspace installs Moxi modules; none found"
     expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR"} | {
         f"MOXI_{m.upper()}_HOME" for m in modules}
+    kept = set(testing.KEPT_ENV)
+    if testing.WINDOWS:
+        expected |= set(testing.WINDOWS_HOMES) | {"HOMEDRIVE", "HOMEPATH", "TEMP", "TMP"}
+        kept |= set(testing.WINDOWS_KEPT_ENV)
     for key in os.environ:
-        assert (key in expected or key in testing.KEPT_ENV or key.startswith("LC_")), key
+        assert (key in expected or key in kept or key.startswith("LC_")), key
     assert expected <= set(os.environ)
     assert "PATH" in os.environ
     assert os.environ["HOME"] == str(tmp_path / "home") == str(fence.home)
@@ -67,11 +72,32 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
     assert len(str(fence.runtime)) < 40
 
 
-def test_the_fence_clears_everything_else():
+#: A Windows user's own environment, as a test process there inherits it.
+WINDOWS_SOURCE = {
+    "PATH": "C:\\Windows\\system32;C:\\Users\\ann\\.local\\bin", "SYSTEMROOT": "C:\\Windows",
+    "SYSTEMDRIVE": "C:", "WINDIR": "C:\\Windows",
+    "COMSPEC": "C:\\Windows\\system32\\cmd.exe", "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "OS": "Windows_NT", "PROCESSOR_ARCHITECTURE": "AMD64", "NUMBER_OF_PROCESSORS": "4",
+    "USERNAME": "ann", "USERDOMAIN": "PC", "COMPUTERNAME": "PC",
+    "USERPROFILE": "C:\\Users\\ann", "HOMEDRIVE": "C:", "HOMEPATH": "\\Users\\ann",
+    "APPDATA": "C:\\Users\\ann\\AppData\\Roaming",
+    "LOCALAPPDATA": "C:\\Users\\ann\\AppData\\Local",
+    "TEMP": "C:\\Users\\ann\\AppData\\Local\\Temp",
+    "TMP": "C:\\Users\\ann\\AppData\\Local\\Temp",
+    "ONEDRIVE": "C:\\Users\\ann\\OneDrive", "PUBLIC": "C:\\Users\\Public",
+    "PROGRAMDATA": "C:\\ProgramData", "PSMODULEPATH": "C:\\Users\\ann\\Documents\\ps",
+    "WIN_PD_OVERRIDE_APPDATA": "C:\\Users\\ann\\AppData\\Roaming",
+    "ANTHROPIC_API_KEY": "k"}
+
+
+def test_the_fence_clears_everything_else(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", False)
     env = testing._fenced_env(
         {"PATH": "/bin", "LANG": "C.UTF-8", "LC_ALL": "C", "OPENCODE_CONFIG_CONTENT": "{}",
          "OPENCODE_SERVER_PASSWORD": "x", "MOXI_COMMS_STATE_HOME": "/real",
-         "ANTHROPIC_API_KEY": "k", "SSH_AUTH_SOCK": "/run/agent", "GIT_DIR": "/repo"},
+         "ANTHROPIC_API_KEY": "k", "SSH_AUTH_SOCK": "/run/agent", "GIT_DIR": "/repo",
+         # Off Windows, Windows's own variables are cleared like any other.
+         **{k: v for k, v in WINDOWS_SOURCE.items() if k != "PATH"}},
         Path("/t/home"), Path("/s/run"), Path("/s"), ["comms"])
     assert env == {
         "PATH": "/bin", "LANG": "C.UTF-8", "LC_ALL": "C",
@@ -80,6 +106,49 @@ def test_the_fence_clears_everything_else():
         "XDG_CACHE_HOME": "/t/home/.cache", "CLAUDE_CONFIG_DIR": "/t/home/.claude",
         "CODEX_HOME": "/t/home/.codex", "XDG_RUNTIME_DIR": "/s/run",
         "MOXI_COMMS_HOME": "/s/comms"}
+
+
+def test_on_windows_the_fence_moves_the_user_s_folders_and_keeps_the_system_s(
+        monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    home, short = PureWindowsPath("D:/t/home"), PureWindowsPath("D:/s")
+    env = testing._fenced_env(WINDOWS_SOURCE, home, short / "run", short, ["comms"])
+    assert env == {
+        "PATH": WINDOWS_SOURCE["PATH"], "SYSTEMROOT": "C:\\Windows", "SYSTEMDRIVE": "C:",
+        "WINDIR": "C:\\Windows", "COMSPEC": "C:\\Windows\\system32\\cmd.exe",
+        "PATHEXT": ".COM;.EXE;.BAT;.CMD", "OS": "Windows_NT",
+        "PROCESSOR_ARCHITECTURE": "AMD64", "NUMBER_OF_PROCESSORS": "4", "USERNAME": "ann",
+        "HOME": "D:\\t\\home", "XDG_CONFIG_HOME": "D:\\t\\home\\.config",
+        "XDG_DATA_HOME": "D:\\t\\home\\.local\\share",
+        "XDG_STATE_HOME": "D:\\t\\home\\.local\\state",
+        "XDG_CACHE_HOME": "D:\\t\\home\\.cache", "CLAUDE_CONFIG_DIR": "D:\\t\\home\\.claude",
+        "CODEX_HOME": "D:\\t\\home\\.codex", "XDG_RUNTIME_DIR": "D:\\s\\run",
+        "MOXI_COMMS_HOME": "D:\\s\\comms",
+        "USERPROFILE": "D:\\t\\home", "HOMEDRIVE": "D:", "HOMEPATH": "\\t\\home",
+        "LOCALAPPDATA": "D:\\t\\home\\AppData\\Local",
+        "APPDATA": "D:\\t\\home\\AppData\\Roaming",
+        "WIN_PD_OVERRIDE_LOCAL_APPDATA": "D:\\t\\home\\AppData\\Local",
+        "WIN_PD_OVERRIDE_APPDATA": "D:\\t\\home\\AppData\\Roaming",
+        "WIN_PD_OVERRIDE_USER_PROGRAM_FILES": "D:\\t\\home\\AppData\\Local\\Programs",
+        "WIN_PD_OVERRIDE_PROGRAMS":
+            "D:\\t\\home\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs",
+        "WIN_PD_OVERRIDE_TEMPLATES":
+            "D:\\t\\home\\AppData\\Roaming\\Microsoft\\Windows\\Templates",
+        "WIN_PD_OVERRIDE_PERSONAL": "D:\\t\\home\\Documents",
+        "WIN_PD_OVERRIDE_DOWNLOADS": "D:\\t\\home\\Downloads",
+        "WIN_PD_OVERRIDE_DESKTOPDIRECTORY": "D:\\t\\home\\Desktop",
+        "WIN_PD_OVERRIDE_MYPICTURES": "D:\\t\\home\\Pictures",
+        "WIN_PD_OVERRIDE_MYVIDEO": "D:\\t\\home\\Videos",
+        "WIN_PD_OVERRIDE_MYMUSIC": "D:\\t\\home\\Music",
+        "TEMP": "D:\\s", "TMP": "D:\\s"}
+    # Only PATH, kept as it is everywhere, still names the real profile; and `~` is the
+    # test's home, the way Python on Windows finds it.
+    assert {k for k, v in env.items() if "\\users\\ann" in v.lower()} == {"PATH"}
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert ntpath.expanduser("~\\x") == "D:\\t\\home\\x"
+    monkeypatch.delenv("USERPROFILE")
+    assert ntpath.expanduser("~\\x") == "D:\\t\\home\\x"      # from HOMEDRIVE + HOMEPATH
 
 
 # --- uv in a child ---------------------------------------------------------------------
@@ -96,9 +165,33 @@ def test_uv_finds_its_directories_as_uv_does():
     # An empty value is unset, as uv reads it.
     assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", windows=False) == \
         dirs({}, "/h", windows=False)
-    win = dirs({"LOCALAPPDATA": "L", "APPDATA": "R"}, "H", windows=True)
-    assert win == {"UV_CACHE_DIR": os.path.join("L", "uv", "cache"),
-                   "UV_PYTHON_INSTALL_DIR": os.path.join("R", "uv", "data", "python")}
+
+
+def test_on_windows_uv_finds_its_directories_as_uv_does(monkeypatch, tmp_path):
+    local, roaming, home = tmp_path / "L", tmp_path / "R", tmp_path / "H"
+    older = tmp_path / "R2"
+    (older / "uv").mkdir(parents=True)
+    (older / "uv" / "data").write_text("")
+    # Made before the platform is patched: the fence judges this test's own writes by it.
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    environ = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+    assert testing._uv_dirs(environ, str(home)) == {
+        "UV_CACHE_DIR": str(local / "uv" / "cache"),
+        "UV_PYTHON_INSTALL_DIR": str(roaming / "uv" / "python")}
+    # Without the two folders' variables, the folders under the home.
+    assert testing._uv_dirs({}, str(home)) == {
+        "UV_CACHE_DIR": str(home / "AppData" / "Local" / "uv" / "cache"),
+        "UV_PYTHON_INSTALL_DIR": str(home / "AppData" / "Roaming" / "uv" / "python")}
+    # uv goes on using its older data folder where it is there, even as a file.
+    assert testing._uv_dirs({"APPDATA": str(older)}, str(home))[
+        "UV_PYTHON_INSTALL_DIR"] == str(older / "uv" / "data" / "python")
+    assert testing._uv_dirs({**environ, "UV_PYTHON_INSTALL_DIR": "P"}, str(home))[
+        "UV_PYTHON_INSTALL_DIR"] == "P"
+    # Off Windows the same environment gives the XDG places, whatever is in APPDATA.
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    assert testing._uv_dirs(environ, str(home)) == {
+        "UV_CACHE_DIR": str(home / ".cache" / "uv"),
+        "UV_PYTHON_INSTALL_DIR": str(home / ".local" / "share" / "uv" / "python")}
 
 
 def test_uv_env_carries_the_real_uv_and_leaves_this_process_fenced(fence, uv_env):
@@ -180,6 +273,65 @@ def test_a_write_in_the_tmp_goes_through(tmp_path):
     with open(os.devnull, "w") as sink:
         sink.write("x")
     assert (tmp_path / "b").read_text() == "x"
+
+
+#: Each spelling a write to Windows's `nul` resolves to, which Windows opens as the
+#: null device.
+WINDOWS_NULLS = ("\\\\.\\nul", "\\\\.\\NUL", "C:\\work\\nul", "C:\\work\\NUL",
+                 "C:/work/nul", "\\\\server\\share\\nul")
+#: Paths that only look like it: a `\\?\` or `\\.\` path creates a file named nul, and
+#: the rest are other names.
+WINDOWS_NOT_NULLS = ("\\\\?\\C:\\work\\nul", "\\\\.\\C:\\work\\nul", "\\\\?\\nul",
+                     "C:\\work\\nul.txt", "C:\\work\\nul:", "C:\\work\\annul",
+                     "C:\\work\\null", "C:\\work\\nul\\x", "\\\\.\\con", "/dev/null")
+
+
+def test_on_windows_the_null_device_goes_through_in_each_spelling(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    for path in WINDOWS_NULLS:
+        assert testing._allowed(path), path
+    for path in WINDOWS_NOT_NULLS:
+        assert not testing._allowed(path), path
+
+
+def test_off_windows_the_null_device_is_os_devnull_alone(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    assert testing._allowed(os.devnull)
+    for path in (*WINDOWS_NULLS, "/work/nul", "/dev/null2", "/dev/nul"):
+        assert not testing._allowed(path), path
+
+
+#: Allowed roots on Windows, and paths inside them in long form.
+WINDOWS_ROOTS = ("C:\\t\\base", "\\\\srv\\share\\short")
+WINDOWS_LONG_INSIDE = ("\\\\?\\C:\\t\\base", "\\\\?\\C:\\t\\base\\gw0\\basetemp",
+                       "\\\\?\\UNC\\srv\\share\\short\\x", "\\\\?\\unc\\srv\\share\\short")
+#: Long forms that name a place outside, or no plain path at all.
+WINDOWS_LONG_OUTSIDE = ("\\\\?\\C:\\t\\elsewhere", "\\\\?\\C:\\t\\base2\\x",
+                        "\\\\?\\C:\\t\\base\\..\\out", "\\\\?\\C:\\t\\base\\.\\x",
+                        "\\\\?\\C:\\t\\base/x", "\\\\?\\C:\\t\\base\\",
+                        "\\\\?\\UNC\\srv\\share\\other",
+                        "\\\\?\\GLOBALROOT\\Device\\C:\\t\\base\\x",
+                        "\\\\?\\Volume{0}\\t\\base\\x", "\\\\.\\C:\\t\\base\\x")
+
+
+def test_on_windows_a_long_form_path_is_judged_by_the_path_it_names(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    for path in WINDOWS_LONG_INSIDE:
+        assert testing._under(path, WINDOWS_ROOTS), path
+    for path in WINDOWS_LONG_OUTSIDE:
+        assert not testing._under(path, WINDOWS_ROOTS), path
+    # A root that is itself in long form matches its plain paths.
+    assert testing._under("C:\\t\\base\\x", ["\\\\?\\C:\\t\\base"])
+    # The long form of nul in the tmp is a file there, and outside it is still refused.
+    assert not testing._allowed("\\\\?\\C:\\work\\nul")
+
+
+def test_off_windows_a_long_form_path_is_a_name_like_any_other(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    for path in WINDOWS_LONG_INSIDE:
+        assert not testing._under(path, WINDOWS_ROOTS), path
+    assert testing._under("/t/base/x", ["/t/base"])
+    assert not testing._under("/t/base2", ["/t/base"])
 
 
 def test_reading_outside_the_tmp_is_not_a_write():
