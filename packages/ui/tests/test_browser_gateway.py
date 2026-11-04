@@ -45,17 +45,27 @@ WORKER = """async () => {
   return null;
 }"""
 #: Waits until the gateway's worker answers this page: only it answers `/offline` with the
-#: page made from its own bytes, whose root says the case it saw. It waits on the update
-#: check, the install and the claim, so it allows more than the other polls.
+#: page made from its own bytes, whose root says the case it saw. It asks once, then waits
+#: for the claim (`controllerchange`) and asks again; it allows more than the other polls,
+#: since it waits on the update check, the install and the claim.
+#:
+#: It sends nothing through the planted worker while the swap is pending. In Chromium, a
+#: fetch that lands while the planted worker is being stopped for the swap starts it again,
+#: and the swap then waits until that worker has had no event for 30 s, which a page
+#: fetching every 100 ms never allows.
 OWN_OFFLINE = """async () => {
-  const until = Date.now() + 30000;
-  while (Date.now() < until) {
+  const claimed = new Promise((done) => navigator.serviceWorker.addEventListener(
+    "controllerchange", () => done(true), {once: true}));
+  const own = async () => {
     try {
-      if ((await (await fetch("/offline")).text()).includes("data-reach=")) return true;
-    } catch {}
-    await new Promise((done) => setTimeout(done, 100));
-  }
-  return false;
+      return (await (await fetch("/offline")).text()).includes("data-reach=");
+    } catch {
+      return false;
+    }
+  };
+  if (await own()) return true;
+  const late = new Promise((done) => setTimeout(() => done(false), 30000));
+  return (await Promise.race([claimed, late])) && await own();
 }"""
 #: Takes the real worker and its cache off the phone, as a phone that never had them.
 UNREGISTER = """async () => {
