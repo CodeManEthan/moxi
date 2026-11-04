@@ -1582,9 +1582,12 @@ class Daemon:
     def _agents_query(self, frame: dict) -> dict:
         self._drop_reserved()
         with self._lock:
+            # `handed`: the ids handed to the binding and not yet acked (pushed, waiting
+            # in its overflow, or in a digest not settled), which `waiting` leaves out.
             bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
                          "tier": b.tier, "adapter": b.adapter,
-                         "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
+                         "endpoint": b.endpoint, "endpoint_since": b.endpoint_since,
+                         "handed": len(b.delivered - b.handled)}
                         for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
             now = self.clock()
             waiting = self._waiting_view(now)

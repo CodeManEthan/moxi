@@ -131,8 +131,8 @@ def test_the_built_in_adapter_kinds_stay_three():
     """
     from moxi_comms.daemon import ADAPTER_KINDS
 
-    assert ADAPTER_KINDS == ("claude-shim", "codex", "opencode")
-    assert len(set(ADAPTER_KINDS)) == 3
+    assert ADAPTER_KINDS == ("claude-shim", "codex", "opencode", "connector")
+    assert len(set(ADAPTER_KINDS)) == 4
 
 
 def test_the_daemon_holds_no_posting_credential(rig):
