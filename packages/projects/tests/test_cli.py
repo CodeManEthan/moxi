@@ -237,11 +237,41 @@ def test_remove_past_an_entry_that_wont_load_is_exit_1(capsys, site, golden_copy
     assert api.get("gamma")
 
 
-def test_add_past_an_entry_that_wont_load_is_exit_1_and_a_set_of_a_known_kind_goes_on(
+def test_add_past_an_entry_that_wont_load_warns_on_one_line_and_writes_the_row(
         capsys, site, golden_copy):
     site.contribution("broken", "INTERFACE = 9\n")
-    code, _out, err = run(capsys, "add", "new", "--root", "/srv/new")
-    assert code == 1 and "broken" in err
+    code, out, err = run(capsys, "add", "new", "--root", "/srv/new")
+    assert code == 0 and out.startswith("new\n")
+    [line] = [line for line in err.splitlines() if line.startswith("warning: ")]
+    assert line.startswith("warning: skipped broken, which won't load")
+    assert "defaults and checks were not applied" in line
+    assert "moxi uninstall broken" in line
+    assert api.get("new").root == "/srv/new"
+
+
+def test_add_json_past_an_entry_that_wont_load_carries_the_warning(capsys, site,
+                                                                   golden_copy):
+    site.contribution("broken", "INTERFACE = 9\n")
+    code, out, err = run(capsys, "add", "new", "--root", "/srv/new", "--json")
+    assert code == 0 and "warning: skipped broken" in err
+    body = json.loads(out)
+    assert {k: v for k, v in body.items() if k != "warnings"} == api.get("new").as_dict()
+    [warning] = body["warnings"]
+    assert warning.startswith("skipped broken") and "moxi uninstall broken" in warning
+
+
+def test_add_json_that_skips_nothing_is_the_project_alone(capsys, golden_copy):
+    body = run_json(capsys, "add", "new", "--root", "/srv/new")
+    assert body == api.get("new").as_dict()
+
+
+def test_add_or_set_of_an_unknown_kind_past_an_entry_that_wont_load_is_exit_1(
+        capsys, site, golden_copy):
+    site.contribution("broken", "INTERFACE = 9\n")
+    code, _out, err = run(capsys, "add", "new", "--root", "/srv/new", "--kind", "topic")
+    assert code == 1 and "broken" in err and "moxi uninstall broken" in err
+    with pytest.raises(api.NotFound):
+        api.get("new")
     assert run(capsys, "set", "gamma", "--kind", "agent")[0] == 0
     assert run(capsys, "set", "gamma", "--kind", "topic")[0] == 1
 

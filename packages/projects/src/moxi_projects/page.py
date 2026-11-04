@@ -95,6 +95,9 @@ WHERE = {"store": _PATH, "git": _MAYBE_PATH}
 #: An add or a set: the project as it now stands, and notes that refuse nothing (a root
 #: that doesn't exist yet, what a create made).
 WRITTEN = {"project": PROJECT, "notes": lb.Out("list", items=_SAYS)}
+#: An add: a write, and `warnings`, what the add went ahead without (a contribution
+#: skipped since it won't load, with the fix); empty when it went without nothing.
+ADDED = {**WRITTEN, "warnings": lb.Out("list", items=_SAYS)}
 #: A remove request: `state` is `removed` or `refused`; `key` the project's key as
 #: stored (as asked when there was none); `project` the key the request was kept under.
 #: A refused one has its `reason`, `fix`, `sentences` (each contribution's, named by its
@@ -148,7 +151,7 @@ PAGE = lb.Page(
         lb.Route("/api/where", "read", _target("where"), returns=WHERE),
         lb.Route(STATUS_ROUTE, "read", _target("remove_status"),
                  query={"job": lb.Field("string", max=JOB_MAX)}, returns=STATUS),
-        lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns=WRITTEN),
+        lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns=ADDED),
         lb.Route("/api/set", "act", _target("set_fields"), body=SET_BODY, returns=WRITTEN),
         lb.Route("/api/agents-add", "act", _target("agents_add"), body=AGENT_BODY,
                  returns=ONE),
@@ -159,5 +162,6 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["ADD_BODY", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "ONE", "PAGE",
-           "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]
+__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "ONE",
+           "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE",
+           "WRITTEN"]

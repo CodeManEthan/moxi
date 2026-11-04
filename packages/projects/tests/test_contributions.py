@@ -186,18 +186,93 @@ def test_an_entry_that_wont_load_is_named_by_kinds(site, source):
     assert [m for m, _r in kinds.broken] == ["bad"]
 
 
-def test_an_entry_that_wont_load_blocks_add_and_remove_but_not_a_set_of_a_known_kind(
+def test_an_entry_that_wont_load_blocks_remove_but_not_a_set_of_a_known_kind(
         site, golden_copy):
     site.contribution("bad", BROKEN_ENTRIES["import"])
     with pytest.raises(Broken) as caught:
-        contributions.plan_add("new", root="/srv/new")
-    assert caught.value.exit_code == 1
-    assert caught.value.modules == ("bad",)
-    assert "moxi uninstall bad" in caught.value.fix
-    with pytest.raises(Broken):
         contributions.load().remove_refusals(api.get("gamma"))
+    assert caught.value.exit_code == 1 and caught.value.modules == ("bad",)
+    assert "moxi uninstall bad" in caught.value.fix
     assert contributions.plan_set("gamma", kind="agent", lead="someone").name == "agent"
     assert contributions.plan_set("gamma", root="/srv/elsewhere") is not None
+
+
+@pytest.mark.parametrize("source", BROKEN_ENTRIES.values(), ids=BROKEN_ENTRIES.keys())
+def test_an_add_of_a_built_in_kind_skips_an_entry_that_wont_load_with_a_warning(
+        site, store_path, source):
+    site.contribution("bad", source)
+    planned = contributions.plan_add("new", root="/srv/new")
+    assert planned.row["root"] == "/srv/new" and planned.kind.name == "project"
+    [warning] = planned.warnings
+    assert warning.startswith("skipped bad, which won't load (bad: the entry bad won't load")
+    assert "its defaults and checks were not applied" in warning
+    assert "fix: repair bad or uninstall it (`moxi uninstall bad`)" in warning
+    assert store.write(planned.insert).key == "new"
+
+
+def test_an_add_of_a_loaded_modules_kind_skips_an_entry_that_wont_load(site, tmp_path):
+    site.contribution("notes", TOPIC)
+    site.contribution("bad", BROKEN_ENTRIES["import"])
+    planned = contributions.plan_add("t", kind="topic", root=str(tmp_path / "notes" / "t"))
+    assert planned.kind.module == "notes"
+    assert len(planned.warnings) == 1 and "skipped bad" in planned.warnings[0]
+    with pytest.raises(Refused, match="notes folder"):
+        contributions.plan_add("u", kind="topic", root=str(tmp_path / "elsewhere"))
+
+
+def test_the_warning_names_every_entry_skipped(site):
+    site.contribution("bad", BROKEN_ENTRIES["import"])
+    site.contribution("worse", BROKEN_ENTRIES["interface"])
+    [warning] = contributions.plan_add("new", root="/srv/new").warnings
+    assert warning.startswith("skipped bad and worse, which won't load (bad: ")
+    assert "worse: the entry worse won't load" in warning
+    assert "their defaults and checks were not applied" in warning
+    assert "`moxi uninstall bad`" in warning and "`moxi uninstall worse`" in warning
+
+
+def test_a_loaded_entrys_prepare_still_runs_past_a_skipped_one(site):
+    entry = site.contribution("svc", prepare_source('{"root": "/srv/from-svc"}'))
+    site.contribution("bad", BROKEN_ENTRIES["import"])
+    planned = contributions.plan_add("k")
+    assert planned.row["root"] == "/srv/from-svc" and planned.supplied
+    assert sys.modules[entry].SEEN == [{"key": "k", "kind": "project"}]
+    assert planned.warnings
+
+
+def test_a_skipped_entrys_prepare_is_not_called_and_fills_nothing(site):
+    entry = site.contribution("bad", prepare_source('{"root": "/srv/from-bad"}',
+                                                    interface=7))
+    planned = contributions.plan_add("typed", root="/srv/typed")
+    assert planned.row["root"] == "/srv/typed" and planned.supplied == {}
+    with pytest.raises(Usage) as caught:
+        contributions.plan_add("k")
+    assert "bad won't load, and may be the one that would" in caught.value.reason
+    assert sys.modules[entry].SEEN == []
+
+
+def test_no_warning_while_every_entry_loads(site):
+    site.contribution("svc", HOLDS)
+    assert contributions.plan_add("new", root="/srv/new").warnings == []
+
+
+@pytest.mark.parametrize("root", ["/srv/new", None])
+def test_an_add_of_an_unknown_kind_past_an_entry_that_wont_load_is_exit_1(site, root):
+    site.contribution("bad", BROKEN_ENTRIES["import"])
+    with pytest.raises(Broken) as caught:
+        contributions.plan_add("new", kind="topic", root=root)
+    assert caught.value.exit_code == 1 and caught.value.modules == ("bad",)
+    assert "may be the kind's home" in caught.value.reason
+    assert "moxi uninstall bad" in caught.value.fix
+
+
+def test_a_blocked_kind_still_blocks_an_add_past_an_entry_that_wont_load(site):
+    site.contribution("notes", TOPIC)
+    site.contribution("other", TOPIC)
+    site.contribution("bad", BROKEN_ENTRIES["import"])
+    with pytest.raises(Broken) as caught:
+        contributions.plan_add("t", kind="topic", root="/srv/t")
+    assert set(caught.value.modules) == {"notes", "other"}
+    assert contributions.plan_add("p", root="/srv/p").warnings
 
 
 def test_a_set_of_an_unknown_kind_past_an_entry_that_wont_load_is_exit_1(site, golden_copy):
