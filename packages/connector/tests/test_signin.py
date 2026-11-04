@@ -415,6 +415,31 @@ def test_a_retired_refresh_token_in_its_grace_answers_a_new_pair_once(door, cloc
     run(main())
 
 
+def test_a_stop_between_a_rotation_and_the_new_pairs_first_use_keeps_the_grace(door, clock):
+    """The refresh answer is lost, the process stops and starts again, and Claude retries
+    the old refresh token: still its grace, not reuse."""
+    async def main():
+        d = await door()
+        client, first = await d.sign_in()
+        assert (await d.mcp(first["access_token"])).status == 200      # the first pair used
+        assert (await d.refresh(client, first["refresh_token"])).status == 200  # answer lost
+        await d.oauth.stopping(True)
+        await d.close()
+        gid = d.grant_id()
+        grant = d.oauth.store.view()["grants"][gid]
+        assert grant["replacement_used"] is False and grant["used"] is not None
+        again = await door()
+        clock.advance(60)
+        got = await again.refresh(client, first["refresh_token"])
+        assert got.status == 200, got.body
+        assert (await again.mcp(got.json()["access_token"])).status == 200
+        assert not again.oauth.store.view()["grants"][gid]["revoked"]
+        assert [r["kind"] for r in again.rows if r["kind"].startswith("refresh")] == [
+            "refresh"]
+        await again.close()
+    run(main())
+
+
 def test_a_grace_is_given_once(door, clock):
     async def main():
         d = await door()
@@ -517,9 +542,9 @@ def test_last_use_is_written_at_most_once_a_minute_and_at_the_stop(door, clock):
         writes = []
         real = d.oauth.store.note_used
 
-        def counted(g, at=None):
+        def counted(g, at=None, **kw):
             writes.append(at)
-            real(g, at)
+            real(g, at, **kw)
 
         d.oauth.store.note_used = counted
         for _ in range(5):

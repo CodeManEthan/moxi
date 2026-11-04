@@ -344,15 +344,18 @@ class Store:
 
         return self.change(fn)
 
-    def note_used(self, gid: str, at: float | None = None) -> None:
-        """Write a grant's last use, and that its current pair has been used."""
+    def note_used(self, gid: str, at: float | None = None, *, pair: bool = True) -> None:
+        """Write a grant's last use and, unless `pair` is False, that its current pair has
+        been used. A writer that doesn't know which pair was used passes False: a use
+        before a rotation says nothing about the pair the rotation made."""
         now = self.clock() if at is None else at
 
         def fn(data):
             grant = data["grants"].get(gid)
             if grant is not None:
                 grant["used"] = max(now, grant.get("used") or 0)
-                grant["replacement_used"] = True
+                if pair:
+                    grant["replacement_used"] = True
 
         self.change(fn)
 

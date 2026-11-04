@@ -259,14 +259,19 @@ class OAuth:
 
     async def stopping(self, switch_on: bool) -> None:
         """At the process's stop: write pending last-use times; with the switch off,
-        revoke every grant, so none stays valid behind a port nothing holds."""
+        revoke every grant, so none stays valid behind a port nothing holds.
+
+        The stop writes only the time. Whether a grant's current pair has been used is
+        written at its first use (`used`), and a use seen before a rotation was of the
+        pair the rotation retired, so writing it as the new pair's would take the grace
+        from a retry of the lost refresh answer after a restart."""
         for task in list(self._tasks):
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 await task
         for gid, seen in list(self._seen.items()):
             if seen > self._used.get(gid, 0):
                 with contextlib.suppress(Exception):
-                    await asyncio.to_thread(self.store.note_used, gid, seen)
+                    await asyncio.to_thread(self.store.note_used, gid, seen, pair=False)
         if not switch_on:
             count = await asyncio.to_thread(self.store.revoke_all, by="stop")
             await self.event("revoke", all=True, by="stop", count=count)
