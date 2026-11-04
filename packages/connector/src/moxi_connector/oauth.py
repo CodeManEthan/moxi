@@ -77,7 +77,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToke
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import request_response
 
-from . import calllog, grants
+from . import calllog, codes, grants
 from .origin import ASM_PATH, PRM_PATH, Origin
 from .signin import GRANT, ASGIApp, Grant, Mount
 
@@ -109,7 +109,6 @@ BAD_REDIRECT = ("This sign-in asks to return to an address the connector doesn't
 TOO_MANY_PENDING = "Too many sign-ins in progress. Try again in a few minutes."
 TOO_MANY_CLIENTS = "too many clients; try again later"
 SLOW_DOWN = b"Too many requests. Try again in a minute.\n"
-NO_PAGE = b"The sign-in page isn't served by this connector yet.\n"
 
 _CHALLENGE = re.compile(r"[A-Za-z0-9._~-]{43,128}")
 
@@ -218,7 +217,9 @@ class OAuth:
 
     `store` is the grants file, `calllog` the call log, `redirect_uris` the callbacks a
     client may register, `refresh_days` a grant's lifetime after its last refresh. `page`
-    makes the `/authorize` app for one `Under`."""
+    makes the `/authorize` app for one `Under`: the sign-in page (`moxi_connector.page`)
+    unless a test gives another. `codes` are the one-time codes minted at the terminal;
+    they outlive an origin, so they live here and not on an `Under`."""
 
     def __init__(self, store: grants.Store, calllog_: calllog.Writer, *,
                  redirect_uris: Iterable[str], clock: Callable[[], float] = time.time,
@@ -229,7 +230,11 @@ class OAuth:
         self.clock = clock
         self.store.clock = clock
         self.limits = Limits(clock)
-        self.page = page or unserved_page
+        if page is None:
+            from .page import page as sign_in_page
+            page = sign_in_page
+        self.page = page
+        self.codes = codes.Codes(clock)
         self.current: Under | None = None
         self._used: dict[str, float] = {}
         self._seen: dict[str, float] = {}
@@ -735,17 +740,7 @@ def _with_grant(app: ASGIApp) -> ASGIApp:
     return inner
 
 
-def unserved_page(under: Under) -> ASGIApp:
-    """The `/authorize` app until the sign-in page is built: 503, and no sign-in."""
-
-    async def app(scope, receive, send) -> None:
-        await _answer(send, 503, NO_PAGE)
-
-    return app
-
-
 __all__ = ["AUTH_METHODS", "Access", "AuthRequest", "CAPS", "CODE_LIFE", "Code",
            "HashedSecrets", "Limits", "OAuth", "PENDING_LIFE", "PENDING_MAX",
            "PENDING_MISSES", "PageError", "Pending", "Provider", "RedirectError", "Refresh",
-           "SCOPE", "TooMany", "UNKNOWN_CLIENT", "Under", "methods", "limited",
-           "unserved_page"]
+           "SCOPE", "TooMany", "UNKNOWN_CLIENT", "Under", "methods", "limited"]

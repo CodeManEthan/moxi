@@ -5,6 +5,7 @@
     moxi connector status [--json]
     moxi connector check [--json]
     moxi connector log [--days N] [--json]
+    moxi connector code [--label NAME]
     moxi connector grants [--json]
     moxi connector revoke <id> | --all
 
@@ -12,14 +13,19 @@
 `off` revokes every grant, then sets the switch false. `status` shows the address, the
 ports, the process, each provider with its tools and rows, the grants, the last call and
 every row of the doctor that isn't ok. `check` is the one networked check: a probe of the
-public address through the edge, run only when typed. `log` prints the call log. `grants`
+public address through the edge, run only when typed. `log` prints the call log. `code`
+mints a one-time sign-in code through the running process, behind the mint gate: each
+installed provider's gate checks this shell first, then the process checks the caller
+again before it mints. `grants`
 lists the sign-ins the grants file keeps; `revoke` revokes one, or every one with `--all`,
 which also drops every client, so Claude needs the connector added again. Both read and
 write the grants file itself, so they work with the process up or down.
 
 Exit codes: 0 ok; 1 the check failed, or a step went wrong; 2 usage; 3 refused (the
-connector is off, has no address, or its process doesn't answer). With `--json` a refusal
-prints `{"error": ..., "fix": ...}`.
+connector is off, has no address, or its process doesn't answer). `code` exits 77 when the
+mint gate refuses or no gate is installed, naming the check that failed, and 75 when the
+connector is off or its process doesn't answer. With `--json` a refusal prints
+`{"error": ..., "fix": ...}`.
 
 Verbs are kept by name in `VERBS`, each `fn(args, out) -> int`, with their arguments added
 in `_parser`.
@@ -271,6 +277,80 @@ def _log(args, out: TextIO) -> int:
     return codes.OK
 
 
+# -- code ------------------------------------------------------------------------------------
+
+#: The exit of a mint the gate refused: not permitted.
+NOPERM = 77
+
+
+def _local_gates() -> list[tuple[str, Any]]:
+    """The mint gates of the providers installed here, each with its module: what the
+    verb's own shell check runs. Importing a provider runs none of its start."""
+    from .providers import load
+
+    return [(e.module, e.provider.gate) for e in load()
+            if e.provider is not None and e.provider.gate is not None]
+
+
+def _refused_row(**fields: Any) -> None:
+    try:
+        calllog.event(calllog.CallLog(), "code-refused", **fields)
+    except Exception as e:  # noqa: BLE001 - the refusal stands without its row
+        print(f"The refusal couldn't be written to the call log: {e}", file=sys.stderr)
+
+
+def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
+    import os
+    import time
+
+    from moxi import ipc
+
+    from . import codes as mint
+    from . import settings
+
+    env = dict(os.environ if environ is None else environ)
+    name = "moxi connector code"
+    gates = _local_gates()
+    if not gates:
+        _refused_row(check="gate", refusal=mint.NO_GATE_TEXT)
+        print(f"{name}: {mint.NO_GATE_TEXT}", file=sys.stderr)
+        return NOPERM
+    for module, gate in gates:
+        try:
+            said = gate.shell(env)
+        except Exception as e:  # noqa: BLE001 - a check that fails never lets a mint through
+            said = (f"The mint gate of {module} failed in this shell "
+                    f"({type(e).__name__}), so no code is minted.")
+        if said is not None:
+            _refused_row(check="shell", module=module, refusal=str(said))
+            print(f"{name}: {said}", file=sys.stderr)
+            return NOPERM
+    if not settings.enabled():
+        print(f"{name}: the connector is off, so it can't mint a code.", file=sys.stderr)
+        print("  fix: moxi connector on", file=sys.stderr)
+        return codes.TEMPFAIL
+    try:
+        got = checks.ask("mint_code", {"label": mint.clean_label(args.label)})
+    except ipc.RpcError as e:
+        print(f"{name}: {e.message}", file=sys.stderr)
+        return NOPERM if e.code in (mint.REFUSED, mint.NO_GATE) else codes.ERROR
+    except ipc.IpcError as e:
+        print(f"{name}: the connector's process doesn't answer ({e}), so no code is "
+              "minted.", file=sys.stderr)
+        print(f"  fix: {checks.RESTART}", file=sys.stderr)
+        return codes.TEMPFAIL
+    if not isinstance(got, dict) or not isinstance(got.get("code"), str):
+        print(f"{name}: the connector answered something that isn't a code.",
+              file=sys.stderr)
+        return codes.ERROR
+    until = time.strftime("%H:%M:%S", time.localtime(float(got.get("expires") or 0)))
+    print(got["code"], file=out)
+    label = f", label {got['label']}" if got.get("label") else ""
+    print(f"It works once, until {until}{label}.", file=out)
+    print(mint.USE_IT, file=out)
+    return codes.OK
+
+
 # -- grants and revoke -----------------------------------------------------------------------
 
 def _when(t: float | None) -> str:
@@ -323,14 +403,15 @@ def _revoke(args, out: TextIO) -> int:
 
 VERBS: dict[str, Callable[[argparse.Namespace, TextIO], int]] = {
     "on": _on, "off": _off, "status": _status, "check": _check, "log": _log,
-    "grants": _grants, "revoke": _revoke,
+    "code": _code, "grants": _grants, "revoke": _revoke,
 }
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog, description="The public MCP door for the Claude apps: turn it on and "
-                               "off, see its state, check its address, read its log.")
+                               "off, see its state, check its address, read its log, "
+                               "mint a sign-in code, list and revoke grants.")
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
@@ -354,6 +435,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, default=1, metavar="N",
                    help="today and the N-1 days before (default 1)")
     p.add_argument("--json", action="store_true", help="one JSON object per line")
+    p = verbs.add_parser("code", help="a one-time sign-in code, for a sign-in you started",
+                         description="Mint a one-time code for the sign-in page Claude "
+                                     "opened. It works once, for 5 minutes. Only your own "
+                                     "terminal, outside every agent session, can mint one.")
+    p.add_argument("--label", metavar="NAME",
+                   help="a name for the sign-in, shown by moxi connector grants")
     p = verbs.add_parser("grants", help="the sign-ins the connector keeps",
                          description="Each grant: id, label, client name, when made and "
                                      "last used, and whether it is stale.")
@@ -391,4 +478,4 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi connector") -> 
         return _fail(args, name, str(exc), exc.fix, exc.exit_code)
 
 
-__all__ = ["ADD_IN_CLAUDE", "REVOKED_ALL", "Refused", "VERBS", "main", "revoke_every_grant"]
+__all__ = ["ADD_IN_CLAUDE", "NOPERM", "REVOKED_ALL", "Refused", "VERBS", "main", "revoke_every_grant"]

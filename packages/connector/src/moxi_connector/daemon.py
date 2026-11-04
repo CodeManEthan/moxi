@@ -9,7 +9,8 @@ What one run does, in order:
 1. takes its listening socket (`listen.take`): the socket unit's, else its own bound on
    `port`. A port it can't have stops it, with a doctor record naming why. Deletes the
    call log's files past 30 days;
-2. serves its control socket (`control.Control`), so `status` answers from here on;
+2. serves its control socket (`control.Control`), so `status` answers from here on, and
+   `mint_code` mints a sign-in code behind the providers' mint gates (`codes`);
 3. loads every provider of `moxi.connector.providers` and runs each start (`Registry`);
 4. reads the origin and builds the app from it (`origin.read`, `app.build_app`), then
    serves it (`server.Endpoint`);
@@ -38,6 +39,7 @@ from moxi import aio, doctor
 from moxi import exit as codes
 
 from . import calllog, grants, listen
+from .codes import mint_method
 from .control import Control, Method
 from . import origin as origins
 from . import settings as connector_settings
@@ -209,7 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     host = Host(Registry.from_group(), signin=signin, calllog=calls,
                 redirect_uris=redirect_uris, version=_version())
     daemon = Daemon(taken.sock, host, read_origin=_read_origin,
-                    switch=connector_settings.enabled)
+                    switch=connector_settings.enabled,
+                    methods={"mint_code": mint_method(signin, host.registry)})
     return aio.run(lambda: _serve(daemon))
 
 

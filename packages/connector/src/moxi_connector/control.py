@@ -13,7 +13,10 @@ The methods:
   tools, the providers' own status rows, and the modules whose mint gate is loaded;
 - `probe_expect`: register a fresh nonce for `moxi connector check`, answered as
   `{"nonce": ...}`;
-- `probe_seen` `{"nonce": ...}`: `{"seen": bool}`, whether a request carried it.
+- `probe_seen` `{"nonce": ...}`: `{"seen": bool}`, whether a request carried it;
+- `mint_code` `{"label": ...}`, which the daemon passes in (`codes.mint_method`): a
+  one-time sign-in code, minted only when a started provider declares a mint gate and no
+  gate's `peer` check refuses this connection's peer.
 
 A method is `async fn(peer, params) -> result`, kept by name in `Control.methods`; one
 raising `moxi.ipc.RpcError` answers with that error. More methods join through the

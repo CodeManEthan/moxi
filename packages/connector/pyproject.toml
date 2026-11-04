@@ -51,7 +51,11 @@ connector = "moxi_connector.module"
 "connector.mcp" = "moxi_connector.tunnel:MCP"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# The sign-in page's browser test drives Playwright's Chromium against the door on
+# loopback, behind a TLS relay whose certificate cryptography makes on the spot.
+# moxi-ui's testing extra is how a package here brings its tests a browser; the test
+# imports Playwright and cryptography itself, so both are named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2", "cryptography>=46"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -63,11 +67,11 @@ packages = ["src/moxi_connector"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_connector", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "docs", "src/moxi_connector", "tests"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
-# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
-# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
 # `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1). Mark a test that asserts
 # a wall-clock budget `timed`: the check runs it alone, after the parallel pass.
 [tool.pytest.ini_options]

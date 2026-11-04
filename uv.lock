@@ -892,7 +892,10 @@ tunnel = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -909,7 +912,10 @@ provides-extras = ["tunnel"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cryptography", specifier = ">=46" },
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 

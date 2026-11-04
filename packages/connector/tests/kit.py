@@ -262,6 +262,20 @@ class Running:
         self._thread.join(10)
 
 
+def wait_for(found, *, within: float = 5.0, every: float = 0.01):
+    """Poll `found()` until it gives something truthy, and return that; fail after
+    `within` seconds. For what another thread writes after it answers."""
+    import time
+
+    deadline = time.monotonic() + within
+    while True:
+        got = found()
+        if got:
+            return got
+        assert time.monotonic() < deadline, f"nothing came within {within:g} s"
+        time.sleep(every)
+
+
 def http(port: int, method: str, path: str, *, host: str = HOST, headers=None,
          body: bytes | None = None):
     """One request to a door on loopback: (status, headers by lower-case name, body)."""

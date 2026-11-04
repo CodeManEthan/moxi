@@ -1,5 +1,5 @@
-"""The sign-in, driven by a fake Claude client: registration, the page's entry in place of
-the page, `/token`, the bearer guard, rotation and reuse, revocation, the origin swap and the
+"""The sign-in, driven by a fake Claude client: registration, the sign-in page (or its entry,
+where a test is about something else), `/token`, the bearer guard, rotation and reuse, revocation, the origin swap and the
 limits on callers without a token."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from conftest import ORIGIN
 from kit import HTTPX, initialize, modern, request, rpc
-from signin_kit import CALLBACK, CALLBACKS, pkce
+from signin_kit import CALLBACK, CALLBACKS, pending_of, pkce, query_of
 
 from moxi_connector import grants
 from moxi_connector.oauth import (AUTH_METHODS, CAPS, PENDING_MAX, PENDING_MISSES,
@@ -45,8 +45,16 @@ def test_the_full_sign_in_from_registration_to_tools_list(door):
         assert asm.status == 200 and asm.json()["authorization_endpoint"] == o.url + "/authorize"
         client = await d.client()
         assert client["client_id"] and client["client_secret"]
-        verifier, query = d.page(client)
-        assert query["iss"] == o.issuer
+        # The page, as the browser Claude opened, and a code from the terminal.
+        verifier, params = d.params(client)
+        shown = await d.authorize(params)
+        assert shown.status == 200 and b'name="code"' in shown.body
+        done = await d.finish(pending_of(shown.body), d.mint("phone"))
+        assert done.status == 303
+        location = done.header("location")
+        assert location.startswith(CALLBACK + "?")
+        query = query_of(location)
+        assert query["iss"] == o.issuer and query["state"] == params["state"]
         started = time.perf_counter()
         got = await d.token(client, query["code"], verifier)
         took = time.perf_counter() - started
@@ -221,11 +229,12 @@ def test_each_route_is_served_by_its_one_handler_and_the_metadata_comes_from_o(d
     run(main())
 
 
-def test_without_the_page_authorize_answers_503_and_signs_nobody_in(door):
+def test_the_sign_in_page_is_what_authorize_serves_by_default(door):
     async def main():
         d = await door()
         got = await request(d.front, "GET", "/authorize")
-        assert got.status == 503
+        assert got.status == 400 and got.header("content-type").startswith("text/html")
+        assert UNKNOWN_CLIENT.encode() in got.body
         await d.close()
     run(main())
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
-from kit import Admit, Running, echo_tool, http, provider
+from kit import Admit, Running, echo_tool, http, provider, wait_for
 
 from moxi_connector import calllog, cli
 from moxi_connector import origin as origins
@@ -129,8 +129,12 @@ def test_status_json_of_a_running_process(make_host, fake, config_file, no_tunne
     host = asyncio.run(make_host())
     with Running(host, O) as d:
         http(d.port, "POST", "/mcp", body=b"{}")
+        # The door writes a request's row after it answers, so wait for it.
+        row = wait_for(lambda: next((r for r in host.calllog.rows
+                                     if r.get("kind") == "request"
+                                     and r.get("route") == "mcp"), None))
         host.calllog.flush()
-        calllog.CallLog().write(host.calllog.rows[-1], durable=False, collapse=None)
+        calllog.CallLog().write(row, durable=False, collapse=None)
         assert cli.main(["status", "--json"]) == 0
     got = json.loads(capsys.readouterr().out)
     assert got["enabled"] is True and got["url"] == "https://door.example.net/mcp"
