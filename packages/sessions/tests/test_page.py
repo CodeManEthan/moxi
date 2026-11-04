@@ -269,6 +269,17 @@ def test_the_export_carries_the_measured_budget():
     assert page.PAGE.budget == ROUTES.budget
 
 
+def test_each_component_is_a_built_asset_of_the_page():
+    from moxi_sessions import module
+
+    exported = LB.export(page.PAGE)
+    assert {"page.js", "window.js"} <= set(exported["assets"])
+    for decl in module.COMPONENTS.values():
+        assert decl["script"] in exported["assets"]
+    assert {r["path"] for r in exported["routes"]} == {"/api/window", "/api/subagents"}
+    assert LB.gate_matrix(page.PAGE)
+
+
 # -- the window, for each harness -----------------------------------------------------------
 
 def test_a_claude_window_sends_each_record_as_its_view_row(roots):

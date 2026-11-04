@@ -118,7 +118,8 @@ why.
 
 Other modules' pages can place the same view with the shell's `place()`, as the `window`
 block, with the attributes `harness` (`claude`, `codex` or `opencode`), `session` and, for
-a Claude Code subagent, `agent`. It links to the page at the session's address.
+a Claude Code subagent, `agent`. It links to the page at the session's address. A
+subagent chosen in the block opens in the block, with Back to return.
 
 The page only reads. It sends no tool call's input and no tool's output, and sends at most
 64 KiB of any one message, saying when it cut one. It reads a session when it is shown and
