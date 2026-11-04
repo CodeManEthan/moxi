@@ -1195,10 +1195,16 @@ dependencies = [
 projects = [
     { name = "moxi-projects" },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-projects" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -1206,13 +1212,17 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["projects"]
+provides-extras = ["projects", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-projects", editable = "packages/projects" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 

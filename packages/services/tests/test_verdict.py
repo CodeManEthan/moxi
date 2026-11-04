@@ -345,6 +345,71 @@ def test_views_past_the_status_limit_are_unknown_and_run_no_health(fake, monkeyp
     assert ran == []
 
 
+def _running(n: int) -> list:
+    return [(user(name=f"svc{i}", enabled=True, health=["/bin/true"]), st(name=f"svc{i}"))
+            for i in range(n)]
+
+
+def _counting(monkeypatch, seconds: float) -> list[int]:
+    """Puts a health check in place that takes `seconds`; returns [running, most]."""
+    import threading
+    import time
+
+    counts = [0, 0]
+    lock = threading.Lock()
+
+    def slow(row, st_):
+        with lock:
+            counts[0] += 1
+            counts[1] = max(counts[1], counts[0])
+        time.sleep(seconds)
+        with lock:
+            counts[0] -= 1
+        return "ok", "fine"
+
+    monkeypatch.setattr(verdict.state, "health", slow)
+    return counts
+
+
+def test_health_checks_start_all_at_once_without_a_bound(monkeypatch):
+    counts = _counting(monkeypatch, 0.1)
+    found = verdict.healths(_running(12), 2.0)
+    assert counts[1] == 12
+    assert len(found) == 12 and set(found.values()) == {("ok", "fine")}
+
+
+def test_health_checks_at_once_run_no_more_than_that_many_together(monkeypatch):
+    counts = _counting(monkeypatch, 0.05)
+    found = verdict.healths(_running(12), 2.0, at_once=3)
+    assert counts[1] == 3
+    assert len(found) == 12 and set(found.values()) == {("ok", "fine")}
+
+
+def test_a_check_still_waiting_its_turn_at_the_limit_fails_and_never_runs(monkeypatch):
+    import threading
+    import time
+
+    gate_ = threading.Event()
+    ran = []
+
+    def stuck(row, st_):
+        ran.append(row.id)
+        gate_.wait(5)
+        return "ok", "late"
+
+    monkeypatch.setattr(verdict.state, "health", stuck)
+    found = verdict.healths(_running(3), 0.1, at_once=1)
+    gate_.set()
+    assert len(ran) == 1, ran
+    assert found[ran[0]] == ("fail", "did not finish in 5 s")
+    rest = {"services/svc0", "services/svc1", "services/svc2"} - set(ran)
+    assert len(rest) == 2
+    for ident in rest:
+        assert found[ident][1].startswith("did not get its turn"), found[ident]
+    time.sleep(0.1)
+    assert len(ran) == 1, ran
+
+
 def test_worst():
     assert verdict.worst(["ok", "off", "warn"]) == "warn"
     assert verdict.worst(["fail", "ok"]) == "fail"

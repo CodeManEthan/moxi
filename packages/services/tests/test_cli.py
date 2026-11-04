@@ -90,15 +90,15 @@ def test_list_with_no_rows_says_how_to_add_one(fake, no_modules, capsys):
 
 
 def test_list_shows_module_rows(fake, site, capsys):
-    site.module("notes", '''
-        DAEMONS = {"sync": {"command": "moxi-notes-sync", "doc": "sync the notes",
+    site.module("jotter", '''
+        DAEMONS = {"sync": {"command": "moxi-jotter-sync", "doc": "sync the notes",
                             "stop": "group", "upgrade": "restart"}}
         ''')
-    fake.modules[("notes", "sync")] = Unit("daemon", True, active=False)
+    fake.modules[("jotter", "sync")] = Unit("daemon", True, active=False)
     code, out, _ = run(capsys, "list", "--json")
     found = {r["id"]: r for r in json.loads(out)}
-    assert found["notes/sync"]["verdict"]["reason"] == "not running"
-    assert found["notes/sync"]["verdict"]["fix"] == "moxi services start notes/sync"
+    assert found["jotter/sync"]["verdict"]["reason"] == "not running"
+    assert found["jotter/sync"]["verdict"]["fix"] == "moxi services start jotter/sync"
 
 
 def test_a_busy_store_exits_75(fake, no_modules, capsys, monkeypatch):
@@ -230,22 +230,22 @@ def test_a_module_switch_prints_the_cores_unit_lines_once(fake, site, capsys,
                                                            monkeypatch):
     from moxi.units import Applied, UnitChange
 
-    site.module("notes", '''
-        DAEMONS = {"sync": {"command": "moxi-notes-sync", "doc": "sync",
+    site.module("jotter", '''
+        DAEMONS = {"sync": {"command": "moxi-jotter-sync", "doc": "sync",
                             "stop": "group", "upgrade": "restart",
                             "switch": "sync.enabled"}}
         ''')
-    change = UnitChange("notes", "sync", "daemon", "add", None, (), None, "add")
+    change = UnitChange("jotter", "sync", "daemon", "add", None, (), None, "add")
 
     def config_set(module, key, value, *, by):
-        print("notes/sync: written and started")  # the core says it as it applies
-        return [Applied(change, True, ("notes/sync: written and started",))]
+        print("jotter/sync: written and started")  # the core says it as it applies
+        return [Applied(change, True, ("jotter/sync: written and started",))]
 
     monkeypatch.setattr(moxi.config, "set", config_set)
-    code, out, _ = run(capsys, "enable", "notes/sync")
+    code, out, _ = run(capsys, "enable", "jotter/sync")
     assert code == 0
-    assert out.count("notes/sync: written and started") == 1
-    assert "notes sync.enabled set to true" in out
+    assert out.count("jotter/sync: written and started") == 1
+    assert "jotter sync.enabled set to true" in out
 
 
 def test_the_worst_code():

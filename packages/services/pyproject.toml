@@ -12,6 +12,9 @@ dependencies = ["moxi>=0.1,<0.2", "psutil>=5.9"]
 # through moxi.modules.load("projects"), and projects reads services' link through its
 # `moxi.projects` group below.
 projects = ["moxi-projects>=0.1,<0.2"]
+# The browser UI shell: with it, services' page shows there. Loopback, which services'
+# page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -27,7 +30,12 @@ services = "moxi_services.module"
 services = "moxi_services.projects_link"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs services' page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too. The
+# browser page test seeds its rows' projects through `moxi projects add`, so projects is
+# named as well.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2",
+       "moxi-projects>=0.1,<0.2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -38,7 +46,7 @@ packages = ["src/moxi_services"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_services", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_services", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
