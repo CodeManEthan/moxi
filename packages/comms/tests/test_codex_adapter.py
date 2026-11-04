@@ -409,3 +409,140 @@ def test_a_wrappers_launch_into_a_held_name_is_refused_before_the_look(rig, laun
     with pytest.raises(DaemonError) as refused:
         second.start()
     assert refused.value.refused
+
+
+# --------------------------------------------------------------------------- a resume
+
+OLD = "thread-old"
+
+
+def ready_sources(frames) -> list:
+    return [f.get("source") for f in frame_kinds(frames, "ready")]
+
+
+class _ReadySession(FakeSession):
+    """A session whose first load had already raised its ready when the watch
+    subscribed, as turns' `wait_ready` hands one over: the watch never gives that
+    ready."""
+
+    def facts(self):
+        from fake_turns import Facts, Ready
+
+        with self._lock:
+            return Facts(self.session_id, self._turn_number, self.open_turn is not None,
+                         ready=Ready("resume", self.session_id, 1.0))
+
+
+def test_a_register_told_to_resume_reports_the_thread_as_resumed(rig, launch):
+    adapter = launch(start=False, resume=OLD)
+    report = adapter.session_report(register=True)
+    assert (report["session_id"], report["new_session"]) == (OLD, False)
+    assert report["turned"] is True, "a resumed thread had turns before this launch"
+    fresh = launch(start=False, name="other").session_report(register=True)
+    assert fresh["new_session"] is True and "session_id" not in fresh
+
+
+def test_the_daemon_holds_the_resumed_thread_before_the_session_is_found(rig, launch):
+    seen = []
+    adapter = launch(start=False, resume=OLD, session=FakeSession(OLD))
+
+    def find(pid, timeout):
+        binding = rig.daemon.bindings[IDENTITY]
+        seen.append((binding.session_id, binding.new_session))
+        return adapter.fake
+
+    adapter._find = find
+    adapter.start()
+    assert seen == [(OLD, False)]
+
+
+def test_a_resumed_launch_reports_one_resume_ready_and_records_the_thread(
+        rig, launch, frames, monkeypatch):
+    owed_changes = []
+    adapter = launch(start=False, resume=OLD, session=FakeSession(OLD))
+    real = adapter.owed_session_changed
+    monkeypatch.setattr(adapter, "owed_session_changed",
+                        lambda source, sid: owed_changes.append((source, sid))
+                        or real(source, sid))
+    adapter.start()
+    assert wait_until(lambda: ready_sources(frames) == ["resume"])
+    assert owed_changes == [("resume", OLD)]
+    record = codex_threads.read_meta(IDENTITY)
+    assert record["thread_id"] == OLD == adapter.thread_id
+    assert record["launch"] == adapter.launch
+    assert record["layer_one"] == layer_one_hash(adapter.comms_path)
+    # turns' own ready for the same first load, given after the launch reported it.
+    adapter.fake.ready("resume")
+    adapter.fake.ready("compact")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "compact"])
+    assert owed_changes == [("resume", OLD)]
+    # A later resume (a reconnect's load) is reported as any resume is.
+    adapter.fake.ready("resume")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "compact", "resume"])
+    assert owed_changes == [("resume", OLD), ("resume", OLD)]
+
+
+def test_turns_first_resume_ready_given_before_the_launch_reports_is_not_reported(
+        rig, launch, frames, monkeypatch):
+    """turns' ready for the first load is the watch's first event, taken before the
+    launch reports its own: still one resume ready."""
+    session = FakeSession(OLD)
+    session.ready("resume")                      # waiting for the watch's first read
+    adapter = launch(start=False, resume=OLD, session=session)
+    real = adapter.owed_session_changed
+
+    def owed_after_the_watch(source, sid):
+        assert wait_until(lambda: not adapter._first_resume_unseen), \
+            "the watch has not taken turns' ready"
+        real(source, sid)
+
+    monkeypatch.setattr(adapter, "owed_session_changed", owed_after_the_watch)
+    adapter.start()
+    session.ready("compact")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "compact"])
+    session.ready("resume")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "compact", "resume"])
+
+
+def test_a_resume_ready_after_a_subscription_that_saw_the_first_is_reported(
+        rig, launch, frames):
+    """When the first load's ready came before the watch, the watch's resume ready is a
+    later load's, and is reported."""
+    adapter = launch(resume=OLD, session=_ReadySession(OLD))
+    assert wait_until(lambda: ready_sources(frames) == ["resume"])
+    adapter.fake.ready("resume")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "resume"])
+
+
+def test_a_launch_not_told_to_resume_reports_a_startup(rig, launch, frames,
+                                                       monkeypatch):
+    owed_changes = []
+    adapter = launch(start=False)
+    monkeypatch.setattr(adapter, "owed_session_changed",
+                        lambda source, sid: owed_changes.append((source, sid)))
+    adapter.start()
+    assert wait_until(lambda: ready_sources(frames) == ["startup"])
+    assert owed_changes == [] and adapter.resume is None
+    assert adapter.session_report(register=False)["turned"] is False
+
+
+def test_a_host_that_ends_before_it_resumed_the_thread_ends_the_binding(
+        rig, launch, caplog):
+    """A first load that never resumed the thread: the host ends, the launch fails and
+    the name is not left bound to the thread."""
+    alive = [True]
+
+    def find(pid, timeout):
+        assert rig.daemon.bindings[IDENTITY].session_id == OLD
+        alive[0] = False                         # the host failed its first load
+        raise TimeoutError("not ready")
+
+    adapter = launch(start=False, resume=OLD, alive=lambda: alive[0], find_step=0.01)
+    adapter._find = find
+    with caplog.at_level("WARNING", logger="comms.codex"):
+        with pytest.raises(HostGone):
+            adapter.start()
+    assert f"ended before it resumed thread {OLD}" in caplog.text
+    assert codex_threads.read(IDENTITY) is None, "no record of a thread never loaded"
+    adapter.stop()
+    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)

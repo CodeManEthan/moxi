@@ -253,8 +253,9 @@ class Context:
     `agent` role was asked for and did not resolve. `runs_dir` holds the system prompt
     file. `moxi` is the command comms' wrappers run under; `host` turns' Codex host, None
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
-    its Codex wrapper's per-launch settings and its headless flags. `windows` picks the
-    command line limit.
+    its Codex wrapper's per-launch settings and its headless flags, and
+    `comms_codex_resume` whether that wrapper resumes a thread it is told to (read only
+    for a resume). `windows` picks the command line limit.
 
     A replay of a stored launch sets the rest. `posture` is the start posture the
     identity block shows in place of the values' own (a relaunch's), which the values,
@@ -283,6 +284,7 @@ class Context:
     moxi: str = "moxi"
     host: str | None = None
     comms_codex: bool = False
+    comms_codex_resume: bool = False
     comms_headless: bool = False
     windows: bool = os.name == "nt"
     posture: str | None = None

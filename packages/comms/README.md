@@ -231,8 +231,9 @@ the detail.
 - **Codex**: `moxi comms codex --name <name>` launches one identity's thread through Moxi
   turns' Codex host, which runs the `codex app-server` and its hooks. comms mail goes
   into the thread at turn boundaries, and `--interrupt` mail into the running turn; a
-  digest settles when its turn ends. Mail goes to the thread this launch
-  started: /clear, /new, /fork and /resume in the window start or open another thread,
+  digest settles when its turn ends. `--resume THREAD_ID` continues an earlier
+  thread instead of starting a new one. Mail goes to the thread this launch
+  started or resumed: /clear, /new, /fork and /resume in the window start or open another thread,
   which comms does not follow. To start fresh, end the launch and launch again. Install
   the extra: `moxi install comms --with codex`. The settings flags are the host's own
   (`--model`, `--sandbox`, `--option KEY=VALUE`); an identity listed in the config file's

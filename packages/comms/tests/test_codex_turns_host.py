@@ -185,3 +185,58 @@ def test_the_wrapper_runs_turns_real_host_and_passes_the_roster_options(
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, 5)
     assert wait_until(lambda: any(row["event"] == "app-server-exit"
                                   for row in events(records)), 5)
+
+
+def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
+        rig, tmp_path, spawn):
+    """A first launch starts and primes a thread; a second, `--name ... --resume T`,
+    has turns' host resume T, and the name is bound to T as a resume."""
+    from moxi_comms import codex_threads
+
+    records = tmp_path / "records"
+    records.mkdir()
+    first = wrapper(spawn, records, tmp_path)
+    try:
+        assert wait_until(lambda: calls(records, "turn/start"), 20), \
+            first.stdout.read() if first.poll() is not None else "no priming turn"
+        thread_id = calls(records, "turn/start")[0]["params"]["threadId"]
+        assert wait_until(
+            lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, 10)
+        # Once the priming turn has ended the thread has a rollout, which
+        # `thread/resume` needs.
+        assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned, 20)
+    finally:
+        output = stop(first)
+    assert first.returncode == 0, output
+    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, 10)
+    first_launch = codex_threads.read_meta(IDENTITY)["launch"]
+
+    env = dict(os.environ)
+    env.update({
+        "PATH": f"{(tmp_path / 'bin')}{os.pathsep}{env.get('PATH', '')}",
+        "FAKE_CODEX_DIR": str(records),
+        "MOXI_TURNS_RUNTIME_DIR": env["MOXI_COMMS_RUNTIME_DIR"],
+    })
+    name, scope = IDENTITY.split("@")
+    second = spawn(
+        [sys.executable, "-m", "moxi_comms.adapters.codex", "--name", name, "--scope",
+         scope, "--no-window", "--resume", thread_id],
+        cwd=str(tmp_path / "work"), env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True)
+    try:
+        assert wait_until(lambda: calls(records, "thread/resume"), 20), \
+            second.stdout.read() if second.poll() is not None else "no thread/resume"
+        assert calls(records, "thread/resume")[0]["params"]["threadId"] == thread_id
+        assert len(calls(records, "thread/start")) == 1, "no new thread"
+        assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 10)
+        binding = rig.daemon.bindings[IDENTITY]
+        assert (binding.session_id, binding.new_session) == (thread_id, False)
+        assert binding.turned is True, "a resumed thread had turns before this launch"
+        record = wait_until(lambda: (lambda r: r if r.get("launch") != first_launch
+                                     else None)(codex_threads.read_meta(IDENTITY) or {}),
+                            10)
+        assert record["thread_id"] == thread_id and record["layer_one"], record
+        assert second.poll() is None
+    finally:
+        output = stop(second)
+    assert second.returncode == 0, output

@@ -425,6 +425,32 @@ def test_a_codex_launch_with_an_identity_runs_the_wrapper_comms_offers():
                       ctx(session_id=None, modules=frozenset({"comms"}), comms_codex=True))
 
 
+THREAD = "7c6d5e4f-3a2b-4c1d-9e8f-0a1b2c3d4e5f"
+
+
+def test_a_codex_resume_with_an_identity_passes_the_thread_after_the_wrappers_flags():
+    got = codex.compose(codex_values(identity="coder", scope="moxi", model="gpt-5",
+                                     sandbox=""),
+                        ctx(session_id=THREAD, resume=True,
+                            modules=frozenset({"turns", "comms"}), host=HOST,
+                            comms_codex=True, comms_codex_resume=True))
+    assert list(got.argv) == [
+        "moxi", "comms", "codex", "--name", "coder", "--scope", "moxi", "--model", "gpt-5",
+        *UPDATE_OPTION, "--resume", THREAD]
+    assert got.mode == "host"
+
+
+def test_a_codex_resume_with_an_identity_and_an_older_comms_is_not_yet():
+    # The composer holds the same gate as the resume's own refusal.
+    with pytest.raises(common.NotYet) as raised:
+        codex.compose(codex_values(identity="coder"),
+                      ctx(session_id=THREAD, resume=True,
+                          modules=frozenset({"turns", "comms"}), host=HOST,
+                          comms_codex=True, comms_codex_resume=False))
+    assert raised.value.exit_code == 3 and raised.value.hint == "upgrade moxi-comms"
+    assert "comms' Codex wrapper here can't resume a thread" in raised.value.problem
+
+
 def test_codex_with_turns_but_no_host_runs_without_turns_and_says_so():
     got = codex.compose(codex_values(),
                         ctx(session_id=None, modules=frozenset({"turns"}), host=None,

@@ -16,7 +16,10 @@ preset read), with the row's own environment rule, `resume_of` naming the launch
 resumes, and the harness told to resume the session: Claude's `--resume <id>`, turns'
 Codex host's `--resume <thread id>`. It sends no first turn. It keeps the session id it
 resumes, and that id then belongs to the new launch, so every later act on the id finds
-the new launch.
+the new launch. A Codex launch with a comms name resumes like any other: its replay runs
+comms' Codex wrapper with the wrapper's own flags and then `--resume <thread id>`, and the
+wrapper binds the name to that thread and continues it. Only a resume passes `--resume`: a
+relaunch, a repair and a recycle start a new thread.
 
 It is refused, with nothing written, when:
 
@@ -25,8 +28,9 @@ It is refused, with nothing written, when:
 - the launch has no session id (`no-session-id`): a Codex launch made without turns'
   host never learned its thread id, so `codex resume` resumes it outside the launcher;
 - its harness is no longer one the launcher launches (`not-catalogued`);
-- it is a Codex launch with a comms name (`not-yet`): comms' Codex wrapper starts a new
-  thread at every launch, so it can't resume one; `codex resume` can;
+- it is a Codex launch with a comms name, and comms' Codex wrapper here can't resume a
+  thread (`not-yet`): an older comms starts a new thread at every launch; upgrading
+  moxi-comms lets it resume. Whether comms can is read once per list, not once per entry;
 - its session is live now (`live`): attach to it instead; liveness is read again at the
   call, whatever the list said;
 - its liveness can't be read (`liveness-unread`, exit 1).
@@ -53,12 +57,13 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from functools import cache
 from typing import Any
 
 from moxi import exit as codes
 from moxi import proc
 
-from . import catalog, first, relaunch, slots, store, target
+from . import catalog, first, presets, relaunch, slots, store, target
 
 LOOK = relaunch.LOOK
 Refused = relaunch.Refused
@@ -109,18 +114,21 @@ def sessions(*, limit: int | None = None, before: str | datetime | None = None,
     """The past-sessions list, newest first: one line per launch, and `--json`'s
     entries (`data["sessions"]`). `turns` stands in for turns' API (None: no turns)."""
     api = _turns(turns)
+    codex_resume = cache(_codex_resume)
     try:
         with relaunch._store(conn) as c:
-            entries = [entry(c, row, api) for row in store.log(c, limit=limit,
-                                                                before=before)]
+            entries = [entry(c, row, api, codex_resume=codex_resume)
+                       for row in store.log(c, limit=limit, before=before)]
     except target.NotLaunched:
         entries = []
     lines = tuple(session_line(e) for e in entries) or ("no sessions",)
     return Result(codes.OK, lines, data={"sessions": [e.as_json() for e in entries]})
 
 
-def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None) -> Past:
-    """`row`'s entry in the list, its liveness read now."""
+def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
+          codex_resume: Callable[[], bool] | None = None) -> Past:
+    """`row`'s entry in the list, its liveness read now. `codex_resume` is as
+    `static_refusal`'s."""
     known = store.session_ids(conn, row.request_id)
     newest = known[-1][0] if known else row.session_id
     holder = store.resolve(conn, newest) if newest else None
@@ -128,7 +136,7 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None) -> 
                and holder.request_id != row.request_id else None)
     # A later launch's session is not this launch's to read: only its own process is.
     live, unread = liveness(row, None if held_by else newest, turns)
-    refused = static_refusal(row, newest)
+    refused = static_refusal(row, newest, codex_resume=codex_resume)
     if refused is None and held_by:
         refused = Refused("held-by", f"launch {held_by} resumed session {newest} since",
                           f"resume it as that launch's: moxi launcher resume {newest}")
@@ -180,8 +188,13 @@ def liveness(row: store.LaunchRow, session_id: str | None,
     return False, None
 
 
-def static_refusal(row: store.LaunchRow, session_id: str | None) -> Refused | None:
-    """The refusal a resume of `row` meets whatever its session's state, or None."""
+def static_refusal(row: store.LaunchRow, session_id: str | None, *,
+                   codex_resume: Callable[[], bool] | None = None) -> Refused | None:
+    """The refusal a resume of `row` meets whatever its session's state, or None.
+
+    `codex_resume` answers whether comms' Codex wrapper resumes a thread, asked only for
+    a Codex launch with a comms name; the list passes one that reads comms once for all
+    its entries. None reads it now (`presets.comms_codex_resume`)."""
     if row.harness not in catalog.HARNESSES:
         return Refused("not-catalogued", f"the launcher no longer launches {row.harness}",
                        f"resume it with {row.harness} itself")
@@ -194,11 +207,11 @@ def static_refusal(row: store.LaunchRow, session_id: str | None) -> Refused | No
                                         "resume",
                        "a Codex launch made without turns' host never learned its thread "
                        "id: use codex resume")
-    if row.harness == "codex" and row.identity and slots.links("comms"):
+    if (row.harness == "codex" and row.identity and slots.links("comms")
+            and not (codex_resume or _codex_resume)()):
         return Refused("not-yet", f"launch {row.request_id} runs Codex as comms name "
-                                  f"{row.identity}, and comms' Codex wrapper starts a new "
-                                  "thread at every launch, so it can't resume one",
-                       "resume it with codex resume, outside the launcher")
+                                  f"{row.identity}, and comms' Codex wrapper here can't "
+                                  "resume a thread", "upgrade moxi-comms")
     return None
 
 
@@ -343,6 +356,10 @@ def _running(api: Any) -> bool:
         return bool(api.supported().ok)
     except Exception:  # noqa: BLE001  (slots that can't say: the launch's check says)
         return False
+
+
+def _codex_resume() -> bool:
+    return presets.comms_codex_resume()
 
 
 def _turns(given: Any) -> Any | None:

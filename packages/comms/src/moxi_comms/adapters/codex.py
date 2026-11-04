@@ -23,6 +23,15 @@ process owns:
     turn open, or None. turns gives the Stop's facts, the thread's running background
     terminals among them; Codex has no crons.
 
+**A resume.** A launch starts a new thread unless it is told to resume one. Told to
+resume thread T (the wrapper's `--resume T`, which the host also gets), every report the
+adapter makes describes T as resumed, once: a register before the session is found
+gives `session_id` T with `new_session: false`; once found, the launch reports one
+`ready` with the resume source, the owed ledger hears that T resumed, and the thread
+record names T. turns raises its own resume `Ready` for that first load; when the watch
+gives it, it is not reported a second time. A host that ends before it has loaded T ends
+the launch, and the binding with it, as a failed first start does.
+
 **Delivery.** Plain mail goes one digest at a time, at turn boundaries only: while no
 turn runs, by `deliver(text, ref=<digest>)`, which starts a turn. Mail that arrives
 while a turn runs waits in the queue for that turn's end, and goes as one digest then.
@@ -229,7 +238,7 @@ class Hand:
 
 class CodexAdapter(HarnessAdapter):
     """One identity: the daemon binding, the queue, the digests in flight and the stop
-    handler, over the turns session of the thread this launch started."""
+    handler, over the turns session of the thread this launch started or resumed."""
 
     KIND = ADAPTER_KIND
     STATE_NOUN = "thread-id file"
@@ -242,7 +251,8 @@ class CodexAdapter(HarnessAdapter):
                  on_bound=None, autoreconnect: bool = True, backoff=None,
                  status_sink=None, clock=time.time, comms_path: str | None = None,
                  layer_one: bool = True, exit_hook=None, wait_retry: float = WAIT_RETRY,
-                 find_step: float = FIND_STEP, wait_when_held: bool = True):
+                 find_step: float = FIND_STEP, wait_when_held: bool = True,
+                 resume: str | None = None):
         #: The host process: turns' Codex host, the wrapper's pid kept across its exec.
         #: The claim's root. None in a test that hands in its own `find`.
         self.harness_pid = harness_pid
@@ -264,6 +274,11 @@ class CodexAdapter(HarnessAdapter):
         #: Whether the thread was given layer one (the wrapper's instructions file), so
         #: the thread record carries its hash.
         self.layer_one = layer_one
+        #: The thread this launch was told to resume, or None: it starts a new one.
+        self.resume = resume or None
+        #: Whether the watch may still give turns' resume ready for the first load,
+        #: which the launch reported itself (`start_port`).
+        self._first_resume_unseen = False
 
         #: The turns session of this launch's thread, once launched.
         self.session = None
@@ -281,7 +296,8 @@ class CodexAdapter(HarnessAdapter):
         #: The turn the reply reminder holds open, while it does.
         self._blocked_turn: str | None = None
         #: Whether a turn of this launch's thread has ended (the cache clock's `turned`).
-        self._own_turned = False
+        #: A resumed thread has had its turns before this launch.
+        self._own_turned = self.resume is not None
         #: Which launch wrote the thread record: `<pid>@<UTC start>`.
         self.launch = launch_stamp()
         #: What the thread record says the thread was born with (layer one's hash).
@@ -307,23 +323,28 @@ class CodexAdapter(HarnessAdapter):
 
     def record_read(self) -> tuple:
         """The base class's record read. No launch calls it: a launch starts its own
-        thread and reads no id from the record."""
+        thread, or resumes the one its caller names, and reads no id from the record."""
         return codex_threads.read_outcome(self.agent.qualified)
 
     def session_report(self, *, register: bool) -> dict:
         """The thread id, its sessions root and `turned`; on `register`, `new_session`.
 
-        Every launch starts its own thread, so a `register` before the launch reports
-        `new_session: true`: the thread that follows is this launch's own creation. A
-        `register` that holds the launch's thread (a daemon reconnect inside the launch)
-        reports it, `new_session: false`. `turned` is false until a turn of it ends."""
+        A launch not told to resume a thread starts its own, so a `register` before the
+        launch reports `new_session: true`: the thread that follows is this launch's own
+        creation. A launch told to resume thread T reports T from its first `register`,
+        `new_session: false`, before the session is found. A `register` that holds the
+        launch's thread (a daemon reconnect inside the launch) reports it,
+        `new_session: false`. `turned` is false until a turn of a new thread ends, and
+        true for a resumed one, which had turns before this launch."""
         with self._lock:
-            thread_id = self.thread_id
-        if thread_id:
-            self.claims.note_session(thread_id)
+            found = self.thread_id
+            thread_id = found or self.resume
+            turned = self._own_turned
+        if found:
+            self.claims.note_session(found)
         report: dict = {}
         if thread_id:
-            report.update(session_id=thread_id, turned=self._own_turned)
+            report.update(session_id=thread_id, turned=turned)
             if register:
                 report["new_session"] = False
         elif register:
@@ -358,6 +379,11 @@ class CodexAdapter(HarnessAdapter):
             if self._stop.is_set():
                 raise HostGone("the adapter was stopped before the session was ready")
             if not self._alive():
+                if self.resume is not None:
+                    # The daemon has held T for this name since the register: the
+                    # launch's log says the resume failed.
+                    self.log.warning("the Codex host of %s ended before it resumed thread "
+                                     "%s", self.agent.qualified, self.resume)
                 raise HostGone("the Codex host ended before its session was ready")
             try:
                 return self._find(self.harness_pid, self.find_step)
@@ -394,13 +420,22 @@ class CodexAdapter(HarnessAdapter):
         watch = self._watch_handle = session.watch()
         with self._lock:
             self.turn_open = bool(watch.facts.turn_open)
+            # The watch replays nothing: turns' resume ready for the first load reaches
+            # it only when no ready had been raised at the subscription.
+            self._first_resume_unseen = (self.resume is not None
+                                         and getattr(watch.facts, "ready", None) is None)
         self._watcher = threading.Thread(target=self._watch, args=(watch,),
                                          daemon=True, name="comms-codex-watch")
         self._watcher.start()
         self.log.info("found codex thread %s for %s through turns", thread_id,
                       self.agent.qualified)
-        # The launch is the session start; a fresh session's mail goes as it comes up.
-        self.report_ready(SOURCE_STARTUP)
+        if self.resume is not None:
+            # The first load resumed the thread: one resume ready, from here.
+            self.owed_session_changed(SOURCE_RESUME, thread_id)
+            self.report_ready(SOURCE_RESUME)
+        else:
+            # The launch is the session start; a fresh session's mail goes as it comes up.
+            self.report_ready(SOURCE_STARTUP)
         self._wake.set()
 
     def stop_before_unbind(self) -> None:
@@ -574,8 +609,19 @@ class CodexAdapter(HarnessAdapter):
             self.report_refresh()          # `turned` changed: a report refresh
 
     def _ready(self, source, session_id) -> None:
-        """A resume or a compaction of the thread. The startup was reported at launch."""
+        """A resume or a compaction of the thread. The startup was reported at launch,
+        and so was the first load's resume of a thread the launch was told to resume:
+        turns' resume ready for that load, when the watch gives it, is dropped, and every
+        later one (a reconnect's) is reported."""
         if source == SOURCE_RESUME:
+            with self._lock:
+                first = self._first_resume_unseen and session_id in (None, self.resume)
+                if first:
+                    self._first_resume_unseen = False
+            if first:
+                self.log.info("the first load's resume of thread %s was reported at the "
+                              "launch", self.resume)
+                return
             self.owed_session_changed(SOURCE_RESUME, session_id)
             self.report_ready(SOURCE_RESUME)
         elif source == SOURCE_COMPACT:

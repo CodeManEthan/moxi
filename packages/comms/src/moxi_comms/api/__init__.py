@@ -29,6 +29,8 @@ outside comms.
   `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
+* `CODEX_RESUME`: True when the Codex wrapper, `moxi comms codex --name N`, takes
+  `--resume THREAD_ID`; a comms without it has no resume.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
 * `moxi_comms.api.tokens`: the token store the box's own consumers read.
 """
@@ -56,6 +58,9 @@ from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, DeleteResult, Recipient
 
 #: The interface this module is.
 INTERFACE = 2
+
+#: The Codex wrapper takes `--resume THREAD_ID` (with `--name`) and reports a resume.
+CODEX_RESUME = True
 
 #: A read's default wait for the daemon, in seconds.
 READ_DEADLINE = 10.0
@@ -549,7 +554,7 @@ def daemon_socket() -> Path:
 
 __all__ = [
     "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
-    "Recipient", "Refusal",
+    "Recipient", "Refusal", "CODEX_RESUME",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
     "Standing", "Owner", "roster_rows", "RosterRow",
