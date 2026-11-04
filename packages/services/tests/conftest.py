@@ -7,10 +7,12 @@ reads and writes is the test's own.
 
 from __future__ import annotations
 
+import importlib
 import sqlite3
 import sys
 import textwrap
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -37,19 +39,28 @@ def too_new(store_path):
 # --- fake distributions ------------------------------------------------------------------
 
 class Site:
-    """A directory on sys.path where a test installs fake Moxi modules."""
+    """A directory on sys.path where a test installs fake Moxi modules.
+
+    A package the site writes stands in for any real one of that name: the real
+    package's entries in `sys.modules`, if another test imported it, are set aside when
+    the site first writes the package, so an import finds the fake, and are put back
+    when the fixture ends."""
 
     def __init__(self, root: Path):
         self.root = root
         self.packages: set[str] = set()
+        self.shadowed: dict[str, ModuleType] = {}
 
     def write(self, relpath: str, text: str) -> Path:
         path = self.root / relpath
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(text))
         top = relpath.split("/")[0]
-        if not top.endswith(".dist-info"):
+        if not top.endswith(".dist-info") and top not in self.packages:
             self.packages.add(top)
+            for mod in [m for m in sys.modules if m.split(".")[0] == top]:
+                self.shadowed[mod] = sys.modules.pop(mod)
+        importlib.invalidate_caches()
         return path
 
     def module(self, name: str, announcement: str) -> None:
@@ -89,6 +100,7 @@ def site(tmp_path, monkeypatch):
     for mod in list(sys.modules):
         if mod.split(".")[0] in s.packages:
             del sys.modules[mod]
+    sys.modules.update(s.shadowed)
     moxi.modules.reset()
 
 
