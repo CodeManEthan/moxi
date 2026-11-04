@@ -91,8 +91,8 @@ EXIT_BOUND_S = 5.0
 #: (a reload's SIGTERM met it, or the exit was held).
 NOT_EXITED = "not-exited"
 #: How many endpoints `sessions()` probes at once. Each probe is bounded by `CONNECT_S`
-#: and `READ_S`, so the endpoints that never answer cost a call about one bound while
-#: there are no more of them than this.
+#: and `READ_S`, so the endpoints that never answer cost a call about one bound for
+#: each this many of them.
 _PROBE_WORKERS = 8
 
 #: `moxi.ipc`'s hello codes.
@@ -967,12 +967,13 @@ def sessions() -> list[Session]:
     """Every live version 2 endpoint, newest first. Dead ones are swept; version 1
     directories are left alone and not listed.
 
-    The endpoints are probed at the same time, up to `_PROBE_WORKERS` at once, so one
-    that accepts a connection and never answers its hello holds the call for its own
-    bound and no longer. Every probe has ended, and its connection closed, when this
-    returns. A probe that raised raises here once all have ended, the newest
-    endpoint's first, and the sessions found are closed. An interrupt leaves the probes
-    under way to end within their bounds, closing what they find."""
+    The endpoints are probed at the same time, up to `_PROBE_WORKERS` at once, so up
+    to that many that accept a connection and never answer their hello hold the call
+    for one bound together; each further `_PROBE_WORKERS` of them adds a bound. Every
+    probe has ended, and its connection closed, when this returns. A probe that raised
+    raises here once all have ended, the newest endpoint's first, and the sessions found
+    are closed. An interrupt leaves the probes under way to end within their bounds,
+    closing what they find."""
     wanted = [(directory, hello) for directory, hello, version in _candidates()
               if version == 2]
     if not wanted:
