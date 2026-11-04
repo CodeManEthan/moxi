@@ -625,6 +625,14 @@ def test_comms_codex_follows_comms_interface(monkeypatch):
     assert not presets.comms_codex()
 
 
+def test_comms_codex_resume_follows_comms_constant(monkeypatch):
+    for api_, can in ((SimpleNamespace(CODEX_RESUME=True), True),
+                      (SimpleNamespace(CODEX_RESUME=False), False),
+                      (SimpleNamespace(), False), (None, False)):
+        monkeypatch.setattr(presets, "comms_api", lambda api_=api_: api_)
+        assert presets.comms_codex_resume() is can
+
+
 def test_links_follow_the_values(monkeypatch):
     got = resolve(typed={"target": "slot"}, available=only("turns", "slots"))
     assert got.links == {"turns", "slots"}

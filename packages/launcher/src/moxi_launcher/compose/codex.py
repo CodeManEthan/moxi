@@ -50,8 +50,10 @@ passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE
 
 A resume (`Context.resume`, the session id the Codex thread's) is the host's own
 `--resume THREAD_ID`, after the rows. Only the host resumes a thread: a resume in another
-mode, or with an identity (comms' Codex wrapper starts a new thread every launch), is
-refused.
+mode is refused. An explicit resume of a launch with a comms name continues its thread
+through comms' wrapper, which takes the same `--resume THREAD_ID` after its own flags; a
+comms whose wrapper can't resume a thread (`Context.comms_codex_resume` false) is
+refused. A relaunch, a repair and a recycle are not resumes, and start a new thread.
 """
 
 from __future__ import annotations
@@ -188,13 +190,14 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
 def _resumable(mode_: str, identity: str | None, ctx: Context) -> None:
     """Refuse a Codex resume that turns' host can't make: one with no thread id, one in a
-    mode other than `host`, or one with an identity."""
+    mode other than `host`, or one with an identity whose comms' Codex wrapper can't
+    resume a thread."""
     if not ctx.session_id:
         raise ValueError("a Codex resume needs the thread id it resumes")
-    if identity:
-        raise NotYet("identity", "comms' Codex wrapper starts a new thread at every launch, "
-                     "so a Codex launch with an identity can't be resumed",
-                     "resume it with codex resume, outside the launcher")
+    if identity and not ctx.comms_codex_resume:
+        raise NotYet("identity", "comms' Codex wrapper here can't resume a thread, so a "
+                     "Codex launch with an identity can't be resumed",
+                     "upgrade moxi-comms")
     if mode_ != "host":
         raise NotYet("resume", "only turns' Codex host resumes a Codex thread, and this "
                      f"launch runs in {mode_} mode",
