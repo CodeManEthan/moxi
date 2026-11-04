@@ -40,7 +40,8 @@ class Answer:
         return json.loads(self.body)
 
 
-def scope(method="POST", path="/mcp", *, host=HOST, headers=(), user_agent=CLAUDE):
+def scope(method="POST", path="/mcp", *, host=HOST, headers=(), user_agent=CLAUDE,
+          query: str = ""):
     pairs = []
     if host is not None:
         pairs.append((b"host", host.encode()))
@@ -49,14 +50,20 @@ def scope(method="POST", path="/mcp", *, host=HOST, headers=(), user_agent=CLAUD
     pairs.extend((k.lower().encode(), v.encode()) for k, v in headers)
     return {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
             "http_version": "1.1", "method": method, "scheme": "http", "path": path,
-            "raw_path": path.encode(), "query_string": b"", "root_path": "",
+            "raw_path": path.encode(), "query_string": query.encode(), "root_path": "",
             "headers": pairs, "server": ("127.0.0.1", 8452), "client": ("127.0.0.1", 50000)}
 
 
 async def request(app, method="POST", path="/mcp", body=None, *, host=HOST, headers=(),
-                  user_agent=CLAUDE, raw: bytes | None = None, send_fails=False) -> Answer:
+                  user_agent=CLAUDE, raw: bytes | None = None, send_fails=False,
+                  form: dict | None = None, query: dict | None = None) -> Answer:
     """One request through `app`. `send_fails` makes the server's send raise on the final
-    body, as a connection the client dropped does."""
+    body, as a connection the client dropped does. `form` sends a form-encoded body, as
+    an OAuth client does; `query` is the query string's fields."""
+    from urllib.parse import urlencode
+
+    if form is not None:
+        raw = urlencode(form).encode()
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None
                                         else b"")
     chunks = [data]
@@ -77,10 +84,12 @@ async def request(app, method="POST", path="/mcp", body=None, *, host=HOST, head
                 raise OSError("the client went away")
             out.body += message.get("body", b"")
 
-    extra = [("content-type", "application/json"),
-             ("accept", "application/json, text/event-stream"), *headers]
+    kind = "application/x-www-form-urlencoded" if form is not None else "application/json"
+    extra = [("content-type", kind), ("accept", "application/json, text/event-stream"),
+             *([("content-length", str(len(data)))] if form is not None else []), *headers]
     try:
-        await app(scope(method, path, host=host, headers=extra, user_agent=user_agent),
+        await app(scope(method, path, host=host, headers=extra, user_agent=user_agent,
+                        query=urlencode(query or {})),
                   receive, send)
     except OSError:
         if not send_fails:

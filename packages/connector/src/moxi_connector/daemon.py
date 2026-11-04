@@ -37,14 +37,14 @@ from importlib import metadata
 from moxi import aio, doctor
 from moxi import exit as codes
 
-from . import calllog, listen
+from . import calllog, grants, listen
 from .control import Control, Method
 from . import origin as origins
 from . import settings as connector_settings
 from .app import Front, Host, build_app
 from .providers import Registry
+from .oauth import OAuth
 from .server import Endpoint
-from .signin import Closed
 
 log = logging.getLogger("moxi.connector")
 
@@ -203,8 +203,11 @@ def main(argv: list[str] | None = None) -> int:
     calls = calllog.CallLog()
     with contextlib.suppress(Exception):
         calls.prune()
-    host = Host(Registry.from_group(), signin=Closed(), calllog=calls,
-                redirect_uris=tuple(values["redirect_uris"]), version=_version())
+    redirect_uris = tuple(values["redirect_uris"])
+    signin = OAuth(grants.Store(days=int(values["refresh_days"])), calls,
+                   redirect_uris=redirect_uris)
+    host = Host(Registry.from_group(), signin=signin, calllog=calls,
+                redirect_uris=redirect_uris, version=_version())
     daemon = Daemon(taken.sock, host, read_origin=_read_origin,
                     switch=connector_settings.enabled)
     return aio.run(lambda: _serve(daemon))

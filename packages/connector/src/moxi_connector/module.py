@@ -13,7 +13,7 @@ sign-in, and the tools other modules provide through the group
 #: `moxi.modules.load("connector", interface=1).api`, never by importing it.
 INTERFACES = frozenset({1})
 API = "moxi_connector.provider"
-#: `moxi connector`: on, off, status, check and log.
+#: `moxi connector`: on, off, status, check, log, grants and revoke.
 CLI = "moxi_connector.cli:main"
 SUMMARY = ("The public MCP door for the Claude apps: the listener, the sign-in, the address "
            "and the tools other modules provide.")

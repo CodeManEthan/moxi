@@ -6,8 +6,11 @@ import textwrap
 
 import pytest
 from kit import HOST, Admit, Fake, echo_tool, provider
+from signin_kit import CALLBACKS, Clock, Door
 
+from moxi_connector import grants
 from moxi_connector.app import Front, Host, build_app
+from moxi_connector.oauth import OAuth
 from moxi_connector.calllog import MemoryLog
 from moxi_connector.origin import Origin
 from moxi_connector.providers import Registry
@@ -62,3 +65,26 @@ def config_file():
         return path
 
     return write
+
+
+@pytest.fixture
+def clock() -> Clock:
+    return Clock()
+
+
+@pytest.fixture
+def door(make_host, clock):
+    """`await door(origin=ORIGIN)`: the door with the real sign-in over the grants file in
+    the test's own state directory, on a clock the test moves."""
+
+    async def make(origin=ORIGIN, **kw):
+        host = await make_host()
+        oauth = OAuth(grants.Store(), host.calllog, redirect_uris=CALLBACKS, clock=clock,
+                      **kw)
+        host.signin = oauth
+        host.redirect_uris = CALLBACKS
+        app = build_app(origin, host)
+        await app.start()
+        return Door(Front(app, host), oauth, clock)
+
+    return make

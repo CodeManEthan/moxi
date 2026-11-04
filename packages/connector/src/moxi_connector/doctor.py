@@ -68,10 +68,22 @@ class Grants:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
 
-def grants_view() -> Grants | None:
-    """The grants file, read for the grants row and `status`. None while there is no
-    sign-in to keep grants: the sign-in fills this in."""
-    return None
+def grants_view(origin: origins.Origin | None = None) -> Grants | None:
+    """The grants file, read for the grants row and `status`: the live grants, and how
+    many of them are stale under `origin` (O as the process would read it now). None
+    while there is no grants file, so a connector that never signed anyone in shows no
+    grants row."""
+    import time
+
+    from . import grants
+
+    store = grants.Store(days=int(connector_settings.load()["refresh_days"]))
+    if not store.exists():
+        return None
+    rows = grants.listing(store.view(), resource=origin.resource if origin else None,
+                          now=time.time(), days=store.days)
+    live = [r for r in rows if r["state"] == "live"]
+    return Grants(len(live), sum(1 for r in live if r["stale"]), rows)
 
 
 @dataclass
@@ -143,7 +155,7 @@ def take(*, ask: Callable[..., object] | None = None,
     last_check = next((r for r in reversed(rows) if r.get("kind") == "check"), None)
     last_call = next((r for r in reversed(rows) if r.get("kind") == "request"), None)
     try:
-        grants = grants_view()
+        grants = grants_view(found)
     except Exception:  # noqa: BLE001
         log.warning("the grants couldn't be read", exc_info=True)
         grants = None

@@ -98,8 +98,12 @@ def test_off_turns_off_even_when_the_revoke_fails(config_file, applied, no_tunne
     assert "couldn't be revoked" in err and "moxi connector revoke --all" in err
 
 
-def test_the_off_hook_is_a_no_op_until_the_sign_in_fills_it():
-    assert cli.revoke_every_grant() is None
+def test_the_off_hook_says_the_grants_are_revoked_and_writes_no_file_when_none(config_file):
+    from moxi_connector import grants
+
+    config_file("")
+    assert cli.revoke_every_grant() == cli.REVOKED_ALL
+    assert not grants.Store().exists()
 
 
 # -- status -------------------------------------------------------------------------------

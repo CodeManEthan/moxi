@@ -198,7 +198,7 @@ def test_a_good_entry_loads_its_provider(monkeypatch):
 
 # -- the seam rule: the host imports nothing of a provider --------------------------------
 
-_HOST_MAY_IMPORT = {"moxi", "mcp", "uvicorn", "jsonschema", "moxi_connector"}
+_HOST_MAY_IMPORT = {"moxi", "mcp", "uvicorn", "jsonschema", "starlette", "moxi_connector"}
 
 
 def _imports(path: Path) -> set[str]:

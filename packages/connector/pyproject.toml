@@ -23,8 +23,10 @@ classifiers = [
 # both required, since the door is the module's whole purpose. Their ranges are the ones
 # comms pins for its own tools, so one environment holds one of each. jsonschema, which
 # mcp brings anyway, checks a tool call's arguments against the provider's schema before
-# the provider sees them.
-dependencies = ["moxi>=0.1.3,<0.2", "mcp>=2.3,<3", "uvicorn>=0.54,<1", "jsonschema>=4.20,<5"]
+# the provider sees them. starlette, which mcp brings too, carries the SDK's OAuth handlers
+# and its authentication middleware, which the sign-in mounts itself.
+dependencies = ["moxi>=0.1.3,<0.2", "mcp>=2.3,<3", "uvicorn>=0.54,<1", "jsonschema>=4.20,<5",
+                "starlette>=1.10,<2"]
 
 [project.optional-dependencies]
 # The public address comes from tunnel's record of `connector/mcp`. Without tunnel the

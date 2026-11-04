@@ -881,6 +881,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "moxi" },
+    { name = "starlette" },
     { name = "uvicorn" },
 ]
 
@@ -901,6 +902,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3,<3" },
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-tunnel", marker = "extra == 'tunnel'", editable = "packages/tunnel" },
+    { name = "starlette", specifier = ">=1.10,<2" },
     { name = "uvicorn", specifier = ">=0.54,<1" },
 ]
 provides-extras = ["tunnel"]

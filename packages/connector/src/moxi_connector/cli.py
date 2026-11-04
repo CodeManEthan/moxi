@@ -5,12 +5,17 @@
     moxi connector status [--json]
     moxi connector check [--json]
     moxi connector log [--days N] [--json]
+    moxi connector grants [--json]
+    moxi connector revoke <id> | --all
 
 `on` sets the switch (the core writes and starts the daemon) and prints the next steps.
 `off` revokes every grant, then sets the switch false. `status` shows the address, the
 ports, the process, each provider with its tools and rows, the grants, the last call and
 every row of the doctor that isn't ok. `check` is the one networked check: a probe of the
-public address through the edge, run only when typed. `log` prints the call log.
+public address through the edge, run only when typed. `log` prints the call log. `grants`
+lists the sign-ins the grants file keeps; `revoke` revokes one, or every one with `--all`,
+which also drops every client, so Claude needs the connector added again. Both read and
+write the grants file itself, so they work with the process up or down.
 
 Exit codes: 0 ok; 1 the check failed, or a step went wrong; 2 usage; 3 refused (the
 connector is off, has no address, or its process doesn't answer). With `--json` a refusal
@@ -65,12 +70,31 @@ def _set_switch(value: bool, by: str) -> list[str]:
     return [line for line in lines.getvalue().splitlines() if line.strip()]
 
 
+REVOKED_ALL = ("Every grant is revoked, so the next sign-in needs a code from moxi "
+               "connector code.")
+
+
+def _store():
+    from . import grants, settings
+
+    return grants.Store(days=int(settings.load()["refresh_days"]))
+
+
+def _revoke_row(**fields: Any) -> None:
+    try:
+        calllog.event(calllog.CallLog(), "revoke", **fields)
+    except Exception as e:  # noqa: BLE001 - the revoke stands without its row
+        print(f"The revoke couldn't be written to the call log: {e}", file=sys.stderr)
+
+
 def revoke_every_grant() -> str | None:
     """Revoke every grant in the grants file, before `off` sets the switch false, so no
     grant stays valid behind a port nothing holds. Returns the line `off` prints about
-    it, or None when there is nothing to say. The sign-in fills this in; until then there
-    are no grants to revoke."""
-    return None
+    it. Raises when the file can't be written."""
+    count = _store().revoke_all(by="off")
+    if count:
+        _revoke_row(all=True, by="off", count=count)
+    return REVOKED_ALL
 
 
 def _on(args, out: TextIO) -> int:
@@ -247,10 +271,59 @@ def _log(args, out: TextIO) -> int:
     return codes.OK
 
 
+# -- grants and revoke -----------------------------------------------------------------------
+
+def _when(t: float | None) -> str:
+    return calllog.stamp(t)[:16].replace("T", " ") if t else "never"
+
+
+def _grants(args, out: TextIO) -> int:
+    import time
+
+    from . import grants
+
+    store = _store()
+    snap_origin = doctor.take(ask=_no_ask).origin
+    rows = grants.listing(store.view(), resource=snap_origin.resource if snap_origin else None,
+                          now=time.time(), days=store.days)
+    if args.json:
+        print(json.dumps(rows, indent=2), file=out)
+        return codes.OK
+    if not rows:
+        print("No grants. A sign-in from Claude makes one.", file=out)
+        return codes.OK
+    for r in rows:
+        state = r["state"] + (", stale" if r["stale"] else "")
+        print(f"{r['id']}  {r['label'] or '-'}  client {r['client_name'] or r['client']}  "
+              f"made {_when(r['made'])}  used {_when(r['used'])}  {state}", file=out)
+    if any(r["stale"] for r in rows):
+        print(doctor.STALE, file=out)
+    return codes.OK
+
+
+def _revoke(args, out: TextIO) -> int:
+    store = _store()
+    if args.all:
+        count = store.revoke_all(by="cli", drop_clients=True) if store.exists() else 0
+        _revoke_row(all=True, by="cli", count=count)
+        print(f"Every grant is revoked ({count} live) and every client is dropped. In "
+              "Claude, remove the connector and add it again.", file=out)
+        return codes.OK
+    if not args.id:
+        raise Refused("name a grant, or give --all", "moxi connector grants")
+    if not store.exists() or not store.revoke(args.id, by="cli"):
+        raise Refused(f"there is no grant {args.id}", "moxi connector grants")
+    _revoke_row(grant=args.id, by="cli")
+    print(f"Grant {args.id} is revoked; the next call with its tokens is answered 401.",
+          file=out)
+    return codes.OK
+
+
 # -- the parser and the dispatch -------------------------------------------------------------
 
 VERBS: dict[str, Callable[[argparse.Namespace, TextIO], int]] = {
     "on": _on, "off": _off, "status": _status, "check": _check, "log": _log,
+    "grants": _grants, "revoke": _revoke,
 }
 
 
@@ -281,6 +354,16 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, default=1, metavar="N",
                    help="today and the N-1 days before (default 1)")
     p.add_argument("--json", action="store_true", help="one JSON object per line")
+    p = verbs.add_parser("grants", help="the sign-ins the connector keeps",
+                         description="Each grant: id, label, client name, when made and "
+                                     "last used, and whether it is stale.")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p = verbs.add_parser("revoke", help="revoke a grant, or every grant",
+                         description="Revoke a grant in the grants file; the next call with "
+                                     "its tokens is answered 401. --all also drops every "
+                                     "client, so Claude needs the connector added again.")
+    p.add_argument("id", nargs="?", help="the grant's id, from moxi connector grants")
+    p.add_argument("--all", action="store_true", help="every grant, and every client")
     return parser
 
 
@@ -308,4 +391,4 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi connector") -> 
         return _fail(args, name, str(exc), exc.fix, exc.exit_code)
 
 
-__all__ = ["ADD_IN_CLAUDE", "Refused", "VERBS", "main", "revoke_every_grant"]
+__all__ = ["ADD_IN_CLAUDE", "REVOKED_ALL", "Refused", "VERBS", "main", "revoke_every_grant"]
