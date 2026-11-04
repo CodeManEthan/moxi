@@ -104,6 +104,33 @@ def test_no_window_reaches_the_host(tmp_path):
     assert read_host(launch)["window"] is False and not launch.window
 
 
+def test_a_named_launch_told_to_resume_passes_the_thread_to_the_host(tmp_path):
+    launch = plan(args("--name", NAME, "--model", "m", "--resume", "thread-old"),
+                  cwd=str(tmp_path))
+    assert read_host(launch)["resume"] == "thread-old" == launch.resume
+    i = launch.flags.index("--resume")
+    assert launch.flags[i + 1] == "thread-old"
+    assert "--resume" in launch.host_argv("host")
+    fresh = plan(args("--name", NAME), cwd=str(tmp_path))
+    assert fresh.resume is None and read_host(fresh)["resume"] is None
+    assert "--resume" not in fresh.flags
+
+
+def test_the_plan_says_whether_the_launch_resumes_a_thread(tmp_path):
+    import io
+
+    def said(*argv):
+        launch = plan(args("--name", NAME, *argv), cwd=str(tmp_path))
+        out = io.StringIO()
+        codex_wrapper.print_plan(launch, launch.host_argv("host"), out=out)
+        (line,) = [ln for ln in out.getvalue().splitlines()
+                   if ln.startswith("  thread     ")]
+        return line
+
+    assert said("--resume", "thread-old").endswith("(resumes thread thread-old)")
+    assert said().endswith("(a new thread at this launch)")
+
+
 def test_a_roster_launch_is_the_rows_flags_with_no_window(tmp_path, monkeypatch):
     from moxi_comms.adapters import codex_roster
 
@@ -133,6 +160,8 @@ def test_a_roster_launch_is_the_rows_flags_with_no_window(tmp_path, monkeypatch)
     (["--name", NAME, "--sandbox", "open"], "invalid choice"),
     (["--name", NAME, "--option", "no-equals"], "expected KEY=VALUE"),
     (["--name", NAME, "--director", "bad name"], "bad name"),
+    (["planner@proj-a", "--resume", "thread-old"], "--resume goes with --name"),
+    (["--name", NAME, "--resume", " "], "--resume names a thread id"),
 ])
 def test_a_launch_the_host_or_comms_refuses_is_refused_before_anything(
         tmp_path, capsys, argv, says):
@@ -281,6 +310,31 @@ def test_the_launch_binds_then_execs_the_host_which_keeps_the_pid(
     assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15), \
         "the adapter ends with the host"
     assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")), 10)
+
+
+def test_a_launch_told_to_resume_binds_the_name_to_that_thread(rig, fake_host):
+    """The host gets `--resume`, and the adapter bound the name to the thread before the
+    host started, as a resume and not a new session. A host that ends before its
+    session is ready takes the binding with it."""
+    proc = run_wrapper(fake_host, "--name", NAME, "--scope", "proj-a", "--no-window",
+                       "--resume", "thread-old")
+    try:
+        assert wait_until(lambda: fake_host.out.exists()
+                          and "layer-one" in fake_host.out.read_text(), timeout=20), \
+            proc.stderr.read() if proc.poll() is not None else "the host did not start"
+        (line,) = [ln for ln in fake_host.out.read_text().splitlines()
+                   if ln.startswith("args ")]
+        words = line.split()
+        assert words[words.index("--resume") + 1] == "thread-old"
+        with rig.daemon._lock:
+            binding = rig.daemon.bindings.get("coder@proj-a")
+        assert binding is not None
+        assert (binding.session_id, binding.new_session) == ("thread-old", False)
+    finally:
+        fake_host.release.touch()
+        proc.communicate(timeout=20)
+    assert proc.returncode == 0
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15)
 
 
 def test_a_held_name_is_refused_before_the_host_starts(rig, fake_host):

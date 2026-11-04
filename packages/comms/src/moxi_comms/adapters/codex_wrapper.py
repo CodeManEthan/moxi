@@ -4,7 +4,7 @@ Codex session with a comms identity, through turns' Codex host.
     moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
                      [--model M] [--sandbox MODE | --permissions PROFILE]
                      [--option KEY=VALUE]... [--options-file F]
-                     [--no-window] [--dry-run]
+                     [--resume THREAD_ID] [--no-window] [--dry-run]
 
     moxi-comms-codex IDENTITY [--config PATH] [--window] [--dry-run]
 
@@ -13,6 +13,14 @@ reads the same with or without comms. The second form is for an existing roster:
 the row IDENTITY names in the `[codex]` table of comms' config file (or of the file
 `--config` names, checked whole) and turns the row into the same flags, so there is one
 launch path. A roster launch runs with no window unless it asks for one.
+
+A launch starts a new thread unless it is told to resume one. `--resume THREAD_ID`, in
+the `--name` form only, goes to the host with the other settings, so the host resumes
+that thread (`thread/resume`) instead of starting one, and the adapter reports the
+launch as a resume of it, not as a new session. comms trusts the caller's id, as its
+Claude wrapper trusts `--resume U`: it keeps no history of a name's threads to check it
+against, and a thread Codex can't resume fails in turns' host, loudly, ending the
+launch. A roster launch always starts a new thread.
 
 What the wrapper does, in order:
 
@@ -263,6 +271,9 @@ class Launch:
     tools_url: str | None = None
     #: Why the session gets no comms tools, when `tools_url` is None.
     tools_why: str = ""
+    #: The thread the host resumes, as turns' parser read `--resume`, or None: the host
+    #: starts a new thread.
+    resume: str | None = None
 
     @property
     def dir(self) -> Path:
@@ -332,6 +343,8 @@ def settings_flags(args) -> list[str]:
         flags += ["--option", item]
     if args.options_file:
         flags += ["--options-file", args.options_file]
+    if args.resume is not None:
+        flags += ["--resume", args.resume]
     return flags
 
 
@@ -371,6 +384,8 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     if args.identity is not None:
         if args.name is not None:
             raise Refused("name the launch once: a roster IDENTITY or --name, not both")
+        if args.resume is not None:
+            raise Refused("--resume goes with --name: a roster launch starts a new thread")
         given = [flag for flag, value in (
             ("--scope", args.scope), ("--global", args.global_ or None),
             ("--director", args.director or None), ("--model", args.model),
@@ -406,10 +421,11 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     flags = settings + comms_flags(asked, write_root, network=tools_url is None)
     if not window:
         flags.append("--no-window")
-    options = launch_args(["--cwd", cwd, *flags])["options"]
-    return Launch(agent=agent, source=source, cwd=cwd, flags=flags, options=options,
-                  window=window, write_root=write_root, write_root_reason=reason,
-                  comms_path=own_comms(), tools_url=tools_url, tools_why=tools_why)
+    read = launch_args(["--cwd", cwd, *flags])
+    return Launch(agent=agent, source=source, cwd=cwd, flags=flags,
+                  options=read["options"], window=window, write_root=write_root,
+                  write_root_reason=reason, comms_path=own_comms(), tools_url=tools_url,
+                  tools_why=tools_why, resume=read["resume"])
 
 
 def reach_note(launch: Launch) -> str | None:
@@ -429,9 +445,11 @@ def print_plan(launch: Launch, host_line: list, out=None) -> None:
         print(text, file=out)
 
     agent, options = launch.agent, launch.options
+    thread = (f"resumes thread {launch.resume}" if launch.resume is not None
+              else "a new thread at this launch")
     plan_head(agent, SimpleNamespace(source=launch.source), say,
               record=f"  thread     {codex_threads_dir() / (agent.qualified + '.json')} "
-                     "(a new thread at this launch)")
+                     f"({thread})")
     settings = (options.get("config") or {}).get("sandbox_workspace_write") or {}
     if options.get("permissions"):
         say(f"  sandbox    profile {options['permissions']} (approvals never by turns)")
@@ -484,6 +502,9 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                       help="one Codex config override (KEY a TOML dotted key, VALUE TOML)")
     host.add_argument("--options-file", metavar="F",
                       help="a JSON object of thread parameters")
+    host.add_argument("--resume", metavar="THREAD_ID",
+                      help="resume this Codex thread instead of starting a new one "
+                           "(with --name)")
     host.add_argument("--no-window", action="store_true",
                       help="run no Codex window in this terminal")
     roster = ap.add_argument_group("a roster launch")
@@ -689,7 +710,7 @@ def _adapter_process(launch: Launch, env: dict, harness_pid: int, handle: int,
     say = teller(word_fd)
     adapter = CodexAdapter(launch.agent, harness_pid=harness_pid,
                            claim_socket=launch.claim_socket, comms_path=launch.comms_path,
-                           wait_when_held=False)
+                           wait_when_held=False, resume=launch.resume)
     try:
         return serve(adapter, handle, say=say)
     finally:
