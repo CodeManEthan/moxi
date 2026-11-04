@@ -52,9 +52,16 @@ def workspace(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "uv.calls"
-    uv = bin_dir / "uv"
-    uv.write_text(f'#!/bin/sh\necho "$PWD $*" >> {calls}\nexit "${{UV_EXIT:-0}}"\n')
-    uv.chmod(0o755)
+    if os.name == "nt":
+        # A batch file, which `shutil.which` finds by PATHEXT: a bare `uv` it never finds,
+        # so the real uv would run.
+        (bin_dir / "uv.cmd").write_text(
+            f'@echo off\n>>"{calls}" echo %CD% %*\n'
+            "if defined UV_EXIT exit /b %UV_EXIT%\nexit /b 0\n", newline="\r\n")
+    else:
+        uv = bin_dir / "uv"
+        uv.write_text(f'#!/bin/sh\necho "$PWD $*" >> {calls}\nexit "${{UV_EXIT:-0}}"\n')
+        uv.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.chdir(root)
     return root
@@ -72,7 +79,8 @@ def run(*argv: str) -> int:
 
 def rendered(root, module="sample") -> list[str]:
     package = root / "packages" / module
-    return sorted(str(p.relative_to(package)) for p in package.rglob("*") if p.is_file())
+    return sorted(p.relative_to(package).as_posix() for p in package.rglob("*")
+                  if p.is_file())
 
 
 # --- what it writes ---------------------------------------------------------------------
@@ -85,7 +93,8 @@ def test_it_writes_the_package_and_nothing_else(workspace, capsys):
     assert (package / "LICENSE").read_bytes() == LICENSE.read_bytes()
     assert (package / "README.md").read_text().startswith("# moxi-sample\n")
     out = capsys.readouterr().out.splitlines()
-    assert sorted(out[:-1]) == [f"packages/sample/{f}" for f in FILES]
+    # Each file is named as this system writes a path.
+    assert sorted(out[:-1]) == sorted(str(Path("packages/sample", f)) for f in FILES)
     assert out[-1] == ("pyproject.toml: packages/sample added to the workspace members "
                        "and sources")
 

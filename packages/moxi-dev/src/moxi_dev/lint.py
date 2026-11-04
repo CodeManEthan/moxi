@@ -99,7 +99,8 @@ def _members(paths: Iterable[Path], package: Path) -> dict[str, Path]:
         if path.resolve() == package.resolve():
             continue
         try:
-            name = tomllib.loads((path / "pyproject.toml").read_text())["project"]["name"]
+            name = tomllib.loads((path / "pyproject.toml").read_text(encoding="utf-8"))[
+                "project"]["name"]
         except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
             continue
         found[_normalize(str(name))] = path
