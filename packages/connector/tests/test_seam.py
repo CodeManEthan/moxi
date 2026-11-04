@@ -354,10 +354,17 @@ def test_setting_the_switch_applies_the_units_through_the_core(monkeypatch, conf
                        ("connector", "enabled")]
 
 
-def test_the_daemon_refuses_to_start_while_switched_off(capsys):
+def test_the_daemon_refuses_to_start_while_switched_off(capsys, monkeypatch):
+    import moxi.log
+
     from moxi_connector import daemon
 
+    # The daemon's own log setup puts a handler on the root logger; the test keeps it off,
+    # so no later test in this process finds the daemon's log on its stderr.
+    setups = []
+    monkeypatch.setattr(moxi.log, "setup", lambda *args, **kw: setups.append(args))
     assert daemon.main([]) == 3
+    assert setups == [("connector", "info")]
     assert "the connector is off" in capsys.readouterr().err
 
 
