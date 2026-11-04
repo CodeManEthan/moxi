@@ -15,9 +15,13 @@ the `site` fixture shows the tests no other installed module's daemons and timer
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import sqlite3
 import sys
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -152,6 +156,52 @@ def test_an_unexpected_failure_is_state_error_naming_only_its_class(monkeypatch)
     listed = read("/api/rows")
     assert listed["state"] == "error"
     assert "RuntimeError" in listed["detail"] and "secret" not in listed["detail"]
+
+
+def _garbage(store_path):
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_bytes(b"not a database " * 512)
+
+
+def _too_new(store_path):
+    store.write(lambda conn: None)
+    conn = sqlite3.connect(store_path)
+    conn.execute(f"PRAGMA user_version = {store.VERSION + 1}")
+    conn.commit()
+    conn.close()
+
+
+@pytest.mark.parametrize(("spoil", "says"), [
+    (_garbage, pagehandlers.STORE_UNREADABLE),
+    (_too_new, pagehandlers.STORE_TOO_NEW),
+    (None, "no service is named web; fix: `moxi services list` shows every row's id"),
+], ids=["unreadable", "too-new", "no-row"])
+def test_no_refusal_the_gateway_can_reach_names_the_store_or_the_home(store_path, caplog,
+                                                                      spoil, says):
+    """The gateway passes a refusal's text to the phone as it is, so none names a file."""
+    if spoil is not None:
+        spoil(store_path)
+    hidden = {str(store_path), str(store_path.parent), os.environ["HOME"],
+                str(Path.home())}
+    reached = [r for r in page.PAGE.routes if r.gateway and not r.stream]
+    answers: dict[str, tuple[int, dict | None]] = {}
+    for n, route in enumerate(reached):
+        if route.kind == "read":
+            query = "&".join(f"{k}={'web' if k == 'id' else 'x'}" for k in route.query)
+            answers[route.path] = get(route.path, query)
+        else:
+            answers[route.path] = post(route.path, {"id": "web"}, key=f"{n:043d}")
+    for path, (status, body) in answers.items():
+        if 400 <= status < 500:
+            text = json.dumps(body)
+            assert not any(s in text for s in hidden), (path, text)
+    row_routes = [r.path for r in reached if r.path == "/api/row" or r.confirmed]
+    assert len(row_routes) == 7, row_routes
+    for path in row_routes:
+        assert answers[path] == (422, {"refused": says}), (path, answers[path])
+    if spoil is not None:
+        logged = [r for r in caplog.records if r.name == "moxi.services.page"]
+        assert len(logged) == 1 and str(store_path) in logged[0].getMessage(), logged
 
 
 def test_row_gives_one_row_with_its_runs_and_log():

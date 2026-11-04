@@ -36,6 +36,9 @@ status route gives its state, lines and fix.
   splits them.
 - A refusal is answered as the verb's exit code says: exit 2 and 3 are a 422 whose text is
   the reason and the fix, and a store locked past the wait (exit 75) is a 409, try again.
+- A store that can't be read, or that a newer services wrote, is a 422 with a fixed
+  sentence that names no file: the gateway passes a refusal's text to the phone as it
+  is, and the store's reason carries its full path. The full text is logged once.
 
 **The status route** reads the job's record; for a job this server holds no record of
 (after a restart, or one never sent) it answers `unknown`, "no record of this act; the
@@ -73,7 +76,7 @@ from moxi import modules
 
 from . import acts, jobs, rows, state, store, verdict
 from .cli import split_command
-from .errors import Busy, ServicesError
+from .errors import Busy, ServicesError, TooNew, Unreadable
 from .page import STATUS_ROUTE, TOPIC, lb
 from .rows import MODULE, ModuleRow, UserRow
 
@@ -92,6 +95,12 @@ KEY_REUSED = "this Idempotency-Key was used for another request"
 #: A timer's start and restart, and a daemon's run.
 TIMER_RUNS = "a timer runs through /api/run"
 DAEMON_STARTS = "/api/run runs a timer; a daemon starts through /api/start"
+#: What a read of one row or an act is told when services' store can't be read, or a
+#: newer services wrote it. Neither names the file.
+STORE_UNREADABLE = ("services' store can't be read; fix: `moxi services list` on this "
+                    "machine names the file and how to fix it")
+STORE_TOO_NEW = ("services' store was written by a newer moxi-services; fix: upgrade it "
+                 "with `moxi install services`")
 
 log = logging.getLogger("moxi.services.page")
 
@@ -113,9 +122,13 @@ def _text(exc: ServicesError) -> str:
 
 def _answer(exc: ServicesError) -> Exception:
     """The page's answer to a refusal: 409 for a lock or store busy past the wait (exit
-    75), else 422, with the reason and the fix."""
+    75), else 422, with the reason and the fix. A store that can't be read or is too new
+    gets a fixed sentence naming no file, its full text logged once."""
     if isinstance(exc, Busy):
         return lb.Conflict(_text(exc))
+    if isinstance(exc, Unreadable):
+        _log_once(exc, f"services' store couldn't be read: {_text(exc)}")
+        return lb.Refused(STORE_TOO_NEW if isinstance(exc, TooNew) else STORE_UNREADABLE)
     return lb.Refused(_text(exc))
 
 
