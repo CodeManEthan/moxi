@@ -1,40 +1,70 @@
-"""The call log's writer interface: what the door hands each row to.
+"""The call log: one JSON object per line, one file per UTC day.
 
-The door builds its rows (`moxi_connector.app`) and gives each one to a `CallLog`:
+    STATE/connector/calls/<YYYY-MM-DD>.jsonl     the directory 0700, each file 0600
+
+The door builds its rows (`moxi_connector.app`) and gives each one to a `Writer`:
 
     write(row, *, durable, collapse)
 
-- `row` is a flat mapping of plain values, already checked against `FORBIDDEN`, with
-  `at` (UTC, ISO 8601) and `kind` (`request`, or a sign-in event's name, or
-  `tool-error`, or `origin-changed`);
-- `durable` is True for rows of tool calls with a valid sign-in and for events: they must
-  be on disk when `write` returns;
+- `row` is a flat mapping of plain values with `at` (UTC, ISO 8601, to the millisecond)
+  and `kind` (`request`, a sign-in event's name, `tool-error`, `origin-changed`, or
+  `check`, the last `moxi connector check`);
+- `durable` is True for rows of tool calls with a valid sign-in and for events: they are
+  on disk when `write` returns. Request rows are not, so a power loss can lose the last
+  second of those;
 - `collapse` is None, or the class name of a row a caller without a token can cause (a
-  401, 404, 405, 421, 429 or 503 with no grant): the writer may fold those past a rate
-  into one summary row with a count.
+  401, 404, 405, 421, 429 or 503 with no grant).
 
 `flush()` is called every 30 s and `close()` at the process's stop.
 
-`MemoryLog` keeps the rows in memory; it is the process's writer until the day files are
-built on the core's `append_record` options, and the tests' writer after. A writer
-refuses a row holding a `FORBIDDEN` name, at any depth, with `ValueError`, and writes
-nothing of it.
+`CallLog` is the process's writer, built on the core's `moxi.files.append_record`:
+
+- **No secrets.** Every row goes through `append_record`'s `refuse` option with
+  `FORBIDDEN`: a row holding one of those names as a key, at any depth, raises
+  `ValueError` and writes nothing. A provider's `ctx.log` fields pass the same refusal.
+- **Nothing always-written is lost.** `max_bytes=None`, so a file never rolls. The only
+  thing that removes a row is the deletion of files older than `RETAIN_DAYS`, at start
+  (`prune()`, which the daemon calls before it serves) and at each UTC midnight (the first
+  write or flush of a new day).
+- **The day is bounded.** A collapsed row goes through `append_record`'s `collapse`
+  option with the writer's one `moxi.files.Collapse`: past `COLLAPSE_AFTER` rows of one
+  class in a minute the rest of that minute become one `summary` row with their count, and
+  once the day's file holds `DAY_CAP` bytes those classes write one summary an hour.
+
+`MemoryLog` keeps the rows in memory, for tests. `read_rows` reads the day files back, for
+`moxi connector log`, `status` and the doctor.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
+import json
+import logging
+import os
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from pathlib import Path
 from typing import Any, Protocol
 
 from .provider import FORBIDDEN, refused_field
 
+log = logging.getLogger("moxi.connector.calllog")
+
+MODULE = "connector"
+#: The store's directory, under the module's state directory.
+CALLS_DIR = "calls"
+#: Days of files kept; older ones are deleted at start and at each UTC midnight.
+RETAIN_DAYS = 30
+#: Rows of one collapsed class written in a minute before the rest are counted.
+COLLAPSE_AFTER = 10
+#: Past this many bytes in a day's file, collapsed classes write one summary an hour.
+DAY_CAP = 64 * 1024 * 1024
 #: Status codes a caller without a token can cause; their rows are collapsed by class.
 COLLAPSED_STATUSES = frozenset({401, 404, 405, 421, 429, 503})
 
 
-class CallLog(Protocol):
+class Writer(Protocol):
     def write(self, row: Mapping[str, Any], *, durable: bool,
               collapse: str | None) -> None: ...
 
@@ -45,8 +75,28 @@ class CallLog(Protocol):
 
 def now() -> str:
     """The time for a row's `at`: UTC, to the millisecond."""
-    t = time.time()
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 1000):03d}Z"
+    return stamp(time.time())
+
+
+def stamp(t: float) -> str:
+    """`t` as a row writes it: `2026-11-04T10:44:00.250Z`."""
+    return _utc(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _utc(t: float) -> _dt.datetime:
+    return _dt.datetime.fromtimestamp(t, _dt.UTC)
+
+
+def day(t: float) -> str:
+    """The UTC date of `t`, the name of its day file without `.jsonl`."""
+    return _utc(t).strftime("%Y-%m-%d")
+
+
+def calls_dir(env: Mapping[str, str] | None = None) -> Path:
+    """The call log's directory, `STATE/connector/calls`."""
+    from moxi.paths import Layout
+
+    return Layout(MODULE).state_dir(env) / CALLS_DIR
 
 
 def check(row: Mapping[str, Any]) -> None:
@@ -56,8 +106,86 @@ def check(row: Mapping[str, Any]) -> None:
         raise ValueError(f"the call log refuses the field {bad!r}")
 
 
+class CallLog:
+    """The day-file writer, one per process. Thread-safe: `append_record` writes each
+    line with one call, and the collapse keeps its own lock.
+
+    `directory` defaults to `calls_dir()`; `clock` gives seconds since the epoch and
+    names the day file a row goes to."""
+
+    def __init__(self, directory: str | os.PathLike | None = None, *,
+                 clock: Callable[[], float] = time.time):
+        from moxi import files
+
+        self.dir = Path(directory) if directory is not None else calls_dir()
+        self._clock = clock
+        self.window = files.Collapse(COLLAPSE_AFTER, DAY_CAP, clock=clock)
+        self._made = False
+        self._lock = threading.Lock()
+        self._pruned: str | None = None
+
+    def path(self, t: float | None = None) -> Path:
+        """The day file of `t` (now, with none)."""
+        return self.dir / f"{day(self._clock() if t is None else t)}.jsonl"
+
+    def write(self, row: Mapping[str, Any], *, durable: bool, collapse: str | None) -> None:
+        from moxi import files
+
+        t = self._clock()
+        self._new_day(t)
+        if not self._made:
+            files.private_dir(self.dir)
+            self._made = True
+        files.append_record(self.path(t), dict(row), max_bytes=None, durable=durable,
+                            refuse=FORBIDDEN,
+                            collapse=(self.window, collapse) if collapse else None)
+
+    def flush(self) -> None:
+        """Write the summaries of the windows that have ended, of every day's file; at
+        the first flush of a UTC day, delete the files past `RETAIN_DAYS`."""
+        self.window.flush()
+        self._new_day(self._clock())
+
+    def close(self) -> None:
+        """Write every pending summary."""
+        self.window.close()
+
+    def _new_day(self, t: float) -> None:
+        today = day(t)
+        if self._pruned == today:
+            return
+        with self._lock:
+            if self._pruned == today:
+                return
+            self._pruned = today
+        self.prune(t)
+
+    def prune(self, t: float | None = None) -> list[str]:
+        """Delete the day files older than `RETAIN_DAYS` days before `t` (now), and
+        return their names. Today's file and the 29 before it are kept."""
+        if t is None:
+            t = self._clock()
+            self._pruned = day(t)
+        oldest = (_utc(t).date() - _dt.timedelta(days=RETAIN_DAYS - 1)).isoformat()
+        gone: list[str] = []
+        try:
+            names = os.listdir(self.dir)
+        except OSError:
+            return gone
+        for name in sorted(names):
+            stem, dot, suffix = name.partition(".")
+            if suffix == "jsonl" and dot and is_day(stem) and stem < oldest:
+                try:
+                    os.unlink(self.dir / name)
+                    gone.append(name)
+                except OSError:
+                    log.warning("the call log file %s can't be deleted", name,
+                                exc_info=True)
+        return gone
+
+
 class MemoryLog:
-    """A `CallLog` that keeps every row in memory, with what it was written with."""
+    """A `Writer` that keeps every row in memory, with what it was written with."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -83,9 +211,59 @@ class MemoryLog:
         self.closed = True
 
 
-def event(log: CallLog, kind: str, **fields: Any) -> None:
+def event(log_: Writer, kind: str, **fields: Any) -> None:
     """Write one event row, durable and never collapsed."""
-    log.write({"at": now(), "kind": kind, **fields}, durable=True, collapse=None)
+    log_.write({"at": now(), "kind": kind, **fields}, durable=True, collapse=None)
 
 
-__all__ = ["COLLAPSED_STATUSES", "CallLog", "MemoryLog", "check", "event", "now"]
+def is_day(text: str) -> bool:
+    """Whether `text` is a `YYYY-MM-DD` date."""
+    try:
+        _dt.date.fromisoformat(text)
+    except ValueError:
+        return False
+    return len(text) == 10
+
+
+def read_rows(*, days: int = 1, now: float | None = None,
+              directory: str | os.PathLike | None = None) -> Iterator[dict[str, Any]]:
+    """The rows of today's file and the `days - 1` days before it, oldest first. A line
+    that isn't a JSON object is skipped."""
+    when = _utc(time.time() if now is None else now).date()
+    folder = Path(directory) if directory is not None else calls_dir()
+    for back in range(max(days, 1) - 1, -1, -1):
+        path = folder / f"{(when - _dt.timedelta(days=back)).isoformat()}.jsonl"
+        try:
+            handle = path.open("rb")
+        except OSError:
+            continue
+        with handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict):
+                    yield row
+
+
+def last(kinds: Iterable[str], *, days: int = 2, now: float | None = None,
+         directory: str | os.PathLike | None = None) -> dict[str, Any] | None:
+    """The latest row of one of `kinds` in `days` days, or None."""
+    wanted = frozenset(kinds)
+    found = None
+    for row in read_rows(days=days, now=now, directory=directory):
+        if row.get("kind") in wanted:
+            found = row
+    return found
+
+
+def detail(row: Mapping[str, Any]) -> str:
+    """A row's fields but `at` and `kind`, as `key=value` in key order, None left out."""
+    return " ".join(f"{key}={row[key]}" for key in sorted(row)
+                    if key not in ("at", "kind") and row[key] is not None)
+
+
+__all__ = ["CALLS_DIR", "COLLAPSED_STATUSES", "COLLAPSE_AFTER", "CallLog", "DAY_CAP",
+           "MemoryLog", "RETAIN_DAYS", "Writer", "calls_dir", "check", "day", "detail",
+           "event", "is_day", "last", "now", "read_rows", "stamp"]

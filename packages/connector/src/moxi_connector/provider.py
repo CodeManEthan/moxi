@@ -1,5 +1,9 @@
 """What a module gives the connector to serve its tools, and what the connector gives each
-call. The one part of the connector a provider imports.
+call: the connector's interface 1, the one part of it a provider reaches.
+
+A provider that has the connector only through an extra reaches this module through
+`moxi.modules.load("connector", interface=1).api`, the way any module reaches an optional
+one, and never imports it at its own import time.
 
 A module offers a provider as an entry of the group `moxi.connector.providers`, named by
 the module and pointing at a `Provider` in its package:

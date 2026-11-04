@@ -7,13 +7,16 @@ refuses and exits 3.
 What one run does, in order:
 
 1. takes its listening socket (`listen.take`): the socket unit's, else its own bound on
-   `port`. A port it can't have stops it, with a doctor record naming why;
-2. loads every provider of `moxi.connector.providers` and runs each start (`Registry`);
-3. reads the origin and builds the app from it (`origin.read`, `app.build_app`), then
+   `port`. A port it can't have stops it, with a doctor record naming why. Deletes the
+   call log's files past 30 days;
+2. serves its control socket (`control.Control`), so `status` answers from here on;
+3. loads every provider of `moxi.connector.providers` and runs each start (`Registry`);
+4. reads the origin and builds the app from it (`origin.read`, `app.build_app`), then
    serves it (`server.Endpoint`);
-4. every `origin.POLL` seconds reads the origin again and swaps the app when the swap
-   rule says so (`origin.Watch`), and flushes the call log;
-5. at SIGTERM, SIGINT or SIGHUP: stops listening, stops the apps, reads the switch again
+5. every `origin.POLL` seconds reads the origin again and swaps the app when the swap
+   rule says so (`origin.Watch`), and flushes the call log (which also deletes old files
+   at the first flush of a UTC day);
+6. at SIGTERM, SIGINT or SIGHUP: stops listening, closes the control socket, stops the apps, reads the switch again
    and tells the sign-in (`SignIn.stopping(switch_on)`), stops the providers, closes the
    call log.
 
@@ -28,13 +31,14 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from importlib import metadata
 
 from moxi import aio, doctor
 from moxi import exit as codes
 
 from . import calllog, listen
+from .control import Control, Method
 from . import origin as origins
 from . import settings as connector_settings
 from .app import Front, Host, build_app
@@ -53,12 +57,16 @@ class Daemon:
     """The door on one listening socket, run on the caller's loop.
 
     `read_origin()` gives O now (blocking: it reads the config file and tunnel's record);
-    `switch()` the daemon switch now."""
+    `switch()` the daemon switch now. `methods` are control-socket methods beyond the
+    door's own (`control.Control`); `control_address` serves the control socket somewhere
+    other than its usual address (tests)."""
 
     def __init__(self, sock, host: Host, *,
                  read_origin: Callable[[], origins.Origin | None],
                  switch: Callable[[], bool], poll: float = origins.POLL,
-                 env: dict[str, str] | None = None):
+                 env: dict[str, str] | None = None,
+                 methods: Mapping[str, Method] | None = None,
+                 control_address: str | None = None):
         self.sock = sock
         self.host = host
         self.read_origin = read_origin
@@ -69,8 +77,10 @@ class Daemon:
         self.endpoint: Endpoint | None = None
         self.watch: origins.Watch | None = None
         self._poller: asyncio.Task | None = None
+        self.control = Control(self, methods, address=control_address)
 
     async def start(self) -> None:
+        await self.control.start()
         await self.host.registry.start(self.env)
         found = await _blocking(self.read_origin)
         self.watch = origins.Watch(found)
@@ -113,6 +123,8 @@ class Daemon:
                 await self._poller
         if self.endpoint is not None:
             await self.endpoint.stop()
+        with contextlib.suppress(Exception):
+            await self.control.stop()
         if self.front is not None:
             await self.front.close()
         try:
@@ -188,7 +200,10 @@ def main(argv: list[str] | None = None) -> int:
         return codes.ERROR
     with contextlib.suppress(Exception):
         doctor.clear(MODULE, LISTEN_RECORD)
-    host = Host(Registry.from_group(), signin=Closed(), calllog=calllog.MemoryLog(),
+    calls = calllog.CallLog()
+    with contextlib.suppress(Exception):
+        calls.prune()
+    host = Host(Registry.from_group(), signin=Closed(), calllog=calls,
                 redirect_uris=tuple(values["redirect_uris"]), version=_version())
     daemon = Daemon(taken.sock, host, read_origin=_read_origin,
                     switch=connector_settings.enabled)
