@@ -82,7 +82,7 @@ class Comms:
 
     def status(self):
         if self.link is None:
-            return [self.api.StatusRow("comms identity", "warn", "not started")]
+            return [self.api.StatusRow("identity", "warn", "not started")]
         return [self.api.StatusRow(*row) for row in self.link.status()]
 
     def tool(self, name: str):

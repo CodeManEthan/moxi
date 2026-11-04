@@ -319,14 +319,16 @@ class Link:
 
     # ---------------------------------------------------------------- status
     def status(self) -> list[tuple[str, str, str]]:
+        """The provider's rows. The connector shows each under the provider's module
+        name, so a row is named without it: `identity` reads as `comms identity`."""
         with self._lock:
             state, detail = self.state, self.detail
             provisioned = self.provisioned
         level = {BOUND: "ok", STARTING: "warn", OFFLINE: "warn", HELD: "fail",
                  REFUSED: "fail", STOPPED: "warn"}[state]
-        rows = [("comms identity", level, detail or f"{self.identity}: {state}")]
+        rows = [("identity", level, detail or f"{self.identity}: {state}")]
         if provisioned is False:
-            rows.append(("comms standing name", "warn",
+            rows.append(("standing name", "warn",
                          f"{self.identity} isn't provisioned as a standing name, so its "
                          "mail doesn't wait while the connector is down; see the log"))
         return rows
