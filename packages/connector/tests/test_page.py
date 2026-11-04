@@ -19,7 +19,7 @@ from signin_kit import CALLBACK, CALLBACKS, Clock, pending_of, pkce, query_of
 from moxi_connector import cli, codes, grants
 from moxi_connector.oauth import (CAPS, OAuth, PENDING_MAX, PENDING_MISSES,
                                   TOO_MANY_PENDING, UNKNOWN_CLIENT)
-from moxi_connector.page import DROPPED, FORBIDDEN_POST, GET_A_CODE, GONE
+from moxi_connector.page import DROPPED, FORBIDDEN_POST, GET_A_CODE, GONE, SLOW_DOWN
 from moxi_connector.provider import Gate
 
 CODE_SHAPE = re.compile(r"[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}")
@@ -31,6 +31,17 @@ def run(coro):
 
 def kinds(rows, kind):
     return [r for r in rows if r.get("kind") == kind]
+
+
+def assert_the_pages_headers(got) -> None:
+    """The headers every answer of the sign-in page carries."""
+    assert got.header("cache-control") == "no-store"
+    assert got.header("referrer-policy") == "same-origin"
+    assert got.header("x-content-type-options") == "nosniff"
+    csp = got.header("content-security-policy")
+    nonce = re.search(r"style-src 'nonce-([^']+)'", csp).group(1)
+    assert csp == (f"default-src 'none'; style-src 'nonce-{nonce}'; form-action 'self' "
+                   "https://claude.ai https://claude.com; frame-ancestors 'none'")
 
 
 # -- GET /authorize ---------------------------------------------------------------------------
@@ -166,6 +177,9 @@ def test_get_authorize_is_capped_per_minute(door, clock):
             assert (await d.authorize({"client_id": "nobody"})).status == 400
         over = await d.authorize({"client_id": "nobody"})
         assert over.status == 429 and over.header("retry-after") == "60"
+        assert over.header("content-type") == "text/html; charset=utf-8"
+        assert_the_pages_headers(over)
+        assert SLOW_DOWN.encode() in over.body
         clock.advance(60)
         assert (await d.authorize({"client_id": "nobody"})).status == 400
         await d.close()
@@ -358,6 +372,7 @@ def test_post_authorize_is_capped_per_minute(door, clock):
             assert (await d.finish("none", "x")).status == 400
         over = await d.finish("none", "x")
         assert over.status == 429 and over.header("retry-after") == "60"
+        assert_the_pages_headers(over)
         await d.close()
     run(main())
 

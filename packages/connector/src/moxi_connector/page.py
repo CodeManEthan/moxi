@@ -31,7 +31,8 @@ removed, HTML-escaped, and labelled as the name the client gave itself.
 **Headers agree with browsers.** Every answer carries `Cache-Control: no-store`, a CSP of
 `default-src 'none'; style-src 'nonce-<n>'; form-action <O and each allowed callback's
 origin>; frame-ancestors 'none'`, `Referrer-Policy: same-origin` and
-`X-Content-Type-Options: nosniff`. `form-action` names the callbacks because Chromium
+`X-Content-Type-Options: nosniff`; so does the 429 past the minute's cap, which the
+sign-in answers with `slow_down(under)`. `form-action` names the callbacks because Chromium
 applies it to the redirect after the form's POST, and `same-origin` keeps `Origin` on the
 form's own POST (under `no-referrer` Chromium sends `Origin: null`).
 """
@@ -66,6 +67,8 @@ GET_A_CODE = ("Run moxi connector code in your own terminal, outside every agent
               "and type the code it prints.")
 TOO_BIG = "This form is too large."
 REPEATED = "a parameter appears more than once"
+SLOW_DOWN = ("Too many sign-in requests reached the connector this minute. Try again in a "
+             "minute.")
 
 _STYLE = """body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:2rem auto;
 padding:0 1rem;color:#1a1a1a;background:#fafafa}
@@ -77,31 +80,50 @@ padding:.3rem;text-transform:uppercase;border:1px solid #888;border-radius:4px}
 button{font-size:1rem;padding:.4rem 1.2rem;margin-left:.5rem}"""
 
 
+def _page_headers(form_action: str, nonce: str) -> list[tuple[bytes, bytes]]:
+    """The headers every answer of the page carries."""
+    csp = (f"default-src 'none'; style-src 'nonce-{nonce}'; form-action {form_action}; "
+           "frame-ancestors 'none'")
+    return [(b"cache-control", b"no-store"),
+            (b"content-security-policy", csp.encode()),
+            (b"referrer-policy", b"same-origin"),
+            (b"x-content-type-options", b"nosniff")]
+
+
+async def _show(send, form_action: str, status: int, title: str, body: str, *,
+                extra: tuple[tuple[bytes, bytes], ...] = ()) -> None:
+    nonce = secrets.token_urlsafe(16)
+    text = (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{html.escape(title)}</title>"
+            f'<style nonce="{nonce}">{_STYLE}</style></head>'
+            f"<body><h1>{html.escape(title)}</h1>{body}</body></html>").encode()
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"text/html; charset=utf-8"),
+                            (b"content-length", str(len(text)).encode()),
+                            *_page_headers(form_action, nonce), *extra]})
+    await send({"type": "http.response.body", "body": text})
+
+
+def slow_down(under: Under):
+    """The answer at `/authorize` past the minute's cap: 429 with `Retry-After: 60`, as a
+    page of the sign-in page's own, with its headers."""
+    form_action = under.origin.form_action(under.oauth.redirect_uris)
+
+    async def app(scope, receive, send) -> None:
+        await _show(send, form_action, 429, "Sign-in refused",
+                    f"<p>{_text(SLOW_DOWN)}</p>", extra=((b"retry-after", b"60"),))
+
+    return app
+
+
 def page(under: Under):
     """The `/authorize` app under `under`'s origin."""
     oauth = under.oauth
     form_action = under.origin.form_action(oauth.redirect_uris)
 
-    def headers(nonce: str) -> list[tuple[bytes, bytes]]:
-        csp = (f"default-src 'none'; style-src 'nonce-{nonce}'; form-action {form_action}; "
-               "frame-ancestors 'none'")
-        return [(b"cache-control", b"no-store"),
-                (b"content-security-policy", csp.encode()),
-                (b"referrer-policy", b"same-origin"),
-                (b"x-content-type-options", b"nosniff")]
-
     async def show(send, status: int, title: str, body: str) -> None:
-        nonce = secrets.token_urlsafe(16)
-        text = (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-                f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-                f"<title>{html.escape(title)}</title>"
-                f'<style nonce="{nonce}">{_STYLE}</style></head>'
-                f"<body><h1>{html.escape(title)}</h1>{body}</body></html>").encode()
-        await send({"type": "http.response.start", "status": status,
-                    "headers": [(b"content-type", b"text/html; charset=utf-8"),
-                                (b"content-length", str(len(text)).encode()),
-                                *headers(nonce)]})
-        await send({"type": "http.response.body", "body": text})
+        await _show(send, form_action, status, title, body)
 
     async def refused(send, status: int, text: str) -> None:
         await show(send, status, "Sign-in refused", f"<p>{_text(text)}</p>")
@@ -109,7 +131,7 @@ def page(under: Under):
     async def redirect(send, url: str) -> None:
         await send({"type": "http.response.start", "status": 303,
                     "headers": [(b"location", url.encode()), (b"content-length", b"0"),
-                                *headers(secrets.token_urlsafe(16))]})
+                                *_page_headers(form_action, secrets.token_urlsafe(16))]})
         await send({"type": "http.response.body", "body": b""})
 
     async def form(send, status: int, pid: str, *, said: str | None = None) -> None:
@@ -248,4 +270,4 @@ async def _read(receive, limit: int) -> bytes | None:
 
 
 __all__ = ["DROPPED", "FORBIDDEN_POST", "GET_A_CODE", "GONE", "MAX_FORM", "NAME_MAX",
-           "WRONG", "page", "shown_name"]
+           "SLOW_DOWN", "WRONG", "page", "shown_name", "slow_down"]

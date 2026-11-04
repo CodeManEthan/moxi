@@ -36,7 +36,8 @@ grant lives `refresh_days` from its last refresh. A grant whose resource is not 
 O/mcp is stale and answered 401 until O comes back.
 
 **Limits on callers without a token**, per minute: 10 registrations, 20 `GET /authorize`,
-20 `POST /authorize`, 60 `POST /token`. Past a cap the answer is 429.
+20 `POST /authorize`, 60 `POST /token`. Past a cap the answer is 429; at `/authorize` it
+is a page with the sign-in page's headers (`moxi_connector.page.slow_down`).
 
 **The page's entry.** The sign-in page (`OAuth.page`, a factory of the ASGI app for
 `/authorize` under one `Under`) checks a request with `Under.check(params)`, keeps it with
@@ -468,14 +469,17 @@ class Under:
         token = TokenHandler(self.provider, self.authenticator)
         revoke = RevocationHandler(self.provider, self.authenticator)
         page = oauth.page(self)
+        from .page import slow_down
+        over = slow_down(self)
         routes = {
             PRM_PATH: methods({"GET": _json_app(self.resource_document())}),
             ASM_PATH: methods({"GET": request_response(MetadataHandler(self.metadata())
                                                        .handle)}),
             "/register": methods({"POST": limited(limits, "register",
                                                   _sdk(registration.handle))}),
-            "/authorize": methods({"GET": limited(limits, "authorize-get", page),
-                                   "POST": limited(limits, "authorize-post", page)}),
+            "/authorize": methods({"GET": limited(limits, "authorize-get", page, over=over),
+                                   "POST": limited(limits, "authorize-post", page,
+                                                   over=over)}),
             "/token": methods({"POST": limited(limits, "token", _sdk(token.handle))}),
             "/revoke": methods({"POST": _sdk(revoke.handle)}),
         }
@@ -705,11 +709,16 @@ def methods(table: Mapping[str, ASGIApp]) -> ASGIApp:
     return app
 
 
-def limited(limits: Limits, kind: str, inner: ASGIApp) -> ASGIApp:
-    """`inner`, past the minute's cap for `kind` answered 429."""
+def limited(limits: Limits, kind: str, inner: ASGIApp, *,
+            over: ASGIApp | None = None) -> ASGIApp:
+    """`inner`, past the minute's cap for `kind` answered by `over`, by default a plain
+    429 with `Retry-After: 60`."""
 
     async def app(scope, receive, send) -> None:
         if not limits.take(kind):
+            if over is not None:
+                await over(scope, receive, send)
+                return
             await _answer(send, 429, SLOW_DOWN, headers=((b"retry-after", b"60"),))
             return
         await inner(scope, receive, send)
