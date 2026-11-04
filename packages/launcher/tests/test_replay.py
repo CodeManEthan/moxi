@@ -113,10 +113,10 @@ def settings_file(text: str) -> None:
 def without_ids(argv, *ids) -> list[str]:
     """`argv` with each id, and the system prompt file named by one, put as `<id>`.
 
-    An id is replaced only where it stands alone, with no letter or digit on either side,
-    so a short id such as `r3` is not found inside a random directory name like
-    `mx-znbhhrr3`."""
-    patterns = [re.compile(rf"(?<![A-Za-z0-9]){re.escape(given)}(?![A-Za-z0-9])")
+    An id is replaced only where it stands alone, with no letter, digit or underscore on
+    either side, so a short id such as `r3` is not found inside a random directory name
+    like `mx-znbhhrr3` or `mx-r3_abcde`."""
+    patterns = [re.compile(rf"(?<![A-Za-z0-9_]){re.escape(given)}(?![A-Za-z0-9_])")
                 for given in ids]
     out = []
     for word in argv:
