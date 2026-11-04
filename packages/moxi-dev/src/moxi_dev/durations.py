@@ -14,10 +14,11 @@ serial pass, after its parallel one; their times join the package's in the same 
 and the package counts as passed only when both passes did.
 
 Two checks can keep the same commit's record at once, from two worktrees of one clone.
-Each writes its own part file and replaces the record with it, and on a system with
-`fcntl` the read, merge and write hold a lock on `.lock` beside the records, so neither
-drops the packages the other kept. Where `fcntl` is missing the last writer's packages
-win.
+Each writes its own part file and replaces the record with it, and the read, merge and
+write hold a lock on `.lock` beside the records (`fcntl.flock`, or on Windows
+`msvcrt.locking` on its first byte), so neither drops the packages the other kept. On
+Windows the lock also keeps the two from failing outright: a record another check has
+open to read can't be replaced there.
 
 The comparison is with the newest record for a commit on `main` that is an ancestor of
 HEAD (the commits from the merge base back), HEAD itself left out, over the packages
@@ -28,19 +29,25 @@ slowdown.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import math
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 try:
     import fcntl
-except ImportError:                     # not on Windows: no lock (module doc)
+except ImportError:                     # Windows: msvcrt's lock instead (module doc)
     fcntl = None
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 FORMAT = 1
 #: The share of tests, slowest first, whose part of the total the summary gives.
@@ -130,7 +137,8 @@ def summarize(runs: Mapping[str, PackageRun]) -> Summary:
 
 
 def _git(root: Path, *args: str) -> str | None:
-    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+    # git writes paths in UTF-8 on every system; Windows's locale encoding is another.
+    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, encoding="utf-8")
     return proc.stdout if proc.returncode == 0 else None
 
 
@@ -150,18 +158,44 @@ def read_record(path: Path) -> dict[str, PackageRun] | None:
         return None
 
 
+#: How long the Windows lock waits between tries: `msvcrt` has no lock that waits for
+#: as long as it takes.
+LOCK_RETRY = 0.01
+
+
 @contextlib.contextmanager
 def _locked(directory: Path) -> Iterator[None]:
-    """Hold the records' lock, where the system has `fcntl` (module doc)."""
-    if fcntl is None:
+    """Hold the records' lock (module doc); without `fcntl` or `msvcrt`, no lock."""
+    if fcntl is None and msvcrt is None:
         yield
         return
     fd = os.open(directory / ".lock", os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield                       # closing the descriptor releases the lock
+            return
+        _lock_first_byte(fd)
+        try:
+            yield
+        finally:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
     finally:
-        os.close(fd)                    # closing the descriptor releases the lock
+        os.close(fd)
+
+
+def _lock_first_byte(fd: int) -> None:
+    """Lock the first byte of `fd` on Windows, waiting while another handle holds it."""
+    while True:
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EDEADLK):
+                raise
+        time.sleep(LOCK_RETRY)
 
 
 def keep(directory: Path, commit: str, runs: Mapping[str, PackageRun]) -> Path:

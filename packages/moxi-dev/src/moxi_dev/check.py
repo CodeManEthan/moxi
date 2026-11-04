@@ -247,7 +247,8 @@ def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
 
 
 def _git(root: Path, *args: str) -> str:
-    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+    # git writes paths in UTF-8 on every system; Windows's locale encoding is another.
+    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, encoding="utf-8")
     if proc.returncode != 0:
         raise CheckError(f"git {' '.join(args)}: {proc.stderr.strip()}")
     return proc.stdout
