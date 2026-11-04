@@ -1100,6 +1100,46 @@ def param_id(value: object) -> str:
     return type(value).__qualname__
 
 
+def console_script(directory: str | os.PathLike[str], name: str,
+                   source: str | None = None) -> Path:
+    """Write a stand-in for console script `name` into `directory` and return its path.
+
+    It has the name this system finds a console script by, so `moxi.paths.script(name)`
+    finds it when the scripts directory is `directory`, and so does a PATH lookup
+    (`shutil.which`) when `directory` is on PATH; and it runs. On POSIX it is `name`, a
+    `/bin/sh` script with mode 0o755. On Windows it is `name.cmd`, a batch file: an
+    installer writes `name.exe`, which a test can't write as text, and `.cmd` is on every
+    `PATHEXT`. A test that needs the path uses the one returned, never `directory / name`.
+
+    With no `source` it does nothing and exits 0. With `source`, Python code, it runs
+    that code under this interpreter, with the stand-in's arguments in `sys.argv[1:]`,
+    and exits with its status. On Windows the arguments pass through `cmd.exe`, so one
+    holding `&`, `|`, `^`, `%`, `<` or `>` doesn't arrive as written.
+    """
+    python = sys.executable
+    if WINDOWS:
+        if source is not None and "%" in python:
+            raise ValueError(f"can't quote {python!r} for cmd.exe")
+        path = Path(directory, f"{name}.cmd")
+        # `-x` makes Python skip the first line, the one cmd.exe runs; `call` reads
+        # Python's exit status after it ran, not when cmd.exe read the line.
+        head = ("@exit /b 0" if source is None
+                else f'@"{python}" -x "%~f0" %* & call exit /b %%errorlevel%%')
+        path.write_bytes(f"{head}\r\n{source or ''}".replace("\r\n", "\n")
+                         .replace("\n", "\r\n").encode())
+        return path
+    path = Path(directory, name)
+    if source is None:
+        path.write_text("#!/bin/sh\n")
+    else:
+        if "'" in python or "\\" in python:
+            raise ValueError(f"can't quote {python!r} for both sh and Python")
+        # Line 2 runs Python on this file in sh, and is a bare string to Python.
+        path.write_text(f"#!/bin/sh\n\"exec\" '{python}' \"$0\" \"$@\"\n{source}")
+    path.chmod(0o755)
+    return path
+
+
 def write_sqlite(path: str | os.PathLike[str], schema: str = "",
                  rows: Mapping[str, Iterable[Sequence[Any]]] | None = None) -> Path:
     """Write a SQLite database for a test, fast: one transaction, no syncing.
@@ -1149,7 +1189,8 @@ def _statements(script: str) -> Iterator[str]:
 
 
 __all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
-           "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
-           "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES",
-           "WINDOWS_KEPT_ENV", "fence", "findings_of", "param_id", "selection", "served",
-           "short_dir", "touches_match", "uv_env", "wait_for", "write_sqlite"]
+           "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS",
+           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV",
+           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
+           "param_id", "selection", "served", "short_dir", "touches_match", "uv_env",
+           "wait_for", "write_sqlite"]

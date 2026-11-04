@@ -26,6 +26,7 @@ import moxi.paths
 from moxi import units
 from moxi.units import _backend
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi_dev.testing import console_script
 
 #: How an install records itself in `direct_url.json`; one from an index writes none.
 FROM_INDEX = None
@@ -62,9 +63,7 @@ def box(request, tmp_path, monkeypatch):
     name, script, unit, lines = DAEMONS[module]
     scripts = tmp_path / "bin"
     scripts.mkdir()
-    command = scripts / script
-    command.write_text("#!/bin/sh\n")
-    command.chmod(0o755)
+    command = console_script(scripts, script)
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
@@ -114,7 +113,7 @@ def daemon_of(box, changes):
 def test_the_module_declares_one_daemon_the_core_accepts(box):
     decl = units.declarations(box.module)
     assert list(decl.daemons) == [box.name] and decl.timers == {}
-    assert decl.daemons[box.name]["command"] == box.command.name
+    assert moxi.paths.script(decl.daemons[box.name]["command"]) == box.command
     assert decl.rejected == {}
 
 

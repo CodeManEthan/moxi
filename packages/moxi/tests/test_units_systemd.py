@@ -24,6 +24,7 @@ from moxi.units._fake import FakeSupervisor
 from moxi.units._fence import Fence
 from moxi.units._systemd import SystemdBackend, quote
 from moxi.units._types import Wrapped
+from moxi_dev.testing import console_script
 
 SETTINGS = """
 [relay.enabled]
@@ -52,7 +53,7 @@ def bin_dir(tmp_path, monkeypatch):
     scripts = tmp_path / "bin"
     scripts.mkdir()
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
-    _script(scripts / "moxi")
+    console_script(scripts, "moxi")
     return scripts
 
 
@@ -112,6 +113,8 @@ def test_a_plain_daemon_has_no_kill_mode_and_no_memory_lines(unit_root):
     assert "ExecStart=/opt/ana/bin/x --port 1\nWorkingDirectory=/srv/ana\n" in text
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the golden text writes the gate's path "
+                    "bare, as a POSIX path is; Windows never uses systemd")
 def test_a_timer_is_a_service_through_the_gate_and_a_schedule(unit_root, bin_dir):
     [group] = SystemdBackend().render(spec(
         "timer", module="notes", name="snapshot", doc="commit a snapshot of the notes",
@@ -401,7 +404,7 @@ def w(site, tmp_path, unit_root, bin_dir, monkeypatch):
         return units.apply(changes, runner=sup, say=lines.append, **kw)
 
     def script(name):
-        return _script(bin_dir / name)
+        return console_script(bin_dir, name)
 
     with _backend.use(SystemdBackend()):
         yield types.SimpleNamespace(root=unit_root, sup=sup, lines=lines, module=module,
@@ -1962,6 +1965,8 @@ def _wrap(root, manager=None, *, module="services", key="backup.enabled", name="
     return acted, manager
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the golden text writes the gate's path "
+                    "bare, as a POSIX path is; Windows never uses systemd")
 def test_wrap_writes_the_marked_drop_in_and_reloads_once(unit_root, bin_dir):
     acted, manager = _wrap(unit_root)
     assert acted.ok and (acted.module, acted.name, acted.act) == (None, "backup.timer",
@@ -1995,7 +2000,7 @@ def test_the_wrap_forms_in_the_drop_in_parse_in_the_gate(unit_root, bin_dir):
     forms = {}
     for key in ("ExecCondition", "ExecStopPost"):
         words = shlex.split(re.search(rf"^{key}=(.*)$", text, re.M)[1])
-        assert words[:2] == [str(bin_dir / "moxi"), "run"]
+        assert words[:2] == [str(moxi.paths.script("moxi")), "run"]
         forms[key] = run.parse(words[2:])
     condition, result = forms["ExecCondition"], forms["ExecStopPost"]
     assert (condition.condition, condition.switch, condition.module, condition.name) == (

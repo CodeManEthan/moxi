@@ -22,6 +22,7 @@ from moxi.units import _backend, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._schtasks import BACKEND, NS, SchtasksBackend
+from moxi_dev.testing import console_script
 
 N = {"t": NS}
 
@@ -130,14 +131,17 @@ class FakeSchtasks:
 @pytest.fixture
 def w(site, tmp_path, monkeypatch):
     """A fake module `demo`, a scripts directory with `pythonw.exe`, the backend as
-    `PC\\ana`, and the fake `schtasks.exe`."""
+    `PC\\ana`, and the fake `schtasks.exe`. The scripts directory holds `python` under
+    both systems' names, so `moxi.paths.python` finds it on either."""
     scripts = tmp_path / "Scripts"
     scripts.mkdir()
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
-    for name in ("python", "pythonw.exe", "moxi-demo-relay", "moxi-demo-snap"):
+    for name in ("python", "python.exe", "pythonw.exe"):
         path = scripts / name
         path.write_text("")
         path.chmod(0o755)
+    for name in ("moxi-demo-relay", "moxi-demo-snap"):
+        console_script(scripts, name)
     backend = SchtasksBackend(user="PC\\ana")
     sup = FakeSchtasks()
     lines: list[str] = []

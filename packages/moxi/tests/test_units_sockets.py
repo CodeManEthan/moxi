@@ -17,6 +17,7 @@ from moxi import config, units
 from moxi.units import _backend, _plan
 from moxi.units._backend import UnitRef, socket_name, socket_place, socket_state
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi_dev.testing import console_script
 
 SETTINGS = """
 [port]
@@ -47,8 +48,7 @@ def shell(*addresses, name="shell", more=""):
 def w(site, tmp_path, monkeypatch):
     scripts = tmp_path / "bin"
     scripts.mkdir()
-    (scripts / "moxi-demo-shell").write_text("#!/bin/sh\n")
-    (scripts / "moxi-demo-shell").chmod(0o755)
+    console_script(scripts, "moxi-demo-shell")
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
     monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
     root = tmp_path / "units"
