@@ -129,8 +129,8 @@ class Daemon:
             await _blocking(self.host.calllog.close)
 
 
-async def _blocking(fn, *args):
-    return await asyncio.get_running_loop().run_in_executor(None, lambda: fn(*args))
+async def _blocking(fn, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: fn(*args, **kwargs))
 
 
 def _version() -> str:
