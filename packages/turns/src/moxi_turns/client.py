@@ -49,6 +49,7 @@ A call whose bound passed leaves its connection open: `moxi.ipc` drops the late 
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import logging
 import threading
@@ -89,6 +90,10 @@ EXIT_BOUND_S = 5.0
 #: The reason of a gate-passed `exit` whose harness process still runs after the bound
 #: (a reload's SIGTERM met it, or the exit was held).
 NOT_EXITED = "not-exited"
+#: How many endpoints `sessions()` probes at once. Each probe is bounded by `CONNECT_S`
+#: and `READ_S`, so the endpoints that never answer cost a call about one bound for
+#: each this many of them.
+_PROBE_WORKERS = 8
 
 #: `moxi.ipc`'s hello codes.
 _HELLO_REFUSED = -32001
@@ -941,20 +946,67 @@ def _names(info: dict[str, Any], session_id: str) -> bool:
             or session_id in (info.get("earlier") or ()))
 
 
+def _probe_listed(directory: Path, hello: dict[str, Any]) -> Session | None:
+    """`_probe`, with an endpoint that refuses this library's versions logged and left
+    out."""
+    try:
+        return _probe(directory, hello)
+    except VersionError as exc:
+        log.info("%s", exc)
+        return None
+
+
+def _close_found(future: concurrent.futures.Future) -> None:
+    if not future.cancelled() and future.exception() is None:
+        session = future.result()
+        if session is not None:
+            session.close()
+
+
 def sessions() -> list[Session]:
     """Every live version 2 endpoint, newest first. Dead ones are swept; version 1
-    directories are left alone and not listed."""
-    out = []
-    for directory, hello, version in _candidates():
-        if version != 2:
-            continue
+    directories are left alone and not listed.
+
+    The endpoints are probed at the same time, up to `_PROBE_WORKERS` at once, so up
+    to that many that accept a connection and never answer their hello hold the call
+    for one bound together; each further `_PROBE_WORKERS` of them adds a bound. Every
+    probe has ended, and its connection closed, when this returns. A probe that raised
+    raises here once all have ended, the newest endpoint's first, and the sessions found
+    are closed. An interrupt leaves the probes under way to end within their bounds,
+    closing what they find."""
+    wanted = [(directory, hello) for directory, hello, version in _candidates()
+              if version == 2]
+    if not wanted:
+        return []
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(_PROBE_WORKERS, len(wanted)), thread_name_prefix="turns-probe")
+    futures: list[concurrent.futures.Future] = []
+    try:
+        for directory, hello in wanted:
+            futures.append(pool.submit(_probe_listed, directory, hello))
+        concurrent.futures.wait(futures)
+    except BaseException:
+        # Interrupted: drop the probes not yet begun, and close each session found,
+        # now or when its probe ends.
+        pool.shutdown(wait=False, cancel_futures=True)
+        for future in futures:
+            future.add_done_callback(_close_found)
+        raise
+    pool.shutdown(wait=True)
+    out: list[Session] = []
+    failure: BaseException | None = None
+    for future in futures:
         try:
-            session = _probe(directory, hello)
-        except VersionError as exc:
-            log.info("%s", exc)
+            session = future.result()
+        except BaseException as exc:  # noqa: BLE001 - raised below, in the endpoints' order
+            failure = failure or exc
             continue
         if session is not None:
             out.append(session)
+    if failure is not None:
+        for session in out:
+            session.close()
+        raise failure
     return out
 
 

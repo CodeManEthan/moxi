@@ -9,6 +9,7 @@ import concurrent.futures
 import contextlib
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -459,3 +460,181 @@ def test_an_endpoint_of_another_version_names_both_ranges(turns_env):
     finally:
         loop.call_soon_threadsafe(server.close)
         thread.join(5)
+
+
+# -- finding many at once ---------------------------------------------------------------
+
+#: The hello bound these tests set, shorter than the library's so a slow run shows fast.
+BOUND = 1.0
+#: What a call may take past one bound on a loaded machine.
+SLACK = 0.8
+
+
+class Mute:
+    """An endpoint that accepts a connection and never answers its hello: a socket that
+    listens and never accepts, found by `sessions()` through a `hello.json` of its own,
+    as a suspended harness looks."""
+
+    def __init__(self, name: str, started: float):
+        self.address = ipc.address("turns", name)
+        self.dir = protocol.v2_root(client.runtime_dir()) / name
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(self.address)
+        self.sock.listen(16)
+        (self.dir / protocol.HELLO).write_text(json.dumps(
+            {"address": self.address, "protocol": 2, "started": started}))
+
+    def close(self):
+        self.sock.close()
+
+
+@pytest.fixture
+def mute(monkeypatch):
+    monkeypatch.setattr(client, "CONNECT_S", BOUND)
+    made = []
+
+    def make(name, started):
+        made.append(Mute(name, started))
+        return made[-1]
+
+    yield make
+    for server in made:
+        server.close()
+
+
+def _hello(name: str, body: dict) -> Path:
+    directory = protocol.v2_root(client.runtime_dir()) / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / protocol.HELLO).write_text(json.dumps(body))
+    return directory
+
+
+@contextlib.contextmanager
+def _other_version(name: str, started: float):
+    """An endpoint that speaks only protocol 3, found through a `hello.json`."""
+    from moxi import aio
+
+    address = ipc.address("turns", name)
+    ready = concurrent.futures.Future()
+
+    async def main():
+        import asyncio
+
+        server = await ipc.serve(address, lambda c, m, p: None, hello=ipc.Hello((3, 3)))
+        ready.set_result((asyncio.get_running_loop(), server))
+        await server.serve_forever()
+
+    thread = threading.Thread(target=aio.run, args=(main,), daemon=True)
+    thread.start()
+    loop, server = ready.result(5)
+    try:
+        yield _hello(name, {"address": address, "protocol": 3, "started": started})
+    finally:
+        loop.call_soon_threadsafe(server.close)
+        thread.join(5)
+
+
+def _probe_threads() -> list[str]:
+    return [t.name for t in threading.enumerate() if t.name.startswith("turns-probe")]
+
+
+def _fds() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+def _settles_to(count: int, within: float = 3.0) -> bool:
+    """Whether this process's open descriptors come back to `count`: an endpoint served
+    here closes its side of a probe's connection a moment after the probe does."""
+    deadline = time.monotonic() + within
+    while _fds() != count:
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def test_mute_endpoints_cost_a_list_one_bound_and_the_order_holds(make_endpoint, mute):
+    mute("claude-mute-newest", time.time() + 60)        # probed first, newest of all
+    make_endpoint(session_id="s-1")
+    mute("claude-mute-a", time.time())
+    make_endpoint(session_id="s-2")
+    mute("claude-mute-b", time.time())
+    make_endpoint(session_id="s-3")
+    mute("claude-mute-c", time.time())
+    turns.sessions()                                    # every endpoint served once
+    fds = _fds()
+
+    began = time.monotonic()
+    found = turns.sessions()
+    took = time.monotonic() - began
+
+    assert [s.session_id for s in found] == ["s-3", "s-2", "s-1"]
+    assert took < BOUND + SLACK, f"four mute endpoints held the list {took:.2f} s"
+    assert _probe_threads() == []
+    assert _settles_to(fds)
+
+
+def test_mixed_answers_keep_the_newest_first_order(make_endpoint, mute):
+    gate = threading.Event()
+    slow = Scripted("slow")                             # answers its session late
+    slow.session_gate = gate
+    try:
+        _hello("fake-slow", {"address": slow.address, "protocol": 2,
+                             "started": time.time() + 60})
+        make_endpoint(session_id="s-c")
+        mute("claude-mute", time.time())
+        _hello("claude-no-address", {"protocol": 2, "started": time.time()})
+        make_endpoint(session_id="s-b")
+        dead = _hello("claude-dead", {"address": ipc.address("turns", "nothing-here"),
+                                      "protocol": 2, "started": time.time()})
+        v1 = client.runtime_dir() / "claude-old"
+        v1.mkdir(parents=True)
+        (v1 / "hello.json").write_text(json.dumps({"session_id": "s-old", "pid": 1,
+                                                   "started": time.time()}))
+        with _other_version("fake-v3", time.time()):
+            make_endpoint(session_id="s-a")
+            threading.Timer(0.3, gate.set).start()
+            began = time.monotonic()
+            found = turns.sessions()
+            took = time.monotonic() - began
+        assert [s.session_id for s in found] == ["s-1", "s-a", "s-b", "s-c"]
+        assert found[0].address == slow.address
+        assert took < BOUND + SLACK
+        assert not dead.exists()                        # the dead one is swept
+        assert v1.exists()                              # version 1 is left alone
+        assert _probe_threads() == []
+    finally:
+        gate.set()
+        slow.stop()
+
+
+def test_a_probe_that_raises_raises_the_first_in_order_and_closes_what_was_found(
+        make_endpoint, monkeypatch):
+    make_endpoint(session_id="s-old")
+    second = _hello("claude-second", {"address": "x", "protocol": 2,
+                                      "started": time.time()})
+    first = _hello("claude-first", {"address": "y", "protocol": 2,
+                                    "started": time.time() + 1})
+    make_endpoint(session_id="s-new")
+    probe = client._probe
+    found = []
+
+    def failing(directory, hello):
+        if directory == first:
+            time.sleep(0.2)                             # ends after the second's failure
+            raise RuntimeError("first")
+        if directory == second:
+            raise RuntimeError("second")
+        session = probe(directory, hello)
+        found.append(session)
+        return session
+
+    monkeypatch.setattr(client, "_probe", failing)
+    with pytest.raises(RuntimeError, match="first"):
+        turns.sessions()
+    assert sorted(s.session_id for s in found) == ["s-new", "s-old"]
+    for session in found:
+        with pytest.raises(turns.TurnsError):
+            session.facts()                             # closed
+    assert _probe_threads() == []
