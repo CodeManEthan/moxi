@@ -82,6 +82,20 @@ from .errors import Busy, ServicesError, TooNew, Unreadable
 from .page import STATUS_ROUTE, TOPIC, lb
 from .rows import MODULE, ModuleRow, UserRow
 
+# The poller's cost, measured against the real systemd user manager on Linux (Fedora 43,
+# systemd 258, Python 3.14, a 16-thread i7-13620H), CPU time from /proc over 3-minute
+# windows. With no stream open the server used 0.08 CPU s a minute (0.13% of a core) at
+# every size. With one stream open:
+#   12 rows, 5 read at the supervisor, 3 with a health check: 0.28 s/min of its own,
+#   0.38 with its children (each `systemctl show` and check), 0.64% of a core;
+#   20 rows, 13 read, 6 with a check: 0.29 s/min of its own, 0.45 with its children,
+#   0.75% of a core.
+# The user manager answering the reads added 0.09 and 0.17 s/min. After the stream
+# closed, the poller ran on at about the same rate (0.57% and 0.71% with children) until
+# the idle exit. A row whose unit is missing costs no supervisor read. So loopback's
+# default `idle_s` stays: the poller's run after the last stream closes costs about
+# 3 CPU seconds, the user manager's share included.
+
 #: Seconds between the poller's ticks: a supervisor read at each.
 PERIOD = 5.0
 #: Seconds between the poller's health passes.
