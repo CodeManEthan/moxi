@@ -68,6 +68,12 @@ export interface Written {
   notes: string[];
 }
 
+/** `/api/add`'s value: a write, and the warnings for what the add went ahead without (a
+ * contribution skipped since it won't load, with the fix). */
+export interface Added extends Written {
+  warnings: string[];
+}
+
 /** `/api/remove-status`: what a remove request came to. */
 export interface RemoveStatus {
   job: string;
@@ -176,6 +182,13 @@ export function parseWhere(data: unknown): Where | null {
 export function parseWritten(data: unknown): Written | null {
   if (!isObj(data) || !isProject(data.project) || !isStrings(data.notes)) return null;
   return { project: project(data.project), notes: [...data.notes] };
+}
+
+/** `/api/add`'s value, or null when it isn't one. */
+export function parseAdded(data: unknown): Added | null {
+  const written = parseWritten(data);
+  if (written === null || !isObj(data) || !isStrings(data.warnings)) return null;
+  return { ...written, warnings: [...data.warnings] };
 }
 
 /** `/api/remove-status`'s value, or null when it isn't one. */
