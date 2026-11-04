@@ -196,7 +196,8 @@ class Client:
         no limit), `NotRpc` when the server sends a line that isn't JSON-RPC, and
         `IpcError` when the connection ends first. `timeout` covers the whole call:
         the wait to write the request as well as the wait for its answer. A request
-        the timeout cuts off partway ends the connection."""
+        the timeout cuts off partway ends the connection. On Windows so does any
+        request whose write the timeout cancels, even one the server read none of."""
         deadline = None if timeout is None else time.monotonic() + timeout
         call = _Call()
         with self._lock:
@@ -245,7 +246,10 @@ class Client:
         failed, an answer line was over `max_line`, or a line was not JSON-RPC); by a
         write that failed; and by a request its call's timeout cut off partway, which
         ends the connection. A call that timed out before writing anything, or whose
-        answer was only late, leaves it False.
+        answer was only late, leaves it False. On Windows a pipe write the timeout
+        cancels counts as cut off, so it ends the connection and sets this even when the
+        server read none of it; only a call that timed out waiting for its turn to write
+        leaves it False there.
 
         Safe to read from any thread with no lock: it reads one reference, set once and
         never cleared. False doesn't promise the next call succeeds: a server that has
@@ -271,7 +275,9 @@ class Client:
         `time.monotonic()` time), the wait for the lock and for the socket to take the
         frame both end then, and False says the time ran out: nothing was written, or
         the frame was cut partway and the connection is ended, since the server can
-        no longer tell where the next frame starts."""
+        no longer tell where the next frame starts. On Windows any write the deadline
+        cancels ends the connection, even when the server read none of it: the system
+        reports no bytes written for a cancelled write, whatever the server read."""
         frame = _wire.encode(message)
         if deadline is None:
             self._write_lock.acquire()
