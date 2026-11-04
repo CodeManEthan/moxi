@@ -174,6 +174,16 @@ def test_the_core_imports_no_module(repo, tmp_path):
     assert "moxi_dev" not in out
 
 
+def test_a_sibling_s_pyproject_is_read_as_utf_8(repo, tmp_path):
+    # Whatever the system's own encoding: on Windows that is often cp1252, which can't
+    # decode every UTF-8 byte (Á is C3 81, and 0x81 is no cp1252 character).
+    core = core_repo(tmp_path / "moxi")
+    repo.beta.write("pyproject.toml", pyproject("moxi-beta") + "# Ádám keeps this module.\n")
+    plan(core.root, tmp_path / "w", members=[core.root, repo.beta.root])
+    config = (tmp_path / "w" / IMPORTLINTER_CONFIG).read_text(encoding="utf-8")
+    assert 'forbidden_modules = ["moxi_beta"]' in config
+
+
 def test_deptry_does_not_read_the_core_s_vendored_copies(repo, tmp_path):
     core = core_repo(tmp_path / "moxi")
     core.src("_vendor/__init__.py")
@@ -183,7 +193,7 @@ def test_deptry_does_not_read_the_core_s_vendored_copies(repo, tmp_path):
     dev.write("pyproject.toml", pyproject("moxi-dev", entry_points={}, scripts={}))
     out = lint(core, members=[core.root, repo.beta.root, dev.root],
                path=[core.root / "src", repo.beta.root / "src"])[OUTSIDE]
-    assert "src/moxi/names.py" in out
+    assert str(Path("src/moxi/names.py")) in out       # deptry names it as this system does
     assert "_vendor" not in out
 
 
@@ -193,7 +203,8 @@ def test_an_undeclared_import_is_refused(repo):
     repo.src("core.py", "def f():\n    import requests\n")
     out = run(repo)
     assert list(out) == [OUTSIDE]
-    assert "src/moxi_alpha/core.py:2:12: DEP001 'requests' imported but missing" in out[OUTSIDE]
+    assert (f"{Path('src/moxi_alpha/core.py')}:2:12: DEP001 'requests' imported but missing"
+            in out[OUTSIDE])
 
 
 def test_a_declared_distribution_counts_whether_or_not_it_is_installed(repo):
@@ -230,7 +241,7 @@ def test_tests_may_import_a_dependency_group(repo):
                                            groups={"dev": ["pytest", "hypothesis>=6"]}))
     assert run(repo) == {}
     repo.write("tests/test_core.py", "import requests\n")
-    assert "tests/test_core.py:1:8: DEP001 'requests'" in run(repo)[TESTS]
+    assert f"{Path('tests/test_core.py')}:1:8: DEP001 'requests'" in run(repo)[TESTS]
 
 
 def test_src_may_not_import_a_dependency_group(repo):

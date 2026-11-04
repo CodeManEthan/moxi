@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from moxi_dev import check, stamp
+from test_contract_rules import symlink
 
 REPO = Path(__file__).resolve().parents[3]
 VERSION = "0.28.2"
@@ -175,7 +176,7 @@ def test_an_input_git_may_rewrite_stops_the_check(repo):
 
 
 def test_a_linked_input_stops_the_check(repo):
-    (repo / "packages/alpha/web/src/link.ts").symlink_to("page.ts")
+    symlink(repo / "packages/alpha/web/src/link.ts", "page.ts")
     with pytest.raises(stamp.StampError, match="link"):
         stamp.check_stamps(repo)
 

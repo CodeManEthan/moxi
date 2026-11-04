@@ -70,7 +70,8 @@ class Repo:
     def write(self, rel: str, text: str = "") -> Path:
         path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(textwrap.dedent(text))
+        # The text's own bytes, on every system: no locale encoding, no CRLF added.
+        path.write_text(textwrap.dedent(text), encoding="utf-8", newline="")
         return path
 
     def src(self, rel: str, text: str = "") -> Path:
@@ -782,11 +783,26 @@ def test_staged_a_skills_folder_missing_or_a_file_in_the_index_fails(repo):
     repo.git("add", ".")
     assert "is a file, not a folder" in repo.findings("7", staged=True)[0]
 
+#: Windows's error for a symlink made without the right to make one.
+ERROR_PRIVILEGE_NOT_HELD = 1314
+
+
+def symlink(path: Path, target: str) -> None:
+    """A symlink at `path` whose target is `target`, as written; the test skips where
+    this account may not make one (Windows without Developer Mode or the privilege)."""
+    try:
+        path.symlink_to(target)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == ERROR_PRIVILEGE_NOT_HELD:
+            pytest.skip("this account has no right to make a symlink")
+        raise
+
+
 def link(repo, rel, target):
     """A symlink at src/<pkg>/<rel> whose target is `target`, as written."""
     path = repo.root / f"src/{repo.pkg}/{rel}"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(target)
+    symlink(path, target)
     return path
 
 
