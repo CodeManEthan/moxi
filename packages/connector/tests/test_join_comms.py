@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,7 +32,8 @@ from urllib.parse import urlencode
 
 import pytest
 from conftest import ORIGIN
-from kit import CLAUDE, HTTPX, Running, call, http, initialize, request, rpc, wait_for
+from kit import (CLAUDE, HTTPX, Running, call, hang_up, http, initialize, request, rpc,
+                 wait_for)
 from signin_kit import CALLBACK, CALLBACKS, Clock, Door, pending_of, pkce, query_of
 
 from moxi import ipc, modules
@@ -426,6 +428,113 @@ def test_a_failed_write_leaves_comms_messages_unread(door, registry, rig):
 
     asyncio.run(main())
     wait_for(lambda: not unread(rig))
+
+
+# -- a caller that hangs up, on a real socket ---------------------------------------------------
+
+def sent_by_me(rig) -> str | None:
+    """The id of the last message comms' identity posted, or None."""
+    return next((str(m.id) for m in reversed(rig.record.history(rig.names_channel))
+                 if m.author_id == ME), None)
+
+
+def tool_rows(d, name):
+    return [r for r in d.host.calllog.rows if r.get("kind") == "request"
+            and r.get("tool") == name]
+
+
+def test_a_caller_that_hangs_up_mid_wait_frees_the_slot_and_the_late_reply_stays_unread(
+        running, walk, registry, rig):
+    """Funnel or Claude's tool timeout cuts a long `send_and_wait`; the agent replies
+    after. The host cancels the wait at the hang-up, so its slot frees at once, and the
+    reply, which no answer carried, comes through `check_messages` unread."""
+    rig.shim(name="planner", scope="proj-a", project="proj-a")
+    bound(registry)
+    walk("outside")
+    tools = comms("connector").COMMS.tools
+    with running as d:
+        access = sign_in_over(d.port)
+        hang_up(d.port, call("send_and_wait", {"to": "planner@proj-a", "text": "ok?",
+                                               "wait_seconds": 60}, rid=8),
+                token=access, until=lambda: tools.waiting == 1 and sent_by_me(rig))
+        cut = time.monotonic()
+        wait_for(lambda: tools.waiting == 0, within=10)
+        assert time.monotonic() - cut < 5               # well before the 60 s asked
+        wait_for(lambda: tool_rows(d, "send_and_wait"))
+        mid = sent_by_me(rig)
+        late = str(rig.post_as("planner@proj-a", [ME], "the late reply", reply_to=mid).id)
+        wait_for(lambda: late in pending())
+        got = mcp_over(d.port, access, call("check_messages", rid=9))
+        shown = [m["id"] for m in got["structuredContent"]["messages"]]
+        assert late in shown
+        wait_for(lambda: not unread(rig))
+    [row] = tool_rows(d, "send_and_wait")
+    assert row["dropped"] is True
+
+
+@pytest.fixture
+def slow_link(monkeypatch):
+    """`slow_link(method)`: comms' link answers `method` 1.5 s late, from then on, and
+    the returned event is set when a late call has begun."""
+    link = comms("connector").COMMS.link
+
+    def make(method: str) -> threading.Event:
+        began = threading.Event()
+        real = getattr(link, method)
+
+        def late(*args, **kwargs):
+            began.set()
+            time.sleep(1.5)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(link, method, late)
+        return began
+
+    return make
+
+
+def hang_up_on_check_messages(d, access, rig, began):
+    ids = [post(rig, f"m{i}") for i in range(2)]
+    wait_for(lambda: pending() == ids)
+    hang_up(d.port, call("check_messages", rid=8), token=access, until=began.is_set)
+    wait_for(lambda: tool_rows(d, "check_messages"))
+    return ids
+
+
+def test_a_caller_that_hangs_up_on_check_messages_leaves_its_messages_unread(
+        running, walk, registry, rig, slow_link):
+    """The hang-up lands after comms opened the digest and registered its settle (while
+    it reads the count): the host settles False, and the messages wait again."""
+    bound(registry)
+    walk("outside")
+    with running as d:
+        access = sign_in_over(d.port)
+        began = slow_link("read")
+        ids = hang_up_on_check_messages(d, access, rig, began)
+        [row] = tool_rows(d, "check_messages")
+        assert row["dropped"] is True
+        assert unread(rig) == set(ids)
+        wait_for(lambda: pending() == ids)
+        got = mcp_over(d.port, access, call("check_messages", rid=9))
+        assert [m["id"] for m in got["structuredContent"]["messages"]] == ids
+        wait_for(lambda: not unread(rig))
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "comms opens the digest and registers its settle in two steps, and a cancel between "
+    "them strands the messages; this passes once comms settles a digest whose call was "
+    "cancelled"))
+def test_a_caller_that_hangs_up_while_comms_opens_the_digest_leaves_its_messages_unread(
+        running, walk, registry, rig, slow_link):
+    bound(registry)
+    walk("outside")
+    with running as d:
+        access = sign_in_over(d.port)
+        began = slow_link("open_digest")
+        ids = hang_up_on_check_messages(d, access, rig, began)
+        time.sleep(2)                                   # the digest's open has landed
+        got = mcp_over(d.port, access, call("check_messages", rid=9))
+        assert [m["id"] for m in got["structuredContent"]["messages"]] == ids
 
 
 # -- the host's own checks, against comms' provider --------------------------------------------

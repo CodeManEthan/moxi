@@ -33,12 +33,19 @@ set from O too: O's host as the one allowed host and O as the one allowed `Origi
 - passes the request to the current app, and counts it as that app's while it runs, so a
   swap lets requests already started finish on the old app;
 - watches the ASGI `send` seam: once the final `http.response.body` (`more_body` false)
-  is sent without an error, the callbacks run with `written=True`; when `send` raises, or
-  the request ends with no final body, they run with `written=False`;
+  is sent without an error, the callbacks run with `written=True`; when `send` raises,
+  the request ends with no final body, or the caller hung up first, they run with
+  `written=False`. A callback registered after that runs at the request's end, with False;
+- on `/mcp`, once the request body is in, watches the connection, as the only reader of
+  `receive` from then on (the app's later reads wait for the disconnect). uvicorn's `send`
+  returns quietly once the peer is gone and never cancels the app, so this watch is what
+  notices a caller that hangs up: it cancels the request's app and its tool calls, so a
+  tool's wait ends then, and the row says `dropped`;
 - writes one row of the request to the call log (`moxi_connector.calllog`): time, id,
   method, route class, JSON-RPC method, tool and provider, status, milliseconds, grant
   and client, the first 64 characters of the user agent, the `X-Forwarded-For` value as an
-  untrusted hint, and the fields the tool added through `ctx.log`.
+  untrusted hint, `dropped` when the caller hung up, and the fields the tool added
+  through `ctx.log`.
 
 The tool learns its call through a context variable set just before the SDK's app runs.
 """
@@ -80,6 +87,8 @@ MAX_BODY = 256 * 1024
 RETIRE_WAIT = 120.0
 #: The text every request gets while there is no origin.
 NO_ORIGIN = b"The connector has no public address yet. Run moxi connector status.\n"
+#: What a tool call the host cancelled answers, though its caller is gone.
+HUNG_UP = "The caller hung up before the answer; nothing more ran."
 #: The scope key that holds the request's `Call`.
 CALL_KEY = "moxi.connector.call"
 #: Route classes by path, for the call log.
@@ -124,7 +133,16 @@ class Call:
     provider: str | None = None
     fields: dict[str, Any] = field(default_factory=dict)
     after: list[Callable[[bool], Any]] = field(default_factory=list)
-    answered: bool = False
+    #: The answer's fate once known: True written, False not. None until then.
+    fate: bool | None = None
+    #: How many of `after` have run.
+    ran: int = 0
+    #: True once the final body went to the server.
+    sent: bool = False
+    #: True once the caller hung up before the answer went out.
+    dropped: bool = False
+    #: The tasks running this request's tool calls, cancelled when the caller hangs up.
+    tasks: set[asyncio.Task] = field(default_factory=set, repr=False)
     body: bytearray = field(default_factory=bytearray, repr=False)
 
     def ctx(self) -> Ctx:
@@ -145,6 +163,8 @@ class Call:
         }
         if self.forwarded_for is not None:
             out["forwarded_for_untrusted"] = self.forwarded_for
+        if self.dropped:
+            out["dropped"] = True
         for key, value in self.fields.items():
             out.setdefault(key, value)
         return out
@@ -249,9 +269,14 @@ class Tools:
             log.error("the tool %s of %s declares a schema that doesn't read", name, module)
             return await self._failed(call, module, name, "its input schema doesn't read")
         try:
-            result = await tool.call(args, call.ctx())
+            result = await _run(call, tool.call(args, call.ctx()))
             if not isinstance(result, Result):
                 raise TypeError(f"the tool answered {type(result).__name__}, not a Result")
+        except asyncio.CancelledError:
+            if not call.dropped or _cancelling():
+                raise
+            # The host cancelled the tool because its caller hung up; nobody reads this.
+            return _error(HUNG_UP, "hung-up")
         except Exception as e:  # noqa: BLE001 - a provider's fault stays its own
             log.exception("the tool %s of %s failed (request %s)", name, module,
                           call.request_id)
@@ -264,6 +289,23 @@ class Tools:
             "tool": name, "provider": module, "error": why,
             "grant": call.grant.id if call.grant else None}, durable=True, collapse=None)
         return _error(TOOL_FAILED, "tool-error")
+
+
+async def _run(call: Call, work) -> Any:
+    """Await one tool call in a task of its own, kept on the request's `Call`, so a
+    hang-up cancels the tool wherever the SDK runs its handler."""
+    task = asyncio.ensure_future(work)
+    call.tasks.add(task)
+    try:
+        return await task
+    finally:
+        call.tasks.discard(task)
+
+
+def _cancelling() -> bool:
+    """True when the running task itself is being cancelled."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
 
 
 def new_id() -> str:
@@ -492,13 +534,36 @@ class Front:
         self.host.probes.saw(header(scope, PROBE_HEADER))
         scope = {**scope, CALL_KEY: call}
         keep_body = call.route == "mcp"
+        gone = asyncio.Event()
+        watcher: asyncio.Task | None = None
+        runner: asyncio.Task | None = None
+
+        async def watch() -> None:
+            # From the body's end on, this is the only reader of `receive`, so no reader
+            # in the SDK takes the disconnect first.
+            while (await receive()).get("type") != "http.disconnect":
+                pass
+            gone.set()
+            if call.sent:
+                return  # the answer went out; the server says so this way too
+            call.dropped = True
+            for task in list(call.tasks):
+                task.cancel()
+            if runner is not None:
+                runner.cancel()
 
         async def receive_() -> dict:
+            nonlocal watcher
+            if watcher is not None:
+                await gone.wait()
+                return {"type": "http.disconnect"}
             message = await receive()
             if keep_body and message.get("type") == "http.request":
                 room = MAX_BODY - len(call.body)
                 if room > 0:
                     call.body += message.get("body", b"")[:room]
+                if not message.get("more_body", False):
+                    watcher = asyncio.ensure_future(watch())
             return message
 
         async def send_(message: dict) -> None:
@@ -512,18 +577,28 @@ class Front:
                 await _settle(call, False)
                 raise
             if final:
-                await _settle(call, True)
+                call.sent = True
+                # uvicorn's send returns quietly once the peer is gone, so a hang-up the
+                # watcher saw first settles False here.
+                await _settle(call, not call.dropped)
 
         app = self.app
         app.enter()
+        runner = asyncio.ensure_future(app(scope, receive_, send_))
         try:
-            await app(scope, receive_, send_)
+            try:
+                await runner
+            except asyncio.CancelledError:
+                if not call.dropped or _cancelling():
+                    raise
         except Exception:
             log.exception("request %s failed", call.request_id)
             if call.status is None:
                 with contextlib.suppress(Exception):
                     await answer(send_, 500)
         finally:
+            if watcher is not None:
+                watcher.cancel()
             app.leave()
             await _settle(call, False)
             if keep_body:
@@ -540,11 +615,14 @@ class Front:
 
 
 async def _settle(call: Call, written: bool) -> None:
-    """Run the request's `after_answer` callbacks once, with `written`."""
-    if call.answered:
-        return
-    call.answered = True
-    for fn in list(call.after):
+    """Run each of the request's `after_answer` callbacks that hasn't run yet, with
+    `written`. The first settle fixes the answer's fate; the request's end settles False,
+    so a callback registered after the fate was known runs then, with False."""
+    if call.fate is None:
+        call.fate = written
+    while call.ran < len(call.after):
+        fn = call.after[call.ran]
+        call.ran += 1
         try:
             out = fn(written)
             if asyncio.iscoroutine(out):

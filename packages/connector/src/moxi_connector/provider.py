@@ -156,7 +156,9 @@ class Ctx:
     - `request_id`: the call's id, which its log row carries;
     - `after_answer(fn)`: `fn(written)` runs once the answer's fate is known, `written`
       True when the answer's last byte went to the server without an error, False when
-      writing it failed or no answer was written. `fn` may be a coroutine function;
+      writing it failed, no answer was written, or the caller hung up first. A caller
+      that hangs up also cancels the call: the tool sees `CancelledError` at its next
+      await. `fn` may be a coroutine function;
     - `log(**fields)`: adds fields to the call's log row. A field name the log refuses
       (`FORBIDDEN`, at any depth) raises `ValueError` naming it, and nothing is added.
     """

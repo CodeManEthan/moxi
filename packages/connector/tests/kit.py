@@ -58,7 +58,8 @@ async def request(app, method="POST", path="/mcp", body=None, *, host=HOST, head
                   user_agent=CLAUDE, raw: bytes | None = None, send_fails=False,
                   form: dict | None = None, query: dict | None = None) -> Answer:
     """One request through `app`. `send_fails` makes the server's send raise on the final
-    body, as a connection the client dropped does. `form` sends a form-encoded body, as
+    body, as an ASGI server may once the client is gone (uvicorn's h11 returns quietly
+    instead; `hang_up` covers that on a real socket). `form` sends a form-encoded body, as
     an OAuth client does; `query` is the query string's fields."""
     from urllib.parse import urlencode
 
@@ -274,6 +275,30 @@ def wait_for(found, *, within: float = 5.0, every: float = 0.01):
             return got
         assert time.monotonic() < deadline, f"nothing came within {within:g} s"
         time.sleep(every)
+
+
+def hang_up(port: int, body: dict, *, token: str = TOKEN, host: str = HOST,
+            until=None, within: float = 0.2) -> None:
+    """`POST /mcp` to a door on loopback as Claude does, then hang up before the answer,
+    as Funnel or Claude's own tool timeout does: once `until()` holds (polled, at most 10
+    s), else after `within` seconds. A real socket, so uvicorn sees the peer go."""
+    import socket
+    import time
+
+    data = json.dumps(body).encode()
+    head = (f"POST /mcp HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {CLAUDE}\r\n"
+            f"Authorization: Bearer {token}\r\nContent-Type: application/json\r\n"
+            f"Accept: application/json, text/event-stream\r\n"
+            f"Content-Length: {len(data)}\r\n\r\n").encode()
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    try:
+        sock.sendall(head + data)
+        if until is not None:
+            wait_for(until, within=10)
+        else:
+            time.sleep(within)
+    finally:
+        sock.close()
 
 
 def http(port: int, method: str, path: str, *, host: str = HOST, headers=None,

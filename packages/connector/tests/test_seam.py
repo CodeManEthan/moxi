@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -68,6 +70,46 @@ def test_after_answer_runs_false_when_no_final_body_comes(front, fake):
         assert fake.written == [False]
         await f.close()
     run(main())
+
+
+def test_a_caller_that_hangs_up_on_a_real_socket_cancels_the_tool_and_settles_false(
+        make_host, fake):
+    """uvicorn's send returns quietly once the peer is gone, and it never cancels the app:
+    the host's own watch on the connection is what ends the tool and settles False."""
+    from conftest import ORIGIN
+    from kit import Running, hang_up, http, wait_for
+
+    began, ended = [], []
+
+    async def slow(args, ctx):
+        ctx.after_answer(fake.written.append)
+        began.append(time.monotonic())
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            ended.append(time.monotonic())
+            raise
+        return Result("late")
+
+    host = run(make_host(providers={"demo": provider(fake, echo_tool(fake),
+                                                     Tool("slow", "x", {}, slow))}))
+    with Running(host, ORIGIN) as d:
+        # A caller that stays gets its answer, settled True, on the same socket path.
+        status, _, _ = http(d.port, "POST", "/mcp", headers={
+            "Authorization": "Bearer good-token", "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"},
+            body=json.dumps(call("echo", {"say": "hi"})).encode())
+        assert status == 200
+        wait_for(lambda: fake.written == [True])
+        hang_up(d.port, call("slow"), until=lambda: began)
+        wait_for(lambda: ended, within=5)
+        wait_for(lambda: fake.written == [True, False])
+        assert ended[0] - began[0] < 5
+        wait_for(lambda: len([r for r in host.calllog.rows if r.get("tool") == "slow"]))
+    [row] = [r for r in host.calllog.rows if r.get("tool") == "slow"]
+    assert row["dropped"] is True and row["kind"] == "request"
+    [kept] = [r for r in host.calllog.rows if r.get("tool") == "echo"]
+    assert "dropped" not in kept
 
 
 def test_a_tool_name_two_providers_declare_is_refused_for_both(front):
