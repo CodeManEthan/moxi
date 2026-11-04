@@ -186,6 +186,26 @@ def test_an_entry_that_wont_load_is_named_by_kinds(site, source):
     assert [m for m, _r in kinds.broken] == ["bad"]
 
 
+def test_a_load_failure_reason_keeps_every_line_on_one(site):
+    site.contribution("bad", "raise ImportError('first line\\n  second line')\n")
+    [(module, reason)] = contributions.load().unloadable
+    assert module == "bad" and "\n" not in reason
+    assert reason.startswith("the entry bad won't load: ")
+    assert reason.endswith("first line second line")
+
+
+def test_a_load_failure_that_is_no_value_error_keeps_every_line_on_one(site, monkeypatch):
+    site.contribution("bad", "INTERFACE = 1\n")
+
+    def read(ext):
+        raise RuntimeError("first line\n\tsecond line\n")
+
+    monkeypatch.setattr(contributions, "_read", read)
+    [(module, reason)] = contributions.load().unloadable
+    assert module == "bad"
+    assert reason == "the entry bad won't load: RuntimeError: first line second line"
+
+
 def test_an_entry_that_wont_load_blocks_remove_but_not_a_set_of_a_known_kind(
         site, golden_copy):
     site.contribution("bad", BROKEN_ENTRIES["import"])

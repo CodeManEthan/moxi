@@ -249,6 +249,18 @@ def test_add_past_an_entry_that_wont_load_warns_on_one_line_and_writes_the_row(
     assert api.get("new").root == "/srv/new"
 
 
+def test_a_multi_line_load_failure_warns_and_refuses_on_one_line(capsys, site, golden_copy):
+    site.contribution("broken", "raise ImportError('first line\\nsecond line')\n")
+    code, out, err = run(capsys, "add", "new", "--root", "/srv/new")
+    assert code == 0 and out.startswith("new\n")
+    assert all(line.startswith(("note: ", "warning: ")) for line in err.splitlines())
+    [line] = [line for line in err.splitlines() if line.startswith("warning: ")]
+    assert line.startswith("warning: skipped broken") and "first line second line" in line
+    assert api.get("new").root == "/srv/new"
+    code, _out, err = run(capsys, "remove", "gamma")
+    assert code == 1 and "first line second line" in err
+
+
 def test_add_json_past_an_entry_that_wont_load_carries_the_warning(capsys, site,
                                                                    golden_copy):
     site.contribution("broken", "INTERFACE = 9\n")

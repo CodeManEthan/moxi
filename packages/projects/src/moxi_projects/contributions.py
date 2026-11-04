@@ -407,7 +407,7 @@ class Contributions:
 
 def load() -> Contributions:
     """Read the group afresh and load every entry. Never raises: an entry that won't load
-    is listed in `unloadable` with the reason."""
+    is listed in `unloadable` with the reason, on one line."""
     importlib.invalidate_caches()
     loaded: list[Contribution] = []
     unloadable: list[tuple[str, str]] = []
@@ -415,11 +415,19 @@ def load() -> Contributions:
         try:
             loaded.append(_read(ext))
         except ValueError as exc:
-            unloadable.append((ext.module, f"the entry {ext.name} won't load: {exc}"))
-        except Exception as exc:  # noqa: BLE001 - one entry never stops the reading
             unloadable.append((ext.module, f"the entry {ext.name} won't load: "
-                                           f"{_describe(exc)}"))
+                                           f"{_one_line(str(exc))}"))
+        except Exception as exc:  # noqa: BLE001 - one entry never stops the reading
+            text = _one_line(str(exc))
+            said = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+            unloadable.append((ext.module, f"the entry {ext.name} won't load: {said}"))
     return Contributions(loaded, unloadable)
+
+
+def _one_line(text: str) -> str:
+    """`text` with every run of whitespace, line breaks included, folded to one space, so
+    a reason keeps all its lines and still prints as one."""
+    return " ".join(text.split())
 
 
 def notes_present() -> bool:
