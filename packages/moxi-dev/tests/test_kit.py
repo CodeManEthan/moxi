@@ -8,6 +8,7 @@ import os
 import socket
 import socketserver
 import sqlite3
+import sys
 import time
 from pathlib import Path
 
@@ -25,7 +26,9 @@ class _Echo(socketserver.BaseRequestHandler):
         self.request.sendall(self.request.recv(64))
 
 
-class _Unix(socketserver.UnixStreamServer):
+# Windows has no Unix-socket server class: the name stands on a plain base there, and the
+# row that serves one is skipped.
+class _Unix(getattr(socketserver, "UnixStreamServer", object)):
     pass
 
 
@@ -49,7 +52,10 @@ def _connect(server):
     return socket.create_connection(address, timeout=5)
 
 
-@pytest.mark.parametrize("kind", [_Unix, _Tcp], ids=param_id)
+@pytest.mark.parametrize("kind", [
+    pytest.param(_Unix, marks=pytest.mark.skipif(sys.platform == "win32",
+                                                 reason="Unix sockets")),
+    _Tcp], ids=param_id)
 def test_served_serves_and_stops_within_its_poll(kind):
     with served(_make(kind)) as server:
         with _connect(server) as c:

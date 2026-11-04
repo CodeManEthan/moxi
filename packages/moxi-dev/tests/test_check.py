@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import tomllib
 from pathlib import Path
@@ -954,7 +955,8 @@ def test_head_s_own_record_is_not_its_ancestor(ignoring):
     assert result.kept is not None and result.delta is None
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a read-only directory")
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="POSIX directory modes; root writes into a read-only directory")
 def test_a_record_the_disk_refuses_is_said_and_the_line_still_prints(
         ignoring, monkeypatch, capsys):
     commit_file(ignoring, "packages/cache/x.py")
