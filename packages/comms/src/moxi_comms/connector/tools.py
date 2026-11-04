@@ -190,6 +190,8 @@ class Tools:
         self.env = env
         self.clock = clock
         self.waiting = 0
+        #: Held from a call's look at the buffer until its digest is open.
+        self._opening = asyncio.Lock()
         #: Ids a wait showed from the record before their push came.
         self.shown: OrderedDict[str, None] = OrderedDict()
         #: Ids settled `handled`: no longer in the identity's queue.
@@ -298,7 +300,7 @@ class Tools:
             # The count first: once the digest is open, no read may fail and turn the
             # answer into an error, which the connector would still settle as written.
             waiting = await self._waiting()
-            shown = await self._take(self.link.pending()[:limit], ctx)
+            shown = await self._take(ctx, lambda pending: pending[:limit])
         except (DaemonError, DaemonOffline) as e:
             return self._read_refused(e)
         more = max(0, waiting - len(shown))
@@ -311,20 +313,41 @@ class Tools:
             lines.append(f"{more} more waiting.")
         return self.result("\n".join(lines), {"messages": shown, "more_waiting": more})
 
-    async def _take(self, payloads: list, ctx) -> list[dict]:
-        """Open one digest for `payloads`, register its settle with the connector, and
-        return the messages it kept, rendered. Ids a wait already showed are marked.
+    async def _take(self, ctx, pick: Callable[[list], list]) -> list[dict]:
+        """Open one digest for the pushes `pick` chooses from the buffer, register its
+        settle with the connector, and return the messages it kept, rendered. Ids a wait
+        already showed are marked.
 
-        It is the call's last daemon call: a read after it that failed would answer an
-        error the connector still settles as written, and the messages would be read."""
-        if not payloads:
-            return []
-        ids = [str(p["message_id"]) for p in payloads]
-        answer = await self._open(ids)
-        kept = {str(i) for i in answer.get("ids") or ()}
-        digest = answer.get("digest")
-        if digest is not None:
-            ctx.after_answer(self._settler(digest, sorted(kept)))
+        One call at a time looks at the buffer and opens its digest, so two overlapping
+        calls never take the same messages: the daemon would move them to the later
+        digest, and both calls would return them. The open is the call's last daemon
+        call: a read after it that failed would answer an error the connector still
+        settles as written, and the messages would be read."""
+        await self._opening.acquire()
+        held = True
+        try:
+            payloads = pick(self.link.pending())
+            if not payloads:
+                return []
+            ids = [str(p["message_id"]) for p in payloads]
+            job = asyncio.ensure_future(asyncio.to_thread(self.link.open_digest, ids))
+            try:
+                answer = await asyncio.shield(job)
+            except asyncio.CancelledError:
+                # The caller hung up while the daemon opened the digest. The open runs
+                # on in its thread, and its digest has no settle: once it returns, settle
+                # it unhandled so its messages wait again, and only then let the next
+                # call look at the buffer.
+                held = False
+                job.add_done_callback(self._abandoned)
+                raise
+            kept = {str(i) for i in answer.get("ids") or ()}
+            digest = answer.get("digest")
+            if digest is not None:
+                ctx.after_answer(self._settler(digest, sorted(kept)))
+        finally:
+            if held:
+                self._opening.release()
         out = []
         for p in payloads:
             mid = str(p["message_id"])
@@ -334,25 +357,17 @@ class Tools:
             self.shown.pop(mid, None)
         return out
 
-    async def _open(self, ids: list[str]) -> dict:
-        """`open_digest` for `ids`, which a cancel can't split from its settle. The open
-        runs on in its thread when the call is cancelled (the caller hung up), and the
-        digest it opens then has no settle registered; so once it returns, that digest is
-        settled unhandled and its messages wait again."""
-        job = asyncio.ensure_future(asyncio.to_thread(self.link.open_digest, ids))
-        try:
-            return await asyncio.shield(job)
-        except asyncio.CancelledError:
-            job.add_done_callback(self._abandoned)
-            raise
-
     def _abandoned(self, job: asyncio.Future) -> None:
-        """A cancelled call's open has returned: settle its digest unhandled."""
-        if job.cancelled() or job.exception() is not None:
-            return
-        digest = job.result().get("digest")
-        if digest is not None:
-            asyncio.get_running_loop().run_in_executor(None, self._release, digest)
+        """A cancelled call's open has returned: settle its digest unhandled, and free
+        the buffer for the next call."""
+        try:
+            if job.cancelled() or job.exception() is not None:
+                return
+            digest = job.result().get("digest")
+            if digest is not None:
+                asyncio.get_running_loop().run_in_executor(None, self._release, digest)
+        finally:
+            self._opening.release()
 
     def _release(self, digest) -> None:
         try:
@@ -434,7 +449,9 @@ class Tools:
         try:
             waiting = await self._waiting()             # before the digest opens
             if pushed:
-                taken = await self._take([reply], ctx)
+                mid = str(reply["message_id"])
+                taken = await self._take(ctx, lambda pending: [
+                    p for p in pending if str(p["message_id"]) == mid])
                 message = taken[0] if taken else self._message(reply, already=False)
             else:
                 message = self._message(reply, already=False)

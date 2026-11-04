@@ -251,6 +251,42 @@ def test_a_cancel_while_the_digest_opens_leaves_the_mail_unread(rig, tools, link
     assert wait_until(lambda: not unread(rig))
 
 
+def test_two_overlapping_checks_never_return_the_same_mail(rig, tools, link):
+    """Two clients of one identity (the desktop and the phone), or parallel tool calls."""
+    ids = [post(rig, [ME], f"m{i}") for i in range(2)]
+    assert wait_until(lambda: len(link.pending()) == 2)
+    real = link.open_digest
+    inside, go_on, opens = threading.Event(), threading.Event(), []
+
+    def slow(asked):
+        opens.append(list(asked))
+        inside.set()
+        go_on.wait(timeout=5)                        # the second call starts meanwhile
+        return real(asked)
+
+    link.open_digest = slow
+
+    async def go():
+        c1, c2 = Ctx(), Ctx()
+        first = asyncio.ensure_future(tools.check_messages({}, c1))
+        assert await asyncio.to_thread(inside.wait, 5)
+        second = asyncio.ensure_future(tools.check_messages({}, c2))
+        await asyncio.sleep(0.3)                     # its count read, then the lock
+        go_on.set()
+        r1, r2 = await asyncio.gather(first, second)
+        await c1.answered(True)
+        await c2.answered(True)
+        return r1, r2
+
+    try:
+        r1, r2 = run(go())
+    finally:
+        link.open_digest = real
+    assert [m["id"] for m in r1.structured["messages"]] == ids
+    assert r2.structured["messages"] == [] and opens == [ids]
+    assert wait_until(lambda: not unread(rig))
+
+
 def test_more_waiting_comes_from_the_daemons_count_past_its_window(rig, tools, link):
     for i in range(70):
         post(rig, [ME], f"m{i}")
