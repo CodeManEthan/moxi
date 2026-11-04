@@ -295,8 +295,10 @@ class Tools:
             return self.refused("limit-shape", f"limit {limit} is outside "
                                 f"{LIMIT[0]} to {LIMIT[1]}. Nothing was read.")
         try:
-            shown = await self._take(self.link.pending()[:limit], ctx)
+            # The count first: once the digest is open, no read may fail and turn the
+            # answer into an error, which the connector would still settle as written.
             waiting = await self._waiting()
+            shown = await self._take(self.link.pending()[:limit], ctx)
         except (DaemonError, DaemonOffline) as e:
             return self._read_refused(e)
         more = max(0, waiting - len(shown))
@@ -311,7 +313,10 @@ class Tools:
 
     async def _take(self, payloads: list, ctx) -> list[dict]:
         """Open one digest for `payloads`, register its settle with the connector, and
-        return the messages it kept, rendered. Ids a wait already showed are marked."""
+        return the messages it kept, rendered. Ids a wait already showed are marked.
+
+        It is the call's last daemon call: a read after it that failed would answer an
+        error the connector still settles as written, and the messages would be read."""
         if not payloads:
             return []
         ids = [str(p["message_id"]) for p in payloads]
@@ -399,6 +404,7 @@ class Tools:
                 {**fields, "outcome": "no-reply", "reply": None, "other_new": 0})
         reply, pushed = found
         try:
+            waiting = await self._waiting()             # before the digest opens
             if pushed:
                 taken = await self._take([reply], ctx)
                 message = taken[0] if taken else self._message(reply, already=False)
@@ -407,7 +413,6 @@ class Tools:
                 self.shown[str(reply["message_id"])] = None
                 while len(self.shown) > SHOWN_MAX:
                     self.shown.popitem(last=False)
-            waiting = await self._waiting()
         except (DaemonError, DaemonOffline) as e:
             return self._read_refused(e)
         in_queue = str(reply["message_id"]) not in self.consumed

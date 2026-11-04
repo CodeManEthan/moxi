@@ -14,7 +14,7 @@ import pytest
 from moxi import modules
 
 from moxi_comms import directory, kinds
-from moxi_comms.client import DaemonClient, DaemonError
+from moxi_comms.client import DaemonClient, DaemonError, DaemonOffline
 from moxi_comms.connector import tools as tools_mod
 from moxi_comms.connector.link import BOUND, HELD, Link
 from moxi_comms.paths import comms_db, daemon_socket
@@ -80,6 +80,12 @@ def planner(rig):
 
 def post(rig, to, text="hi", *, author="planner@proj-a", reply_to=None):
     return str(rig.post_as(author, to, text, reply_to=reply_to).id)
+
+
+def unread(rig):
+    """The ids the daemon handed the identity's binding and has not had acked."""
+    b = rig.daemon.bindings.get(ME)
+    return set() if b is None else {str(i) for i in b.delivered - b.handled}
 
 
 def call(tools, name, args=None, *, written=True):
@@ -182,6 +188,27 @@ def test_a_failed_write_leaves_the_messages_unread(rig, tools, link):
     got, _ = call(tools, "check_messages", written=False)
     assert [m["id"] for m in got.structured["messages"]] == ids
     assert wait_until(lambda: len(link.pending()) == 2)
+    got, _ = call(tools, "check_messages")
+    assert [m["id"] for m in got.structured["messages"]] == ids
+
+
+def test_a_failed_count_read_answers_an_error_and_reads_nothing(rig, tools, link):
+    ids = [post(rig, [ME], f"m{i}") for i in range(2)]
+    assert wait_until(lambda: len(link.pending()) == 2)
+    real = link.read
+
+    def failing(method, params=None):
+        if method == "agents":
+            raise DaemonOffline("the short read failed")
+        return real(method, params)
+
+    link.read = failing
+    try:
+        got, ctx = call(tools, "check_messages")     # the error answer was written
+    finally:
+        link.read = real
+    assert got.is_error and got.refusal == "offline" and "Nothing was" in got.text
+    assert ctx.after == [] and link.pending() and unread(rig) == set(ids)
     got, _ = call(tools, "check_messages")
     assert [m["id"] for m in got.structured["messages"]] == ids
 
