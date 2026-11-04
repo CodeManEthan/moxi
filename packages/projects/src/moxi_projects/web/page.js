@@ -81,7 +81,7 @@ var z=globalThis,q=z.ShadowRoot&&(z.ShadyCSS===void 0||z.ShadyCSS.nativeShadow)&
         <button type="button" data-action="read" ?disabled=${i.reading} @click=${()=>this.#h()}>Read again</button>
       </div>
       ${o.length?p`<div data-part="broken">
-        <p class="dim">Can't be used now. Until each is repaired or uninstalled, a remove is refused while a module won't load, and an add goes ahead without it, with a warning; a blocked kind can't be added or set:</p>
+        <p class="dim">Can't be used now. Until each is repaired or uninstalled, while a module won't load a remove is refused, as is an add or set of a kind no loaded module declares, and any other add goes ahead without it, with a warning; a blocked kind can't be added or set:</p>
         ${o.map(d=>p`<p class="broken" data-line="broken">${d}</p>`)}</div>`:h}
       ${a!==null?this.#$(a):h}
       ${s.state==="loading"?p`<div class="placeholder"></div>`:h}

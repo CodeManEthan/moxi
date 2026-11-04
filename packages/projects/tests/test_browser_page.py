@@ -248,7 +248,9 @@ def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_w
     panel = page.locator("#moxi-panel > moxi-projects-page")
     broken = panel.locator('section[data-part="list"] [data-part="broken"]')
     expect(broken.locator('[data-line="broken"]')).to_contain_text("broken:")
-    expect(broken).to_contain_text("an add goes ahead without it, with a warning")
+    expect(broken).to_contain_text("a remove is refused, as is an add or set of a kind no "
+                                   "loaded module declares")
+    expect(broken).to_contain_text("any other add goes ahead without it, with a warning")
     form = panel.locator("moxi-projects-add")
     expect(form.locator('[data-line="broken"]')).to_contain_text("broken:")
     where = root(shell, "skipping")
