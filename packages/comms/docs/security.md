@@ -95,9 +95,31 @@ setting, so a Codex agent that answers through `moxi comms reply` needs `network
 true`, and that grants the agent full outbound network. There is no narrower setting
 that admits the daemon socket. Treat a Codex comms agent as not network-contained.
 
+## Connector
+
+With the `connector` extra installed and the connector (the public MCP host) switched on,
+comms' four tools (`agents`, `send`, `check_messages`, `send_and_wait`) are reachable
+from the internet through the connector, behind its sign-in.
+
+- They send as their own name, `[connector] identity` (`claude-app` by default), never as
+  you. Agents see that name's mail as information, not your directives, unless a launch
+  makes it a director. `check_messages` and `send_and_wait` read only mail sent to that
+  name, from its queue or the record, never mail to `operator`.
+- Message bodies, and the names you send to, cross Anthropic's servers and the tunnel
+  provider's.
+- comms' mint gate decides who can mint a sign-in code. It refuses every process the
+  session walk places inside a live comms session, and a process it can't place. An
+  agent that deliberately starts a process outside its own session's tree (`setsid`,
+  `systemd-run --user`), or any other process of your user outside every session, still
+  passes it: the same boundary as your own lane and the reserved names above.
+- While the connector is down, any process of your user can bind that name, as with any
+  name; the connector's status names whoever holds it.
+
+The connector's own `docs/security.md` covers its sign-in, its tokens and its call log.
+
 ## Network
 
-The supported path opens no network connection. The daemon, the CLI and the adapters
+Without the connector, the supported path opens no network connection. The daemon, the CLI and the adapters
 talk over Unix sockets and local files. There is no telemetry.
 
 ## Reporting a vulnerability

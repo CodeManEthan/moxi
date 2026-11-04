@@ -102,6 +102,9 @@ from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name, qualify, spl
 log = logging.getLogger("comms.daemon")
 
 TIER_EPHEMERAL = attribution.TIER_EPHEMERAL
+
+#: The most messages one `replies_to` read answers.
+REPLY_QUERY_LIMIT = 8
 TIER_CHOSEN = attribution.TIER_CHOSEN
 TIER_STANDING = attribution.TIER_STANDING
 
@@ -1582,9 +1585,12 @@ class Daemon:
     def _agents_query(self, frame: dict) -> dict:
         self._drop_reserved()
         with self._lock:
+            # `handed`: the ids handed to the binding and not yet acked (pushed, waiting
+            # in its overflow, or in a digest not settled), which `waiting` leaves out.
             bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
                          "tier": b.tier, "adapter": b.adapter,
-                         "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
+                         "endpoint": b.endpoint, "endpoint_since": b.endpoint_since,
+                         "handed": len(b.delivered - b.handled)}
                         for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
             now = self.clock()
             waiting = self._waiting_view(now)
@@ -1660,6 +1666,66 @@ class Daemon:
         if msg is None:
             raise _unknown_message(mid)
         return {"message": msg.to_dict()}
+
+    def _replies_to_query(self, frame: dict) -> dict:
+        """The replies one identity can read to one message, by one author.
+
+            -> {"op": "query", "kind": "replies_to", "identity": "claude-app",
+                "reply_to": "4611686018427387905", "author": "planner@proj-a"}
+            <- {"messages": [{"message_id": "4611686018427387912",
+                              "author": {"name": "planner@proj-a", "tier": "chosen",
+                                         "attribution": "verified"},
+                              "posture": "open", "open_mark": false,
+                              "reply_to": "4611686018427387905",
+                              "text": "the body, line zero removed",
+                              "timestamp": "2026-01-01T12:00:00Z"}]}
+
+        A message is returned only when its id is above `reply_to`, its line zero's
+        `re:` is `reply_to`, `author` wrote it (as the sent index and the record's
+        attribution both say), and one of its recipient tags names `identity`. Nothing
+        else is read from the record: the candidates come from the sent index, which
+        holds every `#names` message of the last `OWED_TTL`, and only their own ids are
+        fetched. So mail to any other name, the operator's included, is never read here.
+        Oldest first, at most `REPLY_QUERY_LIMIT`.
+
+        It is for a caller that waits on a reply its binding may not have been pushed
+        (the push window full of other mail): comms' connector provider. A READ: it
+        changes no hold, delivery, cursor or ask state. Who may ask: any process that
+        can open this socket, as for `attributed_message`, which already answers any one
+        message to such a process, so no caller learns more through it.
+        """
+        identity, author = frame.get("identity"), frame.get("author")
+        raw = frame.get("reply_to")
+        reply_to = str(raw).strip() if isinstance(raw, (str, int)) else ""
+        if not reply_to.isdigit():
+            raise Refusal("replies_to: `reply_to` must be a message id")
+        for key, value in (("identity", identity), ("author", author)):
+            if not isinstance(value, str) or not value.strip():
+                raise Refusal(f"replies_to: `{key}` must be a qualified name")
+        with self._lock:
+            entries = list(self.sent.get(author, ()))
+        floor = _as_id(reply_to)
+        candidates = [e for e in entries
+                      if _as_id(e.id) > floor and str(e.reply_to or "") == reply_to
+                      and any(tag_matches(t, identity) for t in e.tags)]
+        out = []
+        for entry in candidates:
+            if len(out) >= REPLY_QUERY_LIMIT:
+                break
+            msg = self.record.get_message(entry.id)
+            ml = None if msg is None else parse_machine_line(msg.content)
+            if ml is None or str(ml.reply_to or "") != reply_to:
+                continue
+            who = self.attribute(msg, live=False)
+            if who.qualified != author:
+                continue
+            out.append({"message_id": str(msg.id),
+                        "author": {"name": who.qualified, "tier": who.tier,
+                                   "attribution": who.attribution},
+                        "posture": ml.posture, "open_mark": bool(ml.open_mark),
+                        "reply_to": str(ml.reply_to), "text": ml.text,
+                        "timestamp": msg.timestamp})
+        return {"messages": out}
 
     def _history_query(self, frame: dict) -> dict:
         channel_id = frame.get("channel_id") or self._names_channel()
@@ -3582,7 +3648,7 @@ class DaemonStopping(Exception):
 #: The read methods: any client may call them, and they take no connection.
 READS = ("resolve", "agents", "session", "owner", "asks", "owed", "readable", "explain",
          "binding_window", "attributed_message", "rooms", "message", "history", "max_id",
-         "last_digest")
+         "last_digest", "replies_to")
 
 
 class Refusal(Exception):

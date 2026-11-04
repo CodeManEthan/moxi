@@ -18,6 +18,8 @@ OPTIONAL = {
              "its next turn, and a cache comms cannot read refuses the send. Without it "
              "every agent reads as having no cache and gets its mail live.",
     "ui": "The comms panel and its roster of agents in the browser UI shell.",
+    "connector": "comms' tools in the Claude apps, text chat and voice mode, through the "
+                 "public MCP host",
 }
 GATED = {"moxi-comms-codex": "codex"}
 #: Each variable of comms' prefix it reads outside moxi.paths and moxi.config, and why.

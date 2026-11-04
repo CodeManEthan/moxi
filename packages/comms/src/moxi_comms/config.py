@@ -33,6 +33,11 @@ line of doc and, for a few, the one variable that overrides it for one process:
     enabled = true                          # serve comms' tools over MCP
     port    = 8450                          # on 127.0.0.1, always
 
+    [connector]                             # comms' tools in the Claude apps
+    identity     = "claude-app"             # the name they send and receive as
+    wait_default = 45                       # send_and_wait's wait, in seconds
+    wait_max     = 90                       # the longest wait a call may ask for
+
     [codex.agents."planner@proj-a"]         # the Codex roster (adapters/codex_roster)
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
 
@@ -195,6 +200,21 @@ class McpConfig:
     port: int = _default("mcp.port")
 
 
+#: The longest `[connector] wait_max` may be, in seconds: Cloudflare ends an origin's
+#: answer at 100 s, and a JSON reply sends nothing until the wait is over.
+CONNECTOR_WAIT_CEILING = 99
+
+
+@dataclass
+class ConnectorConfig:
+    """`[connector]`: what comms' tools in the Claude apps send and receive as, and how long
+    `send_and_wait` waits. Read by comms' provider when the connector starts it."""
+
+    identity: str = _default("connector.identity")
+    wait_default: int = _default("connector.wait_default")
+    wait_max: int = _default("connector.wait_max")
+
+
 @dataclass
 class ReplayConfig:
     """`[replay]`: comms 0.2's catch-up bound, read only by the move of its files."""
@@ -215,6 +235,7 @@ class CommsConfig:
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     replay: ReplayConfig = field(default_factory=ReplayConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
+    connector: ConnectorConfig = field(default_factory=ConnectorConfig)
     block: bool = _default("block")
     #: The rosters' tables, raw: `{"defaults": {...}, "agents": {...}}`.
     codex: dict = field(default_factory=dict)
@@ -425,6 +446,7 @@ def _typed(settings, path: Path | None) -> CommsConfig:
     operator = v["provision.operator"].strip()
     if not operator:
         raise bad("provision.operator", "is empty", "name the human's identity")
+    connector = _connector(bad, v, operator)
 
     return CommsConfig(
         backend=v["backend"],
@@ -442,12 +464,39 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
         replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         mcp=McpConfig(enabled=v["mcp.enabled"], port=v["mcp.port"]),
+        connector=connector,
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),
         source=str(path) if path is not None and path.exists() else "defaults",
         sources=dict(settings.sources),
     )
+
+
+def _connector(bad, v, operator: str) -> ConnectorConfig:
+    """`[connector]`, checked: the identity is a plain global name that is neither the
+    operator's nor an agent-N, and the waits are whole seconds with the default inside the
+    cap and the cap under `CONNECTOR_WAIT_CEILING`."""
+    from .scoping import NAME_RE, is_auto_name
+
+    identity = str(v["connector.identity"]).strip()
+    if not NAME_RE.match(identity) or is_auto_name(identity):
+        raise bad("connector.identity", f"is {identity!r}",
+                  "name a global comms name: letters, digits, dots, dashes and "
+                  "underscores, with no @scope, and not agent-N")
+    if identity == operator:
+        raise bad("connector.identity", f"is {identity!r}, the operator's own name",
+                  "name an identity of the tools' own; they never send as the operator")
+    wait_max, wait_default = v["connector.wait_max"], v["connector.wait_default"]
+    if not 1 <= wait_max <= CONNECTOR_WAIT_CEILING:
+        raise bad("connector.wait_max", f"is {wait_max}",
+                  f"set it to a whole number of seconds from 1 to "
+                  f"{CONNECTOR_WAIT_CEILING}")
+    if not 1 <= wait_default <= wait_max:
+        raise bad("connector.wait_default", f"is {wait_default}",
+                  f"set it to a whole number of seconds from 1 to wait_max ({wait_max})")
+    return ConnectorConfig(identity=identity, wait_default=wait_default,
+                           wait_max=wait_max)
 
 
 def _chain(bad, chain) -> tuple:

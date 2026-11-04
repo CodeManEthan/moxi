@@ -833,6 +833,9 @@ cache = [
 codex = [
     { name = "moxi-turns", extra = ["codex"] },
 ]
+connector = [
+    { name = "moxi-connector" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -854,13 +857,14 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3,<3" },
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
+    { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "moxi-turns", extras = ["codex"], marker = "extra == 'codex'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "uvicorn", specifier = ">=0.54,<1" },
 ]
-provides-extras = ["codex", "cache", "ui"]
+provides-extras = ["codex", "cache", "ui", "connector"]
 
 [package.metadata.requires-dev]
 dev = [
