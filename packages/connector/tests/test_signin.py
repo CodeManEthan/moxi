@@ -273,6 +273,16 @@ def test_an_origin_change_swaps_the_sign_ins_values_drops_codes_and_stales_grant
         view = grants.listing(d.oauth.store.view(), resource=OTHER.resource, now=time.time(),
                               days=30)
         assert view[0]["stale"]
+        # The page's POST is checked against the new origin: a form the old origin's page
+        # sent is refused, and the new one's finishes.
+        shown = await d.authorize(d.params(client)[1])
+        assert shown.status == 200
+        pid = pending_of(shown.body)
+        stale_form = await d.finish(pid, d.mint(), headers=d.browser_headers(ORIGIN))
+        assert stale_form.status == 403
+        done = await d.finish(pid, d.mint())
+        assert done.status == 303 and done.header("location").startswith(CALLBACK + "?")
+        assert query_of(done.header("location"))["iss"] == OTHER.issuer
         # The old origin's pending request and code are gone.
         assert old.pending == {} and old.codes == {}
         with pytest.raises(KeyError):
