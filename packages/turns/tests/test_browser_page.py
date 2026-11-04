@@ -17,6 +17,7 @@ import pytest
 from playwright.sync_api import expect
 
 from fake_harness import FakeHarness
+from moxi_dev.testing import short_dir
 from moxi_turns.results import Agent
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
@@ -32,6 +33,21 @@ EMPTY = "No session is reachable. A session shows here while it runs with turns'
 SESSIONS = "/m/turns/api/sessions"
 #: How long a new endpoint may take to show: one rescan, its first read, the push.
 APPEAR_MS = 10_000
+
+
+@pytest.fixture(scope="module")
+def ui_shell(ui_shells, ui_shell_options):
+    """The test shell, its home in a short directory rather than pytest's tmp. The
+    endpoints the tests open put their sockets under the shell's runtime root, and under
+    pytest's root (a numbered directory per run, a worker's directory, a counted one per
+    shell) a socket's path can pass the core's limit, which moves it to a shared directory
+    outside the test. The shell is stopped before its home is removed."""
+    with short_dir("tb-") as home:
+        shell = ui_shells(home=home, **ui_shell_options)
+        try:
+            yield shell
+        finally:
+            shell.stop()
 
 
 @pytest.fixture
