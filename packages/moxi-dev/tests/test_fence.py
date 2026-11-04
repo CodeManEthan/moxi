@@ -165,9 +165,33 @@ def test_uv_finds_its_directories_as_uv_does():
     # An empty value is unset, as uv reads it.
     assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", windows=False) == \
         dirs({}, "/h", windows=False)
-    win = dirs({"LOCALAPPDATA": "L", "APPDATA": "R"}, "H", windows=True)
-    assert win == {"UV_CACHE_DIR": os.path.join("L", "uv", "cache"),
-                   "UV_PYTHON_INSTALL_DIR": os.path.join("R", "uv", "data", "python")}
+
+
+def test_on_windows_uv_finds_its_directories_as_uv_does(monkeypatch, tmp_path):
+    local, roaming, home = tmp_path / "L", tmp_path / "R", tmp_path / "H"
+    older = tmp_path / "R2"
+    (older / "uv").mkdir(parents=True)
+    (older / "uv" / "data").write_text("")
+    # Made before the platform is patched: the fence judges this test's own writes by it.
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    environ = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+    assert testing._uv_dirs(environ, str(home)) == {
+        "UV_CACHE_DIR": str(local / "uv" / "cache"),
+        "UV_PYTHON_INSTALL_DIR": str(roaming / "uv" / "python")}
+    # Without the two folders' variables, the folders under the home.
+    assert testing._uv_dirs({}, str(home)) == {
+        "UV_CACHE_DIR": str(home / "AppData" / "Local" / "uv" / "cache"),
+        "UV_PYTHON_INSTALL_DIR": str(home / "AppData" / "Roaming" / "uv" / "python")}
+    # uv goes on using its older data folder where it is there, even as a file.
+    assert testing._uv_dirs({"APPDATA": str(older)}, str(home))[
+        "UV_PYTHON_INSTALL_DIR"] == str(older / "uv" / "data" / "python")
+    assert testing._uv_dirs({**environ, "UV_PYTHON_INSTALL_DIR": "P"}, str(home))[
+        "UV_PYTHON_INSTALL_DIR"] == "P"
+    # Off Windows the same environment gives the XDG places, whatever is in APPDATA.
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    assert testing._uv_dirs(environ, str(home)) == {
+        "UV_CACHE_DIR": str(home / ".cache" / "uv"),
+        "UV_PYTHON_INSTALL_DIR": str(home / ".local" / "share" / "uv" / "python")}
 
 
 def test_uv_env_carries_the_real_uv_and_leaves_this_process_fenced(fence, uv_env):
@@ -275,6 +299,39 @@ def test_off_windows_the_null_device_is_os_devnull_alone(monkeypatch):
     assert testing._allowed(os.devnull)
     for path in (*WINDOWS_NULLS, "/work/nul", "/dev/null2", "/dev/nul"):
         assert not testing._allowed(path), path
+
+
+#: Allowed roots on Windows, and paths inside them in long form.
+WINDOWS_ROOTS = ("C:\\t\\base", "\\\\srv\\share\\short")
+WINDOWS_LONG_INSIDE = ("\\\\?\\C:\\t\\base", "\\\\?\\C:\\t\\base\\gw0\\basetemp",
+                       "\\\\?\\UNC\\srv\\share\\short\\x", "\\\\?\\unc\\srv\\share\\short")
+#: Long forms that name a place outside, or no plain path at all.
+WINDOWS_LONG_OUTSIDE = ("\\\\?\\C:\\t\\elsewhere", "\\\\?\\C:\\t\\base2\\x",
+                        "\\\\?\\C:\\t\\base\\..\\out", "\\\\?\\C:\\t\\base\\.\\x",
+                        "\\\\?\\C:\\t\\base/x", "\\\\?\\C:\\t\\base\\",
+                        "\\\\?\\UNC\\srv\\share\\other",
+                        "\\\\?\\GLOBALROOT\\Device\\C:\\t\\base\\x",
+                        "\\\\?\\Volume{0}\\t\\base\\x", "\\\\.\\C:\\t\\base\\x")
+
+
+def test_on_windows_a_long_form_path_is_judged_by_the_path_it_names(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    for path in WINDOWS_LONG_INSIDE:
+        assert testing._under(path, WINDOWS_ROOTS), path
+    for path in WINDOWS_LONG_OUTSIDE:
+        assert not testing._under(path, WINDOWS_ROOTS), path
+    # A root that is itself in long form matches its plain paths.
+    assert testing._under("C:\\t\\base\\x", ["\\\\?\\C:\\t\\base"])
+    # The long form of nul in the tmp is a file there, and outside it is still refused.
+    assert not testing._allowed("\\\\?\\C:\\work\\nul")
+
+
+def test_off_windows_a_long_form_path_is_a_name_like_any_other(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    for path in WINDOWS_LONG_INSIDE:
+        assert not testing._under(path, WINDOWS_ROOTS), path
+    assert testing._under("/t/base/x", ["/t/base"])
+    assert not testing._under("/t/base2", ["/t/base"])
 
 
 def test_reading_outside_the_tmp_is_not_a_write():

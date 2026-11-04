@@ -44,7 +44,10 @@ The fence, around every test (the autouse fixture `fence`):
   resolves to one in the working directory), which Windows opens as the device. A
   `\\\\?\\` or `\\\\.\\` path to a file named `nul` creates a real file, so it is
   refused; so are `nul.txt` and `nul:`, which only some Windows versions open as the
-  device. A write is: `open` for writing or
+  device. On Windows a long-form path (`\\\\?\\C:\\...`, which pytest uses to remove its
+  temp directories) is judged as the plain path it names, so it is let through where
+  that path is; one that names no plain path (a `..` past the prefix) is refused.
+  A write is: `open` for writing or
   creating, `os.mkdir`, `os.rename`/`os.replace` (both ends), `os.remove`, `os.rmdir`,
   `os.symlink` and `os.link` (the new name), `os.truncate`, `os.chmod`, `os.chown`,
   `os.utime`, `os.setxattr`, `os.removexattr`, `shutil.rmtree`, `shutil.copyfile`,
@@ -77,7 +80,9 @@ it as that child's environment. It is the fenced environment plus uv's real cach
 (`UV_CACHE_DIR`) and installed Pythons (`UV_PYTHON_INSTALL_DIR`), read when pytest
 starts, before any test empties the environment; where neither is set, uv's own default
 under the real home (`$XDG_CACHE_HOME/uv` or `~/.cache/uv`, `$XDG_DATA_HOME/uv/python`
-or `~/.local/share/uv/python`; on Windows under `%LOCALAPPDATA%` and `%APPDATA%`). It
+or `~/.local/share/uv/python`; on Windows `%LOCALAPPDATA%\\uv\\cache` and
+`%APPDATA%\\uv\\python`, or `%APPDATA%\\uv\\data\\python` where uv's older `data` folder
+is there). It
 also sets `UV_PYTHON_DOWNLOADS=never`, so a child finds the Pythons already installed
 and never adds one to the real directory. The test's own process stays fenced.
 
@@ -376,11 +381,38 @@ def _null_device(real: str) -> bool:
     return ntpath.isabs(path) and ntpath.basename(path) == "nul"
 
 
+def _plain(real: str) -> str:
+    """On Windows, a long-form path (`\\\\?\\C:\\...`, `\\\\?\\UNC\\server\\share\\...`) as
+    the plain path it names; any other path as it is.
+
+    Past the prefix Windows takes each name literally, so a long form whose plain path
+    normalizes to something else (a `..`, a `.`, a `/`, a trailing separator) names no
+    plain path and is kept long, which no root matches."""
+    if not WINDOWS or not real.startswith("\\\\?\\"):
+        return real
+    rest = real[4:]
+    if rest[:4].upper() == "UNC\\":
+        plain = "\\\\" + rest[4:]
+    elif rest[:1].isalpha() and rest[1:3] == ":\\":
+        plain = rest
+    else:
+        return real
+    return plain if ntpath.normpath(plain) == plain else real
+
+
+def _under(real: str, roots: Iterable[str]) -> bool:
+    """Whether a resolved path is one of `roots` or inside one, each judged as the plain
+    path it names (`_plain`)."""
+    real = _plain(real)
+    sep = ntpath.sep if WINDOWS else os.sep
+    return any(real == root or real.startswith(root + sep)
+               for root in map(_plain, roots))
+
+
 def _allowed(real: str) -> bool:
     if _null_device(real) or real == "/dev/tty" or real.startswith("/dev/pts/"):
         return True
-    return any(real == root or real.startswith(root + os.sep)
-               for root in (*_GUARD.roots, *_SHORT_DIRS))
+    return _under(real, (*_GUARD.roots, *_SHORT_DIRS))
 
 
 def _write(event: str, path: object, dir_fd: object = None, *,
@@ -572,16 +604,21 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
 
 
 def _uv_dirs(environ: Mapping[str, str], home: str, *,
-             windows: bool = os.name == "nt") -> dict[str, str]:
-    """uv's cache and installed-Python directories, as uv finds them from `environ`."""
+             windows: bool | None = None) -> dict[str, str]:
+    """uv's cache and installed-Python directories, as uv finds them from `environ`;
+    `windows` is `WINDOWS` unless given."""
     def given(key: str) -> str | None:
         return environ.get(key) or None
 
-    if windows:
+    if WINDOWS if windows is None else windows:
         local = given("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
         roaming = given("APPDATA") or os.path.join(home, "AppData", "Roaming")
         cache = os.path.join(local, "uv", "cache")
-        pythons = os.path.join(roaming, "uv", "data", "python")
+        # uv keeps its Pythons in <Roaming>\uv\python, unless its older folder
+        # <Roaming>\uv\data is there, which it goes on using.
+        legacy = os.path.join(roaming, "uv", "data")
+        pythons = os.path.join(legacy if os.path.exists(legacy)
+                               else os.path.join(roaming, "uv"), "python")
     else:
         cache = os.path.join(given("XDG_CACHE_HOME") or os.path.join(home, ".cache"), "uv")
         pythons = os.path.join(given("XDG_DATA_HOME")
