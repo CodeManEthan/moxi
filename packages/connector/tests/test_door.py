@@ -75,7 +75,7 @@ def test_the_closed_sign_in_answers_401_with_the_challenge(make_host):
         got = await request(f, "POST", "/mcp", initialize(), headers=bearer())
         assert got.status == 401
         assert got.header("www-authenticate") == ORIGIN.challenge()
-        assert host.calllog.written[-1][2] == "401"
+        assert host.calllog.written[-1][2] == "mcp-401"
         await f.close()
     run(main())
 

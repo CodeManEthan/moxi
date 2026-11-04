@@ -12,8 +12,11 @@ The door builds its rows (`moxi_connector.app`) and gives each one to a `Writer`
 - `durable` is True for rows of tool calls with a valid sign-in and for events: they are
   on disk when `write` returns. Request rows are not, so a power loss can lose the last
   second of those;
-- `collapse` is None, or the class name of a row a caller without a token can cause (a
-  401, 404, 405, 421, 429 or 503 with no grant).
+- `collapse` is None, or the class name of a row a caller without a token can cause.
+  Every request row without a valid grant is collapsed, whatever its status, in the class
+  `<route>-<status>` (`prm-200`, `token-400`, `mcp-401`); so are registrations
+  (`register`). Rows of calls with a valid grant and the other events are never
+  collapsed.
 
 `flush()` is called every 30 s and `close()` at the process's stop.
 
@@ -60,8 +63,6 @@ RETAIN_DAYS = 30
 COLLAPSE_AFTER = 10
 #: Past this many bytes in a day's file, collapsed classes write one summary an hour.
 DAY_CAP = 64 * 1024 * 1024
-#: Status codes a caller without a token can cause; their rows are collapsed by class.
-COLLAPSED_STATUSES = frozenset({401, 404, 405, 421, 429, 503})
 
 
 class Writer(Protocol):
@@ -264,6 +265,6 @@ def detail(row: Mapping[str, Any]) -> str:
                     if key not in ("at", "kind") and row[key] is not None)
 
 
-__all__ = ["CALLS_DIR", "COLLAPSED_STATUSES", "COLLAPSE_AFTER", "CallLog", "DAY_CAP",
-           "MemoryLog", "RETAIN_DAYS", "Writer", "calls_dir", "check", "day", "detail",
-           "event", "is_day", "last", "now", "read_rows", "stamp"]
+__all__ = ["CALLS_DIR", "COLLAPSE_AFTER", "CallLog", "DAY_CAP", "MemoryLog", "RETAIN_DAYS",
+           "Writer", "calls_dir", "check", "day", "detail", "event", "is_day", "last", "now",
+           "read_rows", "stamp"]

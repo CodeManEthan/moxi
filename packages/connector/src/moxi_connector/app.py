@@ -639,8 +639,10 @@ class Front:
 
     async def _log(self, call: Call) -> None:
         status = call.status or 0
-        collapse = (str(status) if call.grant is None
-                    and status in calllog.COLLAPSED_STATUSES else None)
+        # A caller without a token can make any route answer as often as it likes, so
+        # every row without a grant is collapsed, by route and status; a route's first
+        # rows each minute are still written whole.
+        collapse = None if call.grant is not None else f"{call.route}-{status}"
         durable = call.tool is not None and call.grant is not None
         await write(self.host.calllog, call.row(), durable=durable, collapse=collapse)
 

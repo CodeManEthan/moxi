@@ -224,3 +224,47 @@ def test_read_rows_reads_days_oldest_first_and_skips_bad_lines(logdir):
     assert [r["kind"] for r in calllog.read_rows(now=T0, directory=logdir)] == ["b", "check"]
     assert calllog.last({"a"}, now=T0, directory=logdir) == {"kind": "a"}
     assert calllog.last({"zzz"}, now=T0, directory=logdir) is None
+
+
+def test_a_flood_of_metadata_fetches_without_a_token_stays_bounded(logdir):
+    """Hundreds of tokenless `GET`s on both metadata documents, and junk `/revoke` posts,
+    in one minute, through the real sign-in and the real writer: each route and status
+    writes its first 10 rows, and the rest of the minute is one summary each."""
+    from kit import Fake, echo_tool, provider
+    from signin_kit import CALLBACKS
+
+    from moxi_connector import grants
+    from moxi_connector.app import Front, Host, build_app
+    from moxi_connector.oauth import OAuth
+    from moxi_connector.origin import ASM_PATH, PRM_PATH, Origin
+    from moxi_connector.providers import Registry
+
+    clock = Clock()
+
+    async def main():
+        fake = Fake()
+        registry = Registry.of({"demo": provider(fake, echo_tool(fake))})
+        await registry.start({})
+        log = CallLog(logdir, clock=clock)
+        host = Host(registry, calllog=log, redirect_uris=CALLBACKS)
+        host.signin = OAuth(grants.Store(), log, redirect_uris=CALLBACKS, clock=clock)
+        app = build_app(Origin("door.example.net"), host)
+        await app.start()
+        f = Front(app, host)
+        for _ in range(300):
+            for path in (PRM_PATH, ASM_PATH):
+                assert (await request(f, "GET", path, user_agent="python-httpx/0.28.1")
+                        ).status == 200
+            await request(f, "POST", "/revoke", form={"token": "x", "client_id": "nobody"})
+        await f.close()
+        clock.t += 60
+        log.flush()
+    asyncio.run(main())
+    rows = rows_of(logdir / "2026-11-04.jsonl")
+    requests = [r for r in rows if r["kind"] == "request"]
+    assert [r["route"] for r in requests].count("prm") == 10
+    assert [r["route"] for r in requests].count("asm") == 10
+    assert len(requests) <= 30
+    summaries = {r["class"]: r["count"] for r in rows if r["kind"] == "summary"}
+    assert summaries["prm-200"] == 290 and summaries["asm-200"] == 290
+    assert sum(summaries.values()) + len(requests) == 900

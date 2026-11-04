@@ -566,6 +566,42 @@ def test_a_401_on_mcp_is_never_capped(door):
     run(main())
 
 
+def test_every_request_row_without_a_grant_is_collapsed_by_route_and_status(door, clock):
+    """The capped routes' successes and 400s too, not only their refusals; a call with a
+    valid grant and the sign-in's events are never collapsed."""
+    async def main():
+        d = await door()
+        await request(d.front, "GET", PRM_PATH, user_agent=HTTPX)
+        await request(d.front, "GET", ASM_PATH, user_agent=HTTPX)
+        client = await d.client()
+        verifier, params = d.params(client)
+        assert (await d.authorize(params)).status == 200
+        assert (await request(d.front, "GET", "/authorize")).status == 400
+        assert (await d.token(client, "a-code-nobody-made", verifier)).status == 400
+        assert (await d.mcp("nothing")).status == 401
+        for _ in range(CAPS["authorize-get"]):
+            await d.authorize(params)
+        clock.advance(601)                      # the page loads' pending requests expire
+        _, tokens = await d.sign_in(client)
+        assert (await d.mcp(tokens["access_token"])).status == 200
+        requests = [(row["route"], row["status"], collapse)
+                    for row, _, collapse in d.host.calllog.written
+                    if row["kind"] == "request"]
+        assert requests[:6] == [
+            ("prm", 200, "prm-200"), ("asm", 200, "asm-200"),
+            ("register", 201, "register-201"), ("authorize", 200, "authorize-200"),
+            ("authorize", 400, "authorize-400"), ("token", 400, "token-400")]
+        assert ("mcp", 401, "mcp-401") in requests
+        assert ("authorize", 429, "authorize-429") in requests
+        assert ("token", 200, "token-200") in requests
+        assert requests[-1] == ("mcp", 200, None)
+        events = {row["kind"]: collapse for row, _, collapse in d.host.calllog.written
+                  if row["kind"] != "request"}
+        assert events == {"register": "register", "token": None}
+        await d.close()
+    run(main())
+
+
 # -- the page's entry -----------------------------------------------------------------------
 
 def test_the_page_entry_checks_a_request_before_keeping_it(door):

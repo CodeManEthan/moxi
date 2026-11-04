@@ -110,8 +110,10 @@ Every request and every sign-in event goes to `STATE/connector/calls/<UTC date>.
 0600, kept 30 days. A row holds the time, the route, the status, the tool, the grant's id,
 the client's id and the first 64 characters of the user agent. No row holds a token, a
 code, an `Authorization` header, a query string, a request or answer body, or a message
-body: the writer refuses those fields. Rows a caller without a token can cause are
-collapsed into counts past 10 a minute, so a flood can't fill the disk.
+body: the writer refuses those fields. Every row a caller without a token can cause is
+collapsed: past 10 a minute of one route and status (every request without a valid grant,
+metadata fetches and page loads among them) and past 10 registrations a minute, the rest
+of the minute is one row with a count, so a flood can't fill the disk.
 
 ## Other users on the machine
 
