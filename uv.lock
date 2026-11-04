@@ -1202,6 +1202,7 @@ ui = [
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-projects" },
     { name = "moxi-ui", extra = ["testing"] },
     { name = "playwright" },
     { name = "pytest" },
@@ -1219,6 +1220,7 @@ provides-extras = ["projects", "ui"]
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-projects", editable = "packages/projects" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
     { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },

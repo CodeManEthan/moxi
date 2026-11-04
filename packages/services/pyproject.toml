@@ -31,8 +31,11 @@ services = "moxi_services.projects_link"
 
 [dependency-groups]
 # moxi-ui's pytest plugin runs services' page in a real shell; its testing extra brings
-# the browser. The browser tests import Playwright themselves, so it is named too.
-dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
+# the browser. The browser tests import Playwright themselves, so it is named too. The
+# browser page test seeds its rows' projects through `moxi projects add`, so projects is
+# named as well.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2",
+       "moxi-projects>=0.1,<0.2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
