@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -97,6 +98,27 @@ def commit_file(root: Path, rel: str, text: str = "x\n") -> None:
 def picked(root: Path, base: str = "main") -> list[str]:
     packages = check.load_workspace(root)
     return [p.dir for p in check.pick(packages, check.changed_paths(root, base))]
+
+
+def program_path(directory: Path, name: str) -> Path:
+    """Where `program` writes `name`: as it is, or as `name.cmd` on Windows."""
+    return directory / (f"{name}.cmd" if os.name == "nt" else name)
+
+
+def program(directory: Path, name: str, *, code: int = 0, stderr: tuple[str, ...] = ()
+            ) -> Path:
+    """A stand-in program that prints `stderr`'s lines there and exits `code`: a shell
+    script, or on Windows a batch file, which `shutil.which` finds by PATHEXT and a
+    child process starts by its path."""
+    path = program_path(directory, name)
+    if os.name == "nt":
+        path.write_text("".join(["@echo off\n", *(f">&2 echo {line}\n" for line in stderr),
+                                 f"exit /b {code}\n"]), newline="\r\n")
+    else:
+        path.write_text("".join(["#!/bin/sh\n", *(f"echo {shlex.quote(line)} >&2\n"
+                                                   for line in stderr), f"exit {code}\n"]))
+        path.chmod(0o755)
+    return path
 
 
 class Runs:
@@ -193,9 +215,11 @@ def test_a_move_between_packages_picks_both(repo):
 
 
 def test_odd_file_names_are_read_whole(repo):
-    commit_file(repo, "packages/sessions/a name\twith tab.py")
+    # Windows refuses a tab in a file name; there the name keeps its spaces only.
+    odd = "a name with spaces.py" if os.name == "nt" else "a name\twith tab.py"
+    commit_file(repo, f"packages/sessions/{odd}")
     commit_file(repo, "packages/sessions/été.py")
-    assert check.changed_paths(repo) == ["packages/sessions/a name\twith tab.py",
+    assert check.changed_paths(repo) == [f"packages/sessions/{odd}",
                                          "packages/sessions/été.py"]
 
 
@@ -411,7 +435,7 @@ def test_a_lint_failure_fails_the_check_and_the_rest_still_run(repo):
             raise check.lint.LintError("no announcement")
         return [check.lint.Command("one", ["deptry", "."])]
 
-    runs = Runs({lambda cmd, cwd: cmd[0].endswith("deptry") and cwd.name == "comms": 1})
+    runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "deptry" and cwd.name == "comms": 1})
     result = run_check(repo, runs, plan=plan)
     assert result.code == 1
     assert "| lint fail (cache, comms) |" in result.line()
@@ -544,14 +568,10 @@ def test_a_failed_sync_runs_no_probe(browser_repo):
 
 
 def test_the_probe_says_why_chromium_cant_start(tmp_path):
-    fake = tmp_path / "python"
-    fake.write_text("#!/bin/sh\necho 'Traceback (most recent call last):' >&2\n"
-                    "echo \"No module named 'playwright'\" >&2\nexit 1\n")
-    fake.chmod(0o755)
+    fake = program(tmp_path, "python", code=1, stderr=(
+        "Traceback (most recent call last):", "No module named 'playwright'"))
     assert check.chromium_probe(fake, {"PATH": "/usr/bin:/bin"}) == "No module named 'playwright'"
-    good = tmp_path / "good"
-    good.write_text("#!/bin/sh\nexit 0\n")
-    good.chmod(0o755)
+    good = program(tmp_path, "good")
     assert check.chromium_probe(good, {"PATH": "/usr/bin:/bin"}) is None
     assert "could not run" in check.chromium_probe(tmp_path / "missing", {})
 
@@ -583,9 +603,7 @@ def _tools(tmp_path, *names):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name in names:
-        tool = bin_dir / name
-        tool.write_text("#!/bin/sh\nexit 0\n")
-        tool.chmod(0o755)
+        program(bin_dir, name)
     return str(bin_dir)
 
 
@@ -597,13 +615,15 @@ def test_with_node_and_node_modules_the_built_files_are_compared(repo, monkeypat
     assert result.code == 0 and "| web pass |" in result.line()
     lock, web, sync, *_ = runs.calls
     # The npm `which` found, so Windows's npm.cmd starts too.
-    assert web[0] == [str(tmp_path / "bin" / "npm"), "run", "check"] and web[1] == repo
+    npm = program_path(tmp_path / "bin", "npm")
+    assert [os.path.normcase(web[0][0]), *web[0][1:]] == [
+        os.path.normcase(npm), "run", "check"] and web[1] == repo
 
 
 def test_a_built_file_that_differs_fails_before_the_sync(repo, monkeypatch, tmp_path):
     _with_page(repo, monkeypatch)
     (repo / "node_modules").mkdir()
-    runs = Runs({lambda cmd, cwd: Path(cmd[0]).name == "npm" and cmd[1] == "run": 1})
+    runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "npm" and cmd[1] == "run": 1})
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
     assert result.code == 1 and runs.suites() == []
     assert "| web fail | sync not run |" in result.line()
@@ -620,7 +640,7 @@ def test_without_node_the_compare_is_left_out_with_a_line(repo, monkeypatch, tmp
     runs = Runs()
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, *tools)})
     assert result.code == 0 and "| web skipped |" in result.line()
-    assert not any(Path(cmd[0]).name == "npm" for cmd, _, _ in runs.calls)
+    assert not any(Path(cmd[0]).stem == "npm" for cmd, _, _ in runs.calls)
     assert ("moxi-dev check: the built web files were not compared with their sources: "
             + why) in capsys.readouterr().err
 
@@ -631,7 +651,7 @@ def test_no_page_picked_runs_no_compare(repo, monkeypatch, tmp_path):
     runs = Runs()
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
     assert "| web none |" in result.line()
-    assert not any(Path(cmd[0]).name == "npm" for cmd, _, _ in runs.calls)
+    assert not any(Path(cmd[0]).stem == "npm" for cmd, _, _ in runs.calls)
 
 
 # --- the environment's programs ---------------------------------------------------------
@@ -728,7 +748,15 @@ def test_a_bad_member_stops_the_check_with_a_line(repo, monkeypatch, capsys, tex
 def test_uv_missing_stops_the_check_with_a_line(repo, monkeypatch, capsys):
     bin_dir = repo.parent / "bin"            # git, and no uv
     bin_dir.mkdir()
-    (bin_dir / "git").symlink_to(shutil.which("git"))
+    real_git = Path(shutil.which("git"))
+    try:
+        (bin_dir / real_git.name).symlink_to(real_git)
+    except OSError:
+        # No right to make a symlink (Windows without Developer Mode): git's own
+        # directory serves, where uv isn't in it.
+        if shutil.which("uv", path=str(real_git.parent)):
+            pytest.skip("no right to make a symlink here, and uv sits beside git")
+        bin_dir = real_git.parent
     monkeypatch.setenv("PATH", str(bin_dir))
     result = check.check(repo, full=True)
     assert result.code == 2 and result.lock == "not run"
@@ -976,6 +1004,14 @@ def test_a_record_the_disk_refuses_is_said_and_the_line_still_prints(
     assert LINE.match(out.splitlines()[-1]), out
     assert "| durations 3.0s, slowest 5% 67%, delta none |" in out
     assert list(where.iterdir()) == []
+
+
+def test_the_records_are_in_git_s_own_directory_whatever_its_name(tmp_path):
+    from moxi_dev import durations
+    root = tmp_path / "dépôt"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    assert durations.records_dir(root) == root / ".git" / "moxi-dev" / "durations"
 
 
 def test_another_writer_s_part_file_is_left_alone(tmp_path):

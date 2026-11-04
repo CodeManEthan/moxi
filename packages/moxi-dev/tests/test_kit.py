@@ -84,7 +84,13 @@ def test_the_served_ids_are_the_class_names(request):
 
 def test_short_dir_is_short_and_goes():
     with short_dir() as where:
-        assert where.is_dir() and len(str(where)) < 30
+        assert where.is_dir()
+        if hasattr(socket, "AF_UNIX"):
+            assert len(str(where)) < 30
+        else:
+            # The bound is for a Unix socket's path, and Python has no Unix sockets here
+            # (Windows): the directory is a short name right in the short root.
+            assert where.parent == Path(testing._short_root()) and len(where.name) < 16
     assert not where.exists()
 
 
@@ -155,7 +161,8 @@ def test_an_honest_fsync_reaches_the_disk(tmp_path):
     often is): there a pass would show nothing reached a disk. Run with a disk-backed
     root (PYTEST_DEBUG_TEMPROOT=/var/tmp) and the read comes from the device. It does
     not prove the bytes survive a power cut: the drive's own cache is beyond what a test
-    can see."""
+    can see. On Windows a directory can't be opened as a file, so its fsync is left out,
+    and there is no call that drops the file's cached pages."""
     kind = filesystem_type(tmp_path)
     if kind in MEMORY_FILESYSTEMS:
         pytest.skip(f"tmp_path is on {kind}, which has no disk; set PYTEST_DEBUG_TEMPROOT "
@@ -163,18 +170,20 @@ def test_an_honest_fsync_reaches_the_disk(tmp_path):
     assert os.fsync is testing._REAL_FSYNC
     data = os.urandom(256 * 1024)
     path = tmp_path / "durable"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    binary = getattr(os, "O_BINARY", 0)     # Windows opens in text mode without it
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | binary, 0o600)
     try:
         assert os.write(fd, data) == len(data)
         os.fsync(fd)
     finally:
         os.close(fd)
-    dir_fd = os.open(tmp_path, os.O_RDONLY)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
-    fd = os.open(path, os.O_RDONLY)
+    if os.name != "nt":
+        dir_fd = os.open(tmp_path, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    fd = os.open(path, os.O_RDONLY | binary)
     try:
         if hasattr(os, "posix_fadvise"):
             os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)

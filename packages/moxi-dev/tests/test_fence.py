@@ -13,7 +13,7 @@ import sys
 import tempfile
 import threading
 import uuid
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -73,12 +73,16 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
         assert Path(os.environ[key]).is_relative_to(tmp_path)
     assert os.environ["XDG_RUNTIME_DIR"] == str(fence.runtime)
     assert os.environ["TMPDIR"] == str(fence.short) == tempfile.gettempdir()
-    assert fence.runtime.is_dir() and (fence.runtime.stat().st_mode & 0o777) == 0o700
+    assert fence.runtime.is_dir()
+    if not testing.WINDOWS:         # Windows keeps no POSIX mode: the profile's ACL does
+        assert (fence.runtime.stat().st_mode & 0o777) == 0o700
     for module in modules:
         home = Path(os.environ[f"MOXI_{module.upper()}_HOME"])
         assert home == fence.module_home(module) and home.parent == fence.short
-    # Short enough that a socket a few directories under it fits in sun_path.
-    assert len(str(fence.runtime)) < 40
+    # Short enough that a socket a few directories under it fits in sun_path, where
+    # Python has Unix sockets (not on Windows).
+    if hasattr(socket, "AF_UNIX"):
+        assert len(str(fence.runtime)) < 40
 
 
 #: A Windows user's own environment, as a test process there inherits it.
@@ -107,7 +111,7 @@ def test_the_fence_clears_everything_else(monkeypatch):
          "ANTHROPIC_API_KEY": "k", "SSH_AUTH_SOCK": "/run/agent", "GIT_DIR": "/repo",
          # Off Windows, Windows's own variables are cleared like any other.
          **{k: v for k, v in WINDOWS_SOURCE.items() if k != "PATH"}},
-        Path("/t/home"), Path("/s/run"), Path("/s"), ["comms"])
+        PurePosixPath("/t/home"), PurePosixPath("/s/run"), PurePosixPath("/s"), ["comms"])
     assert env == {
         "PATH": "/bin", "LANG": "C.UTF-8", "LC_ALL": "C",
         "HOME": "/t/home", "XDG_CONFIG_HOME": "/t/home/.config",
@@ -163,11 +167,12 @@ def test_on_windows_the_fence_moves_the_user_s_folders_and_keeps_the_system_s(
 # --- uv in a child ---------------------------------------------------------------------
 
 def test_uv_finds_its_directories_as_uv_does():
-    dirs = testing._uv_dirs
+    dirs, join = testing._uv_dirs, os.path.join     # joined by this system's separator
     assert dirs({}, "/h", windows=False) == {
-        "UV_CACHE_DIR": "/h/.cache/uv", "UV_PYTHON_INSTALL_DIR": "/h/.local/share/uv/python"}
+        "UV_CACHE_DIR": join("/h", ".cache", "uv"),
+        "UV_PYTHON_INSTALL_DIR": join("/h", ".local", "share", "uv", "python")}
     assert dirs({"XDG_CACHE_HOME": "/c", "XDG_DATA_HOME": "/d"}, "/h", windows=False) == {
-        "UV_CACHE_DIR": "/c/uv", "UV_PYTHON_INSTALL_DIR": "/d/uv/python"}
+        "UV_CACHE_DIR": join("/c", "uv"), "UV_PYTHON_INSTALL_DIR": join("/d", "uv", "python")}
     assert dirs({"UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up", "XDG_CACHE_HOME": "/c",
                  "XDG_DATA_HOME": "/d"}, "/h", windows=False) == {
         "UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up"}
@@ -224,31 +229,35 @@ def test_uv_reads_the_real_cache_only_through_uv_env(fence, uv_env):
                               text=True, check=True, timeout=60).stdout.strip()
 
     assert cache_dir(uv_env) == uv_env["UV_CACHE_DIR"]
-    assert Path(cache_dir(dict(os.environ))) == fence.home / ".cache" / "uv"
+    own = ("AppData", "Local", "uv", "cache") if testing.WINDOWS else (".cache", "uv")
+    assert Path(cache_dir(dict(os.environ))) == fence.home.joinpath(*own)
 
 
 UV_PROBE = '''
 import os
 
-CACHE, DATA = {cache!r}, {data!r}
+CACHE, DATA, DATA_VAR = {cache!r}, {data!r}, {data_var!r}
 
 
 def test_uv_env_is_read_at_the_start(uv_env):
     assert uv_env["UV_CACHE_DIR"] == CACHE
     assert uv_env["UV_PYTHON_INSTALL_DIR"] == os.path.join(DATA, "uv", "python")
     assert "UV_CACHE_DIR" not in os.environ
-    assert os.environ["XDG_DATA_HOME"] != DATA
+    assert os.environ[DATA_VAR] != DATA
 '''
 
 
 def test_uv_env_reads_uv_before_the_fence_empties_the_environment(pytester, monkeypatch,
                                                                     tmp_path):
     cache, data = str(tmp_path / "cache"), str(tmp_path / "data")
+    # The variable uv takes its Pythons' folder from: APPDATA on Windows.
+    data_var = "APPDATA" if testing.WINDOWS else "XDG_DATA_HOME"
     monkeypatch.setenv("UV_CACHE_DIR", cache)
-    monkeypatch.setenv("XDG_DATA_HOME", data)
+    monkeypatch.setenv(data_var, data)
     monkeypatch.delenv("UV_PYTHON_INSTALL_DIR", raising=False)
     pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
-    pytester.makepyfile(test_uv_probe=UV_PROBE.format(cache=cache, data=data))
+    pytester.makepyfile(test_uv_probe=UV_PROBE.format(cache=cache, data=data,
+                                                      data_var=data_var))
     result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
     result.assert_outcomes(passed=1)
 
@@ -268,12 +277,20 @@ def test_a_write_to_the_real_home_fails():
     assert not target.exists()
 
 
+#: Windows's error for a symlink made without the right to make one.
+ERROR_PRIVILEGE_NOT_HELD = 1314
+
+
 def test_a_write_in_the_tmp_goes_through(tmp_path):
     (tmp_path / "a").write_text("x")
     os.rename(tmp_path / "a", tmp_path / "b")
     (tmp_path / "tree" / "deep").mkdir(parents=True)
     (tmp_path / "tree" / "deep" / "f").write_text("x")
-    os.symlink(tmp_path / "b", tmp_path / "tree" / "link")
+    try:
+        os.symlink(tmp_path / "b", tmp_path / "tree" / "link")
+    except OSError as exc:          # Windows without the right to make one: no link
+        if getattr(exc, "winerror", None) != ERROR_PRIVILEGE_NOT_HELD:
+            raise
     shutil.rmtree(tmp_path / "tree")             # removes by dir_fd, name by name
     fd, name = tempfile.mkstemp()
     os.close(fd)
@@ -340,7 +357,7 @@ def test_off_windows_a_long_form_path_is_a_name_like_any_other(monkeypatch):
     monkeypatch.setattr(testing, "WINDOWS", False)
     for path in WINDOWS_LONG_INSIDE:
         assert not testing._under(path, WINDOWS_ROOTS), path
-    assert testing._under("/t/base/x", ["/t/base"])
+    assert testing._under(os.path.join("/t/base", "x"), ["/t/base"])   # this system's sep
     assert not testing._under("/t/base2", ["/t/base"])
 
 
@@ -441,7 +458,9 @@ def test_temp_files_land_in_the_test_s_short_directory(fence):
     os.close(fd)
     assert Path(name).parent == fence.short
     with testing.short_dir() as where:
-        assert where.parent == fence.short and len(str(where / "sock")) < 40
+        assert where.parent == fence.short
+        if hasattr(socket, "AF_UNIX"):          # a Unix socket's bound; Windows has none
+            assert len(str(where / "sock")) < 40
 
 
 @pytest.fixture(scope="module")
