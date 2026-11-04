@@ -97,6 +97,35 @@ With `--json`, each command prints one JSON object that starts with the shape ve
 Three settings name a root when it is not the usual one: `claude.projects`,
 `codex.sessions` and `opencode.database`. `moxi config sessions` shows them.
 
+## The page
+
+With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), sessions has a page in the shell
+that shows one session: its directory, title and last activity, then its last five turns,
+oldest first. Each message shows as text, cut at 2,000 characters with a way to show the
+rest; each tool call as one line naming the tool and what it was called on; each tool
+result as its size and whether it failed; compactions, aborted turns and rollbacks as
+labelled rules; and each request's model and token counts. "Earlier" shows the turns
+before. The page lists the session's subagents, and opening one shows its turns the same
+way.
+
+The page lists no sessions. It opens a session by harness and id: at the page's own
+address it asks for both, and a session's address is `<harness>/<session id>`, or
+`claude/<session id>/<agent id>` for a Claude Code subagent. An OpenCode child session and
+a Codex subagent thread each open at their own id. The page server runs in the shell's
+environment, so the roots it reads are the ones that environment and sessions' settings
+name, which can differ from your terminal's. A session that can't be found or read shows
+why.
+
+Other modules' pages can place the same view with the shell's `place()`, as the `window`
+block, with the attributes `harness` (`claude`, `codex` or `opencode`), `session` and, for
+a Claude Code subagent, `agent`. It links to the page at the session's address. A
+subagent chosen in the block opens in the block, with Back to return.
+
+The page only reads. It sends no tool call's input and no tool's output, and sends at most
+64 KiB of any one message, saying when it cut one. It reads a session when it is shown and
+when you ask it to, and runs nothing in the background. Without the extra, nothing of
+sessions changes.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
@@ -120,7 +149,8 @@ the other modules.
 
 ## Dependencies
 
-`moxi`, Moxi's core, and nothing else. sessions has no optional extras.
+`moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
+UI shell, which brings loopback, the base sessions' page server runs on.
 
 ## License
 

@@ -1,12 +1,17 @@
 [project]
 name = "moxi-sessions"
-version = "0.2.0"
+version = "0.2.1"
 description = "Read each harness's own session records in one shape: find a session and its subagents, list a root's sources, read records forward or back."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2"]
+
+[project.optional-dependencies]
+# The browser UI shell: with it, the sessions page and its window block show there.
+# Loopback, which sessions' page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -18,7 +23,9 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 sessions = "moxi_sessions.module"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs sessions' page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -30,7 +37,8 @@ packages = ["src/moxi_sessions"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds only these paths; hatchling adds
 # pyproject.toml and .gitignore itself.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_sessions", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_sessions", "tests",
+                "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
