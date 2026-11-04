@@ -163,7 +163,8 @@ def test_a_file_in_place_of_a_root_is_unreadable(tmp_path):
     assert claude.probe_root(tmp_path / "file", SID).outcome.startswith("unreadable:")
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="POSIX directory modes; root reads any directory")
 def test_a_root_without_permission_is_unreadable(tmp_path):
     locked = tmp_path / "locked"
     locked.mkdir()

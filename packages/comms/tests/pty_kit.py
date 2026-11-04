@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 import signal
 import subprocess
 import sys
-import termios
 import threading
 import time
 
@@ -22,6 +20,9 @@ class PtyWrapper:
     """One `moxi-comms-codex --window` process on its own pty, as a terminal would run it."""
 
     def __init__(self, argv, env):
+        import fcntl  # POSIX only, as ptys are; the kit's other names import on any system
+        import termios
+
         master, slave = os.openpty()
         self.fd = master
         self.proc = subprocess.Popen(

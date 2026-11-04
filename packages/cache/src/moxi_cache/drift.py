@@ -33,10 +33,10 @@ What each state of the file reads as, for the models of a measured row:
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
+import sys
 import tempfile
 import threading
 from dataclasses import dataclass, field
@@ -48,6 +48,8 @@ from . import clock as _clock
 from .clock import Clock, unknown
 
 log = logging.getLogger("moxi.cache")
+
+_WINDOWS = sys.platform == "win32"
 
 MODULE = "cache"
 RECORD_NAME = "drift.json"
@@ -231,9 +233,7 @@ class Store:
             log.warning("cache: could not open %s (%s); this process reads the drift "
                         "record and does not learn", self.lock_path, e.strerror or e)
             return False
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        if not _try_lock(fd, shared=False):
             os.close(fd)
             log.warning("cache: another process is learning into %s; this process reads "
                         "it and does not learn", self.path)
@@ -246,7 +246,7 @@ class Store:
         with self._mutex:
             if self._lock_fd is not None:
                 try:
-                    fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                    _unlock(self._lock_fd)
                 finally:
                     os.close(self._lock_fd)
                     self._lock_fd = None
@@ -361,14 +361,46 @@ def learner_holds_lock(env=None) -> bool | None:
     except OSError:
         return None
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-    except OSError:
-        return True
-    else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        if not _try_lock(fd, shared=True):
+            return True
+        _unlock(fd)
         return False
     finally:
         os.close(fd)
+
+
+def _try_lock(fd: int, *, shared: bool) -> bool:
+    """Take the lock on `fd` without waiting: True when taken, False when another holds
+    it. POSIX: `flock`, shared or exclusive. Windows has no shared lock, so there
+    `msvcrt.locking` takes the file's first byte; a probe holds it only for its check."""
+    if _WINDOWS:
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+
+    try:
+        fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _unlock(fd: int) -> None:
+    if _WINDOWS:
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 __all__ = ["UNREADABLE", "UNWRITTEN", "DriftView", "Record", "Store", "load", "judge",

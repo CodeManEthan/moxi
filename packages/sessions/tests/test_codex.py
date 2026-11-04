@@ -67,7 +67,8 @@ def test_an_absent_root_raises_rather_than_answering_none(tmp_path):
         codex.find_rollout(tmp_path / "nowhere", THREAD)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="POSIX directory modes; root reads any directory")
 def test_an_unreadable_root_raises(tmp_path):
     locked = tmp_path / "locked"
     locked.mkdir()

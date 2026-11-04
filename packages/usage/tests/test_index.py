@@ -284,7 +284,8 @@ def test_an_archive_lane_that_lists_empty_or_goes_offline_keeps_its_rows(reading
     assert sorted(r["output"] for r in won()) == [11, 22]
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="POSIX directory modes; root reads every directory")
 def test_a_source_under_an_unreadable_directory_keeps_its_row(readings, roots):
     t = transcript(roots["claude"], SESSION_A)
     t.write()
@@ -304,7 +305,8 @@ def test_a_source_under_an_unreadable_directory_keeps_its_row(readings, roots):
     assert {row["held"] for row in files("claude")} == {None}
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every file")
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="POSIX file modes; root reads every file")
 def test_a_source_that_cannot_be_read_keeps_its_rows_and_its_cursor(readings, roots):
     t = transcript(roots["claude"], SESSION_A)
     t.write()

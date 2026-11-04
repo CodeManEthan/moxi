@@ -88,7 +88,8 @@ class _TCP(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 
-class _Unix(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+#: Windows' socketserver has no Unix server; the tests that use one skip there.
+class _Unix(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStreamServer", object)):
     daemon_threads = True
 
 

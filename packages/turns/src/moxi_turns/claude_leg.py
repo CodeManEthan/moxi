@@ -310,9 +310,13 @@ class LineWriter:
         return False
 
 
-class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    daemon_threads = True
-    allow_reuse_address = False
+#: Windows' socketserver has no Unix server, so there no `mod.sock` is served and
+#: `LegServer` refuses; the module's other names import on any system.
+_Server = None
+if hasattr(socketserver, "UnixStreamServer"):
+    class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+        allow_reuse_address = False
 
 
 class LegServer:
@@ -325,6 +329,9 @@ class LegServer:
         self.path = path
         self.times = hooktimes.Recorder("claude") if times is None else times
         handler = _handler_for(_with_hook_times(handle, self.times))
+        if _Server is None:
+            raise OSError("the Claude leg's mod.sock is a Unix socket, which this Python "
+                          "has no server for")
         self._server = _Server(path, handler)
         self._thread = threading.Thread(target=self._server.serve_forever,
                                         kwargs={"poll_interval": 0.2}, daemon=True,
