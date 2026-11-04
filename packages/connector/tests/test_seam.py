@@ -112,6 +112,82 @@ def test_a_caller_that_hangs_up_on_a_real_socket_cancels_the_tool_and_settles_fa
     assert "dropped" not in kept
 
 
+def test_a_hang_up_cancels_a_tool_whose_handler_runs_outside_the_requests_task(
+        make_host, fake):
+    """On the SDK's older protocol path the handler runs in a task of the session
+    manager's, not of the request: cancelling the request leaves it running. The task the
+    host keeps for each tool call is what reaches the tool there."""
+    from kit import scope
+
+    from moxi_connector.app import CALL, CALL_KEY, Front, Tools, _Served
+
+    began, ended = asyncio.Event(), []
+
+    async def slow(args, ctx):
+        ctx.after_answer(fake.written.append)
+        began.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            ended.append(True)
+            raise
+        return Result("late")
+
+    class Elsewhere(_Served):
+        """Reads the body, then runs the tool call in a task the request doesn't own and
+        waits for it shielded, so a cancel of the request stops only the wait."""
+
+        def __init__(self, host):
+            super().__init__()
+            self.tools = Tools(host)
+            self.handlers: list[asyncio.Task] = []
+
+        async def __call__(self, scope_, receive, send):
+            while (await receive()).get("more_body", False):
+                pass
+            token = CALL.set(scope_[CALL_KEY])
+            try:
+                handler = asyncio.get_running_loop().create_task(self.tools.call_tool(
+                    None, SimpleNamespace(name="slow", arguments={})))
+            finally:
+                CALL.reset(token)
+            self.handlers.append(handler)
+            await asyncio.shield(handler)
+
+    async def main():
+        host = await make_host(providers={"demo": provider(fake,
+                                                           Tool("slow", "x", {}, slow))})
+        app = Elsewhere(host)
+        f = Front(app, host)
+        body, gone = [json.dumps(call("slow")).encode()], asyncio.Event()
+
+        async def receive():
+            if body:
+                return {"type": "http.request", "body": body.pop(), "more_body": False}
+            await gone.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            pass
+
+        pending = asyncio.ensure_future(f(scope(headers=[
+            ("content-type", "application/json")]), receive, send))
+        await began.wait()
+        gone.set()
+        await asyncio.wait_for(pending, 5)
+        [handler] = app.handlers
+        await asyncio.wait({handler}, timeout=5)
+        try:
+            assert handler.done() and ended == [True]
+            assert handler.result().structured_content == {"refusal": "hung-up"}
+        finally:
+            handler.cancel()
+        assert fake.written == [False]
+        [(row, _, _)] = host.calllog.written
+        assert row["dropped"] is True and row["tool"] == "slow"
+    run(main())
+
+
 def test_a_tool_name_two_providers_declare_is_refused_for_both(front):
     one, two = Fake(), Fake()
 
