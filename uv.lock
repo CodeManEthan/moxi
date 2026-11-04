@@ -11,6 +11,7 @@ members = [
     "moxi",
     "moxi-cache",
     "moxi-comms",
+    "moxi-connector",
     "moxi-dev",
     "moxi-launcher",
     "moxi-loadout",
@@ -870,6 +871,44 @@ dev = [
     { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
+]
+
+[[package]]
+name = "moxi-connector"
+version = "0.1.0"
+source = { editable = "packages/connector" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "mcp" },
+    { name = "moxi" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+tunnel = [
+    { name = "moxi-tunnel" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.20,<5" },
+    { name = "mcp", specifier = ">=2.3,<3" },
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-tunnel", marker = "extra == 'tunnel'", editable = "packages/tunnel" },
+    { name = "uvicorn", specifier = ">=0.54,<1" },
+]
+provides-extras = ["tunnel"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
 ]
 
 [[package]]
