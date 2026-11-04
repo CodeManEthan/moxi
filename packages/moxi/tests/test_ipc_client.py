@@ -979,6 +979,31 @@ def test_one_client_shared_by_many_threads(serving):
             ("pushed", [i]) for i in range(100)]
 
 
+def test_a_client_in_another_process(serving):
+    async def answer(conn, method, params):
+        if method == "peer":
+            return conn.peer.pid
+        if method == "push":
+            conn.notify("pushed", [1])
+            return "pushed"
+        return params
+
+    srv = serving(answer, hello=ipc.Hello((1, 2), {"x"}))
+    code = ("import json, os, sys\nimport moxi.ipc as ipc\n"
+            "with ipc.connect(sys.argv[1]) as c:\n"
+            "    agreed = c.hello((1, 1))\n"
+            "    out = {'me': os.getpid(),"
+            " 'agreed': [agreed.version, sorted(agreed.capabilities)],"
+            " 'peer': c.call('peer', timeout=10), 'push': c.call('push', timeout=10),"
+            " 'note': next(c.notifications())}\n"
+            "print(json.dumps(out))\n")
+    done = subprocess.run([sys.executable, "-c", code, srv.address], capture_output=True,
+                          text=True, timeout=60, check=True)
+    got = json.loads(done.stdout)
+    assert got == {"me": got["me"], "agreed": [1, ["x"]], "peer": got["me"],
+                   "push": "pushed", "note": ["pushed", [1]]}
+
+
 def test_the_reader_is_one_daemon_thread_that_ends_with_the_client(serving):
     srv = serving(handler)
     before = {t.ident for t in threading.enumerate()}
