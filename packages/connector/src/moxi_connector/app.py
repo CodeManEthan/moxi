@@ -28,6 +28,8 @@ set from O too: O's host as the one allowed host and O as the one allowed `Origi
 
 - makes the request's `Call`: a request id, and the `after_answer` callbacks a tool
   registers (`moxi_connector.provider.Ctx`);
+- notes an `X-Moxi-Probe` value that `moxi connector check` registered
+  (`moxi_connector.probe.Probes`), before the Host gate;
 - passes the request to the current app, and counts it as that app's while it runs, so a
   swap lets requests already started finish on the old app;
 - watches the ASGI `send` seam: once the final `http.response.body` (`more_body` false)

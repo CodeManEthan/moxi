@@ -177,14 +177,14 @@ def run(origin, *, ask: Callable[[str, object], object], fetch: Fetch = fetch,
                                   "Accept": "application/json, text/event-stream"},
                     b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
     except OSError as e:
-        steps.append(Step("challenge", False, f"POST {mcp} didn't connect: {e}"))
+        steps.append(Step("unsigned", False, f"POST {mcp} didn't connect: {e}"))
     else:
         challenge = got.headers.get("www-authenticate", "")
         if got.status == 401 and "resource_metadata=" in challenge:
-            steps.append(Step("challenge", True, f"POST {mcp} without a token answered 401 "
+            steps.append(Step("unsigned", True, f"POST {mcp} without a token answered 401 "
                                                  "pointing at the metadata, as Claude needs"))
         else:
-            steps.append(Step("challenge", False,
+            steps.append(Step("unsigned", False,
                               f"POST {mcp} without a token answered {got.status}"
                               + ("" if got.status != 401 else " with no resource_metadata")
                               + ", not 401 with resource_metadata"))

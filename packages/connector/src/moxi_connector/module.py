@@ -8,9 +8,13 @@ sign-in, and the tools other modules provide through the group
 `moxi.connector.providers` (`moxi_connector.provider`). It is off until its switch is on.
 """
 
-INTERFACES = frozenset()
-API = None
-CLI = None
+#: Interface 1, `moxi_connector.provider`: what a module gives to serve its tools. A
+#: provider that has the connector only through an extra reaches it through
+#: `moxi.modules.load("connector", interface=1).api`, never by importing it.
+INTERFACES = frozenset({1})
+API = "moxi_connector.provider"
+#: `moxi connector`: on, off, status, check and log.
+CLI = "moxi_connector.cli:main"
 SUMMARY = ("The public MCP door for the Claude apps: the listener, the sign-in, the address "
            "and the tools other modules provide.")
 OPTIONAL = {
@@ -36,6 +40,10 @@ DAEMONS = {"server": {"command": "moxi-connector-server",
                                  "start": "login"}}}
 #: The door's health: its control socket answers `status` within 2 s.
 HEALTH = {"server": "moxi_connector.checks:health"}
+#: The connector's doctor rows: the switch, the process, the address, the port, the edge,
+#: the providers, the mint gate, the grants and each provider's own. While the switch is
+#: off they are quiet but for a tunnel entry forwarding to the port nothing holds.
+DOCTOR = "moxi_connector.doctor:rows"
 #: What the door may cost at idle, `moxi doctor --costs`. Measured with no provider: about
 #: 76 MB and 8 descriptors after start, and no measurable CPU over 90 s while it woke
 #: every 30 s to read its origin. A provider adds its own (comms' a daemon client: one
