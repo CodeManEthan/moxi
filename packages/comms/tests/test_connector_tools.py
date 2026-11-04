@@ -489,6 +489,36 @@ def test_send_and_wait_finds_the_reply_in_the_record_past_a_full_window(rig, too
         pytest.fail("the reply never came through check_messages")
 
 
+def test_send_and_wait_never_shows_a_reply_withdrawn_before_the_open(rig, tools, link):
+    shim = planner(rig)
+    real, dropped = link.open_digest, []
+
+    def withdraw_first(asked):
+        if not dropped:                              # the author withdraws it just now
+            dropped.extend(asked)
+            for mid in asked:
+                rig.daemon.books.withdraw(mid)
+        return real(asked)
+
+    link.open_digest = withdraw_first
+
+    def replies():
+        mid = sent_id(rig)
+        assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))
+        post(rig, [ME], "withdrawn", reply_to=mid)
+        assert wait_until(lambda: dropped)
+        post(rig, [ME], "kept", reply_to=mid)
+
+    try:
+        got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5},
+                        replies)
+    finally:
+        link.open_digest = real
+    assert got.structured["outcome"] == "replied", got.text
+    assert got.structured["reply"]["text"] == "kept"
+    assert got.structured["reply"]["id"] not in dropped
+
+
 def test_send_and_wait_to_a_recipient_that_cant_read_now_answers_at_once(rig, tools):
     got = wait_call(tools, {"to": "main@proj-b", "text": "ok?", "wait_seconds": 5})
     assert got.structured["outcome"] == "not-delivered"

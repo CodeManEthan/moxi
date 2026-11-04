@@ -300,7 +300,7 @@ class Tools:
             # The count first: once the digest is open, no read may fail and turn the
             # answer into an error, which the connector would still settle as written.
             waiting = await self._waiting()
-            shown = await self._take(ctx, lambda pending: pending[:limit])
+            shown, _ = await self._take(ctx, lambda pending: pending[:limit])
         except (DaemonError, DaemonOffline) as e:
             return self._read_refused(e)
         more = max(0, waiting - len(shown))
@@ -313,10 +313,11 @@ class Tools:
             lines.append(f"{more} more waiting.")
         return self.result("\n".join(lines), {"messages": shown, "more_waiting": more})
 
-    async def _take(self, ctx, pick: Callable[[list], list]) -> list[dict]:
+    async def _take(self, ctx, pick: Callable[[list], list]) -> tuple[list[dict], set[str]]:
         """Open one digest for the pushes `pick` chooses from the buffer, register its
-        settle with the connector, and return the messages it kept, rendered. Ids a wait
-        already showed are marked.
+        settle with the connector, and return the messages it kept, rendered (ids a wait
+        already showed are marked), and the ids the daemon dropped as withdrawn or
+        expired.
 
         One call at a time looks at the buffer and opens its digest, so two overlapping
         calls never take the same messages: the daemon would move them to the later
@@ -328,7 +329,7 @@ class Tools:
         try:
             payloads = pick(self.link.pending())
             if not payloads:
-                return []
+                return [], set()
             ids = [str(p["message_id"]) for p in payloads]
             job = asyncio.ensure_future(asyncio.to_thread(self.link.open_digest, ids))
             try:
@@ -355,7 +356,7 @@ class Tools:
                 continue
             out.append(self._message(p, already=mid in self.shown))
             self.shown.pop(mid, None)
-        return out
+        return out, {str(d.get("id")) for d in answer.get("dropped") or ()}
 
     def _abandoned(self, job: asyncio.Future) -> None:
         """A cancelled call's open has returned: settle its digest unhandled, and free
@@ -437,29 +438,42 @@ class Tools:
                                {**fields, "outcome": "not-delivered", "reply": None,
                                 "other_new": 0})
         sent = str(result.message_id)
-        found = await self._wait_for_reply(sent, recipient.qualified, wait)
-        if found is None:
-            ctx.log(waited=wait, replied=False)
-            return self.result(
-                f"No reply within {wait} second{'' if wait == 1 else 's'}. The message "
-                f"was sent, msg {sent}. The "
-                "reply will show in check_messages.",
-                {**fields, "outcome": "no-reply", "reply": None, "other_new": 0})
-        reply, pushed = found
-        try:
-            waiting = await self._waiting()             # before the digest opens
-            if pushed:
-                mid = str(reply["message_id"])
-                taken = await self._take(ctx, lambda pending: [
-                    p for p in pending if str(p["message_id"]) == mid])
-                message = taken[0] if taken else self._message(reply, already=False)
-            else:
+        deadline = time.monotonic() + wait
+        # Replies the daemon dropped at the open (withdrawn or expired): never shown.
+        dropped: set[str] = set()
+        while True:
+            found = await self._wait_for_reply(sent, recipient.qualified, deadline, dropped)
+            if found is None:
+                ctx.log(waited=wait, replied=False)
+                return self.result(
+                    f"No reply within {wait} second{'' if wait == 1 else 's'}. The "
+                    f"message was sent, msg {sent}. The "
+                    "reply will show in check_messages.",
+                    {**fields, "outcome": "no-reply", "reply": None, "other_new": 0})
+            reply, pushed = found
+            mid = str(reply["message_id"])
+            try:
+                waiting = await self._waiting()             # before the digest opens
+                if pushed:
+                    taken, gone = await self._take(ctx, lambda pending, mid=mid: [
+                        p for p in pending if str(p["message_id"]) == mid])
+            except (DaemonError, DaemonOffline) as e:
+                return self._read_refused(e)
+            if not pushed:
                 message = self._message(reply, already=False)
-                self.shown[str(reply["message_id"])] = None
+                self.shown[mid] = None
                 while len(self.shown) > SHOWN_MAX:
                     self.shown.popitem(last=False)
-        except (DaemonError, DaemonOffline) as e:
-            return self._read_refused(e)
+                break
+            if mid in gone:
+                # Withdrawn or expired by the open, comms' last check: not a reply to
+                # show. The wait goes on for another.
+                dropped.add(mid)
+                continue
+            # Not kept and not dropped: another call took it from the buffer first, and
+            # its settle decides whether it is read.
+            message = taken[0] if taken else self._message(reply, already=False)
+            break
         in_queue = str(reply["message_id"]) not in self.consumed
         others = max(0, waiting - (1 if in_queue else 0))
         ctx.log(waited=wait, replied=True, other_new=others)
@@ -469,25 +483,26 @@ class Tools:
         return self.result(text, {**fields, "outcome": "replied", "reply": message,
                                   "other_new": others})
 
-    async def _wait_for_reply(self, sent: str, author: str, wait: float):
-        """The reply to `sent` from `author`: `(payload, pushed)`, or None when none came
-        within `wait` seconds. It looks in the pushes first, then waits on new pushes
-        and reads the record once a second, so a reply the daemon hasn't pushed (its
-        window full of other unread mail) is found too."""
-        deadline = time.monotonic() + wait
+    async def _wait_for_reply(self, sent: str, author: str, deadline: float,
+                              skip: set[str] = frozenset()):
+        """The reply to `sent` from `author`, other than the ids in `skip`:
+        `(payload, pushed)`, or None when none came before `deadline` (a monotonic
+        time). It looks in the pushes first, then waits on new pushes and reads the
+        record once a second, so a reply the daemon hasn't pushed (its window full of
+        other unread mail) is found too."""
         next_read = time.monotonic()
         while True:
             event = self.link.waiter()
             try:
-                hit = self._in_pushes(sent, author)
+                hit = self._in_pushes(sent, author, skip)
                 if hit is not None:
                     return hit, True
                 now = time.monotonic()
                 if now >= next_read:
                     next_read = now + RECORD_EVERY
-                    hit = await asyncio.to_thread(self._in_record, sent, author)
+                    hit = await asyncio.to_thread(self._in_record, sent, author, skip)
                     if hit is not None:
-                        pushed = self._in_pushes(sent, author)
+                        pushed = self._in_pushes(sent, author, skip)
                         return (pushed, True) if pushed is not None else (hit, False)
                 left = deadline - time.monotonic()
                 if left <= 0:
@@ -501,14 +516,16 @@ class Tools:
             finally:
                 self.link.forget(event)
 
-    def _in_pushes(self, sent: str, author: str) -> dict | None:
+    def _in_pushes(self, sent: str, author: str, skip=frozenset()) -> dict | None:
         for p in self.link.pending():
+            if str(p["message_id"]) in skip:
+                continue
             if (str(p.get("reply_to") or "") == sent
                     and (p.get("author") or {}).get("name") == author):
                 return p
         return None
 
-    def _in_record(self, sent: str, author: str) -> dict | None:
+    def _in_record(self, sent: str, author: str, skip=frozenset()) -> dict | None:
         """The reply as the record holds it, through the daemon's `replies_to` read, which
         returns only messages above `sent` that answer it, by `author`, addressed to the
         identity. Mail to any other name, the operator's included, is never read."""
@@ -517,6 +534,8 @@ class Tools:
         except (DaemonError, DaemonOffline):
             return None
         for m in got:
+            if str(m.get("message_id")) in skip:
+                continue
             if str(m.get("reply_to") or "") != sent:
                 continue
             if (m.get("author") or {}).get("name") != author:
