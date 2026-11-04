@@ -42,6 +42,16 @@ def test_the_announcement_offers_interface_2():
     assert api.INTERFACE == 2
 
 
+def test_the_codex_wrapper_takes_a_resume():
+    """A caller reads the constant to know `moxi comms codex --name N` takes
+    `--resume THREAD_ID`; a comms without it has none."""
+    from moxi_comms.adapters.codex_wrapper import build_parser
+
+    assert api.CODEX_RESUME is True
+    parsed = build_parser().parse_args(["--name", "n", "--resume", "thread-old"])
+    assert parsed.resume == "thread-old"
+
+
 def test_load_finds_comms_and_its_api():
     modules.reset()
     found = modules.load("comms", interface=2)
@@ -59,7 +69,7 @@ def test_interface_2_holds_its_names():
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
-        "session_of", "caller_identity", "roster_rows", "RosterRow"}
+        "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer

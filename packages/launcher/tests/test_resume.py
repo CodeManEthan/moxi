@@ -17,7 +17,8 @@ from moxi import proc
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, first, resume, slots, store, target, targets
+from moxi_launcher import (api, catalog, first, presets, resume, slots, store, target,
+                           targets)
 
 TESTS = Path(__file__).resolve().parent
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -44,9 +45,9 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", harness="claude", target_name="slot", session_id=SID,
-             slot="3", identity=None, live=False, pid=None, at=None):
+             slot="3", identity=None, live=False, pid=None, at=None, values=None):
     store.insert(conn, request_id=request_id, actor="ann", harness=harness,
-                 target=target_name, cwd="/work", values={"model": "opus"},
+                 target=target_name, cwd="/work", values=values or {"model": "opus"},
                  argv=[harness], env={}, posture="operator",
                  session_id=session_id if harness == "claude" else None,
                  slot=slot if target_name == "slot" else None, identity=identity, at=at)
@@ -248,14 +249,43 @@ def test_what_no_resume_can_take(conn, fields, why):
     assert not past["resumable"] and why in past["why"]
 
 
-def test_a_codex_launch_with_a_comms_name_is_not_resumable(conn, monkeypatch):
+def with_comms(monkeypatch, api_) -> list[int]:
+    """comms linked, its API `api_`; the list counts each time the API is read."""
+    reads = []
     monkeypatch.setattr(slots, "links", lambda name: name == "comms")
+    monkeypatch.setattr(presets, "comms_api", lambda: reads.append(1) or api_)
+    return reads
+
+
+NEW_COMMS = SimpleNamespace(CODEX_RESUME=True)
+#: A comms from before its Codex wrapper took --resume: no CODEX_RESUME at all.
+OLD_COMMS = SimpleNamespace()
+
+
+def test_a_codex_launch_with_a_comms_name_is_resumable_when_comms_can(conn, monkeypatch):
+    with_comms(monkeypatch, NEW_COMMS)
     launched(conn, harness="codex", target_name="terminal", session_id=THREAD,
              identity="builder")
     [past] = resume.sessions(conn=conn, turns=None).data["sessions"]
-    assert not past["resumable"]
-    assert "comms' Codex wrapper starts a new thread" in past["why"]
-    assert past["hint"] == "resume it with codex resume, outside the launcher"
+    assert past["resumable"] and past["why"] is None
+    assert past["session_id"] == THREAD
+
+
+def test_a_codex_launch_with_a_comms_name_and_an_older_comms_is_not_yet(conn, monkeypatch):
+    reads = with_comms(monkeypatch, OLD_COMMS)
+    launched(conn, request_id="r1", harness="codex", target_name="terminal",
+             session_id=THREAD, identity="builder", at="2026-10-30T10:00:00.000000+00:00")
+    launched(conn, request_id="r2", harness="codex", target_name="terminal",
+             session_id=SID2, identity="planner", at="2026-10-31T10:00:00.000000+00:00")
+    launched(conn, request_id="r3", session_id=SID, at="2026-11-01T10:00:00.000000+00:00")
+    claude_past, *codex_pasts = resume.sessions(conn=conn, turns=None).data["sessions"]
+    assert claude_past["resumable"]
+    for past in codex_pasts:
+        assert not past["resumable"]
+        assert "comms' Codex wrapper here can't resume a thread" in past["why"]
+        assert past["hint"] == "upgrade moxi-comms"
+    # comms is read once for the whole list, not once per entry.
+    assert len(reads) == 1
 
 
 def test_a_codex_launch_with_a_comms_name_and_no_comms_is_resumable(conn, monkeypatch):
@@ -310,15 +340,47 @@ def test_a_codex_launch_with_no_thread_id_is_refused(conn):
     assert refused.code == "no-session-id" and "codex resume" in refused.hint
 
 
-def test_a_codex_resume_with_a_comms_name_is_refused(conn, monkeypatch):
-    monkeypatch.setattr(slots, "links", lambda name: name == "comms")
+def test_a_codex_resume_with_a_comms_name_and_an_older_comms_is_refused(conn,
+                                                                         monkeypatch):
+    with_comms(monkeypatch, OLD_COMMS)
     launched(conn, harness="codex", target_name="terminal", session_id=THREAD,
              identity="builder")
     with pytest.raises(resume.Refused) as refused:
         go(conn, THREAD)
     assert refused.value.code == "not-yet" and refused.value.exit_code == 3
-    assert "can't resume one" in refused.value.problem
+    assert "comms' Codex wrapper here can't resume a thread" in refused.value.problem
+    assert refused.value.hint == "upgrade moxi-comms"
     assert launches(conn) == 1
+
+
+HOST = "/env/bin/moxi-turns-codex-host"
+
+
+def test_a_codex_resume_with_a_comms_name_continues_its_thread(conn, monkeypatch):
+    # The replay composes comms' Codex wrapper with its own flags, then the thread.
+    with_comms(monkeypatch, NEW_COMMS)
+    monkeypatch.setattr(slots, "links", lambda name: name in ("comms", "turns"))
+    monkeypatch.setattr(first, "turns_api", lambda quiet=False: SimpleNamespace())
+    monkeypatch.setattr(presets, "codex_host", lambda: HOST)
+    launched(conn, harness="codex", target_name="terminal", session_id=THREAD,
+             identity="builder", values={"harness": "codex", "target": "terminal",
+                                         "cwd": "/work", "identity": "builder",
+                                         "model": "gpt-5"})
+    composed = []
+
+    def launch(request, *, environ=None, warn=None):
+        composed.append(api.preview(request, environ=environ))
+        return Launch()(request, environ=environ, warn=warn)
+
+    result = resume.resume(THREAD, conn=conn, turns=None, slots_api=None, launch=launch,
+                           request_id="r2", environ={first.COMMS_NAME: "ann"})
+    assert result.exit_code == 0 and result.data["resume_of"] == "r1"
+    assert result.data["session_id"] == THREAD
+    [got] = composed
+    argv = list(got.argv)
+    assert got.mode == "host" and argv[1:5] == ["comms", "codex", "--name", "builder"]
+    assert argv[-2:] == ["--resume", THREAD] and argv.count("--resume") == 1
+    assert "--sandbox" in argv[:-2]
 
 
 def test_a_harness_no_longer_catalogued_is_refused(conn, monkeypatch):

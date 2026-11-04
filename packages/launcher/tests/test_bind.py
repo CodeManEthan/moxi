@@ -342,3 +342,31 @@ def test_comms_codex_wrapper_takes_the_composed_line(tmp_path):
     assert run.returncode == 0, run.stderr
     assert f"--cwd {work}" in run.stdout and "--model gpt-5" in run.stdout
     assert f'projects."{work}".trust_level="trusted"' in run.stdout
+
+
+def test_comms_codex_wrapper_takes_the_composed_resume_line(tmp_path):
+    # A resume of a Codex launch with an identity, handed to the real wrapper's
+    # `--dry-run`: it takes `--resume` after its own flags and says it resumes the thread.
+    if not all(importlib.util.find_spec(name) for name in ("moxi_comms", "moxi_turns")):
+        pytest.skip("comms and turns are not both installed")
+    from moxi import paths
+
+    from moxi_launcher.compose import Context, codex
+
+    try:
+        moxi = str(paths.script("moxi"))
+    except FileNotFoundError:
+        pytest.skip("this environment has no moxi script")
+    thread = "7c6d5e4f-3a2b-4c1d-9e8f-0a1b2c3d4e5f"
+    values = {"harness": "codex", "cwd": str(tmp_path), "identity": "coder",
+              "scope": "moxi", "model": "gpt-5"}
+    got = codex.compose(values, Context(request_id="r1", session_id=thread, actor="ann",
+                                        moxi=moxi, modules=frozenset({"turns", "comms"}),
+                                        host="/env/bin/moxi-turns-codex-host",
+                                        comms_codex=True, comms_codex_resume=True,
+                                        resume=True))
+    assert got.argv[-2:] == ("--resume", thread)
+    run = subprocess.run([*got.argv, "--dry-run"], cwd=tmp_path, capture_output=True,
+                         text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    assert f"resumes thread {thread}" in run.stdout and "--model gpt-5" in run.stdout
