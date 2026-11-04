@@ -25,7 +25,8 @@ def test_the_announcement_offers_interface_2():
     assert module.API == "moxi_sessions.api"
     assert module.CLI == "moxi_sessions.cli:main"
     assert module.SETTINGS == "settings.toml"
-    assert module.OPTIONAL == {} and module.GATED == {} and module.INTERNAL_ENV == {}
+    assert set(module.OPTIONAL) == {"ui"}
+    assert module.GATED == {} and module.INTERNAL_ENV == {}
 
 
 def test_the_announcement_declares_its_doctor_and_no_store():
