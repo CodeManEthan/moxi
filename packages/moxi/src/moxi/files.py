@@ -15,7 +15,8 @@ imports nothing heavy at module level, so a hook can import `moxi.files` cheaply
   the core's vendored tomlkit inside the call).
 - `append_record` and `read_records` keep a log of JSON lines that rolls to one older
   generation at a size cap (or never, with no cap); a durable append is on disk when it
-  returns.
+  returns. Its options refuse records that hold given field names, and collapse a busy
+  class of records into one summary row a minute or an hour (`Collapse`).
 - `private_dir` makes a directory only its owner can enter.
 """
 
@@ -25,7 +26,7 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
@@ -504,7 +505,9 @@ def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
 # -- records -----------------------------------------------------------------------------
 
 def append_record(path: str | os.PathLike, record: dict, *,
-                  max_bytes: int | None = 1_000_000, durable: bool = False) -> None:
+                  max_bytes: int | None = 1_000_000, durable: bool = False,
+                  refuse: Collection[str] | None = None,
+                  collapse: tuple[Collapse, str] | None = None) -> None:
     """Append `record` to the log `path` as one JSON line.
 
     The line is written with one `write` on a descriptor opened for appending (the file
@@ -518,18 +521,55 @@ def append_record(path: str | os.PathLike, record: dict, *,
     With `durable=True` the file is flushed to disk after the write, and so is its
     directory (POSIX) when this write created the file, so the line survives a power loss
     once the call returns.
+
+    `refuse` is a set of field names no record may hold. A record that holds one as a key,
+    at any depth of its nested objects and arrays, raises `ValueError` naming it, and
+    nothing is written or counted.
+
+    `collapse` is `(window, name)`: `window` a `Collapse` the caller keeps for the log and
+    `name` the record's class. The record is then written or counted by the window's rules
+    (see `Collapse`). Without it the record is always written.
     """
     import json
 
     path = Path(path)
     line = (json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
-    if max_bytes is None:
-        _append(path, line, durable=durable)
-        return
-    if len(line) > max_bytes:
+    if refuse:
+        found = sorted(_refused(record, frozenset(refuse)))
+        if found:
+            raise ValueError(f"a record may not hold the field{'s' if len(found) > 1 else ''} "
+                             f"{', '.join(found)}")
+    _check_length(line, max_bytes)
+    if collapse is None:
+        _write_line(path, line, max_bytes, durable)
+    else:
+        window, name = collapse
+        window._take(path, name, line, max_bytes, durable)
+
+
+def _refused(value: object, names: frozenset[str]) -> set[str]:
+    """The keys of `names` that `value` holds at any depth. Called after `value` encoded,
+    so it holds no cycle."""
+    found: set[str] = set()
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            found.update(key for key in item if key in names)
+            stack.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            stack.extend(item)
+    return found
+
+
+def _check_length(line: bytes, max_bytes: int | None) -> None:
+    if max_bytes is not None and len(line) > max_bytes:
         raise ValueError(f"a record of {len(line)} bytes is longer than the log's cap "
                          f"of {max_bytes} bytes")
-    if _size(path) + len(line) <= max_bytes:
+
+
+def _write_line(path: Path, line: bytes, max_bytes: int | None, durable: bool) -> None:
+    if max_bytes is None or _size(path) + len(line) <= max_bytes:
         _append(path, line, durable=durable)
         return
     with _gated_lock(_lock_path(path)):
@@ -540,6 +580,114 @@ def append_record(path: str | os.PathLike, record: dict, *,
             except FileNotFoundError:
                 pass
         _append(path, line, durable=durable)
+
+
+class Collapse:
+    """The collapse of one log's busy classes, for `append_record(..., collapse=(window,
+    name))`. Keep one for a log, in the one process that writes it.
+
+    Per path and class it holds the current window, the rows written in it and the rows
+    held back, under its own lock. In a window of one minute the first `after` rows of a
+    class are written and the rest are counted. Once the path's file holds `hourly_past`
+    bytes or more, the window is an hour and every row of it is counted. When a later row
+    of that class meets a new window (the next minute or hour, or a change between the
+    two), the old window's count is written first, as one row::
+
+        {"at": ..., "kind": "summary", "class": name, "count": n,
+         "per": "minute" | "hour", "since": <the window's start>}
+
+    with the `max_bytes` and `durable` of the class's last row. A window that counted
+    nothing writes no summary. A row is never held back without being counted.
+
+    `flush` writes the summaries of windows that have ended, and `close` writes every
+    pending one; a writer calls `flush` now and then and `close` at its stop. The counts
+    live in this process's memory, so a crash loses the counts of the windows open at
+    the time, and two processes writing one file collapse apart.
+
+    `clock` gives the time in seconds since the epoch.
+    """
+
+    def __init__(self, after: int = 10, hourly_past: int | None = None, *,
+                 clock: Callable[[], float] = time.time) -> None:
+        if after < 0:
+            raise ValueError("after must be zero or more")
+        if hourly_past is not None and hourly_past < 0:
+            raise ValueError("hourly_past must be zero or more")
+        self.after = after
+        self.hourly_past = hourly_past
+        self._clock = clock
+        self._lock = threading.Lock()
+        #: (path, class) -> [window start, per, written, held, max_bytes, durable]
+        self._windows: dict[tuple[Path, str], list] = {}
+
+    def flush(self, path: str | os.PathLike | None = None) -> None:
+        """Write the summaries of the windows of `path` (of every path, with none) that
+        have ended."""
+        now = self._clock()
+        with self._lock:
+            for key in self._keys(path):
+                window = self._windows[key]
+                if _window_start(now, window[1]) != window[0]:
+                    self._summary(key, self._windows.pop(key))
+
+    def close(self, path: str | os.PathLike | None = None) -> None:
+        """Write every pending summary of `path` (of every path, with none)."""
+        with self._lock:
+            for key in self._keys(path):
+                self._summary(key, self._windows.pop(key))
+
+    def _keys(self, path: str | os.PathLike | None) -> list[tuple[Path, str]]:
+        wanted = None if path is None else _key_path(path)
+        return [key for key in self._windows if wanted is None or key[0] == wanted]
+
+    def _take(self, path: Path, name: str, line: bytes, max_bytes: int | None,
+              durable: bool) -> None:
+        now = self._clock()
+        key = (_key_path(path), name)
+        with self._lock:
+            hourly = self.hourly_past is not None and _size(path) >= self.hourly_past
+            per = "hour" if hourly else "minute"
+            start = _window_start(now, per)
+            window = self._windows.get(key)
+            if window is not None and (window[0] != start or window[1] != per):
+                self._summary(key, self._windows.pop(key))
+                window = None
+            if window is None:
+                window = self._windows[key] = [start, per, 0, 0, max_bytes, durable]
+            window[4], window[5] = max_bytes, durable
+            if per == "minute" and window[2] < self.after:
+                _write_line(path, line, max_bytes, durable)
+                window[2] += 1
+            else:
+                window[3] += 1
+
+    def _summary(self, key: tuple[Path, str], window: list) -> None:
+        import json
+
+        start, per, _written, held, max_bytes, durable = window
+        if not held:
+            return
+        row = {"at": _stamp(self._clock()), "kind": "summary", "class": key[1],
+               "count": held, "per": per, "since": _stamp(start * _SPAN[per])}
+        line = (json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+        _write_line(key[0], line, max_bytes, durable)
+
+
+_SPAN = {"minute": 60, "hour": 3600}
+
+
+def _window_start(now: float, per: str) -> int:
+    return int(now // _SPAN[per])
+
+
+def _key_path(path: str | os.PathLike) -> Path:
+    return Path(os.path.abspath(path))
+
+
+def _stamp(when: float) -> str:
+    """`when` as UTC to the millisecond: `2026-11-04T10:44:00.123Z`."""
+    millis = int(when % 1 * 1000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(when)) + f".{millis:03d}Z"
 
 
 def _size(path: Path) -> int:
@@ -750,4 +898,4 @@ def _owner(uid: int) -> str:
 
 
 __all__ = ["LockTimeout", "atomic_write", "lock", "adopt_core_claim", "update", "edit_toml",
-           "append_record", "read_records", "private_dir"]
+           "append_record", "Collapse", "read_records", "private_dir"]

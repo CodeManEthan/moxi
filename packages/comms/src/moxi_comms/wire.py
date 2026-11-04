@@ -45,7 +45,10 @@ VERSIONS = (1, 1)
 #: The daemon's capabilities at version 1, listed so a client tests a name, not a
 #: version. `mcp` is the adapter method `mcp_token`, which registers the hash of the
 #: session's token for comms' tools; an adapter calls it only when the hello lists it.
-CAPABILITIES = frozenset({"delete", "expiry", "interrupt", "reserved-names", "mcp"})
+#: `connector` is the read `replies_to`, the replies one identity can read to one message,
+#: which comms' connector provider asks only when the hello lists it.
+CAPABILITIES = frozenset({"delete", "expiry", "interrupt", "reserved-names", "mcp",
+                          "connector"})
 
 # -- error codes -------------------------------------------------------------------------
 NAME_HELD = 1101

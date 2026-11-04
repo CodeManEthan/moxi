@@ -16,6 +16,7 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `claude-shim` | `moxi-comms-claude` | a Claude Code session |
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
 | `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
+| `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
 
 `moxi install comms` puts the wrappers in the `moxi` tool's environment, and uv puts none
 of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. On
