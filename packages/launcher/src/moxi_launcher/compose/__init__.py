@@ -108,6 +108,7 @@ def context(values: Mapping[str, object], *, request_id: str,
         "instructions_file", values.get("instructions_file"))
 
     comms = bool(values.get("identity")) and "comms" in links
+    codex_comms = harness == "codex" and comms
     key = handoffs.key_of_row(SimpleNamespace(
         identity=values.get("identity") if comms else None, preset_kind=preset_kind,
         preset_name=preset_name, project_key=project_key))
@@ -140,7 +141,9 @@ def context(values: Mapping[str, object], *, request_id: str,
                    handoff_dir=handoff_dir, role_found=role_found, additions=additions,
                    runs_dir=str(Layout(MODULE).state_dir(environ) / "runs"),
                    moxi=moxi_command(), host=host,
-                   comms_codex=harness == "codex" and comms and presets.comms_codex(),
+                   comms_codex=codex_comms and presets.comms_codex(),
+                   comms_codex_resume=(codex_comms and bool((replay or {}).get("resume"))
+                                       and presets.comms_codex_resume()),
                    **dict(replay or {}))
 
 

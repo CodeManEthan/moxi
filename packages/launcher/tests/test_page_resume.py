@@ -15,13 +15,14 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import proc
-from test_page import post
+from test_page import get, post
 from test_page_launch import Spawned, requested, row
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, first, job, pagehandlers, slots, store, targets
+from moxi_launcher import (api, catalog, first, job, pagehandlers, presets, slots, store,
+                           targets)
 
 TESTS = Path(__file__).resolve().parent
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
@@ -77,13 +78,17 @@ def with_store(run):
 
 
 def seed(request_id="r1", *, target_name="slot", harness="claude", session_id=SID,
-         slot="3", live=False, pid=True) -> None:
+         slot="3", live=False, pid=True, identity=None, at=None) -> None:
     """A launch in the log, its process ended unless `live`; with no `pid`, none recorded."""
     def insert(conn):
         store.insert(conn, request_id=request_id, actor="ann", harness=harness,
                      target=target_name, cwd="/work", values={"model": "opus"},
-                     argv=[harness], env={}, posture="operator", session_id=session_id,
-                     slot=slot if target_name == "slot" else None)
+                     argv=[harness], env={}, posture="operator",
+                     session_id=session_id if harness == "claude" else None,
+                     slot=slot if target_name == "slot" else None, identity=identity,
+                     at=at)
+        if harness == "codex" and session_id:
+            store.learn_session(conn, request_id, session_id, "sender")
         if pid:
             mine = proc.identity(os.getpid())
             conn.execute("UPDATE launches SET pid = ?, pid_started = ? WHERE request_id = ?",
@@ -209,6 +214,47 @@ def test_a_slot_named_for_a_terminal_launch_is_refused():
     said = resumed({"session": SID, "slot": "4"})
     assert said["refused"]["code"] == "bad-value" and said["refused"]["row"] == "slot"
     assert said["command"] is None and no_request_files()
+
+
+# --- a Codex launch with a comms name -------------------------------------------------------------
+
+def with_comms(monkeypatch, api_) -> list[int]:
+    """comms linked beside slots, its API `api_`; each read of the API is counted."""
+    reads = []
+    monkeypatch.setattr(slots, "links", lambda name: name in ("slots", "comms"))
+    monkeypatch.setattr(presets, "comms_api", lambda: reads.append(1) or api_)
+    return reads
+
+
+def test_a_codex_launch_with_a_comms_name_resumes_when_comms_can(monkeypatch):
+    with_comms(monkeypatch, SimpleNamespace(CODEX_RESUME=True))
+    seed(target_name="terminal", harness="codex", identity="builder")
+    said = resumed({"session": SID})
+    assert said == {"refused": None, "command": f"moxi launcher resume {SID}"}
+
+
+def test_a_codex_launch_with_a_comms_name_and_an_older_comms_is_refused_not_yet(
+        monkeypatch):
+    with_comms(monkeypatch, SimpleNamespace())
+    seed(target_name="terminal", harness="codex", identity="builder")
+    said = resumed({"session": SID})
+    assert said["refused"]["code"] == "not-yet" and said["command"] is None
+    assert "comms' Codex wrapper here can't resume a thread" in said["refused"]["problem"]
+    assert said["refused"]["hint"] == "upgrade moxi-comms"
+    assert no_request_files()
+
+
+def test_the_pages_past_sessions_read_comms_once_for_the_list(monkeypatch):
+    reads = with_comms(monkeypatch, SimpleNamespace())
+    seed("r1", target_name="terminal", harness="codex", identity="builder",
+         at="2026-01-01T00:00:00.000000Z")
+    seed("r2", target_name="terminal", harness="codex", identity="planner",
+         session_id=OTHER, at="2026-01-02T00:00:00.000000Z")
+    status, said, _ = get("/api/sessions")
+    assert status == 200 and [r["request_id"] for r in said["sessions"]] == ["r2", "r1"]
+    for entry in said["sessions"]:
+        assert not entry["resumable"] and entry["hint"] == "upgrade moxi-comms"
+    assert len(reads) == 1
 
 
 # --- a slot launch: the job ------------------------------------------------------------------------

@@ -158,7 +158,7 @@ def test_a_codex_resume_under_the_host_passes_the_thread_id():
 @pytest.mark.parametrize("fields, words", [
     ({"mode": "interactive"}, "only turns' Codex host resumes"),
     ({"mode": "host", "host": "/bin/h", "modules": frozenset({"turns", "comms"}),
-      "comms_codex": True}, "starts a new thread"),
+      "comms_codex": True}, "can't resume a thread"),
 ])
 def test_a_codex_resume_the_host_cant_make_is_refused(fields, words):
     values = {"harness": "codex", "cwd": "/work"}

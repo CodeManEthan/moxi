@@ -189,10 +189,12 @@ the exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-d
 **Resume.** `moxi launcher sessions` lists past launches, newest first, each with whether
 it is live and whether it can be resumed, and why not: it is live (attach to its slot
 instead), it ran headless, it never learned a session id (a Codex launch made without
-turns' host: use `codex resume`), it ran Codex under a comms name (comms' Codex wrapper
-starts a new thread each time), its harness is no longer launched, or a later launch
-resumed it since. `moxi launcher resume SESSION_ID` launches it again from its launch's
-values, resumed, keeping its session id: in its own slot when that can take it, else
+turns' host: use `codex resume`), it ran Codex under a comms name and the installed comms'
+Codex wrapper can't resume a thread (upgrade moxi-comms), its harness is no longer
+launched, or a later launch resumed it since. `moxi launcher resume SESSION_ID` launches
+it again from its launch's values, resumed, keeping its session id (a Codex launch under a
+comms name continues its thread through comms' wrapper; a relaunch or recycle starts a
+new one): in its own slot when that can take it, else
 the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch,
 where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 `TERM_PROGRAM_VERSION`) and nothing else of your shell's. It sends no first turn. Liveness is checked again as the new launch is written: while

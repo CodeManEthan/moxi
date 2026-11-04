@@ -136,6 +136,30 @@ def test_the_context_never_makes_the_launchers_own_handoff_folder(tmp_path):
         assert got.handoff_dir == str(folder) and not folder.exists()
 
 
+def test_the_context_asks_whether_comms_resumes_a_codex_thread_only_for_a_resume(
+        tmp_path, monkeypatch):
+    asked = []
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex_resume", lambda: asked.append(1) or True)
+    values = {"harness": "codex", "cwd": str(tmp_path), "identity": "coder"}
+    links = frozenset({"comms"})
+    fresh = compose.context(values, request_id="r1", modules=links)
+    assert fresh.comms_codex and not fresh.comms_codex_resume and asked == []
+    relaunch = compose.context(values, request_id="r1", modules=links,
+                               replay={"resume": False, "relaunched": True})
+    assert not relaunch.comms_codex_resume and asked == []
+    resumed = compose.context(values, request_id="r1", session_id=SID, modules=links,
+                              replay={"resume": True})
+    assert resumed.resume and resumed.comms_codex_resume and asked == [1]
+    # Without comms, or for Claude, comms is not asked.
+    for other in ({**values, "harness": "claude"}, values):
+        got = compose.context(other, request_id="r1", session_id=SID,
+                              modules=links if other is not values else frozenset(),
+                              replay={"resume": True})
+        assert not got.comms_codex_resume
+    assert asked == [1]
+
+
 def test_the_prompt_file_goes_in_the_runs_store():
     got = compose.context({"harness": "claude", "cwd": "/work"}, request_id="r1",
                           modules=frozenset())

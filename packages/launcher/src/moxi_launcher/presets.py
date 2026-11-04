@@ -1092,6 +1092,15 @@ def comms_codex() -> bool:
     return comms_api() is not None
 
 
+def comms_codex_resume() -> bool:
+    """Whether comms' Codex wrapper resumes a thread it is told to resume
+    (`moxi comms codex --name N --resume THREAD_ID`): its API says so with `CODEX_RESUME`
+    set true. An older comms has no such constant, and its wrapper starts a new thread at
+    every launch."""
+    api = comms_api()
+    return api is not None and bool(getattr(api, "CODEX_RESUME", False))
+
+
 def codex_host() -> str | None:
     """turns' Codex host, when it can start here, else None: its script is installed in
     this environment, and turns says the host can start (`codex_host_available()`, true
@@ -1210,6 +1219,6 @@ __all__ = [
     "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_codex",
-    "harness_of", "layered", "mode_of", "path", "project_agents", "projects_api", "read",
-    "resolve", "roles", "schema",
+    "comms_codex_resume", "harness_of", "layered", "mode_of", "path", "project_agents",
+    "projects_api", "read", "resolve", "roles", "schema",
 ]
