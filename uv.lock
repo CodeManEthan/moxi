@@ -1306,6 +1306,7 @@ ui = [
 dev = [
     { name = "moxi-dev" },
     { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
     { name = "websockets" },
 ]
@@ -1323,6 +1324,7 @@ provides-extras = ["codex", "ui"]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
 ]

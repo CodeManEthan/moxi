@@ -48,6 +48,12 @@ SETUP = "moxi_turns.claude_setup:setup"
 SEGMENT = None
 #: turns' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_turns.page:PAGE"
+#: What turns offers the browser UI shell: its panel, and no other component.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Live sessions", "contract": 1, "place": "page",
+             "doc": "Every running session turns can reach: its turn, its agents and its "
+                    "trouble, read-only"},
+}
 DOCTOR = "moxi_turns.doctor:check"
 #: A hook may cost the agent at most twice the floor, `python -I -c pass`.
 BUDGETS = {"hook_ms": 2.0}

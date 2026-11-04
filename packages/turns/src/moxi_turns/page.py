@@ -12,6 +12,9 @@ process; `pagehandlers` starts it on the page's first read or subscribe. Every r
 read, and none is the gateway's. `cwd` is marked `path`; `trouble` and an agent's
 `description`, which the harness writes and which can name a path, are marked `redact`.
 
+The page's assets are what the repository's web build writes from `packages/turns/web/`
+into this package's `web/`: `page.js`, the panel, and its build stamp.
+
 The browser UI shell starts the page server on the first request for turns' page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in turns' announcement, API,
@@ -113,6 +116,7 @@ def _target(name: str) -> str:
 BUDGET = {"rss": "80M", "fds": 128}
 
 PAGE = lb.Page(
+    assets="web",
     budget=BUDGET,
     routes=(
         lb.Route("/api/sessions", "read", _target("sessions"),
