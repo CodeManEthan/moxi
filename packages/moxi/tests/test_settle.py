@@ -20,6 +20,7 @@ from conftest import drop_modules
 from moxi import _settle, config, doctor, files, home, units
 from moxi.units import _backend, _declare, _plan, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi_dev.testing import console_script
 
 SETTINGS = """
 [relay.enabled]
@@ -81,9 +82,7 @@ def w(site, tmp_path, monkeypatch):
     scripts = tmp_path / "bin"
     scripts.mkdir()
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
-    for name in ("moxi-demo-relay",):
-        (scripts / name).write_text("#!/bin/sh\n")
-        (scripts / name).chmod(0o755)
+    console_script(scripts, "moxi-demo-relay")
     monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldbox")
     monkeypatch.setattr(_settle, "_state", _settle._Signals())
     saved = {s: signal.getsignal(s) for s in _settle.signals()}
@@ -381,9 +380,7 @@ def _other_command(w, *, keep=False):
     """The relay's socket daemon with another command: its service text changes and its
     socket set does not. (The name is longer, so the module file's size changes and its
     cached bytecode, written in the same second, is not taken for it.)"""
-    script = moxi.paths._scripts() / "moxi-demo-relay-next"
-    script.write_text("#!/bin/sh\n")
-    script.chmod(0o755)
+    console_script(moxi.paths._scripts(), "moxi-demo-relay-next")
     w.module(DAEMONS=SOCKET.replace("'moxi-demo-relay'", "'moxi-demo-relay-next'"
                                     + (", 'upgrade': 'keep'" if keep else "")))
     assert {c.kind: c.action for c in units.plan("demo")} == {"daemon": "change",
@@ -459,7 +456,7 @@ def test_every_path_out_starts_exactly_the_recorded_units(w, capsys, monkeypatch
         monkeypatch.setattr(os, "rename", lambda a, b: (_ for _ in ()).throw(
             PermissionError(13, "Permission denied")))
     if path == "command":
-        (moxi.paths._scripts() / "moxi-demo-relay").unlink()
+        moxi.paths.script("moxi-demo-relay").unlink()
     if path == "switch":
         w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'port'}, "
                          "'aux': {'command': 'moxi-demo-relay'}}")
@@ -499,7 +496,7 @@ def test_replace_whose_unit_step_refuses_the_unit_starts_the_old_one(w, capsys, 
     w.sup.reload()
     w.sup.state(SERVICE)["active"] = True
     w.legacy()
-    (moxi.paths._scripts() / "moxi-demo-relay").unlink()
+    moxi.paths.script("moxi-demo-relay").unlink()
     code, out = settle(w, capsys, monkeypatch, replace=True)
     assert code == 1 and "no moxi-demo-relay in this environment" in out
     assert w.calls("start") == [("start", SERVICE)] and w.active(SERVICE)
@@ -1469,7 +1466,7 @@ def test_a_refused_unit_or_a_relative_legacy_link_still_runs_the_later_steps(
     if path == "link" and sys.platform == "win32":
         pytest.skip("symbolic links need a privilege on Windows")
     if path == "unit":
-        (moxi.paths._scripts() / "moxi-demo-relay").unlink()   # the plan refuses it
+        moxi.paths.script("moxi-demo-relay").unlink()   # the plan refuses it
         qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
     else:
         ear.installed(DAEMONS=ONE)

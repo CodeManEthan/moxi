@@ -24,6 +24,7 @@ from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
+from moxi_dev.testing import console_script
 
 SETTINGS = """
 [relay.enabled]
@@ -81,10 +82,7 @@ def d(site, tmp_path, monkeypatch):
     backend = FakeBackend(root, runner=supervisor)
 
     def script(name):
-        path = scripts / name
-        path.write_text("#!/bin/sh\n")
-        path.chmod(0o755)
-        return path
+        return console_script(scripts, name)
 
     def module(name="demo", *, settings=SETTINGS, files_=None, **names):
         pkg = f"moxi_{name}"

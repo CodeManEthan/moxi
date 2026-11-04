@@ -23,6 +23,7 @@ from moxi.units import _backend, _launchd, _plan, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Socket, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
+from moxi_dev.testing import console_script
 
 UID = 501
 DOMAIN = f"gui/{UID}"
@@ -136,10 +137,7 @@ def mac(site, tmp_path, monkeypatch):
     lines: list[str] = []
 
     def script(name):
-        path = scripts / name
-        path.write_text("#!/bin/sh\n")
-        path.chmod(0o755)
-        return path
+        return console_script(scripts, name)
 
     script("moxi")
 
@@ -364,12 +362,12 @@ def test_a_switchless_timer_runs_the_gate_without_if(mac):
     [group] = mac.backend.render(spec("timer", name="rows", command=("/opt/tool",),
                                       schedule=Schedule(every=5)))
     argv = plistlib.loads(group.files[0][1].encode())["ProgramArguments"]
-    assert argv == [str(mac.scripts / "moxi"), "run", "--record", "demo/rows", "--",
+    assert argv == [str(moxi.paths.script("moxi")), "run", "--record", "demo/rows", "--",
                     "/opt/tool"]
 
 
 def test_a_timer_with_no_moxi_script_is_refused_with_cause_command(mac):
-    (mac.scripts / "moxi").unlink()
+    moxi.paths.script("moxi").unlink()
     with pytest.raises(RenderError) as caught:
         mac.backend.render(spec("timer", schedule=Schedule(every=5)))
     assert caught.value.cause == "command" and "no moxi" in caught.value.text
@@ -625,7 +623,7 @@ def test_a_switched_timer_is_written_after_the_settle_step_records_it(mac):
     assert done.ok
     body = mac.plist("moxi.demo.snapshot")
     assert body["StartInterval"] == 300 and "RunAtLoad" not in body
-    assert body["ProgramArguments"][:4] == [str(mac.scripts / "moxi"), "run", "--if",
+    assert body["ProgramArguments"][:4] == [str(moxi.paths.script("moxi")), "run", "--if",
                                             "demo.snapshot.enabled"]
     assert [c[0] for c in mac.ctl.calls] == ["enable", "bootstrap"]
     assert mac.ctl.loaded["moxi.demo.snapshot"] == [None, None]

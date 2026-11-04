@@ -18,6 +18,7 @@ from moxi import doctor, files, units
 from moxi.units import _act, _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._types import Stopped
+from moxi_dev.testing import console_script
 
 SETTINGS = """
 [relay.enabled]
@@ -78,10 +79,7 @@ def w(site, tmp_path, monkeypatch):
     lines: list[str] = []
 
     def script(name):
-        path = scripts / name
-        path.write_text("#!/bin/sh\n")
-        path.chmod(0o755)
-        return path
+        return console_script(scripts, name)
 
     def module(name="demo", *, units_from=None, settings=SETTINGS, **names):
         pkg = f"moxi_{name}"

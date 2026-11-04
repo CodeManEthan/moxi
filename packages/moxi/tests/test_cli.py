@@ -16,6 +16,7 @@ import pytest
 import moxi
 import moxi.cli as cli
 from moxi import names
+from moxi_dev.testing import console_script
 
 CLI_SOURCE = """\
 import argparse
@@ -337,18 +338,20 @@ def test_modules_text_lists_state_shortcut_and_extras(site, capsys):
 
 @pytest.fixture
 def path_dirs(tmp_path, monkeypatch):
-    """A PATH of two directories: `bin` holding a stub `moxi`, and `other`."""
+    """A PATH of two directories: `bin` holding a stub `moxi` that logs its arguments, and
+    `other`."""
     bin_dir, other = tmp_path / "bin", tmp_path / "other"
     bin_dir.mkdir()
     other.mkdir()
     log = tmp_path / "moxi.log"
-    stub = bin_dir / "moxi"
-    stub.write_text(f'#!/bin/sh\necho "$@" >> {log}\n')
-    stub.chmod(0o755)
+    console_script(bin_dir, "moxi", f"import sys\nwith open({str(log)!r}, 'a') as f:\n"
+                                    "    f.write(' '.join(sys.argv[1:]) + '\\n')\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{other}")
     return types.SimpleNamespace(bin=bin_dir, other=other, log=log)
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the shortcut is a /bin/sh script here; the .cmd one has its own")
 def test_shortcut_writes_an_executable_beside_moxi(alpha, path_dirs, capsys):
     code, out, _ = run(capsys, "shortcut", "alpha")
     assert code == 0 and "wrote the shortcut" in out
@@ -367,9 +370,7 @@ def test_shortcut_writes_an_executable_beside_moxi(alpha, path_dirs, capsys):
 
 
 def test_shortcut_refuses_a_name_already_on_path(alpha, path_dirs, capsys):
-    clash = path_dirs.other / "alpha"
-    clash.write_text("#!/bin/sh\n")
-    clash.chmod(0o755)
+    clash = console_script(path_dirs.other, "alpha")
     code, _, err = run(capsys, "shortcut", "alpha")
     assert code == 1 and str(clash) in err
     assert not (path_dirs.bin / "alpha").exists()
@@ -389,6 +390,8 @@ def test_shortcut_refuses_an_absent_module_or_one_with_no_command(site, path_dir
     assert code == 1 and "no command of its own" in err
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the shortcut is a /bin/sh script here; the .cmd one has its own")
 def test_shortcut_remove_removes_only_its_own_file(alpha, path_dirs, capsys):
     run(capsys, "shortcut", "alpha")
     code, out, _ = run(capsys, "shortcut", "alpha", "--remove")
