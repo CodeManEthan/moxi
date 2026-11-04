@@ -252,9 +252,9 @@ def test_steps_run_in_order_from_the_right_places(repo):
     assert [cwd for _, cwd, _ in suites] == [repo / "packages" / d
                                              for d in ("sessions", "cache", "comms")]
     for cmd, _, env in suites:
-        assert cmd[:3] == [str(env_dir / "bin" / "python"), "-m", "pytest"]
+        assert cmd[:3] == [str(check.venv_program(env_dir, "python")), "-m", "pytest"]
         assert env["VIRTUAL_ENV"] == str(env_dir)
-        assert env["PATH"].split(":")[0] == str(env_dir / "bin")
+        assert env["PATH"].split(os.pathsep)[0] == str(check.venv_bin(env_dir))
 
 
 def test_no_step_sets_a_pytest_tmp_root_or_basetemp(repo):
@@ -393,7 +393,7 @@ def test_each_lint_command_runs_in_the_check_s_environment(repo):
     linted = [(cmd, cwd, env) for cmd, cwd, env in runs.calls if "pytest" not in cmd
               and cmd[0] != "uv"]
     assert [(cmd[0], cwd.name) for cmd, cwd, _ in linted] == [
-        (str(env_dir / "bin" / tool), d) for d in ("sessions", "cache", "comms")
+        (str(check.venv_program(env_dir, tool)), d) for d in ("sessions", "cache", "comms")
         for tool in ("lint-imports", "deptry")]
     assert linted[0][2]["PYTHONPATH"] == "here" and "PYTHONPATH" not in linted[1][2]
     assert linted[0][2]["VIRTUAL_ENV"] == str(env_dir)
@@ -499,7 +499,7 @@ def test_with_chromium_a_browser_package_runs_its_browser_tests_in_its_suite(bro
     assert suites["plain"][3:] == ["-n", "4"]
     # One probe, with the check's own python and the suites' environment.
     env_dir = browser_repo / ".moxi-dev" / "env-3.12"
-    assert [python for python, _ in probe.calls] == [env_dir / "bin" / "python"]
+    assert [python for python, _ in probe.calls] == [check.venv_program(env_dir, "python")]
     assert probe.calls[0][1]["VIRTUAL_ENV"] == str(env_dir)
     assert "without its browser tests" not in result.line()
 
@@ -595,13 +595,14 @@ def test_with_node_and_node_modules_the_built_files_are_compared(repo, monkeypat
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
     assert result.code == 0 and "| web pass |" in result.line()
     lock, web, sync, *_ = runs.calls
-    assert web[0] == ["npm", "run", "check"] and web[1] == repo
+    # The npm `which` found, so Windows's npm.cmd starts too.
+    assert web[0] == [str(tmp_path / "bin" / "npm"), "run", "check"] and web[1] == repo
 
 
 def test_a_built_file_that_differs_fails_before_the_sync(repo, monkeypatch, tmp_path):
     _with_page(repo, monkeypatch)
     (repo / "node_modules").mkdir()
-    runs = Runs({lambda cmd, cwd: cmd[:2] == ["npm", "run"]: 1})
+    runs = Runs({lambda cmd, cwd: Path(cmd[0]).name == "npm" and cmd[1] == "run": 1})
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
     assert result.code == 1 and runs.suites() == []
     assert "| web fail | sync not run |" in result.line()
@@ -618,7 +619,7 @@ def test_without_node_the_compare_is_left_out_with_a_line(repo, monkeypatch, tmp
     runs = Runs()
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, *tools)})
     assert result.code == 0 and "| web skipped |" in result.line()
-    assert not any(cmd[0] == "npm" for cmd, _, _ in runs.calls)
+    assert not any(Path(cmd[0]).name == "npm" for cmd, _, _ in runs.calls)
     assert ("moxi-dev check: the built web files were not compared with their sources: "
             + why) in capsys.readouterr().err
 
@@ -629,7 +630,36 @@ def test_no_page_picked_runs_no_compare(repo, monkeypatch, tmp_path):
     runs = Runs()
     result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
     assert "| web none |" in result.line()
-    assert not any(cmd[0] == "npm" for cmd, _, _ in runs.calls)
+    assert not any(Path(cmd[0]).name == "npm" for cmd, _, _ in runs.calls)
+
+
+# --- the environment's programs ---------------------------------------------------------
+
+@pytest.mark.parametrize("windows, programs, python, script", [
+    (False, "bin", "python", "lint-imports"),
+    (True, "Scripts", "python.exe", "lint-imports.exe")])
+def test_the_environments_programs_are_where_the_platform_keeps_them(
+        monkeypatch, tmp_path, windows, programs, python, script):
+    monkeypatch.setattr(check, "WINDOWS", windows)
+    assert check.venv_bin(tmp_path) == tmp_path / programs
+    assert check.venv_program(tmp_path, "python") == tmp_path / programs / python
+    assert check.venv_program(tmp_path, "lint-imports") == tmp_path / programs / script
+
+
+def test_on_windows_every_step_runs_the_environments_programs_from_scripts(
+        repo, monkeypatch):
+    monkeypatch.setattr(check, "WINDOWS", True)
+    commit_file(repo, "packages/sessions/x.py")
+    lint_plan = lambda package, work, members: [
+        check.lint.Command("rules", ["lint-imports", "--config", "x"])]
+    runs = Runs()
+    result = run_check(repo, runs, plan=lint_plan)
+    assert result.code == 0
+    scripts = repo / ".moxi-dev" / "env-3.12" / "Scripts"
+    ran = [cmd[0] for cmd, _, _ in runs.calls if cmd[0] != "uv"]
+    assert ran and set(ran) == {str(scripts / "lint-imports.exe"), str(scripts / "python.exe")}
+    for _, _, env in runs.calls[2:]:
+        assert env["PATH"].split(os.pathsep)[0] == str(scripts)
 
 
 # --- the summary line -------------------------------------------------------------------

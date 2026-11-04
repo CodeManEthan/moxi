@@ -87,7 +87,7 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     assert ("packages: low, high | lock pass | tags pass | stamps none | web none | "
             "sync pass | lint none | low pass") in line, line
     assert ", high pass " in line and line.endswith("exit 0")
-    assert (workspace / ".moxi-dev/env-3.12/bin/python").exists()
+    assert check.venv_program(workspace / ".moxi-dev/env-3.12", "python").exists()
     assert not (workspace / ".venv").exists()
     assert not (Path(os.environ["HOME"]) / ".cache" / "uv").exists()  # the real cache served
 

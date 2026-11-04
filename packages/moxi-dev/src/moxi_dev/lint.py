@@ -58,7 +58,7 @@ class Command:
     """One tool run over the package."""
 
     what: str                      # what it checks, for the report
-    argv: list[str]                # argv[0] is the tool's script, in the environment's bin
+    argv: list[str]                # argv[0] is the tool's script in the environment
     pythonpath: list[str] = field(default_factory=list)   # put first on PYTHONPATH
 
 

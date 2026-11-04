@@ -117,6 +117,23 @@ Run = Callable[[Sequence[str], Path, Mapping[str, str]], int]
 Plan = Callable[[Path, Path, Sequence[Path]], list[lint.Command]]
 
 
+#: Whether this is Windows, where a virtual environment keeps its programs in `Scripts`
+#: and names them `<name>.exe`; tests replace it.
+WINDOWS = os.name == "nt"
+
+
+def venv_bin(venv: Path) -> Path:
+    """The directory of a virtual environment's programs: `Scripts` on Windows, else
+    `bin`."""
+    return venv / ("Scripts" if WINDOWS else "bin")
+
+
+def venv_program(venv: Path, name: str) -> Path:
+    """A program a virtual environment installs (`python`, a console script), by its
+    name: `Scripts\\<name>.exe` on Windows, else `bin/<name>`."""
+    return venv_bin(venv) / (f"{name}.exe" if WINDOWS else name)
+
+
 class CheckError(Exception):
     """The check can't start; the message says why."""
 
@@ -483,7 +500,7 @@ class _Steps:
         suite_env = {key: value for key, value in env.items()
                      if key not in SUITE_DROPPED_ENV}
         suite_env = {**suite_env, "VIRTUAL_ENV": str(venv),
-                     "PATH": os.pathsep.join(filter(None, [str(venv / "bin"),
+                     "PATH": os.pathsep.join(filter(None, [str(venv_bin(venv)),
                                                            env.get("PATH")]))}
         result.lint = []
         for package in chosen:
@@ -513,7 +530,7 @@ class _Steps:
         work = self.root / RUN_DIR
         work.mkdir(parents=True, exist_ok=True)
         env = {**suite_env, **self.selection_env(work)}
-        python = str(venv / "bin" / "python")
+        python = str(venv_program(venv, "python"))
         ok, ran = True, False
         # Each package's (passed, tests) over both passes; passed None: it ran nothing.
         runs: dict[str, tuple[bool | None, dict | None]] = {}
@@ -577,7 +594,7 @@ class _Steps:
         browser = [package for package in chosen if package.browser]
         if not browser:
             return {}
-        why = self.probe(venv / "bin" / "python", suite_env)
+        why = self.probe(venv_program(venv, "python"), suite_env)
         if why is None:
             return {package.dir: (("-m", WITH_BROWSER), {}) for package in browser}
         for package in browser:
@@ -645,7 +662,7 @@ class _Steps:
             env = {key: value for key, value in suite_env.items() if key != "PYTHONPATH"}
             if command.pythonpath:
                 env["PYTHONPATH"] = os.pathsep.join(command.pythonpath)
-            argv = [str(venv / "bin" / command.argv[0]), *command.argv[1:]]
+            argv = [str(venv_program(venv, command.argv[0])), *command.argv[1:]]
             ok = self.run(argv, package.path, env) == 0 and ok
         self.result.lint.append((package.dir, ok))
         return ok
@@ -668,7 +685,8 @@ def _web(root: Path, env: Mapping[str, str], run: Run, result: Result) -> bool:
         result.web = "none"
         return True
     path = env.get("PATH")
-    missing = [tool for tool in ("node", "npm") if shutil.which(tool, path=path) is None]
+    found = {tool: shutil.which(tool, path=path) for tool in ("node", "npm")}
+    missing = [tool for tool, where in found.items() if where is None]
     if missing or not (root / "node_modules").is_dir():
         why = (f"no {' or '.join(missing)} on PATH" if missing
                else "no node_modules at the root (run `npm ci`)")
@@ -676,7 +694,8 @@ def _web(root: Path, env: Mapping[str, str], run: Run, result: Result) -> bool:
               f"sources: {why}", file=sys.stderr, flush=True)
         result.web = "skipped"
         return True
-    ok = run(["npm", "run", "check"], root, env) == 0
+    # The path `which` found: on Windows npm is `npm.cmd`, which a bare `npm` can't start.
+    ok = run([found["npm"], "run", "check"], root, env) == 0
     result.web = "pass" if ok else "fail"
     return ok
 
