@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import textwrap
 import time
 import types
@@ -16,6 +17,9 @@ from moxi import config, units
 from moxi.units import _backend, _declare, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script
+
+#: A platform this one isn't, for a unit declared for another system only.
+OTHER_PLATFORM = "linux" if sys.platform == "win32" else "win32"
 
 SETTINGS = """
 [relay.enabled]
@@ -385,7 +389,8 @@ def test_no_backend_skips_every_unit(w, monkeypatch):
 
 def test_an_off_platform_unit_is_skipped(w):
     w.script("moxi-demo-relay")
-    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'platforms': ['win32']}}")
+    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'platforms': "
+                     f"['{OTHER_PLATFORM}']}}}}")
     change = w.plan()[("relay", "daemon")]
     assert (change.action, change.cause) == ("skip", "platform")
 

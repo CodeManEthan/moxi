@@ -20,6 +20,9 @@ from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._types import Stopped
 from moxi_dev.testing import console_script
 
+#: A platform this one isn't, for a unit declared for another system only.
+OTHER_PLATFORM = "linux" if sys.platform == "win32" else "win32"
+
 SETTINGS = """
 [relay.enabled]
 type = "bool"
@@ -639,7 +642,8 @@ def test_a_timer_that_was_not_read_names_no_unit(w, monkeypatch):
     """`off` (here, not on this system) and `nobackend` make no read, and a failed `show`
     reads nothing: none of them carries `triggers`."""
     w.installed(TIMERS=TIMER[:-1] + ", 'win': {'command': 'moxi-demo-snap', 'every': '5m', "
-                                    "'switch': 'snapshot.enabled', 'platforms': ['win32']}}")
+                                    "'switch': 'snapshot.enabled', 'platforms': "
+                                    f"['{OTHER_PLATFORM}']}}}}")
     w.foreign_timer()
     states = {s.name: s for s in units.status("demo", foreign=["backup.timer"])}
     assert (states["win"].kind, states["win"].state, states["win"].triggers) == (
@@ -919,8 +923,10 @@ def test_config_show_json_lists_switch_table_entries_in_the_file_and_named(w, ca
                        "'switch': 'rows.snap'}}",
                 QUESTIONS="{'rows.asked': 'Ask?', 'rows.snap': 'Snapshots?'}",
                 units_from="""
+                import sys
+
                 def units():
-                    return {"timers": {"late": {"argv": ["/bin/true"], "every": "1h",
+                    return {"timers": {"late": {"argv": [sys.executable], "every": "1h",
                                                 "switch": "rows.late"}}}
                 """)
     w.foreign_timer()

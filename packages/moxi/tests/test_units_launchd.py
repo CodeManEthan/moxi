@@ -225,6 +225,9 @@ BIN = "/Users/ana/.local/share/uv/tools/moxi/bin"
 @pytest.fixture
 def ana(monkeypatch):
     """The default roots of a user `ana` on a Mac, for the golden texts."""
+    if sys.platform == "win32":
+        pytest.skip("a Mac user's roots: on Windows moxi's roots are under the user's "
+                    "AppData, and Windows never uses launchd")
     for name in list(os.environ):
         if name.startswith(("MOXI_", "XDG_")):
             monkeypatch.delenv(name)
@@ -263,7 +266,7 @@ def test_a_daemon_without_process_stop_does_not_abandon_its_group(mac):
     [group] = mac.backend.render(spec())
     body = plistlib.loads(group.files[0][1].encode())
     assert "AbandonProcessGroup" not in body and "Sockets" not in body
-    assert body["StandardOutPath"].endswith("/demo/logs/relay.log")
+    assert body["StandardOutPath"].endswith(os.sep + os.path.join("demo", "logs", "relay.log"))
 
 
 GOLDEN_SOCKET = """\
@@ -1005,7 +1008,7 @@ def test_status_from_recorded_print(mac, monkeypatch):
     assert states["relay"].since == 1700000000.0 and states["idle"].since is None
     assert states["unloaded"].detail == "not loaded"
     assert states["snap"].last == {"status": 0} and states["relay"].last is None
-    assert states["relay"].log.endswith("/demo/logs/relay.log")
+    assert states["relay"].log.endswith(os.sep + os.path.join("demo", "logs", "relay.log"))
     assert states["absent"].log is None
     assert states["com.example.agent"].module is None
     assert states["com.example.agent"].log is None  # a foreign job with no plist here
@@ -1127,7 +1130,7 @@ def test_a_socket_reads_the_daemons_job_and_is_never_failed(mac, monkeypatch):
     assert "has no Sockets" in sockets["old"].detail
     assert "moxi install demo" in sockets["old"].detail
     assert "no plist at" in sockets["absent"].detail
-    assert sockets["idle"].log.endswith("/demo/logs/idle.log")
+    assert sockets["idle"].log.endswith(os.sep + os.path.join("demo", "logs", "idle.log"))
     assert sockets["old"].log is None and sockets["absent"].log is None
 
 
@@ -1180,6 +1183,8 @@ def test_the_backend_object_is_found_for_launchd(monkeypatch):
     assert not hasattr(impl, "runner")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a Mac user's LaunchAgents and uid; "
+                    "Windows has no uid and never uses launchd")
 def test_the_default_paths_are_the_users_launch_agents_and_uid(monkeypatch):
     monkeypatch.setenv("HOME", "/Users/ana")
     backend = LaunchdBackend()

@@ -372,7 +372,8 @@ def test_shortcut_writes_an_executable_beside_moxi(alpha, path_dirs, capsys):
 def test_shortcut_refuses_a_name_already_on_path(alpha, path_dirs, capsys):
     clash = console_script(path_dirs.other, "alpha")
     code, _, err = run(capsys, "shortcut", "alpha")
-    assert code == 1 and str(clash) in err
+    # Windows may name the file with PATHEXT's case (`alpha.CMD`): its names ignore case.
+    assert code == 1 and os.path.normcase(str(clash)) in os.path.normcase(err)
     assert not (path_dirs.bin / "alpha").exists()
 
 

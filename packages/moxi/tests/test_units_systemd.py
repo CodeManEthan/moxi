@@ -113,6 +113,8 @@ def test_a_plain_daemon_has_no_kill_mode_and_no_memory_lines(unit_root):
     assert "ExecStart=/opt/ana/bin/x --port 1\nWorkingDirectory=/srv/ana\n" in text
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the golden text writes the gate's path "
+                    "bare, as a POSIX path is; Windows never uses systemd")
 def test_a_timer_is_a_service_through_the_gate_and_a_schedule(unit_root, bin_dir):
     [group] = SystemdBackend().render(spec(
         "timer", module="notes", name="snapshot", doc="commit a snapshot of the notes",
@@ -1963,6 +1965,8 @@ def _wrap(root, manager=None, *, module="services", key="backup.enabled", name="
     return acted, manager
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the golden text writes the gate's path "
+                    "bare, as a POSIX path is; Windows never uses systemd")
 def test_wrap_writes_the_marked_drop_in_and_reloads_once(unit_root, bin_dir):
     acted, manager = _wrap(unit_root)
     assert acted.ok and (acted.module, acted.name, acted.act) == (None, "backup.timer",

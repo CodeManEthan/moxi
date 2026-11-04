@@ -26,6 +26,9 @@ from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
 from moxi_dev.testing import console_script
 
+#: A platform this one isn't, for a unit declared for another system only.
+OTHER_PLATFORM = "linux" if sys.platform == "win32" else "win32"
+
 SETTINGS = """
 [relay.enabled]
 type = "bool"
@@ -334,7 +337,8 @@ def test_an_editable_install_s_units_are_information_and_exit_0(d, capsys):
 
 def test_an_off_platform_unit_and_no_supervisor_are_off(d, monkeypatch):
     d.script("moxi-demo-relay")
-    d.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'platforms': ['win32']}}")
+    d.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'platforms': "
+                     f"['{OTHER_PLATFORM}']}}}}")
     row = d.rows("demo")[("demo", "daemon relay")]
     assert row.state == "off" and "not on this system" in row.detail
     d.module(DAEMONS=DAEMON)
