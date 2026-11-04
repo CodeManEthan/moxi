@@ -21,6 +21,14 @@ The fence, around every test (the autouse fixture `fence`):
   OpenCode reads its homes through `XDG_*`; its content variables (`OPENCODE_*`) are
   cleared with the rest. A package that starts reading another home adds it to
   `HARNESS_HOMES`.
+  On Windows the fence does the same for the user's own folders, so no test sees or
+  writes the real profile: `USERPROFILE` is the test's home, `HOMEDRIVE` and `HOMEPATH`
+  are that home split at its drive, `LOCALAPPDATA` and `APPDATA` are under it, and so
+  is each per-user folder platformdirs reads through a `WIN_PD_OVERRIDE_*` variable
+  (without one it asks Windows for the real folder, whatever `APPDATA` says); see
+  `WINDOWS_HOMES`. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
+  variables a process needs (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of
+  `WINDOWS_KEPT_ENV`) are kept. Off Windows none of these is set or kept.
 - Byte code. `sys.dont_write_bytecode` is set for the test, so a module first imported
   inside it is compiled in memory and nothing is written next to its source.
 - Writes. An audit hook (`sys.addaudithook`) refuses, with `FenceError`, a write whose
@@ -30,7 +38,13 @@ The fence, around every test (the autouse fixture `fence`):
   makes, and the test's short directory, with every directory `short_dir` has made and
   not yet removed. The rest of the system temp directories (other runs, other
   processes' files) is outside. Besides those it lets through, and only these:
-  `os.devnull`, `/dev/tty` and `/dev/pts/*` (terminals). A write is: `open` for writing or
+  the null device, `/dev/tty` and `/dev/pts/*` (terminals). The null device is
+  `os.devnull`; on Windows it is either spelling a write to `nul` resolves to:
+  `\\\\.\\nul`, and a drive or UNC path whose last part is `nul` (a relative `nul`
+  resolves to one in the working directory), which Windows opens as the device. A
+  `\\\\?\\` or `\\\\.\\` path to a file named `nul` creates a real file, so it is
+  refused; so are `nul.txt` and `nul:`, which only some Windows versions open as the
+  device. A write is: `open` for writing or
   creating, `os.mkdir`, `os.rename`/`os.replace` (both ends), `os.remove`, `os.rmdir`,
   `os.symlink` and `os.link` (the new name), `os.truncate`, `os.chmod`, `os.chown`,
   `os.utime`, `os.setxattr`, `os.removexattr`, `shutil.rmtree`, `shutil.copyfile`,
@@ -131,6 +145,7 @@ import dataclasses
 import functools
 import ipaddress
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -220,6 +235,38 @@ HARNESS_HOMES = {
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID")
+
+#: Whether this is Windows, where the fence also moves the user's folders and keeps the
+#: system's variables; tests replace it.
+WINDOWS = os.name == "nt"
+
+#: On Windows, the user's folders the fence also points under the test's home, each
+#: relative to it, laid out as Windows lays out a profile. The `WIN_PD_OVERRIDE_*`
+#: variables are platformdirs' per-user folders. `HOMEDRIVE` and `HOMEPATH` are the home
+#: split at its drive, and `TEMP` and `TMP` are the test's short directory.
+WINDOWS_HOMES = {
+    "USERPROFILE": ".",
+    "LOCALAPPDATA": "AppData/Local",
+    "APPDATA": "AppData/Roaming",
+    "WIN_PD_OVERRIDE_LOCAL_APPDATA": "AppData/Local",
+    "WIN_PD_OVERRIDE_APPDATA": "AppData/Roaming",
+    "WIN_PD_OVERRIDE_USER_PROGRAM_FILES": "AppData/Local/Programs",
+    "WIN_PD_OVERRIDE_PROGRAMS": "AppData/Roaming/Microsoft/Windows/Start Menu/Programs",
+    "WIN_PD_OVERRIDE_TEMPLATES": "AppData/Roaming/Microsoft/Windows/Templates",
+    "WIN_PD_OVERRIDE_PERSONAL": "Documents",
+    "WIN_PD_OVERRIDE_DOWNLOADS": "Downloads",
+    "WIN_PD_OVERRIDE_DESKTOPDIRECTORY": "Desktop",
+    "WIN_PD_OVERRIDE_MYPICTURES": "Pictures",
+    "WIN_PD_OVERRIDE_MYVIDEO": "Videos",
+    "WIN_PD_OVERRIDE_MYMUSIC": "Music",
+}
+
+#: On Windows, the system's variables carried into the fence unchanged, when set: what a
+#: process needs to start and load its libraries (`SYSTEMROOT` above all: sockets and
+#: OpenSSL need it), `PATHEXT` to find a program by its bare name, `COMSPEC` for a
+#: shell, and `USERNAME`, the only place `getpass.getuser` finds the user's name there.
+WINDOWS_KEPT_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
+                    "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERNAME")
 
 #: What `uv_env` adds to the fenced environment, besides uv's two directories.
 _UV_NO_DOWNLOADS = {"UV_PYTHON_DOWNLOADS": "never"}
@@ -316,8 +363,21 @@ def _resolve(path: object, dir_fd: object = None, *, follow: bool = True) -> str
     return os.path.join(os.path.realpath(head), tail)
 
 
+def _null_device(real: str) -> bool:
+    """Whether a resolved path is the null device (module doc, Writes)."""
+    if not WINDOWS:
+        return real == os.devnull
+    path = real.replace("/", "\\").lower()
+    if path == "\\\\.\\nul":
+        return True
+    # Past a \\?\ or \\.\ prefix Windows takes the name as it is: a file named nul.
+    if path.startswith(("\\\\?\\", "\\\\.\\")):
+        return False
+    return ntpath.isabs(path) and ntpath.basename(path) == "nul"
+
+
 def _allowed(real: str) -> bool:
-    if real == os.devnull or real == "/dev/tty" or real.startswith("/dev/pts/"):
+    if _null_device(real) or real == "/dev/tty" or real.startswith("/dev/pts/"):
         return True
     return any(real == root or real.startswith(root + os.sep)
                for root in (*_GUARD.roots, *_SHORT_DIRS))
@@ -496,12 +556,18 @@ def _modules() -> list[str]:
 def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Path,
                 modules: Iterable[str]) -> dict[str, str]:
     env = {key: value for key, value in source.items()
-           if key in KEPT_ENV or key.startswith(_KEPT_PREFIXES)}
+           if key in KEPT_ENV or key.startswith(_KEPT_PREFIXES)
+           or (WINDOWS and key.upper() in WINDOWS_KEPT_ENV)}
     for key, rel in HARNESS_HOMES.items():
         env[key] = str(home if rel == "." else home / rel)
     env["XDG_RUNTIME_DIR"] = str(runtime)
     for module in modules:
         env[f"MOXI_{module.upper()}_HOME"] = str(short / module)
+    if WINDOWS:
+        for key, rel in WINDOWS_HOMES.items():
+            env[key] = str(home if rel == "." else home / rel)
+        env["HOMEDRIVE"], env["HOMEPATH"] = ntpath.splitdrive(str(home))
+        env["TEMP"] = env["TMP"] = str(short)
     return env
 
 
@@ -1047,6 +1113,6 @@ def _statements(script: str) -> Iterator[str]:
 
 __all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
            "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
-           "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV", "fence",
-           "findings_of", "param_id", "selection", "served", "short_dir", "touches_match",
-           "uv_env", "wait_for", "write_sqlite"]
+           "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES",
+           "WINDOWS_KEPT_ENV", "fence", "findings_of", "param_id", "selection", "served",
+           "short_dir", "touches_match", "uv_env", "wait_for", "write_sqlite"]
