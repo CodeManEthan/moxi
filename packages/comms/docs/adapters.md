@@ -131,10 +131,12 @@ a harness.
    agent with no memory answering as the old one.
 
    *Codex and OpenCode:* a Codex or OpenCode launch starts a new
-   thread or session, as a Claude launch starts a new session, and never resumes or
-   loads the one an earlier launch recorded. A launch is one `moxi-comms-codex` or
+   thread or session, as a Claude launch starts a new session, unless it is told to
+   resume one: `moxi comms codex --name <name> --resume THREAD_ID` resumes that Codex
+   thread and reports the launch as a resume of it. No launch resumes or loads an id it
+   reads from the record. A launch is one `moxi-comms-codex` or
    `moxi-comms-opencode` process, and no code path in it reads an id from the record that it
-   did not itself start. The rule above holds inside one launch: when the launch's own
+   did not itself start or was not told to resume. The rule above holds inside one launch: when the launch's own
    thread or session fails to resume or is gone, that is said out loud and never
    replaced. Codex retries the resume; OpenCode stops posting for the rest of the
    launch.
@@ -228,7 +230,7 @@ a loop while supervision brings it back.
 | harness | kind | how a person sits in the session | what ends a turn | status |
 |---|---|---|---|---|
 | Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the wrapper forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
-| Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
+| Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch, or on the thread `--resume THREAD_ID` names | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
 | OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
@@ -296,7 +298,7 @@ is acked when the turn that took it ends with an answer, and handed again otherw
 hand-in whose answer never came is waited on, not handed again: the text may already be
 in a turn.
 
-**One thread.** The adapter delivers into the thread this launch started. /clear, /new
+**One thread.** The adapter delivers into the thread this launch started or resumed. /clear, /new
 and /fork in the window start another thread, and /resume opens one; comms does not
 follow any of them, and mail still goes to the launch's thread. To start fresh, end the
 launch and launch again.

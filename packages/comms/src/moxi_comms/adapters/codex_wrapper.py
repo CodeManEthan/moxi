@@ -19,8 +19,10 @@ the `--name` form only, goes to the host with the other settings, so the host re
 that thread (`thread/resume`) instead of starting one, and the adapter reports the
 launch as a resume of it, not as a new session. comms trusts the caller's id, as its
 Claude wrapper trusts `--resume U`: it keeps no history of a name's threads to check it
-against, and a thread Codex can't resume fails in turns' host, loudly, ending the
-launch. A roster launch always starts a new thread.
+against. A thread Codex can't resume fails in turns' host, loudly: a launch with its
+window ends when the window gives up, and one run with `--no-window` keeps retrying while
+the name stays bound, as a failed first start does. A roster launch always starts a new
+thread.
 
 What the wrapper does, in order:
 
