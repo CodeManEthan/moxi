@@ -517,6 +517,21 @@ def test_importing_moxi_ipc_loads_neither_the_server_nor_the_client():
     assert done.stdout.strip() == ""
 
 
+def test_the_user_check_imports_psutil_on_first_use_only():
+    """The server imports the user check at its top, and psutil costs tens of milliseconds:
+    importing the check leaves psutil out until a user is read."""
+    code = textwrap.dedent("""\
+        import os, sys
+        from moxi.ipc import _users
+        print("psutil" in sys.modules)
+        _users.user_of(os.getpid())
+        print("psutil" in sys.modules)
+        """)
+    done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
+                          check=True, timeout=60)
+    assert done.stdout.split() == ["False", "True"]
+
+
 def test_the_public_surface():
     for name in ("address", "hello", "Hello", "Agreed", "IpcError", "RpcError", "NotRpc",
                  "NotServing", "AlreadyServing", "Timeout"):

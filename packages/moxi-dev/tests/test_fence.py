@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import ntpath
 import os
-import pwd
 import shutil
 import socket
 import socketserver
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -20,8 +20,17 @@ import pytest
 from moxi_dev import testing
 from moxi_dev.testing import FenceError
 
-#: The user's real home, read from the password database: the fence moves only $HOME.
-REAL_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
+#: The tests that need a POSIX name: the password database, Unix sockets or /tmp.
+POSIX = pytest.mark.skipif(sys.platform == "win32",
+                           reason="the password database, Unix sockets and /tmp are POSIX")
+
+
+def real_home() -> Path:
+    """The user's real home, read from the password database: the fence moves only
+    $HOME. POSIX only."""
+    import pwd
+
+    return Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
 def refused(action) -> str:
@@ -37,7 +46,7 @@ def refused(action) -> str:
 
 def stray() -> Path:
     """A name in the real home that nothing else uses."""
-    return REAL_HOME / f".moxi-dev-fence-probe-{uuid.uuid4().hex}"
+    return real_home() / f".moxi-dev-fence-probe-{uuid.uuid4().hex}"
 
 
 # --- the environment -------------------------------------------------------------------
@@ -246,6 +255,7 @@ def test_uv_env_reads_uv_before_the_fence_empties_the_environment(pytester, monk
 
 # --- writes ----------------------------------------------------------------------------
 
+@POSIX
 def test_a_write_to_the_real_home_fails():
     target = stray()
     assert "outside the test's tmp" in refused(lambda: target.write_text("x"))
@@ -254,7 +264,7 @@ def test_a_write_to_the_real_home_fails():
     refused(lambda: os.mkdir(target))
     refused(lambda: os.remove(target))
     refused(lambda: sqlite3.connect(target))
-    refused(lambda: tempfile.mkstemp(dir=REAL_HOME))
+    refused(lambda: tempfile.mkstemp(dir=real_home()))
     assert not target.exists()
 
 
@@ -340,12 +350,14 @@ def test_reading_outside_the_tmp_is_not_a_write():
     os.close(os.open(testing.__file__, os.O_RDONLY))
 
 
+@POSIX
 def test_a_link_out_of_the_tmp_is_outside(tmp_path):
-    os.symlink(REAL_HOME, tmp_path / "out")
+    os.symlink(real_home(), tmp_path / "out")
     refused(lambda: (tmp_path / "out" / stray().name).write_text("x"))
     os.remove(tmp_path / "out")                  # the link itself is inside
 
 
+@POSIX
 def test_a_rename_out_of_the_tmp_fails(tmp_path):
     (tmp_path / "a").write_text("x")
     refused(lambda: os.rename(tmp_path / "a", stray()))
@@ -353,6 +365,7 @@ def test_a_rename_out_of_the_tmp_fails(tmp_path):
     assert (tmp_path / "a").exists()
 
 
+@POSIX
 def test_another_thread_is_fenced_too():
     errors = []
 
@@ -392,6 +405,7 @@ def outside():
         shutil.rmtree(where, ignore_errors=True)
 
 
+@POSIX
 def test_a_module_first_imported_in_a_test_writes_no_byte_code(outside, monkeypatch):
     where, name = outside
     import importlib
@@ -404,12 +418,14 @@ def test_a_module_first_imported_in_a_test_writes_no_byte_code(outside, monkeypa
     assert not (where / "src" / "__pycache__").exists()
 
 
+@POSIX
 def test_a_write_into_a_pycache_outside_the_tmp_fails(outside):
     where, _ = outside
     refused(lambda: (where / "cached" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b""))
     refused(lambda: os.mkdir(where / "src" / "__pycache__"))
 
 
+@POSIX
 def test_the_rest_of_the_temp_dirs_is_outside(outside, fence, tmp_path_factory):
     where, _ = outside
     refused(lambda: (where / "f").write_text("x"))             # another process's, in /tmp
@@ -438,6 +454,7 @@ def module_server():
         yield server
 
 
+@POSIX
 def test_a_test_reaches_a_server_a_wider_fixture_serves(module_server):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
         c.settimeout(5)
@@ -448,6 +465,7 @@ def test_a_test_reaches_a_server_a_wider_fixture_serves(module_server):
 
 # --- a pytest run inside a test --------------------------------------------------------
 
+@POSIX
 def test_an_in_process_run_puts_the_outer_fence_back(pytester):
     pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
     pytester.makepyfile(test_inner=(
@@ -480,6 +498,7 @@ def test_a_connect_off_the_machine_fails(host):
         refused(lambda: u.sendto(b"x", (host, 9)))
 
 
+@POSIX
 def test_a_connect_to_a_socket_outside_the_tmp_fails():
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         refused(lambda: s.connect(f"/run/user/{os.getuid()}/moxi-dev-probe.sock"))
@@ -594,6 +613,7 @@ def probes(pytester, monkeypatch):
     return pytester
 
 
+@POSIX
 def test_a_probe_run_fails_what_breaks_the_fence(probes):
     result = probes.runpytest_subprocess("-p", "no:cacheprovider", "-rA")
     result.assert_outcomes(failed=3, errors=1, passed=3, skipped=1)
@@ -611,9 +631,10 @@ def test_a_probe_run_fails_what_breaks_the_fence(probes):
     assert "outside the test's call" in text                         # the teardown one
     assert "not a loopback address" in text
     assert "a live test runs only with MOXI_TEST_LIVE=1" in text
-    assert not list(REAL_HOME.glob(".moxi-dev-fence-probe-*"))
+    assert not list(real_home().glob(".moxi-dev-fence-probe-*"))
 
 
+@POSIX
 def test_a_live_probe_runs_with_the_word(probes, monkeypatch):
     monkeypatch.setenv("MOXI_TEST_LIVE", "1")
     result = probes.runpytest_subprocess("-p", "no:cacheprovider", "-k", "live")
