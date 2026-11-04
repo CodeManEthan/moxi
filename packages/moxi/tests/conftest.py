@@ -413,3 +413,106 @@ class Raw:
 
     def close(self) -> None:
         self.sock.close()
+
+
+class PipeRaw:
+    """`Raw` for a named pipe on Windows: a plain client handle, opened overlapped so a
+    read or a write gives up at its deadline instead of blocking for ever."""
+
+    _BUSY = 231  # ERROR_PIPE_BUSY: every instance is taken; another comes soon
+
+    def __init__(self, address, timeout: float = 10.0):
+        import _winapi
+        import time
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                self.handle = _winapi.CreateFile(
+                    str(address), _winapi.GENERIC_READ | _winapi.GENERIC_WRITE, 0,
+                    _winapi.NULL, _winapi.OPEN_EXISTING, _winapi.FILE_FLAG_OVERLAPPED,
+                    _winapi.NULL)
+                break
+            except OSError as exc:
+                if exc.winerror != self._BUSY or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+        self.timeout = timeout
+        self.buffer = b""
+
+    def _finish(self, ov, err: int, timeout: float) -> tuple[int, bool]:
+        """Wait for overlapped operation `ov`; cancel it at `timeout`. Returns the bytes
+        moved and whether it was cancelled."""
+        import _winapi
+
+        if err == _winapi.ERROR_IO_PENDING:
+            ms = max(0, int(timeout * 1000))
+            if _winapi.WaitForMultipleObjects([ov.event], False, ms) != _winapi.WAIT_OBJECT_0:
+                ov.cancel()
+        n, err = ov.GetOverlappedResult(True)
+        return n, err == _winapi.ERROR_OPERATION_ABORTED
+
+    def send(self, data: bytes) -> None:
+        import _winapi
+
+        ov, err = _winapi.WriteFile(self.handle, data, overlapped=True)
+        n, cancelled = self._finish(ov, err, self.timeout)
+        assert not cancelled and n == len(data), f"wrote {n} of {len(data)} bytes in time"
+
+    def _recv(self, timeout: float) -> bytes:
+        """The next bytes read, b"" at the end of the stream."""
+        import _winapi
+
+        try:
+            ov, err = _winapi.ReadFile(self.handle, 65536, overlapped=True)
+            _, cancelled = self._finish(ov, err, timeout)
+        except (BrokenPipeError, OSError) as exc:
+            if isinstance(exc, BrokenPipeError) or getattr(exc, "winerror", None) in (
+                    109, 233):  # ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED
+                return b""
+            raise
+        data = ov.getbuffer()
+        assert data or not cancelled, "no bytes in time"
+        return bytes(data)
+
+    def line(self) -> bytes:
+        """The next line, without its newline. AssertionError at the end of the stream."""
+        import time
+
+        deadline = time.monotonic() + self.timeout
+        while b"\n" not in self.buffer:
+            left = deadline - time.monotonic()
+            assert left > 0, "no line in time"
+            chunk = self._recv(left)
+            assert chunk, f"the stream ended; unread: {self.buffer[:200]!r}"
+            self.buffer += chunk
+        line, _, self.buffer = self.buffer.partition(b"\n")
+        return line
+
+    def json(self) -> dict:
+        import json
+
+        return json.loads(self.line())
+
+    def closed(self) -> bool:
+        """Read to the end of the stream: True when the server closed it with nothing
+        more sent (anything unread fails the test)."""
+        import time
+
+        deadline = time.monotonic() + self.timeout
+        while True:
+            left = deadline - time.monotonic()
+            assert left > 0, "the stream did not end in time"
+            chunk = self._recv(left)
+            if not chunk:
+                break
+            self.buffer += chunk
+        assert self.buffer == b"", f"unread: {self.buffer[:200]!r}"
+        return True
+
+    def close(self) -> None:
+        import _winapi
+
+        if self.handle is not None:
+            _winapi.CloseHandle(self.handle)
+            self.handle = None
