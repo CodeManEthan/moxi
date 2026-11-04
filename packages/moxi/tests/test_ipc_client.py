@@ -304,8 +304,6 @@ def opens(monkeypatch):
     `opens.tried` lists the addresses opened."""
     import types
 
-    pairs = []
-
     def open_pipe(address):
         opens.tried.append(address)
         answer = opens.answers.pop(0) if opens.answers else win_error(231)
@@ -313,18 +311,26 @@ def opens(monkeypatch):
             raise answer
         return answer
 
-    def pair_end():
-        """One end of a socket pair, standing in for an opened pipe."""
-        ours, theirs = socket.socketpair()
-        pairs.append(ours)
-        return theirs
-
-    opens = types.SimpleNamespace(answers=[], tried=[], pair_end=pair_end)
+    opens = types.SimpleNamespace(answers=[], tried=[])
     monkeypatch.setattr(_client, "_WINDOWS", True)
     monkeypatch.setattr(_pipe, "open_pipe", open_pipe)
-    yield opens
-    for sock in pairs:
-        sock.close()
+    return opens
+
+
+class Opened:
+    """A stand-in for an opened pipe: nothing comes from it until it is closed."""
+
+    def __init__(self):
+        self.gone = threading.Event()
+
+    def recv(self, size: int) -> bytes:
+        self.gone.wait(20)
+        return b""
+
+    def shutdown(self, how=None) -> None:
+        self.gone.set()
+
+    close = shutdown
 
 
 PIPE = r"\\.\pipe\moxi-demo-a-0123abcd"
@@ -345,11 +351,12 @@ def test_on_windows_a_busy_pipe_is_tried_every_50_ms_until_the_timeout(opens):
         ipc.connect(PIPE, timeout=0.3)
     assert 0.3 - EARLY <= time.monotonic() - start < 3
     assert "busy" in str(caught.value) and isinstance(caught.value, TimeoutError)
-    assert 2 <= len(opens.tried) <= 8
+    # every 50 ms, and in the clock's last step before the deadline a few more times
+    assert 2 <= len(opens.tried) <= 15
 
 
 def test_on_windows_a_busy_pipe_is_tried_again_until_it_opens(opens):
-    end = opens.pair_end()
+    end = Opened()
     opens.answers = [win_error(231), win_error(231), win_error(231), end]
     start = time.monotonic()
     with ipc.connect(PIPE, timeout=5.0) as client:
