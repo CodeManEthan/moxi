@@ -412,7 +412,7 @@ Newline-delimited JSON-RPC 2.0 at `RUNTIME/comms/daemon.sock` (0600, in a 0700
 directory; Moxi's short socket path for it when that one is too long). Each adapter's
 claim socket speaks the same wire. Every connection opens with `rpc.hello`: the client
 offers a range of comms wire versions, and the daemon answers the highest common one and
-its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`), or refuses with
+its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`), or refuses with
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the
@@ -441,7 +441,7 @@ credential, and `content`, line zero and body; answers `message_id`), `delete` (
 `token`, `message_id`; answers `withdrawn` and `delivered`, each a list of names), and
 the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 `explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
-`max_id`, `last_digest` and `mcp_endpoint`. A send's credential is the live binding's token for a bound
+`max_id`, `last_digest`, `replies_to` and `mcp_endpoint`. A send's credential is the live binding's token for a bound
 identity, the operator's credential for `operator`, or a reserved name's token for a
 reserved name.
 
@@ -619,6 +619,28 @@ The read changes nothing. Any process that can open the socket may ask it, as fo
 `message`, `session` and `owner`: it answers nothing that `message`,
 `moxi comms history` and `moxi comms reply` don't already show any process of your user.
 `client.attributed_message(message_id)` asks it and returns None for an unknown id.
+
+`replies_to` reads the replies one identity can read to one message, by one author. comms'
+connector provider asks it while `send_and_wait` waits, for a reply the daemon hasn't
+pushed because the binding's window is full of other mail, and only when the hello lists
+the `connector` capability.
+
+```
+->  {"jsonrpc": "2.0", "id": 6, "method": "replies_to",
+     "params": {"identity": "claude-app", "reply_to": "4611686018427387905",
+                "author": "planner@proj-a"}}
+<-  {"jsonrpc": "2.0", "id": 6, "result": {"messages": [{"message_id": "4611686018427387912",
+     "author": {"name": "planner@proj-a", "tier": "chosen", "attribution": "verified"},
+     "posture": "open", "open_mark": false, "reply_to": "4611686018427387905",
+     "text": "the body, line zero removed", "timestamp": "2026-01-01T12:00:00Z"}]}}
+```
+
+A message is returned only when its id is above `reply_to`, its `re:` is `reply_to`,
+`author` wrote it, and a recipient tag names `identity`. The candidates come from the
+daemon's index of the last day's `#names` messages, and only their own ids are read from
+the record, so mail to any other name, `operator` included, is never read. Oldest first,
+at most 8. The read changes nothing; any process that can open the socket may ask it, as
+for `attributed_message`.
 
 A delivered payload:
 

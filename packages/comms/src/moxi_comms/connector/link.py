@@ -17,7 +17,7 @@ standing name), bound as the adapter kind `connector`, on a connection of its ow
   binding holds is tried again every `HELD_RETRY` seconds, and the status row names the
   holder.
 
-Reads (`agents`, `history`, `attributed_message`) go on short connections of their own,
+Reads (`agents`, `replies_to`) go on short connections of their own,
 so a slow read never costs the binding its connection. The binding's own connection
 carries only the bind and the digest's two methods.
 
@@ -38,6 +38,9 @@ from ..client import DaemonClient, DaemonError, DaemonOffline, backoff_delays
 from ..paths import comms_db, daemon_socket
 from ..provision import add_standing
 from ..scoping import GLOBAL
+
+#: The daemon capability that offers the `replies_to` read.
+CAPABILITY = "connector"
 
 log = logging.getLogger("comms.connector.link")
 
@@ -300,12 +303,19 @@ class Link:
         finally:
             client.close()
 
-    def attributed(self, message_id) -> dict | None:
+    def replies(self, reply_to: str, author: str) -> list[dict]:
+        """The replies to `reply_to` by `author` addressed to the identity, from the
+        daemon's `replies_to` read: nothing addressed only to another name is read. A daemon
+        whose hello doesn't list `connector` has no such read, and the answer is empty."""
         client = self._client_type(self.socket_path, timeout=READ_TIMEOUT).connect()
         try:
-            return client.attributed_message(message_id)
+            if CAPABILITY not in client.capabilities:
+                return []
+            got = client.call("replies_to", {"identity": self.identity,
+                                        "reply_to": str(reply_to), "author": author})
         finally:
             client.close()
+        return list(got.get("messages") or ())
 
     # ---------------------------------------------------------------- status
     def status(self) -> list[tuple[str, str, str]]:

@@ -5,11 +5,12 @@ codes. Offered through one entry point:
     [project.entry-points."moxi.connector.providers"]
     comms = "moxi_comms.connector:PROVIDER"
 
-Only the host loads this package, and nothing else in comms imports it. It imports
-nothing of the host but `moxi_connector.provider`, the interface a provider builds on,
-which it reaches at load (`_interface`). The host is the `connector` extra: an optional
-module, so the import is made by name at the one point it is used, the host's own load of
-this entry, rather than at the top of a comms module.
+Only the host loads this package, and nothing else in comms imports it. It uses nothing
+of the host but its interface 1, `moxi_connector.provider`, what a provider builds on. The
+host comes with the `connector` extra, an optional module, so this package reaches it only
+through `moxi.modules.load("connector", interface=1)` (`_interface`), and no import
+statement in comms names the host's package. When that load fails, importing this package
+raises `ImportError` with the reason.
 
 * `start(env)` reads `[connector]` from comms' config, provisions the identity as a
   standing name when it is missing, and binds it as the adapter kind `connector` (`link`).
@@ -20,9 +21,10 @@ this entry, rather than at the top of a comms module.
 
 from __future__ import annotations
 
-import importlib
 import logging
 from collections.abc import Mapping
+
+from moxi import modules
 
 from .. import config as config_mod
 from . import gate as gate_mod
@@ -31,14 +33,20 @@ from .link import Link
 
 log = logging.getLogger("comms.connector")
 
-#: The host's provider interface, by module name.
-INTERFACE = "moxi_connector.provider"
+#: The host's module name and the interface this provider is written against.
+MODULE = "connector"
+INTERFACE = 1
 
 
 def _interface():
-    """The host's provider interface. This package is loaded by the host alone, so the
-    host is installed whenever this runs."""
-    return importlib.import_module(INTERFACE)
+    """The host's provider interface, `moxi.modules.load("connector", interface=1).api`.
+    Only the host loads this package, so the host is installed whenever this runs; a
+    host that is missing, broken or lacks interface 1 raises `ImportError`."""
+    found = modules.load(MODULE, interface=INTERFACE)
+    if not found.ok or found.api is None:
+        raise ImportError(f"comms' connector provider needs the connector module, "
+                          f"interface {INTERFACE}: {found.reason or found.state}")
+    return found.api
 
 
 class Comms:
@@ -106,4 +114,4 @@ def build(api=None, **kw):
 
 COMMS, PROVIDER = build()
 
-__all__ = ["COMMS", "Comms", "INTERFACE", "PROVIDER", "build"]
+__all__ = ["COMMS", "Comms", "INTERFACE", "MODULE", "PROVIDER", "build"]

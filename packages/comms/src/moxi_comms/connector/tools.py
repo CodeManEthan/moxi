@@ -36,7 +36,6 @@ from ..adapters.claude_shim import frame_marks, parse_timestamp
 from ..client import DaemonError, DaemonOffline
 from ..envelope import scrub
 from ..roster_view import SEND_ONLY, render_agents
-from ..scoping import tag_matches
 from . import link as link_mod
 
 log = logging.getLogger("comms.connector.tools")
@@ -460,28 +459,21 @@ class Tools:
         return None
 
     def _in_record(self, sent: str, author: str) -> dict | None:
-        """The reply as the record holds it, read only among messages above `sent` that
-        are addressed to the identity: anything else, mail to the operator included, is
-        passed over unread."""
+        """The reply as the record holds it, through the daemon's `replies_to` read, which
+        returns only messages above `sent` that answer it, by `author`, addressed to the
+        identity. Mail to any other name, the operator's included, is never read."""
         try:
-            got = self.link.read("history", {"after": sent, "limit": 200})
+            got = self.link.replies(sent, author)
         except (DaemonError, DaemonOffline):
             return None
-        for m in got.get("messages") or ():
-            ml = machine_line.parse(m.get("content") or "")
-            if ml is None or str(ml.reply_to or "") != sent:
+        for m in got:
+            if str(m.get("reply_to") or "") != sent:
                 continue
-            if not any(tag_matches(t, self.link.identity) for t in ml.recipients):
+            if (m.get("author") or {}).get("name") != author:
                 continue
-            try:
-                attributed = self.link.attributed(m["id"])
-            except (DaemonError, DaemonOffline):
-                return None
-            who = (attributed or {}).get("author") or {}
-            if who.get("name") != author:
-                continue
-            return {"message_id": str(m["id"]), "author": who, "posture": ml.posture,
-                    "open_mark": ml.open_mark, "reply_to": ml.reply_to, "text": ml.text,
+            return {"message_id": str(m["message_id"]), "author": m["author"],
+                    "posture": m.get("posture"), "open_mark": bool(m.get("open_mark")),
+                    "reply_to": m.get("reply_to"), "text": m.get("text") or "",
                     "timestamp": m.get("timestamp")}
         return None
 

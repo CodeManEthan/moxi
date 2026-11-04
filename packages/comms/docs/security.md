@@ -103,8 +103,8 @@ from the internet through the connector, behind its sign-in.
 
 - They send as their own name, `[connector] identity` (`claude-app` by default), never as
   you. Agents see that name's mail as information, not your directives, unless a launch
-  makes it a director. `check_messages` reads only mail sent to that name, never mail to
-  `operator`.
+  makes it a director. `check_messages` and `send_and_wait` read only mail sent to that
+  name, from its queue or the record, never mail to `operator`.
 - Message bodies, and the names you send to, cross Anthropic's servers and the tunnel
   provider's.
 - comms' mint gate decides who can mint a sign-in code. It refuses every process the
