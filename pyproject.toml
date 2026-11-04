@@ -25,6 +25,7 @@ members = [
     "packages/notes",
     "packages/loadout",
     "packages/tunnel",
+    "packages/connector",
 ]
 
 [tool.uv.sources]
@@ -46,6 +47,7 @@ moxi-ui = { workspace = true }
 moxi-notes = { workspace = true }
 moxi-loadout = { workspace = true }
 moxi-tunnel = { workspace = true }
+moxi-connector = { workspace = true }
 
 # The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
 # checks a change must pass.

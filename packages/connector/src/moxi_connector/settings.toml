@@ -1,0 +1,33 @@
+# The connector's config schema. The file it governs is CONFIG/connector/config.toml;
+# `moxi config connector` shows every key. None of them is a secret.
+
+[enabled]
+type = "bool"
+default = false
+doc = "The daemon's switch: on, the public MCP door runs and its socket unit holds the port."
+read = "use"
+
+[port]
+type = "int"
+default = 8452
+doc = "The loopback port the door listens on, and the port tunnel's connector/mcp forwards to."
+read = "start"
+
+[public_url]
+type = "string"
+default = ""
+doc = "The public origin (https://<name>[:<port>], no path) when no tunnel gives one. Empty reads tunnel's connector/mcp."
+read = "use"
+
+[redirect_uris]
+type = "list"
+items = "str"
+default = ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"]
+doc = "The callbacks a client may register for its sign-in codes."
+read = "start"
+
+[refresh_days]
+type = "int"
+default = 30
+doc = "How many days a sign-in lasts after its last refresh."
+read = "start"
