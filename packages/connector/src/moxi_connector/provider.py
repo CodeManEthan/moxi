@@ -65,6 +65,13 @@ FORBIDDEN = frozenset({
     "session_id", "secret", "credential", "authorization", "text",
 })
 
+#: The fields of a request's log row the connector itself writes. A tool's `ctx.log` may
+#: not name one.
+HOST_FIELDS = frozenset({
+    "at", "kind", "request", "method", "route", "rpc", "tool", "provider", "status", "ms",
+    "grant", "client", "user_agent", "forwarded_for_untrusted", "dropped",
+})
+
 
 @dataclass(frozen=True)
 class Result:
@@ -167,7 +174,8 @@ class Ctx:
       that hangs up also cancels the call: the tool sees `CancelledError` at its next
       await. `fn` may be a coroutine function;
     - `log(**fields)`: adds fields to the call's log row. A field name the log refuses
-      (`FORBIDDEN`, at any depth) raises `ValueError` naming it, and nothing is added.
+      (`FORBIDDEN`, at any depth), or one the connector writes itself (`HOST_FIELDS`),
+      raises `ValueError` naming it, and nothing is added.
     """
 
     grant_id: str | None
@@ -185,8 +193,11 @@ class Ctx:
         bad = refused_field(fields)
         if bad is not None:
             raise ValueError(f"the call log refuses the field {bad!r}")
+        owned = sorted(HOST_FIELDS.intersection(fields))
+        if owned:
+            raise ValueError(f"the call log's field {owned[0]!r} is the connector's own")
         self._fields.update(fields)
 
 
-__all__ = ["Ctx", "FORBIDDEN", "GROUP", "Gate", "LEVELS", "Provider", "Result",
-           "StatusRow", "TOOL_FAILED", "Tool", "refused_field"]
+__all__ = ["Ctx", "FORBIDDEN", "GROUP", "Gate", "HOST_FIELDS", "LEVELS", "Provider",
+           "Result", "StatusRow", "TOOL_FAILED", "Tool", "refused_field"]

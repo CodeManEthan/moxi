@@ -233,6 +233,40 @@ def test_ctx_log_with_a_refused_field_raises_and_writes_nothing(front, fake):
     run(main())
 
 
+def test_ctx_log_with_a_field_the_connector_writes_raises_and_keeps_its_own(front, fake):
+    caught = []
+
+    async def clashing(args, ctx):
+        for fields in ({"status": 299}, {"returned": 1, "grant": "elsewhere"},
+                       {"dropped": False}):
+            try:
+                ctx.log(**fields)
+            except ValueError as e:
+                caught.append(str(e))
+        return Result("fine")
+
+    async def main():
+        f = await front(providers={"demo": provider(fake, Tool("clashing", "x", {},
+                                                                clashing))})
+        await request(f, "POST", "/mcp", call("clashing"), headers=bearer())
+        assert caught == [f"the call log's field {name!r} is the connector's own"
+                          for name in ("status", "grant", "dropped")]
+        row = f.host.calllog.rows[-1]
+        assert (row["status"], row["grant"]) == (200, GRANT_OF.id)
+        assert "returned" not in row and "dropped" not in row
+        await f.close()
+    run(main())
+
+
+def test_the_host_fields_are_the_request_rows_own():
+    from moxi_connector.app import Call
+    from moxi_connector.provider import HOST_FIELDS
+
+    full = Call("0123456789ab", "POST", "mcp", 0.0, forwarded_for="203.0.113.9",
+                dropped=True)
+    assert set(full.row()) == HOST_FIELDS
+
+
 def test_arguments_that_do_not_fit_the_schema_never_reach_the_provider(front, fake):
     async def main():
         f = await front()
