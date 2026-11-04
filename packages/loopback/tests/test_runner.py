@@ -8,8 +8,10 @@ the measuring side's allowance: the lifeline thread's read, the wakeups and the 
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import re
 import secrets
 import signal
 import socket
@@ -26,6 +28,7 @@ from moxi import proc
 from moxi.paths import Layout
 from moxi_dev.testing import short_dir, wait_for
 
+from moxi_loopback import serve
 from moxi_loopback.check import proof
 from moxi_loopback.runtime import read_runtime, runtime_path
 from moxi_loopback.serve import CLOSE_DEADLINE, EXIT_DEADLINE, LOCK_WAIT, PROMISE
@@ -175,11 +178,11 @@ class Runner:
         reader.start()
         reader.join(timeout)
         assert line, f"no ready line within {timeout} s:\n{self.stderr()}"
-        text = line[0].decode()
-        if not text:
+        if not line[0]:
             return None
-        assert text.startswith("ready ") and text.endswith("\n"), text
-        self.server_id = text.split()[1]
+        match = re.fullmatch(rb"ready ([0-9a-f]{32})\n", line[0])
+        assert match, line[0]
+        self.server_id = match.group(1).decode("ascii")
         return self.server_id
 
     def close_lifeline(self):
@@ -335,6 +338,14 @@ def files_gone(info):
 
 
 # --- start ----------------------------------------------------------------------------
+
+
+def test_the_ready_line_is_the_same_bytes_on_every_system():
+    # A text stdout on Windows writes each LF as CRLF; this stream does that everywhere.
+    raw = io.BytesIO()
+    out = io.TextIOWrapper(raw, encoding="ascii", newline="\r\n")
+    serve._say_ready(out, "0123456789abcdef" * 2)
+    assert raw.getvalue() == b"ready 0123456789abcdef0123456789abcdef\n"
 
 
 @posix

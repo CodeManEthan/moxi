@@ -15,7 +15,8 @@ The runner, `python -P -m moxi_loopback.serve <module> [--tcp] [--idle-s SECONDS
 3. It takes `<runtime_dir>/page.lock` for its whole life (a wait past 3 s exits 75: another
    server is live), binds its socket (a Unix socket, or TCP on `127.0.0.1` with `--tcp` and
    on Windows), writes `page.json` with a fresh token and `server_id`, prints
-   `ready <server_id>` on stdout, and from then on sends stdout to stderr.
+   `ready <server_id>` and a LF (on Windows too) on stdout, and from then on sends stdout
+   to stderr.
 4. It serves `guard(prove(app(...)))` until it decides to stop: when the counted work
    has been idle for the page's `idle_s` (or `--idle-s`), when stdin, its lifeline, closes,
    or on SIGTERM, SIGINT or SIGBREAK.
@@ -765,8 +766,7 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
                  lambda: profile)
 
     try:
-        sys.stdout.write(f"ready {info.server_id}\n")
-        sys.stdout.flush()
+        _say_ready(sys.stdout, info.server_id)
         # From here on a print() anywhere goes to the log; no pipe nobody reads stays on
         # this process's output.
         os.dup2(2, 1)
@@ -808,6 +808,15 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
     aio.run(run, workers=_WORKERS, slow=_SLOW)
     finish(codes.ERROR)  # Not reached: run() always ends the process.
     return codes.ERROR
+
+
+def _say_ready(out: Any, server_id: str) -> None:
+    """Write `ready <server_id>` and one LF to `out`'s bytes, below its text layer. The
+    line is read by another program, so its bytes are the same on every system: a text
+    stream would end it in CRLF on Windows."""
+    out.flush()
+    out.buffer.write(f"ready {server_id}\n".encode("ascii"))
+    out.buffer.flush()
 
 
 def _flush() -> None:
