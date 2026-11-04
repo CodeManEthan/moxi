@@ -18,7 +18,9 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
   and what each name is owed stays in the store.
 - **Delivery adapters** connect to the daemon, bind a name, and put mail in front of a
   model at a turn boundary: `claude-shim` (a Claude Code session), `codex` (a Codex
-  app-server) and `opencode` (an OpenCode server).
+  app-server) and `opencode` (an OpenCode server). The kind `connector` is comms'
+  provider in the connector, which serves the Claude apps; it is a person kind, so its
+  mail is never held.
   A reserved name is one a module sends under and nobody binds or mails
   ([adapters.md](adapters.md#reserved-send-only-names)).
 - **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down
@@ -671,7 +673,11 @@ carry no `held`. `interrupt` and `expires_at` (a Unix second, or null for none) 
 line zero's `[interrupt]` and `[expires:…]`.
 
 `agents` answers `waiting`, `{"<qualified name>": {"count": <n>, "oldest": <epoch
-seconds>}}`, read from the queue, and `pending: {}`, always empty.
+seconds>}}`, read from the queue, and `pending: {}`, always empty. Each of its
+`bindings` carries `handed`, the number of messages the daemon handed that binding and
+has not had acked: pushed, waiting in its overflow, or in a digest not yet settled.
+`waiting` leaves those out, so a name's unread mail is its `waiting` count plus its
+binding's `handed`.
 
 ## Data layout
 

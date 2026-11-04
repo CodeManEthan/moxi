@@ -14,7 +14,8 @@ import pytest
 from moxi import modules
 
 from moxi_comms import directory, kinds
-from moxi_comms.client import DaemonClient, DaemonError
+from moxi_comms.config import CONNECTOR_WAIT_CEILING, ConnectorConfig
+from moxi_comms.client import DaemonClient, DaemonError, DaemonOffline
 from moxi_comms.connector import tools as tools_mod
 from moxi_comms.connector.link import BOUND, HELD, Link
 from moxi_comms.paths import comms_db, daemon_socket
@@ -80,6 +81,12 @@ def planner(rig):
 
 def post(rig, to, text="hi", *, author="planner@proj-a", reply_to=None):
     return str(rig.post_as(author, to, text, reply_to=reply_to).id)
+
+
+def unread(rig):
+    """The ids the daemon handed the identity's binding and has not had acked."""
+    b = rig.daemon.bindings.get(ME)
+    return set() if b is None else {str(i) for i in b.delivered - b.handled}
 
 
 def call(tools, name, args=None, *, written=True):
@@ -184,6 +191,101 @@ def test_a_failed_write_leaves_the_messages_unread(rig, tools, link):
     assert wait_until(lambda: len(link.pending()) == 2)
     got, _ = call(tools, "check_messages")
     assert [m["id"] for m in got.structured["messages"]] == ids
+
+
+def test_a_failed_count_read_answers_an_error_and_reads_nothing(rig, tools, link):
+    ids = [post(rig, [ME], f"m{i}") for i in range(2)]
+    assert wait_until(lambda: len(link.pending()) == 2)
+    real = link.read
+
+    def failing(method, params=None):
+        if method == "agents":
+            raise DaemonOffline("the short read failed")
+        return real(method, params)
+
+    link.read = failing
+    try:
+        got, ctx = call(tools, "check_messages")     # the error answer was written
+    finally:
+        link.read = real
+    assert got.is_error and got.refusal == "offline" and "Nothing was" in got.text
+    assert ctx.after == [] and link.pending() and unread(rig) == set(ids)
+    got, _ = call(tools, "check_messages")
+    assert [m["id"] for m in got.structured["messages"]] == ids
+
+
+def test_a_cancel_while_the_digest_opens_leaves_the_mail_unread(rig, tools, link):
+    """The connector cancels a call whose caller hung up. A cancel that lands while the
+    daemon opens the digest must not leave the messages in a digest nothing settles."""
+    ids = [post(rig, [ME], f"m{i}") for i in range(2)]
+    assert wait_until(lambda: len(link.pending()) == 2)
+    real = link.open_digest
+    inside, go_on = threading.Event(), threading.Event()
+
+    def slow(asked):
+        answer = real(asked)                         # the daemon has opened the digest
+        inside.set()
+        go_on.wait(timeout=5)                        # and the call is cancelled now
+        return answer
+
+    link.open_digest = slow
+
+    async def go():
+        ctx = Ctx()
+        task = asyncio.ensure_future(tools.check_messages({}, ctx))
+        assert await asyncio.to_thread(inside.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        go_on.set()
+        await asyncio.to_thread(wait_until, lambda: len(link.pending()) == 2)
+        return ctx
+
+    try:
+        ctx = run(go())
+    finally:
+        link.open_digest = real
+    assert ctx.after == []
+    assert sorted(p["message_id"] for p in link.pending()) == sorted(ids)
+    got, _ = call(tools, "check_messages")
+    assert [m["id"] for m in got.structured["messages"]] == ids
+    assert wait_until(lambda: not unread(rig))
+
+
+def test_two_overlapping_checks_never_return_the_same_mail(rig, tools, link):
+    """Two clients of one identity (the desktop and the phone), or parallel tool calls."""
+    ids = [post(rig, [ME], f"m{i}") for i in range(2)]
+    assert wait_until(lambda: len(link.pending()) == 2)
+    real = link.open_digest
+    inside, go_on, opens = threading.Event(), threading.Event(), []
+
+    def slow(asked):
+        opens.append(list(asked))
+        inside.set()
+        go_on.wait(timeout=5)                        # the second call starts meanwhile
+        return real(asked)
+
+    link.open_digest = slow
+
+    async def go():
+        c1, c2 = Ctx(), Ctx()
+        first = asyncio.ensure_future(tools.check_messages({}, c1))
+        assert await asyncio.to_thread(inside.wait, 5)
+        second = asyncio.ensure_future(tools.check_messages({}, c2))
+        await asyncio.sleep(0.3)                     # its count read, then the lock
+        go_on.set()
+        r1, r2 = await asyncio.gather(first, second)
+        await c1.answered(True)
+        await c2.answered(True)
+        return r1, r2
+
+    try:
+        r1, r2 = run(go())
+    finally:
+        link.open_digest = real
+    assert [m["id"] for m in r1.structured["messages"]] == ids
+    assert r2.structured["messages"] == [] and opens == [ids]
+    assert wait_until(lambda: not unread(rig))
 
 
 def test_more_waiting_comes_from_the_daemons_count_past_its_window(rig, tools, link):
@@ -388,6 +490,36 @@ def test_send_and_wait_finds_the_reply_in_the_record_past_a_full_window(rig, too
         pytest.fail("the reply never came through check_messages")
 
 
+def test_send_and_wait_never_shows_a_reply_withdrawn_before_the_open(rig, tools, link):
+    shim = planner(rig)
+    real, dropped = link.open_digest, []
+
+    def withdraw_first(asked):
+        if not dropped:                              # the author withdraws it just now
+            dropped.extend(asked)
+            for mid in asked:
+                rig.daemon.books.withdraw(mid)
+        return real(asked)
+
+    link.open_digest = withdraw_first
+
+    def replies():
+        mid = sent_id(rig)
+        assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))
+        post(rig, [ME], "withdrawn", reply_to=mid)
+        assert wait_until(lambda: dropped)
+        post(rig, [ME], "kept", reply_to=mid)
+
+    try:
+        got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5},
+                        replies)
+    finally:
+        link.open_digest = real
+    assert got.structured["outcome"] == "replied", got.text
+    assert got.structured["reply"]["text"] == "kept"
+    assert got.structured["reply"]["id"] not in dropped
+
+
 def test_send_and_wait_to_a_recipient_that_cant_read_now_answers_at_once(rig, tools):
     got = wait_call(tools, {"to": "main@proj-b", "text": "ok?", "wait_seconds": 5})
     assert got.structured["outcome"] == "not-delivered"
@@ -423,6 +555,9 @@ def test_other_new_messages_never_count_the_reply_found_in_the_pushes(rig, tools
 
 
 def test_a_dropped_caller_ends_the_wait_and_the_late_reply_stays_unread(rig, tools, link):
+    """The task's cancel here stands in for the connector's: when a caller hangs up,
+    the host cancels the call's task. The wait unwinds and frees its slot, no digest is
+    open, and a reply that comes later is read through check_messages."""
     planner(rig)
 
     async def go():
@@ -449,9 +584,21 @@ def test_a_fifth_wait_is_refused(rig, tools):
     assert not [m for m in rig.record.history(rig.names_channel) if m.author_id == ME]
 
 
-def test_a_wait_over_wait_max_is_refused(rig, tools):
+def test_a_wait_over_wait_max_waits_wait_max_and_the_schema_says_so(rig, tools):
+    planner(rig)
+    tools.wait_max = 1
     got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_seconds": 6})
+    assert got.structured["outcome"] == "no-reply"
+    assert got.text.startswith("No reply within 1 second.")
+    schema = tools_mod.inputs()["send_and_wait"]["properties"]["wait_seconds"]
+    assert schema["maximum"] == CONNECTOR_WAIT_CEILING
+    assert f"longest wait is {ConnectorConfig.wait_max} seconds" in schema["description"]
+
+
+def test_a_wait_under_one_second_is_refused(rig, tools):
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_seconds": 0})
     assert got.is_error and got.refusal == "wait-shape"
+    assert not [m for m in rig.record.history(rig.names_channel) if m.author_id == ME]
 
 
 # --------------------------------------------------------------------------- only its mail
