@@ -213,6 +213,44 @@ def test_a_failed_count_read_answers_an_error_and_reads_nothing(rig, tools, link
     assert [m["id"] for m in got.structured["messages"]] == ids
 
 
+def test_a_cancel_while_the_digest_opens_leaves_the_mail_unread(rig, tools, link):
+    """The connector cancels a call whose caller hung up. A cancel that lands while the
+    daemon opens the digest must not leave the messages in a digest nothing settles."""
+    ids = [post(rig, [ME], f"m{i}") for i in range(2)]
+    assert wait_until(lambda: len(link.pending()) == 2)
+    real = link.open_digest
+    inside, go_on = threading.Event(), threading.Event()
+
+    def slow(asked):
+        answer = real(asked)                         # the daemon has opened the digest
+        inside.set()
+        go_on.wait(timeout=5)                        # and the call is cancelled now
+        return answer
+
+    link.open_digest = slow
+
+    async def go():
+        ctx = Ctx()
+        task = asyncio.ensure_future(tools.check_messages({}, ctx))
+        assert await asyncio.to_thread(inside.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        go_on.set()
+        await asyncio.to_thread(wait_until, lambda: len(link.pending()) == 2)
+        return ctx
+
+    try:
+        ctx = run(go())
+    finally:
+        link.open_digest = real
+    assert ctx.after == []
+    assert sorted(p["message_id"] for p in link.pending()) == sorted(ids)
+    got, _ = call(tools, "check_messages")
+    assert [m["id"] for m in got.structured["messages"]] == ids
+    assert wait_until(lambda: not unread(rig))
+
+
 def test_more_waiting_comes_from_the_daemons_count_past_its_window(rig, tools, link):
     for i in range(70):
         post(rig, [ME], f"m{i}")

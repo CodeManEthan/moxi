@@ -320,7 +320,7 @@ class Tools:
         if not payloads:
             return []
         ids = [str(p["message_id"]) for p in payloads]
-        answer = await asyncio.to_thread(self.link.open_digest, ids)
+        answer = await self._open(ids)
         kept = {str(i) for i in answer.get("ids") or ()}
         digest = answer.get("digest")
         if digest is not None:
@@ -333,6 +333,34 @@ class Tools:
             out.append(self._message(p, already=mid in self.shown))
             self.shown.pop(mid, None)
         return out
+
+    async def _open(self, ids: list[str]) -> dict:
+        """`open_digest` for `ids`, which a cancel can't split from its settle. The open
+        runs on in its thread when the call is cancelled (the caller hung up), and the
+        digest it opens then has no settle registered; so once it returns, that digest is
+        settled unhandled and its messages wait again."""
+        job = asyncio.ensure_future(asyncio.to_thread(self.link.open_digest, ids))
+        try:
+            return await asyncio.shield(job)
+        except asyncio.CancelledError:
+            job.add_done_callback(self._abandoned)
+            raise
+
+    def _abandoned(self, job: asyncio.Future) -> None:
+        """A cancelled call's open has returned: settle its digest unhandled."""
+        if job.cancelled() or job.exception() is not None:
+            return
+        digest = job.result().get("digest")
+        if digest is not None:
+            asyncio.get_running_loop().run_in_executor(None, self._release, digest)
+
+    def _release(self, digest) -> None:
+        try:
+            self.link.settle(digest, False)
+        except (DaemonError, DaemonOffline) as e:
+            # The binding's close puts the digest's rows back to waiting.
+            log.warning("digest %s of a cancelled call couldn't be released (%s); its "
+                        "messages wait again when the binding closes", digest, e)
 
     def _settler(self, digest, ids):
         async def settle(written: bool) -> None:
