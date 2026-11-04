@@ -120,12 +120,12 @@ def test_a_schedule_out_of_form_is_a_usage_error(schedule):
 
 # --- module rows ------------------------------------------------------------------------
 
-NOTES = '''
-SUMMARY = "notes"
+JOTTER = '''
+SUMMARY = "jotter"
 SETTINGS = None
-DAEMONS = {"sync": {"command": "moxi-notes-sync", "doc": "keep notes in sync",
+DAEMONS = {"sync": {"command": "moxi-jotter-sync", "doc": "keep the jottings in sync",
                     "platforms": ["linux"]}}
-TIMERS = {"snapshot": {"command": "moxi-notes-snapshot", "every": "5m",
+TIMERS = {"snapshot": {"command": "moxi-jotter-snapshot", "every": "5m",
                        "switch": "snapshot.enabled", "doc": "commit a snapshot"}}
 '''
 
@@ -152,17 +152,17 @@ def declared():
 
 
 def test_module_rows_list_each_modules_daemons_and_timers(site):
-    site.module("notes", NOTES)
+    site.module("jotter", JOTTER)
     site.module("quiet", 'SUMMARY = "nothing to run"\n')
     found, problems = rows.module_rows()
     assert problems == []
-    assert [r.id for r in found] == ["notes/snapshot", "notes/sync"]
+    assert [r.id for r in found] == ["jotter/snapshot", "jotter/sync"]
     snapshot, sync = found
     assert (snapshot.kind, snapshot.switch, snapshot.doc, snapshot.platforms) == (
         "timer", "snapshot.enabled", "commit a snapshot", None)
     assert (sync.kind, sync.switch, sync.platforms) == ("daemon", None, ("linux",))
     assert sync.form == "module"
-    assert sync.as_dict()["id"] == "notes/sync"
+    assert sync.as_dict()["id"] == "jotter/sync"
 
 
 def test_module_rows_include_run_time_entries_and_leave_out_rejected_ones(site):
@@ -194,6 +194,6 @@ def test_services_own_declarations_are_never_module_rows(site):
 
 def test_a_module_that_wont_load_is_skipped(site):
     site.module("bad", "DAEMONS = 3\n")
-    site.module("notes", NOTES)
+    site.module("jotter", JOTTER)
     found, problems = rows.module_rows()
-    assert {r.module for r in found} == {"notes"} and problems == []
+    assert {r.module for r in found} == {"jotter"} and problems == []
