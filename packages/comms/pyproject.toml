@@ -37,6 +37,9 @@ cache = ["moxi-cache>=0.1,<0.2"]
 # The browser UI shell: with it, comms' panel and its roster of agents show there.
 # Loopback, which comms' page server runs on, comes with it.
 ui = ["moxi-ui>=0.1,<0.2"]
+# The public MCP host: with it, comms' four tools reach the Claude apps through the host,
+# as its provider `moxi_comms.connector`, which only the host loads.
+connector = ["moxi-connector>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -79,6 +82,12 @@ comms = "moxi_comms.mcp.additions:additions"
 claude-shim = "moxi_comms.kinds:CLAUDE_SHIM"
 codex = "moxi_comms.kinds:CODEX"
 opencode = "moxi_comms.kinds:OPENCODE"
+connector = "moxi_comms.kinds:CONNECTOR"
+
+# comms' tools in the Claude apps: the public MCP host loads this provider, and nothing in
+# comms imports it.
+[project.entry-points."moxi.connector.providers"]
+comms = "moxi_comms.connector:PROVIDER"
 
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,

@@ -1178,3 +1178,242 @@ def test_making_directories_refuses_a_file_in_the_way(tmp_path):
 def test_private_dir_on_windows_grants_only_this_user(tmp_path):
     made = files.private_dir(tmp_path / "d")
     assert made.is_dir()
+
+
+# -- append_record's refuse and collapse -------------------------------------------------
+
+def test_a_refused_name_at_the_top_level_raises_and_writes_nothing(tmp_path):
+    log = tmp_path / "audit" / "day.jsonl"
+    with pytest.raises(ValueError, match="token"):
+        files.append_record(log, {"kind": "x", "token": "t"}, refuse={"token", "code"})
+    assert not log.exists()
+    files.append_record(log, {"i": 0})
+    before = log.read_bytes()
+    with pytest.raises(ValueError, match="code, token"):
+        files.append_record(log, {"code": 1, "token": 2}, refuse=frozenset({"token", "code"}),
+                            max_bytes=None, durable=True)
+    assert log.read_bytes() == before
+
+
+@pytest.mark.parametrize("record", [
+    {"a": {"b": {"token": "t"}}},
+    {"a": [1, {"token": "t"}]},
+    {"a": ({"b": [{"token": "t"}]},)},
+])
+def test_a_refused_name_at_any_depth_raises_and_writes_nothing(tmp_path, record):
+    log = tmp_path / "day.jsonl"
+    with pytest.raises(ValueError, match="token"):
+        files.append_record(log, record, refuse={"token"})
+    assert not log.exists()
+
+
+def test_refuse_looks_at_keys_not_values(tmp_path):
+    log = tmp_path / "day.jsonl"
+    files.append_record(log, {"field": "token", "list": ["token"]}, refuse={"token"})
+    assert files.read_records(log) == [{"field": "token", "list": ["token"]}]
+
+
+def test_without_refuse_any_name_is_written_as_before(tmp_path):
+    log = tmp_path / "day.jsonl"
+    files.append_record(log, {"token": "t", "a": {"code": 1}})
+    files.append_record(log, {"token": "t"}, refuse=set())
+    assert log.read_bytes() == b'{"token":"t","a":{"code":1}}\n{"token":"t"}\n'
+
+
+class Clock:
+    def __init__(self, now: float):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+#: 2026-11-04T10:44:00Z, the start of a minute and of an hour's 44th minute.
+T0 = 1793789040.0
+
+
+def stamp(when: float) -> str:
+    return files._stamp(when)
+
+
+def kinds(log: Path) -> list:
+    return [(r.get("kind"), r.get("i"), r.get("count")) for r in files.read_records(log)]
+
+
+def test_the_stamp_is_utc_to_the_millisecond():
+    assert files._stamp(T0 + 0.25) == "2026-11-04T10:44:00.250Z"
+
+
+def test_ten_rows_are_written_in_a_minute_then_counted(tmp_path):
+    log = tmp_path / "day.jsonl"
+    clock = Clock(T0 + 5)
+    window = files.Collapse(clock=clock)
+    assert (window.after, window.hourly_past) == (10, None)
+    for i in range(15):
+        files.append_record(log, {"kind": "r", "i": i}, collapse=(window, "open"))
+    assert [r["i"] for r in files.read_records(log)] == list(range(10))
+    clock.now = T0 + 61
+    files.append_record(log, {"kind": "r", "i": 15}, collapse=(window, "open"))
+    rows = files.read_records(log)
+    assert rows[10] == {"at": stamp(T0 + 61), "kind": "summary", "class": "open", "count": 5,
+                        "per": "minute", "since": stamp(T0)}
+    assert rows[11] == {"kind": "r", "i": 15}
+    assert len(rows) == 12
+
+
+def test_a_window_that_counted_nothing_writes_no_summary(tmp_path):
+    log = tmp_path / "day.jsonl"
+    clock = Clock(T0)
+    window = files.Collapse(clock=clock)
+    for i in range(10):
+        files.append_record(log, {"i": i}, collapse=(window, "open"))
+    clock.now = T0 + 60
+    files.append_record(log, {"i": 10}, collapse=(window, "open"))
+    window.flush(log)
+    window.close(log)
+    assert [r["i"] for r in files.read_records(log)] == list(range(11))
+
+
+def test_flush_writes_only_the_summaries_of_windows_that_have_ended(tmp_path):
+    log = tmp_path / "day.jsonl"
+    clock = Clock(T0)
+    window = files.Collapse(after=2, clock=clock)
+    for i in range(5):
+        files.append_record(log, {"i": i}, collapse=(window, "open"))
+    clock.now = T0 + 59.9
+    window.flush(log)
+    assert len(files.read_records(log)) == 2
+    clock.now = T0 + 60
+    window.flush(str(log))
+    assert files.read_records(log)[-1] == {
+        "at": stamp(T0 + 60), "kind": "summary", "class": "open", "count": 3,
+        "per": "minute", "since": stamp(T0)}
+    window.flush(log)
+    window.close(log)
+    assert len(files.read_records(log)) == 3
+
+
+def test_close_writes_every_pending_summary(tmp_path):
+    log = tmp_path / "day.jsonl"
+    clock = Clock(T0 + 1)
+    window = files.Collapse(after=1, clock=clock)
+    for name in ("a", "a", "a", "b", "b"):
+        files.append_record(log, {"c": name}, collapse=(window, name))
+    window.close(log)
+    rows = files.read_records(log)
+    assert rows[:2] == [{"c": "a"}, {"c": "b"}]
+    assert sorted((r["class"], r["count"]) for r in rows[2:]) == [("a", 2), ("b", 1)]
+    window.close(log)
+    assert len(files.read_records(log)) == 4
+
+
+def test_past_hourly_past_the_window_is_an_hour_and_only_its_summary_is_written(tmp_path):
+    log = tmp_path / "day.jsonl"
+    clock = Clock(T0)
+    window = files.Collapse(after=3, hourly_past=200, clock=clock)
+    files.append_record(log, {"pad": "p" * 200})
+    files.append_record(log, {"i": 0}, collapse=(window, "open"))
+    files.append_record(log, {"i": 1}, collapse=(window, "open"))
+    clock.now = T0 + 120        # another minute of the same hour
+    files.append_record(log, {"i": 2}, collapse=(window, "open"))
+    window.flush(log)
+    assert [r.get("i") for r in files.read_records(log)] == [None]
+    clock.now = T0 + 16 * 60    # 11:00, the next hour
+    window.flush(log)
+    rows = files.read_records(log)
+    assert rows[-1] == {"at": stamp(T0 + 16 * 60), "kind": "summary", "class": "open",
+                        "count": 3, "per": "hour", "since": stamp(T0 - 44 * 60)}
+
+
+def test_crossing_hourly_past_ends_the_minute_window(tmp_path):
+    log = tmp_path / "day.jsonl"
+    clock = Clock(T0)
+    window = files.Collapse(after=1, hourly_past=60, clock=clock)
+    files.append_record(log, {"i": 0}, collapse=(window, "open"))
+    files.append_record(log, {"i": 1}, collapse=(window, "open"))
+    files.append_record(log, {"pad": "p" * 60})
+    files.append_record(log, {"i": 2}, collapse=(window, "open"))
+    rows = files.read_records(log)
+    assert rows[-1] == {"at": stamp(T0), "kind": "summary", "class": "open", "count": 1,
+                        "per": "minute", "since": stamp(T0)}
+    window.close(log)
+    assert files.read_records(log)[-1]["per"] == "hour"
+    assert files.read_records(log)[-1]["count"] == 1
+
+
+def test_rows_without_collapse_are_never_counted(tmp_path):
+    log = tmp_path / "day.jsonl"
+    window = files.Collapse(after=2, clock=Clock(T0))
+    for i in range(6):
+        files.append_record(log, {"plain": i})
+        files.append_record(log, {"busy": i}, collapse=(window, "open"))
+    rows = files.read_records(log)
+    assert [r["plain"] for r in rows if "plain" in r] == list(range(6))
+    assert [r["busy"] for r in rows if "busy" in r] == [0, 1]
+    window.close()
+    assert files.read_records(log)[-1]["count"] == 4
+
+
+def test_two_classes_and_two_paths_collapse_apart(tmp_path):
+    one, two = tmp_path / "one.jsonl", tmp_path / "two.jsonl"
+    clock = Clock(T0)
+    window = files.Collapse(after=2, clock=clock)
+    for i in range(5):
+        files.append_record(one, {"i": i}, collapse=(window, "a"))
+        files.append_record(one, {"i": i}, collapse=(window, "b"))
+        files.append_record(two, {"i": i}, collapse=(window, "a"))
+    clock.now = T0 + 60
+    window.flush(one)
+    assert sorted((r["class"], r["count"]) for r in files.read_records(one)
+                  if r.get("kind") == "summary") == [("a", 3), ("b", 3)]
+    assert len(files.read_records(two)) == 2
+    window.flush()
+    assert files.read_records(two)[-1]["count"] == 3
+
+
+def test_a_refused_row_is_not_counted(tmp_path):
+    log = tmp_path / "day.jsonl"
+    window = files.Collapse(after=1, clock=Clock(T0))
+    with pytest.raises(ValueError):
+        files.append_record(log, {"token": "t"}, refuse={"token"}, collapse=(window, "open"))
+    files.append_record(log, {"i": 0}, refuse={"token"}, collapse=(window, "open"))
+    window.close()
+    assert files.read_records(log) == [{"i": 0}]
+
+
+def test_a_summary_is_as_durable_as_its_classes_rows(tmp_path, monkeypatch):
+    synced: list[int] = []
+    real = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real(fd)))
+    monkeypatch.setattr(files, "_fsync_dir", lambda directory: None)
+    log = tmp_path / "day.jsonl"
+    window = files.Collapse(after=0, clock=Clock(T0))
+    files.append_record(log, {"i": 0}, durable=True, collapse=(window, "open"))
+    assert not log.exists() and synced == []
+    window.close()
+    assert len(synced) == 1 and files.read_records(log)[0]["count"] == 1
+
+
+def test_threads_writing_one_class_count_every_row(tmp_path):
+    log = tmp_path / "day.jsonl"
+    window = files.Collapse(clock=Clock(T0))
+
+    def write(w: int) -> None:
+        for i in range(50):
+            files.append_record(log, {"w": w, "i": i}, collapse=(window, "open"))
+
+    threads = [threading.Thread(target=write, args=(w,)) for w in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    window.close()
+    rows = files.read_records(log)
+    assert len(rows) == 11 and rows[-1]["count"] == 390
+
+
+def test_collapse_refuses_a_negative_bound():
+    with pytest.raises(ValueError):
+        files.Collapse(after=-1)
+    with pytest.raises(ValueError):
+        files.Collapse(hourly_past=-1)

@@ -95,6 +95,24 @@ default = 8450
 doc = "The loopback port comms' tools are served on, 1 to 65535. The daemon's socket unit holds it, so a change takes effect at the next moxi install comms; a daemon with no unit reads it when it starts. A launch uses the address the running daemon answers."
 read = "start"
 
+[connector.identity]
+type = "string"
+default = "claude-app"
+doc = "The global comms name comms' tools in the Claude apps send and receive as, through the connector. Provisioned as a standing name when the connector starts them."
+read = "start"
+
+[connector.wait_default]
+type = "int"
+default = 45
+doc = "How many seconds send_and_wait waits for a reply when the call names no wait; 1 to wait_max."
+read = "start"
+
+[connector.wait_max]
+type = "int"
+default = 90
+doc = "The longest wait, in seconds, a send_and_wait call may ask for; 1 to 99, under Cloudflare's 100 s limit on an answer."
+read = "start"
+
 [block]
 type = "bool"
 default = false
