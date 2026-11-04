@@ -341,9 +341,11 @@ class Tools:
                 answer = await asyncio.shield(job)
             except asyncio.CancelledError:
                 # The caller hung up while the daemon opened the digest. The open runs
-                # on in its thread, and its digest has no settle: once it returns, settle
-                # it unhandled so its messages wait again, and only then let the next
-                # call look at the buffer.
+                # on in its thread, and its digest has no settle. Once it returns, the
+                # next call may look at the buffer, and a settle unhandled is scheduled
+                # so the digest's messages wait again. The next call doesn't wait for
+                # that settle: if it opens a newer digest over the same ids, the older
+                # settle finds its rows moved and changes nothing.
                 held = False
                 job.add_done_callback(self._abandoned)
                 raise
@@ -364,8 +366,8 @@ class Tools:
         return out, {str(d.get("id")) for d in answer.get("dropped") or ()}
 
     def _abandoned(self, job: asyncio.Future) -> None:
-        """A cancelled call's open has returned: settle its digest unhandled, and free
-        the buffer for the next call."""
+        """A cancelled call's open has returned: schedule its digest's settle unhandled,
+        and free the buffer for the next call without waiting for that settle."""
         try:
             if job.cancelled() or job.exception() is not None:
                 return
