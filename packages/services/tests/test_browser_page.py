@@ -242,32 +242,45 @@ def test_a_run_of_a_row_that_launches_a_session_says_it_spends_usage(seeded, ui_
 
 # --- add ------------------------------------------------------------------------------------
 
-def test_the_add_form_takes_a_202_and_reads_the_status_until_the_job_ends(seeded, ui_shell, ui_page):
+@pytest.mark.parametrize(("name", "port", "tick", "verdict"), [
+    ("notebook", 8123, False, "off"),
+    ("jupyter", 8124, True, "ok"),
+], ids=["left-off", "turned-on"])
+def test_the_add_form_takes_a_202_and_reads_the_status_until_the_job_ends(seeded, ui_shell, ui_page,
+                                                                          name, port, tick, verdict):
+    """A written row starts off, as the command line leaves it; ticking "Turn it on now"
+    starts it."""
     panel = panel_of(ui_page)
     form = panel.locator('section[data-part="add"] form')
     expect(form.get_by_label("Project")).to_contain_text("alpha")
-    form.get_by_label("Name", exact=True).fill("notebook")
-    form.get_by_role("textbox", name="Command line").fill("/usr/bin/python3 -m http.server 8123")
+    form.get_by_label("Name", exact=True).fill(name)
+    form.get_by_role("textbox", name="Command line").fill(f"/usr/bin/python3 -m http.server {port}")
     form.get_by_label("Project").select_option("alpha")
     form.get_by_label("Doc").fill("a notebook server")
+    turn_on = form.get_by_label("Turn it on now")
+    expect(turn_on).not_to_be_checked()
+    if tick:
+        turn_on.check()
     statuses: list[str] = []
     ui_page.on("request", lambda r: statuses.append(r.url) if "/m/services/api/status?job=" in r.url else None)
     with ui_page.expect_response("**/m/services/api/add") as added:
         form.get_by_role("button", name="Add", exact=True).click()
     assert added.value.status == 202, added.value.text()
+    assert added.value.request.post_data_json["enable"] is tick
     link = added.value.json()["status"]
     assert link.startswith("/api/status?job="), link
     said = form.locator('[data-line="said"]')
     expect(said).to_have_attribute("data-tone", "ok")
-    expect(said).to_contain_text("Add notebook: Done.")
+    expect(said).to_contain_text(f"Add {name}: Done.")
     assert any(url.endswith(link) for url in statuses), statuses
-    assert "notebook" in stored(ui_shell)
-    item = row(panel, "services/notebook")
+    assert name in stored(ui_shell)
+    item = row(panel, f"services/{name}")
     expect(item).to_have_count(1)
-    expect(item).to_have_attribute("data-verdict", "ok")
-    expect(panel.locator('.group[data-project="alpha"] li.row[data-id="services/notebook"]')).to_have_count(1)
-    # The form starts again once the add is done.
+    expect(item).to_have_attribute("data-verdict", verdict)
+    expect(panel.locator(f'.group[data-project="alpha"] li.row[data-id="services/{name}"]')).to_have_count(1)
+    # The form starts again once the add is done, the box off again.
     expect(form.get_by_label("Name", exact=True)).to_have_value("")
+    expect(turn_on).not_to_be_checked()
 
 
 def test_an_add_whose_command_is_not_a_full_path_is_refused_before_any_job(seeded, ui_shell, ui_page):

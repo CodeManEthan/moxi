@@ -325,8 +325,10 @@ export interface AddForm {
   doc: string;
 }
 
+/** A new form. A written row starts off, as `moxi services add` leaves it without
+ * `--enable`: the user ticks "Turn it on now" to start it now and at every login. */
 export function emptyForm(): AddForm {
-  return { name: "", kind: "daemon", source: "command", command: "", unit: "", enable: true, adoptOn: "",
+  return { name: "", kind: "daemon", source: "command", command: "", unit: "", enable: false, adoptOn: "",
            schedule: "every", every: "", at: "", days: [], cwd: "", health: "", project: "",
            launchesSession: false, doc: "" };
 }

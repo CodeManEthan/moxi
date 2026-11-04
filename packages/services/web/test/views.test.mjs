@@ -125,8 +125,15 @@ test("a job's status: running, then its end with its lines and fix", () => {
   assert.equal(statusLost("Stop web", null).tone, "warn");
 });
 
+test("a written row starts off unless the user turns it on", () => {
+  assert.equal(emptyForm().enable, false);
+  const form = { ...emptyForm(), name: "web", command: "/usr/bin/python3 -m http.server" };
+  assert.equal(addBody(form).body.enable, false);
+  assert.equal(addBody({ ...form, enable: true }).body.enable, true);
+});
+
 test("the add body: a written daemon, a timer every or at, an adopted unit", () => {
-  const form = { ...emptyForm(), name: " web ", command: "/usr/bin/python3 -m http.server", cwd: "/srv",
+  const form = { ...emptyForm(), name: " web ", command: "/usr/bin/python3 -m http.server", cwd: "/srv", enable: true,
                  health: "/usr/bin/curl -f http://localhost:8000", project: "alpha", doc: "docs" };
   assert.deepEqual(addBody(form), { body: { name: "web", kind: "daemon", command: "/usr/bin/python3 -m http.server",
     enable: true, cwd: "/srv", health: "/usr/bin/curl -f http://localhost:8000", project: "alpha", doc: "docs" } });
