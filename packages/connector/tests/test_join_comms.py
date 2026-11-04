@@ -520,10 +520,6 @@ def test_a_caller_that_hangs_up_on_check_messages_leaves_its_messages_unread(
         wait_for(lambda: not unread(rig))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "comms opens the digest and registers its settle in two steps, and a cancel between "
-    "them strands the messages; this passes once comms settles a digest whose call was "
-    "cancelled"))
 def test_a_caller_that_hangs_up_while_comms_opens_the_digest_leaves_its_messages_unread(
         running, walk, registry, rig, slow_link):
     bound(registry)
