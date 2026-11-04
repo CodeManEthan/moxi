@@ -82,6 +82,21 @@ SETTLED = """async () => {
   }
   return false;
 }"""
+#: Registers the gateway's worker at its own URL, as the shell's client.js does on each
+#: load, and waits until it controls this page with no other version left.
+OWN_WORKER = """async () => {
+  const own = location.origin + "/sw.js";
+  await navigator.serviceWorker.register("/sw.js", {scope: "/"});
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const controller = navigator.serviceWorker.controller;
+    if (reg && reg.active && reg.active.scriptURL === own && !reg.installing && !reg.waiting
+        && controller && controller.scriptURL === own) return true;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  return false;
+}"""
 OFF = """async () => {
   const until = Date.now() + 10000;
   let status = 0;
@@ -428,6 +443,12 @@ def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_a
         # The update check installs the real worker, which sends client.js on past the cache.
         assert page.evaluate(OWN_OFFLINE) is True
         assert page.evaluate(SETTLED) is True
+        # That worker runs at the planted script's URL, so the shell's next load would
+        # register `/sw.js`, which takes over while that load goes on: Firefox then drops
+        # the fetches the replaced worker has open, the panel's script among them, and
+        # Chromium may hold the next navigation until the replaced worker goes idle. So
+        # `/sw.js` takes over here, from this page, which fetches nothing, before the load.
+        assert page.evaluate(OWN_WORKER) is True
         page.goto("/m/ui/")
         page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
         assert page.title() != "planted client"
