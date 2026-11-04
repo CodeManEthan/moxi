@@ -8,9 +8,10 @@ sign-in, and the tools other modules provide through the group
 `moxi.connector.providers` (`moxi_connector.provider`). It is off until its switch is on.
 """
 
-#: Interface 1, `moxi_connector.provider`: what a module gives to serve its tools. A
-#: provider that has the connector only through an extra reaches it through
-#: `moxi.modules.load("connector", interface=1).api`, never by importing it.
+#: Interface 1, `moxi_connector.provider`: what a module gives to serve its tools, and the
+#: one part of the connector a provider reaches. A provider that has the connector only
+#: through an extra reaches it through `moxi.modules.load("connector", interface=1).api`,
+#: and never imports it at its own import time.
 INTERFACES = frozenset({1})
 API = "moxi_connector.provider"
 #: `moxi connector`: on, off, status, check, log, code, grants and revoke.
