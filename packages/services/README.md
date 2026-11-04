@@ -79,6 +79,48 @@ its service.
 With `moxi-projects` installed (`moxi install services --with projects`), `--project
 KEY` files a row under a project, and a project isn't removed while a service names it.
 
+## The page
+
+With the `ui` extra (`moxi-ui`, the browser UI shell), services has a page in the shell,
+at `/m/services/`, and a block on the shell's home that counts the rows that are `ok`,
+`warn`, `fail` and `off`, each verdict as `moxi services list` gives it, and links to the
+page. Each act on the page runs the same code as the `moxi services` command you would
+run in a terminal, and refuses where that command refuses.
+
+- **The list.** Every row, grouped by project, with its verdict and reason, its health
+  check's last result, its switch or on/off, and since when it runs or how its last run
+  went. Open a row to see its command, unit, directory, schedule and the supervisor's own
+  words. The page and the home's block follow the rows as they change: while either is
+  open, services' page server reads the supervisor every 5 seconds and runs the health
+  checks every 30, at most eight at a time, and it keeps doing so for a while after the
+  last one closes, until the server stops when idle.
+- **Acts.** Start, stop and restart for a daemon, run now and run again for a timer,
+  enable and disable, and remove for a row you added. Each opens the shell's confirm
+  sheet, and nothing is sent until you confirm. A run of a row whose runs launch an agent
+  session says on its sheet that it spends usage.
+- **One at a time.** The page server runs its acts one at a time, each as a job, and
+  answers at once with the job's status. The page follows that status until the job ends,
+  shows what the command printed, and keeps every act's control off while one runs. If
+  the answer is lost, the page says the act may have been done and reads the rows again.
+  The server keeps its jobs only while it runs: after it restarts, a status it holds no
+  record of says so, and the row's state shows the outcome.
+- **Add.** The form `moxi services add` takes: a command line to run, or a unit already on
+  the system to adopt, with its schedule, directory, health command, project and doc. A
+  command line's first word must be a full path (`/usr/bin/python3`, not `python3`), and
+  the page refuses one that isn't. The page server runs under your service manager,
+  whose `PATH` isn't your shell's, so it doesn't search one; `command -v python3` in your
+  shell prints the full path. Give a health command's first word in full too, since the
+  checks run with that same `PATH`. As in a terminal, a command you add starts off: tick "Turn
+  it on now" to start it now and at every login. Adopting a unit asks you to say whether
+  it is on or off.
+- **On the phone.** Through the shell's gateway the phone shows the list and the home's
+  block, and can start, stop, restart, run, enable and disable a row, each confirmed on
+  the phone. It can't add or remove a row, and doesn't see the projects list: those stay
+  at the desk. When the gateway lets the phone read but not act, each sheet says to do the
+  act at the desk. Every text that carries the supervisor's or a command's words is
+  redacted on the way out, and a store that can't be read is named on the phone without
+  its path.
+
 ## Uninstalling
 
 `moxi uninstall services` refuses while a command you added still has its unit, naming
