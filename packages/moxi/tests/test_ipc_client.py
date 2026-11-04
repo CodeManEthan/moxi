@@ -1,23 +1,35 @@
 """moxi.ipc's blocking client: connect, calls, hello, notifications, NotRpc, and its safety
-across threads, against the real server and against a fake one on a socket pair."""
+across threads, against the real server and against a fake one on a socket pair (a pipe
+pair on Windows).
+
+The tests run on Unix sockets on Linux and macOS and on named pipes on Windows; the few
+that only one of them can run say so. The Windows connect logic (which open errors mean
+cold and which busy) also runs anywhere with the pipe open patched."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import subprocess
 import sys
 import threading
 import time
+import uuid
 
 import pytest
+from conftest import ServerThread
 
 import moxi.ipc as ipc
-from moxi.ipc import _client
+from moxi.ipc import _client, _pipe, _users
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32",
-                                reason="Unix sockets; the Windows pipe client is built apart")
+WINDOWS = sys.platform == "win32"
+posix = pytest.mark.skipif(WINDOWS, reason="Unix sockets")
+windows = pytest.mark.skipif(not WINDOWS, reason="Windows named pipes")
+#: How early a wait may seem to end by the clock: Windows' monotonic clock moves in
+#: steps of about 15.6 ms.
+EARLY = 0.032 if WINDOWS else 0.0
 
 
 async def handler(conn, method, params):
@@ -56,10 +68,14 @@ def bounded(fn, timeout: float = 20.0):
 
 
 class Fake:
-    """A client on one end of a socket pair, and the test as its server on the other."""
+    """A client on one end of a socket pair (a pipe pair on Windows), and the test as its
+    server on the other."""
 
     def __init__(self, **options):
-        self.server, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        if WINDOWS:
+            self.server, theirs = pipe_pair()
+        else:
+            self.server, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server.settimeout(10)
         self.client = _client.Client(theirs, "pair", **options)
         self.buffer = b""
@@ -84,6 +100,72 @@ class Fake:
         self.server.close()
 
 
+class PipeEnd:
+    """The server's end of a pipe pair, read and written like a socket with a timeout."""
+
+    def __init__(self, handle: int):
+        self.pipe = _pipe.Pipe(handle)
+        self.timeout = 10.0
+
+    def settimeout(self, seconds: float) -> None:
+        self.timeout = seconds
+
+    def recv(self, size: int) -> bytes:
+        """The next bytes; b"" at the end, or once `timeout` passes with none."""
+        timer = threading.Timer(self.timeout, self.pipe.close)
+        timer.start()
+        try:
+            return self.pipe.recv(size)
+        finally:
+            timer.cancel()
+
+    def sendall(self, data: bytes) -> None:
+        sent = self.pipe.send_by(data, time.monotonic() + self.timeout)
+        assert sent == len(data), f"wrote {sent} of {len(data)} bytes in time"
+
+    def close(self) -> None:
+        self.pipe.close()
+
+
+#: The size of each buffer of a test pipe pair's pipe.
+PAIR_BUFFER = 64 * 1024
+
+
+def pipe_instance(name: str, *, first: bool = True, most: int = 1) -> int:
+    """A new overlapped server instance of byte pipe `name`, of at most `most` instances,
+    not yet connected."""
+    import _winapi
+
+    return _winapi.CreateNamedPipe(
+        name, _winapi.PIPE_ACCESS_DUPLEX | _winapi.FILE_FLAG_OVERLAPPED
+        | (_winapi.FILE_FLAG_FIRST_PIPE_INSTANCE if first else 0),
+        _winapi.PIPE_WAIT,  # PIPE_TYPE_BYTE and PIPE_READMODE_BYTE are 0
+        most, PAIR_BUFFER, PAIR_BUFFER, 0, _winapi.NULL)
+
+
+def accept(server: int, open_client):
+    """Connect server instance `server` to the client `open_client()` opens, and return
+    the client."""
+    import _winapi
+
+    ov = _winapi.ConnectNamedPipe(server, overlapped=True)
+    client = open_client()
+    ov.GetOverlappedResult(True)
+    return client
+
+
+def pipe_name() -> str:
+    return rf"\\.\pipe\moxi-test-pair-{uuid.uuid4().hex}"
+
+
+def pipe_pair() -> tuple[PipeEnd, _pipe.Pipe]:
+    """The two ends of a new pipe of one instance, both overlapped: the server's and the
+    client's."""
+    name = pipe_name()
+    server = pipe_instance(name)
+    return PipeEnd(server), accept(server, lambda: _pipe.open_pipe(name))
+
+
 @pytest.fixture
 def fake():
     made = []
@@ -97,8 +179,31 @@ def fake():
         f.close()
 
 
+@pytest.fixture
+def serving(request, tmp_path, monkeypatch):
+    """`serving(handler, **options)` starts a server on a loop thread and closes it after
+    the test: at `<sock_dir>/s/a.sock`, or on Windows at a fresh pipe of the demo module,
+    since pipe names are machine-wide."""
+    if WINDOWS:
+        monkeypatch.setenv("MOXI_DEMO_RUNTIME_DIR", str(tmp_path / "rt"))
+        where = ipc.address("demo", f"t{uuid.uuid4().hex[:12]}")
+    else:
+        where = request.getfixturevalue("sock_dir") / "s" / "a.sock"
+    started = []
+
+    def start(handler, *, address=None, **options):
+        thread = ServerThread(address or where, handler, **options)
+        started.append(thread)
+        return thread
+
+    yield start
+    for thread in reversed(started):
+        thread.close()
+
+
 # -- connect --------------------------------------------------------------------------------
 
+@posix
 def test_nothing_at_the_address_is_not_serving(sock_dir):
     with pytest.raises(ipc.NotServing) as caught:
         ipc.connect(str(sock_dir / "none.sock"))
@@ -106,6 +211,7 @@ def test_nothing_at_the_address_is_not_serving(sock_dir):
     assert caught.value.address == str(sock_dir / "none.sock")
 
 
+@posix
 def test_a_socket_nobody_listens_on_is_not_serving(sock_dir):
     address = str(sock_dir / "left.sock")
     left = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -153,7 +259,7 @@ def test_a_full_backlog_is_busy_until_the_timeout(sock_dir):
         start = time.monotonic()
         with pytest.raises(ipc.Timeout) as caught:
             ipc.connect(listener.getsockname(), timeout=0.3)
-        assert 0.3 <= time.monotonic() - start < 3
+        assert 0.3 - EARLY <= time.monotonic() - start < 3
         assert "busy" in str(caught.value)
     finally:
         for sock in [*waiting, listener]:
@@ -179,6 +285,300 @@ def test_a_busy_server_is_tried_again_until_it_accepts(sock_dir):
     finally:
         for sock in [*waiting, *accepted, listener]:
             sock.close()
+
+
+# -- connect on Windows: what each open error means (any system) ----------------------------
+
+def win_error(code: int) -> OSError:
+    """An `OSError` as `CreateFile` raises it, with Windows error `code`."""
+    if WINDOWS:
+        return OSError(None, f"error {code}", None, code)
+    exc = OSError(None, f"error {code}")
+    exc.winerror = code
+    return exc
+
+
+@pytest.fixture
+def opens(monkeypatch):
+    """`connect` taken down its Windows path on any system, with each pipe open answered
+    by the next of `opens.answers`: an exception raised, else the connection returned.
+    `opens.tried` lists the addresses opened."""
+    import types
+
+    def open_pipe(address):
+        opens.tried.append(address)
+        answer = opens.answers.pop(0) if opens.answers else win_error(231)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    opens = types.SimpleNamespace(answers=[], tried=[])
+    monkeypatch.setattr(_client, "_WINDOWS", True)
+    monkeypatch.setattr(_pipe, "open_pipe", open_pipe)
+    return opens
+
+
+class Opened:
+    """A stand-in for an opened pipe: nothing comes from it until it is closed. Its
+    server is `pid` (this process unless given), or `server_pid()` raises `pid` when it
+    is an exception."""
+
+    def __init__(self, pid: int | BaseException | None = None):
+        self.gone = threading.Event()
+        self.pid = os.getpid() if pid is None else pid
+        self.asked = 0
+
+    def server_pid(self) -> int:
+        self.asked += 1
+        if isinstance(self.pid, BaseException):
+            raise self.pid
+        return self.pid
+
+    def recv(self, size: int) -> bytes:
+        self.gone.wait(20)
+        return b""
+
+    def shutdown(self, how=None) -> None:
+        self.gone.set()
+
+    close = shutdown
+
+
+PIPE = r"\\.\pipe\moxi-demo-a-0123abcd"
+
+
+@pytest.mark.parametrize("code", [2, 3])
+def test_on_windows_a_pipe_that_isnt_there_is_not_serving(opens, code):
+    opens.answers = [win_error(code)]
+    with pytest.raises(ipc.NotServing) as caught:
+        ipc.connect(PIPE)
+    assert caught.value.exit_code == 75 and caught.value.address == PIPE
+    assert opens.tried == [PIPE]
+
+
+def test_on_windows_a_busy_pipe_is_tried_every_50_ms_until_the_timeout(opens):
+    start = time.monotonic()
+    with pytest.raises(ipc.Timeout) as caught:
+        ipc.connect(PIPE, timeout=0.3)
+    assert 0.3 - EARLY <= time.monotonic() - start < 3
+    assert "busy" in str(caught.value) and isinstance(caught.value, TimeoutError)
+    # every 50 ms, and in the clock's last step before the deadline a few more times
+    assert 2 <= len(opens.tried) <= 15
+
+
+def test_on_windows_a_busy_pipe_is_tried_again_until_it_opens(opens):
+    end = Opened()
+    opens.answers = [win_error(231), win_error(231), win_error(231), end]
+    start = time.monotonic()
+    with ipc.connect(PIPE, timeout=5.0) as client:
+        assert client._sock is end and client.address == PIPE
+    assert 0.15 - EARLY <= time.monotonic() - start < 3
+    assert len(opens.tried) == 4
+
+
+def test_on_windows_any_other_open_error_is_raised_as_it_is(opens):
+    opens.answers = [win_error(5)]
+    with pytest.raises(OSError) as caught:
+        ipc.connect(PIPE)
+    assert caught.value.winerror == 5 and not isinstance(caught.value, ipc.IpcError)
+
+
+@pytest.mark.parametrize("address", ["/run/user/1000/moxi/demo/a.sock",
+                                     r"C:\Users\x\AppData\a.sock", r"\\server\pipe\x", ""])
+def test_on_windows_an_address_outside_the_pipe_namespace_is_never_opened(opens, address):
+    with pytest.raises(ipc.NotServing, match="not a named pipe"):
+        ipc.connect(address)
+    assert opens.tried == []
+
+
+@pytest.mark.parametrize("address", [PIPE, r"\\?\pipe\x", r"\\.\PIPE\x", r"\\.\Pipe\x"])
+def test_both_spellings_of_the_pipe_namespace_are_pipes(address):
+    assert _pipe.is_pipe(address)
+
+
+def test_the_pipe_is_opened_overlapped_and_never_lets_the_server_act_as_the_client(
+        monkeypatch):
+    import types
+
+    seen = {}
+    fake = types.SimpleNamespace(GENERIC_READ=0x80000000, GENERIC_WRITE=0x40000000,
+                                 NULL=0, OPEN_EXISTING=3, FILE_FLAG_OVERLAPPED=0x40000000)
+
+    def create_file(name, access, share, security, disposition, flags, template):
+        seen.update(name=name, access=access, disposition=disposition, flags=flags)
+        return 7
+
+    fake.CreateFile = create_file
+    monkeypatch.setitem(sys.modules, "_winapi", fake)
+    monkeypatch.setitem(sys.modules, "_overlapped", types.SimpleNamespace(
+        CreateEvent=lambda *args: 8))
+    pipe = _pipe.open_pipe(PIPE)
+    assert pipe._handle == 7 and pipe._stop == 8
+    assert seen["access"] == 0x80000000 | 0x40000000 and seen["disposition"] == 3
+    # FILE_FLAG_OVERLAPPED, and SECURITY_SQOS_PRESENT with SECURITY_IDENTIFICATION
+    assert seen["flags"] == 0x40000000 | 0x00100000 | 0x00010000
+
+
+# -- connect on Windows: who serves the pipe (any system) ----------------------------------
+
+def test_on_windows_a_pipe_served_by_this_user_is_connected(opens):
+    end = Opened()
+    opens.answers = [end]
+    with ipc.connect(PIPE) as client:
+        assert client._sock is end and end.asked == 1
+
+
+@pytest.fixture
+def server_user(monkeypatch):
+    """`server_user(user)` makes the user read of any process but this one `user`."""
+    _users.own_user()  # read now, before the patch, as a real server's process would be
+
+    def patch(user):
+        mine = os.getpid()
+        real = _users.user_of
+        monkeypatch.setattr(_users, "user_of",
+                            lambda pid: real(pid) if pid == mine else user)
+
+    return patch
+
+
+def test_on_windows_a_pipe_served_by_another_user_is_refused_and_closed(opens,
+                                                                        server_user):
+    server_user("ELSEWHERE\\someone")
+    end = Opened(pid=4321)
+    opens.answers = [end]
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert "(pid 4321) runs as ELSEWHERE\\someone, not as this user" in str(caught.value)
+    assert PIPE in str(caught.value)
+    assert end.gone.is_set() and opens.tried == [PIPE]
+
+
+def test_on_windows_a_pipe_whose_server_user_cant_be_read_is_refused_and_closed(
+        opens, server_user):
+    server_user(None)
+    end = Opened(pid=4321)
+    opens.answers = [end]
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert "(pid 4321) can't be read" in str(caught.value)
+    assert end.gone.is_set() and opens.tried == [PIPE]
+
+
+def test_on_windows_a_pipe_whose_server_pid_cant_be_read_is_refused_and_closed(opens):
+    end = Opened(pid=OSError(0, "GetNamedPipeServerProcessId failed"))
+    opens.answers = [end]
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert "can't be read (GetNamedPipeServerProcessId failed)" in str(caught.value)
+    assert end.gone.is_set()
+
+
+@pytest.mark.parametrize("address", [r"\\.\pipe\other", r"\\.\pipe\moxi-demo-a",
+                                     rf"\\.\pipe\moxi-test-pair-{'0' * 32}"])
+def test_on_windows_a_pipe_name_moxi_doesnt_make_is_not_checked(opens, address):
+    end = Opened(pid=AssertionError("the server was checked"))
+    opens.answers = [end]
+    with ipc.connect(address) as client:
+        assert client._sock is end and end.asked == 0
+
+
+# -- connect on Windows, on real pipes -----------------------------------------------------
+
+@windows
+def test_a_real_pipe_of_this_users_server_is_connected(serving):
+    srv = serving(handler)
+    with ipc.connect(srv.address) as client:
+        assert client._sock.server_pid() == os.getpid()
+        assert client.call("echo", [1], timeout=10) == [1]
+
+
+@windows
+def test_a_real_pipe_whose_server_runs_as_another_user_is_refused(serving, monkeypatch):
+    srv = serving(handler)
+    _users.own_user()
+    real = _users.user_of
+    asked = []
+
+    def user_of(pid):
+        # The client's read, on this thread, sees another user; the server's read of its
+        # peer, on its loop's thread, is left real.
+        if threading.current_thread() is not threading.main_thread():
+            return real(pid)
+        asked.append(pid)
+        return "ELSEWHERE\\someone"
+
+    monkeypatch.setattr(_users, "user_of", user_of)
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(srv.address)
+    assert type(caught.value) is ipc.IpcError
+    assert f"(pid {os.getpid()}) runs as ELSEWHERE\\someone" in str(caught.value)
+    assert asked == [os.getpid()]
+    monkeypatch.setattr(_users, "user_of", real)
+    with ipc.connect(srv.address) as client:  # the server serves on
+        assert client.call("echo", [2], timeout=10) == [2]
+
+
+@windows
+def test_nothing_at_the_pipe_is_not_serving():
+    address = ipc.address("demo", f"none{uuid.uuid4().hex[:12]}")
+    with pytest.raises(ipc.NotServing) as caught:
+        ipc.connect(address)
+    assert caught.value.exit_code == 75 and caught.value.address == address
+
+
+def busy_pipe() -> tuple[str, int, _pipe.Pipe]:
+    """A pipe of at most two instances whose one instance is taken: its name, its server
+    instance and the client that took it."""
+    name = pipe_name()
+    server = pipe_instance(name, most=2)
+    return name, server, accept(server, lambda: _pipe.open_pipe(name))
+
+
+def close_handles(*handles: int) -> None:
+    import _winapi
+
+    for handle in handles:
+        _winapi.CloseHandle(handle)
+
+
+@windows
+def test_a_pipe_with_every_instance_taken_is_busy_until_the_timeout():
+    name, server, taken = busy_pipe()
+    try:
+        start = time.monotonic()
+        with pytest.raises(ipc.Timeout) as caught:
+            ipc.connect(name, timeout=0.3)
+        assert 0.3 - EARLY <= time.monotonic() - start < 3
+        assert "busy" in str(caught.value)
+    finally:
+        taken.close()
+        close_handles(server)
+
+
+@windows
+def test_a_busy_pipe_is_tried_again_until_an_instance_is_free():
+    name, server, taken = busy_pipe()
+    made = []
+
+    def free_one_later():
+        time.sleep(0.3)
+        made.append(pipe_instance(name, first=False, most=2))
+
+    thread = threading.Thread(target=free_one_later, daemon=True)
+    thread.start()
+    try:
+        start = time.monotonic()
+        client = bounded(lambda: ipc.connect(name, timeout=5.0))
+        assert time.monotonic() - start >= 0.3 - EARLY
+        client.close()
+        thread.join(10)
+    finally:
+        taken.close()
+        close_handles(server, *made)
 
 
 def test_connect_passes_its_line_cap_to_the_client(serving):
@@ -242,7 +642,7 @@ def test_a_call_whose_request_cannot_be_written_times_out_and_ends_the_connectio
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
         bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
-    assert 0.3 <= time.monotonic() - start < 3
+    assert 0.3 - EARLY <= time.monotonic() - start < 3
     # Part of the request was written, so the connection can't carry another frame.
     with pytest.raises(ipc.IpcError) as caught:
         bounded(lambda: f.client.call("echo", [1], timeout=1))
@@ -258,7 +658,7 @@ def test_a_call_waiting_on_another_calls_blocked_write_times_out(fake):
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
         bounded(lambda: f.client.call("echo", [1], timeout=0.3))
-    assert 0.3 <= time.monotonic() - start < 3
+    assert 0.3 - EARLY <= time.monotonic() - start < 3
     f.client.close()
     stuck.join(10)
     assert not stuck.is_alive()
@@ -565,6 +965,7 @@ def test_closed_after_a_line_that_is_not_json_rpc(fake):
         f.client.call("again")
 
 
+@posix
 def test_closed_after_a_write_that_failed(fake):
     f = fake()
     # The client's side can no longer write, while its reader still waits on the server.
@@ -580,6 +981,20 @@ def test_closed_after_a_request_cut_off_by_its_timeout(fake):
     f = fake()
     with pytest.raises(ipc.Timeout):
         bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+    assert f.client.closed is True
+    _raise_at_once(f.client)
+
+
+def test_a_request_the_server_read_in_part_before_its_timeout_ends_the_connection(fake):
+    f = fake()
+    read = []
+    reader = threading.Thread(target=lambda: read.append(f.server.recv(65536)), daemon=True)
+    reader.start()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [BIG], timeout=0.5))
+    reader.join(10)
+    assert read and read[0].startswith(b'{"jsonrpc"')
+    # The server holds the start of a frame, so the next can't follow it.
     assert f.client.closed is True
     _raise_at_once(f.client)
 
@@ -625,6 +1040,22 @@ def test_closed_read_from_another_thread_never_raises_or_goes_back(serving):
     assert all(seen[first:])
 
 
+@windows
+def test_closed_after_a_write_that_failed_on_a_pipe(fake, monkeypatch):
+    f = fake()
+
+    def broken(data, deadline):
+        raise BrokenPipeError(32, "the pipe broke")
+
+    # The client's writes fail, while its reader still waits on the server.
+    monkeypatch.setattr(f.client._sock, "send_by", broken)
+    assert f.client.closed is False
+    with pytest.raises(ipc.IpcError, match="broke"):
+        f.client.notify("echo", [1])
+    assert f.client.closed is True
+    _raise_at_once(f.client)
+
+
 def test_closed_is_read_only(fake):
     f = fake()
     with pytest.raises(AttributeError):
@@ -660,6 +1091,31 @@ def test_one_client_shared_by_many_threads(serving):
             ("pushed", [i]) for i in range(100)]
 
 
+def test_a_client_in_another_process(serving):
+    async def answer(conn, method, params):
+        if method == "peer":
+            return conn.peer.pid
+        if method == "push":
+            conn.notify("pushed", [1])
+            return "pushed"
+        return params
+
+    srv = serving(answer, hello=ipc.Hello((1, 2), {"x"}))
+    code = ("import json, os, sys\nimport moxi.ipc as ipc\n"
+            "with ipc.connect(sys.argv[1]) as c:\n"
+            "    agreed = c.hello((1, 1))\n"
+            "    out = {'me': os.getpid(),"
+            " 'agreed': [agreed.version, sorted(agreed.capabilities)],"
+            " 'peer': c.call('peer', timeout=10), 'push': c.call('push', timeout=10),"
+            " 'note': next(c.notifications())}\n"
+            "print(json.dumps(out))\n")
+    done = subprocess.run([sys.executable, "-c", code, srv.address], capture_output=True,
+                          text=True, timeout=60, check=True)
+    got = json.loads(done.stdout)
+    assert got == {"me": got["me"], "agreed": [1, ["x"]], "peer": got["me"],
+                   "push": "pushed", "note": ["pushed", [1]]}
+
+
 def test_the_reader_is_one_daemon_thread_that_ends_with_the_client(serving):
     srv = serving(handler)
     before = {t.ident for t in threading.enumerate()}
@@ -669,6 +1125,17 @@ def test_the_reader_is_one_daemon_thread_that_ends_with_the_client(serving):
     client.close()
     readers[0].join(10)
     assert not readers[0].is_alive()
+
+
+def test_a_read_in_progress_holds_no_write(fake):
+    f = fake()
+    time.sleep(0.1)  # the reader thread waits in its read: the server has sent nothing
+    bounded(lambda: f.client.notify("tick", [1]), timeout=5)
+    assert f.request()["method"] == "tick"
+    thread = threading.Thread(target=lambda: f.answer(f.request()["id"], "ok"))
+    thread.start()
+    assert bounded(lambda: f.client.call("echo", [2], timeout=10)) == "ok"
+    thread.join(10)
 
 
 def test_connect_timeout_bounds_the_wait_for_the_hello(fake):

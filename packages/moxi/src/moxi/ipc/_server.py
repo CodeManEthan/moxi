@@ -1,10 +1,18 @@
-"""The asyncio server of `moxi.ipc`, on a Unix socket (Linux and macOS).
+"""The asyncio server of `moxi.ipc`: a Unix socket on Linux and macOS, a named pipe on
+Windows.
 
 `serve` makes the socket's directory private when it creates it or the directory is the
 core's own (any other directory is checked and never changed), takes the lock beside the
 socket and keeps it for the server's life, removes a socket left over from a dead server
 and binds. Only a live server makes a second one refuse; a sweep's short hold is waited
 out.
+
+On Windows `serve` makes the module's runtime directory private (an access list that
+grants only this user), takes the lock `<name>.lock` there, and serves the pipe on the
+proactor loop's pipe server. The pipe's first instance is created with
+`FILE_FLAG_FIRST_PIPE_INSTANCE`, so a pipe of that name that another process already made
+refuses the server too. The lock is let go only once every instance of the pipe has
+closed, so a free lock always means a free name.
 
 Each connection gets one reader, which hands the handler one message at a time in order,
 and one writer, which drains a bounded queue of frames with a deadline on each write. A
@@ -31,7 +39,7 @@ from .. import names as _names
 from .. import paths as _paths
 from .. import proc as _proc
 from ..modules import _Frozen
-from . import _wire
+from . import _users, _wire
 from ._sweep import lock_path
 from ._wire import AlreadyServing, Hello, Message, Reply
 
@@ -52,7 +60,8 @@ _XUCRED_SIZE = 76
 
 class Peer(_Frozen):
     """The process at the other end of a connection: its pid, its user id and its
-    `moxi.proc.ProcId` (pid and start time), each None when it can't be read."""
+    `moxi.proc.ProcId` (pid and start time), each None when it can't be read. Windows
+    has no user ids, so `uid` is None there; the peer's user is checked all the same."""
 
     __slots__ = _fields = ("pid", "uid", "proc")
 
@@ -77,6 +86,22 @@ def _peer(sock: socket.socket | None) -> Peer:
     except OSError:
         pid, uid = None, None
     return Peer(pid, uid, _proc.identity(pid) if pid else None)
+
+
+def _pipe_peer(transport: asyncio.BaseTransport) -> tuple[Peer, str | None]:
+    """The process at the client end of a pipe connection, and the name of its user
+    (None when either can't be read)."""
+    pid = None
+    pipe = transport.get_extra_info("pipe")
+    if pipe is not None:
+        from .. import _win
+
+        try:
+            pid = _win.pipe_client_pid(pipe.fileno())
+        except (OSError, ValueError):
+            pid = None
+    peer = Peer(pid, None, _proc.identity(pid) if pid else None)
+    return peer, _users.user_of(pid) if pid else None
 
 
 Handler = Callable[["Connection", str, object], Awaitable[object]]
@@ -302,6 +327,11 @@ class Server:
         self._hold = ExitStack()
         self._listener: asyncio.Server | None = None
         self._inode: tuple[int, int] | None = None
+        # Windows: the pipe servers, the pipe instances open now, and whether the lock
+        # was let go.
+        self._pipes: list | None = None
+        self._pipes_open = 0
+        self._released = asyncio.Event()
         self._connections: set[Connection] = set()
         self._tasks: set[asyncio.Task] = set()
         self._closed = asyncio.Event()
@@ -319,6 +349,9 @@ class Server:
         return f"<moxi.ipc.Server {self.address} {state}>"
 
     async def _start(self) -> None:
+        if _PLATFORM == "win32":
+            await self._start_pipe()
+            return
         await self._take_lock()
         try:
             sock = self._bind()
@@ -332,6 +365,38 @@ class Server:
             self._unlink()
             self._hold.close()
             raise
+
+    async def _start_pipe(self) -> None:
+        """Hold the lock, then serve the pipe."""
+        await self._take_lock()
+        loop = self._loop
+
+        def protocol() -> _PipeProtocol:
+            reader = asyncio.StreamReader(limit=self._max_line, loop=loop)
+            return _PipeProtocol(self, reader)
+
+        try:
+            self._pipes = await loop.start_serving_pipe(protocol, self.address)
+        except PermissionError as exc:
+            # The first instance is made with FILE_FLAG_FIRST_PIPE_INSTANCE, which is
+            # refused when a pipe of this name exists: another process made it without
+            # the lock.
+            self._release()
+            raise AlreadyServing(self.address, None) from exc
+        except BaseException:
+            self._release()
+            raise
+
+    def _pipe_closed(self) -> None:
+        """One pipe instance's handle has closed. Once the server is closed and none is
+        left, the name is free and the lock goes."""
+        self._pipes_open -= 1
+        if self._closed.is_set() and self._pipes_open <= 0:
+            self._release()
+
+    def _release(self) -> None:
+        self._hold.close()
+        self._released.set()
 
     async def _take_lock(self) -> None:
         """Hold the lock beside the socket. Another process's hold is waited out for
@@ -391,6 +456,20 @@ class Server:
                          peer.uid, peer.pid)
             writer.transport.abort()
             return
+        await self._serve_connection(reader, writer, peer)
+
+    async def _accept_pipe(self, reader: asyncio.StreamReader,
+                           writer: asyncio.StreamWriter) -> None:
+        peer, user = _pipe_peer(writer.transport)
+        if not _users.is_own(user):
+            _log.warning("dropped a peer of user %s (pid %s): not this user",
+                         user, peer.pid)
+            writer.transport.abort()
+            return
+        await self._serve_connection(reader, writer, peer)
+
+    async def _serve_connection(self, reader: asyncio.StreamReader,
+                                writer: asyncio.StreamWriter, peer: Peer) -> None:
         if self._closed.is_set():
             writer.transport.abort()
             return
@@ -421,6 +500,8 @@ class Server:
         self._closed.set()
         if self._listener is not None:
             self._listener.close()
+        for pipe in self._pipes or ():
+            pipe.close()
         try:
             me = asyncio.current_task()
         except RuntimeError:
@@ -431,13 +512,18 @@ class Server:
             if conn._task is not None and conn._task is not me:
                 conn._task.cancel()
         self._unlink()
-        self._hold.close()
+        if self._pipes is None or self._pipes_open <= 0:
+            self._release()
+        # Otherwise the last pipe instance to close lets the lock go (`_pipe_closed`).
 
     async def wait_closed(self) -> None:
-        """Wait for `close()`, then for every connection to finish."""
+        """Wait for `close()`, then for every connection to finish (and on Windows for
+        the lock to go with the last pipe instance)."""
         await self._closed.wait()
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._pipes is not None:
+            await self._released.wait()
 
     async def serve_forever(self) -> None:
         """Serve until the task is cancelled or `close()` is called, then close."""
@@ -453,6 +539,25 @@ class Server:
     async def __aexit__(self, *exc: object) -> None:
         self.close()
         await self.wait_closed()
+
+
+class _PipeProtocol(asyncio.StreamReaderProtocol):
+    """`StreamReaderProtocol` for one pipe instance, as `start_server` makes for a
+    socket, that counts the instance open from the moment it is accepted until its handle
+    has closed."""
+
+    def __init__(self, server: Server, reader: asyncio.StreamReader):
+        super().__init__(reader, server._accept_pipe, loop=server._loop)
+        self._moxi_server = server
+        server._pipes_open += 1
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        try:
+            super().connection_lost(exc)
+        finally:
+            # The transport closes the handle just after this returns, in the same
+            # callback; the count drops on the next one.
+            self._moxi_server._loop.call_soon(self._moxi_server._pipe_closed)
 
 
 def _socket_dir(directory: str) -> None:
@@ -526,13 +631,13 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     module's runtime directory or the short hashed directory `moxi.paths.socket_path`
     uses. Any other directory that exists is left as it is: one that isn't this user's,
     is a symbolic link, or is writable by group or others raises `OSError` naming it.
+    On Windows `address` is a pipe address `moxi.ipc.address` made (any other string
+    raises `ValueError`), and the module's runtime directory, where the lock is, is made
+    private.
 
     Raises `AlreadyServing` when another server still holds the address's lock after a
-    one-second wait.
+    one-second wait, and on Windows also when a pipe of that name already exists.
     """
-    if _PLATFORM == "win32":
-        raise NotImplementedError("moxi.ipc.serve is not built for Windows yet: the named "
-                                  "pipe server comes later")
     if not callable(handler):
         raise TypeError("handler must be callable")
     if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
@@ -545,7 +650,13 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     if hello is not None and not isinstance(hello, Hello):
         raise TypeError(f"hello is a moxi.ipc.Hello, not {hello!r}")
     address = os.fspath(address)
-    _socket_dir(os.path.dirname(os.path.abspath(address)))
+    if _PLATFORM == "win32":
+        from . import _pipe_parts
+
+        module, _name = _pipe_parts(address)
+        _paths._layout(module).runtime_dir(create=True)
+    else:
+        _socket_dir(os.path.dirname(os.path.abspath(address)))
     server = Server(address, handler, hello=hello, max_line=max_line,
                     write_deadline=write_deadline, queue=queue, legacy=legacy,
                     on_close=on_close)

@@ -5,6 +5,15 @@ sends, hands each answer to the call waiting on its id and queues each notificat
 the server's answers and its pushed notifications share the one connection in any order.
 A call waits on its own event; one that runs out of time raises `Timeout`, and its late
 answer is dropped. A call's time limit holds while its request waits to be written too.
+
+The connection is a Unix socket on Linux and macOS, and on Windows a named pipe opened
+overlapped (`_pipe.Pipe`), which offers the client the same few socket methods.
+
+On Windows every user shares the pipe namespace, and an address `moxi.ipc.address` makes
+is easy to work out, so while a module's server is down another user can create its pipe
+first. The client checks who serves a pipe at such an address before it writes anything:
+the server must run as this user, the check the server makes of each client. On POSIX the
+socket sits in a directory only this user can write, so nothing like it is needed there.
 """
 
 from __future__ import annotations
@@ -20,7 +29,7 @@ import threading
 import time
 from collections.abc import Iterable, Iterator
 
-from . import _wire
+from . import _pipe, _wire
 from ._wire import Agreed, Hello, IpcError, NotServing, Timeout
 
 #: How much the reader thread asks of the socket at a time.
@@ -32,42 +41,102 @@ _COLD = (errno.ENOENT, errno.ECONNREFUSED)
 _BUSY = (errno.EAGAIN, errno.EWOULDBLOCK)
 BUSY_RETRY = 0.05
 _END = object()
+_WINDOWS = sys.platform == "win32"
 
 
 def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LINE) -> Client:
     """A connection to the server at `address`. Raises `NotServing` when nothing listens
     there and `Timeout` when no connection is made in `timeout` seconds. A busy server
-    (its listen backlog full) is tried again every 50 ms until then. `timeout` is also
-    the client's wait for `hello()`. `max_line` caps the answer lines the client reads,
-    in bytes without the newline: match a server given a larger `serve(max_line=...)`."""
-    if sys.platform == "win32":
-        raise NotImplementedError("moxi.ipc.connect is not built for Windows yet: the "
-                                  "named pipe client comes later")
+    (its listen backlog full, or on Windows every instance of its pipe taken) is tried
+    again every 50 ms until then. `timeout` is also the client's wait for `hello()`.
+    On Windows, at an address `moxi.ipc.address` made, the pipe is closed unwritten and
+    `IpcError` raised when the process serving it runs as another user or its user can't
+    be read; a pipe of any other name is not checked, as no socket path is.
+    `max_line` caps the answer lines the client reads, in bytes without the newline:
+    match a server given a larger `serve(max_line=...)`."""
     if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
         raise ValueError(f"max_line is a whole number of bytes above 0, not {max_line!r}")
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(None if deadline is None else max(deadline - time.monotonic(), 0.0))
-        try:
-            sock.connect(address)
-        except TimeoutError:
-            sock.close()
-            raise Timeout(f"no connection to {address} in {timeout} s") from None
-        except OSError as exc:
-            sock.close()
-            if exc.errno in _COLD:
-                raise NotServing(address, exc.strerror) from None
-            if exc.errno not in _BUSY:
-                raise
-            left = BUSY_RETRY if deadline is None else deadline - time.monotonic()
-            if left <= 0:
-                raise Timeout(f"no connection to {address} in {timeout} s: the server "
-                              f"is busy") from None
-            time.sleep(min(BUSY_RETRY, left))
-            continue
-        sock.settimeout(None)
-        return Client(sock, address, timeout=timeout, max_line=max_line)
+        if _WINDOWS:
+            conn = _open_pipe(address)
+        else:
+            conn = _open_socket(address, deadline, timeout)
+        if conn is not None:
+            return Client(conn, address, timeout=timeout, max_line=max_line)
+        left = BUSY_RETRY if deadline is None else deadline - time.monotonic()
+        if left <= 0:
+            raise Timeout(f"no connection to {address} in {timeout} s: the server "
+                          f"is busy") from None
+        time.sleep(min(BUSY_RETRY, left))
+
+
+def _open_socket(address: str, deadline: float | None,
+                 timeout: float | None) -> socket.socket | None:
+    """A socket connected to `address`, or None when the server is busy."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(None if deadline is None else max(deadline - time.monotonic(), 0.0))
+    try:
+        sock.connect(address)
+    except TimeoutError:
+        sock.close()
+        raise Timeout(f"no connection to {address} in {timeout} s") from None
+    except OSError as exc:
+        sock.close()
+        if exc.errno in _COLD:
+            raise NotServing(address, exc.strerror) from None
+        if exc.errno not in _BUSY:
+            raise
+        return None
+    sock.settimeout(None)
+    return sock
+
+
+def _open_pipe(address: str) -> _pipe.Pipe | None:
+    """Pipe `address` opened, or None when every instance of it is taken. An address
+    outside the pipe namespace is never opened: nothing serves there."""
+    if not _pipe.is_pipe(address):
+        raise NotServing(address, "not a named pipe")
+    try:
+        pipe = _pipe.open_pipe(address)
+    except OSError as exc:
+        code = getattr(exc, "winerror", None)
+        if code in _pipe.COLD:
+            raise NotServing(address, exc.strerror) from None
+        if code != _pipe.BUSY:
+            raise
+        return None
+    try:
+        _check_server(pipe, address)
+    except BaseException:
+        pipe.close()
+        raise
+    return pipe
+
+
+def _check_server(pipe: _pipe.Pipe, address: str) -> None:
+    """Raise `IpcError` unless the process serving `pipe` runs as this user, when
+    `address` is one `moxi.ipc.address` made. Any other pipe name is left unchecked."""
+    from . import _pipe_parts, _users
+
+    try:
+        _pipe_parts(address)
+    except ValueError:
+        return
+    try:
+        pid = pipe.server_pid()
+    except OSError as exc:
+        why = exc.strerror or exc
+        raise IpcError(f"refused the pipe at {address}: the process serving it can't be "
+                       f"read ({why}), so it may not be this user's server") from None
+    user = _users.user_of(pid)
+    if _users.is_own(user):
+        return
+    if user is None:
+        raise IpcError(f"refused the pipe at {address}: the user of the process serving "
+                       f"it (pid {pid}) can't be read, so it may not be this user's server")
+    raise IpcError(f"refused the pipe at {address}: the process serving it (pid {pid}) "
+                   f"runs as {user}, not as this user, so another user may hold the name")
 
 
 def _fresh(exc: BaseException) -> BaseException:
@@ -84,6 +153,23 @@ def _writable(sock: socket.socket, seconds: float) -> bool:
     poller = select.poll()
     poller.register(sock.fileno(), select.POLLOUT)
     return bool(poller.poll(max(math.ceil(seconds * 1000), 1)))
+
+
+def _send_socket_by(sock: socket.socket, frame: bytes, deadline: float) -> int:
+    """Write `frame` to `sock` without blocking past `deadline`, waiting for the socket
+    to take more between writes, and return the bytes written."""
+    view = memoryview(frame)
+    sent = 0
+    while sent < len(frame):
+        try:
+            sent += sock.send(view[sent:], socket.MSG_DONTWAIT)
+            continue
+        except BlockingIOError:
+            pass
+        left = deadline - time.monotonic()
+        if left <= 0 or not _writable(sock, left):
+            break
+    return sent
 
 
 class _Call:
@@ -104,7 +190,8 @@ class Client:
     can still carry calls. Use it as a context manager, or `close()` it.
     """
 
-    def __init__(self, sock: socket.socket, address: str, *, timeout: float = 5.0,
+    def __init__(self, sock: socket.socket | _pipe.Pipe, address: str, *,
+                 timeout: float = 5.0,
                  max_line: int = _wire.MAX_LINE):
         self.address = address
         self.agreed: Agreed | None = None
@@ -149,7 +236,8 @@ class Client:
         no limit), `NotRpc` when the server sends a line that isn't JSON-RPC, and
         `IpcError` when the connection ends first. `timeout` covers the whole call:
         the wait to write the request as well as the wait for its answer. A request
-        the timeout cuts off partway ends the connection."""
+        the timeout cuts off partway ends the connection. On Windows so does any
+        request whose write the timeout cancels, even one the server read none of."""
         deadline = None if timeout is None else time.monotonic() + timeout
         call = _Call()
         with self._lock:
@@ -198,7 +286,10 @@ class Client:
         failed, an answer line was over `max_line`, or a line was not JSON-RPC); by a
         write that failed; and by a request its call's timeout cut off partway, which
         ends the connection. A call that timed out before writing anything, or whose
-        answer was only late, leaves it False.
+        answer was only late, leaves it False. On Windows a pipe write the timeout
+        cancels counts as cut off, so it ends the connection and sets this even when the
+        server read none of it; only a call that timed out waiting for its turn to write
+        leaves it False there.
 
         Safe to read from any thread with no lock: it reads one reference, set once and
         never cleared. False doesn't promise the next call succeeds: a server that has
@@ -224,7 +315,9 @@ class Client:
         `time.monotonic()` time), the wait for the lock and for the socket to take the
         frame both end then, and False says the time ran out: nothing was written, or
         the frame was cut partway and the connection is ended, since the server can
-        no longer tell where the next frame starts."""
+        no longer tell where the next frame starts. On Windows any write the deadline
+        cancels ends the connection, even when the server read none of it: the system
+        reports no bytes written for a cancelled write, whatever the server read."""
         frame = _wire.encode(message)
         if deadline is None:
             self._write_lock.acquire()
@@ -243,28 +336,27 @@ class Client:
             self._write_lock.release()
 
     def _send_by(self, frame: bytes, deadline: float) -> bool:
-        """Write `frame` without blocking past `deadline`, waiting for the socket to
-        take more between writes. The caller holds the write lock."""
-        view = memoryview(frame)
-        sent = 0
-        while sent < len(frame):
+        """Write `frame` without blocking past `deadline`. The caller holds the write
+        lock. False says the time ran out; a frame cut off partway ends the
+        connection."""
+        if isinstance(self._sock, socket.socket):
+            sent = _send_socket_by(self._sock, frame, deadline)
+            cut = sent > 0
+        else:
+            # A pipe write its deadline cancels reports no bytes written even when the
+            # server has read part of it, so it counts as cut off.
+            sent = self._sock.send_by(frame, deadline)
+            cut = True
+        if sent == len(frame):
+            return True
+        if cut:
+            self._fail(IpcError(f"the connection to {self.address} is ended: a request "
+                                f"was cut off when its call ran out of time"))
             try:
-                sent += self._sock.send(view[sent:], socket.MSG_DONTWAIT)
-                continue
-            except BlockingIOError:
+                self._sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
                 pass
-            left = deadline - time.monotonic()
-            if left <= 0 or not _writable(self._sock, left):
-                if sent:
-                    self._fail(IpcError(f"the connection to {self.address} is ended: a "
-                                        f"request was cut off when its call ran out of "
-                                        f"time"))
-                    try:
-                        self._sock.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
-                return False
-        return True
+        return False
 
     def _read(self) -> None:
         failure: BaseException = IpcError(
