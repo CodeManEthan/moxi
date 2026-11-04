@@ -728,6 +728,62 @@ def test_peer_gives_every_request_on_a_unix_connection_this_processs_uid(monkeyp
     assert len(reads) == 1, "the peer is read once, when the connection is made"
 
 
+# --- platform's uname, without a WMI query ----------------------------------------------
+
+
+def wmi_recorder(monkeypatch):
+    """`platform` with its cached uname cleared and its WMI query replaced by one that
+    records each call and fails as a query that timed out does."""
+    import platform
+
+    asked = []
+
+    def query(*keys):
+        asked.append(keys)
+        raise OSError("timed out")
+
+    monkeypatch.setattr(platform, "_uname_cache", None)
+    monkeypatch.setattr(platform, "_wmi_query", query, raising=False)
+    return asked, query
+
+
+def test_the_uname_is_filled_without_a_wmi_query_and_the_query_is_put_back(monkeypatch):
+    import platform
+
+    asked, query = wmi_recorder(monkeypatch)
+    serve_mod._uname_without_wmi()
+    assert asked == [] and platform._wmi_query is query
+    assert platform._uname_cache is not None and platform.system()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="platform makes a WMI query on Windows only")
+def test_on_windows_platform_still_asks_wmi_through_the_name_the_helper_replaces(monkeypatch):
+    """The two tests beside this one pass when no query is recorded, and they would pass
+    as well if `platform` stopped asking through `_wmi_query` but still made the query:
+    `_uname_without_wmi` would then refuse nothing, and the query thread it exists to
+    keep from starting would start. Here a plain `uname()` must ask through that name."""
+    import platform
+
+    asked, _ = wmi_recorder(monkeypatch)
+    platform.uname()
+    assert asked, "platform.uname() made no query through platform._wmi_query"
+
+
+def test_serve_starts_on_a_thread_without_a_wmi_query(monkeypatch):
+    asked, _ = wmi_recorder(monkeypatch)
+    sock = bind_tcp(0)
+    served = Served(peer_app(), [sock])
+    try:
+        conn = raw_connect(sock.getsockname())
+        try:
+            assert ask(conn) == "absent"
+        finally:
+            conn.close()
+    finally:
+        served.stop()
+    assert asked == [], "uvicorn's startup asked platform for a WMI query"
+
+
 def test_peer_gives_none_on_tcp():
     sock = bind_tcp(0)
     served = Served(peer_app(), [sock], peer=True)

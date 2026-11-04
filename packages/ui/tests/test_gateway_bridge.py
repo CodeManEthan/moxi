@@ -6,6 +6,7 @@ fixture module's gateway routes and nothing else of it."""
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 import time
 
@@ -89,6 +90,26 @@ def test_on_in_gateway_mode_passes_and_writes_no_unit(tmp_path_factory, fixture_
         assert "moxi tunnel remove ui/gateway" in done.stdout
     finally:
         shell.stop()
+
+
+def test_a_port_another_program_takes_before_the_shell_binds_it_gets_another(
+        tmp_path_factory, fixture_site, monkeypatch):
+    """Another program binds the port the kit picked before the shell does: the shell
+    removes its tunnel entry, so the kit starts it again on another port, where it holds
+    with its address and a phone can pair."""
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        first = [taken.getsockname()[1]]
+        pick = phone_kit.free_port
+        monkeypatch.setattr(phone_kit, "free_port", lambda: first.pop() if first else pick())
+        shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+        try:
+            assert shell.gateway_port != taken.getsockname()[1]
+            status, data = shell.session().post("/m/ui/api/gateway/pair")
+            assert status == 200, data
+        finally:
+            shell.stop()
 
 
 def test_the_usual_test_environment_takes_no_hold(tmp_path_factory, fixture_site):

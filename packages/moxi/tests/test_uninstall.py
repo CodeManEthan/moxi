@@ -20,7 +20,7 @@ import moxi.cli as cli
 import moxi.install as install
 import moxi.modules as modules
 import moxi.uninstall as uninstall
-from conftest import drop_modules
+from conftest import WINDOWS, drop_modules, is_link, link_folder
 from moxi import _questions, _settle, files, paths, units
 from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
@@ -418,20 +418,23 @@ def test_a_second_uninstall_waits_for_a_running_install(fake, capsys):
 
     moxi_install(capsys, "turns", "--none")
     lock = paths.core_lock()
+    # The holder says its own pid: on Windows a venv's python.exe is a launcher that runs
+    # the interpreter as its child, so the pid holding the lock is not `holder.pid`.
     holder = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
-        import time
+        import os, time
         from moxi import files
         with files.lock({str(lock)!r}):
-            print("held", flush=True)
+            print("held", os.getpid(), flush=True)
             time.sleep(1.5)
         """)], stdout=subprocess.PIPE, text=True)
     try:
-        assert holder.stdout.readline().strip() == "held"
+        said, pid = holder.stdout.readline().split()
+        assert said == "held"
         code, _, err = moxi_uninstall(capsys, "turns")
     finally:
         holder.wait(10)
     assert code == 0, err
-    assert f"waiting for another install or uninstall (pid {holder.pid}) to finish" in err
+    assert f"waiting for another install or uninstall (pid {pid}) to finish" in err
 
 
 def test_the_config_file_is_kept(fake, capsys):
@@ -465,9 +468,12 @@ def test_uninstall_is_in_the_usage_and_help(capsys):
 @pytest.fixture
 def skilled(fake, capsys, monkeypatch, tmp_path):
     """turns installed, declaring a `TEARDOWN` and shipping skill `turns-send`, placed for
-    claude and codex under a home of its own."""
-    from moxi import place
+    claude and codex under a home of its own. On Windows `auto` copies a skill folder, so
+    `skills.form` is `link` there, which makes a junction; elsewhere `auto` links."""
+    from moxi import config, place
 
+    if WINDOWS:
+        config.set("moxi", "skills.form", "link", by="test")
     user = tmp_path / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
@@ -532,7 +538,7 @@ def test_a_skill_handed_over_stays_and_a_hand_back_in_teardown_is_removed(
     code, out, err = moxi_uninstall(capsys, "turns")
     assert code == 0, err
     assert not os.path.lexists(skilled.claude("turns-send"))
-    assert os.path.islink(skilled.claude("turns-read"))
+    assert is_link(skilled.claude("turns-read"))
     assert [p.name for p in place.status("loadout")] == ["turns-read"]
     ledger = place._read_ledger()
     send = str(skilled.claude("turns-send"))
@@ -670,7 +676,7 @@ def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path
     (elsewhere / "a").write_text("keep me")
     index = stored.cache / "index"
     shutil.rmtree(index)
-    index.symlink_to(elsewhere)
+    link_folder(index, elsewhere)
     code, out, err = moxi_uninstall(capsys, "turns", "--purge")
     assert code == 0, err
     assert not os.path.lexists(index) and (elsewhere / "a").read_text() == "keep me"
@@ -702,7 +708,7 @@ def test_purge_removes_a_directory_link_or_junction_store_on_windows(stored, cap
     code, out, err = moxi_uninstall(capsys, "turns", "--purge")
     assert code == 0, err
     assert not os.path.lexists(index) and (elsewhere / "a").read_text() == "keep me"
-    assert "turns: removed store index, a link; kept what it points at (" in out
+    assert f"turns: removed store index, a link; kept what it points at ({elsewhere})" in out
 
 
 def test_purge_of_a_broken_module_removes_only_the_core_s_stores(stored, capsys):

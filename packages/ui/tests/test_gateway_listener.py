@@ -67,7 +67,7 @@ class World:
     address: Any = None
     port: int = field(default_factory=_free_port)
     shell_port: int = 1
-    uid: int | None = field(default_factory=os.getuid)
+    uid: int | None = field(default_factory=lambda: os.getuid())
     removed: int = 0
     remove_fails: bool = False
 

@@ -74,6 +74,7 @@ def test_the_runtime_directory_itself_and_its_root_are_refused():
             paths.refuse_outside_runtime(path, "MOXI_COMMS_CLAIM_SOCKET")
 
 
+@pytest.mark.usefixtures("needs_symlinks")
 def test_a_link_inside_the_runtime_directory_that_leaves_it_is_refused(tmp_path):
     outside = tmp_path / "elsewhere.sock"
     outside.touch()

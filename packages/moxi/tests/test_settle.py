@@ -16,10 +16,11 @@ from pathlib import Path
 import pytest
 
 import moxi.paths
-from conftest import drop_modules
+from conftest import WINDOWS, drop_modules, is_link, link_text
 from moxi import _settle, config, doctor, files, home, units
 from moxi.units import _backend, _declare, _plan, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi_dev.testing import console_script, need_symlinks
 
 SETTINGS = """
 [relay.enabled]
@@ -81,9 +82,7 @@ def w(site, tmp_path, monkeypatch):
     scripts = tmp_path / "bin"
     scripts.mkdir()
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
-    for name in ("moxi-demo-relay",):
-        (scripts / name).write_text("#!/bin/sh\n")
-        (scripts / name).chmod(0o755)
+    console_script(scripts, "moxi-demo-relay")
     monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldbox")
     monkeypatch.setattr(_settle, "_state", _settle._Signals())
     saved = {s: signal.getsignal(s) for s in _settle.signals()}
@@ -381,9 +380,7 @@ def _other_command(w, *, keep=False):
     """The relay's socket daemon with another command: its service text changes and its
     socket set does not. (The name is longer, so the module file's size changes and its
     cached bytecode, written in the same second, is not taken for it.)"""
-    script = moxi.paths._scripts() / "moxi-demo-relay-next"
-    script.write_text("#!/bin/sh\n")
-    script.chmod(0o755)
+    console_script(moxi.paths._scripts(), "moxi-demo-relay-next")
     w.module(DAEMONS=SOCKET.replace("'moxi-demo-relay'", "'moxi-demo-relay-next'"
                                     + (", 'upgrade': 'keep'" if keep else "")))
     assert {c.kind: c.action for c in units.plan("demo")} == {"daemon": "change",
@@ -459,7 +456,7 @@ def test_every_path_out_starts_exactly_the_recorded_units(w, capsys, monkeypatch
         monkeypatch.setattr(os, "rename", lambda a, b: (_ for _ in ()).throw(
             PermissionError(13, "Permission denied")))
     if path == "command":
-        (moxi.paths._scripts() / "moxi-demo-relay").unlink()
+        moxi.paths.script("moxi-demo-relay").unlink()
     if path == "switch":
         w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'port'}, "
                          "'aux': {'command': 'moxi-demo-relay'}}")
@@ -499,7 +496,7 @@ def test_replace_whose_unit_step_refuses_the_unit_starts_the_old_one(w, capsys, 
     w.sup.reload()
     w.sup.state(SERVICE)["active"] = True
     w.legacy()
-    (moxi.paths._scripts() / "moxi-demo-relay").unlink()
+    moxi.paths.script("moxi-demo-relay").unlink()
     code, out = settle(w, capsys, monkeypatch, replace=True)
     assert code == 1 and "no moxi-demo-relay in this environment" in out
     assert w.calls("start") == [("start", SERVICE)] and w.active(SERVICE)
@@ -1469,7 +1466,7 @@ def test_a_refused_unit_or_a_relative_legacy_link_still_runs_the_later_steps(
     if path == "link" and sys.platform == "win32":
         pytest.skip("symbolic links need a privilege on Windows")
     if path == "unit":
-        (moxi.paths._scripts() / "moxi-demo-relay").unlink()   # the plan refuses it
+        moxi.paths.script("moxi-demo-relay").unlink()   # the plan refuses it
         qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
     else:
         ear.installed(DAEMONS=ONE)
@@ -1532,9 +1529,12 @@ def test_the_skills_question_at_a_terminal_and_with_nobody_there(capsys, monkeyp
 @pytest.fixture
 def sk(w, monkeypatch):
     """`w` with a home of its own, so every harness folder is under tmp, and helpers for
-    module demo's `SKILLS`."""
+    module demo's `SKILLS`. On Windows `auto` copies a skill folder, so `skills.form` is
+    `link` there, which makes a junction; elsewhere `auto` links already."""
     from moxi import place
 
+    if WINDOWS:
+        config.set("moxi", "skills.form", "link", by="test")
     user = w.tmp / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
@@ -1592,8 +1592,8 @@ def test_skills_flag_places_each_skill_for_each_harness_as_links(sk, capsys):
     assert code == 0, out
     src = sk.pkg / "skills"
     for name in ("moxi-demo-read", "moxi-demo-send"):
-        assert os.readlink(sk.claude(name)) == str(src / name)
-        assert os.readlink(sk.codex(name)) == str(src / name)
+        assert link_text(sk.claude(name)) == str(src / name)
+        assert link_text(sk.codex(name)) == str(src / name)
         assert f"demo: placed skill {name} for claude ({sk.claude(name)})" in out
     assert len(sk.place.status("demo")) == 4
 
@@ -1621,8 +1621,8 @@ def test_an_upgrade_adds_and_removes_skills_as_the_package_says_without_asking(
     code, out = place_settle(sk, capsys)
     assert code == 0, out
     assert not os.path.lexists(sk.claude("moxi-demo-old"))
-    assert os.path.islink(sk.claude("moxi-demo-new"))
-    assert os.path.islink(sk.claude("moxi-demo-send"))
+    assert is_link(sk.claude("moxi-demo-new"))
+    assert is_link(sk.claude("moxi-demo-send"))
     assert (f"demo: removed skill moxi-demo-old for claude "
             f"({sk.claude('moxi-demo-old')})") in out
     # SKILLS dropped altogether: every placement of the package's goes.
@@ -1652,7 +1652,7 @@ def test_a_skill_handed_over_is_skipped_and_counts_as_placed(sk, capsys, monkeyp
     assert "demo: moxi-demo-send was handed to loadout; skipped" in out
     assert sk.place.status("demo") == []
     assert len(sk.place.status("loadout")) == 2
-    assert os.path.islink(sk.claude("moxi-demo-send"))
+    assert is_link(sk.claude("moxi-demo-send"))
 
 
 def test_a_skill_handed_to_an_owner_since_removed_is_placed_again(sk, capsys, monkeypatch):
@@ -1814,7 +1814,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     assert ("demo: moxi-demo-send for claude not placed: harness claude has no row in "
             "harnesses (some rows are skipped: moxi config moxi shows the table)") in out
     assert "removed skill" not in out
-    assert os.path.islink(claude) and owned(sk)["placed"] == before
+    assert is_link(claude) and owned(sk)["placed"] == before
     assert [(r.name, r.state) for r in _run._harness_rows()] == [
         ("harnesses", "warn"), ("skills.harnesses claude", "warn")]
 
@@ -1865,6 +1865,7 @@ def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
     whose source is not in its package: one another module handed it, and a project's
     own skill. Its re-install manages only its own and leaves those exactly as they are,
     even after its own SKILLS go."""
+    need_symlinks()  # the project's own skill links as a symlink
     place = sk.place
     other = tmp_path / "comms-pkg" / "comms-send"
     other.mkdir(parents=True)
@@ -1898,7 +1899,7 @@ def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
         assert code == 0, out
         assert "removed skill comms-send" not in out and "proj-skill" not in out
         assert {k: owned(sk)["placed"][k] for k in keep} == before
-        assert os.readlink(sk.claude("comms-send")) == str(other)
+        assert link_text(sk.claude("comms-send")) == str(other)
         assert os.readlink(dest) == os.path.relpath(held, dest.parent)
         sk.module()
     assert {str(p.path) for p in place.status("demo")} == keep
@@ -1913,10 +1914,10 @@ def test_an_occupant_is_refused_and_exits_1_and_replace_moves_it_aside(sk, capsy
     assert code == 1
     assert "demo: moxi-demo-send for claude not placed:" in out
     assert (mine / "SKILL.md").read_text() == "# mine\n"
-    assert os.path.islink(sk.codex("moxi-demo-send"))
+    assert is_link(sk.codex("moxi-demo-send"))
     code, out = place_settle(sk, capsys, replace=True)
     assert code == 0, out
-    assert os.path.islink(mine) and f"demo: moved {mine} to " in out
+    assert is_link(mine) and f"demo: moved {mine} to " in out
     displaced = moxi.paths.core().data_dir() / "displaced"
     assert [p.read_text() for p in displaced.rglob("SKILL.md")] == ["# mine\n"]
 
@@ -1943,7 +1944,7 @@ def test_an_occupant_git_tracks_is_refused_and_replace_moves_it_aside(sk, capsys
             f"did not mark, and git tracks it") in out
     code, out = place_settle(sk, capsys, replace=True)
     assert code == 0, out
-    assert os.path.islink(mine) and f"demo: moved {mine} to " in out
+    assert is_link(mine) and f"demo: moved {mine} to " in out
     assert f"demo: placed skill moxi-demo-send for claude ({mine})" in out
 
 
@@ -1985,7 +1986,7 @@ def test_a_skill_not_named_moxi_name_is_not_placed_and_the_step_exits_1(sk, caps
     assert code == 1, out
     assert asked == ["demo ships 1 skill (moxi-a). Place them for claude and codex? [y/N] "]
     assert out.count(f"demo: skill b not placed: {RULE}") == 1
-    assert os.path.islink(sk.claude("moxi-a")) and os.path.islink(sk.codex("moxi-a"))
+    assert is_link(sk.claude("moxi-a")) and is_link(sk.codex("moxi-a"))
     assert not os.path.lexists(sk.claude("b")) and not os.path.lexists(sk.codex("b"))
     assert sorted(p.name for p in sk.place.status("demo")) == ["moxi-a", "moxi-a"]
     # Answered ahead, or with nothing else to place, the same.
@@ -2003,7 +2004,7 @@ def test_a_misnamed_skill_an_earlier_install_placed_is_removed(sk, capsys, monke
     place = sk.place
     place.apply(place.plan("demo", [place.Item(src, h, "b") for h in ("claude", "codex")]),
                 say=lambda line: None)
-    assert os.path.islink(sk.claude("b"))
+    assert is_link(sk.claude("b"))
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys)
     assert code == 1, out

@@ -293,6 +293,7 @@ def test_a_fifo_at_a_card_path_answers_instead_of_hanging():
     assert "victim@proj-a" in out and "not a regular file" in out
 
 
+@pytest.mark.usefixtures("needs_symlinks")
 def test_a_symlink_at_a_card_path_is_refused_not_followed():
     """A followed symlink renders up to 8 KB of any readable file inside a
     `claims to be self-authored` envelope: one agent choosing what lands in another's

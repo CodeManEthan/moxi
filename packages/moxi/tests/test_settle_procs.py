@@ -36,6 +36,7 @@ import moxi.paths  # noqa: E402
 from moxi import _settle, config, files, units  # noqa: E402
 from moxi.units import _backend, _state  # noqa: E402
 from moxi.units._fake import FakeBackend  # noqa: E402
+from moxi_dev.testing import console_script
 
 sys.path.insert(0, str(Path(__file__).parent))
 import settle_procs  # noqa: E402
@@ -222,8 +223,7 @@ class Box:
 def box(site, tmp_path, monkeypatch):
     scripts = tmp_path / "bin"
     scripts.mkdir()
-    (scripts / "moxi-demo-relay").write_text("#!/bin/sh\n")
-    (scripts / "moxi-demo-relay").chmod(0o755)
+    console_script(scripts, "moxi-demo-relay")
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
     monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldbox")
     (tmp_path / "units").mkdir()

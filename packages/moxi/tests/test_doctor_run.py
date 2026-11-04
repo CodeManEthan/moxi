@@ -24,6 +24,10 @@ from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
+from moxi_dev.testing import console_script
+
+#: A platform this one isn't, for a unit declared for another system only.
+OTHER_PLATFORM = "linux" if sys.platform == "win32" else "win32"
 
 SETTINGS = """
 [relay.enabled]
@@ -81,10 +85,7 @@ def d(site, tmp_path, monkeypatch):
     backend = FakeBackend(root, runner=supervisor)
 
     def script(name):
-        path = scripts / name
-        path.write_text("#!/bin/sh\n")
-        path.chmod(0o755)
-        return path
+        return console_script(scripts, name)
 
     def module(name="demo", *, settings=SETTINGS, files_=None, **names):
         pkg = f"moxi_{name}"
@@ -336,7 +337,8 @@ def test_an_editable_install_s_units_are_information_and_exit_0(d, capsys):
 
 def test_an_off_platform_unit_and_no_supervisor_are_off(d, monkeypatch):
     d.script("moxi-demo-relay")
-    d.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'platforms': ['win32']}}")
+    d.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'platforms': "
+                     f"['{OTHER_PLATFORM}']}}}}")
     row = d.rows("demo")[("demo", "daemon relay")]
     assert row.state == "off" and "not on this system" in row.detail
     d.module(DAEMONS=DAEMON)

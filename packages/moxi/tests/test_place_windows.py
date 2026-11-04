@@ -26,8 +26,9 @@ def windows(proves: str):
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
-    """A home of its own, so `~/.claude`, `~/.agents` and `~/.codex` are under tmp."""
-    home = tmp_path / "home"
+    """A home of its own, so `~/.claude`, `~/.agents` and `~/.codex` are under tmp (not
+    the fence's `tmp_path / "home"`, whose `CLAUDE_CONFIG_DIR` this unsets)."""
+    home = tmp_path / "user-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))

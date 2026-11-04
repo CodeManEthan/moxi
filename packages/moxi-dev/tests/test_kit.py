@@ -1,5 +1,5 @@
 """The kit's helpers: served, wait_for, param ids, the fsync seam, the SQLite writer,
-the markers, and the contract module's public names."""
+the symlink probe, the markers, and the contract module's public names."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import socket
 import socketserver
 import sqlite3
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -84,7 +85,13 @@ def test_the_served_ids_are_the_class_names(request):
 
 def test_short_dir_is_short_and_goes():
     with short_dir() as where:
-        assert where.is_dir() and len(str(where)) < 30
+        assert where.is_dir()
+        if hasattr(socket, "AF_UNIX"):
+            assert len(str(where)) < 30
+        else:
+            # The bound is for a Unix socket's path, and Python has no Unix sockets here
+            # (Windows): the directory is a short name right in the short root.
+            assert where.parent == Path(testing._short_root()) and len(where.name) < 16
     assert not where.exists()
 
 
@@ -155,7 +162,8 @@ def test_an_honest_fsync_reaches_the_disk(tmp_path):
     often is): there a pass would show nothing reached a disk. Run with a disk-backed
     root (PYTEST_DEBUG_TEMPROOT=/var/tmp) and the read comes from the device. It does
     not prove the bytes survive a power cut: the drive's own cache is beyond what a test
-    can see."""
+    can see. On Windows a directory can't be opened as a file, so its fsync is left out,
+    and there is no call that drops the file's cached pages."""
     kind = filesystem_type(tmp_path)
     if kind in MEMORY_FILESYSTEMS:
         pytest.skip(f"tmp_path is on {kind}, which has no disk; set PYTEST_DEBUG_TEMPROOT "
@@ -163,18 +171,20 @@ def test_an_honest_fsync_reaches_the_disk(tmp_path):
     assert os.fsync is testing._REAL_FSYNC
     data = os.urandom(256 * 1024)
     path = tmp_path / "durable"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    binary = getattr(os, "O_BINARY", 0)     # Windows opens in text mode without it
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | binary, 0o600)
     try:
         assert os.write(fd, data) == len(data)
         os.fsync(fd)
     finally:
         os.close(fd)
-    dir_fd = os.open(tmp_path, os.O_RDONLY)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
-    fd = os.open(path, os.O_RDONLY)
+    if os.name != "nt":
+        dir_fd = os.open(tmp_path, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    fd = os.open(path, os.O_RDONLY | binary)
     try:
         if hasattr(os, "posix_fadvise"):
             os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
@@ -209,6 +219,71 @@ def test_write_sqlite_is_one_transaction(tmp_path):
         write_sqlite(tmp_path / "f.db", SCHEMA, rows)
     with sqlite3.connect(tmp_path / "f.db") as conn:
         assert conn.execute("SELECT name FROM sqlite_master").fetchall() == []
+
+
+# --- the symlink probe -----------------------------------------------------------------
+
+@pytest.fixture
+def fresh_probe():
+    """`can_symlink` with no answer kept, before the test and after it."""
+    testing.can_symlink.cache_clear()
+    yield
+    testing.can_symlink.cache_clear()
+
+
+def refusing(error):
+    """An `os.symlink` that raises `error`."""
+    def symlink(*_args, **_kwargs):
+        raise error
+    return symlink
+
+
+def with_winerror(error, winerror):
+    """`error` with the Windows error code `winerror`, on any system."""
+    error.winerror = winerror
+    return error
+
+
+def test_the_symlink_probe_tries_a_real_link_once_and_leaves_nothing(tmp_path, monkeypatch,
+                                                                      fresh_probe):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    tried = []
+    real = os.symlink
+
+    def symlink(target, link, *args, **kwargs):
+        tried.append(Path(link))
+        return real(target, link, *args, **kwargs)
+
+    monkeypatch.setattr(os, "symlink", symlink)
+    first = testing.can_symlink()
+    assert testing.can_symlink() is first and len(tried) == 1, "the answer is kept"
+    assert tried[0].parent.parent == temp, "tried in a temp directory of its own"
+    assert list(temp.iterdir()) == []
+    if not testing.WINDOWS:
+        assert first is True
+
+
+def test_only_a_missing_privilege_reads_as_no_and_the_skip_says_why(monkeypatch,
+                                                                     fresh_probe):
+    monkeypatch.setattr(os, "symlink", refusing(with_winerror(OSError(1, "no"), 1314)))
+    assert testing.can_symlink() is False
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        testing.need_symlinks()
+    assert skipped.value.msg == testing.NO_SYMLINKS
+
+
+@pytest.mark.parametrize("error", [
+    testing.FenceError("refused by the fence"),
+    with_winerror(OSError(1, "access is denied"), 5),
+    OSError(1, "no winerror"),
+], ids=["fence", "another-windows-error", "posix"])
+def test_any_other_error_is_raised_not_taken_for_no(monkeypatch, fresh_probe, error):
+    monkeypatch.setattr(os, "symlink", refusing(error))
+    with pytest.raises(type(error)) as raised:
+        testing.can_symlink()
+    assert raised.value is error
 
 
 # --- markers ---------------------------------------------------------------------------

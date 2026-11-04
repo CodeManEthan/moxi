@@ -13,6 +13,7 @@ import pytest
 
 from moxi_dev import contract
 from moxi_dev.contract import CheckError, check
+from moxi_dev.testing import need_symlinks
 
 ANNOUNCEMENT = {
     "INTERFACES": "frozenset({1})",
@@ -70,7 +71,8 @@ class Repo:
     def write(self, rel: str, text: str = "") -> Path:
         path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(textwrap.dedent(text))
+        # The text's own bytes, on every system: no locale encoding, no CRLF added.
+        path.write_text(textwrap.dedent(text), encoding="utf-8", newline="")
         return path
 
     def src(self, rel: str, text: str = "") -> Path:
@@ -782,11 +784,18 @@ def test_staged_a_skills_folder_missing_or_a_file_in_the_index_fails(repo):
     repo.git("add", ".")
     assert "is a file, not a folder" in repo.findings("7", staged=True)[0]
 
+def symlink(path: Path, target: str) -> None:
+    """A symlink at `path` whose target is `target`, as written; the test skips where
+    this account may not make one (Windows without Developer Mode or the privilege)."""
+    need_symlinks()
+    path.symlink_to(target)
+
+
 def link(repo, rel, target):
     """A symlink at src/<pkg>/<rel> whose target is `target`, as written."""
     path = repo.root / f"src/{repo.pkg}/{rel}"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.symlink_to(target)
+    symlink(path, target)
     return path
 
 

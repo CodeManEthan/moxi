@@ -502,7 +502,9 @@ def test_the_servers_data_samples_each_running_server(shell_dirs):
         row, = data["servers"]
         assert row["module"] == "stpage" and row["state"] == "running" and row["child"]
         assert row["server_id"] == server.info.server_id and row["version"] == "0.1.0"
-        assert row["pid"] == server.child.pid == row["sample"]["pid"]
+        # The row and its sample name the server's own pid, from its runtime file.
+        assert row["pid"] == server.info.pid == row["sample"]["pid"]
+        assert row["pid"] == _server_pid(server.child.popen)
         assert row["sample"]["rss"] > 0 and row["sample"]["fds"] > 0
         assert row["open"] == {"requests": 0, "streams": 0}
         assert row["starts"] == 1 and row["log"] == starters.log
@@ -755,6 +757,18 @@ def test_a_kill_ends_the_child_and_what_it_started_and_never_signals_the_group(
 
     asyncio.run(asyncio.wait_for(body(), 20))
     assert signalled == []
+
+
+def _server_pid(popen: subprocess.Popen) -> int:
+    """The pid of the page server `popen` started. On Windows a venv's `python.exe` is a
+    launcher that runs the base interpreter as its one child, so the server is that
+    child; elsewhere it is `popen.pid` itself."""
+    if sys.platform != "win32":
+        return popen.pid
+    import psutil
+
+    below = psutil.Process(popen.pid).children()
+    return below[0].pid if len(below) == 1 else popen.pid
 
 
 def _gone(pid: int) -> bool:

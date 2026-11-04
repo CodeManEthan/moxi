@@ -21,8 +21,10 @@ import pytest
 import moxi.config
 import moxi.files
 import moxi.paths
+from conftest import FOLDER_LINK, WINDOWS, is_link, link_folder, link_text
 from moxi import place
 from moxi.place import Item
+from moxi_dev.testing import can_symlink, need_symlinks
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +37,15 @@ def home(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
     return home
+
+
+@pytest.fixture(autouse=True)
+def folder_links():
+    """On Windows `auto` copies a skill folder (`place._AUTO_JUNCTION`), so the tests here
+    that place one as a link set `link`, which makes a junction there; elsewhere `auto`
+    links already, and nothing is set."""
+    if WINDOWS:
+        set_core("skills.form", "link")
 
 
 @pytest.fixture
@@ -92,18 +103,19 @@ def test_a_skill_links_into_each_default_harness_folder(home, skill):
     items = [Item(src, "claude", "comms-send"), Item(src, "codex", "comms-send")]
     steps = place.plan("comms", items)
     assert [s.action for s in steps] == ["add", "add"]
-    assert [s.form for s in steps] == ["link", "link"]
+    assert [s.form for s in steps] == [FOLDER_LINK, FOLDER_LINK]
     said, say = lines()
     done = place.apply(steps, say=say)
     claude = home / ".claude" / "skills" / "comms-send"
     codex = home / ".agents" / "skills" / "comms-send"
-    assert os.readlink(claude) == str(src) and os.readlink(codex) == str(src)
+    assert link_text(claude) == str(src) and link_text(codex) == str(src)
     assert [p.state for p in done] == ["ok", "ok"]
     assert said == []
     assert [s.action for s in place.plan("comms", items)] == ["keep", "keep"]
 
 
 def test_an_agent_goes_to_the_agents_folder_as_one_file(home, tmp_path):
+    need_symlinks()
     agent = tmp_path / "pkg" / "reviewer.md"
     agent.parent.mkdir()
     agent.write_text("an agent\n")
@@ -124,6 +136,7 @@ def test_claude_config_dir_moves_claudes_folders(tmp_path, monkeypatch, skill):
 
 def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path,
                                                                    monkeypatch, skill):
+    need_symlinks()
     agent = tmp_path / "pkg" / "reviewer.md"
     agent.parent.mkdir()
     agent.write_text("an agent\n")
@@ -135,7 +148,7 @@ def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path
              Item(skill(), "codex", "comms-send")]
     place.apply(place.plan("loadout", items))
     assert os.readlink(tmp_path / "cx" / "agents" / "reviewer.md") == str(agent)
-    assert os.path.islink(home / ".agents" / "skills" / "comms-send")
+    assert is_link(home / ".agents" / "skills" / "comms-send")
     assert not os.path.lexists(home / ".codex")
 
 
@@ -143,7 +156,7 @@ def test_a_dest_places_exactly_there_and_a_relative_one_raises(tmp_path, skill):
     src = skill()
     dest = tmp_path / "proj" / ".claude" / "skills" / "x"
     place.apply(place.plan("loadout", [Item(src, "claude", "x", dest=dest)]))
-    assert os.readlink(dest) == str(src)
+    assert link_text(dest) == str(src)
     with pytest.raises(ValueError, match="absolute"):
         place.plan("loadout", [Item(src, "claude", "x", dest=Path("rel/x"))])
 
@@ -206,7 +219,7 @@ def test_one_owner_places_one_name_into_two_roots_and_drops_one(tmp_path, skill)
     steps = place.plan("loadout", both[:1])
     assert [(s.action, s.target) for s in steps] == [("keep", a), ("remove", b)]
     place.apply(steps)
-    assert os.path.islink(a) and not os.path.lexists(b)
+    assert is_link(a) and not os.path.lexists(b)
     assert set(ledger()["loadout"]["placed"]) == {str(a)}
 
 
@@ -221,7 +234,7 @@ def test_a_harness_folder_reached_through_a_symlink_gives_one_key(home, tmp_path
     real = tmp_path / "real-skills"
     real.mkdir()
     (home / ".claude").mkdir()
-    (home / ".claude" / "skills").symlink_to(real)
+    link_folder(home / ".claude" / "skills", real)
     src = skill()
     place.apply(place.plan("comms", [Item(src, "claude", "x")]))
     assert list(ledger()["comms"]["placed"]) == [str(real / "x")]
@@ -291,7 +304,7 @@ def test_an_unmarked_path_is_refused_and_replace_moves_it_aside(home, skill):
     assert (target / "mine.txt").exists() and "not placed" in said[0]
     said, say = lines()
     done = place.apply([step], replace=True, say=say)
-    assert [p.state for p in done] == ["ok"] and os.readlink(target) == str(src)
+    assert [p.state for p in done] == ["ok"] and link_text(target) == str(src)
     displaced = moxi.paths.core().data_dir() / "displaced"
     moved = list(displaced.glob("*/claude/comms-send/mine.txt"))
     assert len(moved) == 1 and moved[0].read_text() == "the user's\n"
@@ -300,7 +313,7 @@ def test_an_unmarked_path_is_refused_and_replace_moves_it_aside(home, skill):
 def test_an_unmarked_link_is_refused(home, tmp_path, skill):
     target = home / ".claude" / "skills" / "comms-send"
     target.parent.mkdir(parents=True)
-    target.symlink_to(tmp_path)
+    link_folder(target, tmp_path)
     step = one(place.plan("comms", [Item(skill(), "claude", "comms-send")]), "refuse")
     assert step.cause == "occupant" and "did not make" in step.reason
 
@@ -397,7 +410,7 @@ def test_git_seconds_must_be_a_number(skill):
 def _occupy(case, target, src, other):
     """Put occupant `case` at `target`, `src` being the item's source."""
     if case == "a link not the placer's":
-        target.symlink_to(other)
+        link_folder(target, other)
     elif case == "an unmarked folder":
         target.mkdir()
         (target / "SKILL.md").write_text("the user's\n")
@@ -606,6 +619,7 @@ def test_a_held_target_that_is_its_source_is_held_in_place(project):
 
 
 def test_a_held_items_links_are_relative_and_survive_the_project_moving(tmp_path, project):
+    need_symlinks()
     root, src = project
     dest = root / ".claude" / "skills" / "tidy"
     item = Item(src, "claude", "tidy", dest=dest, held=True, root=root)
@@ -651,6 +665,7 @@ def test_a_held_item_with_copy_places_copies_marked_held(project):
     one(place.plan("loadout", [item]), "keep")
     place.apply(place.plan("loadout", []))
     assert not dest.exists() and place._hash(str(src)) == before
+    need_symlinks()
     set_core("skills.form", "link")
     place.apply(place.plan("loadout", [item]))
     assert os.readlink(dest) == os.path.join("..", "..", "skills", "tidy")
@@ -742,7 +757,7 @@ def test_a_hand_over_lapses_once_the_taker_no_longer_places_the_target(home, ski
     one(place.plan("comms", [item]), "add")
     done = place.apply(place.plan("comms", [item]))
     assert [(p.owner, p.path) for p in done] == [("comms", target)]
-    assert os.path.islink(target)
+    assert is_link(target)
     led = ledger()
     assert list(led) == ["comms"] and not led["comms"]["handed"]
     assert list(led["comms"]["placed"]) == [str(target)]
@@ -986,7 +1001,7 @@ def test_the_windows_form(monkeypatch, tmp_path, setting, symlinks, held, folder
 def test_the_symlink_probe_leaves_nothing_behind(tmp_path):
     base = tmp_path / "probe"
     base.mkdir()
-    assert place._symlink_allowed(str(base / "not" / "yet")) is True
+    assert place._symlink_allowed(str(base / "not" / "yet")) is can_symlink()
     assert list(base.iterdir()) == []
 
 
@@ -1018,7 +1033,7 @@ def test_from_package_reads_the_installed_package_and_an_older_install_of_it(
     assert place.from_package(found, pkg / "skills" / "x")
     # Reached through a link to the package folder, and the package through a link.
     alias = tmp_path / "alias"
-    alias.symlink_to(pkg)
+    link_folder(alias, pkg)
     assert place.from_package(found, alias / "skills" / "x")
     # Where an older install lay, before an upgrade moved the package.
     old = tmp_path / "old" / "lib" / "python3.11" / "site-packages" / "moxi_fpdemo"

@@ -14,7 +14,6 @@ import logging
 import os
 import signal
 import sys
-import termios
 
 log = logging.getLogger("comms.terminal")
 
@@ -29,8 +28,10 @@ SHOW_CURSOR = b"\x1b[?25h"
 RESTORE_SCREEN = ENTER_ALT_SCREEN + LEAVE_ALT_SCREEN + SHOW_CURSOR
 
 #: The signals a window wrapper ignores in every phase, so Ctrl-Z never suspends it
-#: and it can take the terminal's foreground back from a background group.
-JOB_CONTROL_SIGNALS = (signal.SIGTSTP, signal.SIGTTIN, signal.SIGTTOU)
+#: and it can take the terminal's foreground back from a background group. Windows has
+#: no job control, so there the tuple is empty.
+JOB_CONTROL_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTSTP", "SIGTTIN", "SIGTTOU")
+                            if hasattr(signal, name))
 
 
 #: How long a child (a CLI server, a window) gets after SIGTERM before SIGKILL.
@@ -111,6 +112,8 @@ class Terminal:
         self.hung_up = False
 
     def save(self) -> None:
+        import termios  # POSIX only; the module's other names import on any system
+
         try:
             self.saved = termios.tcgetattr(self.fd)
         except termios.error:
@@ -125,6 +128,8 @@ class Terminal:
         cursor. Skipped on a terminal that has hung up."""
         if self.hung_up:
             return
+        import termios
+
         try:
             os.tcsetpgrp(self.fd, os.getpgrp())
             if self.saved is not None:

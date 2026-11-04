@@ -11,6 +11,7 @@ import pytest
 
 from moxi import paths
 from moxi.paths import Layout
+from moxi_dev.testing import console_script
 
 HOME = "/users/someone"
 
@@ -401,6 +402,7 @@ def test_a_long_socket_path_is_hashed_into_a_private_directory(monkeypatch, tmp_
     assert paths.socket_path("cache", "page") != got
 
 
+@POSIX
 def test_a_socket_name_is_one_plain_name(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "_SHORT_ROOT", str(tmp_path))
     for bad in ("", "..", "a/b"):
@@ -429,8 +431,7 @@ def test_script_is_in_this_environments_scripts_directory(monkeypatch, tmp_path)
 def test_script_never_looks_on_path(monkeypatch, tmp_path):
     elsewhere = tmp_path / "bin"
     elsewhere.mkdir()
-    (elsewhere / "moxi-cache-watch").write_text("#!/bin/sh\n")
-    (elsewhere / "moxi-cache-watch").chmod(0o755)
+    console_script(elsewhere, "moxi-cache-watch")
     monkeypatch.setenv("PATH", str(elsewhere))
     monkeypatch.setattr(paths, "_scripts", lambda: tmp_path / "scripts")
     with pytest.raises(FileNotFoundError):

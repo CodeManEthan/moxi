@@ -17,7 +17,6 @@ import os
 import signal
 import subprocess
 import sys
-import termios
 import threading
 import time
 
@@ -31,7 +30,9 @@ ENTER_ALT_SCREEN = b"\x1b[?1049h"
 LEAVE_ALT_SCREEN = b"\x1b[?1049l"
 SHOW_CURSOR = b"\x1b[?25h"
 RESTORE_SCREEN = ENTER_ALT_SCREEN + LEAVE_ALT_SCREEN + SHOW_CURSOR
-JOB_CONTROL_SIGNALS = (signal.SIGTSTP, signal.SIGTTIN, signal.SIGTTOU)
+#: Windows has no job control, so there the tuple is empty.
+JOB_CONTROL_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTSTP", "SIGTTIN", "SIGTTOU")
+                            if hasattr(signal, name))
 
 READY_WAIT = 180.0
 POLL = 0.1
@@ -72,6 +73,8 @@ class Terminal:
         self.hung_up = False
 
     def save(self) -> None:
+        import termios  # POSIX only; the module's other names import on any system
+
         try:
             self.saved = termios.tcgetattr(self.fd)
         except termios.error:
@@ -80,6 +83,8 @@ class Terminal:
     def take_back(self) -> None:
         if self.hung_up:
             return
+        import termios
+
         try:
             if self.saved is not None:
                 termios.tcsetattr(self.fd, termios.TCSADRAIN, self.saved)
