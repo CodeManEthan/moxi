@@ -295,11 +295,15 @@ class Client:
         connection."""
         if isinstance(self._sock, socket.socket):
             sent = _send_socket_by(self._sock, frame, deadline)
+            cut = sent > 0
         else:
+            # A pipe write its deadline cancels reports no bytes written even when the
+            # server has read part of it, so it counts as cut off.
             sent = self._sock.send_by(frame, deadline)
+            cut = True
         if sent == len(frame):
             return True
-        if sent:
+        if cut:
             self._fail(IpcError(f"the connection to {self.address} is ended: a request "
                                 f"was cut off when its call ran out of time"))
             try:

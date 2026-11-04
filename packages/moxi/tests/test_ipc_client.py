@@ -26,6 +26,9 @@ from moxi.ipc import _client, _pipe
 WINDOWS = sys.platform == "win32"
 posix = pytest.mark.skipif(WINDOWS, reason="Unix sockets")
 windows = pytest.mark.skipif(not WINDOWS, reason="Windows named pipes")
+#: How early a wait may seem to end by the clock: Windows' monotonic clock moves in
+#: steps of about 15.6 ms.
+EARLY = 0.032 if WINDOWS else 0.0
 
 
 async def handler(conn, method, params):
@@ -255,7 +258,7 @@ def test_a_full_backlog_is_busy_until_the_timeout(sock_dir):
         start = time.monotonic()
         with pytest.raises(ipc.Timeout) as caught:
             ipc.connect(listener.getsockname(), timeout=0.3)
-        assert 0.3 <= time.monotonic() - start < 3
+        assert 0.3 - EARLY <= time.monotonic() - start < 3
         assert "busy" in str(caught.value)
     finally:
         for sock in [*waiting, listener]:
@@ -312,7 +315,7 @@ def opens(monkeypatch):
 
     def pair_end():
         """One end of a socket pair, standing in for an opened pipe."""
-        ours, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        ours, theirs = socket.socketpair()
         pairs.append(ours)
         return theirs
 
@@ -340,7 +343,7 @@ def test_on_windows_a_busy_pipe_is_tried_every_50_ms_until_the_timeout(opens):
     start = time.monotonic()
     with pytest.raises(ipc.Timeout) as caught:
         ipc.connect(PIPE, timeout=0.3)
-    assert 0.3 <= time.monotonic() - start < 3
+    assert 0.3 - EARLY <= time.monotonic() - start < 3
     assert "busy" in str(caught.value) and isinstance(caught.value, TimeoutError)
     assert 2 <= len(opens.tried) <= 8
 
@@ -351,7 +354,7 @@ def test_on_windows_a_busy_pipe_is_tried_again_until_it_opens(opens):
     start = time.monotonic()
     with ipc.connect(PIPE, timeout=5.0) as client:
         assert client._sock is end and client.address == PIPE
-    assert 0.15 <= time.monotonic() - start < 3
+    assert 0.15 - EARLY <= time.monotonic() - start < 3
     assert len(opens.tried) == 4
 
 
@@ -430,7 +433,7 @@ def test_a_pipe_with_every_instance_taken_is_busy_until_the_timeout():
         start = time.monotonic()
         with pytest.raises(ipc.Timeout) as caught:
             ipc.connect(name, timeout=0.3)
-        assert 0.3 <= time.monotonic() - start < 3
+        assert 0.3 - EARLY <= time.monotonic() - start < 3
         assert "busy" in str(caught.value)
     finally:
         taken.close()
@@ -451,7 +454,7 @@ def test_a_busy_pipe_is_tried_again_until_an_instance_is_free():
     try:
         start = time.monotonic()
         client = bounded(lambda: ipc.connect(name, timeout=5.0))
-        assert time.monotonic() - start >= 0.3
+        assert time.monotonic() - start >= 0.3 - EARLY
         client.close()
         thread.join(10)
     finally:
@@ -520,7 +523,7 @@ def test_a_call_whose_request_cannot_be_written_times_out_and_ends_the_connectio
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
         bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
-    assert 0.3 <= time.monotonic() - start < 3
+    assert 0.3 - EARLY <= time.monotonic() - start < 3
     # Part of the request was written, so the connection can't carry another frame.
     with pytest.raises(ipc.IpcError) as caught:
         bounded(lambda: f.client.call("echo", [1], timeout=1))
@@ -536,7 +539,7 @@ def test_a_call_waiting_on_another_calls_blocked_write_times_out(fake):
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
         bounded(lambda: f.client.call("echo", [1], timeout=0.3))
-    assert 0.3 <= time.monotonic() - start < 3
+    assert 0.3 - EARLY <= time.monotonic() - start < 3
     f.client.close()
     stuck.join(10)
     assert not stuck.is_alive()
@@ -859,6 +862,20 @@ def test_closed_after_a_request_cut_off_by_its_timeout(fake):
     f = fake()
     with pytest.raises(ipc.Timeout):
         bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+    assert f.client.closed is True
+    _raise_at_once(f.client)
+
+
+def test_a_request_the_server_read_in_part_before_its_timeout_ends_the_connection(fake):
+    f = fake()
+    read = []
+    reader = threading.Thread(target=lambda: read.append(f.server.recv(65536)), daemon=True)
+    reader.start()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [BIG], timeout=0.5))
+    reader.join(10)
+    assert read and read[0].startswith(b'{"jsonrpc"')
+    # The server holds the start of a frame, so the next can't follow it.
     assert f.client.closed is True
     _raise_at_once(f.client)
 

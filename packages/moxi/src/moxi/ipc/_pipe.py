@@ -112,7 +112,9 @@ class Pipe:
     def send_by(self, data: bytes, deadline: float | None) -> int:
         """Write `data`, waiting no later than `deadline` (a `time.monotonic()` time; None
         waits as long as it takes), and return the bytes written: fewer than all means the
-        time ran out. Raises `BrokenPipeError` when the pipe is closed first, and
+        time ran out. The count is what the system reports, and a write cancelled while
+        the server was reading it reports none, so a short write may still have been
+        read in part. Raises `BrokenPipeError` when the pipe is closed first, and
         `OSError` when the write fails. A write cut off any other way (an interrupt)
         closes the pipe, since the server can no longer tell where the next frame
         starts."""
