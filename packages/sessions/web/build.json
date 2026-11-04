@@ -1,0 +1,3 @@
+{
+  "entries": {"page.js": "src/page.ts", "window.js": "src/window.ts"}
+}
