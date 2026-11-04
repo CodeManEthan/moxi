@@ -2,7 +2,9 @@
 
 turns is a library with no user command: other modules call `moxi_turns`, and the
 internal entry points the harness adapters add are spawned, never typed. Its checks run
-in the front door's doctor (`DOCTOR`); it has no daemon, so no `HEALTH`.
+in the front door's doctor (`DOCTOR`); it has no daemon, so no `HEALTH`. With the `ui`
+extra it has a page in the browser UI shell: the live list of the sessions it can reach,
+read-only.
 """
 
 INTERFACES = frozenset({2})
@@ -10,7 +12,11 @@ API = "moxi_turns"
 CLI = None
 SUMMARY = ("Drive a coding-agent session's turns: deliver, steer, compact and read a turn "
            "on any harness.")
-OPTIONAL = {"codex": "launch Codex sessions through a supervised app-server host"}
+OPTIONAL = {
+    "codex": "launch Codex sessions through a supervised app-server host",
+    "ui": "The live sessions panel in the browser UI shell: every session turns can reach, "
+          "its turn, its agents and its trouble, read-only.",
+}
 GATED = {"moxi-turns-ping": "codex", "moxi-turns-codex-host": "codex"}
 INTERNAL_ENV = {
     "MOXI_TURNS_COMMANDS": "a launcher's grant of session commands (clear, exit, compact) "
@@ -40,6 +46,8 @@ QUESTIONS = {
 }
 SETUP = "moxi_turns.claude_setup:setup"
 SEGMENT = None
+#: turns' page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_turns.page:PAGE"
 DOCTOR = "moxi_turns.doctor:check"
 #: A hook may cost the agent at most twice the floor, `python -I -c pass`.
 BUDGETS = {"hook_ms": 2.0}

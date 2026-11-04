@@ -1298,10 +1298,14 @@ dependencies = [
 codex = [
     { name = "websockets" },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
     { name = "pytest" },
     { name = "websockets" },
 ]
@@ -1309,14 +1313,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "websockets", marker = "extra == 'codex'", specifier = ">=17.0.1" },
 ]
-provides-extras = ["codex"]
+provides-extras = ["codex", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
 ]

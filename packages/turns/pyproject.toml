@@ -10,6 +10,7 @@ dependencies = ["moxi>=0.1,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 codex = ["websockets>=17.0.1"]
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -35,7 +36,8 @@ turns = "moxi_turns.guards"
 turns = "moxi_turns.guards"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev", "websockets>=17.0.1"]
+# moxi-ui's pytest plugin runs turns' page in a real shell.
+dev = ["pytest", "moxi-dev", "websockets>=17.0.1", "moxi-ui[testing]"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
