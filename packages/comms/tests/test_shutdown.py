@@ -16,7 +16,12 @@ from conftest import wait_for_queue
 from moxi_comms.paths import daemon_socket
 
 
-@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP])
+#: Windows has no SIGHUP.
+SIGHUP = getattr(signal, "SIGHUP", None)
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, pytest.param(SIGHUP, marks=pytest.mark.skipif(
+    SIGHUP is None, reason="this system has no SIGHUP"))])
 def test_a_signal_runs_the_clean_shutdown(tmp_path, sig):
     proc = subprocess.Popen(
         [sys.executable, "-c", "from moxi_comms.daemon import main; raise SystemExit(main())",

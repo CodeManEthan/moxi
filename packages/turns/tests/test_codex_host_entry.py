@@ -3,14 +3,12 @@ and the host as a process of its own over the stub `codex` binary."""
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
 import signal
 import subprocess
 import sys
-import termios
 import threading
 import time
 from pathlib import Path
@@ -559,6 +557,9 @@ def test_a_launch_that_fails_exits_1_with_the_reason_on_stderr(rig):
 
 @LINUX
 def test_the_window_shares_the_hosts_terminal_and_its_close_ends_the_host(rig):
+    import fcntl
+    import termios
+
     master, slave = os.openpty()
     out = bytearray()
 

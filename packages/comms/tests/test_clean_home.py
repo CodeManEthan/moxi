@@ -44,7 +44,6 @@ environment built from nothing.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -55,7 +54,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 import tomllib
@@ -115,7 +113,9 @@ pytestmark = [pytest.mark.build,
               pytest.mark.touches(*(f"packages/{d.name}/pyproject.toml"
                                     for d in REQUIRED.values()),
                                   "packages/comms/tests/test_clean_home.py"),
-              pytest.mark.skipif(UV is None, reason="the clean-home test needs uv")]
+              pytest.mark.skipif(UV is None, reason="the clean-home test needs uv"),
+              pytest.mark.skipif(not hasattr(os, "openpty"),
+                                 reason="the agents run on ptys, and this system has no pty")]
 
 AUDIT_HOOK = r'''
 import os, sys
@@ -228,6 +228,9 @@ class OnPty:
     wrapper's terminal, so it will not run without one."""
 
     def __init__(self, argv, env, cwd):
+        import fcntl
+        import termios
+
         master, slave = os.openpty()
         self.fd = master
         self.proc = subprocess.Popen(
