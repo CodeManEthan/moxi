@@ -4,7 +4,9 @@ form; the page in full is test_browser_page.py's); the picker listing every
 project with its root, or only those of a kind, and sending its host a bubbling, composed
 `moxi-change` whose detail is the key and nothing else; the card for a key and for a key
 that names no project; and the add form hiding "create" for a kind whose mint is
-`refuse`, then adding a project, which a placed picker then lists.
+`refuse`, then adding a project, which a placed picker then lists; and the add form on a
+shell whose site holds a contribution that won't load, which adds the row and shows the
+warning beside the success.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
 store is the one the page server reads, under the shell's home. A fake module on the
@@ -39,6 +41,8 @@ SHELF = textwrap.dedent('''\
                        "refuse")}
 ''')
 
+BROKEN = "INTERFACE = 1\nimport fake_module_that_is_not_there\n"
+
 # Each placed picker records every event it sends to the document, so a test reads
 # what a host would have got.
 _LISTEN = """(name) => {
@@ -64,6 +68,23 @@ def ui_shell_options(tmp_path_factory) -> dict:
     (info / "entry_points.txt").write_text(
         "[moxi.projects]\nshelves = fake_shelves.projects_link\n", encoding="utf-8")
     return {"site": [str(site)]}
+
+
+def fake_site(base: Path, package: str, entry: str, source: str) -> Path:
+    """A site holding one fake distribution whose `moxi.projects` entry `entry` is
+    `package.projects_link`, with `source` as its text."""
+    site = base / "site"
+    (site / package).mkdir(parents=True)
+    (site / package / "__init__.py").write_text("", encoding="utf-8")
+    (site / package / "projects_link.py").write_text(source, encoding="utf-8")
+    name = package.replace("_", "-")
+    info = site / f"{package}-0.1.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: 0.1.0\n",
+                                   encoding="utf-8")
+    (info / "entry_points.txt").write_text(
+        f"[moxi.projects]\n{entry} = {package}.projects_link\n", encoding="utf-8")
+    return site
 
 
 def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -223,3 +244,25 @@ def test_a_refused_add_shows_the_reason_and_fix_and_makes_nothing(seeded, ui_she
     expect(said).to_have_attribute("data-tone", "error")
     expect(said).to_contain_text("fix:")
     assert shown(ui_shell, "relative") is None
+
+
+def test_the_add_form_past_a_contribution_that_wont_load_adds_with_its_warning(
+        ui_shells, ui_contexts, ui_component_check, tmp_path_factory):
+    site = fake_site(tmp_path_factory.mktemp("broken"), "fake_broken", "broken", BROKEN)
+    shell = ui_shells(site=[str(site)])
+    page = ui_contexts(shell).pages[0]
+    add = ui_component_check(page, "projects", "add", keep=True).locator
+    expect(add.locator('[data-line="broken"]')).to_contain_text("broken:")
+    where = root(shell, "skipping")
+    add.get_by_label("Key", exact=True).fill("skipping")
+    add.get_by_label(re.compile(r"^Root")).fill(where)
+    add.get_by_role("button", name="Add").click()
+    said = add.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-tone", "ok")
+    expect(said).to_contain_text(f"Added skipping at {where}.")
+    warning = add.locator('[data-line="warning"]')
+    expect(warning).to_be_visible()
+    expect(warning).to_contain_text("Warning: skipped broken, which won't load")
+    expect(warning).to_contain_text("defaults and checks were not applied")
+    expect(warning).to_contain_text("moxi uninstall broken")
+    assert shown(shell, "skipping")["root"] == where

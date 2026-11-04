@@ -201,7 +201,8 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
     assert {k for k, v in marks.items() if v == "path"} == roots | {
         "/api/where store", "/api/where git"}
     assert {k for k, v in marks.items() if v == "redact"} == {
-        "/api/kinds broken[].reason", "/api/add notes[]", "/api/set notes[]",
+        "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
+        "/api/set notes[]",
         "/api/remove-status reason", "/api/remove-status fix",
         "/api/remove-status sentences[]"}
 
@@ -338,10 +339,30 @@ def test_a_refused_add_is_422_with_its_reason_and_fix(body, words, store_path):
     assert not store_path.exists()
 
 
-def test_a_broken_contribution_refuses_an_add(site, tmp_path):
+def test_a_contribution_that_wont_load_is_skipped_and_the_add_answer_warns(site,
+                                                                          tmp_path):
     site.contribution("broken", "raise ImportError('gone')\n")
-    said = refused(post("/api/add", {"key": "web", "root": str(tmp_path / "web")}))
+    root = str(tmp_path / "web")
+    body = done("/api/add", {"key": "web", "root": root})
+    assert body["project"] == api.get("web").as_dict()
+    assert body["notes"] == [acts.root_note(root)]
+    [warning] = body["warnings"]
+    assert warning.startswith("skipped broken, which won't load")
+    assert "defaults and checks were not applied" in warning
+    assert "moxi uninstall broken" in warning
+
+
+def test_an_add_of_an_unknown_kind_past_a_contribution_that_wont_load_is_refused(
+        site, tmp_path, store_path):
+    site.contribution("broken", "raise ImportError('gone')\n")
+    said = refused(post("/api/add", {"key": "web", "root": str(tmp_path / "web"),
+                                     "kind": "topic"}))
     assert "won't load" in said and "moxi uninstall broken" in said
+    assert not store_path.exists()
+
+
+def test_an_add_that_skips_nothing_answers_no_warnings(tmp_path):
+    assert done("/api/add", {"key": "web", "root": str(tmp_path / "web")})["warnings"] == []
 
 
 @pytest.mark.parametrize("root", ["relative/web", "~/web", "~"])

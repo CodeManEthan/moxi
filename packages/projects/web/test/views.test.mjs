@@ -4,9 +4,9 @@ import test from "node:test";
 import {
   actedOf, addBody, addSaid, brokenLines, cardFields, cardPath, cardView, createLine, createShown,
   emptyForm, emptyLine, kindLabel, MAY_EXIST, MAY_HAVE_ACTED, NOT_SENT, pickedDetail, pickerPath,
-  pickerView, startKind,
+  pickerView, startKind, warningLine,
 } from "../src/views.ts";
-import { parseWritten } from "../src/feed.ts";
+import { parseAdded, parseWritten } from "../src/feed.ts";
 
 const state = (over) => ({ loading: false, gone: false, failure: null, value: null, ...over });
 const PROJECT = { key: "alpha", root: "/w/alpha", kind: "project", lead: "lead-a",
@@ -134,8 +134,8 @@ test("the root is sent as typed, so the page server refuses a relative one", () 
 });
 
 test("an add's answer: done, refused with its line, or unknown", () => {
-  const written = { project: PROJECT, notes: ["made /w/alpha and ran git init"] };
-  const done = actedOf(200, written, parseWritten);
+  const written = { project: PROJECT, notes: ["made /w/alpha and ran git init"], warnings: [] };
+  const done = actedOf(200, written, parseAdded);
   assert.deepEqual(done, { outcome: "done", value: written });
   assert.deepEqual(addSaid(done, true),
                    { tone: "ok", lines: ["Added alpha at /w/alpha.", "made /w/alpha and ran git init"] });
@@ -145,6 +145,19 @@ test("an add's answer: done, refused with its line, or unknown", () => {
   assert.equal(actedOf(409, { conflict: "the store is busy; try again" }, parseWritten).text,
                "the store is busy; try again");
   assert.equal(actedOf(422, null, parseWritten).text, "projects' page server refused it (422)");
+});
+
+test("an add made past a contribution that won't load shows its warning beside the success", () => {
+  const warning = "skipped fake, which won't load (fake: the entry fake won't load: ImportError: x), "
+    + "so its defaults and checks were not applied; fix: repair fake or uninstall it (`moxi uninstall fake`)";
+  const done = actedOf(200, { project: PROJECT, notes: [], warnings: [warning] }, parseAdded);
+  assert.deepEqual(addSaid(done, false), {
+    tone: "ok", lines: ["Added alpha at /w/alpha."], warnings: [`Warning: ${warning}`],
+  });
+  assert.equal(warningLine("x"), "Warning: x");
+  // An add's answer without its warnings is not the route's shape: it may have acted.
+  assert.deepEqual(actedOf(200, { project: PROJECT, notes: [] }, parseAdded),
+                   { outcome: "unknown", text: MAY_HAVE_ACTED });
 });
 
 test("an answer that never came, or that came from the shell, says what is known", () => {

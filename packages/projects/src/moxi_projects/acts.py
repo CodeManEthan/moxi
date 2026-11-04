@@ -57,14 +57,18 @@ GIT_TIMEOUT = 30
 
 
 class Added:
-    """What `add` did: `project`, the row as written, and `notes`, sentences worth
-    showing that refuse nothing (a root that doesn't exist yet, what a mint made)."""
+    """What `add` did: `project`, the row as written; `notes`, sentences worth showing
+    that refuse nothing (a root that doesn't exist yet, what a mint made); and
+    `warnings`, sentences about what the add went ahead without (a contribution skipped
+    since it won't load, naming the fix)."""
 
-    __slots__ = ("project", "notes")
+    __slots__ = ("project", "notes", "warnings")
 
-    def __init__(self, project: Project, notes: list[str]):
+    def __init__(self, project: Project, notes: list[str],
+                 warnings: list[str] | None = None):
         self.project = project
         self.notes = notes
+        self.warnings = list(warnings or [])
 
 
 def root_note(root: str) -> str | None:
@@ -85,8 +89,9 @@ def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
     """Add project `key`; with `create`, mint its root first.
 
     Paths must already be absolute (`rules.absolutize` makes a command line's so). A root
-    left out comes from a contribution's default, or the add stops with `Usage`.
-    `contributions` and `notes` stand in for the installed contributions and for whether
+    left out comes from a contribution's default, or the add stops with `Usage`. A
+    contribution that won't load is skipped unless the kind may be its own, and
+    `Added.warnings` names it. `contributions` and `notes` stand in for the installed contributions and for whether
     notes is installed. `git_timeout` bounds a `git` mint's `git init`, in seconds.
     """
     planned = _contributions.plan_add(key, kind=kind, root=root, lead=lead,
@@ -95,7 +100,7 @@ def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
     if not create:
         project = store.write(planned.insert)
         note = root_note(project.root)
-        return Added(project, [note] if note else [])
+        return Added(project, [note] if note else [], planned.warnings)
     command = _add_command(planned, notes_root)
     git = _check_mint(planned)
     _check_free(planned)
@@ -107,7 +112,7 @@ def add(key: str, *, root: str | None = None, kind: str = DEFAULT_KIND,
         _amend(exc, f"{exc.reason}; {what}, and is left as it is",
                f"{exc.fix + '; then ' if exc.fix else ''}`{command}` adds its row")
         raise
-    return Added(project, [_made_words(planned, made)])
+    return Added(project, [_made_words(planned, made)], planned.warnings)
 
 
 def _check_mint(planned: Planned) -> str | None:
@@ -370,7 +375,7 @@ def promote(slug: str, key: str, *, kind: str = TOPIC, root: str | None = None,
         if note:
             said.append(note)
     said.append(f"moved {source} to {target}")
-    return Added(project, said)
+    return Added(project, said, planned.warnings)
 
 
 def _notes():

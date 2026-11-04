@@ -2,7 +2,7 @@
 // no DOM so the Node tests can read it. Every string here goes into the page as text.
 
 import { saidOf } from "./feed.ts";
-import type { Failure, Kind, Kinds, One, Project, Projects, RemoveStatus, Where, Written } from "./feed.ts";
+import type { Added, Failure, Kind, Kinds, One, Project, Projects, RemoveStatus, Where } from "./feed.ts";
 
 /** A component's data as its `Feed` holds it. */
 export interface FeedState<V> {
@@ -163,8 +163,9 @@ export function kindLabel(kind: Kind): string {
   return kind.module === "projects" ? kind.name : `${kind.name} (${kind.module})`;
 }
 
-/** One line for each contribution that won't load or kind that is blocked. While any is
- * listed, an add is refused until it is fixed or uninstalled. */
+/** One line for each contribution that won't load or kind that is blocked. Until it is
+ * fixed or uninstalled, an add of a blocked kind, or of a kind no module that loads
+ * declares, is refused; any other add goes ahead without the module, with a warning. */
 export function brokenLines(kinds: Kinds | null): string[] {
   return (kinds?.broken ?? []).map(({ module, reason }) => `${module}: ${reason}`);
 }
@@ -231,17 +232,25 @@ export function actedOf<V>(status: number, data: unknown, parse: (data: unknown)
   return { outcome: "unknown", text: MAY_HAVE_ACTED };
 }
 
-/** What the add form says after an act. */
+/** What the add form says after an act: a tone and its lines, and, for an add that was
+ * made past a contribution that won't load, the warning lines shown beside them. */
 export interface AddSaid {
   tone: "ok" | "error" | "warn";
   lines: string[];
+  warnings?: string[];
+}
+
+/** A warning an add's answer carries, as the form shows it. */
+export function warningLine(warning: string): string {
+  return `Warning: ${warning}`;
 }
 
 /** The add form's lines for `acted`, an add of `form` with create ticked or not. */
-export function addSaid(acted: Acted<Written>, created: boolean): AddSaid {
+export function addSaid(acted: Acted<Added>, created: boolean): AddSaid {
   if (acted.outcome === "done") {
-    const { project, notes } = acted.value;
-    return { tone: "ok", lines: [`Added ${project.key} at ${project.root}.`, ...notes] };
+    const { project, notes, warnings } = acted.value;
+    const said: AddSaid = { tone: "ok", lines: [`Added ${project.key} at ${project.root}.`, ...notes] };
+    return warnings.length ? { ...said, warnings: warnings.map(warningLine) } : said;
   }
   if (acted.outcome === "refused") return { tone: "error", lines: [acted.text] };
   return { tone: "warn", lines: created ? [acted.text, MAY_EXIST] : [acted.text] };

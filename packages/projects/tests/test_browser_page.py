@@ -1,7 +1,8 @@
 """projects' page in a browser, through a real shell that starts projects' real page
 server: the contract check; the store file and the git the page acts with, and a shell
 whose PATH has no git; the list and its kind filter; a contribution that won't load,
-named beside the filter and in the add form, refusing every add; an add with create in a
+named beside the filter and in the add form, which an add goes ahead without and whose
+warning the form shows beside the success; an add with create in a
 real git; a topic added with no root, whose answer is lost, after which the page reads its
 list again and says the directory may exist; the edit form, which sends only what the
 user changed when a terminal has changed the project since it was opened; the lead and
@@ -238,7 +239,7 @@ def test_the_kind_filter_lists_only_that_kind(seeded, ui_page):
     expect(row(panel, "scout-home")).to_have_count(1)
 
 
-def test_a_contribution_that_wont_load_is_named_beside_the_filter_and_refuses_an_add(
+def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_warning(
         ui_shells, ui_contexts, tmp_path_factory):
     site = fake_site(tmp_path_factory.mktemp("broken"), "fake_broken", "broken", BROKEN)
     shell = ui_shells(site=[str(site)])
@@ -247,15 +248,24 @@ def test_a_contribution_that_wont_load_is_named_beside_the_filter_and_refuses_an
     panel = page.locator("#moxi-panel > moxi-projects-page")
     broken = panel.locator('section[data-part="list"] [data-part="broken"]')
     expect(broken.locator('[data-line="broken"]')).to_contain_text("broken:")
-    expect(broken).to_contain_text("every add is refused")
+    expect(broken).to_contain_text("a remove is refused, as is an add or set of a kind no "
+                                   "loaded module declares")
+    expect(broken).to_contain_text("any other add goes ahead without it, with a warning")
     form = panel.locator("moxi-projects-add")
     expect(form.locator('[data-line="broken"]')).to_contain_text("broken:")
-    form.get_by_label("Key", exact=True).fill("blocked")
-    form.get_by_label(re.compile(r"^Root")).fill(root(shell, "blocked"))
+    where = root(shell, "skipping")
+    form.get_by_label("Key", exact=True).fill("skipping")
+    form.get_by_label(re.compile(r"^Root")).fill(where)
     form.get_by_role("button", name="Add").click()
-    expect(form.locator('[data-line="said"]')).to_have_attribute("data-tone", "error")
-    expect(form.locator('[data-line="said"]')).to_contain_text("broken")
-    assert shown(shell, "blocked") is None
+    said = form.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-tone", "ok")
+    expect(said).to_contain_text(f"Added skipping at {where}.")
+    warning = form.locator('[data-line="warning"]')
+    expect(warning).to_be_visible()
+    expect(warning).to_contain_text("Warning: skipped broken, which won't load")
+    expect(warning).to_contain_text("defaults and checks were not applied")
+    expect(warning).to_contain_text("moxi uninstall broken")
+    assert shown(shell, "skipping")["root"] == where
 
 
 # --- add ----------------------------------------------------------------------------------------

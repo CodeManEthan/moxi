@@ -23,7 +23,8 @@ inside it:
 - agents: `fail` for a lead also in the associated set, or a name breaking the name
   rule; only a hand edit gets here.
 - contributions: `fail` for each entry of the `moxi.projects` group that won't load
-  (it blocks remove, add, and set of a kind no loaded module declares), and for each
+  (it blocks remove, and add or set of a kind no loaded module declares; any other add
+  goes ahead without it, with a warning), and for each
   kind declared twice or with a wrong shape (it blocks add and set of that kind alone).
 - notes root: `ok`, with the count, for notes roots kept while notes is not installed.
 """
@@ -257,8 +258,9 @@ def _contribution_rows(found: _contributions.Contributions) -> Iterator[Row]:
         return
     for module, reason in found.unloadable:
         yield Row(MODULE, "contributions", "fail",
-                  f"{module}: {reason}. It blocks remove, add, and set of a kind no loaded "
-                  "module declares",
+                  f"{module}: {reason}. It blocks remove, and add or set of a kind no "
+                  "loaded module declares; any other add goes ahead without it, with a "
+                  "warning",
                   f"repair {module} or uninstall it (`moxi uninstall {module}`)")
     for name, reason, modules in found.blocked():
         fix = (f"repair {modules[0]} or uninstall it (`moxi uninstall {modules[0]}`)"

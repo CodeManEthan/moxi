@@ -22,7 +22,9 @@ prints the read API's field names instead; `find --json` prints the project or `
 Paths on the command line are made absolute: `~` expanded, relative ones against the
 working directory; an empty `--root` or `--notes-root` is a usage error. Notes that
 refuse nothing (a root that doesn't exist yet, what `--create` made, what `promote`
-moved) go to stderr. A refusal prints its reason and the command that fixes it to
+moved) go to stderr. So does a warning: an `add` or `promote` goes ahead past a
+contribution that won't load, unless the kind may be its own, and says on one line which
+it skipped and the fix; with `--json` the project also carries it, as `warnings`. A refusal prints its reason and the command that fixes it to
 stderr, and exits 1 (an error), 2 (usage), 3 (refused) or 75 (the store stayed locked;
 try again).
 """
@@ -158,9 +160,7 @@ def _path(text: str | None) -> str | None:
 def _add(args, out) -> int:
     added = acts.add(args.key, root=_path(args.root), kind=args.kind, lead=args.lead,
                      notes_root=_path(args.notes_root), create=args.create)
-    for note in added.notes:
-        print(f"note: {note}", file=sys.stderr)
-    _print(added.project, args.json, out)
+    _print_added(added, args.json, out)
     return codes.OK
 
 
@@ -199,9 +199,7 @@ def _remove(args, out) -> int:
 def _promote(args, out) -> int:
     added = acts.promote(args.slug, args.key, kind=args.kind, root=_path(args.root),
                          create=args.create)
-    for note in added.notes:
-        print(f"note: {note}", file=sys.stderr)
-    _print(added.project, args.json, out)
+    _print_added(added, args.json, out)
     return codes.OK
 
 
@@ -272,6 +270,20 @@ def _kinds_dict(found: Kinds) -> dict:
                       for k in found.found],
             "broken": [{"module": module, "reason": reason}
                        for module, reason in found.broken]}
+
+
+def _print_added(added: acts.Added, as_json: bool, out) -> None:
+    """An add's notes and warnings on stderr, then the project; with `as_json`, a warning
+    is also in the project's JSON, as `warnings`, present only when there is one."""
+    for note in added.notes:
+        print(f"note: {note}", file=sys.stderr)
+    for warning in added.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if as_json and added.warnings:
+        print(json.dumps({**added.project.as_dict(), "warnings": added.warnings}, indent=2),
+              file=out)
+        return
+    _print(added.project, as_json, out)
 
 
 def _print(project: Project, as_json: bool, out) -> None:

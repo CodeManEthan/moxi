@@ -245,12 +245,24 @@ def test_a_git_mint_inside_the_notes_root_is_refused(git_ok):
 
 
 @needs_notes
-def test_a_contribution_that_wont_load_refuses_as_add_does():
+def test_a_contribution_that_wont_load_is_skipped_with_a_warning_as_add_does():
+    one_off()
+    found = contributions_.load()
+    broken = Contributions(list(found.loaded), [("beta", "the entry beta won't load")])
+    added = acts.promote("sketch", "gardening", contributions=broken)
+    assert added.project.key == "gardening"
+    [warning] = added.warnings
+    assert warning.startswith("skipped beta") and "moxi uninstall beta" in warning
+
+
+@needs_notes
+def test_an_unknown_kind_past_a_contribution_that_wont_load_refuses_as_add_does():
     source = one_off()
     found = contributions_.load()
     broken = Contributions(list(found.loaded), [("beta", "the entry beta won't load")])
     with pytest.raises(Broken) as caught:
-        acts.promote("sketch", "gardening", contributions=broken)
+        acts.promote("sketch", "alpha", kind="nosuch",
+                     root=str(Path.home() / "code" / "alpha"), contributions=broken)
     assert caught.value.exit_code == 1 and "beta" in caught.value.reason
     assert untouched(source)
 

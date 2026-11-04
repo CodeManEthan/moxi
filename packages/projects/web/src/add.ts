@@ -2,11 +2,12 @@
 // the root (an absolute path; it may be left empty, and a kind's module may give it),
 // the kind (starting at `kind` when it is listed), the lead, the notes root (only while
 // notes is installed), and "create", which makes the root: hidden for a kind whose mint
-// is `refuse`. While a contribution won't load, it says which: an add is refused until it
-// is fixed.
+// is `refuse`. While a contribution won't load, it says which: an add of a kind that
+// module may declare is refused, and any other add goes ahead without it.
 //
 // It sends `/api/add` once per press and shows what came back: the project and its
-// notes, or the refusal with its fix. When no answer comes back it can't know whether the
+// notes, with any warning beside them (a contribution skipped since it won't load, and
+// the fix), or the refusal with its fix. When no answer comes back it can't know whether the
 // add was made, so it says so, and that the directory may exist after a create. After
 // every add that was made or may have been, it sends `CHANGED` on the document, so every
 // projects component on the page reads its route again.
@@ -17,7 +18,7 @@ import { css, html, LitElement, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { api, installed } from "/m/ui/client.js";
 
-import { CHANGED, Feed, parseKinds, parseWritten } from "./feed.ts";
+import { CHANGED, Feed, parseAdded, parseKinds } from "./feed.ts";
 import type { Kinds } from "./feed.ts";
 import { BASE } from "./styles.ts";
 import {
@@ -123,6 +124,8 @@ export class ProjectsAdd extends LitElement {
       </div>
       ${this.said ? html`<div class="said ${this.said.tone}" data-line="said" data-tone=${this.said.tone}
         role="status">${this.said.lines.map((line) => html`<p>${line}</p>`)}</div>` : nothing}
+      ${this.said?.warnings?.length ? html`<div class="said warn" data-line="warning" role="status">
+        ${this.said.warnings.map((line) => html`<p>${line}</p>`)}</div>` : nothing}
     </form>`;
   }
 
@@ -147,7 +150,7 @@ export class ProjectsAdd extends LitElement {
     this.said = null;
     try {
       const answer = await api("projects", "api/add", body);
-      const acted = actedOf(answer.status, answer.data, parseWritten);
+      const acted = actedOf(answer.status, answer.data, parseAdded);
       this.said = addSaid(acted, created);
       if (acted.outcome === "done") this.form = emptyForm(this.form.kind);
       if (acted.outcome !== "refused") document.dispatchEvent(new Event(CHANGED));

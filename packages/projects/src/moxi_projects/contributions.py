@@ -37,9 +37,12 @@ and the fix (repair it or uninstall it):
 
 - An entry that won't load (its import fails, its `INTERFACE` is not 1 or 2, its `KINDS`
   is not a mapping, or a function it offers is not callable) blocks `remove`, since it
-  can't say whether it holds the project; `add`, since it can't say whether its
-  `prepare` would have filled a field or its kind is the one asked for; and `set` of a
-  kind no loaded entry declares, whether the set names the kind or the row keeps it.
+  can't say whether it holds the project, and `add` or `set` of a kind no loaded entry
+  declares, since it may be that kind's home (for a `set`, whether the set names the kind
+  or the row keeps it).
+- Any other `add` goes ahead without it. Its `prepare` is not called, so it fills no
+  field and checks nothing, and the add's answer carries a warning that names every
+  entry skipped and the fix.
 - A kind declared twice, by two modules or by one module over a built-in kind, or
   declared with a value of the wrong shape, blocks `add` and `set` of that kind alone,
   and `set` of any field on a row of that kind. A blocked kind is not among the kinds
@@ -263,8 +266,8 @@ class Contributions:
                      if declared is None)
 
     def require_loaded(self, act: str) -> None:
-        """`Broken` when any entry won't load: `add` and `remove` stop past it, since it
-        could bear on either."""
+        """`Broken` when any entry won't load: `remove` stops past it, since it could hold
+        the project."""
         if not self.unloadable:
             return
         modules = tuple(dict.fromkeys(module for module, _r in self.unloadable))
@@ -272,6 +275,19 @@ class Contributions:
         raise Broken(modules, f"{act} can't go ahead while a contribution to projects "
                               f"won't load ({why})",
                      "; ".join(_fix(m) for m in modules))
+
+    def skipped(self) -> str | None:
+        """The warning an `add` carries while some entry won't load, naming every one
+        skipped, why, and the fix; None while every entry loaded."""
+        if not self.unloadable:
+            return None
+        modules = tuple(dict.fromkeys(module for module, _r in self.unloadable))
+        why = "; ".join(f"{module}: {reason}" for module, reason in self.unloadable)
+        one = len(modules) == 1
+        names = modules[0] if one else f"{', '.join(modules[:-1])} and {modules[-1]}"
+        return (f"skipped {names}, which won't load ({why}), so "
+                f"{'its' if one else 'their'} defaults and checks were not applied; fix: "
+                + "; ".join(_fix(m) for m in modules))
 
     def kind(self, name: str, act: str) -> Declared:
         """The kind `name` for `act` (`add` or `set`), or why it can't be used.
@@ -302,7 +318,7 @@ class Contributions:
         `{field: (value, module)}`.
 
         Every loaded interface 2 entry's `prepare` is called with a copy of the user's
-        `fields`. A default fills only a field the user left unset: a default for a field
+        `fields`; an entry that won't load is skipped (`skipped` says so). A default fills only a field the user left unset: a default for a field
         in `fields` is neither merged nor compared. A value of None is no default. A
         default may name only `root` and `notes_root`, each an absolute path, given as a
         string; it is returned normalized. A `notes_root` default is dropped unchecked
@@ -311,10 +327,7 @@ class Contributions:
         other than a dict or None is `Broken` naming the module. Two modules defaulting
         one field to different values is `Broken` naming both; the user settles it by
         passing the field.
-
-        Refuses first, as `add` does, while any entry won't load.
         """
-        self.require_loaded("add")
         proposals: dict[str, list[tuple[str, str]]] = {}
         for c in self.loaded:
             if c.prepare is None:
@@ -394,7 +407,7 @@ class Contributions:
 
 def load() -> Contributions:
     """Read the group afresh and load every entry. Never raises: an entry that won't load
-    is listed in `unloadable` with the reason."""
+    is listed in `unloadable` with the reason, on one line."""
     importlib.invalidate_caches()
     loaded: list[Contribution] = []
     unloadable: list[tuple[str, str]] = []
@@ -402,11 +415,19 @@ def load() -> Contributions:
         try:
             loaded.append(_read(ext))
         except ValueError as exc:
-            unloadable.append((ext.module, f"the entry {ext.name} won't load: {exc}"))
-        except Exception as exc:  # noqa: BLE001 - one entry never stops the reading
             unloadable.append((ext.module, f"the entry {ext.name} won't load: "
-                                           f"{_describe(exc)}"))
+                                           f"{_one_line(str(exc))}"))
+        except Exception as exc:  # noqa: BLE001 - one entry never stops the reading
+            text = _one_line(str(exc))
+            said = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+            unloadable.append((ext.module, f"the entry {ext.name} won't load: {said}"))
     return Contributions(loaded, unloadable)
+
+
+def _one_line(text: str) -> str:
+    """`text` with every run of whitespace, line breaks included, folded to one space, so
+    a reason keeps all its lines and still prints as one."""
+    return " ".join(text.split())
 
 
 def notes_present() -> bool:
@@ -422,15 +443,19 @@ def _notes_gate(notes: bool | None) -> None:
 
 class Planned:
     """An `add` checked and ready to write: `row` (the fields `store.insert` takes),
-    `supplied` (`{field: (value, module)}` for each defaulted field) and `kind`, the
-    `Declared` kind, whose `kind.mint` says how `--create` makes the root."""
+    `supplied` (`{field: (value, module)}` for each defaulted field), `kind`, the
+    `Declared` kind, whose `kind.mint` says how `--create` makes the root, and
+    `warnings`, the sentences the add's answer carries (an entry skipped since it won't
+    load)."""
 
-    __slots__ = ("row", "supplied", "kind")
+    __slots__ = ("row", "supplied", "kind", "warnings")
 
-    def __init__(self, row: dict, supplied: dict[str, tuple[str, str]], kind: Declared):
+    def __init__(self, row: dict, supplied: dict[str, tuple[str, str]], kind: Declared,
+                 warnings: list[str] | None = None):
         self.row = row
         self.supplied = supplied
         self.kind = kind
+        self.warnings = list(warnings or [])
 
     def insert(self, conn) -> Project:
         """Write the row on `conn`, inside the write sequence (`store.writing`). A
@@ -462,11 +487,15 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
     """Check an `add` against every rule before anything is made or written.
 
     In order: the key's rules; a typed `notes_root` only while notes is installed (`notes`
-    overrides that test); every entry loaded (else `Broken`); the defaults the
+    overrides that test); while some entry won't load, a kind some module declares (else
+    `Broken`, since that entry may be the kind's home); the defaults the loaded
     contributions supply for fields the user left unset, merged; a root, typed or
     defaulted (else `Usage`, exit 2); the root, notes root and lead rules; the kind,
     usable (`Contributions.kind`); then the kind's check on the merged row. Typed paths
     must already be absolute (`rules.absolutize` makes a command line's so).
+
+    An entry that won't load is skipped otherwise: the plan carries the warning
+    `Contributions.skipped` gives.
 
     Whether the key or root is taken is checked by the write itself (`Planned.insert`).
     """
@@ -475,7 +504,9 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
     if notes_root is not None:
         _notes_gate(notes)
     contributions = contributions if contributions is not None else load()
-    contributions.require_loaded("add")
+    if contributions.unloadable and kind not in contributions.names():
+        contributions.kind(kind, "add")
+    skipped = contributions.skipped()
     fields: dict[str, object] = {"key": key, "kind": kind}
     if root is not None:
         fields["root"] = check_root(root)
@@ -490,11 +521,14 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
     for name, (value, _module) in supplied.items():
         row[name] = value
     if row["root"] is None:
+        unloadable = tuple(dict.fromkeys(module for module, _r in contributions.unloadable))
+        maybe = (f" ({', '.join(unloadable)} won't load, and may be the one that would)"
+                 if unloadable else "")
         raise Usage(f"project {key!r} needs a root, and no installed module supplies one "
-                    f"for kind {kind!r}", "pass --root DIR")
+                    f"for kind {kind!r}{maybe}", "pass --root DIR")
     declared = contributions.kind(kind, "add")
     declared.check_row(row, supplied)
-    return Planned(row, supplied, declared)
+    return Planned(row, supplied, declared, [skipped] if skipped else [])
 
 
 def plan_set(key: str, *, contributions: Contributions | None = None,
