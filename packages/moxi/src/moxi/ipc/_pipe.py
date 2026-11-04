@@ -7,8 +7,9 @@ pipe is opened with `FILE_FLAG_OVERLAPPED` through `_winapi`, as
 event: until its deadline when it has one, and never past `close()`.
 
 `Pipe` offers what the client uses of a socket: `recv`, `sendall`, `shutdown` and
-`close`, and `send_by`, a write bounded by a deadline. Nothing here runs on another
-system; `_winapi` and `_overlapped` are imported on first use.
+`close`, and `send_by`, a write bounded by a deadline, with `server_pid`, the pid of the
+process serving it. Nothing here runs on another system; `_winapi` and `_overlapped` are
+imported on first use.
 """
 
 from __future__ import annotations
@@ -85,6 +86,13 @@ class Pipe:
         return f"<moxi.ipc pipe {self._handle}{' closed' if self._closing else ''}>"
 
     # -- what the client uses ---------------------------------------------------------------
+
+    def server_pid(self) -> int:
+        """The pid of the process at the server end, the one that made the pipe instance
+        this end opened. Raises `OSError` when it can't be read."""
+        from .. import _win
+
+        return _win.pipe_server_pid(self._handle)
 
     def recv(self, size: int) -> bytes:
         """The next bytes the server sent, waiting for them; b"" once the server's end has

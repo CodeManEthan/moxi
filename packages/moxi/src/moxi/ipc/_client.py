@@ -8,6 +8,12 @@ answer is dropped. A call's time limit holds while its request waits to be writt
 
 The connection is a Unix socket on Linux and macOS, and on Windows a named pipe opened
 overlapped (`_pipe.Pipe`), which offers the client the same few socket methods.
+
+On Windows every user shares the pipe namespace, and an address `moxi.ipc.address` makes
+is easy to work out, so while a module's server is down another user can create its pipe
+first. The client checks who serves a pipe at such an address before it writes anything:
+the server must run as this user, the check the server makes of each client. On POSIX the
+socket sits in a directory only this user can write, so nothing like it is needed there.
 """
 
 from __future__ import annotations
@@ -43,6 +49,9 @@ def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LIN
     there and `Timeout` when no connection is made in `timeout` seconds. A busy server
     (its listen backlog full, or on Windows every instance of its pipe taken) is tried
     again every 50 ms until then. `timeout` is also the client's wait for `hello()`.
+    On Windows, at an address `moxi.ipc.address` made, the pipe is closed unwritten and
+    `IpcError` raised when the process serving it runs as another user or its user can't
+    be read; a pipe of any other name is not checked, as no socket path is.
     `max_line` caps the answer lines the client reads, in bytes without the newline:
     match a server given a larger `serve(max_line=...)`."""
     if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
@@ -89,7 +98,7 @@ def _open_pipe(address: str) -> _pipe.Pipe | None:
     if not _pipe.is_pipe(address):
         raise NotServing(address, "not a named pipe")
     try:
-        return _pipe.open_pipe(address)
+        pipe = _pipe.open_pipe(address)
     except OSError as exc:
         code = getattr(exc, "winerror", None)
         if code in _pipe.COLD:
@@ -97,6 +106,37 @@ def _open_pipe(address: str) -> _pipe.Pipe | None:
         if code != _pipe.BUSY:
             raise
         return None
+    try:
+        _check_server(pipe, address)
+    except BaseException:
+        pipe.close()
+        raise
+    return pipe
+
+
+def _check_server(pipe: _pipe.Pipe, address: str) -> None:
+    """Raise `IpcError` unless the process serving `pipe` runs as this user, when
+    `address` is one `moxi.ipc.address` made. Any other pipe name is left unchecked."""
+    from . import _pipe_parts, _users
+
+    try:
+        _pipe_parts(address)
+    except ValueError:
+        return
+    try:
+        pid = pipe.server_pid()
+    except OSError as exc:
+        why = exc.strerror or exc
+        raise IpcError(f"refused the pipe at {address}: the process serving it can't be "
+                       f"read ({why}), so it may not be this user's server") from None
+    user = _users.user_of(pid)
+    if _users.is_own(user):
+        return
+    if user is None:
+        raise IpcError(f"refused the pipe at {address}: the user of the process serving "
+                       f"it (pid {pid}) can't be read, so it may not be this user's server")
+    raise IpcError(f"refused the pipe at {address}: the process serving it (pid {pid}) "
+                   f"runs as {user}, not as this user, so another user may hold the name")
 
 
 def _fresh(exc: BaseException) -> BaseException:

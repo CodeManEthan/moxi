@@ -22,7 +22,7 @@ from conftest import PipeRaw, ServerThread
 
 import moxi.ipc as ipc
 from moxi import _win, files, proc
-from moxi.ipc import _server, _sweep
+from moxi.ipc import _server, _sweep, _users
 
 WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows named pipes")
 
@@ -151,7 +151,7 @@ def test_a_pipe_peer_is_read_from_the_pipe_handle(monkeypatch):
     assert seen == [1234]
     assert peer.pid == os.getpid() and peer.uid is None
     assert peer.proc == proc.identity(os.getpid())
-    assert user is not None and user == _server._own_user()
+    assert user is not None and user == _users.own_user()
 
 
 def test_a_pipe_peer_that_cant_be_read_has_no_pid_and_no_user(monkeypatch):
@@ -166,7 +166,7 @@ def test_a_pipe_peer_that_cant_be_read_has_no_pid_and_no_user(monkeypatch):
 def test_a_gone_process_has_no_user():
     child = subprocess.Popen([sys.executable, "-c", "pass"])
     child.wait(30)
-    assert _server._user_of(child.pid) is None
+    assert _users.user_of(child.pid) is None
 
 
 class FakeWriter:
@@ -481,7 +481,7 @@ def test_a_peer_of_another_user_is_dropped_on_a_real_pipe(pipe_serving, monkeypa
     async def handler(conn, method, params):
         called.append(method)
 
-    monkeypatch.setattr(_server, "_own_user", lambda: "ELSEWHERE\\someone")
+    monkeypatch.setattr(_users, "own_user", lambda: "ELSEWHERE\\someone")
     srv = pipe_serving(handler)
     raw = PipeRaw(srv.address)
     try:

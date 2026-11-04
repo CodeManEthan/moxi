@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -21,7 +22,7 @@ import pytest
 from conftest import ServerThread
 
 import moxi.ipc as ipc
-from moxi.ipc import _client, _pipe
+from moxi.ipc import _client, _pipe, _users
 
 WINDOWS = sys.platform == "win32"
 posix = pytest.mark.skipif(WINDOWS, reason="Unix sockets")
@@ -318,10 +319,20 @@ def opens(monkeypatch):
 
 
 class Opened:
-    """A stand-in for an opened pipe: nothing comes from it until it is closed."""
+    """A stand-in for an opened pipe: nothing comes from it until it is closed. Its
+    server is `pid` (this process unless given), or `server_pid()` raises `pid` when it
+    is an exception."""
 
-    def __init__(self):
+    def __init__(self, pid: int | BaseException | None = None):
         self.gone = threading.Event()
+        self.pid = os.getpid() if pid is None else pid
+        self.asked = 0
+
+    def server_pid(self) -> int:
+        self.asked += 1
+        if isinstance(self.pid, BaseException):
+            raise self.pid
+        return self.pid
 
     def recv(self, size: int) -> bytes:
         self.gone.wait(20)
@@ -408,7 +419,108 @@ def test_the_pipe_is_opened_overlapped_and_never_lets_the_server_act_as_the_clie
     assert seen["flags"] == 0x40000000 | 0x00100000 | 0x00010000
 
 
+# -- connect on Windows: who serves the pipe (any system) ----------------------------------
+
+def test_on_windows_a_pipe_served_by_this_user_is_connected(opens):
+    end = Opened()
+    opens.answers = [end]
+    with ipc.connect(PIPE) as client:
+        assert client._sock is end and end.asked == 1
+
+
+@pytest.fixture
+def server_user(monkeypatch):
+    """`server_user(user)` makes the user read of any process but this one `user`."""
+    _users.own_user()  # read now, before the patch, as a real server's process would be
+
+    def patch(user):
+        mine = os.getpid()
+        real = _users.user_of
+        monkeypatch.setattr(_users, "user_of",
+                            lambda pid: real(pid) if pid == mine else user)
+
+    return patch
+
+
+def test_on_windows_a_pipe_served_by_another_user_is_refused_and_closed(opens,
+                                                                        server_user):
+    server_user("ELSEWHERE\\someone")
+    end = Opened(pid=4321)
+    opens.answers = [end]
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert "(pid 4321) runs as ELSEWHERE\\someone, not as this user" in str(caught.value)
+    assert PIPE in str(caught.value)
+    assert end.gone.is_set() and opens.tried == [PIPE]
+
+
+def test_on_windows_a_pipe_whose_server_user_cant_be_read_is_refused_and_closed(
+        opens, server_user):
+    server_user(None)
+    end = Opened(pid=4321)
+    opens.answers = [end]
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert "(pid 4321) can't be read" in str(caught.value)
+    assert end.gone.is_set() and opens.tried == [PIPE]
+
+
+def test_on_windows_a_pipe_whose_server_pid_cant_be_read_is_refused_and_closed(opens):
+    end = Opened(pid=OSError(0, "GetNamedPipeServerProcessId failed"))
+    opens.answers = [end]
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert "can't be read (GetNamedPipeServerProcessId failed)" in str(caught.value)
+    assert end.gone.is_set()
+
+
+@pytest.mark.parametrize("address", [r"\\.\pipe\other", r"\\.\pipe\moxi-demo-a",
+                                     rf"\\.\pipe\moxi-test-pair-{'0' * 32}"])
+def test_on_windows_a_pipe_name_moxi_doesnt_make_is_not_checked(opens, address):
+    end = Opened(pid=AssertionError("the server was checked"))
+    opens.answers = [end]
+    with ipc.connect(address) as client:
+        assert client._sock is end and end.asked == 0
+
+
 # -- connect on Windows, on real pipes -----------------------------------------------------
+
+@windows
+def test_a_real_pipe_of_this_users_server_is_connected(serving):
+    srv = serving(handler)
+    with ipc.connect(srv.address) as client:
+        assert client._sock.server_pid() == os.getpid()
+        assert client.call("echo", [1], timeout=10) == [1]
+
+
+@windows
+def test_a_real_pipe_whose_server_runs_as_another_user_is_refused(serving, monkeypatch):
+    srv = serving(handler)
+    _users.own_user()
+    real = _users.user_of
+    asked = []
+
+    def user_of(pid):
+        # The client's read, on this thread, sees another user; the server's read of its
+        # peer, on its loop's thread, is left real.
+        if threading.current_thread() is not threading.main_thread():
+            return real(pid)
+        asked.append(pid)
+        return "ELSEWHERE\\someone"
+
+    monkeypatch.setattr(_users, "user_of", user_of)
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(srv.address)
+    assert type(caught.value) is ipc.IpcError
+    assert f"(pid {os.getpid()}) runs as ELSEWHERE\\someone" in str(caught.value)
+    assert asked == [os.getpid()]
+    monkeypatch.setattr(_users, "user_of", real)
+    with ipc.connect(srv.address) as client:  # the server serves on
+        assert client.call("echo", [2], timeout=10) == [2]
+
 
 @windows
 def test_nothing_at_the_pipe_is_not_serving():

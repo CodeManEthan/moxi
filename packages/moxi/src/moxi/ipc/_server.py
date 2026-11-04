@@ -39,7 +39,7 @@ from .. import names as _names
 from .. import paths as _paths
 from .. import proc as _proc
 from ..modules import _Frozen
-from . import _wire
+from . import _users, _wire
 from ._sweep import lock_path
 from ._wire import AlreadyServing, Hello, Message, Reply
 
@@ -101,27 +101,7 @@ def _pipe_peer(transport: asyncio.BaseTransport) -> tuple[Peer, str | None]:
         except (OSError, ValueError):
             pid = None
     peer = Peer(pid, None, _proc.identity(pid) if pid else None)
-    return peer, _user_of(pid) if pid else None
-
-
-def _user_of(pid: int) -> str | None:
-    """The user process `pid` runs as, `DOMAIN\\name`, or None when it can't be read."""
-    import psutil
-
-    try:
-        return psutil.Process(pid).username()
-    except psutil.Error:
-        return None
-
-
-_me: list[str | None] = []
-
-
-def _own_user() -> str | None:
-    """The user this process runs as, read as `_user_of` reads a peer's."""
-    if not _me:
-        _me.append(_user_of(os.getpid()))
-    return _me[0]
+    return peer, _users.user_of(pid) if pid else None
 
 
 Handler = Callable[["Connection", str, object], Awaitable[object]]
@@ -481,7 +461,7 @@ class Server:
     async def _accept_pipe(self, reader: asyncio.StreamReader,
                            writer: asyncio.StreamWriter) -> None:
         peer, user = _pipe_peer(writer.transport)
-        if user is None or user != _own_user():
+        if not _users.is_own(user):
             _log.warning("dropped a peer of user %s (pid %s): not this user",
                          user, peer.pid)
             writer.transport.abort()

@@ -9,7 +9,8 @@ calls it needs when first called, so importing this module costs nothing anywher
 - `make_private_dir(path)` creates one such directory and leaves an existing one alone;
   `private_file(path)` creates a new file whose access list grants only the current user.
 - `user_sid()` is the current user's SID as text, `S-1-5-21-...`.
-- `pipe_client_pid(handle)` is the pid of the process at the client end of a named pipe.
+- `pipe_client_pid(handle)` is the pid of the process at the client end of a named pipe,
+  and `pipe_server_pid(handle)` the pid of the process at its server end.
 - `Job` is a Job Object: the processes put in it can be ended together, and, made with
   `kill_on_close=True`, they end when the job's last handle closes, which happens when
   the process holding it dies.
@@ -148,6 +149,8 @@ def _bind():
     api.EqualSid = bind(advapi32, "EqualSid", w.BOOL, P, P)
     api.GetNamedPipeClientProcessId = bind(kernel32, "GetNamedPipeClientProcessId", w.BOOL,
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
+    api.GetNamedPipeServerProcessId = bind(kernel32, "GetNamedPipeServerProcessId", w.BOOL,
+                                           w.HANDLE, ctypes.POINTER(w.ULONG))
     _api = api
     return api
 
@@ -218,6 +221,17 @@ def pipe_client_pid(handle: int) -> int:
     pid = api.w.ULONG()
     if not api.GetNamedPipeClientProcessId(handle, api.ctypes.byref(pid)):
         raise _error("GetNamedPipeClientProcessId")
+    return pid.value
+
+
+def pipe_server_pid(handle: int) -> int:
+    """The pid of the process at the server end of the client end `handle` of a named
+    pipe: the process that created the pipe instance it opened. Raises `OSError` when it
+    can't be read."""
+    api = _bind()
+    pid = api.w.ULONG()
+    if not api.GetNamedPipeServerProcessId(handle, api.ctypes.byref(pid)):
+        raise _error("GetNamedPipeServerProcessId")
     return pid.value
 
 
