@@ -14,6 +14,7 @@ import pytest
 from moxi import modules
 
 from moxi_comms import directory, kinds
+from moxi_comms.config import CONNECTOR_WAIT_CEILING, ConnectorConfig
 from moxi_comms.client import DaemonClient, DaemonError, DaemonOffline
 from moxi_comms.connector import tools as tools_mod
 from moxi_comms.connector.link import BOUND, HELD, Link
@@ -580,9 +581,21 @@ def test_a_fifth_wait_is_refused(rig, tools):
     assert not [m for m in rig.record.history(rig.names_channel) if m.author_id == ME]
 
 
-def test_a_wait_over_wait_max_is_refused(rig, tools):
+def test_a_wait_over_wait_max_waits_wait_max_and_the_schema_says_so(rig, tools):
+    planner(rig)
+    tools.wait_max = 1
     got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_seconds": 6})
+    assert got.structured["outcome"] == "no-reply"
+    assert got.text.startswith("No reply within 1 second.")
+    schema = tools_mod.inputs()["send_and_wait"]["properties"]["wait_seconds"]
+    assert schema["maximum"] == CONNECTOR_WAIT_CEILING
+    assert f"longest wait is {ConnectorConfig.wait_max} seconds" in schema["description"]
+
+
+def test_a_wait_under_one_second_is_refused(rig, tools):
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_seconds": 0})
     assert got.is_error and got.refusal == "wait-shape"
+    assert not [m for m in rig.record.history(rig.names_channel) if m.author_id == ME]
 
 
 # --------------------------------------------------------------------------- only its mail

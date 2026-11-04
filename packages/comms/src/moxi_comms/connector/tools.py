@@ -31,7 +31,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from .. import machine_line, sending
-from ..config import CONNECTOR_WAIT_CEILING
+from ..config import CONNECTOR_WAIT_CEILING, ConnectorConfig
 from ..adapters.claude_shim import frame_marks, parse_timestamp
 from ..client import DaemonError, DaemonOffline
 from ..envelope import scrub
@@ -91,8 +91,10 @@ _TO = {"anyOf": [{"type": "string", "minLength": 1},
 
 
 def inputs() -> dict[str, dict]:
-    """Each tool's input schema. `wait_seconds` is bounded here by the ceiling no config may
-    pass; the tool refuses a wait over `[connector] wait_max`, which it reads at start."""
+    """Each tool's input schema. They are built before the config is read, so
+    `wait_seconds` is bounded here by the ceiling no config may pass, and its description
+    names the default `[connector] wait_max`; the tool cuts a longer wait to the
+    configured `wait_max`, which it reads at start."""
     return {
         "agents": {"type": "object", "properties": {}, "additionalProperties": False},
         "send": {"type": "object", "properties": {
@@ -111,7 +113,10 @@ def inputs() -> dict[str, dict]:
             "wait_seconds": {"type": "integer", "minimum": 1,
                              "maximum": CONNECTOR_WAIT_CEILING,
                              "description": "seconds to wait; leave it out for the usual "
-                                            "wait"},
+                                            "wait. The longest wait is "
+                                            f"{ConnectorConfig.wait_max} seconds unless "
+                                            "comms is configured otherwise; a longer "
+                                            "one is cut to it"},
         }, "required": ["to", "text"], "additionalProperties": False},
     }
 
@@ -410,9 +415,12 @@ class Tools:
         if unbound is not None:
             return unbound
         wait = int(args.get("wait_seconds", self.wait_default))
-        if not 1 <= wait <= self.wait_max:
-            return self.refused("wait-shape", f"wait_seconds {wait} is outside 1 to "
-                                f"{self.wait_max}. Nothing was sent.")
+        if wait < 1:
+            return self.refused("wait-shape", f"wait_seconds {wait} is under 1. Nothing "
+                                "was sent.")
+        # The schema can't know the configured longest wait; a longer ask is cut to it,
+        # and the answer says how long it waited.
+        wait = min(wait, self.wait_max)
         if self.waiting >= WAITERS:
             return self.refused("busy", f"{WAITERS} calls are already waiting for "
                                 "replies; try again when one has finished. Nothing was "
