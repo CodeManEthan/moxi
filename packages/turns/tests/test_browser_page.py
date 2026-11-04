@@ -36,16 +36,14 @@ APPEAR_MS = 10_000
 
 
 @pytest.fixture(scope="module")
-def ui_shell(ui_shell_options):
-    """The test shell, rooted in a short directory rather than pytest's tmp. The
+def ui_shell(ui_shells, ui_shell_options):
+    """The test shell, its home in a short directory rather than pytest's tmp. The
     endpoints the tests open put their sockets under the shell's runtime root, and under
     pytest's root (a numbered directory per run, a worker's directory, a counted one per
     shell) a socket's path can pass the core's limit, which moves it to a shared directory
-    outside the test."""
-    from moxi_ui.testing.shell import TestShell
-
-    with short_dir("tb-") as root:
-        shell = TestShell(root, **ui_shell_options).start()
+    outside the test. The shell is stopped before its home is removed."""
+    with short_dir("tb-") as home:
+        shell = ui_shells(home=home, **ui_shell_options)
         try:
             yield shell
         finally:
