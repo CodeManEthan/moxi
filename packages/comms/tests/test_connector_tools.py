@@ -555,6 +555,9 @@ def test_other_new_messages_never_count_the_reply_found_in_the_pushes(rig, tools
 
 
 def test_a_dropped_caller_ends_the_wait_and_the_late_reply_stays_unread(rig, tools, link):
+    """The task's cancel here stands in for the connector's: when a caller hangs up,
+    the host cancels the call's task. The wait unwinds and frees its slot, no digest is
+    open, and a reply that comes later is read through check_messages."""
     planner(rig)
 
     async def go():
