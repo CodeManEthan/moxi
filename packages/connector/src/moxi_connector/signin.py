@@ -1,7 +1,9 @@
 """The sign-in's seam: what the door asks of the sign-in for each app it builds.
 
-The door (`moxi_connector.app.build_app`) calls `SignIn.mount(origin)` once per origin.
-The `Mount` it gets back holds:
+The door calls `SignIn.mount(origin)` once per app it builds for an origin, as the last
+step of that app's start (`moxi_connector.app.App.start`), so an app that fails to start
+never mounts and the serving app's sign-in is left as it was. A mount that raises fails
+the start, and must leave the sign-in as it was too. The `Mount` it gets back holds:
 
 - `routes`: each path the sign-in serves (the metadata documents, `/register`,
   `/authorize`, `/token`, `/revoke`), mapped to the ASGI app that answers it, every method

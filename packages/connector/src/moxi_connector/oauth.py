@@ -247,13 +247,15 @@ class OAuth:
 
     def mount(self, origin: Origin) -> Mount:
         """The routes and the guard for `origin`. The previous origin's pending requests and
-        OAuth codes are dropped here."""
+        OAuth codes are dropped here, once the new ones are built: a mount that raises
+        leaves the sign-in as it was."""
+        under = Under(self, origin)
+        mount = under.mount()
         if self.current is not None:
             self.current.drop_all()
-        under = Under(self, origin)
         self.current = under
         self._later(self._tidy_and_note, origin)
-        return under.mount()
+        return mount
 
     async def stopping(self, switch_on: bool) -> None:
         """At the process's stop: write pending last-use times; with the switch off,

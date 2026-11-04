@@ -266,6 +266,92 @@ def test_a_change_of_origin_swaps_every_derived_value_at_once(make_host):
     run(main())
 
 
+@pytest.fixture
+def broken_manager(monkeypatch):
+    """`broken_manager()`: every app built from then on has an MCP session manager that
+    fails at its start; `broken_manager(False)` mends it."""
+    import contextlib
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    from moxi_connector import app as app_mod
+
+    class Broken(StreamableHTTPSessionManager):
+        @contextlib.asynccontextmanager
+        async def run(self):
+            raise RuntimeError("the session manager can't start")
+            yield  # pragma: no cover
+
+    def set_(broken=True):
+        monkeypatch.setattr(app_mod, "StreamableHTTPSessionManager",
+                            Broken if broken else StreamableHTTPSessionManager)
+
+    return set_
+
+
+def test_a_swap_whose_new_app_fails_to_start_leaves_the_sign_in_and_is_tried_again(
+        make_host, clock, broken_manager):
+    from signin_kit import CALLBACK, CALLBACKS, Door, pkce
+
+    from moxi_connector import grants
+    from moxi_connector.oauth import OAuth
+
+    async def settled(oauth):
+        await asyncio.sleep(0)
+        for task in list(oauth._tasks):
+            await task
+
+    async def main():
+        host = await make_host()
+        oauth = OAuth(grants.Store(), host.calllog, redirect_uris=CALLBACKS, clock=clock)
+        host.signin, host.redirect_uris = oauth, CALLBACKS
+        d = _daemon(host, Reads(ORIGIN, OTHER))
+        await _start_without_listening(d)
+        door = Door(d.front, oauth, clock)
+        client, tokens = await door.sign_in()
+        serving, under = d.front.app, oauth.current
+        verifier, query = door.page(client)              # a code not yet redeemed
+        waiting = under.open(under.check({               # and a sign-in in progress
+            "client_id": client["client_id"], "redirect_uri": CALLBACK,
+            "response_type": "code", "code_challenge": pkce()[1],
+            "code_challenge_method": "S256", "state": "s"}))
+        await settled(oauth)
+
+        broken_manager()
+        await d.tick()
+        await settled(oauth)
+        # The serving app, its origin and its sign-in are as they were.
+        assert d.front.app is serving and d.watch.current == ORIGIN
+        assert oauth.current is under and under.waiting(waiting) is not None
+        assert not [r for r in host.calllog.rows if r["kind"] in ("grant-stale",
+                                                                    "origin-changed")]
+        assert (await door.mcp(tokens["access_token"])).status == 200
+        assert (await door.token(client, query["code"], verifier)).status == 200
+
+        broken_manager(False)
+        await d.tick()                                   # the next read swaps
+        await settled(oauth)
+        assert d.front.origin == OTHER and d.watch.current == OTHER
+        assert oauth.current is not under
+        assert [r["grant"] for r in host.calllog.rows if r["kind"] == "grant-stale"]
+        await d.front.close()
+    run(main())
+
+
+def test_an_app_whose_mount_raises_fails_its_start(make_host):
+    class Raising(Admit):
+        def mount(self, origin):
+            raise RuntimeError("the sign-in can't mount")
+
+    async def main():
+        host = await make_host(signin=Raising())
+        app = build_app(ORIGIN, host)
+        with pytest.raises(RuntimeError, match="can't mount"):
+            await app.start()
+        assert app.mount is None and app._task.done()
+    run(main())
+
+
 def test_one_read_with_no_origin_swaps_nothing_two_in_a_row_swap_to_503(make_host):
     async def main():
         host = await make_host()

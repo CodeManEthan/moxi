@@ -116,7 +116,22 @@ def test_a_different_origin_swaps_at_once():
     w = Watch(A)
     assert w.see(A) is None
     assert w.see(B) == B
+    w.took(B)
     assert w.current == B
+    assert w.see(B) is None
+
+
+def test_a_swap_not_taken_is_asked_for_again_at_the_next_read():
+    w = Watch(A)
+    assert w.see(B) == B
+    assert w.current == A                           # the new app didn't start
+    assert w.see(B) == B
+    assert w.see(A) is None                         # back to the serving app's origin
+    assert w.see(None) is None
+    assert w.see(None) == Watch.NONE
+    assert w.see(None) == Watch.NONE                # the no-origin app didn't start either
+    w.took(None)
+    assert w.see(None) is None
 
 
 def test_one_read_with_no_origin_swaps_nothing_and_two_in_a_row_swap_to_none():
@@ -126,6 +141,7 @@ def test_one_read_with_no_origin_swaps_nothing_and_two_in_a_row_swap_to_none():
     assert w.see(A) is None
     assert w.see(None) is None
     assert w.see(None) == Watch.NONE
+    w.took(None)
     assert w.current is None
     assert w.see(None) is None
     assert w.see(A) == A

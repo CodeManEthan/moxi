@@ -78,7 +78,7 @@ from .probe import HEADER as PROBE_HEADER
 from .probe import Probes
 from .provider import TOOL_FAILED, Ctx, Result, Tool
 from .providers import Registry
-from .signin import GRANT, Closed, Grant, SignIn
+from .signin import GRANT, Closed, Grant, Mount, SignIn
 
 log = logging.getLogger("moxi.connector.app")
 
@@ -385,14 +385,21 @@ class NoOrigin(_Served):
 
 
 class App(_Served):
-    """The app built from one origin. `start()` runs its MCP session manager, `stop()`
-    ends it; the session manager runs in a task of its own, so any task may stop it."""
+    """The app built from one origin. `start()` runs its MCP session manager, then mounts
+    the sign-in for the origin; `stop()` ends the manager, which runs in a task of its
+    own, so any task may stop it.
+
+    The mount is the start's last step, since mounting moves the sign-in to this origin
+    (the serving app's pending sign-ins and OAuth codes go, and grants are judged against
+    this origin). An app whose start fails has mounted nothing, so the app still serving
+    keeps its sign-in as it was."""
 
     def __init__(self, origin: Origin, host: Host):
         super().__init__()
         self.origin = origin
         self.host = host
-        self.mount = host.signin.mount(origin)
+        self.mount: Mount | None = None
+        self.mcp = None
         self.tools = Tools(host)
         self.server = Server(
             host.name, version=host.version,
@@ -406,11 +413,15 @@ class App(_Served):
         self.manager = StreamableHTTPSessionManager(
             app=self.server, json_response=True, stateless=True,
             security_settings=self.security, max_request_body_size=MAX_BODY)
-        sdk = StreamableHTTPASGIApp(self.manager)
-        guard = self.mount.guard or Closed().mount(origin).guard
-        self.mcp = guard(_in_call(sdk))
         self._task: asyncio.Task | None = None
         self._stop: asyncio.Event | None = None
+
+    def _mount(self) -> None:
+        assert self.origin is not None
+        mount = self.host.signin.mount(self.origin)
+        guard = mount.guard or Closed().mount(self.origin).guard
+        self.mcp = guard(_in_call(StreamableHTTPASGIApp(self.manager)))
+        self.mount = mount
 
     async def start(self) -> None:
         if self._task is not None:
@@ -431,6 +442,11 @@ class App(_Served):
             waiter.cancel()
             self._task.result()
             raise RuntimeError("the MCP session manager ended at its start")
+        try:
+            self._mount()
+        except BaseException:
+            await self.stop()
+            raise
 
     async def stop(self) -> None:
         if self._task is None or self._stop is None:
@@ -441,7 +457,7 @@ class App(_Served):
 
     async def __call__(self, scope, receive, send) -> None:
         origin = self.origin
-        assert origin is not None
+        assert origin is not None and self.mount is not None, "an app serves once started"
         if not origin.admits_host(header(scope, b"host")):
             await answer(send, 421, b"This server answers only for its own address.\n")
             return

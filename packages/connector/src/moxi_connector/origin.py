@@ -224,7 +224,9 @@ class Watch:
 
     `see(found)` takes one read and answers what the running app should become: the
     `Origin` to build a new app for, `NONE` to swap to the no-origin app, or None to keep
-    the running one. `current` is the origin the running app was built with."""
+    the running one. `current` is the origin the running app was built with, and changes
+    only through `took`, once a swap has succeeded: a swap whose new app failed to start
+    leaves it, so the next read asks for the swap again."""
 
     #: `see`'s answer: swap to the no-origin app.
     NONE = "none"
@@ -238,15 +240,17 @@ class Watch:
             if self.current is None:
                 return None
             if self._missed:
-                self.current = None
                 return self.NONE
             self._missed = True
             return None
         self._missed = False
         if found == self.current:
             return None
-        self.current = found
         return found
+
+    def took(self, origin: Origin | None) -> None:
+        """The running app is now the one built with `origin`."""
+        self.current = origin
 
 
 __all__ = ["ASM_PATH", "BadOrigin", "MCP_PATH", "Origin", "POLL", "PRM_PATH",

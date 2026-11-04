@@ -15,7 +15,8 @@ What one run does, in order:
 4. reads the origin and builds the app from it (`origin.read`, `app.build_app`), then
    serves it (`server.Endpoint`);
 5. every `origin.POLL` seconds reads the origin again and swaps the app when the swap
-   rule says so (`origin.Watch`), and flushes the call log (which also deletes old files
+   rule says so (`origin.Watch`; a new app that fails to start leaves the serving one
+   and its sign-in as they were, and the next read tries again), and flushes the call log (which also deletes old files
    at the first flush of a UTC day);
 6. at SIGTERM, SIGINT or SIGHUP: stops listening, closes the control socket, stops the apps, reads the switch again
    and tells the sign-in (`SignIn.stopping(switch_on)`), stops the providers, closes the
@@ -112,10 +113,17 @@ class Daemon:
         if verdict is not None:
             new = None if verdict == origins.Watch.NONE else verdict
             old = self.front.origin
-            await self.front.swap(build_app(new, self.host))
-            log.info("the connector's origin is now %s", new.url if new else "none")
-            await _blocking(calllog.event, self.host.calllog, "origin-changed",
-                            old=old.url if old else None, new=new.url if new else None)
+            try:
+                await self.front.swap(build_app(new, self.host))
+            except Exception:  # noqa: BLE001 - the serving app keeps serving
+                log.exception("the app for origin %s couldn't start; the app for %s "
+                              "keeps serving, and the next read tries again",
+                              new.url if new else "none", old.url if old else "none")
+            else:
+                self.watch.took(new)
+                log.info("the connector's origin is now %s", new.url if new else "none")
+                await _blocking(calllog.event, self.host.calllog, "origin-changed",
+                                old=old.url if old else None, new=new.url if new else None)
         await _blocking(self.host.calllog.flush)
 
     async def stop(self) -> None:
