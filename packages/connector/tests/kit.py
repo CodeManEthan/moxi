@@ -189,3 +189,79 @@ def echo_tool(fake: Fake, name: str = "echo") -> Tool:
                 echo, output_schema={"type": "object",
                                      "properties": {"said": {"type": "string"}}},
                 annotations={"readOnlyHint": True, "idempotentHint": True})
+
+
+class Running:
+    """A `Daemon` on a loopback socket, run on a loop in a thread of its own, so a test's
+    blocking code (the CLI, the doctor, `checks.ask`) talks to it as another process would.
+
+        with Running(host, origin) as d:
+            d.port, d.daemon, d.call(coro_fn)
+    """
+
+    def __init__(self, host, origin, *, switch=lambda: True, methods=None):
+        self.host = host
+        self.origin = [origin]
+        self.switch = switch
+        self.methods = methods
+        self.daemon = None
+        self.port = None
+        self._loop = None
+        self._thread = None
+
+    def __enter__(self):
+        import threading
+
+        from moxi_connector import listen
+        from moxi_connector.daemon import Daemon
+
+        ready = threading.Event()
+        failed = []
+
+        def main():
+            loop = asyncio.new_event_loop()
+            self._loop = loop
+            sock = listen.bind(0)
+            self.port = sock.getsockname()[1]
+            self.daemon = Daemon(sock, self.host, read_origin=lambda: self.origin[0],
+                                 switch=self.switch, env={}, methods=self.methods,
+                                 poll=3600)
+            try:
+                loop.run_until_complete(self.daemon.start())
+            except BaseException as e:  # noqa: BLE001 - handed to the test
+                failed.append(e)
+                ready.set()
+                return
+            ready.set()
+            loop.run_forever()
+            loop.run_until_complete(self.daemon.stop())
+            loop.close()
+
+        self._thread = threading.Thread(target=main, daemon=True)
+        self._thread.start()
+        assert ready.wait(10), "the daemon didn't start"
+        if failed:
+            raise failed[0]
+        return self
+
+    def call(self, fn):
+        """Run coroutine function `fn()` on the daemon's loop and return its result."""
+        return asyncio.run_coroutine_threadsafe(fn(), self._loop).result(10)
+
+    def __exit__(self, *exc):
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(10)
+
+
+def http(port: int, method: str, path: str, *, host: str = HOST, headers=None,
+         body: bytes | None = None):
+    """One request to a door on loopback: (status, headers by lower-case name, body)."""
+    import http.client
+
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.request(method, path, body=body, headers={"Host": host, **(headers or {})})
+        got = conn.getresponse()
+        return got.status, {k.lower(): v for k, v in got.getheaders()}, got.read()
+    finally:
+        conn.close()

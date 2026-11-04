@@ -63,6 +63,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from . import calllog
 from .origin import ASM_PATH, MCP_PATH, PRM_PATH, Origin
+from .probe import HEADER as PROBE_HEADER
+from .probe import Probes
 from .provider import TOOL_FAILED, Ctx, Result, Tool
 from .providers import Registry
 from .signin import GRANT, Closed, Grant, SignIn
@@ -91,11 +93,13 @@ CALL: contextvars.ContextVar[Call] = contextvars.ContextVar("moxi_connector_call
 @dataclass
 class Host:
     """What every app the process builds shares: the providers' tools, the sign-in, the
-    call log, and the allowed redirect URIs (the page's `form-action`)."""
+    call log, the allowed redirect URIs (the page's `form-action`), and the nonces of
+    `moxi connector check`."""
 
     registry: Registry
     signin: SignIn = field(default_factory=Closed)
-    calllog: calllog.CallLog = field(default_factory=calllog.MemoryLog)
+    calllog: calllog.Writer = field(default_factory=calllog.MemoryLog)
+    probes: Probes = field(default_factory=Probes)
     redirect_uris: tuple[str, ...] = ()
     name: str = "connector"
     version: str = ""
@@ -265,7 +269,7 @@ def new_id() -> str:
     return secrets.token_hex(6)
 
 
-async def write(log_: calllog.CallLog, row: Mapping[str, Any], *, durable: bool,
+async def write(log_: calllog.Writer, row: Mapping[str, Any], *, durable: bool,
                 collapse: str | None) -> None:
     """Hand one row to the call log off the loop, since a durable write waits on the disk.
     A writer that fails loses the row, logged; it never fails the request."""
@@ -481,6 +485,9 @@ class Front:
                     time.monotonic(),
                     user_agent=clean(header(scope, b"user-agent")),
                     forwarded_for=clean(header(scope, b"x-forwarded-for")))
+        # Before the Host gate: the check asks whether its request reached this process
+        # at all. Only a nonce the check registered counts.
+        self.host.probes.saw(header(scope, PROBE_HEADER))
         scope = {**scope, CALL_KEY: call}
         keep_body = call.route == "mcp"
 
