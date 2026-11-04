@@ -16,11 +16,11 @@ from pathlib import Path
 import pytest
 
 import moxi.paths
-from conftest import WINDOWS, drop_modules, is_link, link_text, need_symlinks
+from conftest import WINDOWS, drop_modules, is_link, link_text
 from moxi import _settle, config, doctor, files, home, units
 from moxi.units import _backend, _declare, _plan, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
-from moxi_dev.testing import console_script
+from moxi_dev.testing import console_script, need_symlinks
 
 SETTINGS = """
 [relay.enabled]
@@ -1865,7 +1865,7 @@ def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
     whose source is not in its package: one another module handed it, and a project's
     own skill. Its re-install manages only its own and leaves those exactly as they are,
     even after its own SKILLS go."""
-    need_symlinks(tmp_path)  # the project's own skill links as a symlink
+    need_symlinks()  # the project's own skill links as a symlink
     place = sk.place
     other = tmp_path / "comms-pkg" / "comms-send"
     other.mkdir(parents=True)

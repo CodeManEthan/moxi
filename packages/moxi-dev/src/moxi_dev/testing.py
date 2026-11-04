@@ -86,6 +86,11 @@ is there). It
 also sets `UV_PYTHON_DOWNLOADS=never`, so a child finds the Pythons already installed
 and never adds one to the real directory. The test's own process stays fenced.
 
+Symlinks: Windows lets an account make one only with the symlink privilege or with
+Developer Mode on. `can_symlink()` tries a real one once per process and keeps the
+answer; a test that needs one asks for the `needs_symlinks` fixture, or calls
+`need_symlinks()` at the point it needs one, and is skipped where the account may not.
+
 The fsync seam: `os.fsync` (and `os.fdatasync`) is a no-op in every test that is not
 marked `honest_fsync`; the no-op still refuses a closed descriptor. Code must call
 `os.fsync(...)` through the module for the seam to reach it.
@@ -1043,6 +1048,43 @@ def short_dir(prefix: str = "mx-") -> Iterator[Path]:
     finally:
         shutil.rmtree(path, ignore_errors=True)
         _SHORT_DIRS.discard(real)
+
+
+#: Why a test that needs a symlink skips where `can_symlink()` is false.
+NO_SYMLINKS = ("this account may not make symlinks (on Windows: it lacks the symlink "
+               "privilege and Developer Mode is off)")
+
+#: Windows' "a required privilege is not held", the error for a symlink made without it.
+_ERROR_PRIVILEGE_NOT_HELD = 1314
+
+
+@functools.cache
+def can_symlink() -> bool:
+    """Whether this account may make a symlink: tried once, on a real link in a new temp
+    directory that is removed after, and the answer kept for the process.
+
+    Only Windows' "a required privilege is not held" reads as no. Any other error is
+    raised, `FenceError` among them, so a fence refusal is never taken for no."""
+    with tempfile.TemporaryDirectory(prefix="mx-link-") as folder:
+        try:
+            os.symlink(os.path.join(folder, "target"), os.path.join(folder, "link"))
+        except OSError as error:
+            if getattr(error, "winerror", None) != _ERROR_PRIVILEGE_NOT_HELD:
+                raise
+            return False
+    return True
+
+
+def need_symlinks() -> None:
+    """Skip the test from here on where this account may not make a symlink."""
+    if not can_symlink():
+        pytest.skip(NO_SYMLINKS)
+
+
+@pytest.fixture
+def needs_symlinks() -> None:
+    """For a test that makes a symlink: skipped where this account may not make one."""
+    need_symlinks()
 
 
 @contextlib.contextmanager

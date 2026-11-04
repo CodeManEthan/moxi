@@ -1,5 +1,5 @@
 """The kit's helpers: served, wait_for, param ids, the fsync seam, the SQLite writer,
-the markers, and the contract module's public names."""
+the symlink probe, the markers, and the contract module's public names."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import socket
 import socketserver
 import sqlite3
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -218,6 +219,71 @@ def test_write_sqlite_is_one_transaction(tmp_path):
         write_sqlite(tmp_path / "f.db", SCHEMA, rows)
     with sqlite3.connect(tmp_path / "f.db") as conn:
         assert conn.execute("SELECT name FROM sqlite_master").fetchall() == []
+
+
+# --- the symlink probe -----------------------------------------------------------------
+
+@pytest.fixture
+def fresh_probe():
+    """`can_symlink` with no answer kept, before the test and after it."""
+    testing.can_symlink.cache_clear()
+    yield
+    testing.can_symlink.cache_clear()
+
+
+def refusing(error):
+    """An `os.symlink` that raises `error`."""
+    def symlink(*_args, **_kwargs):
+        raise error
+    return symlink
+
+
+def with_winerror(error, winerror):
+    """`error` with the Windows error code `winerror`, on any system."""
+    error.winerror = winerror
+    return error
+
+
+def test_the_symlink_probe_tries_a_real_link_once_and_leaves_nothing(tmp_path, monkeypatch,
+                                                                      fresh_probe):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    tried = []
+    real = os.symlink
+
+    def symlink(target, link, *args, **kwargs):
+        tried.append(Path(link))
+        return real(target, link, *args, **kwargs)
+
+    monkeypatch.setattr(os, "symlink", symlink)
+    first = testing.can_symlink()
+    assert testing.can_symlink() is first and len(tried) == 1, "the answer is kept"
+    assert tried[0].parent.parent == temp, "tried in a temp directory of its own"
+    assert list(temp.iterdir()) == []
+    if not testing.WINDOWS:
+        assert first is True
+
+
+def test_only_a_missing_privilege_reads_as_no_and_the_skip_says_why(monkeypatch,
+                                                                     fresh_probe):
+    monkeypatch.setattr(os, "symlink", refusing(with_winerror(OSError(1, "no"), 1314)))
+    assert testing.can_symlink() is False
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        testing.need_symlinks()
+    assert skipped.value.msg == testing.NO_SYMLINKS
+
+
+@pytest.mark.parametrize("error", [
+    testing.FenceError("refused by the fence"),
+    with_winerror(OSError(1, "access is denied"), 5),
+    OSError(1, "no winerror"),
+], ids=["fence", "another-windows-error", "posix"])
+def test_any_other_error_is_raised_not_taken_for_no(monkeypatch, fresh_probe, error):
+    monkeypatch.setattr(os, "symlink", refusing(error))
+    with pytest.raises(type(error)) as raised:
+        testing.can_symlink()
+    assert raised.value is error
 
 
 # --- markers ---------------------------------------------------------------------------

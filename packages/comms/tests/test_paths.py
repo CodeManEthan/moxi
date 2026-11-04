@@ -74,18 +74,13 @@ def test_the_runtime_directory_itself_and_its_root_are_refused():
             paths.refuse_outside_runtime(path, "MOXI_COMMS_CLAIM_SOCKET")
 
 
+@pytest.mark.usefixtures("needs_symlinks")
 def test_a_link_inside_the_runtime_directory_that_leaves_it_is_refused(tmp_path):
     outside = tmp_path / "elsewhere.sock"
     outside.touch()
     runtime = paths.runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
     link = runtime / "looks-local.sock"
-    try:
-        os.symlink(outside, link)
-    except OSError as error:
-        if getattr(error, "winerror", None) != 1314:   # a required privilege is not held
-            raise
-        pytest.skip("this account can't make symlinks (on Windows: Developer Mode is off "
-                    "and the shell is not elevated)")
+    os.symlink(outside, link)
     with pytest.raises(paths.OutsideRuntime):
         paths.refuse_outside_runtime(link, "MOXI_COMMS_CLAIM_SOCKET")

@@ -21,10 +21,10 @@ import pytest
 import moxi.config
 import moxi.files
 import moxi.paths
-from conftest import (FOLDER_LINK, WINDOWS, can_symlink, is_link, link_folder, link_text,
-                      need_symlinks)
+from conftest import FOLDER_LINK, WINDOWS, is_link, link_folder, link_text
 from moxi import place
 from moxi.place import Item
+from moxi_dev.testing import can_symlink, need_symlinks
 
 
 @pytest.fixture(autouse=True)
@@ -115,7 +115,7 @@ def test_a_skill_links_into_each_default_harness_folder(home, skill):
 
 
 def test_an_agent_goes_to_the_agents_folder_as_one_file(home, tmp_path):
-    need_symlinks(tmp_path)
+    need_symlinks()
     agent = tmp_path / "pkg" / "reviewer.md"
     agent.parent.mkdir()
     agent.write_text("an agent\n")
@@ -136,7 +136,7 @@ def test_claude_config_dir_moves_claudes_folders(tmp_path, monkeypatch, skill):
 
 def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path,
                                                                    monkeypatch, skill):
-    need_symlinks(tmp_path)
+    need_symlinks()
     agent = tmp_path / "pkg" / "reviewer.md"
     agent.parent.mkdir()
     agent.write_text("an agent\n")
@@ -619,7 +619,7 @@ def test_a_held_target_that_is_its_source_is_held_in_place(project):
 
 
 def test_a_held_items_links_are_relative_and_survive_the_project_moving(tmp_path, project):
-    need_symlinks(tmp_path)
+    need_symlinks()
     root, src = project
     dest = root / ".claude" / "skills" / "tidy"
     item = Item(src, "claude", "tidy", dest=dest, held=True, root=root)
@@ -665,7 +665,7 @@ def test_a_held_item_with_copy_places_copies_marked_held(project):
     one(place.plan("loadout", [item]), "keep")
     place.apply(place.plan("loadout", []))
     assert not dest.exists() and place._hash(str(src)) == before
-    need_symlinks(root)
+    need_symlinks()
     set_core("skills.form", "link")
     place.apply(place.plan("loadout", [item]))
     assert os.readlink(dest) == os.path.join("..", "..", "skills", "tidy")
@@ -1001,7 +1001,7 @@ def test_the_windows_form(monkeypatch, tmp_path, setting, symlinks, held, folder
 def test_the_symlink_probe_leaves_nothing_behind(tmp_path):
     base = tmp_path / "probe"
     base.mkdir()
-    assert place._symlink_allowed(str(base / "not" / "yet")) is can_symlink(tmp_path)
+    assert place._symlink_allowed(str(base / "not" / "yet")) is can_symlink()
     assert list(base.iterdir()) == []
 
 

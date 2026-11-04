@@ -277,20 +277,13 @@ def test_a_write_to_the_real_home_fails():
     assert not target.exists()
 
 
-#: Windows's error for a symlink made without the right to make one.
-ERROR_PRIVILEGE_NOT_HELD = 1314
-
-
 def test_a_write_in_the_tmp_goes_through(tmp_path):
     (tmp_path / "a").write_text("x")
     os.rename(tmp_path / "a", tmp_path / "b")
     (tmp_path / "tree" / "deep").mkdir(parents=True)
     (tmp_path / "tree" / "deep" / "f").write_text("x")
-    try:
+    if testing.can_symlink():        # no link on Windows without the right to make one
         os.symlink(tmp_path / "b", tmp_path / "tree" / "link")
-    except OSError as exc:          # Windows without the right to make one: no link
-        if getattr(exc, "winerror", None) != ERROR_PRIVILEGE_NOT_HELD:
-            raise
     shutil.rmtree(tmp_path / "tree")             # removes by dir_fd, name by name
     fd, name = tempfile.mkstemp()
     os.close(fd)

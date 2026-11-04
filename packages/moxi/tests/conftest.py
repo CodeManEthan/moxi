@@ -182,38 +182,12 @@ def drop_modules(packages: set[str]) -> None:
 # only where this account can make symlinks (Developer Mode on, or an elevated shell),
 # copying it otherwise. A junction needs no privilege, so a test that needs a folder
 # reached through a link makes a junction there; a test that needs a symlink itself skips
-# where the account can't make one.
+# where the account can't make one (`moxi_dev.testing.need_symlinks`).
 
 WINDOWS = sys.platform == "win32"
 
 #: The form a skill folder takes under `skills.form = link`.
 FOLDER_LINK = "junction" if WINDOWS else "link"
-
-NO_SYMLINKS = ("this account can't make symlinks (on Windows: Developer Mode is off and "
-               "the shell is not elevated)")
-
-
-def can_symlink(folder: Path) -> bool:
-    """Whether this account can make a symlink in `folder`: makes one and removes it.
-    Only Windows' "a required privilege is not held" reads as no; any other error is
-    raised."""
-    import os
-
-    probe = Path(folder) / f".symlink-probe-{os.getpid()}"
-    try:
-        os.symlink(f"{probe}-target", probe)
-    except OSError as error:
-        if getattr(error, "winerror", None) != 1314:
-            raise
-        return False
-    os.unlink(probe)
-    return True
-
-
-def need_symlinks(folder: Path) -> None:
-    """Skip the test here when this account can't make a symlink in `folder`."""
-    if not can_symlink(folder):
-        pytest.skip(NO_SYMLINKS)
 
 
 def link_folder(link: Path, target: Path) -> None:

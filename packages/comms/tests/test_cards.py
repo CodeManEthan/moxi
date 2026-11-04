@@ -293,6 +293,7 @@ def test_a_fifo_at_a_card_path_answers_instead_of_hanging():
     assert "victim@proj-a" in out and "not a regular file" in out
 
 
+@pytest.mark.usefixtures("needs_symlinks")
 def test_a_symlink_at_a_card_path_is_refused_not_followed():
     """A followed symlink renders up to 8 KB of any readable file inside a
     `claims to be self-authored` envelope: one agent choosing what lands in another's
@@ -302,13 +303,7 @@ def test_a_symlink_at_a_card_path_is_refused_not_followed():
     secret.write_text("SECRET-NOT-A-CARD\n")
     path = cards.card_path("planner@proj-a")
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.symlink_to(secret)
-    except OSError as error:
-        if getattr(error, "winerror", None) != 1314:   # a required privilege is not held
-            raise
-        pytest.skip("this account can't make symlinks (on Windows: Developer Mode is off "
-                    "and the shell is not elevated)")
+    path.symlink_to(secret)
     code, out = run(["whois", "planner@proj-a"])
     assert code == 1
     assert "SECRET-NOT-A-CARD" not in out
