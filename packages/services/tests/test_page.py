@@ -370,6 +370,39 @@ def test_an_act_that_blocks_answers_202_at_once_and_stays_running_until_it_ends(
     assert busy_now() == []
 
 
+def test_an_add_that_blocks_answers_202_at_once_and_stays_running_until_it_ends(
+        monkeypatch):
+    release, entered = threading.Event(), threading.Event()
+    real = acts.add_written
+
+    def slow(*args, **kwargs):
+        # Stands for an add that waits on the core lock and the supervisor past the
+        # shell's 30 seconds: it ends only when the test lets it.
+        entered.set()
+        assert release.wait(30)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(acts, "add_written", slow)
+    began = time.monotonic()
+    job = accepted(post("/api/add", {"name": "web", "kind": "daemon",
+                                     "command": f"{PY} -m http.server"}))
+    assert time.monotonic() - began < 5
+    assert entered.wait(5)
+    try:
+        for _ in range(3):
+            found = job_status(job)
+            assert (found["act"], found["id"], found["state"]) == (
+                "add", "services/web", "running")
+            assert busy_now() == [jobs.HOLD]
+            assert store.get("web") is None
+            time.sleep(0.05)
+    finally:
+        release.set()
+    assert ended(job)["state"] == "done"
+    assert busy_now() == []
+    assert store.get("web") is not None
+
+
 def test_a_job_queued_behind_a_running_one_is_running_and_holds_the_idle_exit(monkeypatch):
     a_daemon(enable=True)
     a_daemon("api", enable=True)
