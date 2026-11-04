@@ -3,7 +3,8 @@
 services keeps one list of every daemon and timer on the machine: the ones modules
 declare, commands the user adds, and units already on the system the user adopts. A
 command the user adds becomes a unit through the core's writer, from services' run-time
-declarations (`UNITS_FROM`). It runs no daemon or timer of its own.
+declarations (`UNITS_FROM`). It runs no daemon or timer of its own. With the `ui`
+extra, it has a page in the browser UI shell and a block on the shell's home.
 """
 
 INTERFACES = frozenset()
@@ -14,6 +15,9 @@ SUMMARY = "Moxi's services: one list of every daemon and timer on the machine, w
 OPTIONAL = {
     "projects": "Project keys on services, and projects' remove check: a project is not "
                 "removed while a service still names it.",
+    "ui": "The services page in the browser UI shell: every row with its verdict, start, "
+          "stop, restart, run, enable, disable, add and remove, and a count of the rows "
+          "by verdict on the shell's home.",
 }
 GATED = {}
 INTERNAL_ENV = {}
@@ -37,3 +41,15 @@ STORES = {"registry": {"root": "data", "path": "services.db", "kind": "sqlite",
                        "lazy": True}}
 #: services' own checks: its store, each user row's verdict and the project keys.
 DOCTOR = "moxi_services.doctor:rows"
+#: services' page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_services.page:PAGE"
+#: The page, and the block the shell's home places: how many rows are ok, warn, fail
+#: and off, linking to the page.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Services", "contract": 1, "place": "page",
+             "doc": "Every daemon and timer on the machine, grouped by project, with "
+                    "its verdict, the acts on it, and add"},
+    "summary": {"script": "summary.js", "title": "Services", "contract": 1,
+                "place": "block", "home": True,
+                "doc": "How many rows are ok, warn, fail and off, linking to the page"},
+}
