@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED, Feed, parseKinds, parseOne, parseProjects, parseRemoveStatus, parseWhere, parseWritten,
+  CHANGED, Feed, parseAdded, parseKinds, parseOne, parseProjects, parseRemoveStatus, parseWhere,
+  parseWritten,
   PICKED, RETRIES, saidOf,
 } from "../src/feed.ts";
 
@@ -41,6 +42,10 @@ test("one project, and an add's answer with its notes", () => {
   assert.deepEqual(parseWritten({ project: PROJECT, notes: ["made /w/alpha"] }),
                    { project: PROJECT, notes: ["made /w/alpha"] });
   assert.equal(parseWritten({ project: PROJECT }), null);
+  assert.deepEqual(parseAdded({ project: PROJECT, notes: [], warnings: ["skipped fake"] }),
+                   { project: PROJECT, notes: [], warnings: ["skipped fake"] });
+  assert.equal(parseAdded({ project: PROJECT, notes: [] }), null);
+  assert.equal(parseAdded({ project: PROJECT, notes: [], warnings: [3] }), null);
 });
 
 test("kinds take only the three mints", () => {

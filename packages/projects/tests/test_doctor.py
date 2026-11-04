@@ -205,7 +205,8 @@ def test_the_contributions_row_splits_by_cause(golden_copy, site):
     assert all(r.state == "fail" for r in rows) and len(rows) == 2
     unloadable = [r for r in rows if r.detail.startswith("broken:")]
     collision = [r for r in rows if "'topic'" in r.detail]
-    assert "blocks remove, add, and set of a kind" in unloadable[0].detail
+    assert "blocks remove, and add or set of a kind" in unloadable[0].detail
+    assert "any other add goes ahead without it" in unloadable[0].detail
     assert "moxi uninstall broken" in unloadable[0].fix
     assert "blocks add and set of kind 'topic' alone" in collision[0].detail
     assert "uninstall all but one of notes, other" in collision[0].fix

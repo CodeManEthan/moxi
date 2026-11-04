@@ -4,8 +4,9 @@
 //   server takes the browser shell's environment, not the terminal's, so these can differ
 //   from what `moxi projects` uses in a terminal; the page shows them and compares nothing.
 // - The list, by key, with a kind filter (read through `/api/projects?kind=`) and, beside
-//   it, every contribution or kind that can't be used, which blocks an add until it is
-//   fixed. Each project opens to its fields, an edit form (root, kind, and the notes root
+//   it, every contribution or kind that can't be used until it is fixed: a module that
+//   won't load blocks a remove and an add or set of a kind no loaded module declares, and
+//   any other add goes ahead without it, with a warning; a blocked kind can't be added or set. Each project opens to its fields, an edit form (root, kind, and the notes root
 //   while notes is installed), its lead and associated agents (set or clear the lead, add
 //   or remove an agent), and Remove. A save sends only what the user changed from the
 //   project as the form was opened. When a read again finds the open project changed, a
@@ -317,7 +318,7 @@ export class ProjectsPage extends LitElement {
         <button type="button" data-action="read" ?disabled=${list.reading} @click=${() => this.#readAll()}>Read again</button>
       </div>
       ${broken.length ? html`<div data-part="broken">
-        <p class="dim">Can't be used now, so every add is refused until each is repaired or uninstalled:</p>
+        <p class="dim">Can't be used now. Until each is repaired or uninstalled, while a module won't load a remove is refused, as is an add or set of a kind no loaded module declares, and any other add goes ahead without it, with a warning; a blocked kind can't be added or set:</p>
         ${broken.map((line) => html`<p class="broken" data-line="broken">${line}</p>`)}</div>` : nothing}
       ${loose !== null ? this.#saidPart(loose) : nothing}
       ${view.state === "loading" ? html`<div class="placeholder"></div>` : nothing}

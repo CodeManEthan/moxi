@@ -141,7 +141,8 @@ def _no_git_fix(body: dict) -> str:
 
 def add(call: Any) -> dict[str, Any]:
     """`POST /api/add`: `moxi projects add`, with `create` its `--create`, under the
-    page's `git init` bound."""
+    page's `git init` bound. `warnings` holds what the add went ahead without: a
+    contribution skipped since it won't load, and the fix."""
     body = call.body
     try:
         added = acts.add(body["key"], root=body.get("root"),
@@ -153,7 +154,8 @@ def add(call: Any) -> dict[str, Any]:
                          f"{_no_git_fix(body)}") from None
     except ProjectsError as exc:
         raise _answer(exc) from None
-    return {"project": _project(added.project), "notes": list(added.notes)}
+    return {"project": _project(added.project), "notes": list(added.notes),
+            "warnings": list(added.warnings)}
 
 
 def set_fields(call: Any) -> dict[str, Any]:
