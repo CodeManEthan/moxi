@@ -88,6 +88,22 @@ def test_a_refused_field_at_any_depth_writes_nothing(logdir, row):
     assert b"t0ken-value" not in every_byte(logdir)
 
 
+@pytest.mark.parametrize("row", [
+    {"kind": "request", "Authorization": "Bearer t0ken-value"},
+    {"kind": "request", "nested": {"TOKEN": "t0ken-value"}},
+    {"kind": "request", "list": [{"Text": "t0ken-value"}]},
+])
+def test_a_refused_field_in_another_case_writes_nothing_in_either_writer(logdir, row):
+    log = CallLog(logdir, clock=Clock())
+    for durable, collapse in ((True, None), (False, "mcp-401")):
+        with pytest.raises(ValueError):
+            log.write({"at": "x", **row}, durable=durable, collapse=collapse)
+        with pytest.raises(ValueError):
+            calllog.MemoryLog().write({"at": "x", **row}, durable=durable,
+                                      collapse=collapse)
+    assert b"t0ken-value" not in every_byte(logdir)
+
+
 def test_no_token_or_code_the_door_saw_reaches_a_day_file(front, fake, logdir):
     """Requests carrying a token, a code in the query, an Authorization header and a body
     with a code; a provider that tries to log a code and a message body. Then every day

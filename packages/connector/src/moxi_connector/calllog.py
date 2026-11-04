@@ -22,9 +22,11 @@ The door builds its rows (`moxi_connector.app`) and gives each one to a `Writer`
 
 `CallLog` is the process's writer, built on the core's `moxi.files.append_record`:
 
-- **No secrets.** Every row goes through `append_record`'s `refuse` option with
-  `FORBIDDEN`: a row holding one of those names as a key, at any depth, raises
-  `ValueError` and writes nothing. A provider's `ctx.log` fields pass the same refusal.
+- **No secrets.** A row holding one of the names in `FORBIDDEN` as a key, at any depth
+  and in any case (`Authorization` as well as `authorization`), raises `ValueError` and
+  writes nothing. `check` applies that rule before the write, since the core's `refuse`
+  option, which every row also goes through, matches names exactly. A provider's
+  `ctx.log` fields pass the same refusal, and `MemoryLog` applies the same `check`.
 - **Nothing always-written is lost.** `max_bytes=None`, so a file never rolls. The only
   thing that removes a row is the deletion of files older than `RETAIN_DAYS`, at start
   (`prune()`, which the daemon calls before it serves) and at each UTC midnight (the first
@@ -101,7 +103,8 @@ def calls_dir(env: Mapping[str, str] | None = None) -> Path:
 
 
 def check(row: Mapping[str, Any]) -> None:
-    """Raise `ValueError` when `row` holds a field the log refuses."""
+    """Raise `ValueError` when `row` holds a field the log refuses, at any depth and in
+    any case."""
     bad = refused_field(row, FORBIDDEN)
     if bad is not None:
         raise ValueError(f"the call log refuses the field {bad!r}")
@@ -132,6 +135,7 @@ class CallLog:
     def write(self, row: Mapping[str, Any], *, durable: bool, collapse: str | None) -> None:
         from moxi import files
 
+        check(row)
         t = self._clock()
         self._new_day(t)
         if not self._made:
