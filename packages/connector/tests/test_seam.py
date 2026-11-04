@@ -170,6 +170,29 @@ def test_a_tool_that_raises_answers_the_error_result_and_writes_tool_error(front
     run(main())
 
 
+@pytest.mark.parametrize("answers", ["raises", "refuses", "not-a-result"])
+def test_a_call_that_raised_or_answered_an_error_runs_its_callbacks_false(
+        front, fake, answers):
+    """The error answer is written, but it is not the tool's answer: what the tool
+    registered before it failed or refused runs with False."""
+    async def failing(args, ctx):
+        ctx.after_answer(fake.written.append)
+        if answers == "raises":
+            raise RuntimeError("while rendering")
+        if answers == "refuses":
+            return Result.refused("offline", "comms is offline. Nothing was sent or read.")
+        return "not a Result"
+
+    async def main():
+        f = await front(providers={"demo": provider(fake, Tool("failing", "x", {},
+                                                                failing))})
+        got = await request(f, "POST", "/mcp", call("failing"), headers=bearer())
+        assert got.status == 200 and got.json()["result"]["isError"]
+        assert fake.written == [False]
+        await f.close()
+    run(main())
+
+
 def test_ctx_log_with_a_refused_field_raises_and_writes_nothing(front, fake):
     caught = []
 

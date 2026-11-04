@@ -35,7 +35,9 @@ set from O too: O's host as the one allowed host and O as the one allowed `Origi
 - watches the ASGI `send` seam: once the final `http.response.body` (`more_body` false)
   is sent without an error, the callbacks run with `written=True`; when `send` raises,
   the request ends with no final body, or the caller hung up first, they run with
-  `written=False`. A callback registered after that runs at the request's end, with False;
+  `written=False`. A tool call that raised, or answered an error or something not a
+  `Result`, runs them with False when it ends (`moxi_connector.provider` has the rule). A
+  callback registered after the fate was known runs at the request's end, with False;
 - on `/mcp`, once the request body is in, watches the connection, as the only reader of
   `receive` from then on (the app's later reads wait for the disconnect). uvicorn's `send`
   returns quietly once the peer is gone and never cancels the app, so this watch is what
@@ -281,9 +283,14 @@ class Tools:
             log.exception("the tool %s of %s failed (request %s)", name, module,
                           call.request_id)
             return await self._failed(call, module, name, type(e).__name__)
+        if result.is_error:
+            # An error answer is never the tool's work done: what it registered runs
+            # with False, whatever becomes of the answer's bytes.
+            await _settle(call, False)
         return to_mcp(result)
 
     async def _failed(self, call: Call, module: str, name: str, why: str):
+        await _settle(call, False)
         await write(self.host.calllog, {
             "at": calllog.now(), "kind": "tool-error", "request": call.request_id,
             "tool": name, "provider": module, "error": why,

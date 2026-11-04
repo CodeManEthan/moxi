@@ -537,6 +537,45 @@ def test_a_caller_that_hangs_up_while_comms_opens_the_digest_leaves_its_messages
         assert [m["id"] for m in got["structuredContent"]["messages"]] == ids
 
 
+def test_an_error_answer_after_comms_opened_the_digest_leaves_its_messages_unread(
+        door, registry, rig, monkeypatch):
+    """comms opens the digest, registers its settle, then its count read fails and it
+    answers "Nothing was sent or read." The answer is written, and it is an error: the
+    host settles False, so the messages wait again."""
+    bound(registry)
+    ids = [post(rig, f"m{i}") for i in range(2)]
+    wait_for(lambda: pending() == ids)
+    link = comms("connector").COMMS.link
+    real = link.read
+
+    def failing(method, *args, **kwargs):
+        if method == "agents":
+            raise comms("client").DaemonOffline("the daemon went away")
+        return real(method, *args, **kwargs)
+
+    async def main():
+        d = await door()
+        _, tokens = await d.page_sign_in()
+        access = [("authorization", f"Bearer {tokens['access_token']}")]
+        monkeypatch.setattr(link, "read", failing)
+        got = await request(d.front, "POST", "/mcp", call("check_messages"), headers=access)
+        result = got.json()["result"]
+        assert result["isError"] and "Nothing was sent or read." in \
+            result["content"][0]["text"]
+        monkeypatch.setattr(link, "read", real)
+        assert unread(rig) == set(ids)
+        deadline = time.monotonic() + 5
+        while pending() != ids:
+            assert time.monotonic() < deadline, pending()
+            await asyncio.sleep(0.01)
+        got = await request(d.front, "POST", "/mcp", call("check_messages"), headers=access)
+        assert [m["id"] for m in got.json()["result"]["structuredContent"]["messages"]] == ids
+        await d.close()
+
+    asyncio.run(main())
+    wait_for(lambda: not unread(rig))
+
+
 # -- the host's own checks, against comms' provider --------------------------------------------
 
 def test_arguments_outside_comms_schema_never_reach_comms(door, registry, rig):

@@ -36,6 +36,12 @@ A provider gives:
 Two providers that declare one tool name both lose it: no provider's tool shadows
 another's. A tool whose `call` raises answers "The tool failed; the connector's log has
 the request id." and the exception stays in the connector's log, never sent.
+
+`after_answer` callbacks follow one rule: `written` is True only for a call whose tool
+answered a `Result` without `is_error` and whose answer's last byte went to the server.
+A call whose tool raised, answered something not a `Result`, or answered a `Result` with
+`is_error` runs its callbacks with False as soon as it ends, whatever becomes of the
+error answer; so does a call whose caller hung up first, or whose answer failed to go out.
 """
 
 from __future__ import annotations
@@ -156,7 +162,8 @@ class Ctx:
     - `request_id`: the call's id, which its log row carries;
     - `after_answer(fn)`: `fn(written)` runs once the answer's fate is known, `written`
       True when the answer's last byte went to the server without an error, False when
-      writing it failed, no answer was written, or the caller hung up first. A caller
+      writing it failed, no answer was written, the caller hung up first, or the call
+      raised or answered an error (the module's text above has the whole rule). A caller
       that hangs up also cancels the call: the tool sees `CancelledError` at its next
       await. `fn` may be a coroutine function;
     - `log(**fields)`: adds fields to the call's log row. A field name the log refuses
