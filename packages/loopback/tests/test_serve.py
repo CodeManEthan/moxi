@@ -756,6 +756,19 @@ def test_the_uname_is_filled_without_a_wmi_query_and_the_query_is_put_back(monke
     assert platform._uname_cache is not None and platform.system()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="platform makes a WMI query on Windows only")
+def test_on_windows_platform_still_asks_wmi_through_the_name_the_helper_replaces(monkeypatch):
+    """The two tests beside this one pass when no query is recorded, and they would pass
+    as well if `platform` stopped asking through `_wmi_query` but still made the query:
+    `_uname_without_wmi` would then refuse nothing, and the query thread it exists to
+    keep from starting would start. Here a plain `uname()` must ask through that name."""
+    import platform
+
+    asked, _ = wmi_recorder(monkeypatch)
+    platform.uname()
+    assert asked, "platform.uname() made no query through platform._wmi_query"
+
+
 def test_serve_starts_on_a_thread_without_a_wmi_query(monkeypatch):
     asked, _ = wmi_recorder(monkeypatch)
     sock = bind_tcp(0)
