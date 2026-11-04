@@ -14,7 +14,6 @@ test_win.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import signal
@@ -30,6 +29,7 @@ import pytest
 if sys.platform == "win32":
     pytest.skip("POSIX terminals, sessions and process groups", allow_module_level=True)
 
+import fcntl  # noqa: E402
 import termios  # noqa: E402
 
 import psutil  # noqa: E402
