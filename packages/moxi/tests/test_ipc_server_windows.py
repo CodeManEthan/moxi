@@ -21,7 +21,7 @@ import pytest
 from conftest import PipeRaw, ServerThread
 
 import moxi.ipc as ipc
-from moxi import _win, files, paths, proc
+from moxi import _win, files, proc
 from moxi.ipc import _server, _sweep
 
 WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows named pipes")
