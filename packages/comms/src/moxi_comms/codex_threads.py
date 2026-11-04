@@ -1,15 +1,17 @@
 """Thread-id <-> identity, one file per identity (STATE/comms/codex/<qualified>.json).
 
 The file holds the thread of the identity's CURRENT launch. A launch is one
-`moxi-comms-codex` process: its first start always starts a new thread with `thread/start`
-and records the id here, and the adapter never resumes a thread an earlier launch
-recorded: a Codex relaunch starts a fresh conversation, as a Claude relaunch does.
-Inside one launch the adapter resumes
-only the thread that launch started, which it holds in memory, and never replaces it:
-a resume that fails is loud and retried. No launch reads a thread id from this file;
-it is read only for the keys kept beside the launch's own id (`rollout`, `layer_one`),
-and only when the file names that id. An earlier launch's thread stays in Codex's own
-session store.
+`moxi-comms-codex` process, and it starts a new thread unless it is told to resume one.
+Its first load starts a new thread with `thread/start`, or, told to resume thread T
+(`--resume T`), resumes T with `thread/resume`; either way the launch records the id
+here, with the hash of the layer one it gave the thread. So a fresh launch and a
+relaunch start a fresh conversation, as a Claude relaunch does, and only a launch whose
+caller names a thread continues one. Inside one launch the host resumes only the thread
+that launch loaded, which it holds in memory, and never replaces it: a resume that fails
+is loud and retried. No launch reads a thread id from this file to resume it: the id
+comes only from the caller. The file is read only for the keys kept beside the launch's
+own id (`rollout`, `layer_one`), and only when the file names that id. An earlier
+launch's thread stays in Codex's own session store.
 
 The ADAPTER writes this file and the daemon never does: it is the adapter's own state,
 not comms' books. It is not routing (routing is who is connected right now, and stays
