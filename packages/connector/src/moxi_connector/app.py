@@ -89,6 +89,8 @@ MAX_BODY = 256 * 1024
 RETIRE_WAIT = 120.0
 #: The text every request gets while there is no origin.
 NO_ORIGIN = b"The connector has no public address yet. Run moxi connector status.\n"
+#: What a tool call answers when it reached the handler without its request's context.
+NO_CONTEXT = "The connector couldn't place this call; nothing ran."
 #: What a tool call the host cancelled answers, though its caller is gone.
 HUNG_UP = "The caller hung up before the answer; nothing more ran."
 #: The scope key that holds the request's `Call`.
@@ -250,12 +252,18 @@ class Tools:
     async def call_tool(self, ctx, params) -> types.CallToolResult:
         name = params.name
         call = CALL.get(None)
-        if call is None:
-            # The context variable reaches every call in stateless JSON mode; a call
-            # without one still runs, under a fresh id, and says so in the log.
-            log.warning("a tool call arrived without its request's context")
-            call = Call(new_id(), "POST", "mcp", time.monotonic())
         entry = self.table.get(name)
+        if call is None:
+            # The context variable reaches every call in stateless JSON mode. A call
+            # without one would run with no grant, and its callbacks would never settle,
+            # so it is refused: an SDK change that loses the context fails loudly here.
+            log.error("a tool call of %s arrived without its request's context; refused",
+                      clean(name))
+            await write(self.host.calllog, {
+                "at": calllog.now(), "kind": "tool-error", "request": None,
+                "tool": clean(name), "provider": entry[0] if entry else None,
+                "error": "no-context", "grant": None}, durable=True, collapse=None)
+            return _error(NO_CONTEXT, "no-context")
         call.tool = name
         if entry is None:
             return _error(f"There is no tool named {clean(name)}.", "unknown-tool")

@@ -193,6 +193,24 @@ def test_a_call_that_raised_or_answered_an_error_runs_its_callbacks_false(
     run(main())
 
 
+def test_a_tool_call_without_its_requests_context_is_refused_and_logged(make_host, fake):
+    """Were an SDK update to run the handler outside the request's context, the call
+    would have no grant and its callbacks would never settle: it is refused instead."""
+    from moxi_connector.app import Tools
+
+    async def main():
+        host = await make_host()
+        got = await Tools(host).call_tool(None, SimpleNamespace(name="echo",
+                                                                arguments={"say": "x"}))
+        assert got.is_error and got.structured_content == {"refusal": "no-context"}
+        assert fake.calls == []
+        [(row, durable, collapse)] = host.calllog.written
+        assert (row["kind"], row["tool"], row["provider"], row["error"]) == (
+            "tool-error", "echo", "demo", "no-context")
+        assert durable is True and collapse is None
+    run(main())
+
+
 def test_ctx_log_with_a_refused_field_raises_and_writes_nothing(front, fake):
     caught = []
 
