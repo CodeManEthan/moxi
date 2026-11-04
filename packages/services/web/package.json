@@ -1,0 +1,13 @@
+{
+  "name": "moxi-services-web",
+  "private": true,
+  "description": "The services module's web sources: its page, and the home block that counts the rows by verdict.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}
