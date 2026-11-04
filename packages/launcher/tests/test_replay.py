@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -110,11 +111,17 @@ def settings_file(text: str) -> None:
 
 
 def without_ids(argv, *ids) -> list[str]:
-    """`argv` with each id, and the system prompt file named by one, put as `<id>`."""
+    """`argv` with each id, and the system prompt file named by one, put as `<id>`.
+
+    An id is replaced only where it stands alone, with no letter or digit on either side,
+    so a short id such as `r3` is not found inside a random directory name like
+    `mx-znbhhrr3`."""
+    patterns = [re.compile(rf"(?<![A-Za-z0-9]){re.escape(given)}(?![A-Za-z0-9])")
+                for given in ids]
     out = []
     for word in argv:
-        for given in ids:
-            word = word.replace(given, "<id>")
+        for pattern in patterns:
+            word = pattern.sub("<id>", word)
         out.append(word)
     return out
 
