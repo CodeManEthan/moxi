@@ -10,7 +10,9 @@ and what crosses it.
 Every call to the tools needs a bearer token, and a token comes only from a sign-in. A
 sign-in needs a one-time code typed into the connector's sign-in page, and a code is
 minted only at your machine, by `moxi connector code`. There is no default code, no code
-in the config file, and no code written to disk or to the log.
+in the config file, and no code written to disk or to the log. A process running as your
+user can also go around the sign-in by writing the grants file; "Processes of your own
+user" below says what that means.
 
 A code is 8 characters (40 bits), works once, and lives 5 minutes. At most 3 live at once.
 A sign-in in progress takes 5 wrong codes before it is dropped. After 20 wrong codes across
@@ -89,11 +91,22 @@ refused while the eight stay; codes are minted only through the gate. Per minute
 connector takes 10 registrations, 20 loads and 20 posts of the sign-in page, and 60 token
 requests; past a cap it answers 429.
 
-It can still deny service: fill the 8 sign-in slots, so your sign-in waits up to 10
-minutes; fill the 64 client slots, which keeps a first add or a re-add refused while it
-keeps going and for 24 hours after (a sign-in on a client that already held a grant still
-works; `moxi connector revoke --all` frees the slots, and `moxi connector off` closes the
-door); or flood the connections, which uvicorn and a cap of 32 requests at once bound.
+It can still deny service:
+
+- fill the 8 sign-in slots, so your sign-in waits up to 10 minutes;
+- fill the 64 client slots, which keeps a first add or a re-add refused while it keeps
+  going and for 24 hours after. A sign-in on a client that already held a grant needs no
+  registration; `moxi connector revoke --all` frees the slots;
+- flood the connections, which uvicorn and a cap of 32 requests at once bound;
+- spend the per-minute caps. Every caller shares them, since no header the connector
+  trusts tells one caller from another. 60 junk token requests a minute make your
+  Claude's refresh answer 429, so its grant stops working within the hour (an access
+  token lives an hour) for as long as that goes on. 20 posts of the sign-in page a minute
+  refuse your own form, so no sign-in finishes then. And with a client and sign-ins of
+  its own, its wrong codes count toward the burn at 20, which drops every live code,
+  yours included, and writes a `code-burned` row.
+
+Each lasts only while the caller keeps going. `moxi connector off` closes the door.
 
 ## What crosses the door
 
@@ -114,6 +127,25 @@ body: the writer refuses those fields. Every row a caller without a token can ca
 collapsed: past 10 a minute of one route and status (every request without a valid grant,
 metadata fetches and page loads among them) and past 10 registrations a minute, the rest
 of the minute is one row with a count, so a flood can't fill the disk.
+
+## Processes of your own user
+
+The mint gate guards one thing: who can mint a sign-in code. The rest of the connector's
+local state rests on your user account, the boundary comms keeps for its own store and
+sockets. Any process running as your user, a process inside an agent session included,
+can:
+
+- write the grants file and plant a grant for a token it picked, with no code and no
+  gate involved, or revoke the grants there;
+- connect to the control socket, though the gate still refuses its mint when the walk
+  places it inside a session;
+- change the connector's config file, its switch included.
+
+So a grant comes only from a code for a process that keeps to the connector's own verbs.
+The gate keeps an honest agent from signing Claude in on its own, and a planted grant
+takes deliberate work. The connector does not protect itself from a hostile process
+running as you, and doesn't claim to. comms' security doc says the same of its store and
+sockets.
 
 ## Other users on the machine
 
