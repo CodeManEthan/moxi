@@ -14,9 +14,11 @@ process serving it.
 `server_instance` makes one server instance of a pipe for `moxi.ipc.serve`. Windows'
 default list for a pipe lets every local user open it for reading and lets clients on
 other machines reach it, where a Unix socket in a private directory admits only its own
-user and root. So each instance gets `access_list()`: full access for this process's user
-and for SYSTEM (root's place on Windows), protected so nothing is inherited, and no one
-else; and it refuses clients from other machines. There is no path that makes an
+user and root. So each instance gets `access_list()`: owned by this process's user, with
+full access for that user and for SYSTEM (root's place on Windows), protected so nothing
+is inherited, and no one else; and it refuses clients from other machines. The owner is
+set because an owner may always rewrite the list, and an elevated process's default owner
+is the Administrators group. There is no path that makes an
 instance with the default list instead.
 
 Nothing here runs on another system; `ctypes`, `_winapi` and `_overlapped` are imported
@@ -68,13 +70,15 @@ _create_named_pipe = None
 
 
 def access_list() -> str:
-    """The access list every server instance gets, in SDDL: protected (`P`, nothing
-    inherited), full access (`FA`) for the user SID of this process's token and for
-    SYSTEM, and no other entry. Raises `OSError` naming the call when the token can't be
-    read."""
+    """The security descriptor every server instance gets, in SDDL: owned (`O:`) by the
+    user SID of this process's token, whatever the token's default owner is, and an
+    access list that is protected (`P`, nothing inherited) with full access (`FA`) for
+    that user and for SYSTEM and no other entry. Raises `OSError` naming the call when
+    the token can't be read."""
     from .. import _win
 
-    return f"D:P(A;;FA;;;{_win.user_sid()})(A;;FA;;;{SYSTEM})"
+    sid = _win.user_sid()
+    return f"O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;{SYSTEM})"
 
 
 def server_instance(address: str, sddl: str, *, first: bool) -> int:

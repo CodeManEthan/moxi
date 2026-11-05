@@ -819,6 +819,41 @@ def test_every_pipe_instance_admits_only_this_user_and_system(pipe_serving):
         assert protected and sorted(entries) == want
 
 
+def owner_of(handle: int) -> str:
+    """The owner SID of the pipe instance behind `handle`, read back with
+    `GetSecurityInfo`."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    api = _win._bind()
+    PP = ctypes.POINTER(ctypes.c_void_p)
+    get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
+    get.restype = w.DWORD
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    code = get(handle, _win._SE_FILE_OBJECT, _win._OWNER_SECURITY_INFORMATION,
+               ctypes.byref(owner), None, None, None, ctypes.byref(descriptor))
+    assert code == 0, f"GetSecurityInfo failed with {code}"
+    try:
+        return _win._sid_text(owner.value)
+    finally:
+        api.LocalFree(descriptor)
+
+
+@WINDOWS
+def test_every_pipe_instance_is_owned_by_this_user(pipe_serving):
+    # The owner may always rewrite the list, so it is this user, not the token's default
+    # owner (the Administrators group for an elevated process).
+    srv = pipe_serving(echo)
+    first, second = PipeRaw(srv.address), PipeRaw(srv.address)
+    for i, raw in enumerate((first, second)):
+        raw.send(req(i, "go"))
+        assert raw.json()["id"] == i
+    listening = srv.call(lambda: srv.server._listening.fileno())
+    for handle in (first.handle, second.handle, listening):
+        assert owner_of(handle) == _win.user_sid()
+
+
 def from_the_network(address: str) -> str:
     """Pipe `address` named the way a client on another machine names it, through the
     loopback address."""
