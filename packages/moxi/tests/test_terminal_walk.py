@@ -582,9 +582,12 @@ def test_live_a_run_that_started_with_the_mark_stops_at_itself():
 # -- live, through the real console script -------------------------------------------------
 
 _SITE = textwrap.dedent("""\
-    import atexit, dataclasses, json, os
+    import atexit, dataclasses, json, os, sys
 
     def _walk():
+        # Every interpreter started with this site runs this; only the moxi run writes.
+        if not os.path.basename(sys.argv[0]).lower().startswith("moxi"):
+            return
         import moxi.terminal as t
         from moxi.terminal import _view
         found = t.walk()
@@ -597,7 +600,8 @@ _SITE = textwrap.dedent("""\
         except Exception as error:
             chain.append(repr(error))
         with open(os.environ["WALK_OUT"], "w") as f:
-            json.dump({"found": found and dataclasses.asdict(found), "chain": chain}, f)
+            json.dump({"found": found and dataclasses.asdict(found), "chain": chain,
+                       "me": os.getpid()}, f)
 
     if os.environ.get("WALK_OUT"):
         atexit.register(_walk)
@@ -638,3 +642,6 @@ def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_pa
     assert found_ is not None, got
     print(got)
     assert (found_["kind"], found_["detail"]) == ("E4", "the hop"), got
+    # Found on the process that started with the mark, above the run's entry chain.
+    assert found_["pid"] != got["me"]
+    assert found_["pid"] in [step[0] for step in got["chain"][1:] if isinstance(step, list)]
