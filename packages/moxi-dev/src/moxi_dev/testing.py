@@ -29,6 +29,11 @@ The fence, around every test (the autouse fixture `fence`):
   `WINDOWS_HOMES`. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
   variables a process needs (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of
   `WINDOWS_KEPT_ENV`) are kept. Off Windows none of these is set or kept.
+  `MOXI_ANCHOR_HOME` stands in for the account's own folder, which the core reads from
+  the user database or the shell and no other variable moves: it is the test's home (on
+  Windows the test's `LOCALAPPDATA`), so the core's anchor, and the record of the
+  terminal's environment kept there, are the test's own and never the real account's.
+  The `terminal_record` fixture writes such a record.
 - Byte code. `sys.dont_write_bytecode` is set for the test, so a module first imported
   inside it is compiled in memory and nothing is written next to its source.
 - Writes. An audit hook (`sys.addaudithook`) refuses, with `FenceError`, a write whose
@@ -242,6 +247,10 @@ HARNESS_HOMES = {
     "CODEX_HOME": ".codex",
 }
 
+#: The core's stand-in for the account's own folder, which places its anchor; only test
+#: kits set it (module doc).
+ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID")
@@ -307,6 +316,8 @@ class Fence:
     env: Mapping[str, str]
     #: Where a write may land.
     roots: tuple[Path, ...]
+    #: `MOXI_ANCHOR_HOME`: the test's stand-in for the account's own folder.
+    anchor_home: Path
 
     def module_home(self, module: str) -> Path:
         """Where `MOXI_<MODULE>_HOME` points for `module`."""
@@ -605,6 +616,7 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
             env[key] = str(home if rel == "." else home / rel)
         env["HOMEDRIVE"], env["HOMEPATH"] = ntpath.splitdrive(str(home))
         env["TEMP"] = env["TMP"] = str(short)
+    env[ANCHOR_HOME] = env["LOCALAPPDATA"] if WINDOWS else str(home)
     return env
 
 
@@ -997,7 +1009,7 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     _GUARD.active = True
     try:
         yield Fence(home=home, runtime=runtime, short=short, env=dict(env),
-                    roots=tuple(Path(r) for r in roots))
+                    roots=tuple(Path(r) for r in roots), anchor_home=Path(env[ANCHOR_HOME]))
     finally:
         late = _GUARD.breaches[_GUARD.reported:]
         _GUARD.restore(outer)
@@ -1013,6 +1025,60 @@ def uv_env(fence: Fence) -> dict[str, str]:
     uv's real cache and installed Pythons and no Python downloads. Pass it as the child's
     `env`; this process's own environment is left as the fence made it."""
     return {**os.environ, **_SESSION["uv"], **_UV_NO_DOWNLOADS}
+
+
+# --- the terminal record ---------------------------------------------------------------
+
+#: The record's format the fixture writes.
+RECORD_FORMAT = 1
+
+# The variables the core records: the names its folder and program resolvers read. Kept
+# here, matched by name, until the core's own record writer can be called.
+_RECORDED = frozenset({
+    "MOXI_HOME", "MOXI_DEVICE", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA", "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME", "PATH", "PATHEXT"})
+_RECORDED_SUFFIXES = ("_HOME", "_DATA_HOME", "_STATE_HOME", "_CACHE_HOME", "_CONFIG_HOME",
+                      "_RUNTIME_DIR", "_DEVICE")
+
+
+def _recorded(name: str) -> bool:
+    if name in _RECORDED:
+        return True
+    if not name.startswith("MOXI_") or name == ANCHOR_HOME:
+        return False
+    return any(name.endswith(suffix) and len(name) > len("MOXI_") + len(suffix)
+               for suffix in _RECORDED_SUFFIXES)
+
+
+@pytest.fixture
+def terminal_record(fence: Fence) -> Callable[..., Path]:
+    """A writer of the core's record of the terminal's environment, under the test's
+    anchor (`MOXI_ANCHOR_HOME`), for a test whose code reads it, such as a page that
+    checks before it writes.
+
+    `terminal_record(env=None, *, version=None)` writes the record of `env` (this
+    process's environment as the fence left it, without one): each recorded variable set
+    in it, with its exact value, and nothing else. `version` is the writing core's
+    version, this environment's `moxi` without one. It returns the record's path.
+    """
+    def write(env: Mapping[str, str] | None = None, *, version: str | None = None) -> Path:
+        from importlib import metadata
+
+        from moxi import files, paths
+
+        source = os.environ if env is None else env
+        recorded = {(name.upper() if WINDOWS else name): value
+                    for name, value in source.items()
+                    if _recorded(name.upper() if WINDOWS else name)}
+        path = paths.terminal_record()
+        body = {"format": RECORD_FORMAT, "moxi": version or metadata.version("moxi"),
+                "env": dict(sorted(recorded.items()))}
+        files.atomic_write(path, json.dumps(body, indent=2) + "\n", mode=0o600)
+        return path
+
+    return write
 
 
 # --- helpers ---------------------------------------------------------------------------
@@ -1230,9 +1296,10 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
-           "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS",
-           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV",
-           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
-           "param_id", "selection", "served", "short_dir", "touches_match", "uv_env",
-           "wait_for", "write_sqlite"]
+__all__ = ["ANCHOR_HOME", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
+           "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV",
+           "MARKERS", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
+           "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
+           "console_script", "fence", "findings_of", "param_id", "selection", "served",
+           "short_dir", "terminal_record", "touches_match", "uv_env", "wait_for",
+           "write_sqlite"]

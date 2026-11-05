@@ -1097,7 +1097,8 @@ def _check(argv: list[str]) -> int:
 def _paths(argv: list[str]) -> int:
     parser = _parser("paths", "Where a module keeps its files: its five directories, its "
                               "config file and each store it declares. `moxi paths moxi` "
-                              "gives the core's own.")
+                              "gives the core's own, with the file that records the "
+                              "environment your terminal runs with.")
     parser.add_argument("module")
     parser.add_argument("--json", action="store_true", help="print one JSON object")
     args = parser.parse_args(argv)
@@ -1120,6 +1121,8 @@ def _paths(argv: list[str]) -> int:
     for kind, path in info["directories"].items():
         print(f"  {kind:<12}{path}")
     print(f"  {'config file':<12}{info['config_file']}")
+    if "terminal_record" in info:
+        print(f"  {'terminal':<12}{info['terminal_record'] or 'nowhere'}")
     for note in info["notes"]:
         print(f"  {note}")
     if info["stores"]:
@@ -1160,9 +1163,18 @@ def _paths_of(module: str) -> dict:
         listed.append({"name": name, "path": str(path), "root": entry["root"],
                        "kind": entry["kind"], "lazy": bool(entry.get("lazy", False)),
                        **_store_facts(path, entry["kind"])})
-    return {"module": module,
+    info = {"module": module,
             "directories": {kind: str(path) for kind, path in directories.items()},
             "config_file": str(layout.config_file()), "notes": notes, "stores": listed}
+    if module == names.HARNESS:
+        # The core's record of the terminal's environment, in the anchor no variable
+        # moves; `None` with a note when the account can't be placed.
+        try:
+            info["terminal_record"] = str(paths.terminal_record())
+        except paths.NoAnchor as exc:
+            info["terminal_record"] = None
+            notes.append(f"the terminal record has no place: {exc.cause}; {exc.step}")
+    return info
 
 
 def _store_facts(path, kind: str) -> dict:
