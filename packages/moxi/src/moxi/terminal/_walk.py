@@ -5,7 +5,8 @@
 - `Evidence`: a process shows Moxi, so the run must not record. `kind` is one of
   - `"E1"`, a Moxi program: its command line runs the `moxi` script or a
     `moxi-<module>-<part>` script, or an interpreter run with `-m moxi`, `-m moxi.<name>`
-    or `-m moxi_<module>[...]` (on Windows a script is its `.exe` launcher);
+    or `-m moxi_<module>[...]` (on Windows a script is its `.exe` launcher, and the
+    Python launcher `py` counts as an interpreter);
   - `"E2"`, an agent: its program, the base name of its first argument (which a harness
     may set as its process title), is `claude`, `codex` or `opencode`;
   - `"E3"`, a Moxi unit: on Linux its cgroup is a `moxi-<module>-<name>.service`, on
@@ -26,9 +27,13 @@ by definition: on Linux and macOS that is the run's process alone (a `#!` script
 the interpreter's own process). On Windows it also takes, from the run up and each the
 direct parent of the one below it, at most one venv redirector (a parent whose image is
 the run's `sys.executable`, when the run's own image is another file) and then at most
-one script launcher (a parent whose image is the run's `sys.argv[0]`). Every process
-above the chain is judged by E1 to E4. The walk never starts above any other Moxi
-process, so a `moxi.exe` that isn't the run's own launcher shows E1.
+one script launcher (a parent whose image is the run's `sys.argv[0]`, or that with `.exe`
+put back when it doesn't end in `.exe`, since the uv and pip launchers strip it), and then
+at most one Python launcher for `py -m moxi` (a parent whose image's base name is `py.exe`
+and whose command line, after py's version options, is the run's own `sys.orig_argv`
+from `-m` on). Every process above the chain is judged by E1 to E4. The walk never
+starts above any other Moxi process, so a `moxi.exe` that isn't the run's own launcher
+shows E1.
 
 A shielded process (another account's, or one the system keeps from its own account) is
 judged by its command line alone, where the system shows one, and passed when it shows
@@ -64,6 +69,10 @@ ENDED, UNREAD, DEEP, LOOP, TMUX = "ended", "unread", "deep", "loop", "tmux"
 _SCRIPT = re.compile(r"moxi|moxi-([a-z0-9]+)-[a-z0-9]+(-[a-z0-9]+)*")
 _MODULE = re.compile(r"moxi(\.\w+)*|moxi_([a-z0-9]+)(\.\w+)*")
 _INTERPRETER = re.compile(r"python[0-9.]*[tw]?|pypy[0-9.]*")
+#: The Python launcher's programs on Windows, and its version options: `-3`, `-3.12`,
+#: `-V:<tag>`.
+_PY_LAUNCHERS = ("py", "pyw")
+_PY_VERSION = re.compile(r"-[0-9]+(\.[0-9]+)?|-V:\S+")
 #: Interpreter options that take the next argument (or the rest of their own) as a value.
 _VALUED = "WX"
 _LONG_VALUED = ("--check-hash-based-pycs",)
@@ -71,20 +80,23 @@ _LONG_VALUED = ("--check-hash-based-pycs",)
 
 @dataclass(frozen=True)
 class Run:
-    """The run the walk starts from: its pid, `sys.executable`, `sys.argv[0]`, and the
-    mark's value in the environment it started with (None: it had none)."""
+    """The run the walk starts from: its pid, `sys.executable`, `sys.argv[0]`, the
+    mark's value in the environment it started with (None: it had none), and
+    `sys.orig_argv`, the interpreter's own command line."""
 
     pid: int
     executable: str
     argv0: str
     started_by: str | None
+    orig_argv: tuple[str, ...] = ()
 
     @classmethod
     def here(cls) -> "Run":
         from moxi import _mark
 
         argv = getattr(sys, "argv", None) or [""]
-        return cls(os.getpid(), sys.executable or "", argv[0] or "", _mark.started_by)
+        return cls(os.getpid(), sys.executable or "", argv[0] or "", _mark.started_by,
+                   tuple(getattr(sys, "orig_argv", None) or ()))
 
 
 @dataclass(frozen=True)
@@ -144,7 +156,7 @@ class _Walk:
             return found
         above = self.up(own)
         if self.windows:
-            for match in (self.redirector, self.launcher):
+            for match in (self.redirector, self.launcher, self.python_launcher):
                 if isinstance(above, Proc) and match(above, own):
                     if (found := self.chain_judge(above)) is not None:
                         return found
@@ -163,8 +175,31 @@ class _Walk:
                 and parent.image is not None and self.norm(parent.image) == exe)
 
     def launcher(self, parent: Proc, own: Proc) -> bool:
-        return (bool(self.run.argv0) and parent.image is not None
-                and self.norm(parent.image) == self.norm(self.run.argv0))
+        # The uv and pip launchers strip a trailing `.exe` from `sys.argv[0]` (case
+        # sensitively) before `cli.main` runs, so the launcher's image is `argv0` itself or
+        # `argv0` with `.exe` put back. Both name the one file the launcher ran from.
+        argv0 = self.run.argv0
+        if not argv0 or parent.image is None:
+            return False
+        names = [argv0]
+        if not argv0.lower().endswith(".exe"):
+            names.append(argv0 + ".exe")
+        image = self.norm(parent.image)
+        return any(image == self.norm(name) for name in names)
+
+    def python_launcher(self, parent: Proc, own: Proc) -> bool:
+        # `py -m moxi ...` starts the interpreter as a child and waits. Its `py.exe` is the
+        # run's own when, after py's version options, it runs exactly what the interpreter
+        # was given from `-m` on: the run's own module and arguments.
+        if parent.image is None or ntpath.basename(parent.image).lower() != "py.exe":
+            return False
+        orig = list(self.run.orig_argv[1:])
+        if not parent.argv or "-m" not in orig:
+            return False
+        rest = list(parent.argv[1:])
+        while rest and _PY_VERSION.fullmatch(rest[0]):
+            rest.pop(0)
+        return rest == orig[orig.index("-m"):]
 
     def norm(self, path: str) -> str:
         if self.windows:
@@ -276,7 +311,7 @@ class _Walk:
         if len(words) > 1 and not any(sep in words[0] for sep in "/\\"):
             return self.base(words[0].rstrip(":"))
         name = self.base(first)
-        if _INTERPRETER.fullmatch(name):
+        if self.interpreter(name):
             kind, target = self.runs(proc.argv)
             if kind == "script":
                 return self.base(target)
@@ -287,7 +322,7 @@ class _Walk:
         name = self.base(argv[0])
         if (script := _SCRIPT.fullmatch(name)) is not None:
             return name, script.group(1)
-        if not _INTERPRETER.fullmatch(name):
+        if not self.interpreter(name):
             return None, None
         kind, target = self.runs(argv)
         if kind == "module" and (module := _MODULE.fullmatch(target)) is not None:
@@ -298,11 +333,21 @@ class _Walk:
                 return script_name, script.group(1)
         return None, None
 
+    def interpreter(self, name: str) -> bool:
+        """Whether a program's base name is a Python interpreter's, or on Windows the
+        Python launcher's (`py`, `pyw`), which hands its command line to one."""
+        return (_INTERPRETER.fullmatch(name) is not None
+                or (self.windows and name in _PY_LAUNCHERS))
+
     def runs(self, argv) -> tuple[str | None, str]:
         """What an interpreter's command line runs: ("module", name) for `-m`,
-        ("script", path) for a script, else (None, "") (`-c`, stdin, nothing)."""
+        ("script", path) for a script, else (None, "") (`-c`, stdin, nothing). The Python
+        launcher's own version options come first and are passed over."""
         args = list(argv[1:])
         at = 0
+        if self.windows and self.base(argv[0]) in _PY_LAUNCHERS:
+            while at < len(args) and _PY_VERSION.fullmatch(args[at]):
+                at += 1
         while at < len(args):
             part = args[at]
             if part == "--":
