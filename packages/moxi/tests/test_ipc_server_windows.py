@@ -330,6 +330,16 @@ def test_a_pipe_that_cant_be_made_at_start_raises_the_failed_call(pipe_start, wh
     assert not held(pipe_start.lock)
 
 
+def test_the_access_list_is_owned_by_the_tokens_user(monkeypatch):
+    from moxi.ipc import _pipe
+
+    # Owned by the user, not left to the token's default owner, which for an elevated
+    # process is the Administrators group and could rewrite the list.
+    sid = "S-1-5-21-1111-2222-3333-1001"
+    monkeypatch.setattr(_win, "user_sid", lambda: sid)
+    assert _pipe.access_list() == f"O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;S-1-5-18)"
+
+
 # -- real pipes (Windows) --------------------------------------------------------------------
 
 @pytest.fixture
@@ -852,6 +862,31 @@ def test_every_pipe_instance_is_owned_by_this_user(pipe_serving):
     listening = srv.call(lambda: srv.server._listening.fileno())
     for handle in (first.handle, second.handle, listening):
         assert owner_of(handle) == _win.user_sid()
+
+
+@WINDOWS
+def test_the_access_list_names_this_tokens_user_as_owner():
+    # The read-back above can't tell a named owner from the token's default owner when
+    # the two are the same user, as they are for a process that isn't elevated. The
+    # descriptor itself must carry the owner.
+    import ctypes
+    from ctypes import wintypes as w
+
+    from moxi.ipc import _pipe
+
+    api = _win._bind()
+    get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityDescriptorOwner
+    get.restype = w.BOOL
+    get.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(w.BOOL)]
+    descriptor = _win._descriptor(_pipe.access_list())
+    try:
+        owner, defaulted = ctypes.c_void_p(), w.BOOL()
+        assert get(descriptor, ctypes.byref(owner), ctypes.byref(defaulted)), \
+            ctypes.get_last_error()
+        assert owner.value, "the descriptor names no owner"
+        assert _win._sid_text(owner.value) == _win.user_sid()
+    finally:
+        api.LocalFree(descriptor)
 
 
 def from_the_network(address: str) -> str:
