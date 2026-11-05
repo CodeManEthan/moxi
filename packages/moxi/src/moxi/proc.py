@@ -1075,6 +1075,13 @@ def _kinfo_parent(raw: bytes, pid: int) -> int | None:
 
 
 def _windows_parent(pid: int) -> int | None:
+    parents = _windows_parents()
+    return None if parents is None else parents.get(pid)
+
+
+def _windows_parents() -> dict[int, int] | None:
+    """Every process's parent pid from one Toolhelp snapshot, or None when no snapshot
+    could be taken."""
     import ctypes
     from ctypes import wintypes as w
 
@@ -1104,12 +1111,12 @@ def _windows_parent(pid: int) -> int | None:
     try:
         entry = Entry()
         entry.dwSize = ctypes.sizeof(Entry)
+        parents = {}
         found = first(snapshot, ctypes.byref(entry))
         while found:
-            if entry.th32ProcessID == pid:
-                return int(entry.th32ParentProcessID)
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
             found = following(snapshot, ctypes.byref(entry))
-        return None
+        return parents
     finally:
         kernel32.CloseHandle(snapshot)
 

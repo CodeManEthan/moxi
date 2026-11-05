@@ -278,10 +278,23 @@ def launchd_units(text: str) -> dict[int, str]:
 class WindowsView(_View):
     windows = True
 
+    def __init__(self):
+        self._parents: dict[int, int] | None = None
+
+    def parent(self, pid: int) -> int | None:
+        """From one Toolhelp snapshot, taken at the walk's first read: a process started
+        since is no ancestor of the run, and a pid given to another process since fails
+        the walk's start-time test."""
+        from moxi import proc
+
+        if self._parents is None:
+            self._parents = proc._windows_parents()
+            if self._parents is None:
+                return None
+        return self._parents.get(pid)
+
     def read(self, pid: int) -> Proc:
         import psutil
-
-        from moxi import proc
 
         try:
             found = psutil.Process(pid)
@@ -290,7 +303,7 @@ class WindowsView(_View):
             raise Gone(pid) from None
         except psutil.Error as error:
             raise Unread(pid, _words(error)) from None
-        ppid = proc.parent(pid)
+        ppid = self.parent(pid)
         if ppid is None:
             if not psutil.pid_exists(pid):
                 raise Gone(pid)
