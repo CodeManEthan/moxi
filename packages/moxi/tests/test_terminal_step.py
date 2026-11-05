@@ -231,17 +231,15 @@ def test_a_file_that_cant_be_read_is_replaced_without_waiting(fence, walks, type
     assert recorded()["env"] == terminal.of()
 
 
-def test_the_step_reads_the_file_once(fence, walks, typed, monkeypatch):
-    calls = []
-    real = _record.read
-
-    def counted(path=None, *, retry=1.0):
-        calls.append(retry)
-        return real(path, retry=retry)
-
-    monkeypatch.setattr(_record, "read", counted)
-    terminal.step()
-    assert calls == [0]
+def test_an_unchanged_step_reads_no_json_and_no_walk(fence):
+    """An unchanged step compares bytes: it imports neither `json` nor the walk."""
+    terminal.write()
+    code = ("import sys; from moxi import terminal; o = terminal.step(); "
+            "print(o.kind, *sorted(m for m in ('json', 'moxi.terminal._walk', "
+            "'moxi.terminal._view', 'dataclasses', 'psutil') if m in sys.modules))")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          timeout=120)
+    assert done.stdout.split() == ["same"], done.stderr
 
 
 # -- the record holds only the set, and doesn't move -----------------------------------------
@@ -422,8 +420,10 @@ def test_each_command_the_lines_name_is_a_core_verb():
 
 # -- cost ---------------------------------------------------------------------------------------
 
-#: What the step may add to a command when the environment is unchanged.
-UNCHANGED_MS = 2.0
+#: What the step may add to a command when the environment is unchanged. On Windows
+#: loading the two modules of `moxi.terminal` alone costs about 3 ms (each module file
+#: costs over a millisecond to load there), so its bound is wider.
+UNCHANGED_MS = 5.0 if WINDOWS else 2.0
 
 
 @pytest.mark.slow

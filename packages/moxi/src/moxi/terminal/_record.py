@@ -215,11 +215,42 @@ def parse(path: Path, data: bytes) -> Record | NoRecord | NewerFormat:
 
 
 def text(env: Mapping[str, str], moxi: str) -> str:
-    """The file's text for a record of `env` (already the record's names) by `moxi`."""
-    import json
+    """The file's text for a record of `env` (already the record's names) by `moxi`: JSON,
+    names sorted, one per line, every character outside printable ASCII escaped.
 
-    body = {"format": FORMAT, "moxi": moxi, "env": dict(sorted(env.items()))}
-    return json.dumps(body, indent=2) + "\n"
+    Built here rather than by `json`, whose import costs several times an unchanged
+    record step on Windows; the step compares the file's bytes with this text and so
+    needs no parse. The same environment always gives the same text."""
+    lines = [f'{{\n  "format": {FORMAT},\n  "moxi": {_quote(moxi)},\n  "env": {{']
+    names = sorted(env)
+    for i, name in enumerate(names):
+        comma = "," if i < len(names) - 1 else ""
+        lines.append(f"\n    {_quote(name)}: {_quote(env[name])}{comma}")
+    lines.append("\n  }\n}\n" if names else "}\n}\n")
+    return "".join(lines)
+
+
+_SHORT = {'"': '\\"', "\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b",
+          "\f": "\\f"}
+
+
+def _quote(value: str) -> str:
+    """`value` as a JSON string in ASCII, as `json.dumps` writes one."""
+    if value.isascii() and value.isprintable() and '"' not in value and "\\" not in value:
+        return f'"{value}"'
+    out = []
+    for ch in value:
+        code = ord(ch)
+        if ch in _SHORT:
+            out.append(_SHORT[ch])
+        elif 0x20 <= code <= 0x7E:
+            out.append(ch)
+        elif code > 0xFFFF:
+            code -= 0x10000
+            out.append(f"\\u{0xD800 | (code >> 10):04x}\\u{0xDC00 | (code & 0x3FF):04x}")
+        else:
+            out.append(f"\\u{code:04x}")
+    return '"' + "".join(out) + '"'
 
 
 def write(env: Mapping[str, str] | None = None, *, path: str | os.PathLike | None = None,
@@ -257,9 +288,14 @@ def version() -> str:
 
 
 def _find_version() -> str:
-    for entry in sys.path:
-        if not entry:
-            continue  # the working directory places no installed distribution
+    # The folder holding the `moxi` package first (an ordinary install puts the dist-info
+    # beside it), then each site-packages folder (an editable one), then the rest, so the
+    # standard library's large folders are rarely listed.
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    entries = [e for e in sys.path if e]  # the working directory places no distribution
+    order = sorted(entries, key=lambda e: (os.path.normcase(e) != os.path.normcase(here),
+                                           os.path.basename(e) != "site-packages"))
+    for entry in order:
         try:
             names = os.listdir(entry)
         except OSError:
@@ -375,10 +411,13 @@ def step(env: Mapping[str, str] | None = None, *, stdin=None, view=None,
     except paths.NoAnchor as error:
         no_place = error
     else:
-        # One read, no retry: a file that can't be read now is replaced if the rule holds.
-        now = read(path, retry=0)
-        if isinstance(now, Record) and now.env == held and now.moxi == version():
-            return Outcome(SAME, path)
+        # One read, no retry, no parse: the file is this run's record byte for byte, or the
+        # run applies the rule. A file that can't be read now is replaced if it holds.
+        try:
+            if path.read_bytes() == text(held, version()).encode("ascii"):
+                return Outcome(SAME, path)
+        except OSError:
+            pass
     if not keyboard(stdin):
         return Outcome(NO_KEYBOARD, path)
     from ._walk import Evidence, walk
