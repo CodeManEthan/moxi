@@ -191,12 +191,19 @@ def test_windows_defaults_keep_only_config_roaming(monkeypatch):
 
 @WINDOWS
 def test_windows_defaults_are_the_users_application_data_folders():
+    from moxi import _win
+
     lay = Layout("cache")
-    e = {}
+    # The fence points the override names at the test's own folders.
+    e = {k: os.environ[k] for k in ("WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA")}
     local = os.environ["LOCALAPPDATA"]
     assert lay.data_dir(e) == Path(local, "moxi", "data", "cache")
     assert lay.config_dir(e) == Path(os.environ["APPDATA"], "moxi", "config", "cache")
     assert lay.runtime_dir(e) == Path(local, "moxi", "runtime", "cache")
+    # Without them, the account's own folders, whatever USERPROFILE and LOCALAPPDATA say.
+    real = _win.known_folder("local")
+    assert lay.data_dir({}) == Path(real, "moxi", "data", "cache")
+    assert not Path(real).is_relative_to(os.environ["USERPROFILE"])
 
 
 # -- the core's own layout ---------------------------------------------------------------
@@ -678,6 +685,7 @@ def test_the_windows_anchor_is_under_the_shells_local_folder(shell_folders):
     assert paths.anchor_dir({"MOXI_ANCHOR_HOME": "/kit"}) == Path("/kit/moxi/data/moxi")
 
 
+@POSIX
 def test_an_account_the_user_database_lacks_has_no_anchor(monkeypatch):
     import pwd
 
@@ -735,9 +743,15 @@ def test_the_windows_anchor_is_the_users_real_local_folder(monkeypatch):
 
 
 @WINDOWS
-def test_the_windows_shell_folders_are_the_real_ones():
+def test_the_windows_shell_folders_are_the_real_ones(fence, monkeypatch):
     from moxi import _win
 
+    # The shell expands its folders from USERPROFILE unless asked with the account's
+    # token; the fence's USERPROFILE is the test's home, so these are the token's.
+    real = _win.known_folder("local")
+    assert not Path(real).is_relative_to(fence.home)
+    monkeypatch.setenv("USERPROFILE", str(fence.home / "moved"))
+    assert _win.known_folder("local") == real
     assert paths._windows_folders({}) == (_win.known_folder("roaming"),
                                           _win.known_folder("local"))
     assert paths.home({}) == Path(_win.known_folder("profile"))

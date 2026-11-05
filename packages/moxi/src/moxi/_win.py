@@ -36,6 +36,7 @@ _PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
 _SE_DACL_PROTECTED = 0x1000
 _SDDL_REVISION_1 = 1
 _TOKEN_QUERY = 0x0008
+_TOKEN_IMPERSONATE = 0x0004
 _TOKEN_USER = 1
 _TOKEN_OWNER = 4
 _ACCESS_ALLOWED_ACE_TYPE = 0
@@ -228,6 +229,12 @@ def known_folder(name: str) -> str:
     """The current user's known folder `name` (`roaming`, `local` or `profile`), asked of
     the shell (`SHGetKnownFolderPath`), never read from an environment variable.
 
+    The call names this process's own token. Without one, the shell expands the
+    `%USERPROFILE%` its registry entries hold from the process's environment, and keeps
+    the first answer for the life of the process; with the token it reads the account's
+    own profile, so every process of the account gets the same folders whatever its
+    environment says.
+
     Raises `OSError` when the shell gives none, as for an account with no profile loaded.
     """
     import ctypes
@@ -249,13 +256,19 @@ def known_folder(name: str) -> str:
     guid = GUID()
     if ole32.CLSIDFromString(KNOWN_FOLDERS[name], ctypes.byref(guid)) != 0:
         raise OSError(f"the known folder id for {name} is not a GUID")
+    api = _bind()
+    token = w.HANDLE()
+    if not api.OpenProcessToken(api.GetCurrentProcess(), _TOKEN_QUERY | _TOKEN_IMPERSONATE,
+                                ctypes.byref(token)):
+        raise _error("OpenProcessToken")
     found = w.LPWSTR()
     try:
         result = shell32.SHGetKnownFolderPath(ctypes.byref(guid), _KF_FLAG_DONT_VERIFY,
-                                              None, ctypes.byref(found))
+                                              token, ctypes.byref(found))
         path = found.value
     finally:
         ole32.CoTaskMemFree(ctypes.cast(found, ctypes.c_void_p))
+        api.CloseHandle(token)
     if result != 0 or not path:
         raise OSError(f"the shell gives no {name} folder for this user "
                       f"(SHGetKnownFolderPath returned {result & 0xFFFFFFFF:#010x})")
