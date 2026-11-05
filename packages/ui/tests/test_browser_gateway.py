@@ -10,6 +10,8 @@ with the reason, and the TCP tests show what the phone gets instead: the desk po
 
 from __future__ import annotations
 
+import socket
+import threading
 from urllib.parse import urlsplit
 
 import pytest
@@ -87,6 +89,25 @@ SETTLED = """async () => {
 OWN_WORKER = """async () => {
   const own = location.origin + "/sw.js";
   await navigator.serviceWorker.register("/sw.js", {scope: "/"});
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const controller = navigator.serviceWorker.controller;
+    if (reg && reg.active && reg.active.scriptURL === own && !reg.installing && !reg.waiting
+        && controller && controller.scriptURL === own) return true;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  return false;
+}"""
+#: Registers the gateway's worker from another script URL (the gateway answers every
+#: worker script request with the same bytes), through a Trusted Types policy of the
+#: test's own, and waits until that version controls this page with no other left.
+WORKER_AT = """async (url) => {
+  const own = location.origin + url;
+  const types = globalThis.trustedTypes;
+  const script = types === undefined ? url
+    : types.createPolicy("test-worker", {createScriptURL: (given) => given}).createScriptURL(url);
+  await navigator.serviceWorker.register(script, {scope: "/"});
   const until = Date.now() + 15000;
   while (Date.now() < until) {
     const reg = await navigator.serviceWorker.getRegistration();
@@ -193,6 +214,96 @@ class StoringSquatter(Squatter):
         if headers.get("service-worker") != "script" and urlsplit(target).path == "/m/ui/":
             return "200 OK", "text/html; charset=utf-8", STORE_IN_CACHES.encode(), []
         return super()._answer(target, headers)
+
+
+#: The longest the relay holds an answer.
+HOLD_S = 10
+
+
+class HoldingRelay:
+    """A relay between the bridge and the gateway that copies bytes both ways. After
+    `hold(path, until)`, the answer to the next GET of `path` waits until a GET of `until`
+    has gone on, or `HOLD_S` pass."""
+
+    def __init__(self, target: int):
+        self.target = target
+        self._listener = socket.socket()
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(64)
+        self.port = self._listener.getsockname()[1]
+        self._open: list[socket.socket] = [self._listener]
+        self._lock = threading.Lock()
+        self._path = self._until = b""
+        self._asked = threading.Event()
+
+    def start(self) -> HoldingRelay:
+        threading.Thread(target=self._accept, daemon=True).start()
+        return self
+
+    def stop(self) -> None:
+        with self._lock:
+            held, self._open = self._open, []
+        for sock in held:
+            _shut(sock)
+
+    def hold(self, path: str, until: str) -> None:
+        with self._lock:
+            self._path, self._until = f"GET {path} ".encode(), f"GET {until} ".encode()
+            self._asked.clear()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                client, _ = self._listener.accept()
+                upstream = socket.create_connection(("127.0.0.1", self.target))
+            except OSError:
+                return
+            with self._lock:
+                self._open += [client, upstream]
+            held = threading.Event()
+            threading.Thread(target=self._ask, args=(client, upstream, held), daemon=True).start()
+            threading.Thread(target=self._answer, args=(upstream, client, held),
+                             daemon=True).start()
+
+    def _ask(self, client: socket.socket, upstream: socket.socket,
+             held: threading.Event) -> None:
+        try:
+            while data := client.recv(65536):
+                with self._lock:
+                    if self._path and data.startswith(self._path):
+                        self._path = b""
+                        held.set()
+                    if self._until and data.startswith(self._until):
+                        self._until = b""
+                        self._asked.set()
+                upstream.sendall(data)
+        except OSError:
+            pass
+        finally:
+            _shut(client)
+            _shut(upstream)
+
+    def _answer(self, upstream: socket.socket, client: socket.socket,
+                held: threading.Event) -> None:
+        try:
+            while data := upstream.recv(65536):
+                if held.is_set():
+                    held.clear()
+                    self._asked.wait(HOLD_S)
+                client.sendall(data)
+        except OSError:
+            pass
+        finally:
+            _shut(upstream)
+            _shut(client)
+
+
+def _shut(sock: socket.socket) -> None:
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    sock.close()
 
 
 def _engine(ui_browser) -> str:
@@ -457,6 +568,46 @@ def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_a
     finally:
         squat.stop()
         bridge.stop()
+        shell.stop()
+
+
+#: The most loads the worker-swap test makes for one whose panel script is dropped.
+SWAP_LOADS = 20
+
+
+def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_more_try(
+        ui_browser, tmp_path_factory, fixture_site, phones):
+    """The gateway's worker, registered from another script URL, controls the phone, so
+    the shell's next load registers `/sw.js`, which replaces it while the load goes on.
+    Firefox ends the replaced worker at once and drops a fetch it is sent then. The modules
+    list is held until `/sw.js` is asked for, so the panel's script is fetched near that
+    moment; loads go on until one has it dropped. The shell finds the script fine and tries
+    once more, and every load's panel is placed."""
+    if _engine(ui_browser) != "firefox":
+        pytest.skip("only Firefox ends a replaced worker at once and drops what it is sent; "
+                    "Chromium keeps it until its fetches finish")
+    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    relay = HoldingRelay(shell.gateway_port).start()
+    bridge = PhoneBridge(shell.home, relay.port).start()
+    try:
+        page = _pair(phones(bridge), shell)
+        dropped: list[str] = []
+        page.on("console", lambda msg: dropped.append(msg.text)
+                if "moxi: ui's page could not load" in msg.text else None)
+        panel = page.locator("#moxi-panel > moxi-ui-page")
+        message = page.locator("#moxi-panel .moxi-message")
+        for load in range(SWAP_LOADS):
+            assert page.evaluate(WORKER_AT, f"/m/ui/swap/{load}/sw.js") is True
+            relay.hold("/m/ui/api/modules", until="/sw.js")
+            page.goto("/m/ui/")
+            expect(panel.or_(message)).to_be_attached()
+            assert message.count() == 0, message.inner_text()
+            if dropped:
+                break
+        assert dropped, f"none of {SWAP_LOADS} loads had its panel script dropped"
+    finally:
+        bridge.stop()
+        relay.stop()
         shell.stop()
 
 
