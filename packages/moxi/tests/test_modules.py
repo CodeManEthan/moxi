@@ -232,8 +232,14 @@ def test_load_never_raises(site, monkeypatch):
 
 
 def test_importing_the_core_loads_no_metadata_machinery():
-    src = Path(modules.__file__).parent
-    assert (src / "__init__.py").read_bytes() == b""
+    # The package itself sets the start mark and imports nothing else: every import of the
+    # core runs it, so it stays standard library and cheap.
+    code = ("import sys; before = set(sys.modules); import moxi; "
+            "print(*sorted(set(sys.modules) - before))")
+    out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
+                         text=True, check=True)
+    assert {"moxi", "moxi._mark"} <= set(out.stdout.split()) <= {
+        "moxi", "moxi._mark", "__future__", "collections.abc"}
     code = ("import sys; import moxi.modules, moxi.names, moxi.paths, moxi.config; "
             "print('importlib.metadata' in sys.modules, 'tomllib' in sys.modules)")
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,

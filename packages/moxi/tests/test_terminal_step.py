@@ -54,7 +54,17 @@ def typed(monkeypatch):
 
 @pytest.fixture
 def console(monkeypatch, capsys):
-    """Run `moxi <argv>` as the console script does, in process; returns (code, stderr)."""
+    """Run `moxi <argv>` as the console script does, in process; returns (code, stderr).
+
+    The console script tells strays first, and every other `moxi` on PATH is one place it
+    looks (`moxi.strays`). The test runner's PATH can hold another environment's `moxi`
+    (a workspace's own, beside the check's environment), whose modules would be told as
+    strays on stderr; PATH here holds no `moxi`, so stderr is the record step's alone."""
+    script = "moxi.exe" if WINDOWS else "moxi"
+    monkeypatch.setenv("PATH", os.pathsep.join(
+        entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and not os.path.isfile(os.path.join(entry, script))))
+
     def run(*argv: str):
         monkeypatch.setattr(sys, "argv", ["moxi", *argv])
         monkeypatch.setattr(terminal, "last", None)
