@@ -376,11 +376,21 @@ def test_on_windows_a_busy_pipe_is_tried_again_until_it_opens(opens):
     assert len(opens.tried) == 4
 
 
+def test_on_windows_a_pipe_whose_list_refuses_this_user_is_an_ipc_error(opens):
+    opens.answers = [win_error(5)]  # ERROR_ACCESS_DENIED: another user's pipe
+    with pytest.raises(ipc.IpcError) as caught:
+        ipc.connect(PIPE)
+    assert type(caught.value) is ipc.IpcError
+    assert f"refused the pipe at {PIPE}" in str(caught.value)
+    assert "access denied" in str(caught.value)
+    assert opens.tried == [PIPE]  # not tried again, as busy is
+
+
 def test_on_windows_any_other_open_error_is_raised_as_it_is(opens):
-    opens.answers = [win_error(5)]
+    opens.answers = [win_error(1450)]
     with pytest.raises(OSError) as caught:
         ipc.connect(PIPE)
-    assert caught.value.winerror == 5 and not isinstance(caught.value, ipc.IpcError)
+    assert caught.value.winerror == 1450 and not isinstance(caught.value, ipc.IpcError)
 
 
 @pytest.mark.parametrize("address", ["/run/user/1000/moxi/demo/a.sock",
