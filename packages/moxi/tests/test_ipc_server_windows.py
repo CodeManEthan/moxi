@@ -819,17 +819,32 @@ def test_every_pipe_instance_admits_only_this_user_and_system(pipe_serving):
         assert protected and sorted(entries) == want
 
 
-def server_service() -> str:
-    r"""What `sc query` says of the Server service, the one that serves `\\host\pipe\`."""
-    out = subprocess.run(["sc", "query", "LanmanServer"], capture_output=True, text=True,
-                         timeout=60).stdout
-    return "RUNNING" if "RUNNING" in out else (out.strip().splitlines() or ["absent"])[-1]
-
-
 def from_the_network(address: str) -> str:
     """Pipe `address` named the way a client on another machine names it, through the
     loopback address."""
     return "\\\\127.0.0.1\\pipe\\" + address[len("\\\\.\\pipe\\"):]
+
+
+def admitting_the_network(name: str) -> int:
+    """A first instance of pipe `name` made as the server makes one, with the same
+    access list, but admitting clients on other machines."""
+    import ctypes
+
+    from moxi.ipc import _pipe
+
+    api = _win._bind()
+    descriptor = _win._descriptor(_pipe.access_list())
+    try:
+        attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
+                                             descriptor, False)
+        handle = _pipe._bind_create()(
+            name, _pipe._PIPE_ACCESS_DUPLEX | _pipe._FILE_FLAG_OVERLAPPED
+            | _pipe._FILE_FLAG_FIRST_PIPE_INSTANCE, 0, 1, 8192, 8192, 0,
+            ctypes.byref(attributes))
+        assert handle and handle != ctypes.c_void_p(-1).value, ctypes.get_last_error()
+        return handle
+    finally:
+        api.LocalFree(descriptor)
 
 
 #: What opening a pipe that refuses clients on other machines fails with from one.
@@ -840,23 +855,22 @@ REFUSED_REMOTE = 5  # ERROR_ACCESS_DENIED
 def test_an_open_from_the_network_is_refused(pipe_serving):
     import _winapi
 
-    state = server_service()
-    if state != "RUNNING":
-        pytest.skip(f"the Server service isn't running here ({state}), so no pipe is "
-                    f"reached through \\\\127.0.0.1\\pipe\\")
-    # A pipe of the kind asyncio makes, which admits the network: the path reaches it.
+    # A pipe with the server's own access list but without the refusal of remote
+    # clients. The loopback path reaches it only where the Server service serves pipes;
+    # elsewhere the row skips. (Whether that service runs can't be asked directly: a
+    # non-admin's query of it may be refused.) Opened, it also shows that the list alone
+    # admits this user coming from the network, so what refuses the server's pipe below
+    # is the refusal of remote clients.
     control = rf"\\.\pipe\moxi-test-remote-{uuid.uuid4().hex}"
-    instance = _winapi.CreateNamedPipe(
-        control, _winapi.PIPE_ACCESS_DUPLEX | _winapi.FILE_FLAG_OVERLAPPED,
-        _winapi.PIPE_WAIT, 1, 8192, 8192, 0, _winapi.NULL)
+    instance = admitting_the_network(control)
     try:
         try:
             opened = _winapi.CreateFile(
                 from_the_network(control), _winapi.GENERIC_READ | _winapi.GENERIC_WRITE, 0,
                 _winapi.NULL, _winapi.OPEN_EXISTING, 0, _winapi.NULL)
         except OSError as exc:
-            pytest.skip(f"the Server service runs, but a pipe that admits the network "
-                        f"isn't reached through \\\\127.0.0.1 either ({exc})")
+            pytest.skip(f"\\\\127.0.0.1\\pipe\\ reaches no pipe here, even one that "
+                        f"admits the network ({exc}): the Server service isn't serving")
         _winapi.CloseHandle(opened)
     finally:
         _winapi.CloseHandle(instance)
