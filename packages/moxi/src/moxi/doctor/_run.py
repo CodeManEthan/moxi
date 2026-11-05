@@ -26,9 +26,12 @@
     10. placements: each placement `moxi.place` holds that is `stale`, `modified` or
         `missing` (a gone source reads "source missing: <path>"), and each harness row and
         `skills.harnesses` name the placer skips, on module `moxi`;
-    11. each `moxi.doctor` extension entry's rows;
-    12. each module's `DOCTOR` rows;
-    13. with `costs=True`, each module's active daemons against its `BUDGETS`.
+    11. the terminal record, on module `moxi`: whether a command typed here records the
+        terminal's environment in the account's record, or what stops it, with the one
+        step that fixes it (`terminal_row`);
+    12. each `moxi.doctor` extension entry's rows;
+    13. each module's `DOCTOR` rows;
+    14. with `costs=True`, each module's active daemons against its `BUDGETS`.
 
 Module names restrict the rows to those modules; `moxi` names the core's own rows. A
 `DOCTOR` target and a `moxi.doctor` entry run in a worker thread with `DOCTOR_SECONDS`
@@ -89,7 +92,7 @@ def run(modules: Iterable[str] | None = None, *, costs: bool = False,
     failed: list[Row] = []
     checks = [_check_modules, _check_settings, _check_extensions, _check_units,
               _check_stores, _check_home, _check_strays, _check_setup, _check_records,
-              _check_placements, _check_entries, _check_doctors]
+              _check_placements, _check_terminal, _check_entries, _check_doctors]
     if costs:
         checks.append(_check_costs)
     for check in checks:
@@ -1290,6 +1293,80 @@ def _parse_stamp(text) -> float | None:
         return None
 
 
+# -- 11. the terminal record -------------------------------------------------------------------
+
+def _check_terminal(ctx: _Context) -> list[Row]:
+    from .. import names
+
+    return [terminal_row()] if ctx.wanted(names.HARNESS) else []
+
+
+def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
+    """The doctor's terminal record row: that a command typed here records (the record
+    holds this run's environment), or the first thing that stops it, each with its step.
+
+    It reads only: it places the record, compares it with what this run would record, and
+    runs the front door's keyboard test (`keyboard`, for a test) and the walk (`view` and
+    `run`, as `moxi.terminal.walk` takes them). A write the front door's record step
+    tried and failed in this run (`moxi.terminal.last`) is named with its error; with no
+    step in this run, a record that differs is checked for whether it could be written. A walk that finds Moxi or an agent, or
+    can't decide, is a `warn`; a record that can't be read or written is a `fail`.
+    """
+    from .. import paths, terminal
+    from ..terminal import _check, _lines, _record, _walk
+
+    name = "terminal record"
+
+    def row(state: str, words: tuple[str, str]) -> Row:
+        return Row("moxi", name, state, words[0], words[1])
+
+    try:
+        record = paths.terminal_record()
+    except paths.NoAnchor as no:
+        return row("warn", _lines.row_no_place(no.cause, no.step))
+    if _check._anchor_set(os.environ, _check._windows()):
+        return row("warn", _lines.row_anchor_set(str(record)))
+    if not (_record.keyboard() if keyboard is None else keyboard):
+        return row("warn", _lines.NO_KEYBOARD)
+    found = _walk.walk(view, run)
+    if found is not None:
+        return row("warn", _lines.found_words(found))
+    held = _record.read(record)
+    if isinstance(held, _record.Unreadable):
+        return Row("moxi", name, "fail",
+                   f"the record at {record} can't be read ({_check._error(held.error)})",
+                   f"fix its permissions or remove it, then type {_lines.RECORD_COMMAND} "
+                   "here")
+    if isinstance(held, _record.Record) and held.env == _record.of():
+        return Row("moxi", name, "ok", f"the record at {record} holds this terminal's "
+                   "environment, so a page compares with it")
+    last = getattr(terminal, "last", None)
+    if getattr(last, "kind", None) == "failed":
+        error = last.error
+        error = _check._error(error) if isinstance(error, OSError) else str(error)
+        return row("fail", _lines.row_unwritable(str(record), str(record.parent), error))
+    if last is None and (error := _unwritable(record)) is not None:
+        return row("fail", _lines.row_unwritable(str(record), str(record.parent), error))
+    return Row("moxi", name, "warn",
+               f"the record at {record} doesn't hold this terminal's environment, and "
+               "this run made none: it wasn't started as the moxi command",
+               f"type {_lines.RECORD_COMMAND} in this terminal")
+
+
+def _unwritable(record: Path) -> str | None:
+    """Why `record` can't be written in place, or None: the file, when it exists, and the
+    nearest folder above it that exists must be writable by this account."""
+    import errno
+
+    folder = record.parent
+    while not folder.exists() and folder.parent != folder:
+        folder = folder.parent
+    for path in ((record,) if record.exists() else ()) + (folder,):
+        if not os.access(path, os.W_OK):
+            return f"{path}: {os.strerror(errno.EACCES)}"
+    return None
+
+
 # -- the command -------------------------------------------------------------------------------
 
 def main(argv: list[str]) -> int:
@@ -1342,5 +1419,6 @@ def line(row: Row) -> str:
 
 
 __all__ = ["DOCTOR_SECONDS", "HEALTH_SECONDS", "Measure", "run", "health", "floor_ms",
+           "terminal_row",
            "measure", "cgroup_measure", "process_measure", "idle_rate", "store_rows",
            "doctor_rows", "main", "line"]

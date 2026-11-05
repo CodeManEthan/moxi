@@ -32,3 +32,9 @@ from ._walk import Evidence, Found, Run, Undecided, walk
 __all__ = ["MARK", "marked", "walk", "Evidence", "Undecided", "Found", "Run",
            "FORMAT", "in_set", "of", "read", "write", "version", "keyboard", "Record",
            "NoRecord", "Unreadable", "NewerFormat", "Read"]
+
+# The check a page makes before it writes, and where the browser shell takes a variable.
+from ._check import check  # noqa: E402
+from ._lines import Where, where  # noqa: E402
+
+__all__ += ["check", "where", "Where"]
