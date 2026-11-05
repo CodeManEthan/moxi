@@ -955,7 +955,7 @@ def _child_with(env: dict[str, str], argv0: str = PY) -> subprocess.Popen:
     child = subprocess.Popen([argv0, "-c", "import sys; print('up', flush=True); sys.stdin.read()"],
                              executable=PY, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              env=env)
-    assert child.stdout.readline() == b"up\n"
+    assert child.stdout.readline().strip() == b"up"
     return child
 
 

@@ -439,7 +439,7 @@ def test_slots_loose_without_slots_installed_is_false(monkeypatch):
     from moxi import modules
 
     monkeypatch.setattr(modules, "present", lambda name: False)
-    assert _view.LinuxView().slots_loose() is False
+    assert _view._View().slots_loose() is False
 
 
 @pytest.mark.parametrize("backend, state, loose", [
@@ -456,7 +456,7 @@ def test_slots_loose_asks_the_service_manager(monkeypatch, backend, state, loose
     monkeypatch.setattr(units, "backend", lambda: backend)
     monkeypatch.setattr(units, "status",
                         lambda module: [] if state == "none" else [State()])
-    assert _view.LinuxView().slots_loose() is loose
+    assert _view._View().slots_loose() is loose
 
 
 def test_slots_loose_that_fails_is_true(monkeypatch):
@@ -466,7 +466,7 @@ def test_slots_loose_that_fails_is_true(monkeypatch):
         raise RuntimeError("metadata")
 
     monkeypatch.setattr(modules, "present", fail)
-    assert _view.LinuxView().slots_loose() is True
+    assert _view._View().slots_loose() is True
 
 
 # -- the Linux reader ----------------------------------------------------------------------
@@ -577,3 +577,64 @@ def test_live_a_run_that_started_with_the_mark_stops_at_itself():
 
     got = json.loads(done.stdout)
     assert (got["kind"], got["detail"]) == ("E4", "by hand"), done.stderr
+
+
+# -- live, through the real console script -------------------------------------------------
+
+_SITE = textwrap.dedent("""\
+    import atexit, dataclasses, json, os
+
+    def _walk():
+        import moxi.terminal as t
+        from moxi.terminal import _view
+        found = t.walk()
+        view, me, chain = _view.default_view(), os.getpid(), []
+        try:
+            while me > 0 and len(chain) < 8:
+                p = view.read(me)
+                chain.append([p.pid, p.image or (p.argv or [""])[0]])
+                me = p.parent
+        except Exception as error:
+            chain.append(repr(error))
+        with open(os.environ["WALK_OUT"], "w") as f:
+            json.dump({"found": found and dataclasses.asdict(found), "chain": chain}, f)
+
+    if os.environ.get("WALK_OUT"):
+        atexit.register(_walk)
+    """)
+
+_HOP = textwrap.dedent("""\
+    import os, subprocess, sys
+    env = {k: v for k, v in os.environ.items() if k.upper() != "MOXI_STARTED_BY"}
+    sys.exit(subprocess.run(sys.argv[1:], env=env, timeout=120).returncode)
+    """)
+
+
+def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_path):
+    """`moxi version` run through the installed console script (on Windows its `.exe`
+    launcher, and a venv redirector where there is one), below a process that started
+    with the mark: the walk passes the run's own entry chain and finds the mark on that
+    process, not E1 on the launcher."""
+    import json
+    import shutil
+
+    script = shutil.which("moxi", path=os.path.dirname(sys.executable))
+    if script is None:
+        pytest.skip("no moxi console script beside this interpreter")
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(_SITE)
+    out = tmp_path / "walk.json"
+    keep = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "HOME",
+            "USERPROFILE", "LOCALAPPDATA", "APPDATA", "MOXI_HOME", "XDG_DATA_HOME",
+            "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    env.update(PYTHONPATH=str(site), WALK_OUT=str(out), **{_mark.NAME: "the hop"})
+    done = subprocess.run([sys.executable, "-c", _HOP, script, "version"], env=env,
+                          capture_output=True, text=True, timeout=150)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(out.read_text())
+    found_ = got["found"]
+    assert found_ is not None, got
+    print(got)
+    assert (found_["kind"], found_["detail"]) == ("E4", "the hop"), got
