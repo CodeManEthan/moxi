@@ -11,6 +11,7 @@ calls it needs when first called, so importing this module costs nothing anywher
 - `user_sid()` is the current user's SID as text, `S-1-5-21-...`.
 - `known_folder(name)` is one of the user's own folders (roaming and local application
   data, the profile), asked of the shell and not read from the environment.
+- `pipe_name(handle)` is the name of the pipe a handle is an end of.
 - `pipe_client_pid(handle)` is the pid of the process at the client end of a named pipe,
   and `pipe_server_pid(handle)` the pid of the process at its server end.
 - `Job` is a Job Object: the processes put in it can be ended together, and, made with
@@ -154,6 +155,9 @@ def _bind():
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
     api.GetNamedPipeServerProcessId = bind(kernel32, "GetNamedPipeServerProcessId", w.BOOL,
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
+    api.GetFileType = bind(kernel32, "GetFileType", w.DWORD, w.HANDLE)
+    api.GetFileInformationByHandleEx = bind(kernel32, "GetFileInformationByHandleEx",
+                                            w.BOOL, w.HANDLE, ctypes.c_int, P, w.DWORD)
     _api = api
     return api
 
@@ -297,6 +301,30 @@ def pipe_server_pid(handle: int) -> int:
     if not api.GetNamedPipeServerProcessId(handle, api.ctypes.byref(pid)):
         raise _error("GetNamedPipeServerProcessId")
     return pid.value
+
+
+_FILE_TYPE_PIPE = 3
+_FILE_NAME_INFO = 2
+# FILE_NAME_INFO: a DWORD length in bytes, then that many bytes of UTF-16 name.
+_NAME_BUFFER = 4 + 2 * 1024
+
+
+def pipe_name(handle: int) -> str | None:
+    """The name of the pipe `handle` is an end of, as the system gives it
+    (`\\name`, without the `\\\\.\\pipe` start), or None when `handle` is no pipe or
+    the pipe has no name the system will give. Raises `OSError` for a handle that isn't
+    open."""
+    api = _bind()
+    kind = api.GetFileType(handle)
+    if kind != _FILE_TYPE_PIPE:
+        if kind == 0 and api.ctypes.get_last_error():
+            raise _error("GetFileType")
+        return None
+    buffer = api.ctypes.create_string_buffer(_NAME_BUFFER)
+    if not api.GetFileInformationByHandleEx(handle, _FILE_NAME_INFO, buffer, _NAME_BUFFER):
+        return None
+    length = int.from_bytes(buffer.raw[:4], "little")
+    return buffer.raw[4:4 + min(length, _NAME_BUFFER - 4)].decode("utf-16-le", "replace")
 
 
 # -- private directories ------------------------------------------------------------------
