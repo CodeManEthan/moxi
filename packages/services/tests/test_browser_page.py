@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,10 @@ KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 #: What a run of a row that launches a session adds to its sheet.
 SPENDS = "Each run launches an agent session, so this run spends usage."
 VERDICTS = ("ok", "warn", "fail", "off")
+#: When `paused` was stopped by hand: now, so the stop is after the last boot and still
+#: holds (a stop from before the boot is dropped, and a fixed time fails on any machine
+#: booted since).
+STOPPED = datetime.now(timezone.utc).replace(microsecond=0)
 
 #: The fake supervisor's units, by row name.
 UNITS = {"written": {
@@ -61,7 +66,7 @@ def seeded(ui_shell) -> None:
     seed(ui_shell,
          written("web", project="alpha", doc="serves the docs"),
          written("sync-down"),
-         written("paused", after={"stopped": "2026-11-03T09:00:00Z"}),
+         written("paused", after={"stopped": f"{STOPPED:%Y-%m-%dT%H:%M:%SZ}"}),
          written("spare", enabled=False),
          written("backup", kind="timer", every="5m", argv=["/usr/bin/true"]),
          written("agent-run", kind="timer", every="1h", argv=["/usr/bin/true"],
@@ -146,7 +151,7 @@ def test_the_rows_are_grouped_by_project_with_their_verdicts_and_lines(seeded, u
     expect(row(panel, "services/web").locator('[data-line="flag"]')).to_have_text("flag: on")
     expect(row(panel, "services/spare").locator('[data-line="flag"]')).to_have_text("flag: off")
     expect(row(panel, "services/paused").locator('[data-line="time"]')).to_have_text(
-        "stopped by hand at 2026-11-03 09:00 UTC")
+        f"stopped by hand at {STOPPED:%Y-%m-%d %H:%M} UTC")
     expect(row(panel, "services/web").locator('[data-line="doc"]')).to_have_text("serves the docs")
 
     # A timer runs in place of start and restart, and only a row that launches a session
