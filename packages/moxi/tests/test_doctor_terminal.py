@@ -76,6 +76,17 @@ def test_no_keyboard(acct):
     (Evidence("E2", 312, "claude", "claude"),
      "this command runs under Claude Code (pid 312), an agent, and nothing an agent runs "
      "records", "type it in a terminal of your own"),
+    # A helper the harness names after itself is named as its harness.
+    (Evidence("E2", 1, "codex-linux-sandbox", "codex"),
+     "this command runs under Codex (pid 1), an agent, and nothing an agent runs records",
+     "type it in a terminal of your own"),
+    (Evidence("E2", 1, "3", "/proc/self/fd/3"),
+     "this command runs under a program started from a file descriptor (pid 1), as an "
+     "agent's tool sandbox runs its commands, and nothing an agent runs records",
+     "type it in a terminal of your own"),
+    (Evidence("E2", 100, "moxi", "CLAUDECODE"),
+     "this command runs in a Claude Code tool command (its environment carries "
+     "CLAUDECODE), and nothing an agent runs records", "type it in a terminal of your own"),
 ])
 def test_each_walk_result_names_what_it_found_and_one_step(acct, monkeypatch, found, detail,
                                                            fix):

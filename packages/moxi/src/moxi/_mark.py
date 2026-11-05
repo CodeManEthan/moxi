@@ -7,6 +7,10 @@ a Moxi program's environment carries it, and `marked` adds it to an environment 
 from scratch. The mark can stop this account's terminal record from being written, never
 cause one: a process that started with it is one Moxi started.
 
+`note()` also keeps which harness tool marks (`TOOL_MARKS`) the process started with: a
+variable a harness sets for every command its tools run. Like the mark, one can only stop
+a record.
+
 Standard library only, and nothing imported beyond `os` and `sys`, since every import of
 the core runs this.
 """
@@ -23,6 +27,11 @@ NAME = "MOXI_STARTED_BY"
 #: The mark's value in the environment this process started with; None when it had none.
 #: Read once, by `note()`, before this process sets the mark itself.
 started_by: str | None = None
+#: The harnesses' tool marks, each with the harness that sets it for every command its
+#: tools run: Claude Code sets `CLAUDECODE`, sandbox on or off.
+TOOL_MARKS = {"CLAUDECODE": "claude"}
+#: The tool marks in the environment this process started with, in `TOOL_MARKS` order.
+tool_marks: tuple[str, ...] = ()
 #: The value this process gives the mark: its program's name.
 program: str = "python"
 _noted = False
@@ -31,11 +40,12 @@ _noted = False
 def note() -> None:
     """Keep whether this process started with the mark, then set it if it didn't. Only
     the first call does anything, so reloading the package notes nothing new."""
-    global started_by, program, _noted
+    global started_by, tool_marks, program, _noted
     if _noted:
         return
     _noted = True
     started_by = os.environ.get(NAME)
+    tool_marks = present(os.environ, TOOL_MARKS)
     program = _program()
     if started_by is None:
         os.environ[NAME] = program
@@ -52,6 +62,14 @@ def marked(env: Mapping[str, str] | None = None) -> dict[str, str]:
     else:
         child.setdefault(NAME, program)
     return child
+
+
+def present(env: Mapping[str, str], names, *, fold: bool | None = None) -> tuple[str, ...]:
+    """The `names` that `env` holds, whatever their value (an empty one counts), in the
+    order given. On Windows (`fold` None: this platform) a name matches without case."""
+    fold = sys.platform == "win32" if fold is None else fold
+    held = {name.upper() for name in env} if fold else env
+    return tuple(name for name in names if (name.upper() if fold else name) in held)
 
 
 def _program() -> str:
