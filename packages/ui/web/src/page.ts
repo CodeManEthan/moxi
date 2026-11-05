@@ -17,6 +17,7 @@ import { api, components, gateway, installed, navigate, place, setTheme, subscri
 import type { FieldDescriptor, FormChange, FormElement, ThemeMode } from "/m/ui/client.js";
 
 import "./gateway-desk.ts";
+import { placeOnceMore, scriptFailure } from "./place-model.ts";
 import { doctorRows, homeBlocks, moduleLines, moduleOrder, moduleState } from "./views.ts";
 import type { DoctorRow, ModuleView } from "./views.ts";
 
@@ -240,9 +241,14 @@ export class UiPage extends LitElement {
       const host = document.createElement("div");
       card.append(title, host);
       home.append(card);
-      const placed = await place(host, block.module, block.name);
-      if (mine !== this.#placing) return;
-      if (placed === null) {
+      // A script that gave no element and answers fine gets one more try; one with no
+      // script declared has nothing to fetch again.
+      const url = components(block.module).find((comp) => comp.name === block.name)?.url;
+      const load = await placeOnceMore(() => place(host, block.module, block.name),
+                                       async () => (url === undefined ? "no script" : await scriptFailure(block.module, url)),
+                                       () => mine === this.#placing);
+      if (load === null) return;
+      if (!("placed" in load)) {
         const line = document.createElement("p");
         line.className = "small warn";
         line.textContent = `${block.module}'s ${block.name} could not be shown.`;

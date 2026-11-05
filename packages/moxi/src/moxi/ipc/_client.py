@@ -51,7 +51,8 @@ def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LIN
     again every 50 ms until then. `timeout` is also the client's wait for `hello()`.
     On Windows, at an address `moxi.ipc.address` made, the pipe is closed unwritten and
     `IpcError` raised when the process serving it runs as another user or its user can't
-    be read; a pipe of any other name is not checked, as no socket path is.
+    be read; a pipe of any other name is not checked, as no socket path is. A pipe
+    whose access list doesn't admit this user (another user's server) raises `IpcError`.
     `max_line` caps the answer lines the client reads, in bytes without the newline:
     match a server given a larger `serve(max_line=...)`."""
     if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
@@ -103,6 +104,10 @@ def _open_pipe(address: str) -> _pipe.Pipe | None:
         code = getattr(exc, "winerror", None)
         if code in _pipe.COLD:
             raise NotServing(address, exc.strerror) from None
+        if code == _pipe.DENIED:
+            raise IpcError(f"refused the pipe at {address}: its access list doesn't "
+                           f"admit this user (access denied), so it is another user's "
+                           f"pipe") from None
         if code != _pipe.BUSY:
             raise
         return None
