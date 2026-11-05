@@ -420,8 +420,10 @@ def test_each_command_the_lines_name_is_a_core_verb():
 
 # -- cost ---------------------------------------------------------------------------------------
 
-#: What the step may add to a command when the environment is unchanged.
-UNCHANGED_MS = 2.0
+#: What the step may add to a command when the environment is unchanged. On Windows
+#: loading the two modules of `moxi.terminal` alone costs about 3 ms (each module file
+#: costs over a millisecond to load there), so its bound is wider.
+UNCHANGED_MS = 5.0 if WINDOWS else 2.0
 
 
 @pytest.mark.slow

@@ -371,7 +371,7 @@ def test_a_named_pipe_on_the_input_of_a_child(name, expected):
 
     full = "\\\\.\\pipe\\" + name.format(n=os.getpid())
     server = _winapi.CreateNamedPipe(
-        full, 0x2, _winapi.PIPE_TYPE_BYTE | _winapi.PIPE_WAIT,
+        full, 0x2, 0,  # outbound; a byte pipe that waits
         1, 4096, 4096, 0, _winapi.NULL)
     try:
         client = _winapi.CreateFile(full, _winapi.GENERIC_READ, 0, _winapi.NULL,
