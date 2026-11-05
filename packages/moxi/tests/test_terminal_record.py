@@ -322,6 +322,10 @@ def test_a_file_a_closed_input_or_none_is_no_keyboard(tmp_path):
     r"\cygwin-e022582115c10879-pty12-from-master",
     r"\\.\pipe\msys-1888ae32e00d56aa-pty3-from-master",
     r"\\.\pipe\cygwin-0a-pty0-from-master",
+    # Current Git for Windows adds `-nat` (seen with MSYS=disable_pcon on Git 2.56).
+    r"\msys-1888ae32e00d56aa-pty0-from-master-nat",
+    r"\cygwin-e022582115c10879-pty12-from-master-nat",
+    r"\\.\pipe\msys-1888ae32e00d56aa-pty3-from-master-NAT",
 ])
 def test_a_cygwin_or_msys_pty_input_pipe_is_named_so(name):
     assert _record.is_pty_pipe(name)
@@ -334,14 +338,47 @@ def test_a_cygwin_or_msys_pty_input_pipe_is_named_so(name):
     r"\msys-xyz-pty0-from-master",
     r"\other-dd50a72ab4668b33-pty0-from-master",
     r"\msys-dd50-ptyX-from-master",
+    r"\msys-dd50a72ab4668b33-pty0-to-master-nat",
+    r"\msys-dd50a72ab4668b33-pty0-from-master-nat-nat",
+    r"\msys-dd50a72ab4668b33-pty0-from-master-natx",
+    # A script's pipe, as Git Bash names it for `echo hi | program`.
+    r"\1888ae32e00d56aa-9740-pipe-nt-0x15",
     "",
 ])
 def test_other_pipes_are_not(name):
     assert not _record.is_pty_pipe(name)
 
 
+@posix_only
+def test_on_windows_a_terminal_is_a_keyboard_only_as_a_console_or_the_pty_pipe(monkeypatch):
+    """`isatty()` alone counts on POSIX; on Windows it is true for `NUL` too, so there the
+    handle must be a console's or the pty pipe."""
+    asked = []
+    monkeypatch.setattr(_record, "console", lambda fd: asked.append(fd) or False)
+    monkeypatch.setattr(_record, "pty_pipe", lambda fd: False)
+    leader, follower = os.openpty()
+    try:
+        with os.fdopen(follower, "rb", closefd=False) as stdin:
+            assert keyboard(stdin) and not asked
+            monkeypatch.setattr(_record, "_WINDOWS", True)
+            assert not keyboard(stdin) and asked == [follower]
+            monkeypatch.setattr(_record, "console", lambda fd: True)
+            assert keyboard(stdin)
+    finally:
+        os.close(leader)
+        os.close(follower)
+
+
+def test_the_console_test_is_false_off_windows_and_for_a_bad_descriptor():
+    r, w = os.pipe()
+    os.close(r)
+    os.close(w)
+    assert not _record.console(r)
+
+
 def test_a_pipe_counts_only_on_windows(monkeypatch):
     monkeypatch.setattr(_record, "pty_pipe", lambda fd: True)
+    monkeypatch.setattr(_record, "console", lambda fd: False)
     r, w = os.pipe()
     try:
         with os.fdopen(r, "rb", closefd=False) as stdin:
@@ -358,6 +395,8 @@ def test_a_pipe_counts_only_on_windows(monkeypatch):
 @pytest.mark.parametrize(("name", "expected"), [
     ("msys-0123456789abcdef-pty{n}-from-master", True),
     ("cygwin-0123456789abcdef-pty{n}-from-master", True),
+    ("msys-0123456789abcdef-pty{n}-from-master-nat", True),
+    ("cygwin-0123456789abcdef-pty{n}-from-master-nat", True),
     ("msys-0123456789abcdef-pty{n}-to-master", False),
     ("moxi-test-pipe-{n}", False),
 ])
@@ -395,3 +434,53 @@ def test_a_scripts_pipe_into_a_child_is_no_keyboard():
     done = subprocess.run([sys.executable, "-c", code], input="", capture_output=True,
                           text=True, timeout=60)
     assert done.stdout.strip() == "False", done.stderr
+
+
+# -- the keyboard on Windows, live: NUL, a new console, moxi.proc.run's child --------------
+
+_SAYS = ("import sys; from moxi.terminal import keyboard; "
+         "print(sys.stdin is not None and sys.stdin.isatty(), keyboard())")
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the Windows console")
+def test_nul_on_the_input_is_no_keyboard_though_isatty_says_true():
+    import subprocess
+
+    done = subprocess.run([sys.executable, "-c", _SAYS], stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=60)
+    assert done.stdout.split() == ["True", "False"], done.stderr
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the Windows console")
+def test_a_redirect_from_nul_is_no_keyboard(tmp_path):
+    import subprocess
+
+    script = tmp_path / "says.py"
+    script.write_text(_SAYS)
+    done = subprocess.run(f'"{sys.executable}" "{script}" < NUL', shell=True,
+                          capture_output=True, text=True, timeout=60)
+    assert done.stdout.split() == ["True", "False"], done.stderr
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the Windows console")
+def test_a_new_console_on_the_input_is_a_keyboard(tmp_path):
+    """A child started with a console of its own (as a terminal window starts a shell)
+    has that console on its input."""
+    import subprocess
+
+    out = tmp_path / "out.txt"
+    code = ("import sys; from moxi.terminal import keyboard; "
+            f"open({str(out)!r}, 'w').write('%s %s' % "
+            "(sys.stdin is not None and sys.stdin.isatty(), keyboard()))")
+    proc = subprocess.Popen([sys.executable, "-c", code],
+                            creationflags=subprocess.CREATE_NEW_CONSOLE)
+    assert proc.wait(timeout=60) == 0
+    assert out.read_text().split() == ["True", "True"]
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the Windows console")
+def test_a_child_of_moxi_proc_run_is_no_keyboard():
+    from moxi import proc
+
+    done = proc.run([sys.executable, "-c", _SAYS], timeout=60, input=None)
+    assert done.stdout.decode().split() == ["True", "False"], done.stderr

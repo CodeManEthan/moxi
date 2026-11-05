@@ -314,26 +314,42 @@ def _find_version() -> str:
 # -- the keyboard ---------------------------------------------------------------------------
 
 # The pipe a Cygwin or MSYS pty (Git Bash's mintty) gives a native program as its input.
-_PTY_PIPE = re.compile(r"(?:\\\\\.\\pipe)?\\(?:cygwin|msys)-[0-9a-f]+-pty[0-9]+-from-master",
-                       re.IGNORECASE)
+# Current Git for Windows adds a `-nat` suffix to the name.
+_PTY_PIPE = re.compile(
+    r"(?:\\\\\.\\pipe)?\\(?:cygwin|msys)-[0-9a-f]+-pty[0-9]+-from-master(?:-nat)?",
+    re.IGNORECASE)
 
 
 def keyboard(stdin=None) -> bool:
-    """True when a terminal is on `stdin` (None: `sys.stdin`): it is a terminal
-    (`isatty()`), or on Windows a pipe named as a Cygwin or MSYS pty's master side, which
-    is what Git Bash's mintty gives a native program. Only the input is asked; a closed or
-    missing input is no keyboard."""
+    """True when a terminal is on `stdin` (None: `sys.stdin`). On Linux and macOS that is
+    `isatty()`. On Windows `isatty()` is true for any character device, `NUL` included, so
+    there it is a console handle (`GetConsoleMode` succeeds on it), or a pipe named as a
+    Cygwin or MSYS pty's master side, which is what Git Bash's mintty gives a native
+    program it runs without a console. Only the input is asked; a closed or missing input
+    is no keyboard."""
     stdin = sys.stdin if stdin is None else stdin
     try:
         fd = stdin.fileno()
     except (AttributeError, OSError, ValueError):
         return False
+    if _WINDOWS:
+        return console(fd) or pty_pipe(fd)
     try:
-        if os.isatty(fd):
-            return True
+        return os.isatty(fd)
     except OSError:
         return False
-    return _WINDOWS and pty_pipe(fd)
+
+
+def console(fd: int) -> bool:
+    """True when descriptor `fd` is a console's handle (Windows)."""
+    try:
+        import msvcrt
+
+        from .. import _win
+
+        return _win.console(msvcrt.get_osfhandle(fd))
+    except (ImportError, OSError):
+        return False
 
 
 def pty_pipe(fd: int) -> bool:
@@ -351,8 +367,9 @@ def pty_pipe(fd: int) -> bool:
 
 def is_pty_pipe(name: str) -> bool:
     """True when a pipe's name is a Cygwin or MSYS pty's master side as input:
-    `\\\\.\\pipe\\cygwin-<hex>-pty<N>-from-master` or the `msys-` form, with or without
-    the `\\\\.\\pipe` start (the system gives the name without it)."""
+    `\\\\.\\pipe\\cygwin-<hex>-pty<N>-from-master` or the `msys-` form, either with or
+    without a `-nat` suffix, and with or without the `\\\\.\\pipe` start (the system gives
+    the name without it)."""
     return _PTY_PIPE.fullmatch(name) is not None
 
 
@@ -480,5 +497,5 @@ def _reason(error: BaseException) -> str:
 
 __all__ = ["FORMAT", "FIXED", "in_set", "of", "Record", "NoRecord", "Unreadable",
            "NewerFormat", "Read", "read", "parse", "text", "write", "version", "keyboard",
-           "pty_pipe", "is_pty_pipe", "Outcome", "step", "row", "SAME", "WRITTEN",
+           "console", "pty_pipe", "is_pty_pipe", "Outcome", "step", "row", "SAME", "WRITTEN",
            "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE", "FAILED"]

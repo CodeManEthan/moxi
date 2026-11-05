@@ -305,6 +305,124 @@ def test_a_moxi_exe_that_is_not_the_runs_own_launcher_is_e1():
     assert got == Evidence("E1", RUN + 1, "moxi", "moxi")
 
 
+# The uv and pip launchers strip a trailing `.exe` (case sensitively) from `sys.argv[0]`
+# before the run's `cli.main` reads it, so a typed `moxi` gives `...\moxi`.
+WIN_STRIPPED = WIN_SCRIPTS + r"\moxi"
+
+
+def test_the_launchers_stripped_argv0_still_names_it():
+    me = p([WIN_EXE, WIN_MOXI, "modules"], image=WIN_EXE)
+    launcher = p(["moxi", "modules"], image=WIN_MOXI)
+    assert windows(me, launcher, PWSH, WT, EXPLORER, argv0=WIN_STRIPPED) is None
+
+
+def test_the_stripped_argv0_names_the_launcher_above_a_venv_redirector():
+    me = p([WIN_BASE, WIN_MOXI, "modules"], image=WIN_BASE)
+    redirector = p([WIN_EXE, WIN_MOXI, "modules"], image=WIN_EXE)
+    launcher = p(["moxi", "modules"], image=WIN_MOXI.upper())
+    assert windows(me, redirector, launcher, PWSH, EXPLORER, argv0=WIN_STRIPPED) is None
+
+
+@pytest.mark.parametrize("argv0", [WIN_MOXI, WIN_SCRIPTS + r"\moxi.EXE"])
+def test_an_unstripped_argv0_names_the_launcher(argv0):
+    # `moxi.EXE` (as `shutil.which` spells it from PATHEXT) is left alone by the strip.
+    me = p([WIN_EXE, argv0], image=WIN_EXE)
+    launcher = p([argv0], image=WIN_MOXI)
+    assert windows(me, launcher, PWSH, EXPLORER, argv0=argv0) is None
+
+
+@pytest.mark.parametrize("argv0", [WIN_STRIPPED, WIN_MOXI])
+def test_another_paths_moxi_exe_is_e1_whatever_the_argv0(argv0):
+    me = p([WIN_EXE, WIN_MOXI], image=WIN_EXE)
+    other = p([r"C:\Other\moxi.exe"], image=r"C:\Other\moxi.exe")
+    got = windows(me, other, PWSH, EXPLORER, argv0=argv0)
+    assert got == Evidence("E1", RUN + 1, "moxi", "moxi")
+
+
+def test_exe_is_put_back_only_when_argv0_lacks_it():
+    me = p([WIN_EXE, WIN_MOXI], image=WIN_EXE)
+    # Skipped as the launcher it would pass; judged above the chain, its `moxi` is E1.
+    doubled = p(["moxi"], image=WIN_SCRIPTS + r"\moxi.EXE.exe")
+    got = windows(me, doubled, PWSH, EXPLORER, argv0=WIN_SCRIPTS + r"\moxi.EXE")
+    assert got == Evidence("E1", RUN + 1, "moxi", "moxi")
+
+
+# `py -m moxi modules`: py.exe starts the interpreter as a child and waits.
+PY = r"C:\Users\ada\AppData\Local\Programs\Python\Launcher\py.exe"
+WIN_PY312 = r"C:\Users\ada\AppData\Local\Programs\Python\Python312\python.exe"
+WIN_MAIN = (r"C:\Users\ada\AppData\Local\Programs\Python\Python312\Lib\site-packages"
+            r"\moxi\__main__.py")
+PY_RUN = dict(executable=WIN_PY312, argv0=WIN_MAIN,
+              orig_argv=(WIN_PY312, "-m", "moxi", "modules"))
+
+
+@pytest.mark.parametrize("argv", [
+    ["py", "-m", "moxi", "modules"],
+    [PY, "-3.12", "-m", "moxi", "modules"],
+    ["py.exe", "-3", "-m", "moxi", "modules"],
+    ["py", "-V:3.12", "-m", "moxi", "modules"],
+])
+def test_py_m_moxi_under_its_own_py_exe_records(argv):
+    me = p([WIN_PY312, "-m", "moxi", "modules"], image=WIN_PY312)
+    launcher = p(argv, image=PY.upper())
+    assert windows(me, launcher, PWSH, EXPLORER, **PY_RUN) is None
+
+
+def test_py_m_moxi_under_a_venv_redirector_under_its_own_py_exe_records():
+    me = p([WIN_BASE, "-m", "moxi", "modules"], image=WIN_BASE)
+    redirector = p([WIN_EXE, "-m", "moxi", "modules"], image=WIN_EXE)
+    launcher = p(["py", "-m", "moxi", "modules"], image=PY)
+    got = windows(me, redirector, launcher, PWSH, EXPLORER, executable=WIN_EXE,
+                  argv0=WIN_MAIN, orig_argv=(WIN_BASE, "-m", "moxi", "modules"))
+    assert got is None
+
+
+@pytest.mark.parametrize(("argv", "detail", "module"), [
+    (["py", "-m", "moxi_comms.adapters.window"], "-m moxi_comms.adapters.window", "comms"),
+    (["py", "-m", "moxi", "slots"], "-m moxi", None),
+    (["py", "-3.12", "-m", "moxi", "modules", "--all"], "-m moxi", None),
+    # Interpreter options the run was not given: not its own launcher, so judged (E1).
+    (["py", "-X", "utf8", "-m", "moxi", "modules"], "-m moxi", None),
+])
+def test_a_py_exe_running_another_module_or_other_arguments_stops_it(argv, detail, module):
+    me = p([WIN_PY312, "-m", "moxi", "modules"], image=WIN_PY312)
+    launcher = p(argv, image=PY)
+    got = windows(me, launcher, PWSH, EXPLORER, **PY_RUN)
+    assert got == Evidence("E1", RUN + 1, "py", detail, module)
+
+
+def test_a_py_exe_running_a_script_is_judged_as_any_process():
+    me = p([WIN_PY312, "-m", "moxi", "modules"], image=WIN_PY312)
+    launcher = p(["py", r"C:\x\tool.py", "-m", "moxi", "modules"], image=PY)
+    assert windows(me, launcher, PWSH, EXPLORER, **PY_RUN) is None
+    above = p([WIN_MOXI, "slots"], image=WIN_MOXI)
+    got = windows(me, launcher, above, PWSH, EXPLORER, **PY_RUN)
+    assert got == Evidence("E1", RUN + 2, "moxi", "moxi")
+
+
+def test_a_py_version_tag_is_passed_over_whole():
+    # `-V:Company/Tag` holds an `m`, which is no `-m`.
+    got = windows(p([WIN_PY312, "-m", "moxi", "modules"], image=WIN_PY312),
+                  p(["py", "-V:Company/Tag", "tool.py"]), PWSH, EXPLORER, **PY_RUN)
+    assert got is None
+
+
+def test_a_py_exe_that_is_not_the_direct_parent_stops_it():
+    me = p([WIN_PY312, "-m", "moxi", "modules"], image=WIN_PY312)
+    between = p([r"C:\x\conhost.exe"])
+    launcher = p(["py", "-m", "moxi", "modules"], image=PY)
+    got = windows(me, between, launcher, PWSH, EXPLORER, **PY_RUN)
+    assert got == Evidence("E1", RUN + 2, "py", "-m moxi", None)
+
+
+def test_a_py_exe_is_matched_only_for_a_run_started_with_m():
+    me = p([WIN_EXE, WIN_MOXI, "modules"], image=WIN_EXE)
+    launcher = p(["py", "-m", "moxi", "modules"], image=PY)
+    got = windows(me, launcher, PWSH, EXPLORER, argv0=WIN_STRIPPED,
+                  orig_argv=(WIN_EXE, WIN_MOXI, "modules"))
+    assert got is not None and got.kind == "E1"
+
+
 def test_a_launcher_that_is_not_the_direct_parent_is_e1():
     me = p([WIN_EXE, WIN_MOXI], image=WIN_EXE)
     between = p([r"C:\x\conhost.exe"])
@@ -601,7 +719,7 @@ _SITE = textwrap.dedent("""\
             chain.append(repr(error))
         with open(os.environ["WALK_OUT"], "w") as f:
             json.dump({"found": found and dataclasses.asdict(found), "chain": chain,
-                       "me": os.getpid()}, f)
+                       "me": os.getpid(), "argv0": sys.argv[0]}, f)
 
     if os.environ.get("WALK_OUT"):
         atexit.register(_walk)
@@ -614,33 +732,42 @@ _HOP = textwrap.dedent("""\
     """)
 
 
-def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_path):
-    """`moxi version` run through the installed console script (on Windows its `.exe`
-    launcher, and a venv redirector where there is one), below a process that started
-    with the mark: the walk passes the run's own entry chain and finds the mark on that
-    process, not E1 on the launcher."""
+@pytest.mark.parametrize("form", ["bare", "path"])
+def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_path, form):
+    """`moxi version` run through the installed console script as a person's terminal runs
+    it, below a process that started with the mark: the walk passes the run's own entry
+    chain and finds the mark on that process, not E1 on the launcher. On Windows the
+    script is its `.exe` launcher (and a venv redirector where there is one), typed in
+    lower case: `bare` is `moxi` found on PATH by the system, `path` its full path. The
+    launchers strip a lower-case `.exe` from `sys.argv[0]`, so this is the form a typed
+    command gives the walk."""
     import json
-    import shutil
 
-    script = shutil.which("moxi", path=os.path.dirname(sys.executable))
-    if script is None:
+    folder = os.path.dirname(sys.executable)
+    name = "moxi.exe" if sys.platform == "win32" else "moxi"
+    if not any(entry.lower() == name for entry in os.listdir(folder)):
         pytest.skip("no moxi console script beside this interpreter")
     site = tmp_path / "site"
     site.mkdir()
     (site / "sitecustomize.py").write_text(_SITE)
     out = tmp_path / "walk.json"
-    keep = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "HOME",
+    keep = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "HOME",
             "USERPROFILE", "LOCALAPPDATA", "APPDATA", "MOXI_HOME", "XDG_DATA_HOME",
-            "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR")
+            "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+            "PATHEXT")
     env = {k: os.environ[k] for k in keep if k in os.environ}
-    env.update(PYTHONPATH=str(site), WALK_OUT=str(out), **{_mark.NAME: "the hop"})
+    env.update(PATH=os.pathsep.join([folder, os.environ.get("PATH", "")]),
+               PYTHONPATH=str(site), WALK_OUT=str(out), **{_mark.NAME: "the hop"})
+    script = "moxi" if form == "bare" else os.path.join(folder, name)
     done = subprocess.run([sys.executable, "-c", _HOP, script, "version"], env=env,
-                          capture_output=True, text=True, timeout=150)
+                          cwd=tmp_path, capture_output=True, text=True, timeout=150)
     assert done.returncode == 0, done.stderr
     got = json.loads(out.read_text())
+    if sys.platform == "win32":
+        # The form a typed command gives: the launcher has stripped `.exe`.
+        assert not got["argv0"].lower().endswith(".exe"), got
     found_ = got["found"]
     assert found_ is not None, got
-    print(got)
     assert (found_["kind"], found_["detail"]) == ("E4", "the hop"), got
     # Found on the process that started with the mark, above the run's entry chain.
     assert found_["pid"] != got["me"]

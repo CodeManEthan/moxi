@@ -12,6 +12,7 @@ calls it needs when first called, so importing this module costs nothing anywher
 - `known_folder(name)` is one of the user's own folders (roaming and local application
   data, the profile), asked of the shell and not read from the environment.
 - `pipe_name(handle)` is the name of the pipe a handle is an end of.
+- `console(handle)` says whether a handle is a console's.
 - `pipe_client_pid(handle)` is the pid of the process at the client end of a named pipe,
   and `pipe_server_pid(handle)` the pid of the process at its server end.
 - `Job` is a Job Object: the processes put in it can be ended together, and, made with
@@ -156,6 +157,8 @@ def _bind():
     api.GetNamedPipeServerProcessId = bind(kernel32, "GetNamedPipeServerProcessId", w.BOOL,
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
     api.GetFileType = bind(kernel32, "GetFileType", w.DWORD, w.HANDLE)
+    api.GetConsoleMode = bind(kernel32, "GetConsoleMode", w.BOOL, w.HANDLE,
+                              ctypes.POINTER(w.DWORD))
     api.GetFileInformationByHandleEx = bind(kernel32, "GetFileInformationByHandleEx",
                                             w.BOOL, w.HANDLE, ctypes.c_int, P, w.DWORD)
     _api = api
@@ -325,6 +328,14 @@ def pipe_name(handle: int) -> str | None:
         return None
     length = int.from_bytes(buffer.raw[:4], "little")
     return buffer.raw[4:4 + min(length, _NAME_BUFFER - 4)].decode("utf-16-le", "replace")
+
+
+def console(handle: int) -> bool:
+    """True when `handle` is a console's: `GetConsoleMode` succeeds on it. A character
+    device that is no console, such as `NUL`, fails it, though `isatty()` is true there."""
+    api = _bind()
+    mode = api.w.DWORD()
+    return bool(api.GetConsoleMode(handle, api.ctypes.byref(mode)))
 
 
 # -- private directories ------------------------------------------------------------------
