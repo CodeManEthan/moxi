@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
 from urllib.parse import urlsplit
 
 import pytest
@@ -222,8 +223,8 @@ HOLD_S = 10
 
 class HoldingRelay:
     """A relay between the bridge and the gateway that copies bytes both ways. After
-    `hold(path, until)`, the answer to the next GET of `path` waits until a GET of `until`
-    has gone on, or `HOLD_S` pass."""
+    `hold(path, until, delay)`, the answer to the next GET of `path` waits until a GET of
+    `until` has gone on and `delay` seconds more, or `HOLD_S` pass."""
 
     def __init__(self, target: int):
         self.target = target
@@ -235,6 +236,7 @@ class HoldingRelay:
         self._lock = threading.Lock()
         self._path = self._until = b""
         self._asked = threading.Event()
+        self._delay = 0.0
 
     def start(self) -> HoldingRelay:
         threading.Thread(target=self._accept, daemon=True).start()
@@ -246,9 +248,10 @@ class HoldingRelay:
         for sock in held:
             _shut(sock)
 
-    def hold(self, path: str, until: str) -> None:
+    def hold(self, path: str, until: str, delay: float) -> None:
         with self._lock:
             self._path, self._until = f"GET {path} ".encode(), f"GET {until} ".encode()
+            self._delay = delay
             self._asked.clear()
 
     def _accept(self) -> None:
@@ -289,7 +292,8 @@ class HoldingRelay:
             while data := upstream.recv(65536):
                 if held.is_set():
                     held.clear()
-                    self._asked.wait(HOLD_S)
+                    if self._asked.wait(HOLD_S):
+                        time.sleep(self._delay)  # the swap's moment, not a wait for a result
                 client.sendall(data)
         except OSError:
             pass
@@ -572,7 +576,10 @@ def test_a_cached_start_page_and_client_js_planted_before_the_worker_never_run_a
 
 
 #: The most loads the worker-swap test makes for one whose panel script is dropped.
-SWAP_LOADS = 20
+SWAP_LOADS = 40
+#: How long after `/sw.js` is asked for each load's modules list goes on, in turn: the
+#: swap's moment moves with the machine's load, so the loads try a spread of them.
+SWAP_DELAYS = (0.0, 0.01, 0.02, 0.04, 0.08, 0.16)
 
 
 def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_more_try(
@@ -580,8 +587,8 @@ def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_mo
     """The gateway's worker, registered from another script URL, controls the phone, so
     the shell's next load registers `/sw.js`, which replaces it while the load goes on.
     Firefox ends the replaced worker at once and drops a fetch it is sent then. The modules
-    list is held until `/sw.js` is asked for, so the panel's script is fetched near that
-    moment; loads go on until one has it dropped. The shell finds the script fine and tries
+    list is held until `/sw.js` is asked for, and a little more, so the panel's script is
+    fetched near that moment; loads go on until one has it dropped. The shell finds the script fine and tries
     once more, and every load's panel is placed."""
     if _engine(ui_browser) != "firefox":
         pytest.skip("only Firefox ends a replaced worker at once and drops what it is sent; "
@@ -598,7 +605,8 @@ def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_mo
         message = page.locator("#moxi-panel .moxi-message")
         for load in range(SWAP_LOADS):
             assert page.evaluate(WORKER_AT, f"/m/ui/swap/{load}/sw.js") is True
-            relay.hold("/m/ui/api/modules", until="/sw.js")
+            relay.hold("/m/ui/api/modules", until="/sw.js",
+                       delay=SWAP_DELAYS[load % len(SWAP_DELAYS)])
             page.goto("/m/ui/")
             expect(panel.or_(message)).to_be_attached()
             assert message.count() == 0, message.inner_text()

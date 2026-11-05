@@ -8,8 +8,9 @@
 import type { ComponentInfo } from "./client.ts";
 import { freshN } from "./passkey.ts";
 import type { UpstreamState } from "./push.ts";
+import { placeOnceMore, scriptFailure } from "./place-model.ts";
+import type { Named } from "./place-model.ts";
 import { NAME } from "./rules.ts";
-import { failurePanel } from "./views.ts";
 
 /** One installed module as the menu sees it. */
 export interface PanelModule {
@@ -54,67 +55,23 @@ export function menuEntries(modules: PanelModule[], desk = true): Array<{ module
   return entries;
 }
 
-/** The error panel for a page script at `url` that did not load, from a fetch of it
- * (an asset needs the cookie only), or null when the answer names no failure. */
-async function failure(url: string): Promise<{ title: string; lines: string[] } | null> {
-  const module = where(new URL(url, location.origin).pathname)?.module ?? "";
-  let answer: Response;
-  try {
-    answer = await fetch(url, { credentials: "same-origin", cache: "no-store" });
-  } catch {
-    return failurePanel(module, 0, null);
-  }
-  if (answer.ok) return null;
-  let data: unknown = null;
-  try {
-    data = await answer.json();
-  } catch {
-    data = null;
-  }
-  return failurePanel(module, answer.status, data);
-}
-
 /** What a panel load came to: the element placed, or the error panel to show; null when
  * another load began meanwhile. */
-export type PanelLoad = { placed: Element } | { error: { title: string; lines: string[] } } | null;
+export type PanelLoad = { placed: Element } | { error: Named } | null;
 
 /**
- * Places `module`'s panel with `place`, and when that gives no element, asks `check` why.
- * A failure `check` names is the answer. When it finds the script fine, `place` gets one
- * more try: a browser that replaces the page's worker during the load can drop the
- * script's fetch, and the next import fetches it again, since a failed module fetch is
- * not kept. After that try, the answer is that the panel did not load. `current` says
- * whether this load is still the one shown; when it isn't, anything placed is removed and
- * the answer is null.
+ * Places `module`'s panel with `place`, with `check` asking a fetch of its script why it
+ * gave no element, and one more try when the script answers fine (`placeOnceMore`). A
+ * failure `check` names is the error panel; after the second try it is that the panel did
+ * not load.
  */
 export async function loadPanel(module: string, place: () => Promise<Element | null>,
-                                check: () => Promise<{ title: string; lines: string[] } | null>,
+                                check: () => Promise<Named | null>,
                                 current: () => boolean): Promise<PanelLoad> {
-  // undefined: this load is no longer the one shown.
-  const attempt = async (): Promise<Element | null | undefined> => {
-    let placed: Element | null = null;
-    try {
-      placed = await place();
-    } catch (err) {
-      console.error(err);
-    }
-    if (!current()) {
-      placed?.remove();
-      return undefined;
-    }
-    return placed;
-  };
-  const first = await attempt();
-  if (first === undefined) return null;
-  if (first !== null) return { placed: first };
-  const found = await check();
-  if (!current()) return null;
-  if (found !== null) return { error: found };
-  const second = await attempt();
-  if (second === undefined) return null;
-  if (second !== null) return { placed: second };
-  return { error: { title: `${module}'s panel did not load`,
-                    lines: [`${module}'s panel script could not be loaded. Run moxi doctor ${module} to see why.`] } };
+  const load = await placeOnceMore(place, check, current);
+  if (load === null || "placed" in load) return load;
+  return { error: load.failure ?? { title: `${module}'s panel did not load`,
+    lines: [`${module}'s panel script could not be loaded. Run moxi doctor ${module} to see why.`] } };
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
@@ -193,7 +150,7 @@ export function boot(deps: ShellDeps): void {
     // with the exit and the log, and a second fetch within 10 s gets the same answer
     // with no new start.
     const load = await loadPanel(module, () => deps.place(panel, module, "page", { route }),
-                                 () => failure(url), () => mine === seq);
+                                 () => scriptFailure(module, url), () => mine === seq);
     if (load !== null && "error" in load) say(load.error.title, ...load.error.lines);
   };
 
