@@ -70,11 +70,10 @@ def test_a_variable_only_the_page_sets_is_taken_out(monkeypatch, at):
 
 
 def test_an_empty_terminal_value_is_named_as_empty(monkeypatch, at):
-    monkeypatch.delenv("MOXI_HOME")
-    monkeypatch.setenv("XDG_DATA_HOME", at("xdg"))
-    write_record({**os.environ, "XDG_DATA_HOME": ""})
+    monkeypatch.setenv("MOXI_DEMO_DATA_HOME", at("pinned"))
+    write_record({**os.environ, "MOXI_DEMO_DATA_HOME": ""})
     line = terminal.check(store)
-    assert "XDG_DATA_HOME to an empty value" in line
+    assert "MOXI_DEMO_DATA_HOME to an empty value" in line
 
 
 def test_the_terminal_wording_says_what_the_page_does(monkeypatch, at):
@@ -321,8 +320,8 @@ def test_names_compare_without_case_on_windows():
 def test_the_check_folds_names_on_windows(monkeypatch):
     monkeypatch.setattr(_check, "_windows", lambda: True)
     write_record({"MOXI_HOME": r"C:\m"})
-    monkeypatch.setenv("moxi_home", r"C:\m")
     monkeypatch.delenv("MOXI_HOME", raising=False)
+    monkeypatch.setenv("moxi_home", r"C:\m")
 
     def places(env):
         return {"the folder": env.get("Moxi_Home") + r"\data"}

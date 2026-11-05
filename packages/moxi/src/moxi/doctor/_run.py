@@ -1309,28 +1309,36 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     runs the front door's keyboard test (`keyboard`, for a test) and the walk (`view` and
     `run`, as `moxi.terminal.walk` takes them). A write the front door's record step
     tried and failed in this run (`moxi.terminal.last`) is named with its error; with no
-    step in this run, a record that differs is checked for whether it could be written. A walk that finds Moxi or an agent, or
-    can't decide, is a `warn`; a record that can't be read or written is a `fail`.
+    step in this run, a record that differs is checked for whether it could be written.
+    A walk that finds Moxi or an agent, or can't decide, is a `warn`; a record that can't
+    be read or written is a `fail`.
     """
     from .. import paths, terminal
     from ..terminal import _check, _lines, _record, _walk
 
     name = "terminal record"
 
-    def row(state: str, words: tuple[str, str]) -> Row:
+    def worded(state: str, words: tuple[str, str]) -> Row:
         return Row("moxi", name, state, words[0], words[1])
+
+    def stopped(state: str, outcome) -> Row:
+        # The record step's own words, "<cause>; <step>", shared with its stderr line.
+        cause, _, step = _record.row(outcome).rpartition("; ")
+        return Row("moxi", name, state, cause, step)
 
     try:
         record = paths.terminal_record()
     except paths.NoAnchor as no:
-        return row("warn", _lines.row_no_place(no.cause, no.step))
+        return stopped("warn", _record.Outcome(_record.NO_PLACE, None, error=no))
     if _check._anchor_set(os.environ, _check._windows()):
-        return row("warn", _lines.row_anchor_set(str(record)))
+        return worded("warn", _lines.row_anchor_set(str(record)))
     if not (_record.keyboard() if keyboard is None else keyboard):
-        return row("warn", _lines.NO_KEYBOARD)
+        return worded("warn", _lines.NO_KEYBOARD)
     found = _walk.walk(view, run)
+    if isinstance(found, _walk.Evidence):
+        return worded("warn", _lines.found_words(found))
     if found is not None:
-        return row("warn", _lines.found_words(found))
+        return stopped("warn", _record.Outcome(_record.UNDECIDED, record, found))
     held = _record.read(record)
     if isinstance(held, _record.Unreadable):
         return Row("moxi", name, "fail",
@@ -1340,20 +1348,18 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     if isinstance(held, _record.Record) and held.env == _record.of():
         return Row("moxi", name, "ok", f"the record at {record} holds this terminal's "
                    "environment, so a page compares with it")
-    last = getattr(terminal, "last", None)
-    if getattr(last, "kind", None) == "failed":
-        error = last.error
-        error = _check._error(error) if isinstance(error, OSError) else str(error)
-        return row("fail", _lines.row_unwritable(str(record), str(record.parent), error))
+    last = terminal.last
+    if last is not None and last.kind == _record.FAILED:
+        return stopped("fail", last)
     if last is None and (error := _unwritable(record)) is not None:
-        return row("fail", _lines.row_unwritable(str(record), str(record.parent), error))
+        return stopped("fail", _record.Outcome(_record.FAILED, record, error=error))
     return Row("moxi", name, "warn",
                f"the record at {record} doesn't hold this terminal's environment, and "
                "this run made none: it wasn't started as the moxi command",
                f"type {_lines.RECORD_COMMAND} in this terminal")
 
 
-def _unwritable(record: Path) -> str | None:
+def _unwritable(record: Path) -> OSError | None:
     """Why `record` can't be written in place, or None: the file, when it exists, and the
     nearest folder above it that exists must be writable by this account."""
     import errno
@@ -1363,7 +1369,7 @@ def _unwritable(record: Path) -> str | None:
         folder = folder.parent
     for path in ((record,) if record.exists() else ()) + (folder,):
         if not os.access(path, os.W_OK):
-            return f"{path}: {os.strerror(errno.EACCES)}"
+            return PermissionError(errno.EACCES, f"{path}: {os.strerror(errno.EACCES)}")
     return None
 
 

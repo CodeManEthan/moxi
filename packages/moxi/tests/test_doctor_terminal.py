@@ -8,8 +8,6 @@ real account's record.
 from __future__ import annotations
 
 import os
-import types
-
 import pytest
 
 from moxi import _win, paths, terminal
@@ -31,7 +29,7 @@ def acct(tmp_path, monkeypatch):
     else:
         monkeypatch.setattr(paths, "_account_home", lambda: str(folder))
     monkeypatch.setattr(_walk, "walk", lambda view=None, run=None: None)
-    monkeypatch.setattr(terminal, "last", None, raising=False)
+    monkeypatch.setattr(terminal, "last", None)
     return paths.terminal_record()
 
 
@@ -78,24 +76,6 @@ def test_no_keyboard(acct):
     (Evidence("E2", 312, "claude", "claude"),
      "this command runs under Claude Code (pid 312), an agent, and nothing an agent runs "
      "records", "type it in a terminal of your own"),
-    (Undecided("N1", "ended", 55),
-     "a process above this one ended while moxi read it", "run the command again"),
-    (Undecided("N1", "unread", 55, "zsh", "Input/output error"),
-     "moxi can't read zsh (pid 55) above this terminal (Input/output error), so it can't "
-     "tell whether Moxi started this terminal",
-     "type the command in a terminal that zsh didn't start"),
-    (Undecided("N1", "deep", 55, "sh"),
-     "moxi can't read sh (pid 55) above this terminal (more than 64 processes are above "
-     "it), so it can't tell whether Moxi started this terminal",
-     "type the command in a terminal that sh didn't start"),
-    (Undecided("N1", "loop", 55),
-     "moxi can't read a process (pid 55) above this terminal (its parents go round in a "
-     "loop), so it can't tell whether Moxi started this terminal",
-     "type the command in a terminal that a process didn't start"),
-    (Undecided("N2", "tmux", 4121, "tmux"),
-     "this terminal is inside a tmux server (pid 4121) that moxi can't tell from slots' "
-     "own, because no service manager runs slots' server here",
-     "type the command in a terminal outside tmux"),
 ])
 def test_each_walk_result_names_what_it_found_and_one_step(acct, monkeypatch, found, detail,
                                                            fix):
@@ -103,6 +83,22 @@ def test_each_walk_result_names_what_it_found_and_one_step(acct, monkeypatch, fo
     monkeypatch.setattr(_walk, "walk", lambda view=None, run=None: found)
     got = row()
     assert (got.state, got.detail, got.fix) == ("warn", detail, fix)
+
+
+@pytest.mark.parametrize("found", [
+    Undecided("N1", "ended", 55),
+    Undecided("N1", "unread", 55, "zsh", "Input/output error"),
+    Undecided("N1", "deep", 55, "sh"),
+    Undecided("N1", "loop", 55),
+    Undecided("N2", "tmux", 4121, "tmux"),
+])
+def test_an_undecided_walk_gives_the_record_steps_own_words(acct, monkeypatch, found):
+    monkeypatch.setattr(_walk, "walk", lambda view=None, run=None: found)
+    got = row()
+    words = _record.row(_record.Outcome(_record.UNDECIDED, acct, found))
+    assert got.state == "warn"
+    assert f"{got.detail}; {got.fix}" == words
+    assert got.fix.startswith(("run the command again", "type the command in a terminal"))
 
 
 def test_the_row_hands_its_view_and_run_to_the_walk(acct, monkeypatch):
@@ -134,9 +130,8 @@ def test_an_unreadable_record_fails(acct, monkeypatch):
 
 
 def test_a_write_the_step_tried_and_failed_is_named(acct, monkeypatch):
-    monkeypatch.setattr(terminal, "last", types.SimpleNamespace(
-        kind="failed", path=acct, found=None, error=OSError(28, "No space left on device")),
-        raising=False)
+    monkeypatch.setattr(terminal, "last", _record.Outcome(
+        _record.FAILED, acct, error=OSError(28, "No space left on device")))
     got = row()
     assert got.state == "fail"
     assert got.detail == f"the record at {acct} can't be written (No space left on device)"

@@ -186,30 +186,16 @@ def anchor_set(*, page: bool) -> str:
 # -- the doctor row's words ------------------------------------------------------------------
 
 def found_words(found) -> tuple[str, str]:
-    """(what the walk found, the one step) for a walk result that stops a record: an
-    `Evidence` or an `Undecided` of `moxi.terminal`."""
-    kind = found.kind
-    if kind == "E2":
+    """(what the walk found, the one step) for an `Evidence` of `moxi.terminal`: a Moxi
+    program, unit or start mark (E1, E3, E4), or an agent (E2). What the walk couldn't
+    decide is worded by the record step (`moxi.terminal.row`), which prints the same
+    words."""
+    if found.kind == "E2":
         harness = HARNESS_NAMES.get(found.detail, found.detail)
         return (f"this command runs under {harness} (pid {found.pid}), an agent, and "
                 "nothing an agent runs records", "type it in a terminal of your own")
-    if kind in ("E1", "E3", "E4"):
-        return (f"this terminal was started by Moxi ({_started(found)}), so nothing typed "
-                "in it records", "type the command in a terminal of your own")
-    reason = getattr(found, "reason", "")
-    if kind == "N2":
-        return (f"this terminal is inside a tmux server (pid {found.pid}) that moxi can't "
-                "tell from slots' own, because no service manager runs slots' server "
-                "here", "type the command in a terminal outside tmux")
-    if reason == "ended":
-        return ("a process above this one ended while moxi read it",
-                "run the command again")
-    name = found.program or "a process"
-    error = {"deep": f"more than {_limit()} processes are above it",
-             "loop": "its parents go round in a loop"}.get(reason) or found.error or reason
-    return (f"moxi can't read {name} (pid {found.pid}) above this terminal ({error}), so "
-            "it can't tell whether Moxi started this terminal",
-            f"type the command in a terminal that {name} didn't start")
+    return (f"this terminal was started by Moxi ({_started(found)}), so nothing typed "
+            "in it records", "type the command in a terminal of your own")
 
 
 def _started(found) -> str:
@@ -228,28 +214,13 @@ def _possessive(name: str) -> str:
     return f"{name}'" if name.endswith("s") else f"{name}'s"
 
 
-def _limit() -> int:
-    from ._walk import LIMIT
-
-    return LIMIT
-
-
 NO_KEYBOARD = ("moxi sees no terminal on its input here (it is redirected, or the terminal "
                "gives none)", "type it in a terminal without redirecting its input")
-
-
-def row_no_place(cause: str, step: str) -> tuple[str, str]:
-    return f"Moxi can't find where it keeps the record: {cause}", step
 
 
 def row_anchor_set(record: str) -> tuple[str, str]:
     return (f"{ANCHOR_HOME} is set, which only test kits set, so the record goes to "
             f"{record}", "take it out of this terminal's environment")
-
-
-def row_unwritable(record: str, folder: str, error: str) -> tuple[str, str]:
-    return (f"the record at {record} can't be written ({error})",
-            f"make {folder} writable by you")
 
 
 def _capital(text: str) -> str:
