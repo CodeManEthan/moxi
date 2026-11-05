@@ -615,7 +615,9 @@ def _path(key, value, source, environ):
 
     if value == "":
         return None
-    expanded = Path(_expanduser(value, environ))
+    # `check_text` reads no environment of its own, but its `~` is still this process's
+    # home, as `load` without an `env` expands it.
+    expanded = Path(_expanduser(value, os.environ if environ is _NO_ENV else environ))
     if not expanded.is_absolute():
         raise ConfigError(source, key.name, f"is the relative path {value!r}",
                           "give an absolute path, or one starting with ~")

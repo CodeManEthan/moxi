@@ -108,11 +108,23 @@ def test_a_shells_env_reaches_its_page_servers(ui_shells, fixture_site):
     assert f"HOME={shell.home}".encode() in environ
 
 
+def test_a_shell_reads_the_record_under_the_test_kits_anchor(fence, tmp_path, monkeypatch):
+    from moxi_ui.testing.shell import shell_env
+
+    assert shell_env(tmp_path)["MOXI_ANCHOR_HOME"] == str(fence.anchor_home)
+    assert shell_env(tmp_path, gateway=True)["MOXI_ANCHOR_HOME"] == str(fence.anchor_home)
+    # Outside the kit's fence it still keeps the record under its own home.
+    monkeypatch.delenv("MOXI_ANCHOR_HOME")
+    env = shell_env(tmp_path)
+    assert env["MOXI_ANCHOR_HOME"] == env.get("LOCALAPPDATA", str(tmp_path))
+
+
 def test_a_shells_env_cant_move_it_out_of_its_home(tmp_path):
     from moxi_ui.testing.shell import TestShell, shell_env
 
     assert shell_env(tmp_path, extra={"PATH": "/opt/bin"})["PATH"] == "/opt/bin"
-    for key in ("HOME", "MOXI_HOME", "XDG_STATE_HOME", "TMPDIR", "PYTHONPATH"):
+    for key in ("HOME", "MOXI_HOME", "XDG_STATE_HOME", "TMPDIR", "PYTHONPATH",
+                "MOXI_ANCHOR_HOME"):
         with pytest.raises(ValueError, match=key):
             TestShell(tmp_path, env={key: str(tmp_path / "elsewhere")})
     with pytest.raises(ValueError, match="strings"):

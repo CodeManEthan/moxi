@@ -12,7 +12,8 @@ a ledger of what each owner placed.
     remove(owner)                        remove every placement of `owner`
     adopt(from_owner, to_owner, placed, seeded=False)
                                          hand placements from one owner to another
-    harnesses()                          the harness table, and a line per row skipped
+    harnesses(settings=None, env=None)   the harness table, and a line per row skipped
+    folders(env=None)                    each row's folders by label, resolved from `env`
     chosen()                             `skills.harnesses`, and a line per name skipped
     from_package(found, source)          whether a source lies in a module's own package
 
@@ -249,26 +250,65 @@ class Harness:
 
 # -- the harness table --------------------------------------------------------------------
 
-def _core_settings():
+def _core_settings(env=None):
     from . import config
 
-    return config.load("moxi", config._core_schema())
+    return config.load("moxi", config._core_schema(), env=env)
 
 
-def harnesses(settings=None) -> tuple[dict[str, Harness], list[str]]:
-    """The harness table: each valid row by name, and one line per row skipped."""
+def harnesses(settings=None, env=None) -> tuple[dict[str, Harness], list[str]]:
+    """The harness table: each valid row by name, and one line per row skipped.
+
+    The folders are `folders(env)`'s, made absolute: the placer and a page's check
+    resolve them with the one resolver. `env` is the environment they are resolved from,
+    `os.environ` without one; `settings` the core settings, read from `env` without them.
+    """
     if settings is None:
-        settings = _core_settings()
+        settings = _core_settings(env)
+    rows, lines = _table(settings, env)
+    return {name: Harness(name, *(None if path is None else Path(os.path.abspath(path))
+                                  for path in (row.skills, row.agents)))
+            for name, row in rows.items()}, lines
+
+
+def folders(env=None, *, settings=None) -> dict[str, Path]:
+    """Each harness row's skills and agents folders as the placer resolves them, by a
+    label a person reads ("claude's skills folder"), resolved from `env` alone.
+
+    `env` is a mapping (`os.environ` without one) and is read only by name: a row's folder
+    or the built-in one over `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, `~` expanded from the
+    mapping's home (`moxi.paths.home`), and the core settings read from
+    `moxi.paths.core().config_file(env)` unless `settings` are given. A folder is as the
+    variables give it, not yet made absolute, so a check can tell a relative value from
+    a full path; `harnesses()` makes them absolute. A row the placer skips, and a kind a
+    row has no folder for, give no entry. Raises `moxi.config.ConfigError` when the core
+    settings can't be read.
+    """
+    if settings is None:
+        settings = _core_settings(env)
+    rows, _ = _table(settings, env)
+    found: dict[str, Path] = {}
+    for name, row in rows.items():
+        for kind in ("skills", "agents"):
+            if (path := getattr(row, kind)) is not None:
+                found[f"{name}'s {kind} folder"] = path
+    return found
+
+
+def _table(settings, env) -> tuple[dict[str, Harness], list[str]]:
+    """The harness rows as `folders` resolves them (not made absolute), and one line per
+    row skipped."""
+    environ = os.environ if env is None else env
     rows: dict[str, Harness] = {}
     lines: list[str] = []
     for number, row in enumerate(settings["harnesses"], 1):
-        problem = _row_problem(row, rows)
+        problem = _row_problem(row, rows, environ)
         if problem:
             lines.append(f"harnesses row {number} is skipped: {problem}")
             continue
         name = row["name"]
-        rows[name] = Harness(name, _folder(name, "skills", row.get("skills", "")),
-                             _folder(name, "agents", row.get("agents", "")))
+        rows[name] = Harness(name, _folder(name, "skills", row.get("skills", ""), environ),
+                             _folder(name, "agents", row.get("agents", ""), environ))
     return rows, lines
 
 
@@ -289,7 +329,10 @@ def chosen(settings=None) -> tuple[list[str], list[str]]:
     return names, lines
 
 
-def _row_problem(row, seen: dict) -> str | None:
+def _row_problem(row, seen: dict, environ=None) -> str | None:
+    from .paths import _expanduser
+
+    environ = os.environ if environ is None else environ
     if not isinstance(row, dict):
         return "it is not a table"
     name = row.get("name")
@@ -301,23 +344,28 @@ def _row_problem(row, seen: dict) -> str | None:
         value = row.get(kind, "")
         if not isinstance(value, str):
             return f"{name}'s {kind} folder is not a string"
-        if value and not os.path.isabs(os.path.expanduser(value)):
+        if value and not os.path.isabs(_expanduser(value, environ)):
             return f"{name}'s {kind} folder {value!r} is not an absolute path"
     return None
 
 
-def _folder(name: str, kind: str, value: str) -> Path | None:
+def _folder(name: str, kind: str, value: str, environ=None) -> Path | None:
+    """A row's folder of `kind`, or the built-in one, from `environ` alone; not made
+    absolute (`folders`)."""
+    from .paths import _expanduser
+
+    environ = os.environ if environ is None else environ
     if value:
-        return Path(os.path.abspath(os.path.expanduser(value)))
+        return Path(_expanduser(value, environ))
     if name == "claude":
-        base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
-        return Path(os.path.abspath(os.path.expanduser(base))) / kind
+        base = environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
+        return Path(_expanduser(base, environ)) / kind
     if name == "codex":
         if kind == "skills":
             base = os.path.join("~", ".agents")
         else:
-            base = os.environ.get("CODEX_HOME") or os.path.join("~", ".codex")
-        return Path(os.path.abspath(os.path.expanduser(base))) / kind
+            base = environ.get("CODEX_HOME") or os.path.join("~", ".codex")
+        return Path(_expanduser(base, environ)) / kind
     return None
 
 
