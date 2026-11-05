@@ -6,9 +6,13 @@
   - `"E1"`, a Moxi program: its command line runs the `moxi` script or a
     `moxi-<module>-<part>` script, or an interpreter run with `-m moxi`, `-m moxi.<name>`
     or `-m moxi_<module>[...]` (on Windows a script is its `.exe` launcher, and the
-    Python launcher `py` counts as an interpreter);
+    Python launchers `py` and `pyw` count as interpreters);
   - `"E2"`, an agent: its program, the base name of its first argument (which a harness
-    may set as its process title), is `claude`, `codex` or `opencode`;
+    may set as its process title), is `claude`, `codex` or `opencode`, alone or followed
+    by `-` and more, since a harness names its own helpers after itself (Codex's Linux
+    tool sandbox runs under `codex-linux-sandbox`); on Windows the name is matched after
+    dropping a trailing `.exe` and without case. It can only stop a record, so it errs
+    wide: a person's own `codex-x` stops it too;
   - `"E3"`, a Moxi unit: on Linux its cgroup is a `moxi-<module>-<name>.service`, on
     macOS it is the running process of a `moxi.<module>.<name>` launchd job;
   - `"E4"`, the start mark: `MOXI_STARTED_BY` is in the environment it started with
@@ -19,8 +23,8 @@
   processes, `"loop"` round a loop) or `"N2"` (`reason` `"tmux"`: a tmux server nothing
   places, while slots' server can run outside a unit here, so it can't be told from the
   person's own).
-- None: nothing of Moxi's or an agent's up to the first process with no visible parent,
-  so the run may record.
+- None: nothing of Moxi's or an agent's up to and including the first process with no
+  visible parent (a pid namespace's first process, say), so the run may record.
 
 The run's own entry chain is judged by E3 and E4 only, since it runs the `moxi` script
 by definition: on Linux and macOS that is the run's process alone (a `#!` script runs in
@@ -40,7 +44,9 @@ judged by its command line alone, where the system shows one, and passed when it
 nothing. A parent that started after its child is no parent: on Linux and macOS, where a
 living process always has a living parent, that is a parent that ended during the walk,
 an N1 `Undecided`; on Windows, which never reparents, it ends the walk, as does a parent
-pid with no process. A parent the system hides (Linux `hidepid`) ends the walk too.
+pid with no process. A parent the system hides (Linux `hidepid`) ends the walk too. A process
+whose parent ends the walk in any of these ways is judged first, a shielded one by its
+command line, so a pid namespace's first process is judged before the walk ends there.
 """
 
 from __future__ import annotations
@@ -59,7 +65,8 @@ from ._view import Gone, Proc, Unread
 #: The most processes a walk reads, the run's own included; one more is N1.
 LIMIT = 64
 
-#: The agents' programs.
+#: The agents' programs. A program named one of these, alone or followed by `-` and more,
+#: is that agent or a helper it names after itself.
 HARNESSES = ("claude", "codex", "opencode")
 
 E1, E2, E3, E4 = "E1", "E2", "E3", "E4"
@@ -375,9 +382,13 @@ class _Walk:
         return "script", args[at]
 
     def harness(self, argv) -> str | None:
+        """The harness a program is, or is a helper of: its name is the harness's alone
+        or followed by `-` and more. On Windows `base` has already dropped `.exe` and
+        folded case."""
         for name in self.names(argv):
-            if name in HARNESSES:
-                return name
+            for harness in HARNESSES:
+                if name == harness or name.startswith(harness + "-"):
+                    return harness
         return None
 
     def tmux(self, argv) -> bool:

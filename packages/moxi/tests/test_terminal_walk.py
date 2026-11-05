@@ -194,6 +194,85 @@ def test_a_windows_harness_exe_is_an_agent():
     assert got == Evidence("E2", RUN + 1, "claude", "claude")
 
 
+# Codex's Linux tool sandbox runs each tool command in a new pid namespace whose first
+# process is `codex-linux-sandbox`: the walk sees no parent above it, and nothing of Codex.
+SANDBOX_TOOL = p(["/bin/bash", "-c", "moxi modules"])
+HIDDEN = 4242  # a parent pid the view doesn't answer for, and that stays the parent
+
+
+@pytest.mark.parametrize("top_parent", [0, HIDDEN], ids=["pid-0", "hidden-parent"])
+@pytest.mark.parametrize("argv0", ["codex-linux-sandbox",
+                                   "/home/ada/.local/bin/codex-linux-sandbox"])
+def test_a_namespace_top_a_harness_names_after_itself_stops_it(top_parent, argv0):
+    procs = chain(ME, SANDBOX_TOOL, p([argv0, "--sandbox-policy", "{}", "--", "bash"]),
+                  top_parent=top_parent)
+    got = walk(Table(procs), run())
+    assert got == Evidence("E2", RUN + 2, "codex-linux-sandbox", "codex")
+
+
+def test_a_shielded_namespace_top_is_known_by_its_command_line():
+    top = p(["codex-linux-sandbox", "--", "bash"], shielded=True)
+    assert found(ME, SANDBOX_TOOL, top) == Evidence("E2", RUN + 2, "codex-linux-sandbox",
+                                                    "codex")
+
+
+def test_under_codexs_sandbox_a_typed_moxi_records_nothing(monkeypatch):
+    from moxi.terminal import _record
+
+    monkeypatch.setattr(_record, "keyboard", lambda stdin=None: True)
+    view = Table(chain(ME, SANDBOX_TOOL, p(["codex-linux-sandbox", "--", "bash"])))
+    env = dict(os.environ)
+    outcome = _record.step(env, view=view, run=run())
+    assert outcome.kind == _record.FOUND and outcome.found.kind == "E2"
+    assert not outcome.path.exists()
+
+
+def test_a_helpers_line_names_its_harness():
+    from moxi.terminal import _lines
+
+    got = found(ME, SANDBOX_TOOL, p(["codex-linux-sandbox", "--", "bash"]))
+    what, _ = _lines.found_words(got)
+    assert what.startswith("this command runs under Codex (pid 102), an agent")
+
+
+@pytest.mark.parametrize("suffix", ["", "-", "-x", "-linux-sandbox"])
+@pytest.mark.parametrize("harness", _walk.HARNESSES)
+def test_a_harness_alone_or_followed_by_a_dash_is_an_agent(harness, suffix):
+    got = found(ME, SHELL, p([f"/usr/local/bin/{harness}{suffix}", "x"]), *PERSON[1:])
+    assert got == Evidence("E2", RUN + 2, f"{harness}{suffix}", harness)
+
+
+@pytest.mark.parametrize("name", ["codexx", "codexfoo", "claudette", "opencoder", "xcodex",
+                                  "my-codex", "codex_x", "codex.exe", "Codex"])
+def test_a_near_miss_is_not_an_agent(name):
+    # On Linux and macOS a name is matched as spelled: no `.exe` drop and no case folding.
+    assert found(ME, SHELL, p([f"/usr/local/bin/{name}"]), *PERSON[1:]) is None
+
+
+@pytest.mark.parametrize(("argv0", "program", "harness"), [
+    (r"C:\Users\ada\bin\codex.exe", "codex", "codex"),
+    (r"C:\Users\ada\bin\CODEX.EXE", "codex", "codex"),
+    ("codex-command-runner.exe", "codex-command-runner", "codex"),
+    (r"C:\x\Codex-Command-Runner.EXE", "codex-command-runner", "codex"),
+    (r"C:\x\OpenCode-x.Exe", "opencode-x", "opencode"),
+    ("Claude", "claude", "claude"),
+])
+def test_on_windows_a_harness_matches_without_exe_and_case(argv0, program, harness):
+    got = walk(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), p([argv0]),
+                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+               run(executable=WIN_EXE, argv0=WIN_MOXI))
+    assert got == Evidence("E2", RUN + 1, program, harness)
+
+
+@pytest.mark.parametrize("argv0", [r"C:\x\codexx.exe", r"C:\x\My-Codex.exe",
+                                   r"C:\x\codex.exe.bak"])
+def test_on_windows_a_near_miss_is_not_an_agent(argv0):
+    got = walk(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), p([argv0]),
+                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+               run(executable=WIN_EXE, argv0=WIN_MOXI))
+    assert got is None
+
+
 # -- E3 ------------------------------------------------------------------------------------
 
 def test_a_cgroup_naming_a_moxi_unit_stops_it():
@@ -398,6 +477,28 @@ def test_a_py_exe_running_a_script_is_judged_as_any_process():
     above = p([WIN_MOXI, "slots"], image=WIN_MOXI)
     got = windows(me, launcher, above, PWSH, EXPLORER, **PY_RUN)
     assert got == Evidence("E1", RUN + 2, "moxi", "moxi")
+
+
+PYW = r"C:\Users\ada\AppData\Local\Programs\Python\Launcher\pyw.exe"
+
+
+@pytest.mark.parametrize(("argv", "program", "detail", "module"), [
+    # The very command line `py.exe` would be matched for as the run's own launcher.
+    (["pyw", "-m", "moxi", "modules"], "pyw", "-m moxi", None),
+    ([PYW, "-3.12", "-m", "moxi", "modules"], "pyw", "-m moxi", None),
+    (["pyw.exe", "-m", "moxi_comms.adapters.window"], "pyw", "-m moxi_comms.adapters.window",
+     "comms"),
+    # No `-m moxi`: a Moxi module's GUI script, run by pyw.
+    (["pyw", WIN_SCRIPTS + r"\moxi-slots-server-script.pyw"], "moxi-slots-server",
+     "moxi-slots-server", "slots"),
+])
+def test_pyw_above_the_run_is_e1_and_never_its_own_launcher(argv, program, detail, module):
+    # Only py.exe is matched as the run's own launcher: pyw has no console, so a run typed
+    # at a keyboard never sits under it, and one that does stops at it.
+    me = p([WIN_PY312, "-m", "moxi", "modules"], image=WIN_PY312)
+    launcher = p(argv, image=PYW)
+    got = windows(me, launcher, PWSH, EXPLORER, **PY_RUN)
+    assert got == Evidence("E1", RUN + 1, program, detail, module)
 
 
 def test_a_py_version_tag_is_passed_over_whole():
