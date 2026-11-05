@@ -123,6 +123,26 @@ def test_no_place_for_the_record_raises_no_anchor(monkeypatch):
         write({})
 
 
+@pytest.mark.parametrize("env", [
+    {}, {"HOME": "/home/ada"}, {"A": "", "B": "x", "PATH": "/bin:/usr/bin"},
+    {"HOME": 'q"uote\\back\nnew\ttab\rcr\bbs\ffeed\x01\x7f'},
+    {"HOME": "/home/zo\u00eb/\u65e5\u672c/\U0001f600"},
+    {"HOME": "/home/\udc80\udcff"},              # undecodable bytes, as POSIX keeps them
+    {"PATH": "C:\\Windows;C:\\Program Files\\Git\\cmd"},
+])
+def test_the_text_is_the_json_of_the_record(env):
+    got = _record.text(env, "0.2.0")
+    body = {"format": 1, "moxi": "0.2.0", "env": dict(sorted(env.items()))}
+    assert got == json.dumps(body, indent=2) + "\n"
+    assert got.isascii() and json.loads(got) == body
+
+
+def test_the_same_environment_gives_the_same_bytes(fence):
+    env = {"PATH": "/b", "HOME": "/h"}
+    first = write(env).read_bytes()
+    assert write(dict(reversed(env.items()))).read_bytes() == first
+
+
 # -- reading ------------------------------------------------------------------------------------
 
 def test_a_missing_file_is_no_record(fence):
@@ -351,7 +371,7 @@ def test_a_named_pipe_on_the_input_of_a_child(name, expected):
 
     full = "\\\\.\\pipe\\" + name.format(n=os.getpid())
     server = _winapi.CreateNamedPipe(
-        full, _winapi.PIPE_ACCESS_OUTBOUND, _winapi.PIPE_TYPE_BYTE | _winapi.PIPE_WAIT,
+        full, 0x2, _winapi.PIPE_TYPE_BYTE | _winapi.PIPE_WAIT,
         1, 4096, 4096, 0, _winapi.NULL)
     try:
         client = _winapi.CreateFile(full, _winapi.GENERIC_READ, 0, _winapi.NULL,
