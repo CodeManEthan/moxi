@@ -28,6 +28,11 @@ DOCTOR_COMMAND = "moxi doctor"
 
 #: The agents by the names a person knows them by.
 HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
+#: The harnesses' tool marks, each with its harness (`moxi._mark.TOOL_MARKS`, repeated here
+#: so the words import nothing).
+TOOL_MARKS = {"CLAUDECODE": "claude"}
+#: How the walk names a program run from a file descriptor.
+FD_PREFIX = "/proc/self/fd/"
 
 
 class Where(namedtuple("Where", ("place", "step"))):
@@ -191,9 +196,18 @@ def found_words(found) -> tuple[str, str]:
     decide is worded by the record step (`moxi.terminal.row`), which prints the same
     words."""
     if found.kind == "E2":
+        step = "type it in a terminal of your own"
+        if found.detail in TOOL_MARKS:
+            harness = HARNESS_NAMES.get(TOOL_MARKS[found.detail], found.detail)
+            return (f"this command runs in a {harness} tool command (its environment "
+                    f"carries {found.detail}), and nothing an agent runs records", step)
+        if found.detail.startswith(FD_PREFIX):
+            return (f"this command runs under a program started from a file descriptor "
+                    f"(pid {found.pid}), as an agent's tool sandbox runs its commands, and "
+                    "nothing an agent runs records", step)
         harness = HARNESS_NAMES.get(found.detail, found.detail)
         return (f"this command runs under {harness} (pid {found.pid}), an agent, and "
-                "nothing an agent runs records", "type it in a terminal of your own")
+                "nothing an agent runs records", step)
     return (f"this terminal was started by Moxi ({_started(found)}), so nothing typed "
             "in it records", "type the command in a terminal of your own")
 

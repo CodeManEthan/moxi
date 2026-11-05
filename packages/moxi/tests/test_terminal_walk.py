@@ -273,6 +273,112 @@ def test_on_windows_a_near_miss_is_not_an_agent(argv0):
     assert got is None
 
 
+# Claude Code's Linux sandbox runs the tool command under its own binary run from a file
+# descriptor, so its namespace's first process is named `/proc/self/fd/3`; and Claude Code
+# sets `CLAUDECODE` for every tool command. Either sign alone stops the record.
+FD_TOP = p(["/proc/self/fd/3", "--sandbox", "--", "bash"])
+
+
+@pytest.mark.parametrize("fd", ["/proc/self/fd/3", "/proc/self/fd/12"])
+@pytest.mark.parametrize("top_parent", [0, HIDDEN], ids=["pid-0", "hidden-parent"])
+def test_a_namespace_top_run_from_a_file_descriptor_stops_it(fd, top_parent):
+    procs = chain(ME, SANDBOX_TOOL, p([fd, "--", "bash"]), top_parent=top_parent)
+    got = walk(Table(procs), run())  # no tool mark in the run's environment
+    assert got == Evidence("E2", RUN + 2, fd.rsplit("/", 1)[1], fd)
+
+
+def test_a_shielded_top_run_from_a_file_descriptor_is_known_by_its_command_line():
+    top = p(["/proc/self/fd/3"], shielded=True)
+    assert found(ME, SANDBOX_TOOL, top) == Evidence("E2", RUN + 2, "3", "/proc/self/fd/3")
+
+
+@pytest.mark.parametrize("procs", [
+    # Not a top: something visible is above it.
+    (SANDBOX_TOOL, p(["/proc/self/fd/3"]), *PERSON),
+    # A top whose first argument is something else.
+    (SHELL, TERMINAL, USER_MANAGER, p(["/sbin/init", "/proc/self/fd/3"], shielded=True)),
+    # Near misses, as tops.
+    (SANDBOX_TOOL, p(["/proc/selfx/fd/3"])),
+    (SANDBOX_TOOL, p(["/proc/self/fd/"])),
+    (SANDBOX_TOOL, p(["/proc/self/fd/3x"])),
+    (SANDBOX_TOOL, p(["/proc/1/fd/3"])),
+], ids=["not-a-top", "later-argument", "selfx", "no-number", "not-a-number", "other-pid"])
+def test_a_file_descriptor_path_elsewhere_records(procs):
+    assert found(ME, *procs) is None
+
+
+@pytest.mark.parametrize("value", ["1", ""], ids=["one", "empty"])
+def test_a_tool_mark_in_the_runs_start_environment_stops_it_before_any_read(value):
+    from moxi import _mark
+
+    marks = _mark.present({"CLAUDECODE": value}, _mark.TOOL_MARKS)
+    view = Table(chain(ME, *PERSON))
+    got = walk(view, run(tool_marks=marks))
+    assert got == Evidence("E2", RUN, "moxi", "CLAUDECODE")
+    assert view.reads == []
+
+
+def test_the_runs_own_mark_comes_before_its_tool_mark_and_before_any_read():
+    view = Table(chain(ME, *PERSON))
+    got = walk(view, run(started_by="", tool_marks=("CLAUDECODE",)))
+    assert got == Evidence("E4", RUN, "moxi", "")
+    assert view.reads == []
+
+
+def test_a_run_with_neither_mark_records():
+    view = Table(chain(ME, *PERSON))
+    assert walk(view, run(started_by=None, tool_marks=())) is None
+    assert view.reads == [RUN, RUN + 1, RUN + 2, RUN + 3, RUN + 4]
+
+
+@pytest.mark.parametrize(("env", "fold", "marks"), [
+    ({"CLAUDECODE": "1"}, False, ("CLAUDECODE",)),
+    ({"CLAUDECODE": ""}, False, ("CLAUDECODE",)),
+    ({"claudecode": "1"}, False, ()),
+    ({"claudecode": "1"}, True, ("CLAUDECODE",)),
+    ({"CLAUDECODEX": "1", "CLAUDE": "1"}, True, ()),
+    ({}, False, ()),
+], ids=["set", "empty", "posix-case", "windows-case", "near-miss", "none"])
+def test_which_tool_marks_an_environment_holds(env, fold, marks):
+    from moxi import _mark
+
+    assert _mark.present(env, _mark.TOOL_MARKS, fold=fold) == marks
+
+
+def test_the_run_carries_the_tool_marks_noted_at_import(monkeypatch):
+    from moxi import _mark
+
+    monkeypatch.setattr(_mark, "tool_marks", ("CLAUDECODE",))
+    assert Run.here().tool_marks == ("CLAUDECODE",)
+
+
+@pytest.mark.parametrize(("procs", "marks"), [
+    ((ME, SANDBOX_TOOL, FD_TOP), ()),
+    ((ME, *PERSON), ("CLAUDECODE",)),
+], ids=["fd-top", "tool-mark"])
+def test_under_claude_codes_sandbox_a_typed_moxi_records_nothing(monkeypatch, procs, marks):
+    from moxi.terminal import _record
+
+    monkeypatch.setattr(_record, "keyboard", lambda stdin=None: True)
+    outcome = _record.step(dict(os.environ), view=Table(chain(*procs)),
+                           run=run(tool_marks=marks))
+    assert outcome.kind == _record.FOUND and outcome.found.kind == "E2"
+    assert not outcome.path.exists()
+
+
+def test_each_sign_has_its_own_line():
+    from moxi import _mark
+    from moxi.terminal import _lines
+
+    assert _lines.TOOL_MARKS == _mark.TOOL_MARKS
+    by_fd, _ = _lines.found_words(found(ME, SANDBOX_TOOL, FD_TOP))
+    by_mark, _ = _lines.found_words(found(ME, *PERSON, tool_marks=("CLAUDECODE",)))
+    assert by_fd.startswith("this command runs under a program started from a file "
+                            "descriptor (pid 102)")
+    assert by_mark.startswith("this command runs in a Claude Code tool command (its "
+                              "environment carries CLAUDECODE)")
+
+
 # -- E3 ------------------------------------------------------------------------------------
 
 def test_a_cgroup_naming_a_moxi_unit_stops_it():
