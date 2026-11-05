@@ -12,7 +12,7 @@
 - `identity` and `alive` name a process by its pid and start time, so a pid the system
   has given to another process since never matches.
 - `environ` reads another process's environment as it was started, where the system
-  lets one: Linux and macOS.
+  lets one: Linux and macOS. `cmdline` reads its command line, on Windows too.
 - `status` says how a detached child this process started ended.
 - `parent` reads another process's parent pid, with the standard library only.
 
@@ -29,6 +29,8 @@ import threading
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+
+from . import _mark
 
 _WINDOWS = sys.platform == "win32"
 
@@ -65,7 +67,9 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
     `str` when `input` is a `str` and `bytes` otherwise. `env` is the child's whole
     environment, used as given (None: this process's), less `MOXI_LIFELINE_FD`: the child
     holds no lifeline, so it must not see a value meant for this process, whether it came
-    from this process's environment or from `env`. The exit status is not checked.
+    from this process's environment or from `env`. The start mark, `MOXI_STARTED_BY`, is
+    added when `env` lacks it, so a child given an environment built from scratch is still
+    known as one Moxi started. The exit status is not checked.
 
     POSIX: the child starts in a new session, so it and everything it starts form one
     process group; on timeout the group gets SIGTERM and, two seconds later, SIGKILL
@@ -233,7 +237,8 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
     in it, and `"watch"` and `detached=True` take it out, whether it came from this
     process's environment or from `env`. A watched or detached child holds no lifeline it
     could read, so it must not see a value meant for its parent: its `lifeline_kind()`
-    answers None, as a child of a parent outside Moxi does.
+    answers None, as a child of a parent outside Moxi does. The start mark,
+    `MOXI_STARTED_BY`, is added when `env` lacks it, as `run` adds it.
     """
     if detached:
         if lifeline is not None:
@@ -551,9 +556,10 @@ def _argv(argv: Argv) -> list[str]:
 
 def _lifeline_env(env: Mapping[str, str] | None, value: str | None) -> dict[str, str]:
     """A child's whole environment: `env` (None: this process's) with `MOXI_LIFELINE_FD`
-    set to `value`, or taken out when `value` is None. On Windows, where names are the
-    same whatever their case, every spelling of the name is taken out first."""
-    child = dict(os.environ if env is None else env)
+    set to `value`, or taken out when `value` is None, and with the start mark
+    (`moxi._mark`) added when it lacks one. On Windows, where names are the same whatever
+    their case, every spelling of the name is taken out first."""
+    child = _mark.marked(env)
     if _WINDOWS:
         for name in [name for name in child if name.upper() == LIFELINE_ENV]:
             del child[name]
@@ -720,7 +726,7 @@ def alive(proc: ProcId) -> bool:
         return False
 
 
-# -- environment -------------------------------------------------------------------------
+# -- environment and command line ---------------------------------------------------------
 
 def environ(pid: int) -> dict[str, str] | None:
     """The environment process `pid` was started with, or None when it can't be read.
@@ -734,25 +740,105 @@ def environ(pid: int) -> dict[str, str] | None:
     removed itself since is not seen. An entry without `=` is skipped, and bytes that are
     not UTF-8 are replaced. Standard library only.
     """
-    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+    if not _a_pid(pid) or _WINDOWS:
         return None
+    try:
+        return _environ(pid)
+    except OSError:
+        return None
+
+
+def cmdline(pid: int) -> list[str] | None:
+    """The command line of process `pid` as the system shows it, or None when it can't be
+    read: one string per argument, the first being the program as it was started or the
+    title the process gave itself since.
+
+    Linux reads `/proc/<pid>/cmdline`, which the system shows for every account's
+    processes. macOS asks the kernel (`sysctl` with `KERN_PROCARGS2`), which answers only
+    for a process of the same user. Windows asks psutil, which is refused another
+    account's processes and protected ones. A process that is gone gives None.
+    """
+    if not _a_pid(pid):
+        return None
+    try:
+        return _cmdline(pid)
+    except OSError:
+        return None
+
+
+def _a_pid(pid) -> bool:
+    return not isinstance(pid, bool) and isinstance(pid, int) and pid > 0
+
+
+def _environ(pid: int) -> dict[str, str]:
+    """`environ`'s read on every system, Windows through psutil, raising instead of
+    answering None: `ProcessLookupError` when there is no such process (gone, or ended
+    and not yet reaped), `PermissionError` when the system refuses it, any other `OSError`
+    for a read that failed."""
     if sys.platform.startswith("linux"):
-        return _linux_environ(pid)
+        return _linux_read_environ(pid, "/proc")
     if sys.platform == "darwin":
-        return _mac_environ(pid)
-    return None
+        return _pairs(_procargs2_parts(_mac_procargs(pid))[1])
+    if _WINDOWS:
+        return dict(_psutil_read(pid, "environ"))
+    raise OSError(f"no reader of another process's environment on {sys.platform}")
+
+
+def _cmdline(pid: int) -> list[str]:
+    """`cmdline`'s read, raising as `_environ` does."""
+    if sys.platform.startswith("linux"):
+        return _linux_cmdline(pid, "/proc")
+    if sys.platform == "darwin":
+        return _procargs2_parts(_mac_procargs(pid))[0]
+    if _WINDOWS:
+        return list(_psutil_read(pid, "cmdline"))
+    raise OSError(f"no reader of another process's command line on {sys.platform}")
 
 
 def _linux_environ(pid: int, root: str = "/proc") -> dict[str, str] | None:
     try:
-        with open(os.path.join(root, str(pid), "environ"), "rb") as f:
-            raw = f.read()
+        return _linux_read_environ(pid, root)
     except OSError:
         return None
+
+
+def _linux_read_environ(pid: int, root: str) -> dict[str, str]:
+    raw = _linux_file(pid, root, "environ")
     # A zombie reads as an empty environment; it has ended, so it is gone.
     if not raw and _linux_ended(pid, root):
-        return None
+        raise ProcessLookupError(f"process {pid} has ended")
     return _pairs(raw.split(b"\0"))
+
+
+def _linux_cmdline(pid: int, root: str = "/proc") -> list[str]:
+    raw = _linux_file(pid, root, "cmdline")
+    # A zombie, like a kernel thread, reads as an empty command line.
+    if not raw and _linux_ended(pid, root):
+        raise ProcessLookupError(f"process {pid} has ended")
+    parts = raw.split(b"\0")
+    # Each argument ends with a NUL; a process that wrote a title over its arguments may
+    # leave a run of them.
+    while parts and not parts[-1]:
+        parts.pop()
+    return [part.decode("utf-8", "replace") for part in parts]
+
+
+def _linux_file(pid: int, root: str, name: str) -> bytes:
+    try:
+        with open(os.path.join(root, str(pid), name), "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        raise ProcessLookupError(f"process {pid} is gone") from None
+    except ProcessLookupError:
+        raise
+    except OSError as error:
+        # A read of a process that ended while it was open fails with ESRCH.
+        if error.errno == _ESRCH:
+            raise ProcessLookupError(f"process {pid} is gone") from None
+        raise
+
+
+_ESRCH = 3
 
 
 def _linux_ended(pid: int, root: str) -> bool:
@@ -767,15 +853,30 @@ def _linux_ended(pid: int, root: str) -> bool:
     return state in ([b"Z"], [b"X"], [b"x"])
 
 
-def _mac_environ(pid: int) -> dict[str, str] | None:
+def _psutil_read(pid: int, what: str):
+    """psutil's `Process(pid).<what>()`, its errors as `_environ` raises them."""
+    import psutil
+
+    try:
+        return getattr(psutil.Process(pid), what)()
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        raise ProcessLookupError(f"process {pid} is gone") from None
+    except psutil.AccessDenied:
+        raise PermissionError(f"the system refuses reading process {pid}") from None
+    except psutil.Error as error:
+        raise OSError(f"process {pid} can't be read: {error}") from None
+
+
+def _mac_procargs(pid: int) -> bytes:
+    """The kernel's `KERN_PROCARGS2` answer for `pid`, raising as `_environ` does."""
     import ctypes
     import ctypes.util
 
     try:
         libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
         sysctl = libc.sysctl
-    except (OSError, AttributeError):
-        return None
+    except (OSError, AttributeError) as error:
+        raise OSError(f"sysctl can't be called: {error}") from None
     sysctl.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
                        ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
     sysctl.restype = ctypes.c_int
@@ -784,15 +885,36 @@ def _mac_environ(pid: int) -> dict[str, str] | None:
     argmax = ctypes.c_int(0)
     size = ctypes.c_size_t(ctypes.sizeof(argmax))
     if sysctl(mib, 2, ctypes.byref(argmax), ctypes.byref(size), None, 0) != 0:
-        return None
+        raise OSError(ctypes.get_errno(), "sysctl KERN_ARGMAX failed")
     if argmax.value <= 0:
-        return None
+        raise OSError("sysctl KERN_ARGMAX gave no size")
     buffer = ctypes.create_string_buffer(argmax.value)
     size = ctypes.c_size_t(argmax.value)
     mib = (ctypes.c_int * 3)(_CTL_KERN, _KERN_PROCARGS2, pid)
     if sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) != 0:
-        return None  # gone, another user's, or refused
-    return _procargs2(buffer.raw[:size.value])
+        code = ctypes.get_errno()
+        # The kernel answers EINVAL both for a gone pid and for another user's process.
+        if code == _ESRCH or not _exists(pid):
+            raise ProcessLookupError(f"process {pid} is gone")
+        raise PermissionError(code, f"the system refuses reading process {pid}")
+    return buffer.raw[:size.value]
+
+
+def _exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # another user's: it exists
+    return True
+
+
+def _mac_environ(pid: int) -> dict[str, str] | None:
+    try:
+        return _pairs(_procargs2_parts(_mac_procargs(pid))[1])
+    except OSError:
+        return None
 
 
 # macOS's sysctl names: <sys/sysctl.h>.
@@ -804,7 +926,16 @@ _POINTER = 8
 
 
 def _procargs2(raw: bytes) -> dict[str, str] | None:
-    """The environment in a `KERN_PROCARGS2` answer.
+    """The environment in a `KERN_PROCARGS2` answer, or None for an answer cut short."""
+    try:
+        return _pairs(_procargs2_parts(raw)[1])
+    except OSError:
+        return None
+
+
+def _procargs2_parts(raw: bytes) -> tuple[list[str], list[bytes]]:
+    """The arguments and the environment's entries in a `KERN_PROCARGS2` answer. Raises
+    `OSError` for an answer cut short.
 
     Its layout: `argc` as a C int; the executable's path, NUL-terminated, then NUL
     padding to a pointer-size boundary counted from the path's start; the `argc`
@@ -812,15 +943,16 @@ def _procargs2(raw: bytes) -> dict[str, str] | None:
     by an empty string; then strings the system keeps for itself, which are not the
     environment.
     """
+    short = OSError("the kernel's answer for the process is cut short")
     width = 4
     if len(raw) < width:
-        return None
+        raise short
     argc = int.from_bytes(raw[:width], sys.byteorder, signed=True)
     if argc < 0:
-        return None
+        raise short
     at = raw.find(b"\0", width)
     if at < 0:
-        return None
+        raise short
     # The path is padded with NULs to a pointer-size boundary from its start; only that
     # padding is skipped, so an empty argv[0] after it is still read as an argument. Fewer
     # NULs than that rule asks for means another layout: then every NUL is padding.
@@ -829,10 +961,12 @@ def _procargs2(raw: bytes) -> dict[str, str] | None:
         nuls += 1
     padded = width + _round_up(at + 1 - width, _POINTER)
     at = padded if at + nuls >= padded else at + nuls
+    args = []
     for _ in range(argc):
         end = raw.find(b"\0", at)
         if end < 0:
-            return None  # cut short
+            raise short
+        args.append(raw[at:end].decode("utf-8", "replace"))
         at = end + 1
     entries = []
     while at < len(raw):
@@ -843,7 +977,7 @@ def _procargs2(raw: bytes) -> dict[str, str] | None:
             break  # the empty string that ends the environment
         entries.append(raw[at:end])
         at = end + 1
-    return _pairs(entries)
+    return args, entries
 
 
 def _round_up(n: int, to: int) -> int:
@@ -993,4 +1127,4 @@ def _pairs(entries) -> dict[str, str]:
 
 
 __all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline",
-           "lifeline_kind", "identity", "alive", "environ", "status", "parent"]
+           "lifeline_kind", "identity", "alive", "environ", "cmdline", "status", "parent"]
