@@ -11,30 +11,24 @@ set holds, so a direct read of the process shows as a wrong answer.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
 
 from moxi import _win, paths, place
+from moxi.terminal import _record
 from moxi.paths import Layout
 
 #: The modules whose layouts run, beside the core's own.
 MODULES = ("cache", "projects")
 
-# The names the core records, matched by name. The core's record defines the set; this
-# copy says the same, so a resolver that starts reading another name fails here first.
-FIXED = frozenset({
-    "MOXI_HOME", "MOXI_DEVICE", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
-    "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "HOME", "WIN_PD_OVERRIDE_APPDATA",
-    "WIN_PD_OVERRIDE_LOCAL_APPDATA", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
-    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH", "PATHEXT"})
-MODULE_NAME = re.compile(r"MOXI_[A-Z0-9_]+_(?:%s)" % "|".join((*paths.LOCATORS, "DEVICE")))
+#: The set's names that no prefix makes, from the core's record.
+FIXED = _record.FIXED
 
 
 def in_set(name: str) -> bool:
-    return name in FIXED or bool(MODULE_NAME.fullmatch(name))
+    return _record.in_set(name, fold=False)
 
 
 class Noting(Mapping):
