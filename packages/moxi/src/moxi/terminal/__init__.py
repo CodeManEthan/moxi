@@ -19,16 +19,38 @@ The walk (`moxi.terminal._walk`):
   agent's).
 - `marked(env=None)` is a copy of an environment carrying the start mark, `MARK`
   (`MOXI_STARTED_BY`), for a program that builds a child's environment from scratch.
+
+The front door's record step (`step()`, run by the `moxi` console script before it
+dispatches) leaves its `Outcome` in `last`: None when no step ran in this process.
+
+The walk's names are imported when first used, so the front door's step, which walks
+only when a write is pending, doesn't pay for them on an unchanged environment.
 """
 
 from __future__ import annotations
 
 from .._mark import NAME as MARK
 from .._mark import marked
-from ._record import (FORMAT, NewerFormat, NoRecord, Read, Record, Unreadable, in_set,
-                      keyboard, of, read, version, write)
-from ._walk import Evidence, Found, Run, Undecided, walk
+from ._record import (FAILED, FORMAT, FOUND, NO_KEYBOARD, NO_PLACE, SAME, UNDECIDED,
+                      WRITTEN, NewerFormat, NoRecord, Outcome, Read, Record, Unreadable,
+                      in_set, keyboard, of, read, row, step, version, write)
+
+#: The `Outcome` of this process's front-door record step; None when none ran.
+last: Outcome | None = None
+
+_WALK = ("walk", "Evidence", "Undecided", "Found", "Run")
+
+
+def __getattr__(name: str):
+    if name in _WALK:
+        from . import _walk
+
+        return getattr(_walk, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["MARK", "marked", "walk", "Evidence", "Undecided", "Found", "Run",
            "FORMAT", "in_set", "of", "read", "write", "version", "keyboard", "Record",
-           "NoRecord", "Unreadable", "NewerFormat", "Read"]
+           "NoRecord", "Unreadable", "NewerFormat", "Read", "Outcome", "step", "row",
+           "last", "SAME", "WRITTEN", "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE",
+           "FAILED"]

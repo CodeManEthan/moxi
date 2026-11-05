@@ -42,7 +42,6 @@ import re
 import sys
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import files, paths
@@ -95,42 +94,71 @@ def of(env: Mapping[str, str] | None = None, *, fold: bool = _WINDOWS) -> dict[s
 
 # -- what a read gives ----------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class Record:
+class _Value:
+    """A small value: its fields, compared and shown by name. Not a dataclass, since
+    importing `dataclasses` costs more than the whole of an unchanged record step."""
+
+    __slots__ = ()
+
+    def __init__(self, *args, **kwargs):
+        fields = self.__slots__
+        given = dict(zip(fields, args))
+        given.update(kwargs)
+        for name in fields:
+            if name in given:
+                object.__setattr__(self, name, given[name])
+            elif name in self._defaults:
+                object.__setattr__(self, name, self._defaults[name])
+            else:
+                raise TypeError(f"{type(self).__name__} needs {name}")
+
+    _defaults: dict = {}
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"{type(self).__name__} can't be changed")
+
+    def _fields(self) -> tuple:
+        return tuple(getattr(self, name) for name in self.__slots__)
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._fields() == other._fields()
+
+    def __hash__(self):
+        return hash((type(self).__name__, *(repr(v) for v in self._fields())))
+
+    def __repr__(self) -> str:
+        shown = ", ".join(f"{name}={getattr(self, name)!r}" for name in self.__slots__)
+        return f"{type(self).__name__}({shown})"
+
+
+class Record(_Value):
     """A record read at `path`: its `env`, the `moxi` version that wrote it, its `format`."""
 
-    path: Path
-    env: dict[str, str] = field(hash=False)
-    moxi: str
-    format: int = FORMAT
+    __slots__ = ("path", "env", "moxi", "format")
+    _defaults = {"format": FORMAT}
 
 
-@dataclass(frozen=True)
-class NoRecord:
+class NoRecord(_Value):
     """No record at `path`: the file is missing, won't parse, or isn't a record's shape."""
 
-    path: Path
+    __slots__ = ("path",)
 
 
-@dataclass(frozen=True)
-class Unreadable:
+class Unreadable(_Value):
     """The file at `path` is there but can't be read; `error` is the last error."""
 
-    path: Path
-    error: OSError
+    __slots__ = ("path", "error")
 
 
-@dataclass(frozen=True)
-class NewerFormat:
+class NewerFormat(_Value):
     """A record at `path` in a newer `format` than this core reads, written by the moxi
     version `moxi` (None when the file names none). `reader` is this core's version and
     `reads` the format it reads."""
 
-    path: Path
-    format: int
-    moxi: str | None
-    reader: str
-    reads: int = FORMAT
+    __slots__ = ("path", "format", "moxi", "reader", "reads")
+    _defaults = {"reads": FORMAT}
 
 
 Read = Record | NoRecord | Unreadable | NewerFormat
@@ -292,6 +320,126 @@ def is_pty_pipe(name: str) -> bool:
     return _PTY_PIPE.fullmatch(name) is not None
 
 
+# -- the front door's step -----------------------------------------------------------------
+
+#: What a record step did (`Outcome.kind`).
+SAME = "same"                # the file already held this environment: nothing walked
+WRITTEN = "written"          # the rule held and the record was written
+NO_KEYBOARD = "no keyboard"  # no terminal on the input
+FOUND = "found"              # the walk found Moxi or an agent above the run
+UNDECIDED = "undecided"      # the walk couldn't tell (N1, N2)
+NO_PLACE = "no place"        # the rule held, but the account's folder can't be placed
+FAILED = "failed"            # the rule held, but the file couldn't be written
+
+
+class Outcome(_Value):
+    """What a record step did: `kind` (one of the constants above), the record's `path`
+    (None when it has no place), what the walk `found` (an `Evidence` or `Undecided`, for
+    `FOUND` and `UNDECIDED`), and the `error` (`paths.NoAnchor` for `NO_PLACE`, the
+    `OSError` for `FAILED`)."""
+
+    __slots__ = ("kind", "path", "found", "error")
+    _defaults = {"path": None, "found": None, "error": None}
+
+    def line(self) -> str | None:
+        """The one stderr line the step prints, or None: a note when the walk couldn't
+        decide, a warning when the record couldn't be placed or written. A step stopped
+        by evidence or by no keyboard prints nothing, so a pane Moxi opened, an agent's
+        shell, a timer or a hook gets no extra output."""
+        if self.kind == UNDECIDED:
+            return f"moxi: note: this terminal's environment wasn't recorded: {row(self)}"
+        if self.kind in (NO_PLACE, FAILED):
+            return f"moxi: warning: this terminal's environment wasn't recorded: {row(self)}"
+        return None
+
+
+def step(env: Mapping[str, str] | None = None, *, stdin=None, view=None,
+         run=None) -> Outcome:
+    """Record the terminal's environment if it changed and the rule for who records holds.
+
+    It builds the record of `env` (None: this process's environment) and reads the file
+    once. When the file already holds it, from this core's version, it writes nothing and
+    walks nothing. Otherwise it applies the rule: a keyboard on `stdin` (None:
+    `sys.stdin`), then a walk up the process tree (`view` and `run` as `walk` takes them)
+    that finds nothing Moxi or an agent started. It writes only when both hold. It holds
+    no lock: two runs at once leave the later one's record.
+
+    Nothing here raises for a record that can't be placed or written; the outcome says so.
+    """
+    source = os.environ if env is None else env
+    held = of(source)
+    path = None
+    no_place = None
+    try:
+        path = paths.terminal_record(source)
+    except paths.NoAnchor as error:
+        no_place = error
+    else:
+        # One read, no retry: a file that can't be read now is replaced if the rule holds.
+        now = read(path, retry=0)
+        if isinstance(now, Record) and now.env == held and now.moxi == version():
+            return Outcome(SAME, path)
+    if not keyboard(stdin):
+        return Outcome(NO_KEYBOARD, path)
+    from ._walk import Evidence, walk
+
+    found = walk(view, run)
+    if isinstance(found, Evidence):
+        return Outcome(FOUND, path, found)
+    if found is not None:
+        return Outcome(UNDECIDED, path, found)
+    if path is None:
+        return Outcome(NO_PLACE, None, error=no_place)
+    try:
+        files.atomic_write(path, text(held, version()), mode=0o600)
+    except OSError as error:
+        return Outcome(FAILED, path, error=error)
+    return Outcome(WRITTEN, path)
+
+
+# -- the doctor row's words for what stopped a record -----------------------------------------
+
+def row(outcome: Outcome) -> str | None:
+    """The doctor's terminal record row, in words, for an outcome the walk couldn't
+    decide or a record that couldn't be placed or written; None for any other. Each names
+    its cause and the one step that fixes it."""
+    found, error = outcome.found, outcome.error
+    if outcome.kind == UNDECIDED:
+        return _undecided(found)
+    if outcome.kind == NO_PLACE:
+        return f"Moxi can't find where it keeps the record: {error.cause}; {error.step}"
+    if outcome.kind == FAILED:
+        folder = outcome.path.parent
+        return (f"the record at {outcome.path} can't be written ({_reason(error)}); "
+                f"make {folder} writable by you")
+    return None
+
+
+def _undecided(found) -> str:
+    from . import _walk
+
+    if found.kind == _walk.N2:
+        return (f"this terminal is inside a tmux server (pid {found.pid}) that moxi can't "
+                "tell from slots' own, because no service manager runs slots' server here; "
+                "type the command in a terminal outside tmux")
+    if found.reason == _walk.ENDED:
+        return "a process above this one ended while moxi read it; run the command again"
+    name = found.program or "a process"
+    why = {_walk.DEEP: f"more than {_walk.LIMIT} processes deep",
+           _walk.LOOP: "its parents loop"}.get(found.reason) or found.error or "unread"
+    other = found.program or "that process"
+    return (f"moxi can't read {name} (pid {found.pid}) above this terminal ({why}), so it "
+            f"can't tell whether Moxi started this terminal; type the command in a "
+            f"terminal that {other} didn't start")
+
+
+def _reason(error: BaseException) -> str:
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror
+    return str(error) or type(error).__name__
+
+
 __all__ = ["FORMAT", "FIXED", "in_set", "of", "Record", "NoRecord", "Unreadable",
            "NewerFormat", "Read", "read", "parse", "text", "write", "version", "keyboard",
-           "pty_pipe", "is_pty_pipe"]
+           "pty_pipe", "is_pty_pipe", "Outcome", "step", "row", "SAME", "WRITTEN",
+           "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE", "FAILED"]
