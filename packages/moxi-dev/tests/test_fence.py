@@ -193,6 +193,9 @@ def test_terminal_record_writes_the_recorded_names_under_the_tests_anchor(
     assert path == paths.terminal_record() and path.is_relative_to(fence.anchor_home)
     body = json.loads(path.read_text())
     assert body["format"] == testing.RECORD_FORMAT == 1
+    from moxi import terminal
+
+    assert terminal.read(path).env == body["env"] and terminal.FORMAT == 1
     assert body["moxi"] == metadata.version("moxi")
     recorded = body["env"]
     assert recorded["HOME"] == os.environ["HOME"] and recorded["PATH"] == os.environ["PATH"]

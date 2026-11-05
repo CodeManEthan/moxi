@@ -1029,27 +1029,8 @@ def uv_env(fence: Fence) -> dict[str, str]:
 
 # --- the terminal record ---------------------------------------------------------------
 
-#: The record's format the fixture writes.
+#: The record's format the fixture writes: the core's own (`moxi.terminal.FORMAT`).
 RECORD_FORMAT = 1
-
-# The variables the core records: the names its folder and program resolvers read. Kept
-# here, matched by name, until the core's own record writer can be called.
-_RECORDED = frozenset({
-    "MOXI_HOME", "MOXI_DEVICE", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
-    "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
-    "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA", "CLAUDE_CONFIG_DIR",
-    "CODEX_HOME", "PATH", "PATHEXT"})
-_RECORDED_SUFFIXES = ("_HOME", "_DATA_HOME", "_STATE_HOME", "_CACHE_HOME", "_CONFIG_HOME",
-                      "_RUNTIME_DIR", "_DEVICE")
-
-
-def _recorded(name: str) -> bool:
-    if name in _RECORDED:
-        return True
-    if not name.startswith("MOXI_") or name == ANCHOR_HOME:
-        return False
-    return any(name.endswith(suffix) and len(name) > len("MOXI_") + len(suffix)
-               for suffix in _RECORDED_SUFFIXES)
 
 
 @pytest.fixture
@@ -1059,24 +1040,15 @@ def terminal_record(fence: Fence) -> Callable[..., Path]:
     checks before it writes.
 
     `terminal_record(env=None, *, version=None)` writes the record of `env` (this
-    process's environment as the fence left it, without one): each recorded variable set
-    in it, with its exact value, and nothing else. `version` is the writing core's
-    version, this environment's `moxi` without one. It returns the record's path.
+    process's environment as the fence left it, without one) through the core's own
+    writer (`moxi.terminal.write`): each variable of the core set in it, with its exact
+    value, and nothing else. `version` is the writing core's version, this core's
+    without one. It returns the record's path.
     """
     def write(env: Mapping[str, str] | None = None, *, version: str | None = None) -> Path:
-        from importlib import metadata
+        from moxi import terminal
 
-        from moxi import files, paths
-
-        source = os.environ if env is None else env
-        recorded = {(name.upper() if WINDOWS else name): value
-                    for name, value in source.items()
-                    if _recorded(name.upper() if WINDOWS else name)}
-        path = paths.terminal_record()
-        body = {"format": RECORD_FORMAT, "moxi": version or metadata.version("moxi"),
-                "env": dict(sorted(recorded.items()))}
-        files.atomic_write(path, json.dumps(body, indent=2) + "\n", mode=0o600)
-        return path
+        return terminal.write(env, moxi=version)
 
     return write
 

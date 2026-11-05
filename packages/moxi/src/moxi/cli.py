@@ -24,6 +24,10 @@ Only the core declares the console script `moxi = "moxi.cli:main"`: `uv tool ins
 moxi` puts `moxi` on PATH, and `moxi install <module>` adds a module to the environment it
 runs in. A Moxi module installed anywhere else is a stray, which moxi can't see; every
 command but `help`, `version` and `run` tells each new one once (`moxi.strays`).
+
+The same commands, typed by a person in a terminal of their own, keep the core's record
+of the environment that terminal runs with (`moxi.terminal`), which a browser page
+compares its own with before it writes. Nothing Moxi or an agent started writes it.
 """
 
 from __future__ import annotations
@@ -70,14 +74,17 @@ def main(argv: list[str] | None = None) -> int:
     """The `moxi` console script. Returns the exit code.
 
     Run as the console script (no `argv` given), every command but `help`, `version` and
-    `run` first tells each stray not told before (`moxi.strays`). A caller passing `argv`
-    in process runs the command alone.
+    `run` first tells each stray not told before (`moxi.strays`), then records the
+    terminal's environment when it changed and a person typed the command
+    (`_record_terminal`). A caller passing `argv` in process runs the command alone, and
+    records nothing.
     """
     console = argv is None
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
         if console:
             _tell_strays(argv)
+            _record_terminal(argv)
         return _main(argv)
     except KeyboardInterrupt:
         print("moxi: interrupted", file=sys.stderr)
@@ -113,7 +120,7 @@ def _main(argv: list[str]) -> int:
     return dispatch(first, rest)
 
 
-#: The first words that skip the stray check.
+#: The first words that skip the stray check, and the terminal record step.
 _NO_STRAY_CHECK = frozenset({"run", "help", "version", "-h", "--help", "--version"})
 
 
@@ -127,6 +134,30 @@ def _tell_strays(argv: list[str]) -> None:
         strays.tell()
     except Exception:  # noqa: BLE001 - a broken check must not stop the command
         return
+
+
+def _record_terminal(argv: list[str]) -> None:
+    """The front door's record step: the core's record of the terminal's environment,
+    written when the environment changed, a keyboard is on the input, and nothing Moxi or
+    an agent started is above this run (`moxi.terminal.step`). The words the stray check
+    skips skip it too, so the gate (`moxi run`) never records.
+
+    It prints at most one stderr line: a note when the walk couldn't decide, a warning
+    when the record can't be placed or written. It never fails the command or changes
+    its exit code. Its outcome stays in `moxi.terminal.last` for the doctor's row.
+    """
+    if not argv or argv[0] in _NO_STRAY_CHECK:
+        return
+    try:
+        from . import terminal
+
+        outcome = terminal.step()
+        terminal.last = outcome
+        line = outcome.line()
+    except Exception:  # noqa: BLE001 - a broken step must not stop the command
+        return
+    if line:
+        print(line, file=sys.stderr)
 
 
 def _stray_note(name: str) -> str | None:
