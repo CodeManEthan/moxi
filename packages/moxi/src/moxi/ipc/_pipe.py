@@ -1,4 +1,5 @@
-"""The client's end of a named pipe on Windows, opened overlapped.
+"""Named pipes on Windows: the client's end, opened overlapped, and the server's instances,
+made with an access list of their own.
 
 The client's reader thread reads the handle while other threads write it. On a handle
 opened for synchronous I/O a read in progress holds every write until it returns, so the
@@ -8,8 +9,18 @@ event: until its deadline when it has one, and never past `close()`.
 
 `Pipe` offers what the client uses of a socket: `recv`, `sendall`, `shutdown` and
 `close`, and `send_by`, a write bounded by a deadline, with `server_pid`, the pid of the
-process serving it. Nothing here runs on another system; `_winapi` and `_overlapped` are
-imported on first use.
+process serving it.
+
+`server_instance` makes one server instance of a pipe for `moxi.ipc.serve`. Windows'
+default list for a pipe lets every local user open it for reading and lets clients on
+other machines reach it, where a Unix socket in a private directory admits only its own
+user and root. So each instance gets `access_list()`: full access for this process's user
+and for SYSTEM (root's place on Windows), protected so nothing is inherited, and no one
+else; and it refuses clients from other machines. There is no path that makes an
+instance with the default list instead.
+
+Nothing here runs on another system; `ctypes`, `_winapi` and `_overlapped` are imported
+on first use.
 """
 
 from __future__ import annotations
@@ -23,6 +34,8 @@ import time
 COLD = (2, 3)  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
 #: What it fails with when every instance of the pipe is taken: the server is busy.
 BUSY = 231  # ERROR_PIPE_BUSY
+#: What it fails with when the pipe's access list doesn't admit this user.
+DENIED = 5  # ERROR_ACCESS_DENIED
 #: What a read fails with once the server's end has closed.
 _ENDED = (109, 232, 233)  # ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED
 _ERROR_IO_PENDING = 997
@@ -34,6 +47,80 @@ _SECURITY_SQOS_PRESENT = 0x00100000
 _SECURITY_IDENTIFICATION = 0x00010000
 #: The two spellings of the pipe namespace, lower-cased.
 _PREFIXES = ("\\\\.\\pipe\\", "\\\\?\\pipe\\")
+
+
+#: What `CreateNamedPipeW` fails with when a first instance is asked for and a pipe of
+#: that name exists: another process made it.
+TAKEN = DENIED
+# CreateNamedPipeW's open and pipe modes, and the rest of its arguments.
+_PIPE_ACCESS_DUPLEX = 0x00000003
+_FILE_FLAG_OVERLAPPED = 0x40000000
+_FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000
+_PIPE_TYPE_BYTE = _PIPE_READMODE_BYTE = _PIPE_WAIT = 0
+_PIPE_REJECT_REMOTE_CLIENTS = 0x00000008
+_PIPE_UNLIMITED_INSTANCES = 255
+_BUFFER = 8192  # each way, as asyncio's own pipe server asks
+_NMPWAIT_WAIT_FOREVER = 0xFFFFFFFF
+#: SYSTEM's SID, the one account besides this user that a server's pipe admits.
+SYSTEM = "S-1-5-18"
+
+_create_named_pipe = None
+
+
+def access_list() -> str:
+    """The access list every server instance gets, in SDDL: protected (`P`, nothing
+    inherited), full access (`FA`) for the user SID of this process's token and for
+    SYSTEM, and no other entry. Raises `OSError` naming the call when the token can't be
+    read."""
+    from .. import _win
+
+    return f"D:P(A;;FA;;;{_win.user_sid()})(A;;FA;;;{SYSTEM})"
+
+
+def server_instance(address: str, sddl: str, *, first: bool) -> int:
+    """A new server instance of pipe `address`, not yet connected, as a handle: duplex and
+    overlapped, byte-type, refusing clients on other machines, with the access list
+    `sddl` (`access_list()`). `first` asks for the pipe's first instance
+    (`FILE_FLAG_FIRST_PIPE_INSTANCE`), which fails with `TAKEN` when a pipe of that name
+    exists. Raises `OSError` naming the call that failed."""
+    from .. import _win
+
+    create = _bind_create()
+    api = _win._bind()
+    ctypes = api.ctypes
+    descriptor = _win._descriptor(sddl)
+    try:
+        attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
+                                             descriptor, False)
+        handle = create(
+            address,
+            _PIPE_ACCESS_DUPLEX | _FILE_FLAG_OVERLAPPED
+            | (_FILE_FLAG_FIRST_PIPE_INSTANCE if first else 0),
+            _PIPE_TYPE_BYTE | _PIPE_READMODE_BYTE | _PIPE_WAIT | _PIPE_REJECT_REMOTE_CLIENTS,
+            _PIPE_UNLIMITED_INSTANCES, _BUFFER, _BUFFER, _NMPWAIT_WAIT_FOREVER,
+            ctypes.byref(attributes))
+        if handle is None or handle == ctypes.c_void_p(-1).value:
+            raise _win._error(f"CreateNamedPipeW for {address}")
+        return handle
+    finally:
+        api.LocalFree(descriptor)
+
+
+def _bind_create():
+    global _create_named_pipe
+    if _create_named_pipe is None:
+        import ctypes
+        from ctypes import wintypes as w
+
+        from .. import _win
+
+        api = _win._bind()
+        fn = ctypes.WinDLL("kernel32", use_last_error=True).CreateNamedPipeW
+        fn.restype = w.HANDLE
+        fn.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, w.DWORD, w.DWORD, w.DWORD, w.DWORD,
+                       ctypes.POINTER(api.SECURITY_ATTRIBUTES)]
+        _create_named_pipe = fn
+    return _create_named_pipe
 
 
 def is_pipe(address: str) -> bool:
