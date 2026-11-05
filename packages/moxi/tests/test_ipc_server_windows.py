@@ -1013,6 +1013,43 @@ def test_a_client_before_the_next_instance_is_made_is_busy_then_served(pipe_serv
 
 
 @WINDOWS
+def test_a_client_gone_before_its_accept_costs_that_instance_and_the_server_serves_on(
+        pipe_serving, monkeypatch, caplog):
+    import _winapi
+
+    from moxi.ipc import _pipe
+
+    real = _pipe.server_instance
+    made = []
+
+    def server_instance(address, sddl, *, first):
+        handle = real(address, sddl, first=first)
+        made.append(first)
+        if first:
+            # A client opens the first instance and closes it before the server's loop
+            # has asked for a client on it, so that wait fails.
+            gone = _winapi.CreateFile(address, _winapi.GENERIC_READ | _winapi.GENERIC_WRITE,
+                                      0, _winapi.NULL, _winapi.OPEN_EXISTING, 0, _winapi.NULL)
+            _winapi.CloseHandle(gone)
+        return handle
+
+    monkeypatch.setattr(_pipe, "server_instance", server_instance)
+    caplog.set_level(logging.DEBUG, logger="moxi.ipc")
+    srv = pipe_serving(echo)
+    for i in range(2):
+        raw = PipeRaw(srv.address)
+        raw.send(req(i, "go"))
+        assert raw.json()["id"] == i
+        raw.close()
+    assert srv.server.is_serving()
+    # The spent first instance was replaced, then one more for each client served.
+    assert made[:2] == [True, False]
+    said = [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "moxi.ipc"]
+    assert any("went before it was accepted" in text for _, text in said), said
+    assert not [text for level, text in said if level >= logging.ERROR]
+
+
+@WINDOWS
 def test_a_pipe_whose_list_doesnt_admit_this_user_refuses_connect(pipe):
     from moxi.ipc import _pipe
 
