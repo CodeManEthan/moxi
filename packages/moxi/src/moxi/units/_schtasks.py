@@ -184,6 +184,10 @@ class SchtasksBackend:
         return not (settings and re.search(r"<Enabled>\s*false\s*</Enabled>",
                                            settings.group(1)))
 
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        """None: Task Scheduler writes no socket, and each daemon binds its own."""
+        return ()
+
     def marked(self, module: str) -> tuple[UnitRef, ...]:
         folder = self.xml_path(module, "x").parent
         out = []

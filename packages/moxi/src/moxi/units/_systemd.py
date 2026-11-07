@@ -55,7 +55,7 @@ from pathlib import Path
 
 from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, enabled_by_socket,
-    socket_name, socket_place, socket_state)
+    listen_address, socket_name, socket_place, socket_state)
 from ._fence import Fence, Ran
 from ._home import environment, home_tag
 from ._types import Acted, UnitChange, UnitState, Wrapped
@@ -401,6 +401,30 @@ class SystemdBackend:
             elif (name, ".timer") not in found:
                 out.append(UnitRef(module, name, "daemon", (path.name,), (path,),
                                    self.enabled(texts[path])))
+        return tuple(out)
+
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        try:
+            entries = sorted(self.root.iterdir())
+        except OSError:
+            return ()
+        out = []
+        for path in entries:
+            if path.suffix != ".socket" or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            mark = self.mark(text)
+            if not mark:
+                continue
+            listens = tuple(found for line in text.splitlines()
+                            if line.startswith("ListenStream=")
+                            and (found := listen_address(
+                                line.partition("=")[2].replace("%%", "%"))) is not None)
+            if listens:
+                out.append((path, mark, listens))
         return tuple(out)
 
     def _id(self, change: UnitChange) -> str:

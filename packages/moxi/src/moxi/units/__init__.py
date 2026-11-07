@@ -41,7 +41,8 @@ What `plan` decides for a unit (`UnitChange.action`, with `cause` for the last t
               (cause `switch`); never when `UNITS_FROM` failed
     refuse    editable (a development install), locator (this shell sets one of the
               module's own locators), foreign (an unmarked file is in the way), command
-              (no such script), switch, socket, declaration
+              (no such script), switch, socket (also: one of its addresses is held, or
+              named by a socket file, by what isn't this home's own daemon), declaration
     skip      nobackend, platform, switch (a daemon switched off with no unit),
               declaration (`UNITS_FROM` failed: the units it named are left as they are)
 

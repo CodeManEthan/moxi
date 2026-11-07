@@ -197,6 +197,30 @@ def socket_place(base: str, name: str) -> int | None:
     return int(k)
 
 
+def listen_address(value: str) -> tuple[str, int] | None:
+    """`(address, port)` from a listen value `<IPv4>:<port>` or `[<IPv6>]:<port>`, the
+    address in `ipaddress`'s spelling, so two spellings of one address compare equal;
+    None for any other form (a port alone, a path, a name)."""
+    import ipaddress
+
+    value = value.strip()
+    if value.startswith("["):
+        address, close, rest = value[1:].partition("]")
+        if not close or not rest.startswith(":"):
+            return None
+        port = rest[1:]
+    else:
+        address, colon, port = value.rpartition(":")
+        if not colon or ":" in address:
+            return None
+    try:
+        address = str(ipaddress.ip_address(address))
+        number = int(port)
+    except ValueError:
+        return None
+    return (address, number) if 0 < number < 65536 and port.isdigit() else None
+
+
 def socket_state(unit: UnitRef, backend: str,
                  reads: Sequence[tuple[str, str, bool | None, float | None, str]],
                  log: str | None) -> UnitState:
@@ -480,6 +504,16 @@ class Backend(Protocol):
         `<stem>-<k>.socket` by `socket_place`), `ids` and `paths` in unit order, so `plan`
         can tell which written units a new render drops. A wrap's drop-in is never one of
         them."""
+        ...
+
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        """Every file in the supervisor's unit directory that carries a moxi mark and
+        names a listening address, whatever its module and whatever home wrote it, as
+        `(path, mark, ((address, port), ...))`, read from the files (no supervisor call).
+        systemd: each marked `.socket` unit's `ListenStream=` lines; launchd: each marked
+        plist's `Sockets` entries (`SockNodeName`, `SockServiceName`). Empty where the
+        backend writes no sockets (Task Scheduler). `marked()` sees only this home's names;
+        this sees every home's, so `plan` can tell when another one names a port."""
         ...
 
     def apply(self, changes: Sequence[UnitChange], *, restart: bool, io: ApplyIO) -> None:

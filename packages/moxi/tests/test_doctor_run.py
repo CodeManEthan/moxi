@@ -718,7 +718,9 @@ def test_on_launchd_the_recorded_print_of_an_idle_label_gives_the_same_rows(d, t
     assert set(got) == {("demo", "daemon idle")}
     assert (got[("demo", "daemon idle")].state, got[("demo", "daemon idle")].detail) == (
         "ok", "up to date; idle, socket listening")
-    assert calls == [["launchctl", "print", f"gui/{UID}"]]
+    # One print is the doctor's status read; the other is its plan's, whose port check
+    # finds the daemon's own job naming the address and reads that it is loaded.
+    assert calls == [["launchctl", "print", f"gui/{UID}"]] * 2
 
 
 @pytest.mark.parametrize("seen, state", [("inactive", "warn"), ("active", "ok"),
