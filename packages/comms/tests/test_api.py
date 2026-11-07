@@ -19,6 +19,7 @@ import re
 import pytest
 from conftest import wait_for_queue, write_config
 
+import bind_kit
 from moxi import modules
 from moxi import exit as moxi_exit
 from moxi_comms import adapter, api, cli, module, sending
@@ -52,6 +53,29 @@ def test_the_codex_wrapper_takes_a_resume():
     assert parsed.resume == "thread-old"
 
 
+@pytest.mark.parametrize("harness", bind_kit.HARNESSES)
+def test_the_set_of_wrappers_that_end_on_a_bind_timeout_is_what_they_do(
+        harness, tmp_path):
+    """A harness in `ENDS_ON_BIND_TIMEOUT` has a wrapper whose unanswered bind ends the
+    launch with 75 and starts nothing; one outside it starts its harness anyway. The
+    set is read by the launcher, so it may not drift from the wrappers."""
+    ran = bind_kit.silent_launch(harness, tmp_path, ready_wait=0.3)
+    if harness in api.ENDS_ON_BIND_TIMEOUT:
+        assert (ran.code, ran.execs) == (moxi_exit.TEMPFAIL, []), ran.err
+    else:
+        assert len(ran.execs) == 1, "a wrapper outside the set starts its harness anyway"
+    assert api.ENDS_ON_BIND_TIMEOUT == frozenset({"claude", "codex"})
+    assert isinstance(api.ENDS_ON_BIND_TIMEOUT, frozenset)
+
+
+def test_the_bind_wait_is_the_longer_wrappers_wait():
+    from moxi_comms.adapters import codex_wrapper, session
+
+    assert api.BIND_WAIT == max(session.READY_WAIT, codex_wrapper.READY_WAIT)
+    assert api.BIND_WAIT == 15.0
+    assert isinstance(api.BIND_WAIT, float)
+
+
 def test_load_finds_comms_and_its_api():
     modules.reset()
     found = modules.load("comms", interface=2)
@@ -69,7 +93,8 @@ def test_interface_2_holds_its_names():
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
-        "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME"}
+        "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME",
+        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer

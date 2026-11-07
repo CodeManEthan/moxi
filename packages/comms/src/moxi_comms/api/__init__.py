@@ -31,6 +31,12 @@ outside comms.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
 * `CODEX_RESUME`: True when the Codex wrapper, `moxi comms codex --name N`, takes
   `--resume THREAD_ID`; a comms without it has no resume.
+* `ENDS_ON_BIND_TIMEOUT`: a frozenset of harness names, `{"claude", "codex"}`: the
+  harnesses whose comms wrapper ends the launch with exit 75 (`moxi.exit.TEMPFAIL`) when
+  its bind isn't answered in the wrapper's wait, and never starts the harness without
+  the name. A comms without it has wrappers that start the harness anyway.
+* `BIND_WAIT`: the longest a wrapper the launcher starts (Claude's or Codex's) waits for
+  its bind, in seconds, read from the wrappers' own waits.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
 * `moxi_comms.api.tokens`: the token store the box's own consumers read.
 """
@@ -50,6 +56,8 @@ from .. import paths as _paths
 from .. import reserved as _reserved_mod
 from .. import sending as _sending
 from .. import wire as _wire
+from ..adapters import codex_wrapper as _codex_wrapper
+from ..adapters import session as _claude_wrapper
 from ..claimhold import ClaimServer
 from ..client import DaemonError, DaemonOffline
 from ..scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
@@ -61,6 +69,13 @@ INTERFACE = 2
 
 #: The Codex wrapper takes `--resume THREAD_ID` (with `--name`) and reports a resume.
 CODEX_RESUME = True
+
+#: The harnesses whose comms wrapper ends the launch, exit 75, when its bind isn't
+#: answered in its wait: neither starts its harness under a name it doesn't hold.
+ENDS_ON_BIND_TIMEOUT = frozenset({"claude", "codex"})
+
+#: The longest the Claude and Codex wrappers wait for their bind, in seconds.
+BIND_WAIT = max(_claude_wrapper.READY_WAIT, _codex_wrapper.READY_WAIT)
 
 #: A read's default wait for the daemon, in seconds.
 READ_DEADLINE = 10.0
@@ -554,7 +569,7 @@ def daemon_socket() -> Path:
 
 __all__ = [
     "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
-    "Recipient", "Refusal", "CODEX_RESUME",
+    "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
     "Standing", "Owner", "roster_rows", "RosterRow",

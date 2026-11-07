@@ -7,6 +7,11 @@ starts, with the exit code `EXIT_OF` gives it: a name the daemon refuses (held,
 reserved, retired) is `REFUSED`, and the wrapper prints the daemon's words.
 
 The word is its first character; any text after it is the reason.
+
+A word that doesn't come in the wrapper's wait ends the launch too: the wrapper prints
+why, closes its end of the pipe and exits `TEMPFAIL`, and its harness never starts. The
+adapter then has nobody to give `BOUND` to: `say` reports the word undelivered, and the
+adapter lets go of the name it bound and ends, before it delivers anything.
 """
 
 from __future__ import annotations
@@ -15,6 +20,9 @@ import os
 import select
 
 from moxi import exit as moxi_exit
+
+#: How long a wrapper waits for the word before it says, once, that it is waiting.
+NOTICE_AFTER = 2.0
 
 BOUND, OFFLINE, REFUSED, TRY_AGAIN, FAILED = "B", "O", "R", "T", "E"
 #: The wrapper's exit code for each word but `BOUND`.
@@ -45,26 +53,43 @@ def exit_of(word: str) -> int:
 
 def teller(fd: int):
     """`say(code, reason="")` for the adapter's end of the pipe `fd`: the first call
-    writes the word and closes the pipe, and any later call says nothing."""
+    writes the word and closes the pipe, and any later call says nothing. `say` returns
+    whether its word was delivered: False when the wrapper's end is gone (it gave up
+    waiting, or ended), or when the word was said already."""
     said = []
 
-    def say(code: str, reason: str = "") -> None:
+    def say(code: str, reason: str = "") -> bool:
         if said:
-            return
+            return False
         said.append(code)
+        delivered = True
         try:
             os.write(fd, (code + reason).encode("utf-8")[:4096])
+        except OSError:
+            delivered = False
+        try:
             os.close(fd)
         except OSError:
             pass
+        return delivered
 
     return say
 
 
-def await_word(fd: int, timeout: float):
+def await_word(fd: int, timeout: float, *, notice=None, notice_after=None):
     """The adapter's word, `(code, reason)`, once it has written it; `(FAILED, "")` when
-    it ended without one; None when `timeout` passed first."""
-    ready, _, _ = select.select([fd], [], [], timeout)
+    it ended without one; None when `timeout` passed first. With `notice`, a word that
+    hasn't come after `notice_after` seconds calls `notice()` once, and the wait goes on
+    to `timeout` in all. `notice_after` is `NOTICE_AFTER` unless given."""
+    if notice_after is None:
+        notice_after = NOTICE_AFTER
+    if notice is not None and notice_after < timeout:
+        ready, _, _ = select.select([fd], [], [], notice_after)
+        if not ready:
+            notice()
+            ready, _, _ = select.select([fd], [], [], timeout - notice_after)
+    else:
+        ready, _, _ = select.select([fd], [], [], timeout)
     if not ready:
         return None
     chunks = []
@@ -84,5 +109,5 @@ def await_word(fd: int, timeout: float):
     return (text[0], text[1:])
 
 
-__all__ = ["BOUND", "OFFLINE", "REFUSED", "TRY_AGAIN", "FAILED", "EXIT_OF", "await_word",
-           "exit_of", "teller", "word_for"]
+__all__ = ["BOUND", "OFFLINE", "REFUSED", "TRY_AGAIN", "FAILED", "EXIT_OF", "NOTICE_AFTER",
+           "await_word", "exit_of", "teller", "word_for"]
