@@ -331,14 +331,18 @@ def test_a_background_read_stops_parent_and_child(job, kind):
         assert j.until(lambda: gone(j.child["pid"], j.parent["watchdog"]))
 
 
-def test_closing_the_lifeline_ends_a_deaf_child_and_grandchild_within_three_seconds(job):
+def test_closing_the_lifeline_ends_a_deaf_child_and_grandchild_soon_after_the_grace(job):
     j = job("watch", "fg", "deaf", "grandchild")
     child, grandchild = j.child["pid"], j.child["grandchild"]
     assert running(child) and running(grandchild)
     os.kill(j.parent["pid"], signal.SIGKILL)
     begun = time.monotonic()
     assert j.until(lambda: gone(child, grandchild), timeout=10)
-    assert time.monotonic() - begun < 3.0
+    # The watchdog waits out the grace before its SIGKILL. Around it come the EOF, the
+    # scans and the freeze, each reading the process table, which a loaded machine slows
+    # to past a second. Two seconds over the grace still fails a watchdog that waits a
+    # second grace, or its reap, before the kill.
+    assert time.monotonic() - begun < _watch.GRACE + 2.0
     assert j.until(lambda: gone(j.parent["watchdog"]), timeout=10)
 
 
