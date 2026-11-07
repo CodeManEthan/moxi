@@ -1,4 +1,7 @@
-"""sessions' interface 2, the module other Moxi modules import (`moxi_sessions.api`).
+"""sessions' interfaces 2 and 3, the module other Moxi modules import (`moxi_sessions.api`).
+
+Interface 3 is interface 2 plus `retention()` and `Retention`; a caller that uses them
+loads sessions with interface 3.
 
 The one shape (`moxi_sessions.shape`):
 
@@ -29,6 +32,13 @@ Reading one source (`Read`, `Back`, `LastRequest`, `Batch`, `Window`):
   written since a cursor (`CURSOR_VERSION`), and the cursor to hand back.
 * `window(source, *, turns=5, before=None, limit=WINDOW_LIMIT)`: the last turns, with a
   position to page back.
+
+Each harness's transcript retention (interface 3):
+
+* `retention(environ=None)`: how long each harness keeps its transcripts, as set: Claude
+  Code's `cleanupPeriodDays`, Codex's compression switch and its archive folder, and that
+  sessions reads no setting for OpenCode (`Retention`, with the lines a setup prints).
+  It reads and changes nothing else.
 
 Writing records for tests:
 
@@ -70,6 +80,7 @@ from typing import Any
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("claude", "codex", "opencode", "testing"), ""),
     **dict.fromkeys(("projects_root",), "claude"),
+    **dict.fromkeys(("retention", "Retention"), "retention"),
     **dict.fromkeys(("read_back",), "reader"),
     **dict.fromkeys(("Unreadable",), "errors"),
     **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),

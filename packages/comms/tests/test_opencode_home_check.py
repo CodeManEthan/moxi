@@ -40,7 +40,10 @@ def test_only_new_state_of_opencodes_own_written_during_the_run_is_removed(check
     os.utime(early, ns=(old_ns, old_ns))
     before = check.snapshot(check.opencode_dirs(home))
     before.pop(str(early))                               # it is new to the check...
-    started = time.time_ns()
+    # The run starts by the files' own clock. A file's time is the kernel's coarse
+    # clock, which can stand a tick behind `time.time_ns()`, so a file written right
+    # after reading that could look older than the start.
+    started = touch(tmp_path / "started").stat().st_mtime_ns
     touch(share / "opencode.db")
     touch(share / "opencode.db-wal")
     touch(share / "log" / "2026-10-04T000000.log")

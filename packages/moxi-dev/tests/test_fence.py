@@ -56,7 +56,8 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
     assert current == {k: v for k, v in fence.env.items() if k != "PYTEST_CURRENT_TEST"}
     modules = testing._modules()
     assert modules, "the workspace installs Moxi modules; none found"
-    expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR"} | {
+    expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR",
+                                              testing.ANCHOR_HOME} | {
         f"MOXI_{m.upper()}_HOME" for m in modules}
     kept = set(testing.KEPT_ENV)
     if testing.WINDOWS:
@@ -79,6 +80,10 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
     for module in modules:
         home = Path(os.environ[f"MOXI_{module.upper()}_HOME"])
         assert home == fence.module_home(module) and home.parent == fence.short
+    # The account's folder, which places the core's anchor, is the test's own.
+    anchor = Path(os.environ[testing.ANCHOR_HOME])
+    assert anchor == fence.anchor_home
+    assert anchor == (Path(os.environ["LOCALAPPDATA"]) if testing.WINDOWS else fence.home)
     # Short enough that a socket a few directories under it fits in sun_path, where
     # Python has Unix sockets (not on Windows).
     if hasattr(socket, "AF_UNIX"):
@@ -118,7 +123,7 @@ def test_the_fence_clears_everything_else(monkeypatch):
         "XDG_DATA_HOME": "/t/home/.local/share", "XDG_STATE_HOME": "/t/home/.local/state",
         "XDG_CACHE_HOME": "/t/home/.cache", "CLAUDE_CONFIG_DIR": "/t/home/.claude",
         "CODEX_HOME": "/t/home/.codex", "XDG_RUNTIME_DIR": "/s/run",
-        "MOXI_COMMS_HOME": "/s/comms"}
+        "MOXI_COMMS_HOME": "/s/comms", "MOXI_ANCHOR_HOME": "/t/home"}
 
 
 def test_on_windows_the_fence_moves_the_user_s_folders_and_keeps_the_system_s(
@@ -153,7 +158,8 @@ def test_on_windows_the_fence_moves_the_user_s_folders_and_keeps_the_system_s(
         "WIN_PD_OVERRIDE_MYPICTURES": "D:\\t\\home\\Pictures",
         "WIN_PD_OVERRIDE_MYVIDEO": "D:\\t\\home\\Videos",
         "WIN_PD_OVERRIDE_MYMUSIC": "D:\\t\\home\\Music",
-        "TEMP": "D:\\s", "TMP": "D:\\s"}
+        "TEMP": "D:\\s", "TMP": "D:\\s",
+        "MOXI_ANCHOR_HOME": "D:\\t\\home\\AppData\\Local"}
     # Only PATH, kept as it is everywhere, still names the real profile; and `~` is the
     # test's home, the way Python on Windows finds it.
     assert {k for k, v in env.items() if "\\users\\ann" in v.lower()} == {"PATH"}
@@ -162,6 +168,45 @@ def test_on_windows_the_fence_moves_the_user_s_folders_and_keeps_the_system_s(
     assert ntpath.expanduser("~\\x") == "D:\\t\\home\\x"
     monkeypatch.delenv("USERPROFILE")
     assert ntpath.expanduser("~\\x") == "D:\\t\\home\\x"      # from HOMEDRIVE + HOMEPATH
+
+
+def test_the_real_accounts_anchor_is_never_the_tests(fence):
+    from moxi import paths
+
+    assert paths.anchor_dir().is_relative_to(fence.anchor_home)
+    assert paths.terminal_record().is_relative_to(fence.home.parent)
+
+
+# --- the terminal record ---------------------------------------------------------------
+
+def test_terminal_record_writes_the_recorded_names_under_the_tests_anchor(
+        fence, terminal_record, monkeypatch):
+    import json
+    import stat
+    from importlib import metadata
+
+    from moxi import paths
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a-token")
+    monkeypatch.setenv("MOXI_PROJECTS_DATA_HOME", "")
+    path = terminal_record()
+    assert path == paths.terminal_record() and path.is_relative_to(fence.anchor_home)
+    body = json.loads(path.read_text())
+    assert body["format"] == testing.RECORD_FORMAT == 1
+    from moxi import terminal
+
+    assert terminal.read(path).env == body["env"] and terminal.FORMAT == 1
+    assert body["moxi"] == metadata.version("moxi")
+    recorded = body["env"]
+    assert recorded["HOME"] == os.environ["HOME"] and recorded["PATH"] == os.environ["PATH"]
+    assert recorded["MOXI_PROJECTS_DATA_HOME"] == ""          # empty is kept as empty
+    assert "ANTHROPIC_API_KEY" not in recorded and "TMPDIR" not in recorded
+    assert testing.ANCHOR_HOME not in recorded and "LANG" not in recorded
+    if not testing.WINDOWS:
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    given = terminal_record({"HOME": "/h", "MOXI_HOME": "/m", "SECRET": "x"}, version="9.9")
+    assert json.loads(given.read_text()) == {
+        "format": 1, "moxi": "9.9", "env": {"HOME": "/h", "MOXI_HOME": "/m"}}
 
 
 # --- uv in a child ---------------------------------------------------------------------

@@ -1,5 +1,5 @@
-"""sessions' doctor checks: one row per harness root, `rows()`, which the announcement's
-`DOCTOR` names.
+"""sessions' doctor checks, `rows()`, which the announcement's `DOCTOR` names: one row per
+harness root, then `retention`, each harness's transcript retention as set.
 
 * `ok`: the root is readable. For Codex the imports file beside the sessions root is
   readable too, or absent (an absent one means the user never imported). For OpenCode the
@@ -8,6 +8,10 @@
   or parsed; a root a config key names is missing; the config file cannot be read.
 * `off`: the harness's root is absent and no config key names it, so the harness is not
   used here.
+
+The `retention` row (`retention.retention()`) is `ok` with each harness's setting in its
+detail, and `warn` when a harness's settings file can't be read, Codex's compression
+switch is on, or a setting holds a value that isn't one. It never changes a setting.
 
 sessions writes nothing, so no check changes anything.
 """
@@ -112,10 +116,23 @@ def check(harness: str) -> Row:
     return _opencode(origin.path, origin.detail)
 
 
+def retention_row() -> Row:
+    """Each harness's transcript retention as set, in one row."""
+    from .retention import retention
+
+    said = retention()
+    detail = "; ".join(item.brief for item in said)
+    if any(item.warn for item in said):
+        return Row(MODULE, "retention", "warn", detail)
+    return Row(MODULE, "retention", "ok", detail)
+
+
 def rows() -> Iterator[Row]:
-    """One row per harness root, in the order Claude Code, Codex, OpenCode."""
+    """One row per harness root, in the order Claude Code, Codex, OpenCode, then
+    `retention`."""
     for harness in HARNESSES:
         yield check(harness)
+    yield retention_row()
 
 
-__all__ = ["rows", "check", "MODULE"]
+__all__ = ["rows", "check", "retention_row", "MODULE"]

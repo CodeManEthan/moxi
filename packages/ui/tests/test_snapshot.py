@@ -400,7 +400,7 @@ def test_a_sample_over_the_budget_is_named():
 def test_the_announcement_declares_the_shell_its_page_and_components():
     found = modules.load("ui")
     assert found.state == modules.PRESENT, found.reason
-    assert found.interfaces == frozenset({1}) and found.page == "moxi_ui.page:PAGE"
+    assert found.interfaces == frozenset({1, 2}) and found.page == "moxi_ui.page:PAGE"
     shell = found.daemons["shell"]
     assert "win32" in shell["platforms"] and shell["socket"]["setting"] == "port"
     assert found.health == {"shell": "moxi_ui.health:check"} and not found.budgets

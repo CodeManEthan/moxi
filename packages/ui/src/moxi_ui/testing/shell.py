@@ -5,8 +5,12 @@ its own: `HOME`, the XDG homes, `XDG_RUNTIME_DIR`, `TMPDIR` and `MOXI_HOME` all 
 `home`, `PYTHONPATH` the `site` directories given (and nothing of this process's), and
 `PATH` and the locale kept, with any `env` a test adds. So the shell, its page servers and
 the `moxi` commands it runs keep every file under `home`, and this process's own
-environment never reaches them. The modules it serves are this environment's installed ones, plus any installed
-as a distribution in a `site` directory.
+environment never reaches them. `MOXI_ANCHOR_HOME`, the test kits' stand-in for the
+account's own folder, which places the core's record of the terminal's environment, is
+passed on from this process (the test kit's fence sets it to the test's home), else set
+under `home`: so the shell reads the record a test wrote with the kit's
+`terminal_record`, and never the real account's. The modules it serves are this
+environment's installed ones, plus any installed as a distribution in a `site` directory.
 
 A test reaches it three ways:
 
@@ -17,7 +21,8 @@ A test reaches it three ways:
   `servers()`, `server()`, `wait_server()` and `kill()`.
 
 **Gateway mode.** `TestShell(home, gateway=True)` runs the shell with its gateway, under
-an environment that sets no Moxi locator variable: no `MOXI_HOME` and no `MOXI_<MODULE>_*`.
+an environment that sets no Moxi locator variable: no `MOXI_HOME` and no `MOXI_<MODULE>_*`
+(`MOXI_ANCHOR_HOME` is still set; it names no module and moves no root).
 `HOME`, the XDG homes, `XDG_RUNTIME_DIR` and the temp directories still put every file
 under `home`, so the shell, `moxi ui gateway pair` and `on`, and the doctor find one
 runtime directory, as they do for a user. On Windows, where the roots come from the known
@@ -52,13 +57,16 @@ STOP_TIMEOUT = 15.0
 #: Lines of the shell process's stderr kept for a failure's message.
 STDERR_LINES = 200
 
-_KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT")
+#: The variables passed on from this process, when set. `MOXI_ANCHOR_HOME` is the test
+#: kit's stand-in for the account's folder, so the shell reads the test's record.
+_KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+         "MOXI_ANCHOR_HOME")
 #: The variables that keep a test shell under its home; a test's `env` can't set them.
 _OWNED = frozenset({"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
                     "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "MOXI_HOME", "TMPDIR", "TEMP", "TMP",
                     "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PYTHONPATH",
                     "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
-                    "PYTEST_CURRENT_TEST"})
+                    "PYTEST_CURRENT_TEST", "MOXI_ANCHOR_HOME"})
 #: A Moxi locator variable: `MOXI_HOME`, `MOXI_<M>_HOME`, `MOXI_<M>_<KIND>_HOME` or
 #: `MOXI_<M>_RUNTIME_DIR`. Gateway mode sets none.
 _LOCATOR = re.compile(r"MOXI_(?:HOME|[A-Z0-9_]+_(?:HOME|RUNTIME_DIR))")
@@ -80,8 +88,9 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
     `extra` adds variables of a test's own, or replaces a kept one such as `PATH`. Raises
     `ValueError` for a variable that keeps the shell under `home` (`HOME`, the XDG homes,
     `XDG_RUNTIME_DIR`, `MOXI_HOME`, the temp directories, `PYTHONPATH` and their Windows
-    forms), or a name or value that isn't a string. With `gateway`, the gateway mode's
-    environment (see the module doc), which also refuses any Moxi locator variable.
+    forms, and `MOXI_ANCHOR_HOME`), or a name or value that isn't a string. With
+    `gateway`, the gateway mode's environment (see the module doc), which also refuses any
+    Moxi locator variable.
     """
     home = Path(home)
     extra = dict(extra or {})
@@ -113,6 +122,8 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         if gateway:
             env["WIN_PD_OVERRIDE_APPDATA"] = env["APPDATA"]
             env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = env["LOCALAPPDATA"]
+    if not env.get("MOXI_ANCHOR_HOME"):  # no kit's fence: the shell's own home stands in
+        env["MOXI_ANCHOR_HOME"] = env.get("LOCALAPPDATA") or str(home)
     if site:
         env["PYTHONPATH"] = os.pathsep.join(str(Path(path)) for path in site)
     env.update(extra)

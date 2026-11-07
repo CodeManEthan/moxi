@@ -44,8 +44,10 @@ VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", 
 #: Names the core uses for itself, so no module may take one: `moxi` is the core's own
 #: state directory, `set` and `unset` are the first words of `moxi config set` and
 #: `moxi config unset`, `runtime` holds every module's runtime directory where the system
-#: gives none, and `installs` is the core's entry-point group `moxi.installs`.
-RESERVED = frozenset({"moxi", "set", "unset", "runtime", "installs"})
+#: gives none, `installs` is the core's entry-point group `moxi.installs`, and `anchor`
+#: would give a module the home variable `MOXI_ANCHOR_HOME`, which is the test kits' own
+#: stand-in for the account's folder (`moxi.paths.anchor_dir`).
+RESERVED = frozenset({"moxi", "set", "unset", "runtime", "installs", "anchor"})
 
 _NAME = re.compile(r"[a-z0-9]+")
 

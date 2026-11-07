@@ -103,6 +103,24 @@ whether the phone's acts are mounted, or what stops it), `gateway login` (whethe
 starts at login while the gateway is on) and `gateway audit` (the audit log's directory 0700
 and its files 0600).
 
+## The check a page makes before it writes
+
+A page server runs in the browser shell's environment, which can differ from the user's
+terminal. ui's interface 2 adds `moxi_ui.api`, which a module reaches through its `ui` extra:
+
+```python
+found = moxi.modules.load("ui", interface=2)
+line = found.api.check(places)   # None, or the one line to refuse with
+```
+
+`places(env)` returns `{label: path}`, the folders and files the act reads or writes,
+resolved from the mapping alone. `check` resolves them twice, from the core's record of the
+user's last run in a terminal and from the page's own environment, and returns None when
+they agree; otherwise the line names each difference and the variables to set, with
+`where()`'s place and step for the browser shell. A page act that writes calls it first
+and refuses with the line. A page part that can't load ui at interface 2 refuses its write
+too, and names the step: install or update moxi-ui.
+
 ## Testing a module's pages
 
 `moxi_ui.testing` is a pytest plugin, installed with moxi-ui and loaded in every pytest run

@@ -270,12 +270,14 @@ def test_first_start_waits_for_the_single_instance_probe(tmp_path):
     record, store = _local(tmp_path)
     provision.provision(record, comms_db(), store=store)
     first = Daemon(record, start_trim_thread=False).start()
-    comms_db().unlink()                 # what a first-start provisioning would refill
-    second = _daemon(record, store)
+    # The second daemon's own database, empty: a first-start provisioning would make it.
+    # Not the first daemon's comms.db, which it holds open and its threads can reopen.
+    empty = tmp_path / "second" / "comms.db"
+    second = _daemon(record, store, db_path=empty)
     try:
         with pytest.raises(RuntimeError, match="live comms daemon"):
             second.start()
-        assert not comms_db().exists()
+        assert not empty.exists() and not empty.parent.exists()
     finally:
         second.stop()
         first.stop()
