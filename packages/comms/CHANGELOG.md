@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.0 (2026-11-07)
+
+- `moxi comms service install|uninstall|status` is removed, and so is
+  `moxi_comms.release.UNIT`. `moxi install comms` writes and starts the daemon's unit
+  through the core; stop and start it with `moxi services` or the supervisor.
+- Doctor fixes and the wire's daemon-is-older refusal say `moxi services restart
+  comms/daemon` when services is installed. Without it they name the supervisor's restart
+  of the daemon's unit by its id in this home (`systemctl --user restart
+  moxi-comms-daemon.service` in the default home). A new `services` extra brings
+  services in.
+- The Claude and Codex wrappers wait up to 15 s for their bind (up from 5 s and 10 s),
+  say after 2 s that they are waiting, and end the launch with exit 75, without starting
+  the harness, when the daemon doesn't answer. They no longer start it anyway.
+- An adapter whose wrapper has stopped waiting lets the name go and ends before it
+  delivers anything.
+- `moxi_comms.api` gains `ENDS_ON_BIND_TIMEOUT` (`{"claude", "codex"}`) and `BIND_WAIT`
+  (15.0), so a launcher can tell which wrappers end a launch on a bind timeout and how
+  long they wait.
+- A Codex launch that resumes a thread which has had no turn yet reads that thread as
+  unturned, so the cache can read it fresh. It also no longer misses the ready of a
+  later reconnect.
+- Held mail's help says it goes out at the end of the recipient's next turn. The daemon
+  logs that a release waits on a cold cache only when mail is waiting for that name and
+  has not been handed to it.
+- A Claude Code turn that ends with an answer releases the session's held mail as it
+  ends. The adapter marks its `turn_ended` `answered: true`, and the daemon takes that
+  as proof the cache is warm: it no longer waits for the transcript to show the turn,
+  so a transcript write that lags past the 8 s settle window no longer leaves the mail
+  waiting for the turn after. Other turn ends read the cache as before. A daemon older
+  than this ignores the mark.
+- comms needs moxi 0.1.6 or later, for the unit ids its fix lines name.
+
+## 0.2.1 (2026-11-07)
+
+- The `ui` extra needs moxi-ui 0.2, where the page-server base now lives as
+  `moxi_ui.loopback`.
+
 ## 0.2.0 (2026-10-27)
 
 - Bindings now receive a fresh token at registration. The adapter keeps it only in

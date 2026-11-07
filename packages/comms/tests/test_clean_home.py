@@ -12,11 +12,10 @@ nothing in the developer's shell can pick the backend or a root.
 
 Part one is the documented install and nothing else. `moxi comms doctor` runs first and must
 say the `local` backend by default, with no slots yet.
-`moxi comms service install` writes the user unit; a temp home has no user systemd manager,
-so a stand-in `systemctl` on PATH records the calls, and the test then runs the unit's
-own `ExecStart` in the foreground with the unit's own `Environment=` lines, as the
-manager would. The unit must set no backend or root. The daemon provisions
-itself on first start, and the test asserts the 6 slots it made, through `moxi comms doctor`
+The core writes the daemon's unit at `moxi install comms`; a temp home has no user systemd
+manager, so the test runs what that unit runs, the environment's own `moxi-comms-daemon`,
+in the foreground with no backend or root set. The daemon provisions itself on first
+start, and the test asserts the 6 slots it made, through `moxi comms doctor`
 and the directory. Part one sets no backend or root and runs no provisioning.
 
 Part two adds the fixtures the exchange needs, each named: an OpenCode roster for two
@@ -47,7 +46,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import shutil
 import sqlite3
 import signal
@@ -273,15 +271,6 @@ class OnPty:
             self.proc.kill()
 
 
-#: The stand-in for the user's systemd manager, which a temp home does not have. It
-#: records each call and succeeds, so `moxi comms service install` runs its whole course;
-#: the test then does what the manager would, from the unit file.
-FAKE_SYSTEMCTL = """#!/bin/sh
-echo "$*" >> "$HOME/systemctl.calls"
-exit 0
-"""
-
-
 def run(argv, env, **kw):
     return subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60, **kw)
 
@@ -341,8 +330,6 @@ def installed(fence, uv_env):
 
     fakebin = home / "fakebin"
     fakebin.mkdir()
-    (fakebin / "systemctl").write_text(FAKE_SYSTEMCTL)
-    (fakebin / "systemctl").chmod(0o755)
     env = {
         "HOME": str(home),
         "PATH": f"{venv / 'bin'}:{fakebin}:/usr/bin:/bin",
@@ -361,11 +348,6 @@ def installed(fence, uv_env):
     yield {"base": base, "home": home, "venv": venv, "py": py, "env": env,
            "wheel": wheel}
     shutil.rmtree(base, ignore_errors=True)
-
-
-def unit_lines(path: Path, key: str) -> list[str]:
-    return [line.partition("=")[2] for line in path.read_text().splitlines()
-            if line.startswith(key + "=")]
 
 
 def test_a_stranger_installs_and_two_agents_talk(installed):
@@ -406,33 +388,13 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         assert f"{home}/.local/state/moxi/" in doctor.stdout
         assert "acme" not in doctor.stdout
 
-        # 2. `moxi comms service install`: the unit, then the manager's two calls.
-        installed_unit = run(["moxi", "comms", "service", "install"], env, cwd=home)
-        assert installed_unit.returncode == 0, installed_unit.stdout + installed_unit.stderr
-        unit = home / ".config" / "systemd" / "user" / "moxi-comms-daemon.service"
-        assert unit.is_file()
-        calls = read(home / "systemctl.calls").splitlines()
-        assert calls == ["--user daemon-reload",
-                         "--user enable --now moxi-comms-daemon.service"], calls
-
-        # 3. The unit sets no backend or root.
-        [exec_start] = unit_lines(unit, "ExecStart")
-        environment = unit_lines(unit, "Environment")
-        argv = shlex.split(exec_start)
-        assert argv == [str(venv / "bin" / "moxi-comms-daemon")], exec_start
-        assert not [e for e in environment if "MOXI_" in e or "XDG_" in e], environment
-
-        # 4. Run the unit's own ExecStart in the foreground, with its Environment= lines.
-        unit_env = dict(env)
-        for entry in environment:
-            for pair in shlex.split(entry):
-                key, _, value = pair.partition("=")
-                unit_env[key] = value
+        # 2. The daemon, as its unit runs it: the environment's own script, in the
+        #    foreground, with no backend or root set.
         sock = home / "run" / "moxi" / "comms" / "daemon.sock"
-        daemon = start(*argv, environ=unit_env)
+        daemon = start("moxi-comms-daemon")
         wait_for(sock.exists, what="the daemon's socket")
 
-        # 5. The daemon provisioned the names room and operator on its first start.
+        # 3. The daemon provisioned the names room and operator on its first start.
         doctor = run(["moxi", "comms", "doctor"], env, cwd=home)
         assert not any(line.startswith("slots") for line in doctor.stdout.splitlines())
         assert "daemon      answers at " in doctor.stdout
@@ -464,7 +426,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         stub.chmod(0o755)
         assert "backend" not in (config / "config.toml").read_text()
 
-        # 6. Two OpenCode identities exchange a message through their stub servers. Each
+        # 4. Two OpenCode identities exchange a message through their stub servers. Each
         #    `moxi comms send` an agent makes runs inside its own session: its wrapper spawned
         #    the server with the session's claim socket. The test is the operator at
         #    their own terminal, outside every session, with the id the daemon's first
@@ -522,7 +484,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         assert "[comms] from alice · msg" in read(home / "opencode-bob.log")
         assert "[comms] from bob · msg" in read(home / "opencode-alice.log")
 
-        # 7. A clean exit on SIGTERM, and everything stops.
+        # 5. A clean exit on SIGTERM, and everything stops.
         for proc in (alice, bob):
             assert stop(proc) == 0, proc.text()[-2000:]
         assert stop(daemon) == 0, "the daemon exits 0 on SIGTERM"
@@ -537,7 +499,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
             except ProcessLookupError:
                 pass
 
-    # 8. Nothing outside the home. The audit log is the hook's own output, kept beside it.
+    # 6. Nothing outside the home. The audit log is the hook's own output, kept beside it.
     audit = installed["base"] / "audit.tsv"
     events = [line.split("\t") for line in audit.read_text().splitlines()]
     assert len(events) > 20, "the hook ran in the installed processes"

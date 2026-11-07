@@ -83,3 +83,8 @@ def hang(event):
 def limits(event):
     CALLS.append(("codex_limits", event.kind, event.payload, event.received_at,
                   event.harness, event.session_id))
+
+
+def gone_late(event):
+    time.sleep(0.3)
+    CALLS.append(("gone_late", event.session_id))

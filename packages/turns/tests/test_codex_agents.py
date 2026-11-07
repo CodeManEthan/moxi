@@ -13,6 +13,7 @@ import pytest
 from moxi_turns import codex_protocol as proto
 from moxi_turns.client import Session
 from moxi_turns.results import Agent, Refused
+from conftest import end_endpoint
 from test_codex_commands import CompactClient
 from test_codex_host import _host
 
@@ -56,7 +57,7 @@ def host(turns_env):
 
     yield make
     for endpoint in made:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_codex_host_offers_agents(host):
@@ -360,7 +361,7 @@ def compacting(turns_env, monkeypatch):
 
     yield make
     for endpoint in made:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_failed_terminal_list_refuses_a_plain_compact_but_not_one_that_stops_them(

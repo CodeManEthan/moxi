@@ -18,8 +18,13 @@ and `wrap` with no supervisor and no file outside its tmp:
     with moxi.units._backend.use(FakeBackend(root)):
         moxi.units.apply(moxi.units.plan("demo"), runner=supervisor)
 
-The texts are not the systemd backend's: they carry the mark, the command and the
-schedule in a form this module reads back, and nothing else.
+The texts are not the systemd backend's: they carry the mark, the command, the schedule
+and a tagged home's `env = MOXI_HOME=<path>` in a form this module reads back, and nothing
+else. Names follow the home as systemd's do: `moxi-<tag>-<module>-<name>` and
+`50-moxi-<tag>-<module>.conf` for a home given by `MOXI_HOME`.
+
+It lives beside the core's tests, not in the installed package, so a test imports it by
+its file name (`from fake_backend import FakeBackend`), as `settle_procs.py` does too.
 """
 
 from __future__ import annotations
@@ -27,12 +32,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ._backend import (
-    ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, socket_name,
-    socket_place, socket_state)
-from ._fence import Fence, Ran
-from ._systemd import SocketStarts
-from ._types import Acted, UnitChange, UnitState, Wrapped
+from moxi.units._backend import (
+    ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, listen_address,
+    socket_name, socket_place, socket_state)
+from moxi.units._fence import Fence, Ran
+from moxi.units._home import environment, home_tag
+from moxi.units._systemd import SocketStarts, dropin_name
+from moxi.units._types import Acted, UnitChange, UnitState, Wrapped
 
 MARK = "# moxi unit: "
 DISABLED = "# moxi: enabled = false"
@@ -55,7 +61,8 @@ class FakeSupervisor:
     with. `calls` lists every command as a tuple of its arguments after `systemctl
     --user`, without the `--` the fence puts before the units. `invocations` maps a unit
     id to its `InvocationID`, new at each start; `props` may set `InvocationID` to show
-    another.
+    another. `pid` is the `MainPID` every active service shows (a test sets its own
+    process's, so a check that reads the daemon's process reads the test's).
     """
 
     def __init__(self, root: Path, *, linger: bool = True):
@@ -70,6 +77,7 @@ class FakeSupervisor:
         self.calls: list[tuple[str, ...]] = []
         self.linger = linger
         self.invocations: dict[str, str] = {}
+        self.pid = 4242
         self._starts = 0
         self.reload()
 
@@ -166,12 +174,13 @@ class FakeSupervisor:
             execs = [f"ExecStart={{ path=/bin/true ; argv[]=/bin/true {i} }}"
                      for i in range(props.get("ExecStart", 1 if loaded else 0))]
             active = props.get("ActiveState", "active" if state["active"] else "inactive")
+            pid = self.pid
             blocks.append("\n".join([
                 f"Id={unit}",
                 f"LoadState={'loaded' if loaded else 'not-found'}",
                 f"ActiveState={active}",
                 f"SubState={'running' if state['active'] else 'dead'}",
-                f"MainPID={4242 if state['active'] and unit.endswith('.service') else 0}",
+                f"MainPID={pid if state['active'] and unit.endswith('.service') else 0}",
                 "ActiveEnterTimestampMonotonic=0",
                 f"Result={props.get('Result', 'success')}",
                 f"ExecMainStatus={props.get('ExecMainStatus', 0)}",
@@ -186,7 +195,10 @@ class FakeSupervisor:
 
 
 class FakeBackend:
-    """The `Backend` protocol over files in `root` and the systemd fence."""
+    """The `Backend` protocol over files in `root` and the systemd fence.
+
+    A test may set `sockets = "none"` on one: it then writes no socket units, as Task
+    Scheduler doesn't, and a daemon with a socket binds its own."""
 
     name = "fake"
     supervisor = "systemd"
@@ -203,18 +215,20 @@ class FakeBackend:
     # -- writing -----------------------------------------------------------------------------
 
     def _stem(self, module: str, name: str) -> str:
-        return f"moxi-{module}-{name}"
+        tag = home_tag()
+        return f"moxi-{module}-{name}" if tag is None else f"moxi-{tag}-{module}-{name}"
 
     def render(self, spec: Spec) -> tuple[Rendered, ...]:
         stem = self._stem(spec.module, spec.name)
         head = [f"{MARK}{spec.unit}"] + ([DISABLED] if not spec.enabled else [])
         head.append(f"description = Moxi {spec.module}: {spec.doc}")
+        env = [f"env = {name}={value}" for name, value in spec.environment]
         if spec.kind == "daemon":
-            body = head + [f"run = {' '.join(spec.command)}", f"stop = {spec.stop}"]
+            body = head + env + [f"run = {' '.join(spec.command)}", f"stop = {spec.stop}"]
             if spec.cwd:
                 body.append(f"cwd = {spec.cwd}")
             sockets = []
-            if spec.socket is not None:
+            if spec.socket is not None and self.sockets != "none":
                 for place, address in spec.socket.listens:
                     unit = f"{socket_name(stem, place)}.socket"
                     listen = f"[{address}]" if ":" in address else address
@@ -231,7 +245,7 @@ class FakeBackend:
         gate = [self.gate, "run"] + (["--if", f"{spec.module}.{spec.switch}"]
                                      if spec.switch else [])
         gate += ["--record", spec.unit, "--", *spec.command]
-        service = head + [f"run = {' '.join(gate)}"]
+        service = head + env + [f"run = {' '.join(gate)}"]
         schedule = spec.schedule
         when = (f"every = {schedule.every}m" if schedule.every else
                 "at = " + " ".join(f"{h:02d}:{m:02d}" for h, m in schedule.at)
@@ -256,8 +270,12 @@ class FakeBackend:
             mark = self.mark(text)
             if not mark or mark.split("/", 1)[0] != module:
                 continue
-            texts[path] = text
             name = mark.split("/", 1)[1]
+            # Only a file at a name `render` gives this mark is the writer's (a socket
+            # unit is held to its place below).
+            if path.suffix != ".socket" and path.stem != self._stem(module, name):
+                continue
+            texts[path] = text
             found.setdefault((name, path.suffix), []).append(path)
         out = []
         for (name, suffix), paths in sorted(found.items()):
@@ -279,6 +297,23 @@ class FakeBackend:
             elif (name, ".timer") not in found:
                 out.append(UnitRef(module, name, "daemon", (path.name,), (path,),
                                    self.enabled(texts[path])))
+        return tuple(out)
+
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        out = []
+        for path in sorted(self.root.glob("*.socket")):
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            mark = self.mark(text)
+            if not mark:
+                continue
+            listens = tuple(found for line in text.splitlines()
+                            if line.startswith("listen = ")
+                            and (found := listen_address(line[len("listen = "):]))
+                            is not None)
+            if listens:
+                out.append((path, mark, listens))
         return tuple(out)
 
     def _enable_id(self, change: UnitChange) -> str:
@@ -534,10 +569,10 @@ class FakeBackend:
     # -- wraps -------------------------------------------------------------------------------
 
     def _dropin(self, service: str, module: str) -> Path:
-        return self.root / f"{service}.d" / f"50-moxi-{module}.conf"
+        return self.root / f"{service}.d" / dropin_name(module)
 
     def _wrapped(self, shown: Mapping):
-        from ._types import Wrapped
+        from moxi.units._types import Wrapped
 
         for path in (shown.get("DropInPaths") or "").split():
             try:
@@ -552,15 +587,17 @@ class FakeBackend:
 
     def dropin_text(self, ref: str, *, module: str, key: str, name: str) -> str:
         record = f"{module}/{name}"
+        home = environment(module).get("MOXI_HOME")
+        run = f"{self.gate} run" + (f" --home {home}" if home else "")
         return _text([f"{WRAP_MARK}{record}",
                       f"# moxi: timer = {ref}, if = {module}.{key}",
                       "[Service]",
-                      f"ExecCondition={self.gate} run --if {module}.{key} --record {record} "
+                      f"ExecCondition={run} --if {module}.{key} --record {record} "
                       "--condition",
-                      f"ExecStopPost={self.gate} run --record {record} --result"])
+                      f"ExecStopPost={run} --record {record} --result"])
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
-        from .. import files
+        from moxi import files
 
         def no(line: str) -> Acted:
             return Acted(None, ref, "wrap", False, (line,))
@@ -600,6 +637,9 @@ class FakeBackend:
                 owner = mark[len(WRAP_MARK):].partition("/")[0]
                 if owner != module:
                     return no(f"{service} is wrapped by {owner}")
+                if Path(other) != self._dropin(service, module):
+                    return no(f"{service} is wrapped by {module} of another Moxi home "
+                              f"({Path(other).name})")
         path = self._dropin(service, module)
         if path.exists() and not _first_line(path).startswith(f"{WRAP_MARK}{module}/"):
             return no(f"{path} exists and was not written by moxi; not wrapped")
@@ -610,7 +650,7 @@ class FakeBackend:
 
     def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
         out = []
-        for path in sorted(self.root.glob(f"*.d/50-moxi-{module}.conf")):
+        for path in sorted(self.root.glob(f"*.d/{dropin_name(module)}")):
             try:
                 lines = path.read_text(encoding="utf-8").splitlines()
             except OSError:
@@ -625,7 +665,7 @@ class FakeBackend:
         return tuple(out)
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
-        for path in self.root.glob(f"*.d/50-moxi-{module}.conf"):
+        for path in self.root.glob(f"*.d/{dropin_name(module)}"):
             lines = path.read_text(encoding="utf-8").splitlines()
             if len(lines) > 1 and lines[0].startswith(f"{WRAP_MARK}{module}/") \
                     and f"timer = {ref}," in lines[1]:
@@ -636,7 +676,7 @@ class FakeBackend:
 
     def unwrap_all(self, module: str, fence: Fence) -> list[Acted]:
         out = []
-        for path in sorted(self.root.glob(f"*.d/50-moxi-{module}.conf")):
+        for path in sorted(self.root.glob(f"*.d/{dropin_name(module)}")):
             lines = path.read_text(encoding="utf-8").splitlines()
             if not lines or not lines[0].startswith(f"{WRAP_MARK}{module}/"):
                 continue

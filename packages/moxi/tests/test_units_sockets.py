@@ -16,8 +16,12 @@ import moxi.paths
 from moxi import config, units
 from moxi.units import _backend, _plan
 from moxi.units._backend import UnitRef, socket_name, socket_place, socket_state
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeBackend, FakeSupervisor
+
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
 
 SETTINGS = """
 [port]
@@ -288,7 +292,8 @@ def test_a_v4_only_plan_and_a_backend_without_sockets_never_probe(w, monkeypatch
     assert calls == []
     w.module(shell("127.0.0.1", "::1"))
     monkeypatch.setattr(w.backend, "sockets", "none", raising=False)
-    assert len(w.plan()[("shell", "socket")].paths) == 2
+    plan = w.plan()
+    assert ("shell", "socket") not in plan and plan[("shell", "daemon")].action == "add"
     assert calls == []
 
 
@@ -430,8 +435,9 @@ def test_a_login_daemon_on_the_fake_is_enabled_acted_on_and_read_as_its_service(
     # Back to "connection": the link goes, the sockets carry the enable again.
     units.enable("demo", ["shell"])
     w.module(shell("127.0.0.1", "::1"))
+    changes = units.plan("demo")
     w.sup.calls.clear()
-    w.apply(units.plan("demo"))
+    w.apply(changes)
     assert w.sup.calls[0] == ("disable", f"{STEM}.service")
     rows = {r.kind: r for r in units.status(["demo"])}
     assert rows["daemon"].enabled is True and not w.sup.units[f"{STEM}.service"]["enabled"]

@@ -16,9 +16,13 @@ import pytest
 import moxi.paths
 from moxi import doctor, files, units
 from moxi.units import _act, _backend, _state
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._types import Stopped
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeBackend, FakeSupervisor
+
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
 
 #: A platform this one isn't, for a unit declared for another system only.
 OTHER_PLATFORM = "linux" if sys.platform == "win32" else "win32"

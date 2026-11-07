@@ -16,9 +16,11 @@ Contract anchors:
     message is not flagged `[held]`. Anything else waits: offline, cold, or flagged. A
     queued message goes out only at the name's next release point (a `ready` with a
     `source`, a `turn_ended`, or a bind on a passing read), never because another
-    message to the name went out. A turn end whose read does not pass
-    stays open for a settle window (`RELEASE_SETTLE_STEPS`), read again until
-    a read passes or the window ends. A row is deleted only when a `turn_ended` from
+    message to the name went out. A `turn_ended` marked `answered` (the turn ended
+    with the model's answer, so a request was just made) releases every row at once,
+    with no read. Any other turn end whose read does not pass stays open for a settle
+    window (`RELEASE_SETTLE_STEPS`), read again until a read passes or the window ends;
+    an answered one opens the window too, for a send that queues in the record's lag. A row is deleted only when a `turn_ended` from
     the binding names the digest that holds it `handled`; never by cursor and never
     at unbind. An unhandled digest's rows, the rows a binding held at its unbind, and
     a hand-off whose socket send failed wait again. Rows are never trimmed by age;
@@ -1060,6 +1062,7 @@ class Daemon:
         The books delete the handled digests' rows and advance the cursor, and put the
         unhandled ones' rows back to waiting, in one transaction. It is a release point
         with its settle window, and empty lists are the person's own turn ending.
+        `answered: true` says the turn ended with the model's answer (`_on_turn`).
         Answered with the name's cursor."""
         b = self._own_binding(conn, params)
         self._not_bound(b)
@@ -1076,7 +1079,7 @@ class Daemon:
             self.activity[b.qualified] = self.clock()
             self._take_session(b, params, at=self.clock(), turn=True)
         ended = self.books.turn_ended(b.qualified, lists["handled"], lists["unhandled"])
-        self._on_turn(b, ended)
+        self._on_turn(b, ended, answered=params.get("answered") is True)
         return {"cursor": ended.cursor}
 
     def _activity(self, conn, params: dict, kind: str | None = None) -> None:
@@ -3117,25 +3120,40 @@ class Daemon:
             return
         self._release(b, flagged=True)
 
-    def _on_turn(self, b: Binding, ended) -> None:
+    def _on_turn(self, b: Binding, ended, *, answered: bool = False) -> None:
         """A `turn_ended` from the binding's own connection, after the books took the
         ack (`ended`: the message ids acked and the ids back to waiting). A release point
-        that stays open for a settle window. Its read passing, it releases every row at
-        once and opens no window. Its read not passing, it opens the binding's window
-        (`RELEASE_SETTLE_STEPS`): the harness may not have written the turn yet, and a
-        send can queue a row a moment later in the same lag. The window releases every
-        row then queued at its first read that passes, except the ids this turn left
-        unhandled. A newer turn end of the binding closes the window before its own
-        read; a `ready`, `look` or bind leaves it open. The acked ids leave memory
-        before the release; the unhandled ones wait again after it, so not this
-        release but the next hands them."""
+        that stays open for a settle window.
+
+        `answered`: the turn ended with the model's answer, so it made a request just
+        now and the cache is warm whatever the harness's record says yet. The daemon
+        reads no cache for it: when rows wait it releases every one at once, however
+        long the record takes to show the turn. It still opens the window, so a send
+        whose gate read meets that lag and queues goes at the window's first passing
+        read.
+
+        Otherwise (an interrupted or failed turn, or a turn end an adapter can't vouch
+        for), its read passing, it releases every row at once and opens no window. Its
+        read not passing, it opens the binding's window (`RELEASE_SETTLE_STEPS`): the
+        harness may not have written the turn yet, and a send can queue a row a moment
+        later in the same lag. The window releases every row then queued at its first
+        read that passes, except the ids this turn left unhandled.
+
+        A newer turn end of the binding closes the window before its own read; a
+        `ready`, `look` or bind leaves it open. The acked ids leave memory before the
+        release; the unhandled ones wait again after it, so not this release but the
+        next hands them."""
         opened = time.monotonic()
         self._close_window(b)
         named = set(ended.handled) | set(ended.unhandled)
         if named:
             self._window_take(b, lambda mid: mid in named)
         self._settle(b, handled=ended.handled)
-        if self._passing(b):
+        if answered:
+            if self._rows_wait(b):
+                self._release(b, flagged=True)
+            self._open_window(b, opened, ended.unhandled)
+        elif self._passing(b):
             self._release(b, flagged=True)
         else:
             self._open_window(b, opened, ended.unhandled)
@@ -3165,13 +3183,20 @@ class Daemon:
     def _passing(self, b: Binding) -> bool:
         """A release point's read: it passes or it does not. The send's cold-at is never
         read here: a row already waits, and it waits for a release point that reads a
-        passing cache or reads none."""
+        passing cache or reads none. A read that does not pass is logged only when rows
+        wait for the name: with none, nothing waits on it."""
         clock = self._read(b)
         if clock.kind in cache.PASSING:
             return True
-        log.info("release for %s waits: its cache reads %s", b.qualified,
-                 self._describe(clock))
+        if self._rows_wait(b):
+            log.info("release for %s waits: its cache reads %s", b.qualified,
+                     self._describe(clock))
         return False
+
+    def _rows_wait(self, b: Binding) -> bool:
+        """Whether any row waits for `b`'s name now that `b` was not handed already."""
+        with self._lock:
+            return any(mid not in b.delivered for mid in self.queue.get(b.qualified, {}))
 
     def _behind_returned(self, binding: Binding, message_id: str) -> bool:
         """Whether a row this binding's turns left unhandled still waits below
@@ -3299,8 +3324,8 @@ class Daemon:
     def _window_read(self, w: SettleWindow) -> None:
         """One read of a settle window. A read that passes closes the window and
         releases every row then queued but the frame's `unhandled` ids. The last step's
-        read not passing closes it with one log line. Its reads log nothing else: the
-        frame's own read said why the release waited."""
+        read not passing closes it, with one log line when rows wait. Its reads log
+        nothing else: the frame's own read said why the release waited."""
         b, q = w.binding, w.binding.qualified
         with self._lock:
             bound = self.bindings.get(q) is b
@@ -3320,7 +3345,7 @@ class Daemon:
                     del self._windows[q]
         if passed:
             self._release(b, flagged=True, exclude=w.exclude)
-        elif ran_out:
+        elif ran_out and self._rows_wait(b):
             log.info("release for %s: its cache still reads %s %gs after the turn ended; "
                      "the rows wait for the next release point", q, self._describe(clock),
                      w.steps[-1])

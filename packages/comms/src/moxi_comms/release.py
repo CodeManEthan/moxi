@@ -19,14 +19,11 @@ MODULE = "comms"
 #: The PyPI distribution: harness-module.
 DISTRIBUTION = names.distribution(MODULE)
 
-#: What a person reads: descriptions, the unit's Description=.
+#: What a person reads: descriptions.
 DISPLAY_NAME = f"{names.HARNESS.capitalize()} {MODULE}"
 
-#: The systemd user unit `moxi comms service install` writes.
-UNIT = f"{DISTRIBUTION}-daemon.service"
-
-#: The repository that holds the code, the unit's Documentation=: the one Moxi repository,
+#: The repository that holds the code: the one Moxi repository,
 #: every module's, which holds the issues too (`moxi.names.repo`).
 REPO_URL = f"https://github.com/{names.repo(MODULE)}"
 
-__all__ = ["MODULE", "DISTRIBUTION", "DISPLAY_NAME", "UNIT", "REPO_URL"]
+__all__ = ["MODULE", "DISTRIBUTION", "DISPLAY_NAME", "REPO_URL"]

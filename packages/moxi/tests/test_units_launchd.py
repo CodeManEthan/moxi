@@ -25,6 +25,9 @@ from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
 from moxi_dev.testing import console_script
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 UID = 501
 DOMAIN = f"gui/{UID}"
 
@@ -135,6 +138,9 @@ def mac(site, tmp_path, monkeypatch):
     ctl = FakeLaunchctl()
     backend = LaunchdBackend(agents=agents, uid=UID, runner=ctl)
     lines: list[str] = []
+    # Nothing listens on a port here unless a test says so: the plan's connect never
+    # reaches this machine's own listeners.
+    monkeypatch.setattr(units._plan, "answers", lambda address, port, timeout=0.5: False)
 
     def script(name):
         return console_script(scripts, name)
@@ -727,7 +733,9 @@ def test_a_loaded_keep_socket_daemon_whose_port_changed_is_reloaded(mac):
 def test_a_keep_socket_daemon_with_its_sockets_unchanged_is_only_rewritten(mac):
     _loaded_keep_shell(mac, "127.0.0.1")
     mac.module(DAEMONS=keep_shell("127.0.0.1", more=", 'args': ['-v']"))
-    [done] = mac.apply(units.plan("demo"))
+    changes = units.plan("demo")
+    mac.ctl.calls.clear()
+    [done] = mac.apply(changes)
     assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
     assert done.lines == (f"{RELAY} rewritten; the new code runs from its next start",)
     assert mac.plist(RELAY)["ProgramArguments"][1:] == ["-v"]
@@ -1797,8 +1805,9 @@ def test_a_start_change_under_keep_with_its_sockets_unchanged_waits_for_the_next
     mac.module(DAEMONS=login_shell("127.0.0.1", upgrade="keep", start=other))
     mac.apply(units.plan("demo"))
     mac.module(DAEMONS=login_shell("127.0.0.1", upgrade="keep", start=start))
+    changes = units.plan("demo")
     mac.ctl.calls.clear()
-    [done] = mac.apply(units.plan("demo"))
+    [done] = mac.apply(changes)
     assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
     now = "starts it" if start == "login" else "no longer starts it"
     assert done.lines == (f"{RELAY} rewritten: from the next login, a login {now}; the "
@@ -1834,7 +1843,8 @@ def test_a_login_only_change_is_rewritten_and_the_loaded_job_left_as_it_is(mac, 
         else:
             applied = config.set("demo", "snapshot.enabled", value, by="test")
         [done] = applied
-        assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
+        # One read is the plan's (its own job names the address), one the apply's.
+        assert done.ok and mac.ctl.calls == [("print", DOMAIN)] * 2
         assert done.lines == (f"{RELAY} rewritten: from the next login, a login {now}; "
                               "the loaded job is left as it is",)
         body = mac.plist(RELAY)

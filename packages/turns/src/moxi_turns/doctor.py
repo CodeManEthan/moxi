@@ -5,9 +5,9 @@ registered listeners (an after-tool row's floor that does not import fails its m
 row), the guards, the launch-additions contributors, the live endpoints (dead ones
 are swept on the way) and any version 1 endpoint directory left behind, when a live
 Codex host last saw the account's rate limits (`codex limits`), the hook times,
-and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, `endpoint.json`
-and the Claude Code version; Codex; the OpenCode host's binary). turns has no doctor
-command of its own.
+and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed copy,
+`endpoint.json` and the Claude Code version; Codex; the OpenCode host's binary). turns
+has no doctor command of its own.
 
 The guard rows read the list as an endpoint would, in the doctor's own process: `guards`
 names each guard on, what turned it on and where it runs on each harness; `guard <id>`

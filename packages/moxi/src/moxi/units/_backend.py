@@ -3,8 +3,9 @@
 `backend()` names the supervisor from the platform and the file system alone, with no
 supervisor call. `implementation()` gives the object that speaks to it: a `Backend`.
 Three are written for real systems (`moxi.units._systemd`, `_launchd`, `_schtasks`, each
-defining `BACKEND`), and `moxi.units._fake` is one for tests. A test installs its own with
-`use(backend)`.
+defining `BACKEND`), and `backend()` names only those three. A test installs its own with
+`use(backend)`: the core's tests keep a fake one in their own folder, which is not part
+of the installed package.
 
 The protocol
 ------------
@@ -197,6 +198,30 @@ def socket_place(base: str, name: str) -> int | None:
     return int(k)
 
 
+def listen_address(value: str) -> tuple[str, int] | None:
+    """`(address, port)` from a listen value `<IPv4>:<port>` or `[<IPv6>]:<port>`, the
+    address in `ipaddress`'s spelling, so two spellings of one address compare equal;
+    None for any other form (a port alone, a path, a name)."""
+    import ipaddress
+
+    value = value.strip()
+    if value.startswith("["):
+        address, close, rest = value[1:].partition("]")
+        if not close or not rest.startswith(":"):
+            return None
+        port = rest[1:]
+    else:
+        address, colon, port = value.rpartition(":")
+        if not colon or ":" in address:
+            return None
+    try:
+        address = str(ipaddress.ip_address(address))
+        number = int(port)
+    except ValueError:
+        return None
+    return (address, number) if 0 < number < 65536 and port.isdigit() else None
+
+
 def socket_state(unit: UnitRef, backend: str,
                  reads: Sequence[tuple[str, str, bool | None, float | None, str]],
                  log: str | None) -> UnitState:
@@ -266,7 +291,9 @@ class Spec:
     environment and its `args`, or a run-time entry's `argv`. A timer's backend wraps it in
     the gate, `moxi run [--if <module>.<switch>] --record <module>/<name> -- <command>`,
     with no `--if` when `switch` is None. `doc` is the entry's one line (the unit's name when
-    it has none). `entry` is the declaration as read.
+    it has none). `entry` is the declaration as read. `environment` is the variables the
+    unit runs with (`moxi.units.environment`), as `(name, value)` pairs: `MOXI_HOME` for a
+    tagged home, none for the default home.
     """
 
     module: str
@@ -284,6 +311,7 @@ class Spec:
     memory_swap_max: str | None = None
     schedule: Schedule | None = None
     socket: Socket | None = None
+    environment: tuple[tuple[str, str], ...] = ()
 
     @property
     def unit(self) -> str:
@@ -477,6 +505,16 @@ class Backend(Protocol):
         `<stem>-<k>.socket` by `socket_place`), `ids` and `paths` in unit order, so `plan`
         can tell which written units a new render drops. A wrap's drop-in is never one of
         them."""
+        ...
+
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        """Every file in the supervisor's unit directory that carries a moxi mark and
+        names a listening address, whatever its module and whatever home wrote it, as
+        `(path, mark, ((address, port), ...))`, read from the files (no supervisor call).
+        systemd: each marked `.socket` unit's `ListenStream=` lines; launchd: each marked
+        plist's `Sockets` entries (`SockNodeName`, `SockServiceName`). Empty where the
+        backend writes no sockets (Task Scheduler). `marked()` sees only this home's names;
+        this sees every home's, so `plan` can tell when another one names a port."""
         ...
 
     def apply(self, changes: Sequence[UnitChange], *, restart: bool, io: ApplyIO) -> None:

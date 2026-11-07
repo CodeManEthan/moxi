@@ -53,15 +53,27 @@ under `auto` it is copied, until Claude Code and Codex are seen reading a skill 
 junction (`_AUTO_JUNCTION`). A single file on Windows links when a test symlink in the
 target's folder succeeds, and is otherwise copied with one note. A link is made directly
 at the target, so an existing path makes it fail. A copy is made beside the target as
-`.<name>.moxi-tmp` and renamed into place.
+`.<name>.moxi-tmp` and renamed into place. A copied folder's folders and files are made
+writable by their owner, so a copy of a read-only install can be written into and removed.
 
 Ownership is by mark. A link or junction is the owner's when the ledger names the owner
 for it and it points at the source (or at the source the ledger recorded, a source that
 moved with an upgrade). A copied folder holds `.moxi-placed`, `{"owner", "source",
-"source_hash", "hash"}`, `hash` taken over the copy without the mark. A copied file has no
-room for a mark, so its ledger entry is its mark. Hashes are SHA-256 over sorted relative
-paths and file bytes. The ledger is `STATE/moxi/placed.json`:
-`{owner: {"placed": {target: placement}, "handed": {target: handed}}}`.
+"source_hash", "hash"}` (and `"volatile"` when the item names any), `hash` taken over the
+copy without the mark. A copied file has no room for a mark, so its ledger entry is its
+mark. Hashes are SHA-256 over sorted relative paths and file bytes. The ledger is
+`STATE/moxi/placed.json`: `{owner: {"placed": {target: placement}, "handed": {target:
+handed}}}`.
+
+A copied folder that its owner writes into after placing (a file of settings set up
+beside the copied code, say), or that a harness writes into when it loads it, names those
+paths in the item's `volatile`: paths relative to the folder, each leaving out itself and
+everything under it. Both hashes leave them out, the copy's and the source's, so a write
+there never reads as `modified`, never refuses the next plan as an occupant, and never
+makes the copy `stale`. The mark records them, so `status` and `remove` read the copy as
+it was placed. An `update` replaces the whole copy, volatile paths included, so whoever
+writes them writes them again; an item whose `volatile` differs from the mark's is an
+`update`. A link has nothing to leave out, and a copied file ignores `volatile`.
 
 What `plan` decides (`Step.action`, with `cause` for a `refuse`):
 
@@ -69,7 +81,8 @@ What `plan` decides (`Step.action`, with `cause` for a `refuse`):
     keep     the owner's placement, current, in the form resolved now; or a held
              item's target that is its source ("held in place")
     update   the owner's placement with a changed source and an unmodified copy, a
-             link to an older source, or in another form than the one resolved now
+             link to an older source, in another form than the one resolved now, or a
+             copy whose mark names other volatile paths than the item
     remove   an entry of the owner's ledger that no item's target names
     skip     a target the owner handed to another (`adopt`), while any other owner's
              ledger places it (the taker, or one it handed the target on to); once no
@@ -96,7 +109,8 @@ it, as it is without git.
 
 `plan` never raises for a cause that belongs to one item: each item yields exactly one
 step. Only a wrong call raises: an element of `items` that is not an `Item` (`TypeError`),
-an unknown kind, form or a relative `dest` (`ValueError`). An item whose source is missing
+an unknown kind, form, a relative `dest`, or a `volatile` path that is absolute,
+empty or climbs out with `..` (`ValueError`). An item whose source is missing
 leaves its placement exactly as it is, even a link that now dangles, and its target still
 counts as named, so nothing removes it. `apply(..., replace=True)` moves a refused
 occupant (cause `occupant` or `tracked`) to
@@ -124,7 +138,7 @@ import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 _WINDOWS = sys.platform == "win32"
 
@@ -184,7 +198,10 @@ class Item:
     `name` is the placement's name in that harness's folder. `kind` is `skill` or `agent`.
     `dest`, an absolute path, places the item exactly there instead, and `harness` then
     only labels the placement. `held=True` says the source is a project's own copy inside
-    `root`, the project's root (see the module's docs).
+    `root`, the project's root (see the module's docs). `volatile` names paths inside a
+    copied folder, relative to it, that may change after placing: the hashes leave each
+    out, with everything under it (see the module's docs). Any iterable of strings or
+    paths is kept as a tuple of `/`-separated strings.
     """
 
     source: Path
@@ -194,6 +211,18 @@ class Item:
     dest: Path | None = None
     held: bool = False
     root: Path | None = None
+    volatile: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        volatile = self.volatile
+        if isinstance(volatile, (str, os.PathLike)):
+            volatile = (volatile,)
+        try:
+            kept = tuple(_volatile_path(path) for path in volatile)
+        except TypeError:
+            raise TypeError(f"an item's volatile is a sequence of relative paths, not "
+                            f"{self.volatile!r}") from None
+        object.__setattr__(self, "volatile", kept)
 
 
 @dataclass(frozen=True)
@@ -409,6 +438,31 @@ def _check_item(item) -> None:
         raise ValueError(f"an item's kind is skill or agent, not {item.kind!r}")
     if item.dest is not None and not os.path.isabs(os.path.expanduser(str(item.dest))):
         raise ValueError(f"an item's dest must be an absolute path, not {item.dest}")
+    for path in item.volatile:
+        parts = PurePosixPath(path).parts
+        if path in ("", ".") or os.path.isabs(path) or PureWindowsPath(path).drive \
+                or path.startswith("/") or ".." in parts:
+            raise ValueError(f"an item's volatile paths are relative paths inside it, "
+                             f"not {path!r}")
+
+
+def _volatile_path(path) -> str:
+    """One `volatile` path as a `/`-separated string; `TypeError` for a non-path."""
+    if not isinstance(path, (str, os.PathLike)):
+        raise TypeError(path)
+    text = os.fspath(path)
+    if not isinstance(text, str):
+        raise TypeError(path)
+    return PurePath(text).as_posix() if text else text
+
+
+def _mark_volatile(mark: dict) -> tuple[str, ...]:
+    """The volatile paths a copied folder's mark records, or none for a mark without
+    them (one an earlier placer wrote) or with something else there."""
+    volatile = mark.get("volatile")
+    if isinstance(volatile, list) and all(isinstance(path, str) for path in volatile):
+        return tuple(volatile)
+    return ()
 
 
 def target_key(path: str | os.PathLike) -> str:
@@ -501,7 +555,7 @@ class _Planner:
             return self._step(item, key, "refuse", "source", f"source missing: {source}")
         # Read the whole source now, so an unreadable file is this item's refusal
         # (cause io) whatever the form, and a copy is compared against this hash.
-        self.source_hash = _hash(source)
+        self.source_hash = _hash(source, volatile=item.volatile)
         real_source = os.path.realpath(source)
         entry = self.placed.get(key)
         if item.held:
@@ -597,8 +651,11 @@ class _Planner:
         if entry is None and self._tracked(key):
             # A mark with no ledger entry here came from elsewhere (a commit): not ours.
             return self._occupant(item, key, form, "a marked folder this ledger lacks")
-        if _hash(key, skip_mark=True) != mark.get("hash"):
+        if _hash(key, skip_mark=True, volatile=_mark_volatile(mark)) != mark.get("hash"):
             return self._occupant(item, key, form, "a placed copy that has been modified")
+        if form == "copy" and _mark_volatile(mark) != item.volatile:
+            return self._step(item, key, "update", None, f"{item.name}: volatile changed",
+                              form=form, note=note)
         return self._current_copy(item, key, source, mark, form, note)
 
     def _file_copy(self, item, key, source, entry, form, note) -> Step:
@@ -769,9 +826,11 @@ def _read_mark(folder: str) -> dict | None:
     return mark if isinstance(mark, dict) else None
 
 
-def _hash(path: str, *, skip_mark: bool = False) -> str:
+def _hash(path: str, *, skip_mark: bool = False, volatile: Sequence[str] = ()) -> str:
     """SHA-256 over a file's bytes, or over a folder's sorted relative paths and file
-    bytes (a symlink inside counts by its text). `skip_mark` leaves out a copy's mark."""
+    bytes (a symlink inside counts by its text). `skip_mark` leaves out a copy's mark;
+    `volatile` leaves out each of a folder's relative paths it names, with everything
+    under it."""
     import hashlib
 
     digest = hashlib.sha256()
@@ -781,6 +840,8 @@ def _hash(path: str, *, skip_mark: bool = False) -> str:
         return digest.hexdigest()
     for rel, kind, full in sorted(_entries(path)):
         if skip_mark and rel == MARK:
+            continue
+        if any(rel == path or rel.startswith(path + "/") for path in volatile):
             continue
         digest.update(kind.encode() + b"\0" + rel.encode("utf-8", "surrogateescape") + b"\0")
         if kind == "F":
@@ -1048,12 +1109,15 @@ def _copy(item: Item, source: str, key: str, owner: str) -> None:
         _remove_path(tmp)
     try:
         if os.path.isdir(source):
-            source_hash = _hash(source)
+            source_hash = _hash(source, volatile=item.volatile)
             shutil.copytree(source, tmp, symlinks=True)
+            _own_writable(tmp)
             mark = {"owner": owner, "source": source, "source_hash": source_hash,
-                    "hash": _hash(tmp, skip_mark=True)}
+                    "hash": _hash(tmp, skip_mark=True, volatile=item.volatile)}
             if item.held:
                 mark["held"] = True
+            if item.volatile:
+                mark["volatile"] = list(item.volatile)
             with open(os.path.join(tmp, MARK), "x", encoding="utf-8") as handle:
                 handle.write(json.dumps(mark, indent=1, sort_keys=True) + "\n")
         else:
@@ -1065,6 +1129,24 @@ def _copy(item: Item, source: str, key: str, owner: str) -> None:
         if os.path.lexists(tmp):
             _remove_path(tmp)
         raise
+
+
+def _own_writable(root: str) -> None:
+    """Give the owner write access to each folder and file of a fresh copy. A source in a
+    read-only install copies read-only, and its owner could then neither write a volatile
+    path into the copy nor remove it; the copy's hash reads no mode, so nothing else
+    changes. Links are left as they are."""
+    import stat
+
+    for folder, dirs, files in os.walk(root):
+        for name in [None, *files]:
+            path = folder if name is None else os.path.join(folder, name)
+            if os.path.islink(path):
+                continue
+            mode = os.stat(path).st_mode
+            want = mode | (stat.S_IRWXU if name is None else stat.S_IRUSR | stat.S_IWUSR)
+            if want != mode:
+                os.chmod(path, stat.S_IMODE(want))
 
 
 def _remove_path(path: str) -> None:
@@ -1147,17 +1229,20 @@ def _state(owner: str, key: str, entry: dict) -> str:
             if not _same(pointed, source):
                 return "modified"
             return "ok" if os.path.exists(pointed) else "stale"
+        volatile: tuple[str, ...] = ()
         if os.path.isdir(key):
             mark = _read_mark(key)
-            if mark is None or mark.get("owner") != owner \
-                    or _hash(key, skip_mark=True) != mark.get("hash"):
+            if mark is None or mark.get("owner") != owner:
+                return "modified"
+            volatile = _mark_volatile(mark)
+            if _hash(key, skip_mark=True, volatile=volatile) != mark.get("hash"):
                 return "modified"
             known = mark.get("source_hash")
         else:
             if entry.get("form") != "copy" or _hash(key) != entry.get("hash"):
                 return "modified"
             known = entry.get("source_hash")
-        if not os.path.exists(source) or _hash(source) != known:
+        if not os.path.exists(source) or _hash(source, volatile=volatile) != known:
             return "stale"
         return "ok"
     except OSError:

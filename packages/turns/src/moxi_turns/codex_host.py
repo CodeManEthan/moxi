@@ -32,7 +32,9 @@ is gone, and on SIGTERM, SIGINT or SIGHUP (CTRL_BREAK on Windows). Its environme
 passes through unchanged to the app-server, and so to the agent's shell.
 
 Exit status: 0 once the session has ended (the endpoint stopped), 1 when the launch
-failed (the reason on stderr), 2 for a bad flag. With a window, the host's log goes to
+failed (the reason on stderr), 2 for a bad flag. A stop that comes once the first load
+is accepted ends the session with 0, even while the launch is still finishing; one
+before that point exits 1. With a window, the host's log goes to
 `codex-host.log` in turns' state folder, since the terminal belongs to the window;
 without one, to stderr.
 """
@@ -324,12 +326,17 @@ def main(argv: list[str] | None = None) -> int:
     from . import codex
 
     endpoint = None
+    opened: list = []
     try:
-        _, endpoint = codex._launch(**kwargs)
+        _, endpoint = codex._launch(**kwargs, opened=opened)
         log.info("hosting Codex thread %s", endpoint.harness.session_id)
         while not endpoint.wait_closed(_POLL):
             pass
     except _Stopped:
+        if endpoint is None and opened and not opened[0].is_gone:
+            # The first load was accepted, so the session was ready (a caller may hold
+            # it already) while the launch was still finishing: an ordinary stop.
+            endpoint = opened[0]
         if endpoint is None:
             print(f"{PROG}: the launch was stopped before the session was ready "
                   f"({life.reason})", file=sys.stderr, flush=True)

@@ -567,7 +567,7 @@ def test_bind_failed_revokes_nothing_and_the_doctor_fails_it(serving, sessions):
     assert len(daemon.mcp_tokens.active()) == 1
     row = checks.endpoint_row(answer)
     assert row.state == "fail" and "no token was revoked" in row.detail
-    assert row.fix == checks.RESTART
+    assert row.fix == checks.restart()
 
 
 def test_a_daemon_beside_its_active_socket_unit_is_supervised_and_revokes_nothing(
@@ -716,7 +716,62 @@ def test_the_endpoint_rows_follow_the_daemons_answer():
     assert checks.port_row({"served": True, "url": url, "held": True}, on) is None
     moved = checks.port_row({"served": True, "url": url, "held": False},
                             type("Mcp", (), {"enabled": True, "port": 8451})())
-    assert moved.state == "warn" and moved.fix == checks.RESTART
+    assert moved.state == "warn" and moved.fix == checks.restart()
+
+
+@pytest.mark.parametrize(("state", "fix"), [
+    ("present", "moxi services restart comms/daemon"),
+    ("absent", "systemctl --user restart"), ("broken", "systemctl --user restart")])
+def test_the_restart_fix_names_services_when_it_is_installed_else_the_supervisor(
+        monkeypatch, state, fix):
+    """comms writes no unit of its own: the core does, so the restart is services' verb or
+    the supervisor's own, never a comms verb."""
+    from moxi import modules, units
+
+    monkeypatch.setattr(units, "ids", lambda module, name, kind="daemon": ())
+
+    def load(name, **kw):
+        assert name == "services"
+        return SimpleNamespace(state=state)
+
+    monkeypatch.setattr(modules, "load", load)
+    assert fix in checks.restart()
+    assert "moxi comms" not in checks.restart()
+    row = checks.endpoint_row({"served": False, "why": "bind-failed"})
+    assert row.fix == checks.restart()
+
+
+#: The ids the core gives comms' daemon in a tagged home, per supervisor.
+TAGGED_IDS = {
+    "systemd": ("moxi-h3f9a2c1d-comms-daemon.socket", "moxi-h3f9a2c1d-comms-daemon.service"),
+    "launchd": ("moxi.h3f9a2c1d.comms.daemon",),
+    "schtasks": ("\\Moxi\\h3f9a2c1d\\comms-daemon",),
+}
+
+
+@pytest.mark.parametrize(("backend", "fix"), [
+    ("systemd", "systemctl --user restart moxi-h3f9a2c1d-comms-daemon.service"),
+    ("launchd", "launchctl kickstart -k gui/{uid}/moxi.h3f9a2c1d.comms.daemon"),
+    ("schtasks", 'schtasks /End /TN "\\Moxi\\h3f9a2c1d\\comms-daemon", '
+                 'then schtasks /Run /TN "\\Moxi\\h3f9a2c1d\\comms-daemon"'),
+    (None, checks.SUPERVISOR_RESTART)])
+def test_the_supervisors_restart_names_the_unit_id_the_core_gives(monkeypatch, backend, fix):
+    from moxi import modules, units
+
+    asked = []
+
+    def ids(module, name, kind="daemon"):
+        asked.append((module, name, kind))
+        return TAGGED_IDS.get(backend, ())
+
+    monkeypatch.setattr(modules, "load", lambda name, **kw: SimpleNamespace(state="absent"))
+    monkeypatch.setattr(units, "ids", ids)
+    monkeypatch.setattr(units, "backend", lambda: backend)
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    if backend == "launchd" and not hasattr(os, "getuid"):
+        pytest.skip("launchd's domain names a POSIX uid")
+    assert checks.restart() == fix.format(uid=uid)
+    assert asked == [("comms", "daemon", "daemon")]
 
 
 @pytest.mark.parametrize(("unit", "install"), [
@@ -731,7 +786,7 @@ def test_the_port_taken_fix_names_moxi_install_comms_when_a_socket_unit_is_insta
         del answer["unit"]                      # an older daemon's answer
     fix = checks.endpoint_row(answer).fix
     assert fix.startswith("free the port") and "moxi config set comms mcp.port N" in fix
-    assert fix.endswith(f"then: {checks.RESTART}, then relaunch the sessions")
+    assert fix.endswith(f"then: {checks.restart()}, then relaunch the sessions")
     if install == "names":
         assert ("mcp.port N and moxi install comms, which moves the socket unit to that "
                 "port") in fix
@@ -813,7 +868,7 @@ def test_doctor_rows_ask_the_running_daemon(serving):
     daemon.stop()
     assert "mcp endpoint" not in {r.name for r in checks.mcp_rows()}
     health = checks.health()
-    assert health.state == "fail" and health.fix == checks.RESTART
+    assert health.state == "fail" and health.fix == checks.restart()
 
 
 # ==================================================================== idle cost

@@ -6,8 +6,10 @@ spec covers, and its records carry every failed pass and push. These rows don't 
 them:
 
 - root: the notes folder, and that it is a git work tree's top. `fail` when it is
-  missing; `warn` when it is no git repo, or inside one but not its top: snapshots and the
-  gates are off until it is one.
+  missing after notes' setup has run here; `warn` when it is missing and the core records
+  that notes' setup has never run in this home (a plain wheel install, say), since setup
+  is what makes it; `warn` when it is no git repo, or inside one but not its top:
+  snapshots and the gates are off until it is one.
 - snapshot: a trigger is on (`snapshot.auto` or the timer) and the saved spec equals the
   one notes' config gives. `off` when both triggers are off; `warn` when the saved spec
   differs or none is saved.
@@ -68,6 +70,11 @@ def rows() -> Iterator[Row]:
 
 def _root(found) -> Row:
     if not found.exists:
+        import moxi.modules
+
+        if not moxi.modules.setup_ran(MODULE):
+            return Row(MODULE, "root", "warn", f"notes' setup has not run here, so the "
+                       f"notes root {found.root} is not made yet", "moxi install notes")
         return Row(MODULE, "root", "fail", f"the notes root {found.root} is missing",
                    f"make it, or set another with moxi config set notes root PATH; then "
                    f"{SETUP}")

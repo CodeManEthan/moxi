@@ -1,6 +1,6 @@
 [project]
 name = "moxi-loadout"
-version = "0.1.2"
+version = "0.1.3"
 description = "Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode."
 requires-python = ">=3.12"
 license = "MIT"
@@ -56,8 +56,8 @@ packages = ["src/moxi_loadout"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_loadout", "tests",
-                "web"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
+                "src/moxi_loadout", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

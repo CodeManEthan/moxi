@@ -1,6 +1,6 @@
 [project]
 name = "moxi-projects"
-version = "0.1.2"
+version = "0.1.3"
 description = "Moxi's list of named places: projects, their roots, kinds and agents."
 requires-python = ">=3.12"
 license = "MIT"
@@ -10,6 +10,9 @@ dependencies = ["moxi>=0.1.4,<0.2"]
 [project.optional-dependencies]
 # The browser UI shell: with it, projects' page shows there.
 ui = ["moxi-ui>=0.2,<0.3"]
+# notes' inbox: with it, `moxi projects promote` makes one of notes' inbox one-offs a
+# project.
+notes = ["moxi-notes>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -34,8 +37,8 @@ packages = ["src/moxi_projects"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_projects", "tests",
-                "web"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
+                "src/moxi_projects", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

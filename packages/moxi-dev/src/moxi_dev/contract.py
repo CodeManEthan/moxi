@@ -52,6 +52,15 @@ finding names them:
    line in `tests/write-sites.txt`, and every line there must still match a site. The
    list holds the sites a module has before it moves onto `moxi.files` and `moxi.store`,
    so it only shrinks.
+9. A link with no way to install it. In `src/`, each call to `moxi.modules.load` or
+   `moxi.modules.available` (under any import alias) whose first argument is a string
+   literal or a module-level string constant names a module that must be one of: the
+   package's own, the core, a required dependency's, an extra's, or one that an extra's
+   distribution requires (one hop, read from that distribution's installed metadata,
+   else from its checkout beside this repo). A link reached only through a required
+   module of a declared extra needs nothing more. A module named at run time (a loop
+   variable, a parameter) is not read, so a test of that package holds such names to
+   its extras.
 
 `segment` findings hold a status line segment to showing only: the import-time closure of
 the announcement's `SEGMENT` module, within the module's package, may not import
@@ -615,6 +624,7 @@ class _Repo:
         self.check_segment()
         if not self.core and not self.dev:
             self.check_write_sites()   # check 8
+        self.check_links()             # check 9
         return self.findings
 
     def _read_pyproject(self) -> bool:
@@ -1018,6 +1028,53 @@ class _Repo:
                          f"lists {key!r} {extra} more time(s) than src/ has it; remove "
                          f"the line, so the list only shrinks")
 
+    # -- check 9 -----------------------------------------------------------------------------
+
+    def check_links(self) -> None:
+        """Each module a literal `load` or `available` names comes with the package, its
+        required dependencies or one of its extras."""
+        reachable = {CORE, *self._modules_of(self.deps)}
+        if self.name:
+            reachable.add(self.name)
+        for reqs in self.extras.values():
+            for dist, _ in reqs:
+                reachable.update(self._modules_of([dist]))
+                reachable.update(self._modules_of(self._requires(dist)))
+        for source in sorted(self.sources.values(), key=lambda s: s.path):
+            if not source.in_src:
+                continue
+            consts = _string_constants(source.tree)
+            for line, call, arg in _module_calls(source.tree):
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    target = arg.value
+                elif isinstance(arg, ast.Name) and arg.id in consts:
+                    target = consts[arg.id]
+                else:
+                    continue
+                if target in reachable:
+                    continue
+                self.add(source.path, line, "9",
+                         f"{call}({target!r}) reaches the module {target!r}, which is not "
+                         "this package's, the core's, a required dependency's, an "
+                         "extra's or one an extra's module requires; add the extra "
+                         f"{target!r} installing moxi-{target}, with its OPTIONAL "
+                         "sentence")
+
+    @staticmethod
+    def _modules_of(dists: Iterable[str]) -> set[str]:
+        return {m.group(1) for d in dists if (m := _MODULE_DIST.fullmatch(d))}
+
+    def _requires(self, dist: str) -> set[str]:
+        """The distributions `dist` requires (no extras of its own), read from this
+        environment's metadata, else from its checkout beside this repo."""
+        found = _requires_from_environment(dist)
+        if found is None:
+            match = _MODULE_DIST.fullmatch(dist)
+            if match:
+                found = _requires_from_checkout(
+                    self.root.resolve().parent / match.group(1), dist)
+        return found or set()
+
     # -- check 7 -----------------------------------------------------------------------------
 
     def check_core_names(self) -> None:
@@ -1052,8 +1109,10 @@ class _Repo:
             self.add(here, 0, "7", f"names the module {name!r}, one of the umbrella's own "
                                    "verbs; `moxi " + name + "` could never reach it")
         elif name in names.RESERVED:
-            self.add(here, 0, "7", f"names the module {name!r}, a name the core keeps for "
-                                   "itself; the module needs another name")
+            self.add(here, 0, "7", f"names the module {name!r}: {name!r} is a name moxi "
+                                   f"keeps for itself, not a module: "
+                                   f"{names.reserved_why(name)}; the module needs another "
+                                   "name")
         if name and self.own_import not in self.src_tops:
             self.add(here, 0, "7", f"has no src/{self.own_import}: module {name!r} is "
                                    f"imported as {self.own_import}")
@@ -1478,6 +1537,87 @@ class _OsNames:
                 yield node.lineno, f"os.{func.attr}"
             elif isinstance(func, ast.Name) and func.id in self.process:
                 yield node.lineno, self.process[func.id]
+
+
+def _module_calls(tree: ast.Module) -> Iterable[tuple[int, str, ast.AST]]:
+    """(line, the call as written, first argument) for each call of `moxi.modules.load`
+    or `moxi.modules.available` in the file, under whatever names it imports them by."""
+    verbs = ("load", "available")
+    package: set[str] = set()     # names bound to the core's package
+    module: set[str] = set()      # names bound to moxi.modules
+    bare: set[str] = set()        # names bound to load or available themselves
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "moxi.modules" and alias.asname:
+                    module.add(alias.asname)
+                elif alias.name.split(".")[0] == CORE and not alias.asname:
+                    package.add(CORE)
+                elif alias.name == CORE and alias.asname:
+                    package.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            for alias in node.names:
+                if node.module == CORE and alias.name == "modules":
+                    module.add(alias.asname or alias.name)
+                elif node.module == "moxi.modules" and alias.name in verbs:
+                    bare.add(alias.asname or alias.name)
+    if not (package or module or bare):
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            found = func.id in bare
+        elif isinstance(func, ast.Attribute) and func.attr in verbs:
+            owner = func.value
+            found = ((isinstance(owner, ast.Name) and owner.id in module)
+                     or (isinstance(owner, ast.Attribute) and owner.attr == "modules"
+                         and isinstance(owner.value, ast.Name)
+                         and owner.value.id in package))
+        else:
+            found = False
+        if found:
+            yield node.lineno, ast.unparse(func), node.args[0]
+
+
+def _required(reqs: Iterable[str]) -> set[str]:
+    """The normalized distributions among requirement strings that no extra gates."""
+    found = set()
+    for req in reqs:
+        text, _, marker = req.partition(";")
+        if "extra" in marker:
+            continue
+        parsed = _requirement(text)
+        if parsed:
+            found.add(parsed[0])
+    return found
+
+
+def _requires_from_environment(dist: str) -> set[str] | None:
+    from importlib import metadata
+
+    try:
+        reqs = metadata.requires(dist)
+    except metadata.PackageNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 - a damaged install reads as not found
+        return None
+    return _required(reqs or [])
+
+
+def _requires_from_checkout(repo: Path, dist: str) -> set[str] | None:
+    import tomllib
+
+    try:
+        data = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    project = data.get("project") or {}
+    if _normalize(str(project.get("name", ""))) != dist:
+        return None
+    reqs = project.get("dependencies") or []
+    return _required(r for r in reqs if isinstance(r, str))
 
 
 # --- another module's announcement ---------------------------------------------------------

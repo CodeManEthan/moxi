@@ -33,8 +33,8 @@ show dim. When the list cannot be read at all (no `claude`, an exit, a timeout),
 writes nothing and the next tick asks again. Each log line is written once per change of
 what it says. Codex and OpenCode sessions get no records.
 
-The watcher runs in the foreground (`moxi cache watch`, or this script), or as a systemd
-user service (`moxi cache service install`).
+The watcher runs in the foreground (`moxi cache watch`, or this script), or as a unit of
+the system's supervisor, which `moxi install cache` writes.
 """
 
 from __future__ import annotations

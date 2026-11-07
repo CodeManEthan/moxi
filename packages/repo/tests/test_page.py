@@ -133,7 +133,7 @@ def test_the_announcement_offers_the_page_and_nothing_imports_it():
 
     assert module.PAGE == "moxi_repo.page:PAGE"
     assert module.COMPONENTS["page"]["place"] == "page"
-    assert set(module.OPTIONAL) == {"ui"}
+    assert set(module.OPTIONAL) == {"ui", "projects"}
 
 
 # --- /api/repos -----------------------------------------------------------------------------

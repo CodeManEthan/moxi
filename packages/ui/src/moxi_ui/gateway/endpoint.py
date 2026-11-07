@@ -83,8 +83,9 @@ def runtime_problem(environ: Mapping[str, str] | None = None, *,
     """The locator text when `environ` gives the ui a runtime directory other than the one
     a unit-started shell gets, else None.
 
-    The unit's shell starts with the environment less moxi's locator variables, and on
-    Windows with the user's stored environment (`stored`, read here unless given). The
+    The unit's shell starts with the environment less moxi's locator variables, on
+    Windows with the user's stored environment (`stored`, read here unless given), and
+    with the home its unit was written from (`moxi.units.environment`). The
     check runs whether or not a unit is installed, so a shell started by hand and a
     command run from another terminal never read two directories.
     """

@@ -23,7 +23,7 @@ import moxi.uninstall as uninstall
 from conftest import WINDOWS, drop_modules, is_link, link_folder
 from moxi import _questions, _settle, files, paths, units
 from moxi.units import _backend, _state
-from moxi.units._fake import FakeBackend, FakeSupervisor
+from fake_backend import FakeBackend, FakeSupervisor
 from test_install import CATALOG, Fake, _requirement, moxi_install
 
 

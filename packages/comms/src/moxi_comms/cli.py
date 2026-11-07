@@ -1149,11 +1149,6 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
     wh = sub.add_parser("whoami", help="what comms identity this session holds")
     wh.set_defaults(func=cmd_whoami)
-    v = sub.add_parser("service",
-                       help="run the daemon as a systemd user service: install, "
-                            "uninstall, or status")
-    v.add_argument("action", choices=("install", "uninstall", "status"))
-    v.set_defaults(func=cmd_service)
     sub.metavar = ("{" + ",".join(verb for verb in sub.choices if verb not in UNLISTED_VERBS)
                    + "}")
     return ap
@@ -1163,14 +1158,6 @@ def cmd_whoami(args, ctx: Context) -> int:
     """What comms identity this session holds, read from its claim, or why it holds
     none. Reads the claim socket and nothing else."""
     return claimhold.whoami(ctx.env, say=ctx.say)
-
-
-def cmd_service(args, ctx: Context) -> int:
-    """`moxi comms service`: the box's service manager, not
-    the comms record. See `service.py`."""
-    from . import service
-
-    return service.run(args.action, env=ctx.env, say=ctx.say)
 
 
 #: Verbs that parse and run but no help list names: `moxi comms --help` leaves them out of

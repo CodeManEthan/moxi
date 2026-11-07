@@ -37,7 +37,7 @@ import sys
 import time
 from pathlib import Path
 
-from moxi.units._fake import FakeBackend, FakeSupervisor
+from fake_backend import FakeBackend, FakeSupervisor
 
 HERE = Path(__file__).resolve()
 LOG = "MOXITEST_LOG"

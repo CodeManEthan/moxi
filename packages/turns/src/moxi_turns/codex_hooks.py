@@ -7,6 +7,11 @@ stdout and acknowledges that write. No hook closes a turn: Stop and Interrupt ar
 asking or telling, and the turn ends on Codex's own word (see ``codex``). A
 Stop answered unblocked marks the turn ending, so it takes no more steers.
 
+SessionStart fires inside a thread's first turn. Codex says ``resume`` there when the
+thread was reloaded before it had any turn; while the host holds the thread unturned
+(``start_source``), that ``resume`` is asked of the listeners as ``startup``, and once
+the answer is out the host clears the mark (``start_answered``).
+
 A subagent's hooks run turns' commands too. Its input carries the root thread's
 ``session_id`` and the subagent's own ``agent_id`` (absent, not null, on the main loop),
 and the ping forwards both. A UserPromptSubmit that carries an ``agent_id`` gets no
@@ -61,7 +66,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import hooktimes, protocol
-from .results import StopFacts
 
 log = logging.getLogger("moxi.turns.codex.hooks")
 
@@ -423,6 +427,11 @@ class HookServer:
         if event in ("SessionStart", "PostCompact"):
             source = frame.get("source")
             source = source if isinstance(source, str) else None
+            start_source = getattr(self.harness, "start_source", None)
+            if event == "SessionStart" and start_source is not None:
+                # Codex says `resume` at the first turn of a thread reloaded before it
+                # had any; while the thread has had no turn, that is its start.
+                source = start_source(source)
             # The accepted load raised this start's or resume's Ready.
             loaded = event == "SessionStart" and source in ("startup", "resume")
             # The guards are read again at each ready; their notes join its context.
@@ -444,7 +453,16 @@ class HookServer:
                 compacted = getattr(self.harness, "compacted", None)
                 if compacted is not None:
                     compacted()
-            return {"ok": True, "context": context}
+            reply = {"ok": True, "context": context}
+            start_answered = getattr(self.harness, "start_answered", None)
+            if event == "SessionStart" and start_answered is not None:
+                # The mark clears only once the answer is out: a send that fails leaves
+                # it, as if this start had not been answered.
+                conn.send(reply)
+                self._timed(frame)
+                start_answered()
+                return None
+            return reply
         if event == "UserPromptSubmit":
             if frame.get("agent_id"):
                 # A subagent's prompt is its task, not the main loop's prompt.

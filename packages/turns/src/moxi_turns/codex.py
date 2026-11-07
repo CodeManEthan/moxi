@@ -14,6 +14,23 @@ did not take its text (the request was never sent, or Codex answered it with an 
 once the request went out it reads ``Started`` on a turn the host has just learned of,
 or ``Lost("untied: ...")`` at once.
 
+A fresh thread. Codex writes no rollout for a thread until something enters its
+history, and ``thread/resume`` refuses a thread with none. So right after
+``thread/start`` the host injects one developer item (``thread/inject_items``), which
+writes the rollout and is not a turn: no model call is made, and the window opens on an
+empty transcript. The load is accepted, and raises Ready ``startup``, once Codex takes
+the item. A Codex without ``thread/inject_items`` is refused for good, with no retry and
+no turn sent in its place.
+
+Unturned threads. A thread is unturned until its first turn has run. The mark is set
+when the inject is accepted, or on a resumed load whose turn list is empty. It is
+cleared when the hook server has answered the thread's first ``SessionStart`` since the
+load, or when that first turn ends, whichever the host sees first; ``turn/started``
+never clears it. While it is set, a resumed load raises Ready ``startup``, and the hook
+server reads a ``SessionStart`` ``resume`` as ``startup``: Codex says ``resume`` at the
+first turn of a thread reloaded before any turn, and the listeners would otherwise never
+be asked with ``startup`` for that session.
+
 Subagents. The host lists Codex's collab subagents from the ``collabAgentToolCall``
 items it sees, rebuilt from the thread's history at each resumed load. A spawn that comes
 as a ``subAgentActivity`` item (Codex's ``multi_agent_v2``) carries no state turns can
@@ -125,7 +142,13 @@ BACKOFF_JITTER = 0.2
 VERIFY_WAIT = 30.0
 #: How long one ``thread/backgroundTerminals/list`` may take, in seconds.
 TERMINALS_WAIT = 2.0
-PRIMING_TEXT = "The hosted session is ready. Wait for the next instruction."
+#: The developer item a fresh thread is opened with. It stays in the thread's
+#: model-visible history for every later turn, so it is a plain statement, not an
+#: instruction. Codex refuses an empty item list.
+READY_ITEM = "This thread was opened by Moxi's turns host."
+#: The trouble line of a load refused because Codex cannot inject the item.
+INJECT_MISSING = ("this Codex has no thread/inject_items; Codex 0.153.0 has it. "
+                  "Update Codex, then launch again.")
 OWNED_OPTIONS = frozenset({
     "cwd", "developerInstructions", "threadId", "excludeTurns", "approvalPolicy",
 })
@@ -189,6 +212,11 @@ class Generation:
 
 class _VerifyFailed(RuntimeError):
     pass
+
+
+class CodexTooOld(RuntimeError):
+    """This Codex lacks a call the host needs to open a thread. The load is refused for
+    good: no retry, and no turn is sent in the call's place."""
 
 
 class _TurnEnding(RuntimeError):
@@ -303,7 +331,9 @@ class CodexHarness(Harness):
         self._generation_number = 0
         self._supervisor: threading.Thread | None = None
         self._accepted = threading.Event()
-        self._priming = False        # a fresh thread's priming turn is not yet accepted
+        self._unwritten = False      # a fresh thread's rollout is not written yet
+        #: The thread has had no turn yet (see "Unturned threads" above).
+        self._unturned = False
         self._compacting: _Compaction | None = None
         #: The session's collab subagents by thread id, `(state, final, parent_id)`: the
         #: host's record of Codex's own notices, kept from the item stream and rebuilt from
@@ -461,6 +491,10 @@ class CodexHarness(Harness):
         except codex_hooks.HooksUntrusted:
             self.close()
             raise
+        except CodexTooOld as exc:
+            self._load_failed(exc)
+            self.close()
+            raise
         except Exception as exc:  # the first failed load follows the retry road
             self._load_failed(exc)
         self._supervisor = threading.Thread(
@@ -480,7 +514,7 @@ class CodexHarness(Harness):
 
     def loading(self) -> bool:
         ws = self.ws
-        return ws is None or not ws.connected or self._priming
+        return ws is None or not ws.connected or self._unwritten
 
     def _set_trouble(self, reason: str | None, *, release: bool = True) -> None:
         self.trouble = reason
@@ -628,9 +662,15 @@ class CodexHarness(Harness):
                     else self._read_collab(ws, thread_id)
                 active = False if starting else proto.thread_is_active(thread)
                 turn_id = None
-                if active:
-                    turns = ws.call("thread/turns/list", {"threadId": thread_id})
-                    turn_id = proto.active_turn_id(turns)
+                unturned = False
+                if not starting:
+                    # The newest turn is enough to tell whether there was one; an active
+                    # thread is listed whole, to find the turn it runs.
+                    turns = ws.call("thread/turns/list", {"threadId": thread_id}
+                                    if active else {"threadId": thread_id, "limit": 1})
+                    unturned = proto.no_turns(turns)
+                    if active:
+                        turn_id = proto.active_turn_id(turns)
                 if self._stop.is_set():
                     raise AppServerOffline("the Codex host is stopping")
 
@@ -654,23 +694,27 @@ class CodexHarness(Harness):
                         self._cancel_grace()
                     generation.thread_id = thread_id
                     published = True
-                    self._priming = starting
+                    self._unwritten = starting
+                    self._unturned = unturned
                 self.endpoint.identify(thread_id)
                 self._set_trouble(warning, release=False)
                 for notification in pending_notifications:
                     self._on_notification(*notification)
                 if starting:
-                    # Every fresh thread is primed, window or not: until its first turn
-                    # it has no rollout, and `thread/resume` refuses it. The priming turn
-                    # belongs to the load: a refusal fails it,
-                    # and a windowed launch waits until it is accepted.
-                    self._start_turn(PRIMING_TEXT, None)
-                else:
-                    generation.ready.set()
-                self._priming = False
-                # Only an accepted load raises Ready, so it follows the priming turn: a
-                # refused priming turn fails the load and raises none.
-                self.endpoint.identify(thread_id, ready="startup" if starting else "resume")
+                    # Every fresh thread gets the item, window or not: until something
+                    # enters its history it has no rollout, and `thread/resume` refuses
+                    # it. The inject belongs to the load: a refusal fails it, and a
+                    # windowed launch waits until it is accepted.
+                    self._inject_ready_item(ws, thread_id)
+                    with self._lock:
+                        self._unturned = True
+                generation.ready.set()
+                self._unwritten = False
+                # Only an accepted load raises Ready, so it follows the inject: a refused
+                # inject fails the load and raises none. A thread with no turn yet is a
+                # start, however it was loaded.
+                self.endpoint.identify(
+                    thread_id, ready="startup" if starting or unturned else "resume")
                 self._accepted.set()
                 self._loaded(ws)
                 if old_turn and old_turn != turn_id:
@@ -689,20 +733,20 @@ class CodexHarness(Harness):
                     self._report_started(turn_id, None, claim=True, answered_only=True)
                 self.endpoint.load_changed()
             except BaseException as exc:
-                if self._priming:
-                    # A refused priming turn leaves a thread with no rollout, which
+                if self._unwritten:
+                    # A refused inject leaves a thread with no rollout, which
                     # `thread/resume` refuses for good. Forget it, so the retry starts a
                     # new thread, as after any failed start; its accepted load
                     # names the new id to the endpoint and in its Ready.
                     with self._lock:
                         if self.session_id == thread_id:
                             self.session_id = None
-                self._priming = False
+                self._unwritten = False
                 if generation is not None:
                     generation.ended.set()
                 if ws is not None:
                     # A failed load closes its connection, published or not:
-                    # a refused priming turn fails the load after publication.
+                    # a refused inject fails the load after publication.
                     with self._lock:
                         if self.ws is ws:
                             self.ws = None
@@ -713,6 +757,16 @@ class CodexHarness(Harness):
                 if self._stop.is_set() and spawned:
                     self.app_server.stop()
                 raise
+
+    def _inject_ready_item(self, ws, thread_id: str) -> None:
+        """Write a fresh thread's rollout with `READY_ITEM`. A Codex without the call
+        raises `CodexTooOld`: no turn is sent in its place."""
+        try:
+            ws.call("thread/inject_items", proto.inject_params(thread_id, READY_ITEM))
+        except proto.CodexError as exc:
+            if proto.method_missing(exc):
+                raise CodexTooOld(INJECT_MISSING) from exc
+            raise
 
     def _supervise(self) -> None:
         delays = self._backoff_factory()
@@ -728,7 +782,8 @@ class CodexHarness(Harness):
                 self._connect()
                 delays = self._backoff_factory()
                 wait_before_attempt = False
-            except codex_hooks.HooksUntrusted as exc:
+            except (codex_hooks.HooksUntrusted, CodexTooOld) as exc:
+                # Neither mends on a retry.
                 self._load_failed(exc)
                 self.endpoint.gone(self.trouble)
                 return
@@ -1140,7 +1195,7 @@ class CodexHarness(Harness):
             f"the active Codex turn changed through {STEER_ATTEMPTS} steer attempts"
         )
 
-    def _start_turn(self, text: str, delivery_id: str | None) -> str | None:
+    def _start_turn(self, text: str, delivery_id: str) -> str | None:
         with self._lock:
             thread_id, ws = self.session_id, self.ws
             self._pending_delivery = delivery_id
@@ -1162,7 +1217,7 @@ class CodexHarness(Harness):
                 # A delivery counts as started only once a report claimed it. A turn a
                 # reconnect's load reported before turn/start answered wakes the wait
                 # without a claim; the list below decides that case.
-                tied = delivery_id is None or self._pending_delivery != delivery_id
+                tied = self._pending_delivery != delivery_id
             if tied:
                 if claimed and claimed != turn_id:
                     log.warning("turn/start returned phantom id %s; the live turn is %s",
@@ -1174,8 +1229,6 @@ class CodexHarness(Harness):
         try:
             turns = ws.call("thread/turns/list", {"threadId": thread_id})
         except Exception as exc:
-            if delivery_id is None:
-                raise   # the priming turn has no delivery to lose; its load fails
             log.warning("listing turns for delivery %s failed after Codex took its "
                         "text: %s", delivery_id, exc)
             turns = None
@@ -1413,9 +1466,6 @@ class CodexHarness(Harness):
         outcome = {"completed": "answer", "interrupted": "aborted",
                    "failed": "error"}.get(status, "refusal")
         self.settle_turn(turn.get("id"), outcome)
-        generation = self.generation
-        if generation is not None:
-            generation.ready.set()
 
     def stop_answered(self, turn_id: str | None) -> None:
         """The hold did not block the Stop of `turn_id`, and its answer is about to go
@@ -1442,6 +1492,7 @@ class CodexHarness(Harness):
             if actual is None or actual in self._settled_turns:
                 return
             self._settled_turns.add(actual)
+            self._unturned = False   # a turn has run
             if self._grace is not None and self._grace[0] == actual:
                 self._cancel_grace()
             if self.active_turn_id == actual:
@@ -1474,6 +1525,18 @@ class CodexHarness(Harness):
             task_types=tuple(task_types) if isinstance(task_types, (list, tuple)) else None,
             crons=crons if isinstance(crons, int) else 0,
         )
+
+    def start_source(self, source: str | None) -> str | None:
+        """A main-thread `SessionStart`'s source as the listeners are asked with it: a
+        `resume` reads `startup` while the thread is unturned."""
+        with self._lock:
+            return "startup" if source == "resume" and self._unturned else source
+
+    def start_answered(self) -> None:
+        """The hook server answered the thread's first `SessionStart` since the load: the
+        thread is no longer unturned."""
+        with self._lock:
+            self._unturned = False
 
     def foreign_hook(self, event: str, session_id) -> None:
         with self._lock:
@@ -1515,7 +1578,7 @@ class CodexHarness(Harness):
         if generation is None:
             return "the host never connected to its Codex app-server"
         if generation.thread_id and not generation.ready.is_set():
-            return (f"no turn completed on the fresh Codex thread "
+            return (f"Codex did not take the opening item into the fresh thread "
                     f"{generation.thread_id}, so its window could not attach")
         return "the Codex app-server connection never became ready"
 
@@ -1612,8 +1675,14 @@ def launch(cwd, *, instructions: str | None = None, env=None,
 
 
 def _launch(cwd, *, instructions=None, env=None, window=True, options=None, verify=None,
-            additions=None, resume=None):
-    """`launch`, returning the endpoint beside the session, for the host entry."""
+            additions=None, resume=None, opened: list | None = None):
+    """`launch`, returning the endpoint beside the session, for the host entry.
+
+    With `opened`, the endpoint is appended to it as soon as it is open. A stop asked
+    (an exception that is not an ``Exception``) after the first load was accepted then
+    leaves the endpoint up: the session is ready and other processes may hold it, so the
+    caller ends it as it ends any stop. Without `opened`, or before that point, the
+    endpoint is stopped as a failed launch."""
     from .additions import for_host
 
     path = Path(cwd).resolve()
@@ -1623,13 +1692,18 @@ def _launch(cwd, *, instructions=None, env=None, window=True, options=None, veri
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
                            options=options, verify=verify, resume=resume)
     endpoint = Endpoint(harness, env=harness.env).open()
+    if opened is not None:
+        opened.append(endpoint)
     try:
         harness.start()
         session = (turns_client.find(session_id=harness.session_id)
                    if harness.session_id else turns_client.find(pid=harness.pid))
         if session is None:
             raise RuntimeError("the Codex endpoint opened but could not be found")
-    except BaseException:
+    except BaseException as exc:
+        if (opened is not None and harness._accepted.is_set()
+                and not isinstance(exc, Exception)):
+            raise
         endpoint.stop("the Codex launch failed")
         raise
     with _HOSTS_LOCK:

@@ -251,6 +251,26 @@ the new model, so mail to it is held. A send to anything comms cannot read is re
 these reports, a reverted or forked Codex thread, an OpenCode session with a revert
 pending, and a rollout or row comms does not recognise.
 
+## A launch binds before its harness starts
+
+The Claude and Codex wrappers start no harness under a name they don't hold. Each forks
+its session's adapter, which binds the name with the daemon and listens on the claim
+socket, and waits for the adapter's word before it starts `claude` or turns' Codex host.
+Both wait at most 15 seconds. After 2 seconds with no word the wrapper prints one line,
+`moxi-comms-claude: waiting for the comms daemon to bind <name> (up to 15s)` (or
+`moxi-comms-codex: ...`). A bind the daemon doesn't answer in the 15 seconds ends the
+launch: the wrapper prints `<name> was not launched: the comms daemon did not answer in
+15s; try again, or run moxi comms doctor` with the adapter's log, exits 75, and the
+harness never starts. Neither wrapper starts its harness anyway once the wait runs out.
+
+The adapter that bound late has nobody to tell. Its word to the wrapper can't be
+delivered, so it lets the name go (the daemon unbinds it and its claim file goes) and
+ends, before it delivers anything; an adapter whose wrapper has already ended when it
+starts never binds. A launcher reads which harnesses' wrappers end this way, and the
+longest of their waits, from comms' API: `ENDS_ON_BIND_TIMEOUT` (`{"claude", "codex"}`)
+and `BIND_WAIT` (15 seconds). The OpenCode wrapper isn't one of them: it binds in its
+own process before it starts OpenCode's server, so it waits for no adapter's word.
+
 ## Codex
 
 **Through turns' host.** `moxi comms codex` (also `moxi-comms-codex`) starts a Codex
@@ -285,8 +305,8 @@ every resume, and refuses to deliver into a load whose sandbox did not take; `mo
 doctor` shows why, in turns' rows. `--dry-run` prints the host line and starts nothing.
 
 A bad flag, row or config file exits 2, a name the daemon refuses (held, reserved,
-retired) exits 3 with the daemon's words, and a daemon that isn't running exits 75, all
-before Codex starts. A host that can't start exits 1. Once the host runs, its exit
+retired) exits 3 with the daemon's words, and a daemon that isn't running, or a bind
+it doesn't answer in 15 seconds, exits 75, all before Codex starts. A host that can't start exits 1. Once the host runs, its exit
 status is the launch's.
 
 **How mail arrives.** Mail goes in at turn boundaries: while no turn runs, the adapter

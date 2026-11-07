@@ -45,13 +45,32 @@ def test_the_umbrellas_verbs_are_reserved():
     assert isinstance(names.VERBS, frozenset)
 
 
-def test_the_core_keeps_five_more_names():
-    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs", "anchor"}
+def test_the_core_keeps_seven_more_names():
+    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs", "test",
+                              "anchor"}
     assert not names.RESERVED & names.VERBS
-    for name in ("doctor", "installs", "set", "moxi"):
+    for name in ("doctor", "installs", "set", "moxi", "test"):
         assert names.is_reserved(name)
-    for name in ("comms", "sets", None, 3):
+    for name in ("comms", "sets", "tests", None, 3):
         assert not names.is_reserved(name)
+
+
+def test_each_name_the_core_keeps_has_one_reason():
+    for name in names.RESERVED:
+        why = names.reserved_why(name)
+        assert isinstance(why, str) and why and "\n" not in why, name
+    assert len({names.reserved_why(name) for name in names.RESERVED}) == len(names.RESERVED)
+    assert names.reserved_why("test") == ("its variables would start MOXI_TEST_, which "
+                                          "moxi-dev's test tiers use")
+    for name in ("comms", "doctor", "tests", None, 3):
+        assert names.reserved_why(name) is None
+
+
+def test_test_is_kept_for_moxi_devs_test_tier_prefix():
+    # moxi-dev's test tiers read MOXI_TEST_*; a module named test would own that prefix.
+    from moxi_dev import contract
+
+    assert names.env_prefix("test") == contract.DEV_ENV_PREFIX == "MOXI_TEST_"
 
 
 @pytest.mark.parametrize("name", ["moxi-handoff", "moxi-comms-send", "moxi-2fa", "moxi-a1-b2",

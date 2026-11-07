@@ -14,9 +14,6 @@ Everything it does is driven by the environment it inherits from the wrapper:
                            control.sock   a JSON-lines control socket of the app-server
     FAKE_CODEX_TAG       a label written into every event (which copy of the stub ran)
     FAKE_CODEX_SELF      set by the installed wrapper: the path it was run as
-    FAKE_CODEX_PRIMING   how the first turn of a fresh thread ends: complete (default),
-                         failed, interrupted, hang (starts, never completes) or
-                         never-start (no turn/started at all)
     FAKE_CODEX_WINDOW    comma-separated window behaviours:
                            alt           enter the alternate screen and hide the cursor
                            raw           put the terminal in raw mode
@@ -95,7 +92,6 @@ def app_server(socket_path: str) -> int:
     from fake_app_server import FakeAppServer
 
     directory = record_dir()
-    priming = os.environ.get("FAKE_CODEX_PRIMING", "complete")
 
     class StubServer(FakeAppServer):
         def _dispatch(self, conn, msg):
@@ -104,19 +100,6 @@ def app_server(socket_path: str) -> int:
                     f.write(json.dumps({"pid": os.getpid(), "method": msg.get("method"),
                                         "params": msg.get("params") or {}}) + "\n")
             return super()._dispatch(conn, msg)
-
-        def _turn_start(self, params):
-            thread = self._thread_of(params)
-            first = not thread["turns"]
-            if first and priming == "never-start":
-                return {"turn": {"id": "phantom-never-started", "items": [],
-                                 "status": "inProgress", "error": None}}
-            result = super()._turn_start(params)
-            if first and priming in ("complete", "completed", "failed", "interrupted"):
-                status = "completed" if priming == "complete" else priming
-                threading.Timer(0.2, self.complete_turn,
-                                args=(thread["id"], status)).start()
-            return result
 
     store = str(directory / "threads.json") if directory is not None else None
     server = StubServer(socket_path, store=store)
