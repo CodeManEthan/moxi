@@ -18,8 +18,10 @@ and `wrap` with no supervisor and no file outside its tmp:
     with moxi.units._backend.use(FakeBackend(root)):
         moxi.units.apply(moxi.units.plan("demo"), runner=supervisor)
 
-The texts are not the systemd backend's: they carry the mark, the command and the
-schedule in a form this module reads back, and nothing else.
+The texts are not the systemd backend's: they carry the mark, the command, the schedule
+and a tagged home's `env = MOXI_HOME=<path>` in a form this module reads back, and nothing
+else. Names follow the home as systemd's do: `moxi-<tag>-<module>-<name>` and
+`50-moxi-<tag>-<module>.conf` for a home given by `MOXI_HOME`.
 """
 
 from __future__ import annotations
@@ -31,7 +33,8 @@ from ._backend import (
     ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, socket_name,
     socket_place, socket_state)
 from ._fence import Fence, Ran
-from ._systemd import SocketStarts
+from ._home import environment, home_tag
+from ._systemd import SocketStarts, dropin_name
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
 MARK = "# moxi unit: "
@@ -203,14 +206,16 @@ class FakeBackend:
     # -- writing -----------------------------------------------------------------------------
 
     def _stem(self, module: str, name: str) -> str:
-        return f"moxi-{module}-{name}"
+        tag = home_tag()
+        return f"moxi-{module}-{name}" if tag is None else f"moxi-{tag}-{module}-{name}"
 
     def render(self, spec: Spec) -> tuple[Rendered, ...]:
         stem = self._stem(spec.module, spec.name)
         head = [f"{MARK}{spec.unit}"] + ([DISABLED] if not spec.enabled else [])
         head.append(f"description = Moxi {spec.module}: {spec.doc}")
+        env = [f"env = {name}={value}" for name, value in spec.environment]
         if spec.kind == "daemon":
-            body = head + [f"run = {' '.join(spec.command)}", f"stop = {spec.stop}"]
+            body = head + env + [f"run = {' '.join(spec.command)}", f"stop = {spec.stop}"]
             if spec.cwd:
                 body.append(f"cwd = {spec.cwd}")
             sockets = []
@@ -231,7 +236,7 @@ class FakeBackend:
         gate = [self.gate, "run"] + (["--if", f"{spec.module}.{spec.switch}"]
                                      if spec.switch else [])
         gate += ["--record", spec.unit, "--", *spec.command]
-        service = head + [f"run = {' '.join(gate)}"]
+        service = head + env + [f"run = {' '.join(gate)}"]
         schedule = spec.schedule
         when = (f"every = {schedule.every}m" if schedule.every else
                 "at = " + " ".join(f"{h:02d}:{m:02d}" for h, m in schedule.at)
@@ -256,8 +261,12 @@ class FakeBackend:
             mark = self.mark(text)
             if not mark or mark.split("/", 1)[0] != module:
                 continue
-            texts[path] = text
             name = mark.split("/", 1)[1]
+            # Only a file at a name `render` gives this mark is the writer's (a socket
+            # unit is held to its place below).
+            if path.suffix != ".socket" and path.stem != self._stem(module, name):
+                continue
+            texts[path] = text
             found.setdefault((name, path.suffix), []).append(path)
         out = []
         for (name, suffix), paths in sorted(found.items()):
@@ -534,7 +543,7 @@ class FakeBackend:
     # -- wraps -------------------------------------------------------------------------------
 
     def _dropin(self, service: str, module: str) -> Path:
-        return self.root / f"{service}.d" / f"50-moxi-{module}.conf"
+        return self.root / f"{service}.d" / dropin_name(module)
 
     def _wrapped(self, shown: Mapping):
         from ._types import Wrapped
@@ -552,12 +561,14 @@ class FakeBackend:
 
     def dropin_text(self, ref: str, *, module: str, key: str, name: str) -> str:
         record = f"{module}/{name}"
+        home = environment(module).get("MOXI_HOME")
+        run = f"{self.gate} run" + (f" --home {home}" if home else "")
         return _text([f"{WRAP_MARK}{record}",
                       f"# moxi: timer = {ref}, if = {module}.{key}",
                       "[Service]",
-                      f"ExecCondition={self.gate} run --if {module}.{key} --record {record} "
+                      f"ExecCondition={run} --if {module}.{key} --record {record} "
                       "--condition",
-                      f"ExecStopPost={self.gate} run --record {record} --result"])
+                      f"ExecStopPost={run} --record {record} --result"])
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
         from .. import files
@@ -600,6 +611,9 @@ class FakeBackend:
                 owner = mark[len(WRAP_MARK):].partition("/")[0]
                 if owner != module:
                     return no(f"{service} is wrapped by {owner}")
+                if Path(other) != self._dropin(service, module):
+                    return no(f"{service} is wrapped by {module} of another Moxi home "
+                              f"({Path(other).name})")
         path = self._dropin(service, module)
         if path.exists() and not _first_line(path).startswith(f"{WRAP_MARK}{module}/"):
             return no(f"{path} exists and was not written by moxi; not wrapped")
@@ -610,7 +624,7 @@ class FakeBackend:
 
     def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
         out = []
-        for path in sorted(self.root.glob(f"*.d/50-moxi-{module}.conf")):
+        for path in sorted(self.root.glob(f"*.d/{dropin_name(module)}")):
             try:
                 lines = path.read_text(encoding="utf-8").splitlines()
             except OSError:
@@ -625,7 +639,7 @@ class FakeBackend:
         return tuple(out)
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
-        for path in self.root.glob(f"*.d/50-moxi-{module}.conf"):
+        for path in self.root.glob(f"*.d/{dropin_name(module)}"):
             lines = path.read_text(encoding="utf-8").splitlines()
             if len(lines) > 1 and lines[0].startswith(f"{WRAP_MARK}{module}/") \
                     and f"timer = {ref}," in lines[1]:
@@ -636,7 +650,7 @@ class FakeBackend:
 
     def unwrap_all(self, module: str, fence: Fence) -> list[Acted]:
         out = []
-        for path in sorted(self.root.glob(f"*.d/50-moxi-{module}.conf")):
+        for path in sorted(self.root.glob(f"*.d/{dropin_name(module)}")):
             lines = path.read_text(encoding="utf-8").splitlines()
             if not lines or not lines[0].startswith(f"{WRAP_MARK}{module}/"):
                 continue

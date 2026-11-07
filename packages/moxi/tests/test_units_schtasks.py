@@ -24,6 +24,9 @@ from moxi.units._fence import Fence
 from moxi.units._schtasks import BACKEND, NS, SchtasksBackend
 from moxi_dev.testing import console_script
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 N = {"t": NS}
 
 SETTINGS = """

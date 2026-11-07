@@ -1,9 +1,9 @@
 """The gate, `moxi run`: what every timer the writer installs runs, and what a wrap calls.
 
-    moxi run [--if MODULE.KEY] --record MODULE/NAME [--log PATH] [--restart] [--runtime]
-             [--stop group|process] -- ARGV...
-    moxi run --if MODULE.KEY --record MODULE/NAME --condition
-    moxi run --record MODULE/NAME --result
+    moxi run [--home PATH] [--if MODULE.KEY] --record MODULE/NAME [--log PATH] [--restart]
+             [--runtime] [--stop group|process] -- ARGV...
+    moxi run [--home PATH] --if MODULE.KEY --record MODULE/NAME --condition
+    moxi run [--home PATH] --record MODULE/NAME --result
 
 The first form runs `ARGV` behind a switch. In order:
 
@@ -22,6 +22,12 @@ The first form runs `ARGV` behind a switch. In order:
    start>", "seconds": 1.42, "result": "ran" | "off" | "unreadable" | "not-started",
    "exit": 0}`. A line that can't be written is said on stderr and changes no exit code.
 5. The gate exits with the command's exit code, or 128 + the signal number that ended it.
+
+`--home PATH`, in every form, is the Moxi home the unit was written from: the gate sets
+`MOXI_HOME` to it before it reads anything, so the switch, the run line and the command all
+follow that home. A tagged home's Task Scheduler task carries it, since a task has no
+environment of its own, and so does a tagged home's wrap drop-in, so the foreign service's
+own command is not given the variable. The path must be absolute.
 
 The Windows backend adds four flags; they work the same everywhere, and only the Job
 Object is Windows's own:
@@ -116,15 +122,15 @@ CONDITION_SKIP = 1
 CONDITION_FAULT = 255
 
 USAGE = """\
-usage: moxi run [--if MODULE.KEY] --record MODULE/NAME [--log PATH] [--restart]
-                [--runtime] [--stop group|process] -- ARGV...
-       moxi run --if MODULE.KEY --record MODULE/NAME --condition
-       moxi run --record MODULE/NAME --result
+usage: moxi run [--home PATH] [--if MODULE.KEY] --record MODULE/NAME [--log PATH]
+                [--restart] [--runtime] [--stop group|process] -- ARGV...
+       moxi run [--home PATH] --if MODULE.KEY --record MODULE/NAME --condition
+       moxi run [--home PATH] --record MODULE/NAME --result
 """
 
 _UNIT_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9_-]+")
-_WITH_VALUE = ("--if", "--record", "--log", "--stop")
+_WITH_VALUE = ("--home", "--if", "--record", "--log", "--stop")
 _FLAGS = ("--restart", "--runtime", "--condition", "--result")
 _STOPS = ("group", "process")
 _WINDOWS = sys.platform == "win32"
@@ -138,12 +144,12 @@ class Args:
     """A parsed argument list."""
 
     __slots__ = ("switch", "module", "name", "log", "restart", "runtime", "stop",
-                 "condition", "result", "argv")
+                 "condition", "result", "argv", "home")
 
     def __init__(self, *, switch: tuple[str, str] | None, module: str, name: str,
                  log: str | None = None, restart: bool = False, runtime: bool = False,
                  stop: str = "group", condition: bool = False, result: bool = False,
-                 argv: tuple[str, ...] = ()):
+                 argv: tuple[str, ...] = (), home: str | None = None):
         self.switch = switch
         self.module = module
         self.name = name
@@ -154,6 +160,7 @@ class Args:
         self.condition = condition
         self.result = result
         self.argv = argv
+        self.home = home
 
     @property
     def unit(self) -> str:
@@ -189,11 +196,15 @@ def parse(argv: list[str]) -> Args:
     if "--record" not in seen:
         raise UsageError("--record MODULE/NAME is required")
     module, name = _record(str(seen["--record"]))
+    home = seen.get("--home")
+    if home is not None and not os.path.isabs(str(home)):
+        raise UsageError(f"--home {home!r} is not an absolute path")
+    home = None if home is None else str(home)
     switch = _switch_name(str(seen["--if"]), module) if "--if" in seen else None
     condition, result = "--condition" in seen, "--result" in seen
     if condition or result:
         form = "--condition" if condition else "--result"
-        extra = [w for w in seen if w not in ("--record", "--if", form)]
+        extra = [w for w in seen if w not in ("--home", "--record", "--if", form)]
         if result and "--if" in seen:
             extra.insert(0, "--if")
         if extra:
@@ -203,7 +214,7 @@ def parse(argv: list[str]) -> Args:
         if dashes:
             raise UsageError(f"{form} runs no command; drop the -- and what follows it")
         return Args(switch=switch, module=module, name=name, condition=condition,
-                    result=result)
+                    result=result, home=home)
     if not dashes or not command:
         raise UsageError("the command to run follows --")
     log = seen.get("--log")
@@ -214,7 +225,7 @@ def parse(argv: list[str]) -> Args:
         raise UsageError(f"--stop {stop!r} is neither group nor process")
     return Args(switch=switch, module=module, name=name,
                 log=None if log is None else str(log), restart="--restart" in seen,
-                runtime="--runtime" in seen, stop=stop, argv=command)
+                runtime="--runtime" in seen, stop=stop, argv=command, home=home)
 
 
 def _record(value: str) -> tuple[str, str]:
@@ -342,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, AttributeError):
             pass
         return _usage_exit(argv)
+    if args.home is not None:
+        # Before anything reads a root: the switch, the run line and the command follow it.
+        os.environ[paths.HOME] = args.home
     if args.condition:
         return condition(args)
     if args.result:

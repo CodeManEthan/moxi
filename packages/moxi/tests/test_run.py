@@ -96,6 +96,8 @@ def py(code: str) -> list[str]:
     ["--record", "demo/snapshot", "--stop", "tree", "--", PY],
     ["--record", "demo/snapshot", "--if", "--", PY],
     ["--record", "demo/snapshot", PY],                                  # no --
+    ["--home", "relative", "--record", "demo/snapshot", "--", PY],
+    ["--home", "--record", "demo/snapshot", "--", PY],
 ])
 def test_a_bad_argument_list_exits_2_and_runs_nothing(demo, tmp_path, argv, capsys):
     marker = tmp_path / "ran"
@@ -141,6 +143,37 @@ def test_the_forms_parse():
     assert (args.restart, args.runtime, args.stop, args.argv) == (True, True, "process",
                                                                   ("a", "--b"))
     assert run.parse(["--record", "a/b", "--", "c"]).stop == "group"
+
+
+def test_home_parses_in_every_form():
+    home = str(Path("/homes/b").absolute())
+    assert run.parse(["--home", home, "--record", "a/b", "--", "c"]).home == home
+    assert run.parse(["--home", home, "--if", "demo.rows.backup", "--record",
+                      "demo/backup", "--condition"]).home == home
+    assert run.parse(["--home", home, "--record", "demo/backup", "--result"]).home == home
+    assert run.parse(["--record", "a/b", "--", "c"]).home is None
+
+
+def test_home_is_the_home_the_switch_the_run_line_and_the_command_follow(demo, tmp_path,
+                                                                        monkeypatch):
+    """A task has no environment of its own, so the gate is told the home it was written
+    from: it reads the switch and writes the run line there, and the command runs with it,
+    whatever `MOXI_HOME` the gate was started with."""
+    other = tmp_path / "other-home"
+    monkeypatch.setenv("MOXI_HOME", str(other))
+    write_config(paths.Layout("demo").config_file(), "[snapshot]\nenabled = true\n")
+    other_runs = run.runs_path("demo")
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "moxi-home"))
+    seen = tmp_path / "seen"
+    done = gate("--home", str(other), "--if", "demo.snapshot.enabled", "--record",
+                "demo/snapshot", "--", *py(f"""
+                import os
+                open({str(seen)!r}, "w").write(os.environ["MOXI_HOME"])
+                """))
+    assert done.returncode == 0, done.stderr
+    assert seen.read_text() == str(other)
+    assert [r["result"] for r in files.read_records(other_runs)] == ["ran"]
+    assert lines() == []
 
 
 def test_help_runs_nothing(capsys):

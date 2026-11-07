@@ -266,7 +266,9 @@ class Spec:
     environment and its `args`, or a run-time entry's `argv`. A timer's backend wraps it in
     the gate, `moxi run [--if <module>.<switch>] --record <module>/<name> -- <command>`,
     with no `--if` when `switch` is None. `doc` is the entry's one line (the unit's name when
-    it has none). `entry` is the declaration as read.
+    it has none). `entry` is the declaration as read. `environment` is the variables the
+    unit runs with (`moxi.units.environment`), as `(name, value)` pairs: `MOXI_HOME` for a
+    tagged home, none for the default home.
     """
 
     module: str
@@ -284,6 +286,7 @@ class Spec:
     memory_swap_max: str | None = None
     schedule: Schedule | None = None
     socket: Socket | None = None
+    environment: tuple[tuple[str, str], ...] = ()
 
     @property
     def unit(self) -> str:

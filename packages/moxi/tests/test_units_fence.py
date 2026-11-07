@@ -13,6 +13,9 @@ from moxi.units._backend import Backend, UnitRef
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._fence import Fence, FenceError, argv
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 
 @pytest.mark.parametrize("backend, verb, args, expect", [
     ("systemd", "daemon-reload", (), ["systemctl", "--user", "daemon-reload"]),

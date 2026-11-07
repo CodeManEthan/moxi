@@ -22,6 +22,9 @@ from moxi.units import _backend, _declare, _plan, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script, need_symlinks
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 SETTINGS = """
 [relay.enabled]
 type = "bool"
@@ -75,6 +78,14 @@ def signal_number():
 """
 
 
+class _Roots:
+    """The default home's roots by kind: `roots / "state"` is the state root `MOXI_HOME /
+    "state"` would be under a home of its own."""
+
+    def __truediv__(self, kind: str) -> Path:
+        return getattr(moxi.paths.Layout("demo"), f"{kind}_root")()
+
+
 @pytest.fixture
 def w(site, tmp_path, monkeypatch):
     """A module `demo` with a legacy state folder, its units written and running on the fake
@@ -91,7 +102,7 @@ def w(site, tmp_path, monkeypatch):
     supervisor = FakeSupervisor(root)
     backend = FakeBackend(root, runner=supervisor)
     lines: list[str] = []
-    home_dir = Path(os.environ["MOXI_HOME"])
+    home_dir = _Roots()
 
     def module(*, units_from=None, version="0.1.0", **names):
         site.write("moxi_demo/settings.toml", SETTINGS)

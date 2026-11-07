@@ -127,6 +127,14 @@ TIMER = ("{'snapshot': {'command': 'moxi-demo-relay', 'every': '5m', "
          "'doc': 'take a snapshot', 'switch': 'snapshot.enabled'}}")
 
 
+class _Roots:
+    """The default home's roots by kind: `roots / "state"` is the state root `MOXI_HOME /
+    "state"` would be under a home of its own."""
+
+    def __truediv__(self, kind: str) -> Path:
+        return getattr(moxi.paths.Layout("demo"), f"{kind}_root")()
+
+
 class Box:
     """A module `demo` on the fake backend, set up in this process, and the environment
     the real processes run it in."""
@@ -137,7 +145,7 @@ class Box:
         self.root = tmp / "units"
         self.scripts = tmp / "bin"
         self.log = tmp / "log.jsonl"
-        self.home = Path(os.environ["MOXI_HOME"])
+        self.home = _Roots()
         self.sup = settle_procs.Supervisor(self.root, tmp / "supervisor.json")
         self.backend = FakeBackend(self.root, runner=self.sup)
         layout = tmp / "box.json"
@@ -220,7 +228,9 @@ class Box:
 
 
 @pytest.fixture
-def box(site, tmp_path, monkeypatch):
+def box(site, tmp_path, monkeypatch, default_home):
+    """The box in the default home, whose unit names carry no tag; this process reads the
+    same roots its real processes do."""
     scripts = tmp_path / "bin"
     scripts.mkdir()
     console_script(scripts, "moxi-demo-relay")
@@ -228,6 +238,9 @@ def box(site, tmp_path, monkeypatch):
     monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldbox")
     (tmp_path / "units").mkdir()
     b = Box(site, tmp_path)
+    for name in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME",
+                 "XDG_CACHE_HOME"):
+        monkeypatch.setenv(name, b.env[name])
     b.sup.save()
     with _backend.use(b.backend):
         yield b

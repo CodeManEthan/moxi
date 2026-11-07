@@ -138,6 +138,23 @@ def _no_real_core_roots(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture
+def default_home(_no_real_core_roots, monkeypatch) -> None:
+    """The default home, whose unit names carry no tag: `MOXI_HOME` unset, and no
+    module's own locator (`MOXI_<M>_HOME` and the rest, which the test fence sets and
+    which would have `moxi.units.plan` refuse the module's units). The roots fall back to
+    the XDG homes and Windows's folders, which the fence has put in the test's tmp."""
+    import os
+
+    import moxi.paths
+
+    monkeypatch.delenv(moxi.paths.HOME, raising=False)
+    for name in list(os.environ):
+        if (name.startswith("MOXI_")
+                and name.endswith(tuple(f"_{suffix}" for suffix in moxi.paths.LOCATORS))):
+            monkeypatch.delenv(name)
+
+
+@pytest.fixture
 def work(tmp_path) -> Path:
     """An empty directory of the test's own. The fence keeps its HOME in `tmp_path`, so a
     test that lists what it wrote there lists this instead."""

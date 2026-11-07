@@ -5,6 +5,13 @@ in this environment, its switch, its socket's port and what starts it), renders 
 the backend, and compares the new text with what is on disk. It writes nothing and makes
 no supervisor call, so it takes no lock.
 
+A unit's name says its home (`moxi.units.home_tag`) and nothing else, so a module's units
+are refused, cause `locator`, while this process's environment sets any of that module's
+own locators (`MOXI_<M>_HOME` and the rest), in any home: they would move the module's
+stores under a name that doesn't say so, and in the default home rewrite its units. A
+second store is made with `MOXI_HOME`. The names, the variables a unit runs with and this
+check read this process's environment; `env` is for the module's settings alone.
+
 A daemon's sockets. On a backend that writes them as units of their own (systemd), they
 are one `socket` change over the whole set: `add` when none is written, `keep` when the
 written set names the same files and each is byte-equal, else `change`, with the written
@@ -32,6 +39,7 @@ from pathlib import Path
 from . import _backend
 from ._backend import RenderError, Schedule, Socket, Spec, UnitRef
 from ._declare import digest, merge, switch_problem, switch_value
+from ._home import environment, locators_set
 from ._types import DeclarationError, Declarations, UnitChange
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -77,19 +85,21 @@ def plan(module: str, *, only: Iterable[str] | None = None,
     marked: dict[str, list[UnitRef]] = {}
     for ref in impl.marked(module):
         marked.setdefault(ref.name, []).append(ref)
+    set_here = locators_set(module)
+    if set_here:
+        which = ", ".join(set_here)
+        reason = (f"{which} {'is' if len(set_here) == 1 else 'are'} set, and a unit's name "
+                  "says only its Moxi home, so these units would run with stores their "
+                  "name doesn't say; a second store is made with MOXI_HOME, which gives "
+                  f"its units names of their own; fix: unset {which}")
+        return _refuse_all(module, declared, marked, wanted, "locator", reason)
     if _editable(found):
         reason = (f"{found.distribution} is an editable install; units are written only "
                   f"from an installed release: `moxi install {module}` in a uv tool "
                   "environment")
-        names = {name for _, name, _ in declared}
-        out = [_unit(module, name, kind, "refuse", "editable", reason, entry)
-               for kind, name, entry in declared]
-        out += [_unit(module, ref.name, ref.kind, "refuse", "editable", reason, None,
-                      ref.paths) for name, refs in marked.items() if name not in names
-                for ref in refs if wanted is None or name in wanted]
-        return out
+        return _refuse_all(module, declared, marked, wanted, "editable", reason)
 
-    planner = _Planner(found, impl, env)
+    planner = _Planner(found, impl, env, environment(module))
     out: list[UnitChange] = []
     for kind, name, entry in declared:
         refs = marked.pop(name, [])
@@ -112,14 +122,27 @@ def plan(module: str, *, only: Iterable[str] | None = None,
     return out
 
 
+def _refuse_all(module, declared, marked, wanted, cause, reason) -> list[UnitChange]:
+    """Every declared unit, and every marked one the plan would otherwise remove,
+    refused with `cause` and `reason`."""
+    names = {name for _, name, _ in declared}
+    out = [_unit(module, name, kind, "refuse", cause, reason, entry)
+           for kind, name, entry in declared]
+    out += [_unit(module, ref.name, ref.kind, "refuse", cause, reason, None, ref.paths)
+            for name, refs in marked.items() if name not in names
+            for ref in refs if wanted is None or name in wanted]
+    return out
+
+
 class _Planner:
     """The per-unit half of `plan`, holding what one module's units share."""
 
-    def __init__(self, found, impl, env):
+    def __init__(self, found, impl, env, environ=None):
         self.found = found
         self.module = found.name
         self.impl = impl
         self.env = env
+        self.environment = tuple(sorted((environ or {}).items()))
         self._schema: list = []
         self._ipv6: list[bool] = []
 
@@ -195,7 +218,8 @@ class _Planner:
                     upgrade=entry.get("upgrade", "restart"),
                     memory_high=entry.get("memory_high"),
                     memory_swap_max=entry.get("memory_swap_max"),
-                    schedule=_schedule(entry) if kind == "timer" else None, socket=socket)
+                    schedule=_schedule(entry) if kind == "timer" else None, socket=socket,
+                    environment=self.environment)
         try:
             rendered = self.impl.render(spec)
         except RenderError as exc:
