@@ -41,6 +41,23 @@ Every harness's lines and rows map into the same eight kinds of record:
 - `other`, a line or row no other kind maps, with whether the harness's kind is one the
   mapping knows.
 
+A message says who submitted it, in `injected`. It is true when the harness's own field
+for where the message came from names something other than the person at the session's
+prompt: the harness itself, a plugin, a channel, another session or a background task.
+It is false when that field names the person, or the message is the model's own, and
+unknown when the harness writes no such field. Claude Code writes `origin.kind` and flags
+the lines it adds or summarises (`isMeta`, `isCompactSummary`); Codex writes which kinds
+of content a user message holds; OpenCode marks a text part it added `synthetic`. Where
+no such field is written, a short fixed list of wrappers the harness puts around text it
+composed (Claude Code's `<local-command-stdout>`, an older Codex rollout's
+`<environment_context>`) marks the message true. Three more cases read as true because the
+harness wrote the message itself: a Claude Code assistant message whose model is
+`<synthetic>`, a Codex `developer` or `system` message, and an OpenCode `summary`
+message. A message's text never makes it false.
+So a prompt sent through Claude Code's SDK, a command line typed at the prompt, and most
+user messages in Codex and OpenCode read as unknown: the harness does not say who wrote
+them.
+
 Nothing is dropped: a line sessions cannot map still comes back, as `malformed` or
 `other`, so a caller never takes a gap for nothing there. Every record says which harness
 and session it came from, where in the source it sits, its time, its turn, and the
