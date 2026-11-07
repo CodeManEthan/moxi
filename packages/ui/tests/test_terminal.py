@@ -1,7 +1,8 @@
-"""The check a page makes before it writes, its lines, and `where()`.
+"""The check a page makes before it writes, its lines, `where()`, and the API that offers
+them as ui's interface 2.
 
-Each test writes the record under the test's own anchor (the kit's `MOXI_ANCHOR_HOME`), so
-no test reads or writes the real account's record.
+Each test writes the core's record under the test's own anchor (the kit's
+`MOXI_ANCHOR_HOME`), so no test reads or writes the real account's record.
 """
 
 from __future__ import annotations
@@ -11,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from moxi import cli, paths, terminal
-from moxi.terminal import _check, _lines, _record
+from moxi import modules, paths
+from moxi import terminal as core
+from moxi_ui import terminal
 
 
 def store(env):
@@ -21,7 +23,7 @@ def store(env):
 
 
 def write_record(env, **kw):
-    return _record.write(env, **kw)
+    return core.write(env, **kw)
 
 
 @pytest.fixture
@@ -34,8 +36,8 @@ def at(tmp_path, monkeypatch):
 
 
 def without_anchor_clause(line):
-    return line.replace(" " + _lines.anchor_set(page=True), "").replace(
-        " " + _lines.anchor_set(page=False), "")
+    return line.replace(" " + terminal.anchor_clause(page=True), "").replace(
+        " " + terminal.anchor_clause(page=False), "")
 
 
 # -- agreement and differences -----------------------------------------------------------------
@@ -144,8 +146,8 @@ def test_a_relative_page_value_names_the_terminals_value(monkeypatch, at):
 
 @pytest.mark.skipif(os.name == "nt", reason="HOME places no home on Windows")
 def test_a_relative_home_names_home(monkeypatch):
-    monkeypatch.delenv("MOXI_HOME")
-    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.delenv("MOXI_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     write_record({**os.environ, "HOME": "ada"})
     line = terminal.check(store)
     assert '(HOME is "ada")' in line
@@ -154,8 +156,8 @@ def test_a_relative_home_names_home(monkeypatch):
 
 @pytest.mark.skipif(os.name == "nt", reason="HOME places no home on Windows")
 def test_an_empty_home_reads_as_unset_and_is_a_full_path(monkeypatch):
-    monkeypatch.delenv("MOXI_HOME")
-    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.delenv("MOXI_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.setattr(paths, "_account_home", lambda: os.environ["HOME"])
     write_record({**os.environ, "HOME": ""})
     assert terminal.check(store) is None
@@ -252,10 +254,10 @@ def test_a_shapeless_record_is_no_record():
 
 def test_a_persisting_read_error_gives_the_unreadable_line(monkeypatch):
     write_record(None)
-    real = _record.read
+    real = core.read
     monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(
         PermissionError(13, "Permission denied")))
-    monkeypatch.setattr(_record, "read", lambda path=None: real(path, retry=0.05))
+    monkeypatch.setattr(core, "read", lambda path=None: real(path, retry=0.05))
     line = terminal.check(store)
     assert "can't be read (Permission denied), so this page refuses to write" in line
     assert "then type moxi modules in a terminal of your own" in line
@@ -281,7 +283,7 @@ def test_a_newer_format_names_both_versions():
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text('{"format": 2, "moxi": "9.0.0", "env": {}}')
     line = terminal.check(store)
-    assert f"written by moxi 9.0.0 in format 2, newer than the moxi {_record.version()}" \
+    assert f"written by moxi 9.0.0 in format 2, newer than the moxi {core.version()}" \
         in line
     assert "restart this page on the new code (run moxi ui stop)" in line
 
@@ -310,15 +312,15 @@ def test_no_anchor_variable_no_clause_and_no_place_line(monkeypatch, tmp_path):
 # -- Windows names ------------------------------------------------------------------------------
 
 def test_names_compare_without_case_on_windows():
-    env = _check.Noting({"Path": "a", "moxi_home": "b"}, windows=True)
+    env = terminal.Noting({"Path": "a", "moxi_home": "b"}, windows=True)
     assert env.get("PATH") == "a" and env["MOXI_HOME"] == "b" and "path" in env
     assert list(env.read) == ["PATH", "MOXI_HOME"]
-    posix = _check.Noting({"Path": "a"}, windows=False)
+    posix = terminal.Noting({"Path": "a"}, windows=False)
     assert posix.get("PATH") is None
 
 
 def test_the_check_folds_names_on_windows(monkeypatch):
-    monkeypatch.setattr(_check, "_windows", lambda: True)
+    monkeypatch.setattr(terminal, "_windows", lambda: True)
     write_record({"MOXI_HOME": r"C:\m"})
     monkeypatch.delenv("MOXI_HOME", raising=False)
     monkeypatch.setenv("moxi_home", r"C:\m")
@@ -330,7 +332,7 @@ def test_the_check_folds_names_on_windows(monkeypatch):
 
 
 def test_windows_paths_compare_after_case_folding(monkeypatch):
-    monkeypatch.setattr(_check, "_windows", lambda: True)
+    monkeypatch.setattr(terminal, "_windows", lambda: True)
     write_record({"MOXI_HOME": r"C:\M"})
     monkeypatch.setenv("MOXI_HOME", r"c:/m")
     assert terminal.check(lambda env: {"the folder": env["MOXI_HOME"]}) is None
@@ -350,19 +352,60 @@ def test_where_per_platform():
 
 def test_the_page_fix_reads_set_where_then_step(monkeypatch, at):
     for platform in ("linux", "darwin", "win32"):
-        line = _lines.fix(["x"], ["A to /b"], [], page=True, ui=True, platform=platform)
+        line = terminal.fix(["x"], ["A to /b"], [], page=True, platform=platform)
         place, step = terminal.where(platform)
         assert line == f"x. Set A to /b {place}, then {step}; or run the command in a terminal."
 
 
-def test_the_terminal_fix_names_the_step_only_with_ui():
-    with_ui = _lines.fix(["x"], ["A to /b"], [], page=False, ui=True, platform="linux")
-    without = _lines.fix(["x"], ["A to /b"], [], page=False, ui=False, platform="linux")
-    assert "daemon-reload" in with_ui and "daemon-reload" not in without
+def test_the_terminal_fix_always_names_the_step():
+    # A terminal caller loaded ui to get the line, so the step that restarts the shell is
+    # always ui's to name.
+    for platform in ("linux", "darwin", "win32"):
+        line = terminal.fix(["x"], ["A to /b"], [], page=False, platform=platform)
+        place, step = terminal.where(platform)
+        assert line.endswith(f"set A to /b {place}, then {step}.")
 
 
-@pytest.mark.parametrize("command", [_lines.RECORD_COMMAND, _lines.DOCTOR_COMMAND])
-def test_each_command_a_line_names_is_a_core_verb(command):
-    program, verb = command.split()
-    assert program == "moxi" and verb in cli._VERBS
-    assert verb not in cli._NO_STRAY_CHECK
+def test_the_lines_name_the_cores_commands():
+    record = str(paths.terminal_record())
+    for page in (True, False):
+        line = terminal.no_record(record, page=page)
+        assert f"Type {core.RECORD_COMMAND} in a terminal of your own" in line
+        assert f"run {core.DOCTOR_COMMAND} in that terminal" in line
+        assert f"then type {core.RECORD_COMMAND} in" in terminal.unreadable(record, "x",
+                                                                          page=page)
+
+
+def test_the_restart_step_names_uis_own_stop_verb():
+    from moxi_ui import cli
+
+    assert "moxi ui stop" in terminal.where("linux").step
+    assert "moxi ui stop" in terminal.newer("r", 2, "9", "1", page=True)
+    with pytest.raises(SystemExit) as done:
+        cli.main(["stop", "--help"])
+    assert done.value.code == 0
+
+
+# -- ui's interface 2 --------------------------------------------------------------------------
+
+def test_interface_2_offers_the_check_where_and_where_type():
+    found = modules.load("ui", interface=2)
+    assert found.state == modules.PRESENT, found.reason
+    assert found.api.check is terminal.check
+    assert found.api.where is terminal.where and found.api.Where is terminal.Where
+    write_record(None)
+    assert found.api.check(store) is None
+
+
+def test_loading_the_api_imports_nothing_of_the_shell_or_the_core():
+    # Every `moxi.modules.load("ui")` imports the API module, the shell's own loaders
+    # among them, so it does no work at import: only the standard library.
+    from moxi import proc
+    from moxi.paths import python
+
+    code = ("import sys; before = set(sys.modules); import moxi_ui.api; "
+            "print(sorted(m for m in set(sys.modules) - before "
+            "if m.split('.')[0] in ('moxi', 'moxi_ui', 'moxi_loopback')))")
+    done = proc.run([str(python()), "-I", "-c", code], timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.decode().strip() == "['moxi_ui', 'moxi_ui.api', 'moxi_ui.terminal']"

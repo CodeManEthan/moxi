@@ -1314,7 +1314,7 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     be read or written is a `fail`.
     """
     from .. import paths, terminal
-    from ..terminal import _check, _lines, _record, _walk
+    from ..terminal import _lines, _record, _walk
 
     name = "terminal record"
 
@@ -1330,7 +1330,7 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
         record = paths.terminal_record()
     except paths.NoAnchor as no:
         return stopped("warn", _record.Outcome(_record.NO_PLACE, None, error=no))
-    if _check._anchor_set(os.environ, _check._windows()):
+    if terminal.anchor_set(os.environ):
         return worded("warn", _lines.row_anchor_set(str(record)))
     if not (_record.keyboard() if keyboard is None else keyboard):
         return worded("warn", _lines.NO_KEYBOARD)
@@ -1342,8 +1342,8 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     held = _record.read(record)
     if isinstance(held, _record.Unreadable):
         return Row("moxi", name, "fail",
-                   f"the record at {record} can't be read ({_check._error(held.error)})",
-                   f"fix its permissions or remove it, then type {_lines.RECORD_COMMAND} "
+                   f"the record at {record} can't be read ({_record._reason(held.error)})",
+                   f"fix its permissions or remove it, then type {terminal.RECORD_COMMAND} "
                    "here")
     if isinstance(held, _record.Record) and held.env == _record.of():
         return Row("moxi", name, "ok", f"the record at {record} holds this terminal's "
@@ -1356,7 +1356,7 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     return Row("moxi", name, "warn",
                f"the record at {record} doesn't hold this terminal's environment, and "
                "this run made none: it wasn't started as the moxi command",
-               f"type {_lines.RECORD_COMMAND} in this terminal")
+               f"type {terminal.RECORD_COMMAND} in this terminal")
 
 
 def _unwritable(record: Path) -> OSError | None:
