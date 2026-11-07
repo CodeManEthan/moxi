@@ -128,8 +128,8 @@ own cleanup. `retention()` (interface 3) reads each harness's setting as it is s
 - OpenCode: sessions reads no retention setting for it.
 
 sessions' setup prints these lines at install, and `moxi doctor sessions` shows them in its
-`retention` row, which warns when Codex compresses rollouts or a settings file can't be
-read. Neither changes a setting: to keep Claude Code's transcripts longer, raise
+`retention` row, which warns when Codex compresses rollouts, a settings file can't be
+read, or `cleanupPeriodDays` is not a whole number of days, 1 or more. Neither changes a setting: to keep Claude Code's transcripts longer, raise
 `cleanupPeriodDays` yourself.
 
 Three settings name a root when it is not the usual one: `claude.projects`,

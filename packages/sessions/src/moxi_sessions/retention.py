@@ -55,7 +55,7 @@ class Retention:
       when it can't be listed); None for the others.
     * `warn`: true when something here takes transcripts from sessions that the user may
       not expect: a file that can't be read, Codex's compression switched on, or a
-      `cleanupPeriodDays` that is not a whole number.
+      `cleanupPeriodDays` that is not a whole number of days, 1 or more.
     * `lines`: what a setup prints, each a plain sentence; `brief`: one short clause for the
       doctor.
     """
@@ -140,6 +140,11 @@ def _claude(environ: Mapping[str, str]) -> Retention:
             f"Claude Code: {CLAUDE_KEY} is {json.dumps(value)} in {file}, which is not a "
             "whole number of days.", raise_it),
             f"Claude Code: {CLAUDE_KEY} is {json.dumps(value)}, not a whole number")
+    if value < 1:
+        return Retention(CLAUDE, file, CLAUDE_KEY, value, None, True, (
+            f"Claude Code: {CLAUDE_KEY} is {value} in {file}, which is below one day, so how "
+            "long Claude Code keeps transcripts is not known.", raise_it),
+            f"Claude Code: {CLAUDE_KEY} is {value}, below one day")
     return Retention(CLAUDE, file, CLAUDE_KEY, value, None, False, (
         f"Claude Code: {CLAUDE_KEY} is {value} in {file}. Claude Code deletes transcripts "
         f"older than {value} days.", raise_it),

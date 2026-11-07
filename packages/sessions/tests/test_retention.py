@@ -102,6 +102,22 @@ def test_a_claude_value_that_is_not_whole_days_warns(home, value):
     assert "not a whole number of days" in item.lines[0]
 
 
+@pytest.mark.parametrize("value", [0, -5])
+def test_a_claude_value_below_one_day_warns(home, capsys, value):
+    path = claude_settings(home, {"cleanupPeriodDays": value})
+    item = by_harness()["claude"]
+    assert item.warn and item.value == value
+    assert item.lines[0] == (f"Claude Code: cleanupPeriodDays is {value} in {path}, which is "
+                             "below one day, so how long Claude Code keeps transcripts is "
+                             "not known.")
+    assert item.brief == f"Claude Code: cleanupPeriodDays is {value}, below one day"
+    assert "older than" not in " ".join(item.lines)
+    row = doctor.retention_row()
+    assert row.state == "warn" and f"cleanupPeriodDays is {value}, below one day" in row.detail
+    setup.setup()
+    assert f"sessions: {item.lines[0]}" in capsys.readouterr().out.splitlines()
+
+
 # --- Codex ---------------------------------------------------------------------------------
 
 def test_codex_has_no_age_limit_and_compression_unset_is_off(home):
