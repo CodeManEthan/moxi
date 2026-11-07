@@ -33,9 +33,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 #: A unit the core writes: systemd `moxi-<module>-<name>.service`, launchd
-#: `moxi.<module>.<name>`. The module group is the module's name.
-SYSTEMD_UNIT = re.compile(r"moxi-([a-z0-9]+)-([a-z0-9][a-z0-9_-]*)\.service")
-LAUNCHD_UNIT = re.compile(r"moxi\.([a-z0-9]+)\.([a-z0-9][a-z0-9_.-]*)")
+#: `moxi.<module>.<name>`, each with the home's tag (`h` and 8 hex digits) before the
+#: module for a home given by `MOXI_HOME`. The module group is the module's name.
+SYSTEMD_UNIT = re.compile(r"moxi-(?:h[0-9a-f]{8}-)?([a-z0-9]+)-([a-z0-9][a-z0-9_-]*)\.service")
+LAUNCHD_UNIT = re.compile(r"moxi\.(?:h[0-9a-f]{8}\.)?([a-z0-9]+)\.([a-z0-9][a-z0-9_.-]*)")
 
 #: The one daemon that execs into a program that hands out terminals: slots' server,
 #: which becomes tmux.

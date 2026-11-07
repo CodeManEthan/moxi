@@ -10,6 +10,8 @@
   `moxi.units.ids(module, name, kind="daemon")`. `ids` returns `()` with no supervisor,
   and on a supervisor this moxi has no writer for.
 - `moxi run` takes `--home PATH`.
+- The terminal check reads a tagged home's unit names too, and names the module that
+  started the terminal, not the home's tag.
 - `moxi install` refuses a module's units, cause `locator`, while the shell sets one of
   that module's own locators (`MOXI_<M>_HOME` and the rest); use `MOXI_HOME` for a
   second store.
