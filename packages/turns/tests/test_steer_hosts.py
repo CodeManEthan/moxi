@@ -17,7 +17,6 @@ import pytest
 from claude_runner import FakeRunner, pipe_pair
 from moxi import ipc
 from moxi_turns import claude_leg as leg
-from moxi_turns import codex as codex_module
 from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
 from moxi_turns import protocol
@@ -230,13 +229,12 @@ class FakeClient:
             return {"thread": {"id": "thread-1"}}
         if method == "thread/resume":
             return {"thread": {"id": "thread-1", "status": {"type": "idle"}}}
+        if method == "thread/inject_items":
+            return {}
         if method == "turn/start":
-            priming = params["input"][0]["text"] == codex_module.PRIMING_TEXT
-            turn_id = "prime" if priming else f"turn-{next(self.turns)}"
+            turn_id = f"turn-{next(self.turns)}"
             self.live_turn = turn_id
             self.on_notification("turn/started", {"turn": {"id": turn_id}}, None)
-            if priming:
-                self.complete()
             return {"turn": {"id": turn_id}}
         if method == "turn/steer":
             text = params["input"][0]["text"]
@@ -265,9 +263,8 @@ class FakeClient:
                              {"turn": {"id": turn_id, "status": status}}, None)
 
     def texts(self, method):
-        """The texts of the app-server's `method` calls, the priming turn left out."""
-        return [params["input"][0]["text"] for m, params in self.calls if m == method
-                and params["input"][0]["text"] != codex_module.PRIMING_TEXT]
+        """The texts of the app-server's `method` calls."""
+        return [params["input"][0]["text"] for m, params in self.calls if m == method]
 
 
 @pytest.fixture

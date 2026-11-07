@@ -19,6 +19,8 @@ Driven by the environment it inherits from the host:
                           written into the app-server's start event
     FAKE_CODEX_LIMITS     JSON: what `account/rateLimits/read` answers (else `LIMITS`);
                           `error` answers it with an error
+    FAKE_CODEX_NO_INJECT  set: the app-server has no `thread/inject_items`, as an older
+                          Codex
 
 Each event records the process's pid, parent, process group and session, and whether
 its stdin is a terminal.
@@ -206,11 +208,20 @@ class AppServer:
             thread = self.thread(params)
             with self.lock:
                 if thread.get("loaded") is None:
-                    if not thread["turns"]:
+                    if not thread["turns"] and not thread.get("injected"):
                         raise _Error(-32600, f"no rollout found for thread id "
                                              f"{thread['id']}")
                     thread["loaded"] = _policy(params)
             return self.load_answer(thread)
+        if method == "thread/inject_items" and not os.environ.get("FAKE_CODEX_NO_INJECT"):
+            thread = self.thread(params)
+            if not params.get("items"):
+                raise _Error(-32600, "items must not be empty")
+            with self.lock:
+                # The item writes the rollout, so a later app-server resumes the thread.
+                thread["injected"] = thread.get("injected", 0) + len(params["items"])
+                self.save()
+            return {}
         if method == "turn/start":
             thread = self.thread(params)
             turn = {"id": str(uuid.uuid4()), "status": "inProgress"}

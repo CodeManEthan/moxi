@@ -27,8 +27,12 @@ Every behaviour below was measured on codex-cli 0.160.0, except the phantom turn
     none it loads read-only with the network off. A later resume of a loaded thread
     changes nothing. Both responses report the loaded `sandbox` policy.
   * **A resume of a thread with no rollout is refused** (`-32600 no rollout found for
-    thread id <id>`): a thread that is not loaded and never ran a turn has nothing on
-    disk to load.
+    thread id <id>`): a thread that is not loaded and never ran a turn, and had no item
+    injected, has nothing on disk to load.
+  * **`thread/inject_items` writes the rollout and starts no turn** (codex-cli 0.153.0):
+    its items join the thread's history, no `turn/started` follows, and an empty list
+    is refused (`items must not be empty`). With `inject_missing` set the app-server
+    has no such method, as a Codex before it.
 
 Codex's own hooks, as checked live on codex-cli 0.153.0, run through
 `hook_runner(event, input)` when a test sets one:
@@ -121,6 +125,8 @@ class FakeAppServer:
         self.background_terminals: dict = {}
         #: Set: `thread/backgroundTerminals/list` answers an error.
         self.background_error = False
+        #: Set: there is no `thread/inject_items`, as on a Codex before 0.153.0.
+        self.inject_missing = False
         #: What `account/rateLimits/read` answers.
         self.limits: dict = dict(LIMITS)
         #: `{server name: runtimeStatus}` for `mcpServerStatus/list`; unnamed: connected.
@@ -202,6 +208,14 @@ class FakeAppServer:
             return self._thread_start(conn, params)
         if method == "thread/resume":
             return self._thread_resume(conn, params)
+        if method == "thread/inject_items" and not self.inject_missing:
+            thread = self._thread_of(params)
+            if not params.get("items"):
+                raise _Error(INVALID_REQUEST, "items must not be empty")
+            with self._lock:
+                thread["injected"] = thread.get("injected", 0) + len(params["items"])
+            self._save()
+            return {}
         if method == "thread/turns/list":
             thread = self._thread_of(params)
             return {"data": list(reversed(thread["turns"])), "nextCursor": None}
@@ -351,7 +365,7 @@ class FakeAppServer:
         thread = self._thread_of(params)
         with self._lock:
             if thread.get("loaded") is None:
-                if not thread["turns"]:
+                if not thread["turns"] and not thread.get("injected"):
                     raise _Error(INVALID_REQUEST,
                                  f"no rollout found for thread id {thread['id']}")
                 thread["loaded"] = self.sandbox_policy(params)

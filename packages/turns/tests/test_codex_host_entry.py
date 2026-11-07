@@ -253,7 +253,8 @@ class _Reporting(FakeClient):
         return result
 
 
-def _checked_host(turns_env, report, **kwargs):
+def _checked_host(turns_env, report, *, ran=(), **kwargs):
+    """A host on a reporting client; `ran` are the turns the thread has had."""
     made = []
     harness = None
 
@@ -265,6 +266,7 @@ def _checked_host(turns_env, report, **kwargs):
     harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
                            client_factory=clients, app_server_factory=FakeAppServer,
                            backoff_factory=lambda: iter(lambda: 60.0, None), **kwargs)
+    harness._fake_ran = list(ran)
     endpoint = Endpoint(harness, session_id=None).open()
     harness.start()
     return endpoint, harness, made
@@ -305,7 +307,7 @@ def test_a_resume_that_matches_loads_the_named_thread(turns_env):
     options = _options(turns_env)
     report = {"type": "workspaceWrite", "networkAccess": True, "writableRoots": []}
     endpoint, harness, made = _checked_host(turns_env, report, options=options,
-                                            resume="thread-1")
+                                            resume="thread-1", ran=["turn-0"])
     try:
         assert harness.trouble is None and harness.session_id == "thread-1"
         assert endpoint.facts().ready.source == "resume"
@@ -509,6 +511,9 @@ def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig)
     host = rig.spawn("--no-window", stdin=subprocess.PIPE)
     session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
     thread = session.session_id
+    assert session.facts().ready.source == "startup"
+    # A turn runs (the stub ends it), so the later load is a resume, not a start.
+    session.deliver("work", only_if_idle=True).wait_ended(WAIT)
     session.close()
     host.stdin.close()                      # the end of stdin is not a lifeline
     time.sleep(1.0)
@@ -551,6 +556,21 @@ def test_a_launch_that_fails_exits_1_with_the_reason_on_stderr(rig):
     err = host.out.read_text()
     assert "moxi-turns-codex-host: the Codex launch failed: " in err
     assert "not trusted" in err
+    server = rig.app_server()
+    assert _until(lambda: _gone(server["pid"]), 15.0)
+
+
+@LINUX
+def test_a_codex_without_inject_exits_1_with_the_line_and_sends_no_turn(rig):
+    from moxi_turns.codex import INJECT_MISSING
+
+    host = rig.spawn("--no-window", env={**rig.env, "FAKE_CODEX_NO_INJECT": "1"})
+    assert _exit(host) == 1
+    err = host.out.read_text()
+    assert f"moxi-turns-codex-host: the Codex launch failed: {INJECT_MISSING}" in err
+    made = calls(rig.records)
+    assert [c["method"] for c in made].count("thread/start") == 1   # no retry
+    assert not [c for c in made if c["method"] == "turn/start"]
     server = rig.app_server()
     assert _until(lambda: _gone(server["pid"]), 15.0)
 
