@@ -35,7 +35,8 @@ again once the rows after it are deleted.
 **The mapping** (`message_records`):
 
 * a user message is a **message** with `model` (the `providerID` and `modelID` it asked
-  for, as written) and its text parts joined into `text`;
+  for, as written) and its text parts joined into `text`; it is `injected` when every
+  text part is one OpenCode marked `synthetic`, which the join would otherwise lose;
 * an assistant message is a **message**, and each model step in it is one **request**: a
   `step-start` part opens it (`start_time`), a `step-finish` part closes it (`time`, the
   tokens, `cost_usd`). Its `request_id` is the `step-start` part's id, so it stays the same
@@ -259,6 +260,22 @@ _NAMED_STEP = frozenset({"type", "tokens", "cost"})
 _NAMED_PART = frozenset({"type", "text", "time", "tool", "callID", "state"})
 
 
+def _injected(role: str, data: dict, synthetic: list[bool]) -> Any:
+    """Whether something other than the person at the prompt submitted a message.
+
+    OpenCode writes no submitter on a message. What it does write is `synthetic` on a
+    text part it added itself, and `summary` on an assistant message it wrote to sum up
+    the session. A user message whose text parts are all synthetic is true; any other user
+    message is unknown, one with no text part included. The model's own message is
+    false unless it is a summary. `synthetic` holds, for each of the message's text parts
+    in order, whether OpenCode marked it."""
+    if role == "assistant":
+        return data.get("summary") is True
+    if role == "user" and synthetic and all(synthetic):
+        return True
+    return UNKNOWN
+
+
 def _step(message: dict, start: tuple | None, finish: tuple | None,
           keep_raw: bool) -> Request:
     """One model step's request. `start` and `finish` are `(row, data)` of its
@@ -328,6 +345,7 @@ def message_records(message: tuple, parts: Iterable[tuple], *, agent_id: str | N
                "model": _text(data, "modelID"), "provider": _text(data, "providerID")}
 
     texts: list[str] = []
+    marked: list[bool] = []
     kinds: list[str] = []
     after: list[Record] = []
     open_step: tuple | None = None
@@ -353,12 +371,14 @@ def message_records(message: tuple, parts: Iterable[tuple], *, agent_id: str | N
         if ptype == "text":
             if isinstance(pdata.get("text"), str):
                 texts.append(pdata["text"])
+            marked.append(pdata.get("synthetic") is True)
         elif ptype == "reasoning":
             thought = pdata.get("text")
             after.append(Message(**pcommon, role=role if isinstance(role, str) else UNKNOWN,
                                  reasoning=True,
                                  text=thought if isinstance(thought, str) else "",
-                                 content_kinds=(ptype,), synthetic=False))
+                                 content_kinds=(ptype,), synthetic=False,
+                                 injected=False if role == "assistant" else UNKNOWN))
         elif ptype == "tool":
             state = pdata.get("state")
             if not isinstance(state, dict):
@@ -404,7 +424,8 @@ def message_records(message: tuple, parts: Iterable[tuple], *, agent_id: str | N
                                content_kinds=tuple(kinds),
                                model=data["model"] if role == "user" and "model" in data
                                else UNKNOWN,
-                               flags=flags, synthetic=False))
+                               flags=flags, synthetic=False,
+                               injected=_injected(role, data, marked)))
         else:
             out.append(Other(**mcommon, recognised=False))
     out.extend(after)

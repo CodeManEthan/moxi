@@ -382,10 +382,16 @@ class OpenCodeMessage:
         self.db.put("part", row)
         return row["time_updated"]
 
-    def text(self, text: str = "Done.", *, at: float | None = None) -> str:
+    def text(self, text: str = "Done.", *, synthetic: bool | None = None,
+             at: float | None = None) -> str:
+        """A text part. `synthetic` sets OpenCode's mark for a part it added itself; None
+        leaves the key out, as OpenCode does for text the person or the model wrote."""
         ms = self.db.tick(at)
-        return self._part({"type": "text", "text": text,
-                           "time": {"start": ms, "end": ms}}, ms)
+        data: dict[str, Any] = {"type": "text", "text": text,
+                                "time": {"start": ms, "end": ms}}
+        if synthetic is not None:
+            data["synthetic"] = synthetic
+        return self._part(data, ms)
 
 
 class OpenCodeAssistant(OpenCodeMessage):

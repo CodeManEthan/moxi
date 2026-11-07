@@ -46,7 +46,7 @@ def test_the_umbrellas_verbs_are_reserved():
 
 
 def test_the_core_keeps_five_more_names():
-    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs"}
+    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs", "anchor"}
     assert not names.RESERVED & names.VERBS
     for name in ("doctor", "installs", "set", "moxi"):
         assert names.is_reserved(name)

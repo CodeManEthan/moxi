@@ -9,6 +9,7 @@ Each is pinned here.
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 
 from conftest import wait_until
@@ -100,8 +101,11 @@ def test_a_send_to_an_opencode_name_with_no_session_id_is_refused(rig, bind):
     assert rig.record.history(rig.names_channel) == []
 
 
-def doctor(env):
+def doctor(path):
+    """`moxi comms doctor` over this process's environment with PATH set to `path`: the
+    verb places comms' own files from the same environment it searches."""
     out = io.StringIO()
+    env = {**os.environ, "PATH": path}
     ctx = cli.Context(record=object(), env=env, socket_path=None, out=out,
                       db_path=Path("/nonexistent/db"))
     cli.main(["doctor"], ctx=ctx)
@@ -115,10 +119,10 @@ def test_doctor_lists_the_opencode_binary_with_its_version(tmp_path):
     fake.write_text("#!/bin/sh\necho '1.18.34'\n")
     fake.chmod(0o755)
     rows = {line.split("  ", 1)[0].strip(): line.split("  ", 1)[1].strip()
-            for line in doctor({"PATH": str(bin_dir)}).splitlines()
+            for line in doctor(str(bin_dir)).splitlines()
             if line[:1] != " " and "  " in line}
     assert rows["opencode"] == f"{fake}, 1.18.34"
     rows = {line.split("  ", 1)[0].strip(): line.split("  ", 1)[1].strip()
-            for line in doctor({"PATH": str(tmp_path / "empty")}).splitlines()
+            for line in doctor(str(tmp_path / "empty")).splitlines()
             if line[:1] != " " and "  " in line}
     assert rows["opencode"] == "not on PATH"

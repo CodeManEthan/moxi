@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import exit as exits
-from moxi import modules, proc
+from moxi import modules, proc, terminal
 from moxi.config import ConfigError
 from moxi_dev.testing import wait_for
 
@@ -208,6 +208,8 @@ def test_the_terminal_writes_its_pid_and_started_before_it_execs(work, harness, 
     # Without turns the brief is on the argv: no deliverer.
     assert deliverers == []
     assert result.state == "started" and result.exit_code == exits.OK
+    # The harness is known as one Moxi started, whatever environment it was built from.
+    assert handed["env"][terminal.MARK] == terminal.marked({})[terminal.MARK]
 
 
 def test_the_warnings_are_given_before_the_session_starts(work, harness, no_exec,
@@ -281,6 +283,7 @@ def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
     # Its pid recorded, then the deliverer given that pid, then the child's exit code.
     assert deliverers[0]["pid"] == Child.pid and deliverers[0]["row"].state == "started"
     assert result.exit_code == 5 and row().pid == Child.pid
+    assert Child.seen["env"][terminal.MARK] == terminal.marked({})[terminal.MARK]
 
 
 def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi import _watch, proc
+from moxi import _mark, _watch, proc
 
 POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX sessions and groups")
 PY = sys.executable
@@ -608,8 +608,9 @@ def test_on_windows_every_spelling_of_the_variable_is_taken_out(monkeypatch):
     monkeypatch.setattr(proc, "_WINDOWS", True)
     given = {"PATH": "p", "moxi_lifeline_fd": "7", "Moxi_Lifeline_Fd": "8",
              proc.LIFELINE_ENV: "9"}
-    assert proc._lifeline_env(given, None) == {"PATH": "p"}
-    assert proc._lifeline_env(given, "0") == {"PATH": "p", proc.LIFELINE_ENV: "0"}
+    mark = {_mark.NAME: _mark.program}
+    assert proc._lifeline_env(given, None) == {"PATH": "p", **mark}
+    assert proc._lifeline_env(given, "0") == {"PATH": "p", proc.LIFELINE_ENV: "0", **mark}
     assert given["moxi_lifeline_fd"] == "7"  # the caller's mapping is left alone
 
 
@@ -954,7 +955,7 @@ def _child_with(env: dict[str, str], argv0: str = PY) -> subprocess.Popen:
     child = subprocess.Popen([argv0, "-c", "import sys; print('up', flush=True); sys.stdin.read()"],
                              executable=PY, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              env=env)
-    assert child.stdout.readline() == b"up\n"
+    assert child.stdout.readline().strip() == b"up"
     return child
 
 
@@ -1140,6 +1141,191 @@ def test_environ_on_macos_of_another_users_process_is_none():
 @WINDOWS
 def test_environ_on_windows_is_none():
     assert proc.environ(os.getpid()) is None
+
+
+@WINDOWS
+def test_the_windows_reader_reads_a_child_as_it_was_started():
+    env = child_env(MOXI_TEST_W="here")
+    child = _child_with(env)
+    try:
+        read = proc._environ(child.pid)
+        line = proc.cmdline(child.pid)
+    finally:
+        _end(child)
+    assert {k.upper(): v for k, v in read.items()}["MOXI_TEST_W"] == "here"
+    assert line is not None and line[1:3] == ["-c", line[2]] and "sys.stdin" in line[2]
+
+
+# -- the start mark ------------------------------------------------------------------------
+
+def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
+    env = {k: v for k, v in os.environ.items() if k.upper() != _mark.NAME}
+    code = ("import os, moxi._mark as m; "
+            "print(m.started_by, os.environ[m.NAME] == m.program)")
+    done = proc.run([PY, "-c", code], timeout=30, env=None, capture=True)
+    assert done.returncode == 0
+    # proc.run marks a child it starts, so this child started with the mark.
+    assert done.stdout.decode().split() == [_mark.program, "True"]
+    plain = subprocess.run([PY, "-c", code], env=env, capture_output=True, text=True,
+                           timeout=30)
+    assert plain.stdout.split() == ["None", "True"], plain.stderr
+
+
+@pytest.mark.parametrize("start", ["run", "spawn", "detached"])
+def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
+    code = "import os; print(os.environ.get(%r))" % _mark.NAME
+    env = child_env()
+    assert _mark.NAME not in env
+    if start == "run":
+        out = proc.run([PY, "-c", code], timeout=30, env=env).stdout.decode()
+    elif start == "spawn":
+        child = proc.spawn([PY, "-c", code], env=env, stdout=subprocess.PIPE)
+        out = child.stdout.read().decode()
+        child.lifeline.close()
+        child.wait(timeout=10)
+        child.stdout.close()
+    else:
+        log = tmp_path / "out.log"
+        pid = proc.spawn([PY, "-c", code], env=env, detached=True, output=log)
+        assert wait_for(lambda: proc.status(pid) is not None, 30)
+        out = log.read_text()
+    assert out.strip() == _mark.program
+
+
+def test_a_mark_already_in_the_env_is_kept():
+    env = child_env(**{_mark.NAME: "by hand"})
+    assert proc._lifeline_env(env, None)[_mark.NAME] == "by hand"
+    assert _mark.marked(env)[_mark.NAME] == "by hand"
+    assert env[_mark.NAME] == "by hand" and _mark.NAME in _mark.marked({})
+
+
+def test_on_windows_any_spelling_of_the_mark_counts(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert _mark.marked({"moxi_started_by": "x"}) == {"moxi_started_by": "x"}
+    assert _mark.marked({}) == {_mark.NAME: _mark.program}
+
+
+@pytest.mark.parametrize("argv, orig, name", [
+    (["/venv/bin/moxi", "modules"], [], "moxi"),
+    (["-m"], ["python3", "-I", "-m", "moxi_repo.run"], "python -m moxi_repo.run"),
+    (["-c"], ["python3", "-c", "pass"], "python3"),
+    (["/lib/pytest/__main__.py"], ["python3", "-m", "pytest"], "python -m pytest"),
+    (["/lib/x/__main__.py"], ["python3", "-Im", "x"], "python -m x"),
+    (["-c"], ["python3", "-c", "pass", "-m", "x"], "python3"),
+])
+def test_the_mark_names_the_program(monkeypatch, argv, orig, name):
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(sys, "orig_argv", orig)
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    assert _mark._program() == name
+
+
+# -- cmdline -------------------------------------------------------------------------------
+
+def test_cmdline_reads_a_child():
+    child = _child_with(child_env())
+    try:
+        line = proc.cmdline(child.pid)
+    finally:
+        _end(child)
+    assert line is not None and line[1] == "-c" and "print('up'" in line[2]
+
+
+def test_cmdline_of_a_gone_process_is_none_and_its_read_says_gone():
+    child = subprocess.Popen([PY, "-c", "pass"])
+    child.wait()
+    assert proc.cmdline(child.pid) is None
+    with pytest.raises(ProcessLookupError):
+        proc._cmdline(child.pid)
+
+
+@pytest.mark.parametrize("pid", [0, -1, True])
+def test_cmdline_of_no_pid_is_none(pid):
+    assert proc.cmdline(pid) is None
+
+
+@LINUX
+def test_cmdline_of_another_users_process_is_shown_on_linux():
+    if not os.path.exists("/proc/1/cmdline"):
+        pytest.skip("no pid 1 under /proc")
+    assert proc.cmdline(1)
+
+
+@LINUX
+@pytest.mark.parametrize("raw, stat, read", [
+    (b"python3\0-c\0pass\0", None, ["python3", "-c", "pass"]),
+    (b"tmux: server (/tmp/tmux-1000/default)\0\0\0", None,
+     ["tmux: server (/tmp/tmux-1000/default)"]),
+    (b"claude", None, ["claude"]),
+    (b"", b"12 (x) S 1 12", []),            # a kernel thread
+    (b"", b"12 (x) Z 1 12", ProcessLookupError),
+])
+def test_the_linux_command_line_reader(tmp_path, raw, stat, read):
+    fake = tmp_path / "12"
+    fake.mkdir()
+    (fake / "cmdline").write_bytes(raw)
+    if stat is not None:
+        (fake / "stat").write_bytes(stat)
+    else:
+        (fake / "stat").write_bytes(b"12 (x) S 1 12")
+    if isinstance(read, list):
+        assert proc._linux_cmdline(12, str(tmp_path)) == read
+    else:
+        with pytest.raises(read):
+            proc._linux_cmdline(12, str(tmp_path))
+    with pytest.raises(ProcessLookupError):
+        proc._linux_cmdline(13, str(tmp_path))
+
+
+@LINUX
+def test_the_linux_readers_raise_a_refusal_as_a_permission_error(tmp_path, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise PermissionError(13, "refused")
+
+    monkeypatch.setattr("builtins.open", refuse)
+    with pytest.raises(PermissionError):
+        proc._linux_read_environ(12, str(tmp_path))
+    with pytest.raises(PermissionError):
+        proc._linux_cmdline(12, str(tmp_path))
+
+
+def test_a_procargs2_answer_gives_the_arguments():
+    raw = _procargs(2, b"/usr/bin/python3", [b"python3", b"-c"], [b"A=1"], [b"x=1"])
+    assert proc._procargs2_parts(raw) == (["python3", "-c"], [b"A=1"])
+    raw = _procargs(1, b"/bin/x", [b""], [], [])
+    assert proc._procargs2_parts(raw)[0] == [""]
+    with pytest.raises(OSError):
+        proc._procargs2_parts(3 .to_bytes(4, sys.byteorder) + b"/bin/x\0\0a\0b")
+
+
+@pytest.mark.parametrize("error, raised", [
+    ("NoSuchProcess", ProcessLookupError), ("ZombieProcess", ProcessLookupError),
+    ("AccessDenied", PermissionError), ("Error", OSError)])
+def test_the_psutil_reader_names_each_failure(monkeypatch, error, raised):
+    import psutil
+
+    class Refusing:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def environ(self):
+            raise getattr(psutil, error)(self.pid) if error != "Error" else psutil.Error()
+
+    monkeypatch.setattr(psutil, "Process", Refusing)
+    with pytest.raises(raised) as caught:
+        proc._psutil_read(12, "environ")
+    if raised is OSError:
+        assert type(caught.value) is OSError
+
+
+@MACOS
+def test_cmdline_on_macos_reads_a_same_user_process_through_the_kernel():
+    child = _child_with({"PATH": "/usr/bin:/bin"})
+    try:
+        line = proc.cmdline(child.pid)
+    finally:
+        _end(child)
+    assert line is not None and line[1] == "-c"
 
 
 # -- parent --------------------------------------------------------------------------------

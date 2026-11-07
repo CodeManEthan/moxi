@@ -337,6 +337,29 @@ KNOWN_SYSTEM_SUBTYPES = frozenset({
 #: The model a request Claude Code made up itself names (an error turn, an interrupt).
 SYNTHETIC_MODEL = "<synthetic>"
 
+#: Who submitted a message (`Message.injected`). Each `origin.kind` Claude Code writes,
+#: with whether a message of that origin was submitted by something other than the person
+#: at the session's prompt. A kind not listed here reads as unknown.
+ORIGIN_KINDS: Mapping[str, bool] = {
+    "human": False,
+    "plugin": True,
+    "channel": True,
+    "peer": True,
+    "task-notification": True,
+    "coordinator": True,
+}
+#: The booleans Claude Code writes on a line it added or summarised itself. Either makes
+#: the message injected, whatever its origin says.
+COMPOSED_FLAGS = ("isMeta", "isCompactSummary")
+#: The fixed wrappers Claude Code writes around text it composed: a user message with no
+#: origin that opens with one of these tags is injected. With an origin, the origin
+#: decides alone.
+WRAPPER_TAGS = ("<local-command-stdout>", "<local-command-stderr>", "<bash-stdout>")
+#: The fixed lines Claude Code writes when the person interrupts a turn: a user message
+#: with no origin that is exactly one of these is injected.
+INTERRUPT_LINES = ("[Request interrupted by user]",
+                   "[Request interrupted by user for tool use]")
+
 #: Block types that are a tool call, and on a user line a tool's result.
 TOOL_CALL_BLOCKS = frozenset({"tool_use", "server_tool_use", "mcp_tool_use"})
 TOOL_RESULT_BLOCKS = frozenset({"tool_result", "mcp_tool_result"})
@@ -561,6 +584,29 @@ def _origin(entry: dict) -> Any:
     return _text(entry, "userType")
 
 
+def _injected(entry: dict, role: str, text: str, synthetic: bool) -> Any:
+    """Whether something other than the person at the prompt submitted a line's message.
+
+    A composed flag (`COMPOSED_FLAGS`) makes it true. The model's own message is false,
+    and one Claude Code made up itself (`SYNTHETIC_MODEL`) true. A user message with an
+    `origin` takes its kind's value (`ORIGIN_KINDS`), unknown for a kind not listed. With
+    no origin, a fixed wrapper or interrupt line makes it true; anything else is unknown,
+    a typed command line and a prompt sent through Claude Code's SDK among them."""
+    if any(entry.get(flag) is True for flag in COMPOSED_FLAGS):
+        return True
+    if role == "assistant":
+        return synthetic
+    if role != "user":
+        return UNKNOWN
+    if "origin" in entry:
+        origin = entry["origin"]
+        kind = origin.get("kind") if isinstance(origin, dict) else None
+        return ORIGIN_KINDS.get(kind, UNKNOWN) if isinstance(kind, str) else UNKNOWN
+    if text.lstrip().startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
+        return True
+    return UNKNOWN
+
+
 def _content_records(entry: dict, message: dict, role: str, common: dict,
                      synthetic: bool) -> list[Record]:
     """A user or assistant line's content blocks as records, in block order.
@@ -602,7 +648,8 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
                 out.append(Message(**common, role=role, reasoning=True,
                                    text=thought if isinstance(thought, str) else "",
                                    content_kinds=(btype,), flags=flags, origin=origin,
-                                   synthetic=synthetic))
+                                   synthetic=synthetic,
+                                   injected=_injected(entry, role, "", synthetic)))
             else:
                 if slot is None:
                     slot = len(out)
@@ -610,9 +657,11 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
                 if btype == "text" and isinstance(block.get("text"), str):
                     texts.append(block["text"])
     if slot is not None:
-        out.insert(slot, Message(**common, role=role, text="\n".join(texts),
+        text = "\n".join(texts)
+        out.insert(slot, Message(**common, role=role, text=text,
                                  content_kinds=tuple(kinds), flags=flags, origin=origin,
-                                 synthetic=synthetic))
+                                 synthetic=synthetic,
+                                 injected=_injected(entry, role, text, synthetic)))
     return out
 
 
