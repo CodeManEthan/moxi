@@ -9,6 +9,10 @@ calls it needs when first called, so importing this module costs nothing anywher
 - `make_private_dir(path)` creates one such directory and leaves an existing one alone;
   `private_file(path)` creates a new file whose access list grants only the current user.
 - `user_sid()` is the current user's SID as text, `S-1-5-21-...`.
+- `known_folder(name)` is one of the user's own folders (roaming and local application
+  data, the profile), asked of the shell and not read from the environment.
+- `pipe_name(handle)` is the name of the pipe a handle is an end of.
+- `console(handle)` says whether a handle is a console's.
 - `pipe_client_pid(handle)` is the pid of the process at the client end of a named pipe,
   and `pipe_server_pid(handle)` the pid of the process at its server end.
 - `Job` is a Job Object: the processes put in it can be ended together, and, made with
@@ -34,6 +38,7 @@ _PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
 _SE_DACL_PROTECTED = 0x1000
 _SDDL_REVISION_1 = 1
 _TOKEN_QUERY = 0x0008
+_TOKEN_IMPERSONATE = 0x0004
 _TOKEN_USER = 1
 _TOKEN_OWNER = 4
 _ACCESS_ALLOWED_ACE_TYPE = 0
@@ -151,6 +156,11 @@ def _bind():
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
     api.GetNamedPipeServerProcessId = bind(kernel32, "GetNamedPipeServerProcessId", w.BOOL,
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
+    api.GetFileType = bind(kernel32, "GetFileType", w.DWORD, w.HANDLE)
+    api.GetConsoleMode = bind(kernel32, "GetConsoleMode", w.BOOL, w.HANDLE,
+                              ctypes.POINTER(w.DWORD))
+    api.GetFileInformationByHandleEx = bind(kernel32, "GetFileInformationByHandleEx",
+                                            w.BOOL, w.HANDLE, ctypes.c_int, P, w.DWORD)
     _api = api
     return api
 
@@ -211,6 +221,67 @@ def _sid_text(pointer: int) -> str:
         api.LocalFree(api.ctypes.cast(text, api.ctypes.c_void_p))
 
 
+# -- the user's known folders -------------------------------------------------------------
+
+#: The known folders `known_folder` asks for, by the names the core uses for them.
+KNOWN_FOLDERS = {
+    "roaming": "{3EB685DB-65F9-4CF6-A03A-E3EF65729F3D}",  # FOLDERID_RoamingAppData
+    "local": "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}",    # FOLDERID_LocalAppData
+    "profile": "{5E6C858F-0E22-4760-9AFE-EA3317B67173}",  # FOLDERID_Profile
+}
+_KF_FLAG_DONT_VERIFY = 0x00004000
+
+
+def known_folder(name: str) -> str:
+    """The current user's known folder `name` (`roaming`, `local` or `profile`), asked of
+    the shell (`SHGetKnownFolderPath`), never read from an environment variable.
+
+    The call names this process's own token. Without one, the shell expands the
+    `%USERPROFILE%` its registry entries hold from the process's environment, and keeps
+    the first answer for the life of the process; with the token it reads the account's
+    own profile, so every process of the account gets the same folders whatever its
+    environment says.
+
+    Raises `OSError` when the shell gives none, as for an account with no profile loaded.
+    """
+    import ctypes
+    from ctypes import wintypes as w
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", w.DWORD), ("Data2", w.WORD), ("Data3", w.WORD),
+                    ("Data4", w.BYTE * 8)]
+
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+    shell32.SHGetKnownFolderPath.argtypes = [ctypes.POINTER(GUID), w.DWORD, w.HANDLE,
+                                             ctypes.POINTER(w.LPWSTR)]
+    ole32.CLSIDFromString.restype = ctypes.c_long
+    ole32.CLSIDFromString.argtypes = [w.LPCWSTR, ctypes.POINTER(GUID)]
+    ole32.CoTaskMemFree.restype = None
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    guid = GUID()
+    if ole32.CLSIDFromString(KNOWN_FOLDERS[name], ctypes.byref(guid)) != 0:
+        raise OSError(f"the known folder id for {name} is not a GUID")
+    api = _bind()
+    token = w.HANDLE()
+    if not api.OpenProcessToken(api.GetCurrentProcess(), _TOKEN_QUERY | _TOKEN_IMPERSONATE,
+                                ctypes.byref(token)):
+        raise _error("OpenProcessToken")
+    found = w.LPWSTR()
+    try:
+        result = shell32.SHGetKnownFolderPath(ctypes.byref(guid), _KF_FLAG_DONT_VERIFY,
+                                              token, ctypes.byref(found))
+        path = found.value
+    finally:
+        ole32.CoTaskMemFree(ctypes.cast(found, ctypes.c_void_p))
+        api.CloseHandle(token)
+    if result != 0 or not path:
+        raise OSError(f"the shell gives no {name} folder for this user "
+                      f"(SHGetKnownFolderPath returned {result & 0xFFFFFFFF:#010x})")
+    return path
+
+
 # -- named pipes --------------------------------------------------------------------------
 
 def pipe_client_pid(handle: int) -> int:
@@ -233,6 +304,38 @@ def pipe_server_pid(handle: int) -> int:
     if not api.GetNamedPipeServerProcessId(handle, api.ctypes.byref(pid)):
         raise _error("GetNamedPipeServerProcessId")
     return pid.value
+
+
+_FILE_TYPE_PIPE = 3
+_FILE_NAME_INFO = 2
+# FILE_NAME_INFO: a DWORD length in bytes, then that many bytes of UTF-16 name.
+_NAME_BUFFER = 4 + 2 * 1024
+
+
+def pipe_name(handle: int) -> str | None:
+    """The name of the pipe `handle` is an end of, as the system gives it
+    (`\\name`, without the `\\\\.\\pipe` start), or None when `handle` is no pipe or
+    the pipe has no name the system will give. Raises `OSError` for a handle that isn't
+    open."""
+    api = _bind()
+    kind = api.GetFileType(handle)
+    if kind != _FILE_TYPE_PIPE:
+        if kind == 0 and api.ctypes.get_last_error():
+            raise _error("GetFileType")
+        return None
+    buffer = api.ctypes.create_string_buffer(_NAME_BUFFER)
+    if not api.GetFileInformationByHandleEx(handle, _FILE_NAME_INFO, buffer, _NAME_BUFFER):
+        return None
+    length = int.from_bytes(buffer.raw[:4], "little")
+    return buffer.raw[4:4 + min(length, _NAME_BUFFER - 4)].decode("utf-16-le", "replace")
+
+
+def console(handle: int) -> bool:
+    """True when `handle` is a console's: `GetConsoleMode` succeeds on it. A character
+    device that is no console, such as `NUL`, fails it, though `isatty()` is true there."""
+    api = _bind()
+    mode = api.w.DWORD()
+    return bool(api.GetConsoleMode(handle, api.ctypes.byref(mode)))
 
 
 # -- private directories ------------------------------------------------------------------

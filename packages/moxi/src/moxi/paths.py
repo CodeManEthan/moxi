@@ -18,9 +18,25 @@ as unset):
     runtime  $XDG_RUNTIME_DIR/moxi/M, else               <Local>\\moxi\\runtime\\M
              <state root>/runtime/M
 
-`<Roaming>` and `<Local>` are the user's roaming and local application data folders
-(`%APPDATA%` and `%LOCALAPPDATA%`). Only config roams: data holds machine paths and
-SQLite files that must not follow a profile to another machine.
+`<Roaming>` and `<Local>` are the user's roaming and local application data folders:
+`WIN_PD_OVERRIDE_APPDATA` and `WIN_PD_OVERRIDE_LOCAL_APPDATA` when set and not blank (the
+names platformdirs and test shells use), else the folders the shell gives for the user,
+whatever `%APPDATA%` and `%LOCALAPPDATA%` say. Only config roams: data holds machine paths
+and SQLite files that must not follow a profile to another machine.
+
+`~` in a default is the home folder the environment gives (`home(env)`): `HOME` on Linux
+and macOS, else the user database's entry for this account; on Windows `USERPROFILE`, else
+`HOMEDRIVE` and `HOMEPATH`, else the shell's profile folder. An empty variable reads as
+unset here too.
+
+The anchor (`anchor_dir()`) is the one directory no variable a user sets moves: the core's
+data directory as the account itself places it, `~/.local/share/moxi/moxi` under the
+account's home in the user database on Linux and macOS (not `HOME`), and
+`<Local>\\moxi\\data\\moxi` under the local folder the shell gives on Windows (not
+`LOCALAPPDATA` or an override). So two processes of one account find one anchor whatever
+their environments say. The core keeps its record of the terminal's environment there,
+`terminal.json` (`terminal_record()`). Only test kits set `MOXI_ANCHOR_HOME`, which stands
+in for the account's folder so that a test never touches the real one.
 
 The state and cache directories of a module that already has them under a host folder,
 `<root>/<label>/M` (the layout before this one), are read where they are until they are
@@ -30,7 +46,9 @@ exist.
 `core()` is the core's own layout, for the name `moxi`: it reads only `MOXI_HOME` and the
 defaults. The core keeps its device id and its install lock there.
 
-Every method takes an optional `env` mapping and reads `os.environ` without one.
+Every method takes an optional `env` mapping and reads `os.environ` without one. Given a
+mapping, a resolver reads the environment only through it, never the process's own: a
+check can resolve another process's folders from the variables that process had.
 
 A module writes only under its own five directories. `script(name)` is where one of this
 environment's own console scripts lives, and `python()` is this environment's Python, for
@@ -126,7 +144,7 @@ class Layout:
         if home := self._own(environ, "HOME") or environ.get(HOME):
             return Path(home) / kind
         if _WINDOWS:
-            roaming, local = _windows_folders()
+            roaming, local = _windows_folders(environ)
             return Path(roaming if kind == "config" else local) / self.namespace / kind
         if kind == "runtime":
             if xdg := environ.get("XDG_RUNTIME_DIR"):
@@ -396,27 +414,209 @@ def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
 
 
 def _expanduser(path: str, environ: Mapping[str, str]) -> str:
-    """`os.path.expanduser`, reading HOME from `environ` when it is a mapping of its own.
+    """`path` with a leading `~` expanded from `environ` alone.
 
-    Only a bare `~` or a `~/` start is this user's home; `~user/...` is another user's,
-    found the way `os.path.expanduser` finds it.
+    A bare `~` or a `~/` start (also `~\\` on Windows) becomes `home(environ)`; the
+    process's own environment is never read for it. `~user/...` is another user's home,
+    found the way `os.path.expanduser` finds it. When nothing places the home (no `HOME`
+    and no user-database entry), `path` is left as it is, as `os.path.expanduser` leaves
+    it.
     """
-    if environ is os.environ or "HOME" not in environ:
-        return os.path.expanduser(path)
     seps = ("/", "\\") if _WINDOWS else ("/",)
     if path == "~" or path.startswith(tuple("~" + sep for sep in seps)):
-        return environ["HOME"] + path[1:]
+        found = _home(environ)
+        return path if found is None else found + path[1:]
     return os.path.expanduser(path)
 
 
-def _windows_folders() -> tuple[str, str]:
-    """The user's roaming and local application data folders (Windows only)."""
-    import platformdirs
+def home(env: Mapping[str, str] | None = None) -> Path:
+    """The home folder `env` places (`os.environ` without one), read from it alone.
 
-    return (platformdirs.user_data_dir(roaming=True),
-            platformdirs.user_data_dir(roaming=False))
+    On Linux and macOS that is `HOME`, else this account's home in the user database. On
+    Windows it is `USERPROFILE`, else `HOMEDRIVE` and `HOMEPATH`, else the profile folder
+    the shell gives. An empty variable reads as unset. Raises `LookupError` when nothing
+    places one: no variable, and no user-database entry or profile folder.
+    """
+    found = _home(_environ(env))
+    if found is None:
+        raise LookupError("nothing places the home folder: no HOME is set and this "
+                          "account has no home of its own")
+    return Path(found)
 
 
-__all__ = ["CONFIG_FILE", "LOCATORS", "HOME", "DEVICE", "DEVICE_ID", "SOCKET_MAX", "Layout",
-           "core", "core_lock", "device_id", "device_label", "socket_path", "script",
-           "python"]
+def _home(environ: Mapping[str, str]) -> str | None:
+    if _WINDOWS:
+        if profile := environ.get("USERPROFILE"):
+            return profile
+        if folder := environ.get("HOMEPATH"):
+            return (environ.get("HOMEDRIVE") or "") + folder
+        try:
+            from . import _win
+
+            return _win.known_folder("profile")
+        except OSError:
+            return None
+    if given := environ.get("HOME"):
+        return given
+    return _account_home()
+
+
+def _account_home() -> str | None:
+    """This account's home in the user database, or None when it has no entry there
+    (an arbitrary uid in a container). POSIX only."""
+    import pwd
+
+    try:
+        return pwd.getpwuid(os.getuid()).pw_dir or None
+    except KeyError:
+        return None
+
+
+def _windows_folders(env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """The user's roaming and local application data folders (Windows only), placed by
+    `env` alone.
+
+    Each is its override variable, `WIN_PD_OVERRIDE_APPDATA` or
+    `WIN_PD_OVERRIDE_LOCAL_APPDATA`, when that is set and not blank (read as platformdirs
+    reads it: stripped, a blank value unset), else the folder the shell gives for this
+    user. `APPDATA` and `LOCALAPPDATA` are never read. Raises `OSError` when the shell
+    gives none.
+    """
+    environ = _environ(env)
+    folders = []
+    for name, variable in (("roaming", "WIN_PD_OVERRIDE_APPDATA"),
+                           ("local", "WIN_PD_OVERRIDE_LOCAL_APPDATA")):
+        if override := (environ.get(variable) or "").strip():
+            folders.append(override)
+        else:
+            from . import _win
+
+            folders.append(_win.known_folder(name))
+    return folders[0], folders[1]
+
+
+def which(name: str, env: Mapping[str, str] | None = None) -> str | None:
+    """Where `name` is found on the `PATH` that `env` gives (`os.environ` without one), or
+    None: `shutil.which` with that mapping's `PATH`.
+
+    On Linux and macOS a mapping without `PATH` searches the system's default path, as
+    `shutil.which` does; an empty `PATH` finds nothing. On Windows the extensions tried are
+    the mapping's `PATHEXT` (else Windows' default list), and only the folders on the
+    mapping's `PATH` are searched: not the working directory, which is no part of an
+    environment, and nothing when the mapping has no `PATH`.
+    """
+    environ = _environ(env)
+    search = environ.get("PATH")
+    if _WINDOWS:
+        return _which_windows(name, search or "", environ.get("PATHEXT"))
+    import shutil
+
+    if search is None:
+        try:
+            search = os.confstr("CS_PATH") or os.defpath
+        except (AttributeError, ValueError):
+            search = os.defpath
+    return shutil.which(name, path=search)
+
+
+#: The extensions Windows tries when `PATHEXT` is unset.
+_WINDOWS_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"
+
+
+def _which_windows(name: str, search: str, pathext: str | None) -> str | None:
+    extensions = [e for e in (pathext or _WINDOWS_PATHEXT).split(";") if e]
+    if any(name.lower().endswith(e.lower()) for e in extensions):
+        names = [name]
+    else:
+        names = [name + e for e in extensions]
+
+    def found(path: str) -> bool:
+        return os.path.isfile(path) and os.access(path, os.X_OK)
+
+    if os.path.dirname(name):
+        return next((n for n in names if found(n)), None)
+    for folder in search.split(";"):
+        folder = folder.strip().strip('"')
+        if not folder:
+            continue
+        for candidate in names:
+            path = os.path.join(folder, candidate)
+            if found(path):
+                return path
+    return None
+
+
+# -- the anchor ---------------------------------------------------------------------------
+
+#: The variable only test kits set: it stands in for the account's own folder, so a test
+#: reads and writes its own anchor and never the real account's.
+ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+
+#: The core's record of the environment the user's terminal ran with, in the anchor.
+TERMINAL_RECORD = "terminal.json"
+
+
+class NoAnchor(LookupError):
+    """The account's folder can't be placed, so there is no anchor.
+
+    `cause` says why, in words for a line ("the account has no entry in the user database
+    (uid 1234)"), and `step` the one step that would place it ("give uid 1234 an entry in
+    the user database"). `uid` is the account's uid on POSIX, else None.
+    """
+
+    def __init__(self, cause: str, step: str, uid: int | None = None):
+        super().__init__(cause)
+        self.cause = cause
+        self.step = step
+        self.uid = uid
+
+
+def anchor_dir(env: Mapping[str, str] | None = None) -> Path:
+    """The core's anchor directory: where the account itself places the core's data
+    directory, which no variable a user sets moves.
+
+    On Linux and macOS it is `<home>/.local/share/moxi/moxi` with `<home>` the account's
+    home in the user database, never `HOME`. On Windows it is `<Local>\\moxi\\data\\moxi`
+    with `<Local>` the local application data folder the shell gives, never
+    `LOCALAPPDATA` or `WIN_PD_OVERRIDE_LOCAL_APPDATA`. `MOXI_ANCHOR_HOME`, read from `env`
+    (`os.environ` without one), stands in for `<home>` or `<Local>`; only test kits set it.
+
+    Raises `NoAnchor` when the account's folder can't be placed: a uid with no entry in
+    the user database, or no local folder from the shell. It never falls back to `HOME`.
+    A `MOXI_ANCHOR_HOME` that isn't a full path raises `NoAnchor` too.
+    """
+    environ = _environ(env)
+    if given := environ.get(ANCHOR_HOME):
+        if not os.path.isabs(given):
+            raise NoAnchor(f"{ANCHOR_HOME} is {given!r}, not a full path",
+                           f"take {ANCHOR_HOME} out of this environment")
+        base = given
+    elif _WINDOWS:
+        from . import _win
+
+        try:
+            base = _win.known_folder("local")
+        except OSError:
+            raise NoAnchor("the shell gives no local application data folder",
+                           "sign in as a user with a profile") from None
+    else:
+        uid = os.getuid()
+        base = _account_home()
+        if base is None:
+            raise NoAnchor(f"the account has no entry in the user database (uid {uid})",
+                           f"give uid {uid} an entry in the user database", uid)
+    if _WINDOWS:
+        return Path(base) / names.NAMESPACE / "data" / names.HARNESS
+    return Path(base) / ".local" / "share" / names.NAMESPACE / names.HARNESS
+
+
+def terminal_record(env: Mapping[str, str] | None = None) -> Path:
+    """The file of the core's record of the terminal's environment, `terminal.json` in
+    `anchor_dir(env)`. Raises `NoAnchor` as `anchor_dir` does."""
+    return anchor_dir(env) / TERMINAL_RECORD
+
+
+__all__ = ["CONFIG_FILE", "LOCATORS", "HOME", "DEVICE", "DEVICE_ID", "SOCKET_MAX",
+           "ANCHOR_HOME", "TERMINAL_RECORD", "Layout", "NoAnchor", "core", "core_lock",
+           "device_id", "device_label", "socket_path", "script", "python", "home", "which",
+           "anchor_dir", "terminal_record"]

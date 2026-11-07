@@ -414,7 +414,7 @@ def test_run_time_entries_take_their_own_forms():
 
 # --- names the core keeps ----------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["moxi", "set", "unset", "runtime", "installs"])
+@pytest.mark.parametrize("name", ["moxi", "set", "unset", "runtime", "installs", "anchor"])
 def test_a_name_the_core_keeps_is_broken(site, name):
     site.module(name)
     found = modules.load(name)

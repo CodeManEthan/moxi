@@ -631,6 +631,31 @@ def test_paths_of_the_core(stored, capsys):
     assert info["stores"] == []
 
 
+def test_paths_of_the_core_names_the_terminal_record(stored, capsys, monkeypatch):
+    from moxi import paths
+
+    info = json.loads(run(capsys, "paths", "moxi", "--json")[1])
+    assert info["terminal_record"] == str(paths.anchor_dir() / "terminal.json")
+    # The record doesn't move with MOXI_HOME, which moved every directory above.
+    assert info["directories"]["data"] == str(stored / "data" / "moxi")
+    assert not info["terminal_record"].startswith(info["directories"]["data"])
+    assert f"  terminal    {paths.terminal_record()}" in run(capsys, "paths", "moxi")[1]
+    assert "terminal_record" not in json.loads(run(capsys, "paths", "alpha", "--json")[1])
+
+    def nowhere(env=None):
+        raise paths.NoAnchor("the account has no entry in the user database (uid 7)",
+                             "give uid 7 an entry in the user database", 7)
+
+    monkeypatch.setattr(paths, "anchor_dir", nowhere)
+    code, out, _ = run(capsys, "paths", "moxi", "--json")
+    info = json.loads(out)
+    assert code == 0 and info["terminal_record"] is None
+    assert info["notes"] == ["the terminal record has no place: the account has no entry in "
+                             "the user database (uid 7); give uid 7 an entry in the user "
+                             "database"]
+    assert "  terminal    nowhere" in run(capsys, "paths", "moxi")[1]
+
+
 def test_paths_of_an_absent_module_or_a_bad_name(site, capsys):
     code, _, err = run(capsys, "paths", "nothere")
     assert code == 2 and "moxi install nothere" in err

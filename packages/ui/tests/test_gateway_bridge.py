@@ -35,7 +35,8 @@ def _supervisor(shell) -> str:
 
 def test_the_mode_sets_no_locator_and_keeps_every_root_under_the_home(tmp_path):
     env = shell_env(tmp_path, gateway=True)
-    assert not [key for key in env if key.startswith("MOXI_")]
+    # The anchor's stand-in moves no root: it keeps the terminal record off the account.
+    assert [key for key in env if key.startswith("MOXI_")] == ["MOXI_ANCHOR_HOME"]
     assert env["PYTEST_CURRENT_TEST"]
     assert env["PATH"].split(__import__("os").pathsep)[0] == str(tmp_path / "bin")
     assert "MOXI_HOME" in shell_env(tmp_path)

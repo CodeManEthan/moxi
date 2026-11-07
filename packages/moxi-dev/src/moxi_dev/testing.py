@@ -29,6 +29,11 @@ The fence, around every test (the autouse fixture `fence`):
   `WINDOWS_HOMES`. `TEMP` and `TMP` point where `TMPDIR` does. The system's own
   variables a process needs (`SYSTEMROOT`, `PATHEXT`, `COMSPEC` and the rest of
   `WINDOWS_KEPT_ENV`) are kept. Off Windows none of these is set or kept.
+  `MOXI_ANCHOR_HOME` stands in for the account's own folder, which the core reads from
+  the user database or the shell and no other variable moves: it is the test's home (on
+  Windows the test's `LOCALAPPDATA`), so the core's anchor, and the record of the
+  terminal's environment kept there, are the test's own and never the real account's.
+  The `terminal_record` fixture writes such a record.
 - Byte code. `sys.dont_write_bytecode` is set for the test, so a module first imported
   inside it is compiled in memory and nothing is written next to its source.
 - Writes. An audit hook (`sys.addaudithook`) refuses, with `FenceError`, a write whose
@@ -242,6 +247,10 @@ HARNESS_HOMES = {
     "CODEX_HOME": ".codex",
 }
 
+#: The core's stand-in for the account's own folder, which places its anchor; only test
+#: kits set it (module doc).
+ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID")
@@ -307,6 +316,8 @@ class Fence:
     env: Mapping[str, str]
     #: Where a write may land.
     roots: tuple[Path, ...]
+    #: `MOXI_ANCHOR_HOME`: the test's stand-in for the account's own folder.
+    anchor_home: Path
 
     def module_home(self, module: str) -> Path:
         """Where `MOXI_<MODULE>_HOME` points for `module`."""
@@ -605,6 +616,7 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
             env[key] = str(home if rel == "." else home / rel)
         env["HOMEDRIVE"], env["HOMEPATH"] = ntpath.splitdrive(str(home))
         env["TEMP"] = env["TMP"] = str(short)
+    env[ANCHOR_HOME] = env["LOCALAPPDATA"] if WINDOWS else str(home)
     return env
 
 
@@ -997,7 +1009,7 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     _GUARD.active = True
     try:
         yield Fence(home=home, runtime=runtime, short=short, env=dict(env),
-                    roots=tuple(Path(r) for r in roots))
+                    roots=tuple(Path(r) for r in roots), anchor_home=Path(env[ANCHOR_HOME]))
     finally:
         late = _GUARD.breaches[_GUARD.reported:]
         _GUARD.restore(outer)
@@ -1013,6 +1025,32 @@ def uv_env(fence: Fence) -> dict[str, str]:
     uv's real cache and installed Pythons and no Python downloads. Pass it as the child's
     `env`; this process's own environment is left as the fence made it."""
     return {**os.environ, **_SESSION["uv"], **_UV_NO_DOWNLOADS}
+
+
+# --- the terminal record ---------------------------------------------------------------
+
+#: The record's format the fixture writes: the core's own (`moxi.terminal.FORMAT`).
+RECORD_FORMAT = 1
+
+
+@pytest.fixture
+def terminal_record(fence: Fence) -> Callable[..., Path]:
+    """A writer of the core's record of the terminal's environment, under the test's
+    anchor (`MOXI_ANCHOR_HOME`), for a test whose code reads it, such as a page that
+    checks before it writes.
+
+    `terminal_record(env=None, *, version=None)` writes the record of `env` (this
+    process's environment as the fence left it, without one) through the core's own
+    writer (`moxi.terminal.write`): each variable of the core set in it, with its exact
+    value, and nothing else. `version` is the writing core's version, this core's
+    without one. It returns the record's path.
+    """
+    def write(env: Mapping[str, str] | None = None, *, version: str | None = None) -> Path:
+        from moxi import terminal
+
+        return terminal.write(env, moxi=version)
+
+    return write
 
 
 # --- helpers ---------------------------------------------------------------------------
@@ -1230,9 +1268,10 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
-           "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS",
-           "SHUTDOWN_POLL", "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV",
-           "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "console_script", "fence", "findings_of",
-           "param_id", "selection", "served", "short_dir", "touches_match", "uv_env",
-           "wait_for", "write_sqlite"]
+__all__ = ["ANCHOR_HOME", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
+           "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV",
+           "MARKERS", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
+           "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
+           "console_script", "fence", "findings_of", "param_id", "selection", "served",
+           "short_dir", "terminal_record", "touches_match", "uv_env", "wait_for",
+           "write_sqlite"]

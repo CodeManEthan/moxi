@@ -392,6 +392,19 @@ def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no
     assert "s3cr3t-value" not in new.base_env_json and "API_TOKEN" not in new.env_json
 
 
+def test_a_replayed_terminal_launch_carries_the_start_mark(work, harness, no_exec,
+                                                           monkeypatch):
+    from moxi import terminal
+
+    mark = terminal.MARK
+    api.launch(request(work))
+    assert mark not in row("r1").base_env
+    # The replaying shell's own mark is not carried over; the target adds its own.
+    monkeypatch.setenv(mark, "the replaying shell")
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert no_exec[-1]["env"][mark] == terminal.marked({})[mark] != "the replaying shell"
+
+
 def test_a_token_seat_records_that_it_had_a_token_and_never_the_token(work, harness,
                                                                      no_exec, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-then")

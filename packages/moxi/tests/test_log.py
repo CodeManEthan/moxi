@@ -18,7 +18,9 @@ from moxi import log
 @pytest.fixture(autouse=True)
 def clean(monkeypatch):
     for name in list(os.environ):
-        if name.startswith("MOXI_") or name == "JOURNAL_STREAM":
+        # The test kit's anchor stays: it keeps the core's record off the real account.
+        if (name.startswith("MOXI_") and name != "MOXI_ANCHOR_HOME"
+                or name == "JOURNAL_STREAM"):
             monkeypatch.delenv(name)
     yield
     for name in list(logging.root.manager.loggerDict):
@@ -99,7 +101,7 @@ ROLLER = textwrap.dedent("""
 def run_roller(tmp_path, lines: int, *, named: str | None = None):
     log_file = tmp_path / "unit.log"
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith("MOXI_") and k != "JOURNAL_STREAM"}
+           if not k.startswith("MOXI_") and k != "JOURNAL_STREAM" or k == "MOXI_ANCHOR_HOME"}
     env["MOXI_LOG_FILE"] = str(named or log_file)
     with open(log_file, "ab") as out:
         subprocess.run([sys.executable, "-c", ROLLER, str(lines)], stdout=out,
