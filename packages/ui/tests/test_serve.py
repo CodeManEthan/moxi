@@ -172,7 +172,7 @@ def test_a_push_stream_ends_when_every_browser_is_signed_out(shell):
 
 
 def test_the_runtime_file_names_the_listener(shell):
-    from moxi_loopback.api import call, read_runtime
+    from moxi_ui.loopback.api import call, read_runtime
 
     info = read_runtime("ui")
     assert info.transport == "tcp" and info.port == shell.listeners.port
@@ -359,7 +359,7 @@ def test_an_open_request_or_a_page_server_holds_the_idle_exit(monkeypatch):
 @pytest.mark.skipif(shutil.which("systemd-socket-activate") is None,
                     reason="needs systemd-socket-activate")
 def test_a_shell_started_on_a_passed_socket_serves_it_then_exits_idle(tmp_path):
-    from moxi_loopback.api import call, read_runtime
+    from moxi_ui.loopback.api import call, read_runtime
 
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))

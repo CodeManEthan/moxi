@@ -23,8 +23,14 @@ import os
 import threading
 import time
 
+from moxi import modules
 from moxi.paths import Layout
-from moxi_loopback.api import Accepted, Conflict, Refused, Topics
+
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"the fixture's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
+Accepted, Conflict, Refused, Topics = lb.Accepted, lb.Conflict, lb.Refused, lb.Topics
 
 STATE = Layout("fixture").state_dir()
 

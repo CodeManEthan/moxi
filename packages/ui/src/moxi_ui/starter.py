@@ -8,11 +8,11 @@ reason).
 
 A start follows loopback's spawn contract:
 
-1. `[python(), "-P", "-m", "moxi_loopback.serve", <module>, *child_args]`, spawned with a
-   stdin lifeline, stdout and stderr pipes, and the shell's runtime dir as its working
-   directory: a directory that exists before the spawn and only this user can write. (The
-   module's own runtime dir is not used: only the child's runner creates it, so on a
-   fresh install it does not exist yet.)
+1. `[python(), "-P", "-m", "moxi_ui.loopback.serve", <module>, *child_args]`, spawned
+   with a stdin lifeline, stdout and stderr pipes, and the shell's runtime dir as its
+   working directory: a directory that exists before the spawn and only this user can
+   write. (The module's own runtime dir is not used: only the child's runner creates
+   it, so on a fresh install it does not exist yet.)
 2. A thread per child copies its stderr into the shell's log as `moxi.ui.child.<module>`,
    keeping the last 50 lines; another reads stdout for the `ready <server_id>` line within
    10 s, then closes the shell's end of stdout.
@@ -64,7 +64,14 @@ from typing import Any
 from moxi import files, proc
 from moxi.names import is_module_name
 from moxi.paths import python
-from moxi_loopback.api import NotOurServer, RuntimeInfo, Table, call, open_connection, read_runtime
+from moxi_ui.loopback.api import (
+    NotOurServer,
+    RuntimeInfo,
+    Table,
+    call,
+    open_connection,
+    read_runtime,
+)
 
 #: Seconds from the spawn within which a child prints its ready line and its runtime file
 #: reads with the same server id.
@@ -885,7 +892,8 @@ class Starters:
         """The page server's command line for `module`."""
         if not is_module_name(module):
             raise ValueError(f"{module!r} is not a module name")
-        return [str(python()), "-P", "-m", "moxi_loopback.serve", module, *self.child_args]
+        return [str(python()), "-P", "-m", "moxi_ui.loopback.serve", module,
+                *self.child_args]
 
     def child_env(self) -> dict[str, str]:
         """The shell's environment without the variable that names its log file."""
@@ -1038,7 +1046,7 @@ def export_argv(modules: Sequence[str]) -> list[str]:
     for module in modules:
         if not is_module_name(module):
             raise ValueError(f"{module!r} is not a module name")
-    return [str(python()), "-P", "-m", "moxi_loopback.export", *modules]
+    return [str(python()), "-P", "-m", "moxi_ui.loopback.export", *modules]
 
 
 def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,

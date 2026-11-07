@@ -144,7 +144,7 @@ def _running(pid: Any) -> bool:
 
 def _shell() -> tuple[bool, float | None]:
     """Whether the shell runs, by its runtime file's pid, and when it started."""
-    from moxi_loopback.api import read_runtime
+    from moxi_ui.loopback.api import read_runtime
 
     info = read_runtime(MODULE)
     if info is None or not _running(info.pid):

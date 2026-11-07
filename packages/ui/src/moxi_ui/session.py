@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi import files
-from moxi_loopback.api import Entry, RequestView, response_headers, token_matches
+from moxi_ui.loopback.api import Entry, RequestView, response_headers, token_matches
 
 #: The session cookie's name.
 COOKIE = "moxi-ui"

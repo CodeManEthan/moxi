@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from moxi.paths import Layout
-from moxi_loopback.api import app, export, guard, prove
+from moxi_ui.loopback.api import app, export, guard, prove
 from moxi_ui import document, page
 from moxi_ui.router import Router, shell_profile, shell_table, worker_layer
 from shell_kit import FETCH, NAVIGATE, SERVER_ID, TOKEN, Harness, _drive, scope

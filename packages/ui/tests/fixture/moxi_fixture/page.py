@@ -4,7 +4,13 @@ in `web/`. The gateway reaches a read with a `redact` and a `path` value, the st
 `phone` topic carries both marks), and a confirmed act with its status route; everything
 else is the desk's."""
 
-from moxi_loopback.api import Field, Out, Page, Route
+from moxi import modules
+
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"the fixture's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
+Field, Out, Page, Route = lb.Field, lb.Out, lb.Page, lb.Route
 
 H = "moxi_fixture.handlers"
 

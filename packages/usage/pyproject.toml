@@ -1,6 +1,6 @@
 [project]
 name = "moxi-usage"
-version = "0.1.0"
+version = "0.1.1"
 description = "How much of each plan window is used, how full a session's context is, and what the tokens cost, from each harness's own records."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,8 +12,7 @@ dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 turns = ["moxi-turns>=0.2,<0.3"]
 projects = ["moxi-projects>=0.1,<0.2"]
 # The browser UI shell: with it, the usage page and its limits and cost blocks show there.
-# Loopback, which usage's page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+ui = ["moxi-ui>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

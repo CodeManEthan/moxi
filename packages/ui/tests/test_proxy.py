@@ -24,7 +24,7 @@ import h11
 import psutil
 import pytest
 from moxi.paths import Layout
-from moxi_loopback.api import RuntimeInfo, proof
+from moxi_ui.loopback.api import RuntimeInfo, proof
 
 from moxi_ui import listen
 from moxi_ui import proxy as proxy_mod
@@ -671,8 +671,8 @@ PAGE = '''
 import json
 import os
 
-from moxi_loopback import server as _server
-from moxi_loopback.routes import Field, Out, Page, Route
+from moxi_ui.loopback import server as _server
+from moxi_ui.loopback.routes import Field, Out, Page, Route
 
 # Record the header names of every request the server checks, so a test can see what
 # reached the module.
@@ -708,7 +708,7 @@ HANDLERS = '''
 import asyncio
 import os
 
-from moxi_loopback.server import Topics
+from moxi_ui.loopback.server import Topics
 
 TOPICS = Topics("tick")
 

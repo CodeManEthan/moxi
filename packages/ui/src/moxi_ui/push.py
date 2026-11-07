@@ -48,7 +48,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from moxi.names import is_module_name
-from moxi_loopback.api import response_headers
+from moxi_ui.loopback.api import response_headers
 
 from .gateway.shapes import out_data, redact_value, shape_data
 from .proxy import Client, UpstreamBroken, UpstreamError
@@ -182,7 +182,7 @@ def gateway_topics(mounts: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[st
 def own_shapes() -> dict[str, dict[str, Any]]:
     """The shapes of the shell's own topics (export data): `ui.servers`, its rows without
     the volatile fields, and `ui.modules`, the modules view."""
-    from moxi_loopback.api import Out
+    from moxi_ui.loopback.api import Out
 
     from .page import MODULES_SHAPE, SERVER_ROW
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from moxi_loopback.api import Field, Out, Refused, Route
+from moxi_ui.loopback.api import Field, Out, Refused, Route
 
 from . import audit, pairing
 from .devices import Device, Devices

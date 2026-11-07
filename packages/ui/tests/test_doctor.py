@@ -15,7 +15,7 @@ import pytest
 from moxi import files, modules
 from moxi.doctor import Row
 from moxi.paths import Layout
-from moxi_loopback.api import read_runtime
+from moxi_ui.loopback.api import read_runtime
 
 from moxi_ui import doctor, health
 from moxi_ui.starter import SERVERS_FILE, SERVERS_FORMAT
@@ -265,7 +265,7 @@ def test_a_failed_proof_then_no_file_is_this_users_shell_stopping(monkeypatch):
     """A 503 from this user's own shell at its connection cap fails the proof; when the
     shell then removes its file, the last round read no file, so it is not another
     program."""
-    from moxi_loopback.api import NotOurServer
+    from moxi_ui.loopback.api import NotOurServer
 
     info = SimpleNamespace(port=8460, server_id="a")
     files_read = [info]

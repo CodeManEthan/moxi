@@ -145,7 +145,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert not hasattr(module, "BUDGETS")
     probe = ("import sys, moxi_services.module, moxi_services.cli, moxi_services.doctor, "
              "moxi_services.projects_link\n"
-             "print(sorted(m for m in sys.modules if m.startswith(('moxi_loopback', "
+             "print(sorted(m for m in sys.modules if m.startswith(('moxi_ui', "
              "'moxi_services.page', 'moxi_services.jobs'))))")
     done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                           timeout=60, check=True)

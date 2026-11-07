@@ -47,9 +47,9 @@ SESSION_KEYS = ["key", "harness", "pid", "session_id", "cwd", "started", "capabi
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 @pytest.fixture(autouse=True)
@@ -640,8 +640,7 @@ WITHOUT_UI = textwrap.dedent("""
     import json
     import sys
 
-    # As if neither loopback nor the UI shell were installed.
-    sys.modules["moxi_loopback"] = None
+    # As if the UI shell weren't installed.
     sys.modules["moxi_ui"] = None
 
     import moxi_turns
@@ -654,7 +653,7 @@ WITHOUT_UI = textwrap.dedent("""
     moxi_turns.sessions
     loaded = sorted(name for name in sys.modules
                     if name in ("moxi_turns.page", "moxi_turns.pagehandlers")
-                    or name.startswith(("moxi_loopback.", "moxi_ui.")))
+                    or name.startswith("moxi_ui."))
     try:
         import moxi_turns.page
     except ImportError as err:
@@ -672,7 +671,7 @@ def test_turns_works_without_the_ui(tmp_path):
     assert done.returncode == 0, done.stderr
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["loaded"] == []
-    assert out["refused"].startswith("turns' page needs the loopback module")
+    assert out["refused"].startswith("turns' page needs the ui module")
     assert out["findings"] == []
 
 

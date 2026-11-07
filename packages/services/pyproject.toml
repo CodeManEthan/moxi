@@ -1,6 +1,6 @@
 [project]
 name = "moxi-services"
-version = "0.1.1"
+version = "0.1.2"
 description = "Moxi's services: one list of every daemon and timer on the machine, with start, stop, enable, disable, add, remove and watch."
 requires-python = ">=3.12"
 license = "MIT"
@@ -12,9 +12,8 @@ dependencies = ["moxi>=0.1.5,<0.2", "psutil>=5.9"]
 # through moxi.modules.load("projects"), and projects reads services' link through its
 # `moxi.projects` group below.
 projects = ["moxi-projects>=0.1,<0.2"]
-# The browser UI shell: with it, services' page shows there. Loopback, which services'
-# page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+# The browser UI shell: with it, services' page shows there.
+ui = ["moxi-ui>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

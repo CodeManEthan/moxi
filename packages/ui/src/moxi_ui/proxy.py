@@ -41,7 +41,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable
 from typing import Any
 
 import h11
-from moxi_loopback.api import NotOurServer, Table, complete, response_headers
+from moxi_ui.loopback.api import NotOurServer, Table, complete, response_headers
 
 from .router import forwarded
 from .starter import Conn, Server, ServerGone, StartFailed, Use

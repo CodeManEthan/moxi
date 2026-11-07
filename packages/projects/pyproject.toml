@@ -1,6 +1,6 @@
 [project]
 name = "moxi-projects"
-version = "0.1.1"
+version = "0.1.2"
 description = "Moxi's list of named places: projects, their roots, kinds and agents."
 requires-python = ">=3.12"
 license = "MIT"
@@ -8,9 +8,8 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1.4,<0.2"]
 
 [project.optional-dependencies]
-# The browser UI shell: with it, projects' page shows there. Loopback, which projects'
-# page server runs on, comes with it.
-ui = ["moxi-ui>=0.1.1,<0.2"]
+# The browser UI shell: with it, projects' page shows there.
+ui = ["moxi-ui>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

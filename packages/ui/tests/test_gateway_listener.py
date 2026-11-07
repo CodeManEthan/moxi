@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from moxi.paths import Layout
-from moxi_loopback.api import Table
+from moxi_ui.loopback.api import Table
 from moxi_ui import listen
 from moxi_ui.gateway import Gateway, Parts, endpoint
 from moxi_ui.gateway.address import REFUSED

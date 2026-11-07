@@ -38,7 +38,7 @@ from types import MappingProxyType
 from typing import Any
 
 from moxi.doctor import Row
-from moxi_loopback.api import NotOurServer, RuntimeInfo, call, read_runtime
+from moxi_ui.loopback.api import NotOurServer, RuntimeInfo, call, read_runtime
 
 from . import cli, config
 from .session import SERVERS_PATH

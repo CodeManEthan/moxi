@@ -43,9 +43,9 @@ posix_only = pytest.mark.skipif(sys.platform == "win32",
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 LB = loopback()
@@ -224,7 +224,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert "ui" in module.OPTIONAL
     assert not hasattr(module, "BUDGETS")
     probe = ("import sys, moxi_projects.module, moxi_projects.cli, moxi_projects.api\n"
-             "print(sorted(m for m in sys.modules if m.startswith(('moxi_loopback', "
+             "print(sorted(m for m in sys.modules if m.startswith(('moxi_ui', "
              "'moxi_projects.page'))))")
     done_ = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                            timeout=60, check=True)

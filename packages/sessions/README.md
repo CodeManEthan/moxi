@@ -205,8 +205,8 @@ the other modules.
 ## Dependencies
 
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
-UI shell, which brings loopback, the base sessions' page server runs on. The optional
-extra `secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with.
+UI shell, whose page-server base sessions' page server runs on. The optional extra
+`secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with.
 
 ## Interfaces
 

@@ -31,7 +31,7 @@ SITECUSTOMIZE = textwrap.dedent('''\
     import sys
 
     _argv = list(getattr(sys, "orig_argv", ()))
-    if "moxi_loopback.serve" in _argv and _argv[_argv.index("moxi_loopback.serve") + 1:][:1] == ["services"]:
+    if "moxi_ui.loopback.serve" in _argv and _argv[_argv.index("moxi_ui.loopback.serve") + 1:][:1] == ["services"]:
         import json
 
         sys.path.insert(0, {tests!r})

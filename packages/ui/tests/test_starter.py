@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from moxi import files, proc
 from moxi.paths import Layout, python
-from moxi_loopback.api import RuntimeInfo, read_runtime, write_runtime
+from moxi_ui.loopback.api import RuntimeInfo, read_runtime, write_runtime
 
 from moxi_ui import starter as starter_mod
 from moxi_ui.router import shell_table
@@ -39,7 +39,7 @@ from moxi_ui.starter import (
 )
 
 PAGE = """
-from moxi_loopback.routes import Field, Out, Page, Route
+from moxi_ui.loopback.routes import Field, Out, Page, Route
 
 H = "moxi_{name}.handlers"
 PAGE = Page(
@@ -54,7 +54,7 @@ PAGE = Page(
 """
 
 HANDLERS = """
-from moxi_loopback.server import Topics
+from moxi_ui.loopback.server import Topics
 
 TOPICS = Topics("tick")
 
@@ -191,14 +191,14 @@ def test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir(shell_dirs, 
 
     drive(starters, body)
     (argv, kwargs), = seen
-    assert argv == [str(python()), "-P", "-m", "moxi_loopback.serve", "stpage",
+    assert argv == [str(python()), "-P", "-m", "moxi_ui.loopback.serve", "stpage",
                     "--idle-s", "0.5"]
     assert kwargs["lifeline"] == "stdin"
     assert kwargs["cwd"] == str(shell_dirs[0])
     assert kwargs["stdout"] == kwargs["stderr"] == subprocess.PIPE
     assert "MOXI_LOG_FILE" not in kwargs["env"]
     assert kwargs["env"]["PYTHONPATH"] == os.environ["PYTHONPATH"]
-    assert export_argv(["stpage"])[:4] == [str(python()), "-P", "-m", "moxi_loopback.export"]
+    assert export_argv(["stpage"])[:4] == [str(python()), "-P", "-m", "moxi_ui.loopback.export"]
     with pytest.raises(ValueError):
         make(shell_dirs).argv("not a module")
 
@@ -559,7 +559,7 @@ class Squatter:
 
 
 def _hand_run(module: str, cwd: Path) -> tuple[subprocess.Popen, str]:
-    child = proc.spawn([str(python()), "-P", "-m", "moxi_loopback.serve", module],
+    child = proc.spawn([str(python()), "-P", "-m", "moxi_ui.loopback.serve", module],
                        lifeline="stdin", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                        cwd=str(cwd))
     line = []
