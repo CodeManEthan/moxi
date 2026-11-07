@@ -7,12 +7,14 @@ A hook may cost at most 15 ms per hook process: what Moxi imports and does in it
 bare `python -I` start. The ceiling is per hook, since the hooks of one event run side by
 side. Each share of it is held by its own test. The core's two shares are held here:
 
-- the hook path (`import moxi.paths`, `available()` and `load()`) under 9 ms, for an
+- the hook path (`import moxi.paths`, `available()` and `load()`), a 9 ms share, for an
   absent module and for a module whose announcement is one line;
-- `import moxi.config` with one `load()` of a small file under 7 ms, or under 12 ms on
+- `import moxi.config` with one `load()` of a small file, a 7 ms share, or 12 ms on
   Python 3.12.
 
-One more test runs both in one process and holds them under the 15 ms ceiling together.
+One more test runs both in one process against the 15 ms ceiling together. Each test
+checks its share times `LOAD_MARGIN` (1.5), so the bounds it enforces are 13.5 ms, 10.5 ms
+(18 ms on 3.12) and 22.5 ms; the last paragraph below says why.
 A module's own imports are held by that module's test. The hook path's own `sys.modules`
 check is in test_hook_path.py.
 
