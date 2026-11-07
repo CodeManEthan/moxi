@@ -320,17 +320,28 @@ already handed, oldest first, with `held: true` on the payload:
 | `ready` with `source` `startup`, `clear` or `compact` | no | every row |
 | `ready` with `source` `resume`, or any other value | yes | every row if it passes |
 | `ready` with no `source` | - | nothing |
-| `turn_ended` | yes, and again for a settle window if it does not pass | every row at the first read that passes; then the report settles |
+| `turn_ended` with `answered: true` | no at the frame; its settle window reads | every row at once; then the report settles |
+| any other `turn_ended` | yes, and again for a settle window if it does not pass | every row at the first read that passes; then the report settles |
 | `look` | yes | every row if it passes; settles nothing |
 | `bind` | yes | rows of unflagged messages if it passes; flagged rows wait |
 | a live message to the name, an `activity` | - | nothing |
 
 A turn end is a release point that stays open for a short window, not an instant. So
 held mail goes out at the end of the recipient's next turn, including the turn that
-warmed a cold cache. The harness can write the turn's own record after the turn's end reaches the daemon (Claude
-Code drains its transcript writes on a 100 ms timer), so the read at the frame can judge
-the cache as it was before the turn, and the turn that warmed a cold cache would not
-count. When a `turn_ended`'s read does not pass, whatever the queue holds, the daemon
+warmed a cold cache. The harness can write the turn's own record after the turn's end
+reaches the daemon (Claude Code drains its transcript writes on a 100 ms timer, and a
+loaded machine can take longer), so the read at the frame can judge the cache as it was
+before the turn, and the turn that warmed a cold cache would not count.
+
+A `turn_ended` marked `answered: true` says the turn ended with the model's answer, so it
+made a request just now and the cache is warm whatever the record shows yet. The Claude
+Code adapter marks every turn that ended `answer`; an interrupted or failed turn, and
+every other adapter's turn end, is not marked. For a marked frame the daemon checks the
+queue and, when rows wait, releases every one at once, with no read, however long the
+record takes to show the turn. It reads nothing at the frame, but it still opens the
+binding's settle window, for a send that queues in the record's lag.
+
+When an unmarked `turn_ended`'s read does not pass, whatever the queue holds, the daemon
 opens a settle window for the binding and reads the cache again at 0.25, 0.5, 1, 2, 4
 and 8 s after the frame (`RELEASE_SETTLE_STEPS`). At the first read that passes it
 releases every row then queued for the name, whenever the row was queued, except the
@@ -339,10 +350,10 @@ A newer `turn_ended` of the binding, or the binding's end, closes the window ear
 bind takes its own single read and leaves it open. A window whose last read still
 does not pass logs one line naming the binding, the read and the window's length, and
 the rows wait for the next release point. That line, and the line a release point's
-read that does not pass logs, are written only when rows wait for the name; a turn end
-with an empty queue still reads and opens its window, for a send that queues inside it,
-but logs nothing. Only cache's read of the harness's record says
-a cache is warm: a turn end alone never releases. A window lives in the daemon's memory,
+read that does not pass logs, are written only when rows wait for the name that the
+binding was not handed already; a turn end with an empty queue still opens its window,
+for a send that queues inside it, but logs nothing. Apart from a marked turn end, only
+cache's read of the harness's record says a cache is warm. A window lives in the daemon's memory,
 so a restart loses it; a `[held]` row then waits for the next turn end, and nothing goes
 out cold.
 
@@ -467,7 +478,9 @@ which ends its binding.
 `turn_ended` is sent at every turn end of the agent's session: `handled` lists the
 digests whose turn ended with an answer, and `unhandled` those whose turn ended any other
 way (interrupted, errored, refused, or a hand-in turns could not tie to a turn); empty
-lists are the person's own turn ending. A `turn_ended` with no `turn_id` settles a hand-in
+lists are the person's own turn ending. `answered: true`, when the adapter sets it, says
+the turn itself ended with the model's answer (see "Held mail"); a daemon that predates
+it ignores it. A `turn_ended` with no `turn_id` settles a hand-in
 that failed before any turn. When a turn takes a digest, at its start or by a steer, the
 adapter sends `activity` with that digest's id as `ref`; `explain` reads it for
 `delivered-but-the-turn-never-completed`, and `readable` for an open thread's hour. It is

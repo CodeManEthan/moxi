@@ -367,7 +367,10 @@ class ClaudeAdapter:
 
     def _turn_ended(self, event) -> None:
         """A turn ended: each digest it names settles from its outcome, and the end is a
-        boundary, unless the boundary digest still waits behind it."""
+        boundary, unless the boundary digest still waits behind it. A turn that ended
+        with the model's answer made a request just now, and its `turn_ended` says so
+        (`answered`), so the daemon releases held mail without waiting on the
+        transcript."""
         handled = event.outcome == ANSWER
         with self._lock:
             self.turn_open = False
@@ -384,7 +387,7 @@ class ClaudeAdapter:
                     self.shim.settle_steered(hand.digest, handled=handled)
             if boundary_named:
                 # The boundary digest's own turn: it settles, and the next one goes in.
-                self.shim.on_turn_boundary(failed=not handled)
+                self.shim.on_turn_boundary(failed=not handled, answered=handled)
             elif self.boundary is not None:
                 # Another turn ended (the person's, or one the digest waits behind): the
                 # digest still awaits its own. The turn's block is over, and the daemon
@@ -392,11 +395,11 @@ class ClaudeAdapter:
                 self.shim._clear_block()
                 if self._current(event.session_id):
                     self.shim.note_turned()
-                self.shim._send_turn()
+                self.shim._send_turn(answered=handled)
             else:
                 # A boundary with no digest awaiting: it reports what settled, tells the
                 # daemon, and hands over what is queued.
-                self.shim.on_turn_boundary()
+                self.shim.on_turn_boundary(answered=handled)
 
     # ------------------------------------------------------------------ delivery
     def _handover(self, text: str, digest, *, steer: bool = False) -> None:
@@ -486,10 +489,10 @@ class ClaudeAdapter:
                 log.info("digest %s: its turn ended %s; it is %s", hand.digest,
                          result.outcome, "handled" if handled else "unhandled")
                 if hand.boundary:
-                    self.shim.on_turn_boundary(failed=not handled)
+                    self.shim.on_turn_boundary(failed=not handled, answered=handled)
                 else:
                     self.shim.settle_steered(hand.digest, handled=handled)
-                    self.shim._send_turn()
+                    self.shim._send_turn(answered=handled)
                 return
             reason = getattr(result, "reason", "")
             gone = ((isinstance(result, T.Lost) and not result.untied)

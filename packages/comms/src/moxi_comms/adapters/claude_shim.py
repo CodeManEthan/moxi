@@ -958,7 +958,8 @@ class ClaudeShim:
                      params.get("cursor"))
 
     # ------------------------------------------------------------------ turn boundary
-    def on_turn_boundary(self, *, idle: bool = False, failed: bool = False) -> str | None:
+    def on_turn_boundary(self, *, idle: bool = False, failed: bool = False,
+                         answered: bool = False) -> str | None:
         """The Stop hook. Ends the turn that was running, then opens the next.
 
         Returns the digest text injected, or None when there was nothing to inject. A
@@ -970,6 +971,10 @@ class ClaudeShim:
         its ids go back to the daemon as `unhandled`. A block that a SessionStart
         resolves (`on_session_start`) ends here too.
 
+        `answered` is a turn that ended with the model's answer, so it made a request
+        just now: the `turn_ended` says so, and the daemon releases held mail without
+        waiting for the transcript to show the turn.
+
         `idle` is the adapter's idle tick, which injects queued mail into a
         session standing at its prompt. It is not a turn: it ends nothing, sets no
         `turned`, and its notify carries no `kind`, so it releases nothing held.
@@ -980,7 +985,7 @@ class ClaudeShim:
             self.notify_activity(None)
             return self._flush()
         self.note_turned()
-        self._complete_turn(failed=failed)
+        self._complete_turn(failed=failed, answered=answered)
         return self._flush()
 
     # ------------------------------------------------------------------ reply enforcement
@@ -1117,12 +1122,12 @@ class ClaudeShim:
         """The name's unreported turn ends, when another binding starts."""
         self.unreported_handled, self.unreported_unhandled = [], []
 
-    def _complete_turn(self, *, failed: bool = False) -> None:
+    def _complete_turn(self, *, failed: bool = False, answered: bool = False) -> None:
         """End the turn that was running: its digest is handled, or `unhandled` when
         `failed` (its turn did not end `answer`), and `turn_ended` tells the daemon,
-        which keeps the books."""
+        which keeps the books; `answered` as `_send_turn` takes it."""
         self._settle_awaiting(failed=failed)
-        self._send_turn()
+        self._send_turn(answered=answered)
 
     def _settle_awaiting(self, *, failed: bool = False) -> None:
         """The boundary digest's turn ended: put it on the next `turn_ended`, handled, or
@@ -1168,9 +1173,11 @@ class ClaudeShim:
                 target.append(digest)
         return True
 
-    def _send_turn(self) -> None:
+    def _send_turn(self, *, answered: bool = False) -> None:
         """`turn_ended`, carrying every digest that ended since the last one went out.
-        One that could not go out leaves them for the next, under this binding."""
+        One that could not go out leaves them for the next, under this binding.
+        `answered` marks a turn that ended with the model's answer (`answered: true`),
+        which the daemon takes as proof the session's cache is warm."""
         with self._lock:
             handled = list(self.unreported_handled)
             unhandled = list(self.unreported_unhandled)
@@ -1182,6 +1189,8 @@ class ClaudeShim:
             return
         fields = {"identity": identity, "handled": handled, "unhandled": unhandled,
                   "turned": turned}
+        if answered:
+            fields["answered"] = True
         if endpoint is not None:
             fields["endpoint"] = endpoint
         if session_id:

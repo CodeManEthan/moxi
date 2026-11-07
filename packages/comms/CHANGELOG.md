@@ -22,7 +22,14 @@
   unturned, so the cache can read it fresh. It also no longer misses the ready of a
   later reconnect.
 - Held mail's help says it goes out at the end of the recipient's next turn. The daemon
-  logs that a release waits on a cold cache only when mail is waiting for that name.
+  logs that a release waits on a cold cache only when mail is waiting for that name and
+  has not been handed to it.
+- A Claude Code turn that ends with an answer releases the session's held mail as it
+  ends. The adapter marks its `turn_ended` `answered: true`, and the daemon takes that
+  as proof the cache is warm: it no longer waits for the transcript to show the turn,
+  so a transcript write that lags past the 8 s settle window no longer leaves the mail
+  waiting for the turn after. Other turn ends read the cache as before. A daemon older
+  than this ignores the mark.
 - comms needs moxi 0.1.6 or later, for the unit ids its fix lines name.
 
 ## 0.2.1 (2026-11-07)

@@ -550,6 +550,29 @@ def test_a_lost_delivery_is_unhandled_in_the_next_turn_ended(
     assert a.looks == 1, "an expired delivery keeps the endpoint"
 
 
+@pytest.mark.parametrize("outcome", ["answer", "aborted", "error"])
+def test_only_a_turn_that_ended_with_an_answer_is_reported_answered(
+        rig, adapter, endpoints, frames, outcome):
+    """A turn that ended with the model's answer made a request just now: its
+    `turn_ended` says `answered`, so the daemon releases held mail without waiting on
+    the transcript. An interrupted or failed turn's does not, and its end reads the
+    cache as before. The same holds for a delivered digest's own turn."""
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    ep.start_turn()                       # the person's turn
+    assert wait_until(lambda: a.turn_open)
+    ep.end_turn(outcome)
+    assert wait_until(lambda: frame_kinds(frames, "turn"))
+    send(rig, "a digest of its own")
+    assert wait_until(lambda: len(ep.texts) == 1)
+    ep.start_turn(ep.calls[0][1])
+    ep.end_turn(outcome)
+    assert wait_until(lambda: len(frame_kinds(frames, "turn")) >= 2)
+    marks = [f.get("answered") for f in frame_kinds(frames, "turn")[:2]]
+    assert marks == ([True, True] if outcome == "answer" else [None, None])
+
+
 # --------------------------------------------------------------------------- interrupt
 
 def interrupt(rig, text):
