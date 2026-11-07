@@ -507,12 +507,16 @@ def run(plan: Plan, *, git_seconds: float | None = None) -> Plan:
 
 
 def _adoptable(plan: Plan) -> set[str]:
-    """The targets a module placed itself, which install takes over before it plans."""
+    """The targets a module placed itself at its harness folders, which install takes
+    over before it plans. One the module placed with `dest` stays the module's."""
     from moxi import place
 
+    from moxi_loadout.adoption import at_its_folder
+
+    table, _ = place.harnesses()
     out = set()
     for module in {w.module for w in plan.wants if w.module}:
-        out |= {str(p.path) for p in place.status(module)}
+        out |= {str(p.path) for p in place.status(module) if at_its_folder(p, table)}
     return out
 
 
