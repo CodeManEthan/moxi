@@ -6,13 +6,16 @@
     GET  /api/session   one session by agent and model (`session=ID`)
     GET  /api/projects  tokens and cost by project, or by `cwd` where there is none
     GET  /api/models    tokens and cost by model, with where each price came from
+    GET  /api/terms     every term of each cost, by model, day, month or a session's agent
+    GET  /api/requests  one row per request of a session's agent (`session=ID&agent=ID`)
+    GET  /api/prices    the model table's rates: some models (`models=`) or a search (`q=`)
     GET  /api/status    the index: its lanes, held rows and last pass
     GET  /api/cost      today and the six days before it, by day and model
     POST /api/pass      start a pass over the index, unless one is running
     GET  /api/events    the stream: topics `limits` and `index`
 
 Each read answers from `moxi_usage.api` and reads the index as it is: no read runs a
-pass, so none waits on the index's lock. The one act starts a pass. A report route takes
+pass, so none waits on the index's lock, and `/api/prices` reads no index at all. The one act starts a pass. A report route takes
 the filters `since` and `until` (`YYYY-MM-DD`, both days included), `harness`, `project`,
 `model` and `utc`; days are cut in the page server's local zone, or in UTC with `utc`.
 Each route declares exactly the query keys it reads.
@@ -107,16 +110,18 @@ ROW_SUMS = {**SUMS, "unpriced_models": _WORDS, "rules": _WORDS}
 INDEX = lb.Out("table", items={"passed": _BOOL, "last_pass": _WHEN, "note": _MAYBE_SAYS})
 
 
-def _report(row: dict[str, lb.Out], **extra: lb.Out) -> dict[str, lb.Out]:
+def _report(row: dict[str, lb.Out], *, total: dict[str, lb.Out] | None = None,
+            **extra: lb.Out) -> dict[str, lb.Out]:
     """A report's whole answer: its range (epoch seconds, null for an open end), zone,
-    filters as given, rows, total, unpriced models and rules, and the index note."""
+    filters as given, rows, total (`SUMS` unless the report adds to it), unpriced models
+    and rules, and the index note."""
     return {
         "since": _WHEN,
         "until": _WHEN,
         "tz": _TEXT,
         "filters": _named(_SAYS),
         "rows": lb.Out("list", items=lb.Out("table", items=row)),
-        "total": lb.Out("table", items=SUMS),
+        "total": lb.Out("table", items=SUMS if total is None else total),
         "unpriced_models": _WORDS,
         "rules": _WORDS,
         "index": INDEX,
@@ -178,6 +183,126 @@ PROVENANCE = lb.Out("table", items={
 })
 MODEL_ROW = {"model": _MAYBE, "provenance": lb.Out("list", items=PROVENANCE), **ROW_SUMS}
 MODELS = _report(MODEL_ROW)
+
+#: Dollars per million tokens, null where the table doesn't know the price.
+_PRICE = lb.Out("float", nullable=True)
+_PRICES = lb.Out("table", items={name: _PRICE for name in (
+    "input", "output", "cache_read", "cache_write_5m", "cache_write_1h")})
+
+#: A cost's split by token class and price tier: `tier` null for the row's own prices.
+SPLIT = lb.Out("list", items=lb.Out("table", items={
+    "class": _TEXT, "tier": _MAYBE, "tokens": _INT, "cost": _FLOAT}))
+#: One term of a price group's cost: its class's tokens, the price they paid (null when
+#: unknown), the dollars (null in a group that can't be priced) and where the price came
+#: from (`row`, `tier` or `tier-input`; null for a model the table doesn't know).
+TERM = lb.Out("table", items={
+    "class": _TEXT, "tokens": _INT, "price": _PRICE, "cost": _WHEN, "price_from": _MAYBE,
+    "unknown": _WORDS})
+#: One price group of a cost-terms row, a line of the Reconcile table: `provider` is the
+#: requests' own (null where the harness gives none), `above` the tier's prompt-size bound
+#: (0 for none), `period` the dated `[[model]]` row in force.
+GROUP = lb.Out("table", items={
+    "model": _MAYBE,
+    "provider": _MAYBE,
+    "tier": _MAYBE,
+    "above": _INT,
+    "period": lb.Out("table", nullable=True, items={"from": _MAYBE, "to": _MAYBE}),
+    "provenance": PROVENANCE,
+    "requests": _INT,
+    "terms": lb.Out("list", items=TERM),
+    "cost": _WHEN,
+    "unpriced_tokens": _INT,
+    "unknown_rows": _INT,
+    "rule": _MAYBE,
+    "why": _MAYBE,
+    "unknown": _WORDS,
+})
+#: One row of `/api/terms`: its key is `model`, `period` (a day or a month) or `agent`
+#: and `kind`, as `by` says; the others are null.
+TERMS_ROW = {"model": _MAYBE, "period": _MAYBE, "agent": _MAYBE, "kind": _MAYBE,
+             **ROW_SUMS, "groups": lb.Out("list", items=GROUP), "split": SPLIT}
+TERMS = _report(TERMS_ROW, total={**SUMS, "split": SPLIT}, by=_TEXT)
+
+#: One request of `/api/requests`: `n` is its place on the request axis, `context` its
+#: whole prompt (null when unknown), `window` the one it ran against (null when unknown).
+REQUEST_ROW = {
+    "n": _INT,
+    "ts": _WHEN,
+    "model": _MAYBE,
+    "tier": _MAYBE,
+    "turn": _MAYBE_INT,
+    "turn_start": _BOOL,
+    "context": _MAYBE_INT,
+    "window": _MAYBE_INT,
+    "fresh_input": _INT,
+    "cache_read": _INT,
+    "cache_write_5m": _INT,
+    "cache_write_1h": _INT,
+    "output": _INT,
+    "unknown": _WORDS,
+    "synthetic": _BOOL,
+    "cost": _WHEN,
+    "split": lb.Out("list", items=lb.Out("table", items={"class": _TEXT, "cost": _WHEN})),
+}
+#: The requests' total: their sums, the compactions between them (`after` rows come
+#: before each), how many turns, and what the report can't show.
+REQUESTS = _report(REQUEST_ROW, total={
+    **SUMS,
+    "marks": lb.Out("list", items=lb.Out("table", items={
+        "after": _INT, "ts": _WHEN, "trigger": _MAYBE, "pre_tokens": _MAYBE_INT})),
+    "turns": _MAYBE_INT,
+    "claimed_elsewhere": _INT,
+    "copied_marks": _INT,
+    "marks_known": _BOOL,
+})
+
+_CONDITIONS = lb.Out("table", items={"above_tokens": _MAYBE_INT, "service_tier": _MAYBE,
+                                     "speed": _MAYBE})
+#: One model's rates now: `asked_provider` is the provider it was looked up under (null
+#: for none); each tier carries the prices a request under it pays and which of them came
+#: from the tier's input price or the model's own row; an unknown fact is null and named
+#: in `unknown`.
+RATE = lb.Out("table", items={
+    "model": _MAYBE,
+    "asked_provider": _MAYBE,
+    "input": _PRICE,
+    "output": _PRICE,
+    "cache_read": _PRICE,
+    "cache_write_5m": _PRICE,
+    "cache_write_1h": _PRICE,
+    "window": _MAYBE_INT,
+    "max_output": _MAYBE_INT,
+    "provider": _MAYBE,
+    "tiers": lb.Out("list", items=lb.Out("table", items={
+        "name": _TEXT, "conditions": _CONDITIONS, "prices": _PRICES,
+        "from_tier_input": _WORDS, "from_row": _WORDS})),
+    "provenance": PROVENANCE,
+    "unknown": _WORDS,
+})
+#: One `[[model]]` row of usage's config, with its dated period and note.
+OVERRIDE = lb.Out("table", items={
+    "id": _TEXT,
+    "match": _TEXT,
+    "prices": _PRICES,
+    "window": _MAYBE_INT,
+    "max_output": _MAYBE_INT,
+    "tiers": lb.Out("list", items=lb.Out("table", items={
+        "name": _TEXT, "conditions": _CONDITIONS, "prices": _PRICES})),
+    "provider": _MAYBE,
+    "from": _MAYBE,
+    "to": _MAYBE,
+    "note": _MAYBE,
+})
+PRICES = {
+    "effective_date": _MAYBE,
+    "rows": _INT,
+    "layers": lb.Out("list", items=lb.Out("table", items={
+        "layer": _TEXT, "date": _MAYBE, "rows": _INT})),
+    "overrides": lb.Out("list", items=OVERRIDE),
+    "problems": _WORDS,
+    "models": lb.Out("list", items=RATE),
+    "matched": _INT,
+}
 
 #: One lane of the index: what the last pass learnt of it and what the index holds for it.
 LANE = lb.Out("table", items={
@@ -280,6 +405,20 @@ PAGE = lb.Page(
                  query=FILTERS, returns=PROJECTS),
         lb.Route("/api/models", "read", "moxi_usage.pagehandlers:models",
                  query=FILTERS, returns=MODELS),
+        lb.Route("/api/terms", "read", "moxi_usage.pagehandlers:terms",
+                 query={"by": lb.Field("enum", required=False,
+                                       values=("model", "day", "month", "agent")),
+                        "session": lb.Field("string", required=False, max=512), **FILTERS},
+                 returns=TERMS),
+        lb.Route("/api/requests", "read", "moxi_usage.pagehandlers:requests",
+                 query={"session": lb.Field("string", max=512),
+                        "agent": lb.Field("string", required=False, max=512), **FILTERS},
+                 returns=REQUESTS),
+        lb.Route("/api/prices", "read", "moxi_usage.pagehandlers:prices",
+                 query={"models": lb.Field("string", required=False, max=16384),
+                        "providers": lb.Field("string", required=False, max=4096),
+                        "q": lb.Field("string", required=False, max=200)},
+                 returns=PRICES),
         lb.Route("/api/status", "read", "moxi_usage.pagehandlers:status", returns=STATUS),
         lb.Route("/api/cost", "read", "moxi_usage.pagehandlers:cost", returns=COST),
         lb.Route("/api/pass", "act", "moxi_usage.pagehandlers:start_pass",
@@ -291,7 +430,9 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["AGENT_ROW", "COST", "DAILY", "FILTERS", "HARNESSES", "INDEX", "INDEX_TOPIC",
-           "LANE", "LIMITS", "MODELS", "MODEL_ROW", "PAGE", "PERIOD_ROW", "PROJECTS",
-           "PROJECT_ROW", "PROVENANCE", "ROW_SUMS", "SESSION", "SESSIONS", "SESSION_ROW",
-           "STATUS", "SUMS", "TOP_DEFAULT", "TOP_MAX", "WINDOW"]
+__all__ = ["AGENT_ROW", "COST", "DAILY", "FILTERS", "GROUP", "HARNESSES", "INDEX",
+           "INDEX_TOPIC", "LANE", "LIMITS", "MODELS", "MODEL_ROW", "OVERRIDE", "PAGE",
+           "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
+           "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SESSION", "SESSIONS", "SESSION_ROW",
+           "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
+           "WINDOW"]

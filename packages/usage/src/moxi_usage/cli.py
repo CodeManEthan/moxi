@@ -150,7 +150,7 @@ def _prices(args: argparse.Namespace) -> int:
 
     if args.model is None:
         current = models.table()
-        summary = _summary(current)
+        summary = models.summary(current)
         if args.json:
             print(json.dumps(summary, indent=2))
         else:
@@ -162,24 +162,6 @@ def _prices(args: argparse.Namespace) -> int:
     else:
         _print_facts(facts)
     return codes.OK if facts.known else codes.ERROR
-
-
-def _summary(current: Any) -> dict[str, Any]:
-    from . import models
-
-    layers = [{"layer": models.SHIPPED_LAYER, "date": current.dates.get(models.SHIPPED_LAYER),
-               "rows": len(current.shipped.get("models", {}))}]
-    if current.snapshot is not None:
-        layers.append({"layer": models.SNAPSHOT_LAYER,
-                       "date": current.dates.get(models.SNAPSHOT_LAYER),
-                       "rows": len(current.snapshot.get("models", {})),
-                       "path": str(models.snapshot_path())})
-    if current.overrides:
-        layers.append({"layer": models.OVERRIDE_LAYER, "rows": len(current.overrides),
-                       "overrides": [row.as_dict() for row in current.overrides]})
-    return {"effective_date": current.effective_date, "rows": len(current.rows),
-            "layers": layers, "prefixes": sorted(current.prefixes),
-            "variants": sorted(current.variants), "problems": list(current.problems)}
 
 
 def _print_summary(summary: dict[str, Any]) -> None:

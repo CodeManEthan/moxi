@@ -7,6 +7,9 @@ import {
   labelEvery, MARGIN, menuPaths, meter, NO_FILTERS, parseRoute, projectMenu, provenanceLine,
   rangeFor, refusedLine, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay,
   shouldPass, strip, tickText, viewPath,
+  areaPath, BARS_UP_TO, classChart, classCosts, contextChart, linePath, pricesPath, rateAsks,
+  rateLine, readout, reconcileLines, requestAxis, requestNotes, requestRules, requestsChart,
+  requestsPath, splitBars, splitKeys, splitLabel, stepPath, termCell, tierText,
 } from "../src/views.ts";
 
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
@@ -67,7 +70,11 @@ test("routes", () => {
   assert.deepEqual(parseRoute("/sessions/"), { view: "sessions" });
   assert.deepEqual(parseRoute("projects"), { view: "projects" });
   assert.deepEqual(parseRoute("models"), { view: "models" });
-  assert.deepEqual(parseRoute(sessionRoute("ses a/b")), { view: "session", session: "ses a/b" });
+  assert.deepEqual(parseRoute(sessionRoute("ses a/b")), { view: "session", session: "ses a/b", agent: "main" });
+  assert.deepEqual(parseRoute(sessionRoute("s1", "a/1")), { view: "session", session: "s1", agent: "a/1" });
+  assert.equal(sessionRoute("s1", "main"), "session/s1");
+  assert.deepEqual(parseRoute("terms"), { view: "terms" });
+  assert.deepEqual(parseRoute("session/s1/a/b"), { view: "unknown" });
   assert.deepEqual(parseRoute("session/"), { view: "unknown" });
   assert.deepEqual(parseRoute("pricing"), { view: "unknown" });
 });
@@ -395,3 +402,170 @@ test("the page starts a pass as it opens only over an index read more than 10 mi
 function sum(values) {
   return values.reduce((a, b) => a + b, 0);
 }
+
+
+// --- the cost terms ---
+
+const term = (cls, tokens, price, extra = {}) => ({ class: cls, tokens, price,
+  cost: price === null ? null : tokens * price / 1e6, price_from: "row", unknown: [], ...extra });
+const provenance = { layer: "shipped", step: 2, rule: "exact", row: null, snapshot: "2026-10-30",
+  overridden: [], period: null, note: null, filled: [], variant: null };
+const group = (model, terms, extra = {}) => ({ model, provider: null, tier: null, above: 0, period: null,
+  provenance, requests: 1, terms, cost: terms.every((t) => t.cost !== null) ? terms.reduce((a, t) => a + t.cost, 0) : null,
+  unpriced_tokens: 0, unknown_rows: 0, rule: null, why: null, unknown: [], ...extra });
+const five = (input, read, w5, w1, out, prices = [3, 0.3, 3.75, 6, 15]) =>
+  ["input", "cache_read", "cache_write_5m", "cache_write_1h", "output"].map((cls, i) =>
+    term(cls, [input, read, w5, w1, out][i], prices[i]));
+const termsRow = (model, groups, split = []) => ({ ...sums({ cost: groups.reduce((a, g) => a + (g.cost ?? 0), 0) }),
+  model, period: null, agent: null, kind: null, groups, split });
+
+test("a Reconcile cell's title is tokens x price = dollars", () => {
+  const cell = termCell(term("cache_read", 98_765_432, 0.8, { price_from: "tier-input" }));
+  assert.equal(cell.text, "$79.01");
+  assert.equal(cell.title, "cache read: 98,765,432 x $0.8/M = $79.01 (from the tier's input price)");
+  assert.equal(termCell(term("output", 10, null)).title, "output: 10 x no price = not priced");
+});
+
+test("a model of two groups gets a subtotal equal to their sum, and one of one gets none", () => {
+  const fast = group("m-a", five(1000, 0, 0, 0, 100, [6, 0.6, 7.5, 12, 30]), { tier: "fast" });
+  const standard = group("m-a", five(2000, 500, 0, 0, 300));
+  const other = group("m-b", five(100, 0, 0, 0, 10, [1, 0.1, 1.25, 2, 5]));
+  const rows = [termsRow("m-a", [standard, fast]), termsRow("m-b", [other])];
+  const lines = reconcileLines(report(rows, { total: sums({ cost: rows[0].cost + rows[1].cost }) }));
+  assert.deepEqual(lines.map((line) => [line.kind, line.model]), [
+    ["group", "m-a"], ["group", "m-a"], ["subtotal", "m-a total"], ["group", "m-b"], ["total", "Total"]]);
+  const [a, b, subtotal, , total] = lines;
+  assert.ok(Math.abs(subtotal.cost - (a.cost + b.cost)) < 1e-9);
+  assert.equal(subtotal.cells[0].title, "fresh input: 3,000 tokens over 2 groups = $0.01");
+  assert.ok(b.pricedBy.includes("tier fast"));
+  const groupsOnly = lines.filter((line) => line.kind === "group").reduce((sum_, line) => sum_ + line.cost, 0);
+  assert.ok(Math.abs(total.cost - groupsOnly) < 1e-9);
+});
+
+test("the class split's bars and keys name class and tier", () => {
+  const split = [{ class: "input", tier: null, tokens: 10, cost: 1 }, { class: "output", tier: "fast", tokens: 5, cost: 3 },
+                 { class: "output", tier: null, tokens: 5, cost: 1 }];
+  assert.deepEqual(splitKeys(split), ["input", "output", "output:fast"]);
+  assert.equal(splitLabel("output:fast"), "output, fast");
+  const [bar] = splitBars([termsRow("m-a", [], split)], 100);
+  assert.equal(bar.total, 5);
+  assert.deepEqual(bar.segments.map((seg) => [seg.key, seg.hatch, seg.width]), [
+    ["input", false, 20], ["output:fast", true, 60], ["output", false, 20]]);
+  assert.match(bar.segments[1].title, /^m-a, output, fast: 5 tokens, \$3\.00, 60%$/);
+  assert.deepEqual(classCosts(split).map((item) => [item.key, item.value]), [["input", 1], ["output", 4]]);
+  const chart = classChart([{ ...termsRow("m-a", [], split), model: null, period: "2026-10-01" }], 400, 200);
+  assert.deepEqual(chart.bars[0].segments.map((seg) => [seg.key, seg.index, seg.hatch]), [
+    ["input", 0, false], ["output", 4, false], ["output:fast", 4, true]]);
+});
+
+// --- the rates ---
+
+const rate = (extra = {}) => ({ model: "m-a", asked_provider: null, input: 3, output: 15, cache_read: 0.3,
+  cache_write_5m: 3.75, cache_write_1h: 6, window: 200000, max_output: 64000, provider: "anthropic", tiers: [],
+  provenance: { ...provenance, filled: ["cache_read", "cache_write_5m", "cache_write_1h"] }, unknown: [], ...extra });
+
+test("a tiered model's Tiers cell and a provider default's mark", () => {
+  const line = rateLine(rate({ tiers: [{ name: "fast", conditions: { above_tokens: null, service_tier: null, speed: "fast" },
+    prices: { input: 30, output: 150, cache_read: 3, cache_write_5m: 37.5, cache_write_1h: 60 },
+    from_tier_input: ["cache_read", "cache_write_5m", "cache_write_1h"], from_row: [] }] }));
+  assert.deepEqual(line.tiers, ["fast (speed fast): $30 / $150, cache from tier input"]);
+  assert.deepEqual(line.cells.map((cell) => [cell.text, cell.mark]), [
+    ["$3", null], ["$15", null], ["$0.3", "provider default"], ["$3.75", "provider default"], ["$6", "provider default"]]);
+  assert.equal(line.window, "200,000");
+  const mine = rateLine(rate({ provenance: { ...provenance, layer: "override", overridden: ["input", "output"],
+                                             period: { from: "2026-01-01", to: null } } }));
+  assert.deepEqual(mine.cells.slice(0, 2).map((cell) => cell.mark), ["your config", "your config"]);
+  assert.equal(mine.period, "2026-01-01 to now");
+  assert.equal(tierText({ name: "above_200k", conditions: { above_tokens: 200000, service_tier: null, speed: null },
+    prices: { input: 6, output: 22.5 }, from_tier_input: [], from_row: [] }), "above_200k (above 200k): $6 / $22.5");
+});
+
+test("the Rates section asks for each model under its groups' provider", () => {
+  const rows = [termsRow("m-a", [group("m-a", five(1, 0, 0, 0, 1)), group("m-a", five(1, 0, 0, 0, 1), { provider: "openrouter" })]),
+                termsRow("m-b", [group("m-b", five(1, 0, 0, 0, 1))])];
+  const { asks, more } = rateAsks(rows);
+  assert.deepEqual(asks, [{ model: "m-a", provider: null }, { model: "m-a", provider: "openrouter" }, { model: "m-b", provider: null }]);
+  assert.equal(more, 0);
+  const query = new URLSearchParams(pricesPath(asks).split("?")[1]);
+  assert.equal(query.get("models"), "m-a,m-a,m-b");
+  assert.equal(query.get("providers"), ",openrouter,");
+});
+
+// --- the requests ---
+
+const req = (n, extra = {}) => ({ n, ts: 1_700_000_000 + n * 60, model: "m-a", tier: null, turn: 1, turn_start: false,
+  context: 1000 * n, window: 200000, fresh_input: 100, cache_read: 800, cache_write_5m: 100, cache_write_1h: 0,
+  output: 50, unknown: [], synthetic: false, cost: 0.01,
+  split: [["input", 0.002], ["cache_read", 0.003], ["cache_write_5m", 0.001], ["cache_write_1h", 0], ["output", 0.004]]
+    .map(([cls, cost]) => ({ class: cls, cost })), ...extra });
+const total = (extra = {}) => ({ ...sums(), marks: [], turns: 1, claimed_elsewhere: 0, copied_marks: 0, marks_known: true, ...extra });
+
+test("the requests chart draws bars up to 120 requests and an area past them", () => {
+  const rows = (count) => Array.from({ length: count }, (_, i) => req(i + 1));
+  const bars = requestsChart(rows(BARS_UP_TO), "tokens", 640, 200);
+  assert.equal(bars.mode, "bars");
+  assert.equal(bars.bars.length, 120);
+  const area = requestsChart(rows(121), "tokens", 640, 200);
+  assert.equal(area.mode, "area");
+  assert.equal(area.bars.length, 0);
+  assert.equal(area.areas.length, 5);
+});
+
+test("the cost measure stacks each request's split up to its cost", () => {
+  const chart = requestsChart([req(1), req(2, { cost: 0.02, split: req(1).split.map((s) => ({ ...s, cost: s.cost * 2 })) })],
+                              "cost", 640, 200);
+  const y0 = 200 - MARGIN.bottom;
+  const [one, two] = chart.bars.map((bar) => bar.segments.reduce((a, seg) => a + seg.value, 0));
+  assert.ok(Math.abs(one - 0.01) < 1e-12 && Math.abs(two - 0.02) < 1e-12);
+  // the top segment's top is the row's cost on the scale
+  const top = chart.bars[1].segments.at(-1).y;
+  assert.ok(Math.abs((y0 - top) / (y0 - chart.bars[0].segments.at(-1).y) - 2) < 1e-9);
+  const xs = [10, 20];
+  assert.equal(areaPath(xs, [100, 100], [80, 60]), "M10,80L20,60L20,100L10,100Z");
+});
+
+test("turn and compaction rules sit between the requests", () => {
+  const rows = [req(1), req(2), req(3, { turn: 2, turn_start: true }), req(4, { turn: 2 })];
+  const axis = requestAxis(4, 4 * 10 + MARGIN.left + MARGIN.right);
+  assert.equal(axis.step, 10);
+  const rules = requestRules(rows, total({ turns: 2, marks: [{ after: 2, ts: null, trigger: "auto", pre_tokens: 167412 }] }), axis);
+  assert.deepEqual(rules.turns, [{ n: 3, x: MARGIN.left + 20 }]);
+  assert.equal(rules.compactions[0].x, MARGIN.left + 20);
+  assert.equal(rules.compactions[0].label, "compaction (auto)");
+  assert.equal(rules.compactions[0].dot, 3);
+  assert.match(rules.compactions[0].title, /167,412 before/);
+  assert.deepEqual(requestRules(rows, total({ turns: 1 }), axis).turns, []);
+});
+
+test("the context line breaks where context is unknown or synthetic", () => {
+  assert.equal(linePath([{ x: 1, y: 5 }, { x: 2, y: 6 }, { x: 3, y: null }, { x: 4, y: 7 }]), "M1,5L2,6M4,7");
+  const chart = contextChart([req(1), req(2, { context: null }), req(3, { synthetic: true }), req(4)], 640, 200);
+  assert.equal(chart.points, 2);
+  assert.equal((chart.line.match(/M/g) ?? []).length, 2);
+});
+
+test("the window steps where it changes and the y domain reaches it", () => {
+  assert.equal(stepPath([{ x0: 0, x1: 10, y: 50 }, { x0: 10, x1: 20, y: 50 }, { x0: 20, x1: 30, y: 20 }, { x0: 30, x1: 40, y: null }]),
+               "M0,50H10H20V20H30");
+  const chart = contextChart([req(1, { window: 200000 }), req(2, { window: 1_000_000 })], 640, 200);
+  assert.deepEqual(chart.windowLabels.map((label) => label.text), ["window 200,000", "window 1,000,000"]);
+  const ys = [...chart.window.matchAll(/[MV]-?[\d.]+,?(-?[\d.]+)?/g)].map((m) => m[0]);
+  assert.equal(ys.length, 2);
+  // the top tick reaches the larger window
+  assert.ok(Math.max(...chart.ticks.map((tick) => tick.value)) >= 1_000_000);
+  const unknown = contextChart([req(1, { window: null, model: "m-b" })], 640, 200);
+  assert.equal(unknown.window, "");
+  assert.equal(unknown.unknownWindow, "window unknown for m-b");
+});
+
+test("the readout and the notes", () => {
+  const line = readout(req(5, { turn: 2, unknown: ["output"] }));
+  assert.match(line, /^#5 · .* · turn 2 · m-a · context 5.00k · 2.5% of 200,000 · fresh input 100, .*output \? · \$0\.01$/);
+  assert.deepEqual(requestNotes([req(1)], total({ turns: null, claimed_elsewhere: 2, copied_marks: 1, marks_known: false })), [
+    "2 requests of this agent are counted under another file",
+    "1 compaction copied from another file isn't drawn",
+    "compactions aren't read yet for a file of this agent; the next pass that can read it brings them in",
+    "this harness wrote no turns here"]);
+  assert.equal(requestsPath({ view: "session", session: "s1", agent: "a" }, { ...NO_FILTERS, preset: "all" }, "2026-10-01"),
+               "api/requests?session=s1&agent=a");
+});

@@ -137,14 +137,15 @@ def _index(found: Mapping[str, Any]) -> dict[str, Any]:
             "note": _str(found.get("note"))}
 
 
-def _report(answer: Mapping[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _report(answer: Mapping[str, Any], rows: list[dict[str, Any]],
+            total: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "since": _num(answer.get("since")),
         "until": _num(answer.get("until")),
         "tz": str(answer.get("tz") or "local"),
         "filters": _named(answer.get("filters") or {}, str),
         "rows": rows,
-        "total": _sums(answer.get("total") or {}),
+        "total": _sums(answer.get("total") or {}) if total is None else total,
         "unpriced_models": _words(answer.get("unpriced_models")),
         "rules": _words(answer.get("rules")),
         "index": _index(answer.get("index") or {}),
@@ -258,6 +259,208 @@ def cost(call: Any) -> dict[str, Any]:
     answer = _read("daily", {}, since=since.isoformat())
     return {**_report(answer, [_period_row(row) for row in answer["rows"]]),
             "today": today.isoformat()}
+
+
+# --- the cost terms and the requests -------------------------------------------------------
+
+def _split(found: Any) -> list[dict[str, Any]]:
+    return [{"class": str(item.get("class")), "tier": _str(item.get("tier")),
+             "tokens": _int(item.get("tokens")) or 0, "cost": _num(item.get("cost")) or 0.0}
+            for item in found or ()]
+
+
+def _term(found: Mapping[str, Any]) -> dict[str, Any]:
+    return {"class": str(found.get("class")), "tokens": _int(found.get("tokens")) or 0,
+            "price": _num(found.get("price")), "cost": _num(found.get("cost")),
+            "price_from": _str(found.get("price_from")), "unknown": _words(found.get("unknown"))}
+
+
+def _group(found: Mapping[str, Any]) -> dict[str, Any]:
+    period = found.get("period")
+    return {"model": _str(found.get("model")), "provider": _str(found.get("provider")),
+            "tier": _str(found.get("tier")), "above": _int(found.get("above")) or 0,
+            "period": None if not isinstance(period, Mapping) else {
+                "from": _str(period.get("from")), "to": _str(period.get("to"))},
+            "provenance": _provenance(found.get("provenance") or {}),
+            "requests": _int(found.get("requests")) or 0,
+            "terms": [_term(term) for term in found.get("terms") or ()],
+            "cost": _num(found.get("cost")),
+            "unpriced_tokens": _int(found.get("unpriced_tokens")) or 0,
+            "unknown_rows": _int(found.get("unknown_rows")) or 0,
+            "rule": _str(found.get("rule")), "why": _str(found.get("why")),
+            "unknown": _words(found.get("unknown"))}
+
+
+def terms(call: Any) -> dict[str, Any]:
+    """`GET /api/terms`: every term of each cost, by model (the default), day, month or,
+    with `session`, agent; `session` alone narrows the other keys to that session."""
+    by = call.query.get("by") or "model"
+    given: dict[str, Any] = {"by": by}
+    if call.query.get("session"):
+        given["session"] = call.query["session"]
+    answer = _read("terms", call.query, **given)
+    rows = [{"model": _str(row.get("model")), "period": _str(row.get("day", row.get("month"))),
+             "agent": _str(row.get("agent")), "kind": _str(row.get("kind")),
+             **_row_sums(row), "groups": [_group(group) for group in row.get("groups") or ()],
+             "split": _split(row.get("split"))} for row in answer["rows"]]
+    total = answer.get("total") or {}
+    return {**_report(answer, rows, {**_sums(total), "split": _split(total.get("split"))}),
+            "by": by}
+
+
+def _mark(found: Mapping[str, Any]) -> dict[str, Any]:
+    return {"after": _int(found.get("after")) or 0, "ts": _num(found.get("ts")),
+            "trigger": _str(found.get("trigger")), "pre_tokens": _int(found.get("pre_tokens"))}
+
+
+_REQUEST_CLASSES = ("fresh_input", "cache_read", "cache_write_5m", "cache_write_1h", "output")
+
+
+def _request_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {"n": _int(row.get("n")) or 0, "ts": _num(row.get("ts")),
+            "model": _str(row.get("model")), "tier": _str(row.get("tier")),
+            "turn": _int(row.get("turn")), "turn_start": bool(row.get("turn_start")),
+            "context": _int(row.get("context")), "window": _int(row.get("window")),
+            **{name: _int(row.get(name)) or 0 for name in _REQUEST_CLASSES},
+            "unknown": _words(row.get("unknown")), "synthetic": bool(row.get("synthetic")),
+            "cost": _num(row.get("cost")),
+            "split": [{"class": str(item.get("class")), "cost": _num(item.get("cost"))}
+                      for item in row.get("split") or ()]}
+
+
+def requests(call: Any) -> dict[str, Any]:
+    """`GET /api/requests?session=ID&agent=ID`: one row per request of one session's
+    agent (`main` unless `agent` names another), with its compactions placed between
+    the rows and what the report can't show."""
+    answer = _read("requests", call.query, session=call.query["session"],
+                   agent=call.query.get("agent") or "main")
+    total = answer.get("total") or {}
+    cut = {**_sums(total), "marks": [_mark(mark) for mark in total.get("marks") or ()],
+           "turns": _int(total.get("turns")),
+           "claimed_elsewhere": _int(total.get("claimed_elsewhere")) or 0,
+           "copied_marks": _int(total.get("copied_marks")) or 0,
+           "marks_known": bool(total.get("marks_known"))}
+    return _report(answer, [_request_row(row) for row in answer["rows"]], cut)
+
+
+# --- the rates -----------------------------------------------------------------------------
+
+#: The most model ids `/api/prices?models=` takes, and the most matches `?q=` sends.
+PRICES_MAX = 100
+MATCHES_MAX = 50
+_PRICES = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
+
+
+def _prices_of(found: Mapping[str, Any]) -> dict[str, Any]:
+    return {name: _num(found.get(name)) for name in _PRICES}
+
+
+def _conditions(found: Mapping[str, Any]) -> dict[str, Any]:
+    return {"above_tokens": _int(found.get("above_tokens")),
+            "service_tier": _str(found.get("service_tier")), "speed": _str(found.get("speed"))}
+
+
+def _tiers(facts: Any, defaults: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Each tier of `facts` with its conditions and the prices a request under it pays,
+    as `moxi_usage.cost.prices` works them out, and which of those came from the tier's
+    input price or the model's own row."""
+    import dataclasses
+
+    from . import cost
+
+    tiers = facts.tiers if isinstance(facts.tiers, Mapping) else {}
+    out = []
+    for name in sorted(tiers):
+        tier = tiers[name]
+        if not isinstance(tier, Mapping):
+            continue
+        paid = cost.prices(dataclasses.replace(facts, tiers={name: tier}), defaults,
+                           size=_int(tier.get("above_tokens")) or 0,
+                           service_tier=_str(tier.get("service_tier")),
+                           speed=_str(tier.get("speed")))
+        out.append({"name": str(name), "conditions": _conditions(tier),
+                    "prices": {field: _num(getattr(paid, field)) for field in _PRICES},
+                    "from_tier_input": list(paid.from_tier_input),
+                    "from_row": list(paid.from_row)})
+    return out
+
+
+def _rate(facts: Any, table: Any, asked: str | None) -> dict[str, Any]:
+    data = facts.as_dict()
+    defaults = table.defaults.get(facts.provider) if isinstance(facts.provider, str) else None
+    window, most = data.get("window"), data.get("max_output")
+    return {"model": _str(facts.model), "asked_provider": asked,
+            **_prices_of(data), "window": _int(window), "max_output": _int(most),
+            "provider": _str(data.get("provider")), "tiers": _tiers(facts, defaults),
+            "provenance": _provenance(data.get("provenance") or {}),
+            "unknown": _words(data.get("unknown"))}
+
+
+def _override(row: Mapping[str, Any]) -> dict[str, Any]:
+    tiers = row.get("tiers") if isinstance(row.get("tiers"), Mapping) else {}
+    return {"id": str(row.get("id")), "match": str(row.get("match") or "exact"),
+            "prices": _prices_of(row), "window": _int(row.get("window")),
+            "max_output": _int(row.get("max_output")),
+            "tiers": [{"name": str(name), "conditions": _conditions(tier),
+                       "prices": _prices_of(tier)} for name, tier in tiers.items()],
+            "provider": _str(row.get("provider")), "from": _str(row.get("from")),
+            "to": _str(row.get("to")), "note": _str(row.get("note"))}
+
+
+def _ids(text: str | None) -> list[str]:
+    return [] if text is None else [part.strip() for part in text.split(",")]
+
+
+def prices(call: Any) -> dict[str, Any]:
+    """`GET /api/prices`: the model table's rates, read with no pass and no SQL. Always
+    its effective date, layers, `[[model]]` rows and problems; with `models=ID,...` (up
+    to `PRICES_MAX`, each looked up now under the provider at the same place of
+    `providers=`, none when that place is empty) those models' facts; with `q=TEXT` the
+    table's ids that hold it, ignoring case, the first `MATCHES_MAX` by id, and how many
+    matched."""
+    query = call.query
+    asked, text, given = query.get("models"), query.get("q"), query.get("providers")
+    if asked is not None and text is not None:
+        raise lb.Refused("ask for models or search with q, not both")
+    if given is not None and asked is None:
+        raise lb.Refused("providers go with models, one for each id")
+    from . import models as tables
+
+    try:
+        table = tables.table()
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    found: list[dict[str, Any]] = []
+    matched = 0
+    if asked is not None:
+        ids = _ids(asked)
+        if len(ids) > PRICES_MAX:
+            raise lb.Refused(f"ask for at most {PRICES_MAX} models at once, not {len(ids)}")
+        providers = _ids(given) if given is not None else [""] * len(ids)
+        if len(providers) != len(ids):
+            raise lb.Refused(f"{len(providers)} providers for {len(ids)} models: give one "
+                             "for each id, empty for none")
+        for model, provider in zip(ids, providers, strict=True):
+            if model:
+                found.append(_rate(table.lookup(model, provider=provider or None), table,
+                                   provider or None))
+    elif text is not None:
+        if len(text.strip()) < 2:
+            raise lb.Refused("search with 2 characters or more")
+        needle = text.strip().casefold()
+        hits = [model for model in table.ids() if needle in model.casefold()]
+        matched = len(hits)
+        found = [_rate(table.lookup(model), table, None) for model in hits[:MATCHES_MAX]]
+    summary = tables.summary(table)
+    overrides = next((layer.get("overrides") or [] for layer in summary["layers"]
+                      if layer["layer"] == "override"), [])
+    return {"effective_date": _str(summary.get("effective_date")),
+            "rows": _int(summary.get("rows")) or 0,
+            "layers": [{"layer": str(layer["layer"]), "date": _str(layer.get("date")),
+                        "rows": _int(layer.get("rows")) or 0} for layer in summary["layers"]],
+            "overrides": [_override(row) for row in overrides],
+            "problems": _words(summary.get("problems")),
+            "models": found, "matched": matched}
 
 
 # --- the index -----------------------------------------------------------------------------
@@ -471,5 +674,6 @@ async def events(call: Any) -> Any:
     return call.stream(feed.topics)
 
 
-__all__ = ["COST_DAYS", "PERIOD", "TOPICS", "cost", "daily", "events", "gather_limits",
-           "limits", "models", "projects", "session", "sessions", "start_pass", "status"]
+__all__ = ["COST_DAYS", "MATCHES_MAX", "PERIOD", "PRICES_MAX", "TOPICS", "cost", "daily",
+           "events", "gather_limits", "limits", "models", "prices", "projects", "requests",
+           "session", "sessions", "start_pass", "status", "terms"]

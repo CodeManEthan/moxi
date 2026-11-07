@@ -10,6 +10,8 @@ Model facts (`moxi_usage.models`):
 * `context_window(model, reported=None)`: the window the harness reported when it gave
   one, else the table's, else `UNKNOWN`.
 * `table()`: the table in effect (`Table`), for a caller that looks up many models.
+* `summary(table)`: what a table is made of: its effective date, its row count, each
+  layer with its date and rows, the config's `[[model]]` rows, and what was skipped.
 
 Limits (`moxi_usage.limits`):
 
@@ -84,8 +86,8 @@ from typing import Any
 
 #: Each name's home module, under this package; `UNKNOWN` is sessions'.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("model_facts", "models", "context_window", "table", "ModelFacts",
-                     "Provenance", "Table", "STEPS"), "models"),
+    **dict.fromkeys(("model_facts", "models", "context_window", "table", "summary",
+                     "ModelFacts", "Provenance", "Table", "STEPS"), "models"),
     **dict.fromkeys(("limits", "Limits", "Row", "Pull"), "limits"),
     **dict.fromkeys(("report", "Report", "ReportError", "KINDS"), "reports"),
     **dict.fromkeys(("context", "Context"), "context"),

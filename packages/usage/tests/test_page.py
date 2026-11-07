@@ -31,8 +31,9 @@ from moxi_sessions import api as sessions
 from moxi_usage import index, limits, models, page, pagehandlers, readings, reports, store
 from moxi_usage.readings import Reading
 
-from conftest import write_config
-from test_reports import at, one_session_index, source, request, table
+from conftest import doc, write_config
+from test_reports import (at, one_session_index, request, requests_index, source,
+                          table)
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "T" * 43
@@ -212,6 +213,9 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
         "/api/session": ("read", {"session", *FILTERS}, False),
         "/api/projects": ("read", FILTERS, False),
         "/api/models": ("read", FILTERS, False),
+        "/api/terms": ("read", {"by", "session", *FILTERS}, False),
+        "/api/requests": ("read", {"session", "agent", *FILTERS}, False),
+        "/api/prices": ("read", {"models", "providers", "q"}, False),
         "/api/status": ("read", set(), False),
         "/api/cost": ("read", set(), False),
         "/api/pass": ("act", set(), False),
@@ -219,6 +223,8 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
     }
     assert not any(route["gateway"] or route["confirmed"] for route in routes.values())
     assert routes["/api/session"]["query"]["session"]["required"]
+    assert routes["/api/requests"]["query"]["session"]["required"]
+    assert not routes["/api/terms"]["query"]["session"]["required"]
     assert list(routes["/api/events"]["topics"]) == ["limits", "index"]
     assert routes["/api/pass"]["body"] == {}
     assert page.HARNESSES == reports.HARNESSES
@@ -255,7 +261,7 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
         "total.held_rows[].path", "total.duplicate_rows[].path",
         "total.duplicate_rows[].of_path"}
     for path in ("/api/limits", "/api/daily", "/api/session", "/api/models", "/api/cost",
-                 "/api/pass", "/api/events"):
+                 "/api/terms", "/api/requests", "/api/prices", "/api/pass", "/api/events"):
         assert marked(path, "path") == set(), path
     assert "rows[].title" in marked("/api/sessions", "redact")
     assert "rows[].title" in marked("/api/session", "redact")
@@ -487,11 +493,172 @@ def test_status_cuts_the_lane_facts_and_held_reasons_to_declared_lists(seeded):
     assert body["index"]["last_pass"] == LAST_PASS
 
 
+# --- the cost terms, the requests and the rates ----------------------------------------------
+
+def test_terms_by_model_send_each_group_with_its_terms_and_agree_with_models(seeded):
+    body = get("/api/terms", utc="true")
+    assert body["by"] == "model"
+    models_ = {row["model"]: row for row in get("/api/models", utc="true")["rows"]}
+    assert {row["model"] for row in body["rows"]} == set(models_)
+    for row in body["rows"]:
+        assert set(row) == set(page.TERMS_ROW)
+        assert (row["period"], row["agent"], row["kind"]) == (None, None, None)
+        assert row["tokens"] == models_[row["model"]]["tokens"]
+        if row["cost"] is None:
+            assert models_[row["model"]]["cost"] is None and row["split"] == []
+            continue
+        assert row["cost"] == pytest.approx(models_[row["model"]]["cost"])
+        assert sum(g["cost"] for g in row["groups"] if g["cost"] is not None) == pytest.approx(
+            row["cost"])
+        assert sum(item["cost"] for item in row["split"]) == pytest.approx(row["cost"])
+        for group in row["groups"]:
+            assert set(group) == set(page.GROUP.items)
+            assert [t["class"] for t in group["terms"]] == [
+                "input", "cache_read", "cache_write_5m", "cache_write_1h", "output"]
+            assert sum(t["cost"] for t in group["terms"]) == pytest.approx(group["cost"])
+    [mystery] = [row for row in body["rows"] if row["model"] == "mystery-9"]
+    [group] = mystery["groups"]
+    assert group["cost"] is None and group["why"]
+    assert all(t["cost"] is None and "cost" in t["unknown"] for t in group["terms"])
+    assert body["total"]["split"] and set(body["total"]) == {*page.SUMS, "split"}
+
+
+def test_terms_by_day_and_by_a_sessions_agent(seeded):
+    days = get("/api/terms", by="day", utc="true")
+    assert days["by"] == "day"
+    daily = get("/api/daily", utc="true")["rows"]
+    assert [row["period"] for row in days["rows"]] == sorted({row["period"] for row in daily})
+    for row in days["rows"]:
+        mine = [d for d in daily if d["period"] == row["period"]]
+        assert row["tokens"] == sum(d["tokens"] for d in mine)
+        assert sum(item["cost"] for item in row["split"]) == pytest.approx(row["cost"])
+    agents = get("/api/terms", by="agent", session="s1", harness="claude", utc="true")
+    assert [(row["agent"], row["kind"]) for row in agents["rows"]] == [
+        ("main", "main"), ("a", "subagent"), ("b", "workflow")]
+    assert {"name": "session", "value": "s1"} in agents["filters"]
+    assert "needs a session id" in refused("/api/terms", by="agent")
+    narrowed = get("/api/terms", session="s1", harness="claude", utc="true")
+    assert narrowed["total"]["requests"] == get(
+        "/api/session", session="s1", harness="claude", utc="true")["total"]["requests"]
+
+
+@pytest.fixture
+def requests_seeded(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    conn = store.open_index()
+    try:
+        requests_index(conn)
+    finally:
+        conn.close()
+
+
+def test_requests_send_one_row_per_request_with_the_marks_between_them(requests_seeded):
+    body = get("/api/requests", session="s1", harness="claude", utc="true")
+    rows = body["rows"]
+    assert [row["n"] for row in rows] == [1, 2, 3, 4]
+    assert set(rows[0]) == set(page.REQUEST_ROW)
+    assert [row["turn_start"] for row in rows] == [False, False, True, False]
+    assert rows[1]["tier"] == "fast"
+    assert "output" in rows[2]["unknown"]
+    assert rows[0]["window"] == 200000 and rows[3]["window"] is None
+    assert "window" in rows[3]["unknown"]
+    for row in rows:
+        assert sum(item["cost"] for item in row["split"]) == pytest.approx(row["cost"])
+    total = body["total"]
+    assert total["marks"] == [{"after": 2, "ts": at("2026-10-01T12:00") + 90,
+                               "trigger": "auto", "pre_tokens": 167_412}]
+    assert (total["turns"], total["claimed_elsewhere"], total["copied_marks"],
+            total["marks_known"]) == (2, 0, 0, True)
+    sub = get("/api/requests", session="s1", agent="a", harness="claude", utc="true")
+    assert [row["model"] for row in sub["rows"]] == ["m-b", "m-b"]
+    assert sub["total"]["turns"] is None and sub["total"]["marks"] == []
+    resumed = get("/api/requests", session="s2", harness="claude", utc="true")
+    assert resumed["total"]["claimed_elsewhere"] == 3 and resumed["total"]["copied_marks"] == 1
+
+
+def test_requests_need_a_session_and_answer_empty_for_an_unknown_one(requests_seeded):
+    status, _body = asyncio.run(ask(served(), "/api/requests", {}))
+    assert status == 400
+    body = get("/api/requests", session="nope")
+    assert body["rows"] == [] and body["total"]["marks"] == []
+
+
+#: A dated `[[model]]` row over the reports' test table's `m-a`.
+DATED = models.Override(id="m-a", prices={"input": 4.0, "output": 20.0},
+                        start=at("2026-01-01T00:00"), note="the new rate", number=1)
+
+
+@pytest.fixture
+def rates(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table(DATED))
+
+
+def test_prices_send_the_models_asked_for_cut_to_their_shape(rates):
+    body = get("/api/prices", models="m-a,gpt-x,mystery-9")
+    assert set(body) == set(page.PRICES)
+    assert body["matched"] == 0 and body["rows"] == 4
+    by_model = {row["model"]: row for row in body["models"]}
+    assert list(by_model) == ["m-a", "gpt-x", "mystery-9"]
+    m_a = by_model["m-a"]
+    assert set(m_a) == set(page.RATE.items)
+    assert (m_a["input"], m_a["output"]) == (4.0, 20.0)
+    assert m_a["provenance"]["period"] == {"from": "2026-01-01", "to": None}
+    assert m_a["provenance"]["layer"] == "override"
+    gpt = by_model["gpt-x"]
+    [priority] = gpt["tiers"]
+    assert priority["name"] == "priority"
+    assert priority["conditions"] == {"above_tokens": None, "service_tier": "priority",
+                                      "speed": None}
+    assert priority["prices"]["cache_read"] == 0.2 and priority["prices"]["input"] == 2.0
+    mystery = by_model["mystery-9"]
+    assert mystery["input"] is None and mystery["tiers"] == []
+    assert {"input", "output", "window", "tiers", "provider"} <= set(mystery["unknown"])
+    [row] = body["overrides"]
+    assert (row["id"], row["prices"]["input"], row["note"]) == ("m-a", 4.0, "the new rate")
+    assert row["from"].startswith("2026-01-01") and row["to"] is None
+    assert [layer["layer"] for layer in body["layers"]] == ["shipped", "override"]
+
+
+def test_prices_look_each_model_up_under_its_provider(monkeypatch):
+    seeded = models.Table(doc({"acme/zz-1": {"input": 1.0, "output": 2.0, "provider": "acme"}}))
+    monkeypatch.setattr(models, "table", lambda *a, **k: seeded)
+    body = get("/api/prices", models="zz-1,zz-1", providers=",acme")
+    assert [row["asked_provider"] for row in body["models"]] == [None, "acme"]
+    assert [row["input"] for row in body["models"]] == [None, 1.0]
+    assert body["models"][1]["provenance"]["rule"] == "provider prefix"
+    assert "one for each id" in refused("/api/prices", models="m-a", providers="a,b")
+    assert "go with models" in refused("/api/prices", providers="anthropic")
+
+
+def test_prices_search_the_table_and_say_how_many_matched(rates):
+    body = get("/api/prices", q="M-")
+    assert [row["model"] for row in body["models"]] == ["m-a", "m-b"]
+    assert body["matched"] == 2
+    none = get("/api/prices")
+    assert none["models"] == [] and none["matched"] == 0 and none["overrides"]
+    assert "2 characters" in refused("/api/prices", q="m")
+
+
+def test_prices_refuse_both_keys_and_more_than_a_hundred_ids(rates):
+    assert "not both" in refused("/api/prices", models="m-a", q="m-")
+    many = ",".join(f"m-{n}" for n in range(pagehandlers.PRICES_MAX + 1))
+    assert "at most 100" in refused("/api/prices", models=many)
+    assert len(get("/api/prices", models=",".join(["m-a"] * 100))["models"]) == 100
+
+
+def test_prices_search_the_shipped_table_past_fifty_matches():
+    body = get("/api/prices", q="claude")
+    assert len(body["models"]) == pagehandlers.MATCHES_MAX < body["matched"]
+    ids = [row["model"] for row in body["models"]]
+    assert ids == sorted(ids)
+
+
 # --- the declared shapes on an index that isn't there or isn't this usage's -----------------
 
 READS = [("/api/daily", {}), ("/api/daily", {"by": "month"}), ("/api/sessions", {}),
          ("/api/session", {"session": "s1"}), ("/api/projects", {}), ("/api/models", {}),
-         ("/api/status", {}), ("/api/cost", {})]
+         ("/api/terms", {}), ("/api/terms", {"by": "agent", "session": "s1"}),
+         ("/api/requests", {"session": "s1"}), ("/api/status", {}), ("/api/cost", {})]
 
 
 def test_every_read_holds_its_shape_with_no_index():

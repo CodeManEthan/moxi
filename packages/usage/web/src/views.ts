@@ -1,14 +1,17 @@
 // What usage's page and blocks show, worked out with no DOM so the Node tests can read it:
 // the formatters, the routes and their query strings, the range presets, each view's
-// state, the daily chart's scales, the session treemap's layout, the limits meters, the
-// cost block and the index strip. Every string here goes into the page as text.
+// state, the daily chart's scales, the session treemap's layout, the cost terms (the class
+// split, the Reconcile lines and the rates), a session's request and context charts, the
+// limits meters, the cost block and the index strip. Every string here goes into the page
+// as text, and every chart path is a plain SVG path string built here.
 
 import { max, min, sum } from "d3-array";
 import { hierarchy, treemap, treemapSquarify } from "d3-hierarchy";
 import { scaleBand, scaleLinear } from "d3-scale";
 
 import type {
-  AgentRow, DayRow, Failure, IndexEvent, Limits, Provenance, Report, Status, Sums, Window,
+  AgentRow, DayRow, Failure, Group, IndexEvent, Limits, Mark, Override, Prices, Provenance,
+  Rate, Report, RequestRow, RequestsTotal, SplitItem, Status, Sums, Term, TermsRow, Window,
 } from "./feed.ts";
 
 // --- formatters ---------------------------------------------------------------------------
@@ -103,26 +106,32 @@ export function rangeFor(preset: Preset, today: string): { since?: string; until
 
 // --- routes and their queries -------------------------------------------------------------
 
-export type ViewName = "daily" | "sessions" | "projects" | "models" | "session";
+export type ViewName = "daily" | "sessions" | "projects" | "models" | "terms" | "session";
 
 /** The page's route, the part of the URL after `/m/usage/`. */
 export interface PageRoute {
   view: ViewName | "unknown";
   /** With `session`, its id. */
   session?: string;
+  /** With `session`, the agent whose requests it charts: `main` unless the route names one. */
+  agent?: string;
 }
 
 export const VIEWS: readonly [ViewName, string][] = [
   ["daily", "Daily"], ["sessions", "Sessions"], ["projects", "Projects"], ["models", "Models"],
+  ["terms", "Cost terms"],
 ];
 
 export function parseRoute(route: string): PageRoute {
   const path = route.replace(/^\/+|\/+$/g, "").split(/[?#]/)[0];
   if (path === "" || path === "daily") return { view: "daily" };
-  if (path === "sessions" || path === "projects" || path === "models") return { view: path };
+  if (path === "sessions" || path === "projects" || path === "models" || path === "terms") return { view: path };
   if (path.startsWith("session/") && path.length > "session/".length) {
+    const parts = path.slice("session/".length).split("/");
+    if (parts.length > 2 || parts.some((part) => part === "")) return { view: "unknown" };
     try {
-      return { view: "session", session: decodeURIComponent(path.slice("session/".length)) };
+      const [session, agent] = parts.map((part) => decodeURIComponent(part));
+      return { view: "session", session, agent: agent ?? "main" };
     } catch {
       return { view: "unknown" };
     }
@@ -130,9 +139,10 @@ export function parseRoute(route: string): PageRoute {
   return { view: "unknown" };
 }
 
-/** The route of one session's view. */
-export function sessionRoute(id: string): string {
-  return `session/${encodeURIComponent(id)}`;
+/** The route of one session's view, at one of its agents (`main` when none is named). */
+export function sessionRoute(id: string, agent = "main"): string {
+  const base = `session/${encodeURIComponent(id)}`;
+  return agent === "main" ? base : `${base}/${encodeURIComponent(agent)}`;
 }
 
 /** The filters a sessions row's link opens its session with: the row's own harness, so
@@ -182,8 +192,36 @@ export function viewPath(route: PageRoute, filters: Filters, today: string,
     case "session": return withQuery("api/session", [["session", route.session ?? ""], ...keys]);
     case "projects": return withQuery("api/projects", keys);
     case "models": return withQuery("api/models", keys);
+    case "terms": return withQuery("api/terms", [["by", "model"], ...keys]);
     default: return null;
   }
+}
+
+/** The session view's request rows for its agent. */
+export function requestsPath(route: PageRoute, filters: Filters, today: string): string {
+  return withQuery("api/requests", [["session", route.session ?? ""], ["agent", route.agent ?? "main"],
+                                    ...filterKeys(filters, today)]);
+}
+
+/** The session view's cost terms, by model. */
+export function sessionTermsPath(route: PageRoute, filters: Filters, today: string): string {
+  return withQuery("api/terms", [["by", "model"], ["session", route.session ?? ""], ...filterKeys(filters, today)]);
+}
+
+/** The daily view's cost by class: the terms by day or month. */
+export function classPath(filters: Filters, today: string, by: "day" | "month"): string {
+  return withQuery("api/terms", [["by", by], ...filterKeys(filters, today)]);
+}
+
+/** The rates of some models, each looked up under the provider its requests gave. */
+export function pricesPath(asks: { model: string; provider: string | null }[]): string {
+  return withQuery("api/prices", [["models", asks.map((ask) => ask.model).join(",")],
+                                  ["providers", asks.map((ask) => ask.provider ?? "").join(",")]]);
+}
+
+/** A search of the whole model table. */
+export function searchPath(q: string): string {
+  return withQuery("api/prices", [["q", q]]);
 }
 
 /** The paths that fill the project and model menus: every project and model under the
@@ -272,7 +310,8 @@ export function seriesClass(i: number): string {
 export type Measure = "tokens" | "cost";
 export const UNKNOWN_MODEL = "unknown model";
 
-export interface Segment { key: string; index: number; value: number; y: number; height: number }
+/** One segment of a bar: `index` is its colour's place, `hatch` marks a price tier's part. */
+export interface Segment { key: string; index: number; value: number; y: number; height: number; hatch?: boolean }
 export interface Bar {
   period: string;
   x: number;
@@ -305,8 +344,6 @@ export function dailyChart(rows: DayRow[], measure: Measure, width: number, heig
   const periods = [...new Set(dated.map((row) => row.period as string))].sort();
   const keys = measure === "tokens" ? CLASSES.map(([key]) => key as string)
     : [...new Set(dated.map((row) => row.model ?? UNKNOWN_MODEL))].sort();
-  const x = scaleBand<string>().domain(periods).range([MARGIN.left, width - MARGIN.right])
-    .paddingInner(periods.length > 40 ? 0.1 : 0.2).paddingOuter(0.1);
   const stacks = periods.map((period) => {
     const mine = dated.filter((row) => row.period === period);
     const values = keys.map((key) => measure === "tokens"
@@ -314,14 +351,40 @@ export function dailyChart(rows: DayRow[], measure: Measure, width: number, heig
       : sum(mine.filter((row) => (row.model ?? UNKNOWN_MODEL) === key), (row) => row.cost ?? 0));
     return { period, values, incomplete: mine.some((row) => !row.complete) };
   });
+  return stackBars(stacks, keys, (i) => i, () => false, width, height, rows.length - dated.length);
+}
+
+/** The daily view's "Cost by class": each period's cost split by token class and price
+ * tier, a tier's segment in its class's colour with a hatch. */
+export function classChart(rows: TermsRow[], width: number, height: number): Chart {
+  const dated = rows.filter((row) => row.period !== null);
+  const periods = [...new Set(dated.map((row) => row.period as string))].sort();
+  const keys = splitKeys(dated.flatMap((row) => row.split));
+  const stacks = periods.map((period) => {
+    const mine = dated.filter((row) => row.period === period);
+    const values = keys.map((key) => sum(mine.flatMap((row) => row.split).filter((item) => splitKey(item) === key),
+                                         (item) => item.cost));
+    return { period, values, incomplete: mine.some((row) => !row.complete) };
+  });
+  return stackBars(stacks, keys, (i) => classIndex(keys[i]), (i) => keys[i].includes(":"), width, height,
+                   rows.length - dated.length);
+}
+
+function stackBars(stacks: { period: string; values: number[]; incomplete: boolean }[], keys: string[],
+                   colour: (i: number) => number, hatch: (i: number) => boolean,
+                   width: number, height: number, undated: number): Chart {
+  const periods = stacks.map((stack) => stack.period);
+  const x = scaleBand<string>().domain(periods).range([MARGIN.left, width - MARGIN.right])
+    .paddingInner(periods.length > 40 ? 0.1 : 0.2).paddingOuter(0.1);
   const top = max(stacks, (stack) => sum(stack.values)) ?? 0;
   const y = scaleLinear().domain([0, top > 0 ? top : 1]).nice(4).range([height - MARGIN.bottom, MARGIN.top]);
   const bars = stacks.map(({ period, values, incomplete }) => {
     let base = 0;
     const segments: Segment[] = [];
-    values.forEach((value, index) => {
+    values.forEach((value, i) => {
       if (value > 0) {
-        segments.push({ key: keys[index], index, value, y: y(base + value), height: y(base) - y(base + value) });
+        segments.push({ key: keys[i], index: colour(i), value, y: y(base + value), height: y(base) - y(base + value),
+                        hatch: hatch(i) });
       }
       base += value;
     });
@@ -329,11 +392,12 @@ export function dailyChart(rows: DayRow[], measure: Measure, width: number, heig
     return { period, x: (x(period) ?? 0) + (x.bandwidth() - width) / 2, width, total: base, incomplete, segments };
   });
   const ticks = y.ticks(4).map((value) => ({ value, y: y(value) }));
-  return { width, height, keys, bars, ticks, undated: rows.length - dated.length };
+  return { width, height, keys, bars, ticks, undated };
 }
 
 /** What one segment of a bar holds, as its own `<title>` says it. */
-export function segmentTitle(period: string, key: string, value: number, measure: Measure): string {
+export function segmentTitle(period: string, key: string, value: number, measure: Measure | "class"): string {
+  if (measure === "class") return `${period}, ${splitLabel(key)}: ${fmtCost(value)}`;
   if (measure === "cost") return `${period}, ${key}: ${fmtCost(value)}`;
   const label = CLASSES.find(([name]) => name === key)?.[1] ?? key;
   return `${period}, ${label}: ${fmtTokens(value)} tokens`;
@@ -358,7 +422,7 @@ export function classTotals(total: Sums): ClassTotal[] {
 }
 
 /** An axis label for `value` of `measure`. */
-export function tickText(value: number, measure: Measure): string {
+export function tickText(value: number, measure: Measure | "class"): string {
   if (measure === "tokens") return fmtTokens(value);
   return value >= 1000 ? `$${fmtTokens(value)}` : `$${value % 1 === 0 ? value : value.toFixed(2)}`;
 }
@@ -477,6 +541,464 @@ export function provenanceLine(p: Provenance): string {
   if (p.filled.length) parts.push(`filled ${p.filled.join(", ")}`);
   if (p.note) parts.push(p.note);
   return parts.join(" · ");
+}
+
+// --- the cost terms ---------------------------------------------------------------------------
+
+/** The five token classes a cost's terms price, in order, with their labels. A request
+ * row names the first `fresh_input`. */
+export const TERM_CLASSES = [
+  ["input", "fresh input"], ["cache_read", "cache read"], ["cache_write_5m", "cache write 5m"],
+  ["cache_write_1h", "cache write 1h"], ["output", "output"],
+] as const;
+
+/** A split entry's key: its class, then `:tier` for a price tier's part. */
+export function splitKey(item: { class: string; tier: string | null }): string {
+  return item.tier ? `${item.class}:${item.tier}` : item.class;
+}
+
+/** A class's place in `TERM_CLASSES`, which gives its colour. */
+export function classIndex(key: string): number {
+  const found = TERM_CLASSES.findIndex(([name]) => name === key.split(":")[0]);
+  return found < 0 ? TERM_CLASSES.length : found;
+}
+
+/** A split key as the legend names it: `output`, `output, fast`. */
+export function splitLabel(key: string): string {
+  const [cls, tier] = key.split(/:(.*)/s);
+  const label = TERM_CLASSES.find(([name]) => name === cls)?.[1] ?? cls;
+  return tier ? `${label}, ${tier}` : label;
+}
+
+/** The split keys in class order, the row's own prices before each tier. */
+export function splitKeys(items: SplitItem[]): string[] {
+  const keys = [...new Set(items.map(splitKey))];
+  return keys.sort((a, b) => classIndex(a) - classIndex(b) || (a.includes(":") ? 1 : 0) - (b.includes(":") ? 1 : 0)
+    || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** Each class's dollars over a split, its tiers added in: the totals strip's figures. */
+export function classCosts(split: SplitItem[]): { key: string; label: string; value: number }[] {
+  return TERM_CLASSES.map(([key, label]) => ({
+    key, label, value: sum(split.filter((item) => item.class === key), (item) => item.cost),
+  })).filter((item) => item.value > 0);
+}
+
+/** One horizontal bar of the class split: a row's cost, its segments its `split`. */
+export interface SplitBar {
+  label: string;
+  total: number;
+  segments: { key: string; index: number; hatch: boolean; x: number; width: number; title: string }[];
+}
+
+/** One bar per row, each as long as its cost against the dearest row's, over `width`. */
+export function splitBars(rows: TermsRow[], width: number): SplitBar[] {
+  const totals = rows.map((row) => sum(row.split, (item) => item.cost));
+  const top = max(totals) ?? 0;
+  const scale = top > 0 ? width / top : 0;
+  return rows.map((row, i) => {
+    let at = 0;
+    const label = row.model ?? row.period ?? row.agent ?? UNKNOWN_MODEL;
+    const segments = row.split.filter((item) => item.cost > 0).map((item) => {
+      const key = splitKey(item);
+      const share = totals[i] > 0 ? (item.cost / totals[i]) * 100 : 0;
+      const segment = { key, index: classIndex(key), hatch: item.tier !== null, x: at, width: item.cost * scale,
+                        title: `${label}, ${splitLabel(key)}: ${fmtTokens(item.tokens)} tokens, ${fmtCost(item.cost)}, ${fmtPercent(share)}` };
+      at += segment.width;
+      return segment;
+    });
+    return { label, total: totals[i], segments };
+  });
+}
+
+/** Dollars per million tokens, as short as the price allows: `$3`, `$0.3`, `$3.75`. */
+export function fmtRate(price: number | null | undefined): string {
+  if (price === null || price === undefined || !Number.isFinite(price)) return DASH;
+  return `$${Number(price.toPrecision(6))}`;
+}
+
+/** One cell of a Reconcile line: the term's dollars, and `tokens x price` in its title. */
+export interface TermCell { cls: string; text: string; title: string }
+
+/** One line of the Reconcile table. A `group` line is one price group; a `subtotal` sums a
+ * model's groups when it has two or more; the `total` sums every line. */
+export interface ReconcileLine {
+  kind: "group" | "subtotal" | "total";
+  model: string;
+  pricedBy: string;
+  cells: TermCell[];
+  cost: number | null;
+  flags: string[];
+}
+
+/** A term's cell: `1,234,567 x $8/M = $9.88`. */
+export function termCell(term: Term): TermCell {
+  const tokens = term.tokens.toLocaleString("en-US");
+  const label = TERM_CLASSES.find(([name]) => name === term.class)?.[1] ?? term.class;
+  const priced = term.price === null ? "no price" : `${fmtRate(term.price)}/M`;
+  const dollars = term.cost === null ? "not priced" : fmtCost(term.cost);
+  const from = term.price_from === "tier-input" ? " (from the tier's input price)" : "";
+  return { cls: term.class, text: term.cost === null ? DASH : fmtCost(term.cost),
+           title: `${label}: ${tokens} x ${priced} = ${dollars}${from}` };
+}
+
+function summedCells(groups: Group[], what: string): TermCell[] {
+  return TERM_CLASSES.map(([cls, label]) => {
+    const terms = groups.map((group) => group.terms.find((term) => term.class === cls))
+      .filter((term): term is Term => term !== undefined);
+    const known = terms.filter((term) => term.cost !== null);
+    const cost = known.length ? sum(known, (term) => term.cost as number) : null;
+    const tokens = sum(terms, (term) => term.tokens);
+    return { cls, text: cost === null ? DASH : fmtCost(cost),
+             title: `${label}: ${tokens.toLocaleString("en-US")} tokens over ${what} = ${cost === null ? "not priced" : fmtCost(cost)}` };
+  });
+}
+
+/** How a group was priced: where its prices came from, its tier and its provider. */
+export function pricedBy(group: Group): string {
+  const parts = [provenanceLine(group.provenance)];
+  if (group.tier) parts.push(`tier ${group.tier}`);
+  if (group.above) parts.push(`above ${fmtTokens(group.above)}`);
+  if (group.provider) parts.push(group.provider);
+  return parts.join(" · ");
+}
+
+function groupFlags(group: Group): string[] {
+  const out: string[] = [];
+  if (group.cost === null) out.push(group.why ? `not priced: ${group.why}` : "not priced");
+  if (group.unknown_rows > 0) out.push(`${group.unknown_rows} request${group.unknown_rows === 1 ? "" : "s"} with a token count the harness didn't report`);
+  if (group.rule) out.push(group.rule);
+  return out;
+}
+
+/** The Reconcile table's lines: each model's groups, a subtotal under a model of two or
+ * more, then the total. The terms on each line add up to its cost. */
+export function reconcileLines(report: Report<TermsRow>): ReconcileLine[] {
+  const lines: ReconcileLine[] = [];
+  for (const row of report.rows) {
+    const model = row.model ?? UNKNOWN_MODEL;
+    for (const group of row.groups) {
+      lines.push({ kind: "group", model, pricedBy: pricedBy(group), cells: group.terms.map(termCell),
+                   cost: group.cost, flags: groupFlags(group) });
+    }
+    if (row.groups.length > 1) {
+      lines.push({ kind: "subtotal", model: `${model} total`, pricedBy: `${row.groups.length} price groups`,
+                   cells: summedCells(row.groups, `${row.groups.length} groups`), cost: row.cost, flags: flags(row) });
+    }
+  }
+  const all = report.rows.flatMap((row) => row.groups);
+  lines.push({ kind: "total", model: "Total", pricedBy: "", cells: summedCells(all, "every group"),
+               cost: report.total.cost, flags: flags({ ...report.total, unpriced_models: report.unpriced_models }) });
+  return lines;
+}
+
+// --- the rates ---------------------------------------------------------------------------------
+
+/** The most models the Rates section asks for at once (the route's own cap). */
+export const RATES_MAX = 100;
+
+/** The models and providers the Reconcile lines priced, for the Rates section: each
+ * looked up under its requests' own provider, so the rates are the ones those groups'
+ * lookup gives. */
+export function rateAsks(rows: TermsRow[]): { asks: { model: string; provider: string | null }[]; more: number } {
+  const seen = new Map<string, { model: string; provider: string | null }>();
+  for (const group of rows.flatMap((row) => row.groups)) {
+    if (group.model === null) continue;
+    const key = `${group.model}\u0000${group.provider ?? ""}`;
+    if (!seen.has(key)) seen.set(key, { model: group.model, provider: group.provider });
+  }
+  const asks = [...seen.values()];
+  return { asks: asks.slice(0, RATES_MAX), more: Math.max(0, asks.length - RATES_MAX) };
+}
+
+/** A price cell of the Rates section, marked where a provider default or your config gave it. */
+export interface RateCell { text: string; mark: string | null }
+
+export const RATE_FIELDS = [
+  ["input", "Input"], ["output", "Output"], ["cache_read", "Cache read"], ["cache_write_5m", "Write 5m"],
+  ["cache_write_1h", "Write 1h"],
+] as const;
+
+export function rateCell(rate: Rate, field: (typeof RATE_FIELDS)[number][0]): RateCell {
+  const value = rate[field];
+  const mark = value === null ? null : rate.provenance.filled.includes(field) ? "provider default"
+    : rate.provenance.overridden.includes(field) ? "your config" : null;
+  return { text: fmtRate(value), mark };
+}
+
+/** A tier's conditions in words: `speed fast`, `service tier priority`, `above 200k`. */
+export function conditionsText(c: { above_tokens: number | null; service_tier: string | null; speed: string | null }): string {
+  const parts: string[] = [];
+  if (c.speed) parts.push(`speed ${c.speed}`);
+  if (c.service_tier) parts.push(`service tier ${c.service_tier}`);
+  if (c.above_tokens) parts.push(`above ${fmtTokens(c.above_tokens)}`);
+  return parts.join(", ");
+}
+
+/** A tier as the Tiers cell gives it: `fast (speed fast): $30 / $150, cache from tier input`. */
+export function tierText(tier: Rate["tiers"][number]): string {
+  const base = `${tier.name} (${conditionsText(tier.conditions)}): ${fmtRate(tier.prices.input)} / ${fmtRate(tier.prices.output)}`;
+  return tier.from_tier_input.length ? `${base}, cache from tier input` : base;
+}
+
+/** One line of the Rates section. */
+export interface RateLine {
+  model: string;
+  provider: string | null;
+  known: boolean;
+  cells: RateCell[];
+  window: string;
+  tiers: string[];
+  period: string;
+  from: string;
+}
+
+export function rateLine(rate: Rate): RateLine {
+  const p = rate.provenance;
+  const from = [p.layer ? `${p.layer} layer` : null, p.rule, p.snapshot ? `snapshot ${p.snapshot}` : null,
+                p.row && p.row !== rate.model ? `row ${p.row}` : null].filter((part): part is string => !!part);
+  return {
+    model: rate.model ?? UNKNOWN_MODEL,
+    provider: rate.asked_provider,
+    known: p.step !== 7,
+    cells: RATE_FIELDS.map(([field]) => rateCell(rate, field)),
+    window: rate.window === null ? DASH : rate.window.toLocaleString("en-US"),
+    tiers: rate.tiers.map(tierText),
+    period: p.period && (p.period.from || p.period.to) ? `${p.period.from ?? "the start"} to ${p.period.to ?? "now"}` : "",
+    from: from.join(" · "),
+  };
+}
+
+/** A `[[model]]` row of your config, in a line. */
+export function overrideLine(row: Override): string {
+  const prices = RATE_FIELDS.filter(([field]) => row.prices[field] !== null)
+    .map(([field, label]) => `${label.toLowerCase()} ${fmtRate(row.prices[field])}`);
+  const parts = [`${row.id}${row.match === "exact" ? "" : ` (${row.match})`}`, ...prices];
+  if (row.window !== null) parts.push(`window ${row.window.toLocaleString("en-US")}`);
+  if (row.provider) parts.push(`provider ${row.provider}`);
+  for (const tier of row.tiers) parts.push(`tier ${tier.name} (${conditionsText(tier.conditions)})`);
+  if (row.from || row.to) parts.push(`from ${row.from ?? "the start"} to ${row.to ?? "now"}`);
+  if (row.note) parts.push(row.note);
+  return parts.join(" · ");
+}
+
+/** The model table's line: `model table in effect: 3,328 models, snapshot of 2026-10-30`. */
+export function layerLine(prices: Prices): string {
+  return `model table in effect: ${prices.rows.toLocaleString("en-US")} models, snapshot of ${prices.effective_date ?? "an unknown date"}`;
+}
+
+// --- one agent's requests ---------------------------------------------------------------------
+
+/** A request row's five classes, in the order of `TERM_CLASSES`. */
+export const REQUEST_CLASSES = [
+  ["fresh_input", "fresh input"], ["cache_read", "cache read"], ["cache_write_5m", "cache write 5m"],
+  ["cache_write_1h", "cache write 1h"], ["output", "output"],
+] as const;
+
+/** Up to this many requests the chart draws bars; past it, a stacked area. */
+export const BARS_UP_TO = 120;
+
+/** The request axis: request `n` (from 1) sits in the `n`th of `count` equal columns. */
+export interface Axis {
+  left: number;
+  right: number;
+  step: number;
+  /** The middle of request `n`'s column. */
+  x(n: number): number;
+  /** The edge after `k` requests: the gap between request `k` and `k + 1`. */
+  edge(k: number): number;
+}
+
+export function requestAxis(count: number, width: number): Axis {
+  const left = MARGIN.left;
+  const right = width - MARGIN.right;
+  const step = (right - left) / Math.max(1, count);
+  return { left, right, step, x: (n) => left + (n - 0.5) * step, edge: (k) => left + k * step };
+}
+
+/** A line through `points`, broken where a point's `y` is null. */
+export function linePath(points: { x: number; y: number | null }[]): string {
+  let d = "";
+  let drawing = false;
+  for (const { x, y } of points) {
+    if (y === null) {
+      drawing = false;
+      continue;
+    }
+    d += `${drawing ? "L" : "M"}${round(x)},${round(y)}`;
+    drawing = true;
+  }
+  return d;
+}
+
+/** The band between `lower` and `upper` over `xs`, closed. */
+export function areaPath(xs: number[], lower: number[], upper: number[]): string {
+  if (xs.length === 0) return "";
+  const top = xs.map((x, i) => `${i === 0 ? "M" : "L"}${round(x)},${round(upper[i])}`).join("");
+  const bottom = xs.map((_, i) => xs.length - 1 - i).map((i) => `L${round(xs[i])},${round(lower[i])}`).join("");
+  return `${top}${bottom}Z`;
+}
+
+/** A level over each column `[x0, x1]`, stepping where it changes and broken where it is null. */
+export function stepPath(columns: { x0: number; x1: number; y: number | null }[]): string {
+  let d = "";
+  let last: number | null = null;
+  for (const { x0, x1, y } of columns) {
+    if (y === null) {
+      last = null;
+      continue;
+    }
+    d += last === null ? `M${round(x0)},${round(y)}` : y !== last ? `V${round(y)}` : "";
+    d += `H${round(x1)}`;
+    last = y;
+  }
+  return d;
+}
+
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export type RequestMeasure = "tokens" | "cost";
+
+/** A request's value of one class: its tokens, or the dollars of that class's term. */
+function classValue(row: RequestRow, i: number, measure: RequestMeasure): number {
+  if (measure === "tokens") return row[REQUEST_CLASSES[i][0]];
+  return row.split.find((item) => item.class === TERM_CLASSES[i][0])?.cost ?? 0;
+}
+
+/** The requests chart: bars up to `BARS_UP_TO` requests, a stacked area past it. */
+export interface RequestsChart {
+  mode: "bars" | "area";
+  axis: Axis;
+  bars: { n: number; x: number; width: number; segments: Segment[] }[];
+  areas: { key: string; index: number; d: string }[];
+  ticks: { value: number; y: number }[];
+  /** The y of each request's stack top, for the readout's marker. */
+  tops: number[];
+}
+
+export function requestsChart(rows: RequestRow[], measure: RequestMeasure, width: number, height: number): RequestsChart {
+  const axis = requestAxis(rows.length, width);
+  const stacks = rows.map((row) => REQUEST_CLASSES.map((_, i) => Math.max(0, classValue(row, i, measure))));
+  const top = max(stacks, (values) => sum(values)) ?? 0;
+  const y = scaleLinear().domain([0, top > 0 ? top : 1]).nice(4).range([height - MARGIN.bottom, MARGIN.top]);
+  const ticks = y.ticks(4).map((value) => ({ value, y: y(value) }));
+  const tops = stacks.map((values) => y(sum(values)));
+  if (rows.length <= BARS_UP_TO) {
+    const barWidth = Math.max(1, axis.step * 0.8);
+    const bars = rows.map((row, r) => {
+      let base = 0;
+      const segments: Segment[] = [];
+      stacks[r].forEach((value, i) => {
+        if (value > 0) segments.push({ key: REQUEST_CLASSES[i][0], index: i, value, y: y(base + value), height: y(base) - y(base + value) });
+        base += value;
+      });
+      return { n: row.n, x: axis.x(row.n) - barWidth / 2, width: barWidth, segments };
+    });
+    return { mode: "bars", axis, bars, areas: [], ticks, tops };
+  }
+  const xs = rows.map((row) => axis.x(row.n));
+  const base = rows.map(() => 0);
+  const areas = REQUEST_CLASSES.map(([key], i) => {
+    const lower = base.map((value) => y(value));
+    stacks.forEach((values, r) => { base[r] += values[i]; });
+    return { key, index: i, d: areaPath(xs, lower, base.map((value) => y(value))) };
+  });
+  return { mode: "area", axis, bars: [], areas, ticks, tops };
+}
+
+/** The context chart: the whole prompt per request against the window. */
+export interface ContextChart {
+  axis: Axis;
+  /** The context line, broken where it is unknown or the request synthetic. */
+  line: string;
+  /** How many requests the line has a point for. */
+  points: number;
+  /** The window's step line, and a label where each level starts. */
+  window: string;
+  windowLabels: { x: number; y: number; text: string }[];
+  /** "window unknown for <model>", or null. */
+  unknownWindow: string | null;
+  ticks: { value: number; y: number }[];
+  /** The y of each request's context, null where there is no point. */
+  ys: (number | null)[];
+}
+
+export function contextChart(rows: RequestRow[], width: number, height: number): ContextChart {
+  const axis = requestAxis(rows.length, width);
+  const shown = (row: RequestRow) => row.context !== null && !row.synthetic;
+  const top = Math.max(max(rows, (row) => (shown(row) ? row.context as number : 0)) ?? 0,
+                       max(rows, (row) => row.window ?? 0) ?? 0);
+  const y = scaleLinear().domain([0, top > 0 ? top : 1]).nice(4).range([height - MARGIN.bottom, MARGIN.top]);
+  const ys = rows.map((row) => (shown(row) ? y(row.context as number) : null));
+  const line = linePath(rows.map((row, i) => ({ x: axis.x(row.n), y: ys[i] })));
+  const window = stepPath(rows.map((row) => ({ x0: axis.edge(row.n - 1), x1: axis.edge(row.n),
+                                               y: row.window === null ? null : y(row.window) })));
+  const windowLabels: ContextChart["windowLabels"] = [];
+  rows.forEach((row, i) => {
+    if (row.window !== null && (i === 0 || rows[i - 1].window !== row.window)) {
+      windowLabels.push({ x: axis.edge(row.n - 1), y: y(row.window), text: `window ${row.window.toLocaleString("en-US")}` });
+    }
+  });
+  const unknown = [...new Set(rows.filter((row) => row.window === null).map((row) => row.model ?? UNKNOWN_MODEL))];
+  return {
+    axis, line, points: ys.filter((value) => value !== null).length, window, windowLabels,
+    unknownWindow: unknown.length ? `window unknown for ${unknown.join(", ")}` : null,
+    ticks: y.ticks(4).map((value) => ({ value, y: y(value) })), ys,
+  };
+}
+
+/** The rules both charts draw: a thin one where each turn starts (with two turns or more)
+ * and a dashed one at each compaction, between request `after` and the next. */
+export interface Rules {
+  turns: { n: number; x: number }[];
+  compactions: { after: number; x: number; label: string; title: string; dot: number | null }[];
+}
+
+export function requestRules(rows: RequestRow[], total: RequestsTotal, axis: Axis): Rules {
+  const turns = (total.turns ?? 0) >= 2
+    ? rows.filter((row) => row.turn_start).map((row) => ({ n: row.n, x: axis.edge(row.n - 1) }))
+    : [];
+  const compactions = total.marks.map((mark: Mark) => {
+    const label = mark.trigger ? `compaction (${mark.trigger})` : "compaction";
+    const before = mark.pre_tokens === null ? "" : `, ${mark.pre_tokens.toLocaleString("en-US")} before`;
+    return { after: mark.after, x: axis.edge(mark.after), label,
+             title: `${label}${before}${mark.ts === null ? "" : ` at ${fmtMoment(mark.ts)}`}`,
+             dot: mark.after < rows.length ? mark.after + 1 : null };
+  });
+  return { turns, compactions };
+}
+
+/** The column a request's `unknown` names for each class it doesn't know. */
+const UNKNOWN_COLUMN: Record<(typeof REQUEST_CLASSES)[number][0], string> = {
+  fresh_input: "input", cache_read: "cache_read", cache_write_5m: "cache_write",
+  cache_write_1h: "cache_write_1h", output: "output",
+};
+
+/** The readout line for one request. */
+export function readout(row: RequestRow): string {
+  const parts = [`#${row.n}`, fmtMoment(row.ts)];
+  if (row.turn !== null) parts.push(`turn ${row.turn}`);
+  parts.push(row.model ?? UNKNOWN_MODEL);
+  if (row.synthetic) parts.push("synthetic");
+  parts.push(`context ${fmtTokens(row.context)}`);
+  if (row.context !== null && row.window) parts.push(`${fmtPercent((row.context / row.window) * 100)} of ${row.window.toLocaleString("en-US")}`);
+  parts.push(REQUEST_CLASSES.map(([key, label]) => `${label} ${row.unknown.includes(UNKNOWN_COLUMN[key]) ? "?" : fmtTokens(row[key])}`).join(", "));
+  parts.push(fmtCost(row.cost));
+  return parts.join(" · ");
+}
+
+/** The notes under the charts: what the report can't show. */
+export function requestNotes(rows: RequestRow[], total: RequestsTotal): string[] {
+  const out: string[] = [];
+  const n = total.claimed_elsewhere;
+  if (n) out.push(`${n} request${n === 1 ? "" : "s"} of this agent ${n === 1 ? "is" : "are"} counted under another file`);
+  const c = total.copied_marks;
+  if (c) out.push(`${c} compaction${c === 1 ? "" : "s"} copied from another file ${c === 1 ? "isn't" : "aren't"} drawn`);
+  if (!total.marks_known) out.push("compactions aren't read yet for a file of this agent; the next pass that can read it brings them in");
+  if (rows.length && total.turns === null) out.push("this harness wrote no turns here");
+  return out;
 }
 
 // --- the limits meters ----------------------------------------------------------------------
