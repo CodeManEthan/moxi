@@ -123,6 +123,19 @@ def ping(monkeypatch, harness, event, data, *extra):
     return json.loads(text) if text.strip() else None
 
 
+def timed_count(harness, event: str, expected: int, timeout: float = 5.0) -> int:
+    """How many `event` waits the hook server has recorded, once it has `expected` of them
+    or `timeout` passes. The server records a hook's wait after it sends the answer, so
+    the last one can land a moment after the ping returns."""
+    def count() -> int:
+        return [s["event"] for s in harness.hook_server.times._samples].count(event)
+
+    deadline = time.monotonic() + timeout
+    while count() < expected and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return count()
+
+
 def pre(tool, tool_input=None, **extra):
     return {"session_id": "thread-1", "turn_id": "turn-1", "hook_event_name": "PreToolUse",
             "tool_name": tool, "tool_input": tool_input or {}, "tool_use_id": "exec-1",
@@ -457,8 +470,7 @@ def test_a_deny_a_break_and_lines_in_codex_output(monkeypatch, turns_env):
             "hookEventName": "PreToolUse",
             "additionalContext": "judged Bash\n" + break_line(
                 "t.loose", "it raised RuntimeError: boom")}}
-        samples = [s["event"] for s in harness.hook_server.times._samples]
-        assert samples.count("guard") == 3
+        assert timed_count(harness, "guard", 3) == 3
     finally:
         endpoint.stop("the test ended")
 
@@ -741,8 +753,7 @@ def test_after_tool_text_reaches_codex_with_the_calls_facts(monkeypatch, turns_e
              "/codex/sessions/rollout-main.jsonl", harness.cwd),
             ("after-tool", "apply_patch", "exec-1", "sub-2", "after",
              "/codex/sessions/rollout-sub-2.jsonl", harness.cwd)]
-        assert [s["event"] for s in harness.hook_server.times._samples].count(
-            "after-tool") == 2
+        assert timed_count(harness, "after-tool", 2) == 2
     finally:
         endpoint.stop("the test ended")
 
