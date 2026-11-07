@@ -1,6 +1,6 @@
 [project]
 name = "moxi-sessions"
-version = "0.2.4"
+version = "0.2.5"
 description = "Read each harness's own session records in one shape: find a session and its subagents, list a root's sources, read records forward or back."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,6 +13,8 @@ dependencies = ["moxi>=0.1,<0.2"]
 ui = ["moxi-ui>=0.2,<0.3"]
 # Redaction for `moxi sessions read`, through secrets' credentials and broad sets.
 secrets = ["moxi-secrets>=0.1,<0.2"]
+# turns enforces the transcript-read guard sessions declares.
+turns = ["moxi-turns>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -22,6 +24,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 sessions = "moxi_sessions.module"
+
+# sessions' guard for turns: the transcript-read guard.
+[project.entry-points."moxi.turns.guards"]
+sessions = "moxi_sessions.guards"
 
 [dependency-groups]
 # moxi-ui's pytest plugin runs sessions' page in a real shell; its testing extra brings
@@ -38,8 +44,8 @@ packages = ["src/moxi_sessions"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds only these paths; hatchling adds
 # pyproject.toml and .gitignore itself.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_sessions", "tests",
-                "web"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
+                "src/moxi_sessions", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

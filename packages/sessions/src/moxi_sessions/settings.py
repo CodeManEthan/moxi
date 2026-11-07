@@ -1,9 +1,10 @@
 """sessions' config, read through `moxi.config` at each use.
 
-Three keys, each a root read when the caller hands none in: `claude.projects` (Claude
+Three keys name a root read when the caller hands none in: `claude.projects` (Claude
 Code's projects root), `codex.sessions` (Codex's sessions root) and `opencode.database`
 (OpenCode's database). Unset, each is the harness's own default in the reading process's
-environment.
+environment. A fourth, `guard.transcript_read`, is the transcript-read guard's switch
+(`moxi_sessions.readguard`), off by default.
 """
 
 from __future__ import annotations

@@ -1267,7 +1267,7 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.4"
+version = "0.2.5"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
@@ -1276,6 +1276,9 @@ dependencies = [
 [package.optional-dependencies]
 secrets = [
     { name = "moxi-secrets" },
+]
+turns = [
+    { name = "moxi-turns" },
 ]
 ui = [
     { name = "moxi-ui" },
@@ -1293,9 +1296,10 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-secrets", marker = "extra == 'secrets'", editable = "packages/secrets" },
+    { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["ui", "secrets"]
+provides-extras = ["ui", "secrets", "turns"]
 
 [package.metadata.requires-dev]
 dev = [

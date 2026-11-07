@@ -1,4 +1,4 @@
-"""sessions' doctor rows: one per harness root."""
+"""sessions' doctor rows: one per harness root, then `retention` and `guard`."""
 
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ def home(tmp_path, monkeypatch):
 
 
 def by_name() -> dict[str, doctor.Row]:
-    """The root rows by name, without the `retention` row (see `test_retention.py`)."""
-    return {row.name: row for row in doctor.rows() if row.name != "retention"}
+    """The root rows by name, without the `retention` row (see `test_retention.py`) and the
+    `guard` row (see `test_guard.py`)."""
+    return {row.name: row for row in doctor.rows() if row.name not in ("retention", "guard")}
 
 
 def test_the_rows_are_the_cores_doctor_rows():
@@ -41,7 +42,8 @@ def test_one_row_per_harness_off_when_no_root_is_there(home):
     rows = list(doctor.rows())
     assert [(r.module, r.name, r.state) for r in rows] == [
         ("sessions", "claude", "off"), ("sessions", "codex", "off"),
-        ("sessions", "opencode", "off"), ("sessions", "retention", "ok")]
+        ("sessions", "opencode", "off"), ("sessions", "retention", "ok"),
+        ("sessions", "guard", "off")]
     assert str(home / ".claude" / "projects") in rows[0].detail
 
 

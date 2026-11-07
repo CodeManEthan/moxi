@@ -202,7 +202,7 @@ def test_the_doctor_row_is_ok_with_each_harness_said(home):
     assert row.detail.startswith("Claude Code: cleanupPeriodDays 36500 days; Codex: no age "
                                  "limit, compression not set (off)")
     assert row.detail.endswith("OpenCode: no setting read")
-    assert list(doctor.rows())[-1] == row
+    assert [r for r in doctor.rows() if r.name == "retention"] == [row]
 
 
 def test_the_doctor_row_warns_when_codex_compresses(home):
