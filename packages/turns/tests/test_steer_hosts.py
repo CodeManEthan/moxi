@@ -15,6 +15,7 @@ import time
 import pytest
 
 from claude_runner import FakeRunner, pipe_pair
+from conftest import end_endpoint
 from moxi import ipc
 from moxi_turns import claude_leg as leg
 from moxi_turns import codex_hooks
@@ -93,7 +94,7 @@ def claude(turns_env):
     yield make
     for ep, runner, w in made:
         runner.resume()
-        ep.stop("the test ended")
+        end_endpoint(ep)
         w.close()
 
 
@@ -289,7 +290,7 @@ def codex(turns_env):
     yield make
     for ep, app in made:
         app.steer_gate.set()
-        ep.stop("the test ended")
+        end_endpoint(ep)
 
 
 def test_a_late_turn_steer_answers_at_once_and_starts_at_codexs_word(codex, connect):

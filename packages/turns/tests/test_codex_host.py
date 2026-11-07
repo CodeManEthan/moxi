@@ -19,7 +19,7 @@ from moxi_turns.client import Session
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import Ended, Lost, Refused, Started, StopFacts
-from conftest import bare
+from conftest import bare, end_endpoint
 from fake_codex import LIMITS
 
 
@@ -177,7 +177,7 @@ def test_a_submitted_delivery_is_tied_to_the_app_servers_turn(turns_env):
         ended = delivery.wait_ended(2)
         assert (ended.turn_id, ended.outcome) == ("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
@@ -192,13 +192,13 @@ def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
         app.complete("interrupted")
         assert steered.wait_ended(2).outcome == "aborted"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_stopping_the_endpoint_reaps_the_owned_children_and_runtime_dir(turns_env):
     endpoint, harness, _ = _host(turns_env)
     directory = endpoint.dir
-    endpoint.stop("the test ended")
+    end_endpoint(endpoint)
     assert not harness.app_server.alive
     assert not directory.exists()
 
@@ -215,7 +215,7 @@ def test_a_plain_steer_that_races_the_turn_end_refuses_idle(turns_env):
         assert delivery.wait_ended(2).reason == "idle"
         assert _turn_texts(app) == ["first"]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_supervision_reconnects_and_resumes_the_same_thread(turns_env):
@@ -233,7 +233,7 @@ def test_supervision_reconnects_and_resumes_the_same_thread(turns_env):
         assert harness.app_server.starts == 2
         assert endpoint.session()["session_id"] == "thread-1"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("key", sorted(codex_module.OWNED_OPTIONS))
@@ -281,7 +281,7 @@ def test_options_and_verifier_reach_start_and_every_resume(turns_env):
                             "developerInstructions": "rules"}] * 2
         assert len(answers) == 3
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_unaccepted_resume_gates_input_and_publishes_its_reason(turns_env):
@@ -318,7 +318,7 @@ def test_unaccepted_resume_gates_input_and_publishes_its_reason(turns_env):
         assert "trouble" not in endpoint.session()
     finally:
         accept_resume.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def _injects(app):
@@ -365,7 +365,7 @@ def test_fresh_window_injects_before_releasing_a_gated_delivery(turns_env):
         assert _turn_texts(made[0]) == ["real work"]
     finally:
         release.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_headless_start_injects_one_item_and_sends_no_turn(turns_env):
@@ -382,7 +382,7 @@ def test_a_headless_start_injects_one_item_and_sends_no_turn(turns_env):
         second = harness.ws
         assert _injects(second) == [] and _turn_texts(second) == []
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_injected_item_is_one_developer_message_with_text():
@@ -432,7 +432,7 @@ def test_a_codex_without_inject_is_refused_with_no_turn_and_no_retry(turns_env):
         assert harness.session_id is None     # the unwritten thread is forgotten
         assert harness._stop.is_set() and not harness.app_server.alive
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_retry_that_meets_a_codex_without_inject_gives_up(turns_env):
@@ -466,7 +466,7 @@ def test_a_retry_that_meets_a_codex_without_inject_gives_up(turns_env):
         assert all(_turn_texts(client) == [] for client in made)
         assert harness.session_id is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_start_warning_runs_but_resume_warning_fails_and_stops_its_process(turns_env):
@@ -499,7 +499,7 @@ def test_start_warning_runs_but_resume_warning_fails_and_stops_its_process(turns
         harness._load_failed(RuntimeError("resume differs"))
         assert endpoint.session()["trouble"] == "resume differs"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_real_host_builds_stop_facts_through_its_hook_server(monkeypatch, turns_env):
@@ -528,7 +528,7 @@ def test_real_host_builds_stop_facts_through_its_hook_server(monkeypatch, turns_
             StopFacts("turn-1", "thread-1", None, ("x",), 0)
     finally:
         hold.close()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_phantom_turn_start_id_is_never_reported(monkeypatch, turns_env):
@@ -553,7 +553,7 @@ def test_phantom_turn_start_id_is_never_reported(monkeypatch, turns_env):
         assert delivery.wait_ended(1) == started
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_exhausted_steer_mismatches_refuse_instead_of_claiming_delivery(turns_env):
@@ -578,7 +578,7 @@ def test_exhausted_steer_mismatches_refuse_instead_of_claiming_delivery(turns_en
         assert delivery.wait_ended(2).reason == "unsupported"
         assert _turn_texts(app) == ["first"]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("mode", ["raise", "timeout"])
@@ -612,7 +612,7 @@ def test_verifier_fault_fails_load_without_publishing(mode, turns_env):
         assert not harness.app_server.alive
         assert not made[0].connected
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_dead_process_open_turn_settles_error_before_resume(turns_env):
@@ -627,7 +627,7 @@ def test_dead_process_open_turn_settles_error_before_resume(turns_env):
         assert delivery.wait_ended(2).outcome == "error"
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_backoff_grows_caps_and_jitters():
@@ -678,7 +678,7 @@ def test_headless_first_failure_returns_and_retries_until_accepted(turns_env):
             time.sleep(0.01)
         assert backoff_starts >= 2  # initial retry sequence, then reset on acceptance
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_headless_first_accepted_load_after_a_failure_names_the_thread_in_ready(turns_env):
@@ -723,7 +723,7 @@ def test_headless_first_accepted_load_after_a_failure_names_the_thread_in_ready(
         assert readies == [("startup", "thread-1")]
     finally:
         retry.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_untrusted_hooks_give_up_on_the_first_load(turns_env):
@@ -750,7 +750,7 @@ def test_untrusted_hooks_give_up_on_the_first_load(turns_env):
         assert not harness.app_server.alive
         assert harness.ws is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_close_cleans_a_candidate_started_during_shutdown(turns_env):
@@ -847,7 +847,7 @@ def test_a_refused_inject_closes_its_candidate_and_retries(turns_env):
         assert "trouble" not in endpoint.session()
         assert all(_turn_texts(client) == [] for client in made)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_delivery_made_during_the_inject_waits_at_the_gate(turns_env):
@@ -889,7 +889,7 @@ def test_a_delivery_made_during_the_inject_waits_at_the_gate(turns_env):
         assert _turn_texts(made[1]) == ["mid-load"]
     finally:
         release.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         starter.join(2)
 
 
@@ -946,7 +946,7 @@ def test_accepted_start_and_resume_each_raise_one_ready(turns_env):
         assert [m for m, _ in made[0].calls].index("thread/inject_items") \
             < [m for m, _ in made[0].calls].index("turn/start")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -963,7 +963,7 @@ def test_an_unturned_resume_raises_ready_startup(turns_env):
         assert _readies(events, 2) == [("startup", "thread-1"), ("startup", "thread-1")]
         assert harness._unturned
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -990,7 +990,7 @@ def test_a_launch_that_resumes_an_unturned_thread_raises_ready_startup(turns_env
         assert _injects(made[0]) == [] and _turn_texts(made[0]) == []
         assert _readies(events, 1) == [("startup", "thread-1")]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -1007,7 +1007,7 @@ def test_the_first_turns_end_clears_the_unturned_mark(turns_env):
         delivery.wait_ended(2)
         assert not harness._unturned
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -1058,7 +1058,7 @@ def test_an_unturned_threads_session_start_resume_reads_startup_once(
         assert _session_start(monkeypatch, harness, "resume") == "context at resume"
         assert asked == ["startup", "resume"]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -1078,7 +1078,7 @@ def test_a_turned_threads_session_start_resume_stays_resume(monkeypatch, turns_e
         assert _session_start(monkeypatch, harness, "resume") == "context at resume"
         assert asked == ["startup", "resume"]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -1135,7 +1135,7 @@ def test_a_refused_inject_raises_no_ready(turns_env):
         assert hello["session_id"] == "thread-2" and hello["earlier"] == ["thread-1"]
         assert endpoint.facts().session_id == "thread-2"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -1149,7 +1149,7 @@ def test_a_non_string_verify_answer_fails_the_load(turns_env, answer):
             harness._connect()
         assert not harness.app_server.alive and harness.loading()
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- A Codex turn closes only on Codex's own word ------------------------------------
@@ -1184,7 +1184,7 @@ def test_a_plain_steer_after_an_unblocked_stop_reads_idle(monkeypatch, turns_env
         app.complete()
         assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_blocked_stop_leaves_the_turn_open_to_steers(monkeypatch, turns_env):
@@ -1202,7 +1202,7 @@ def test_a_blocked_stop_leaves_the_turn_open_to_steers(monkeypatch, turns_env):
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
         hold.close()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_stop_answer_waits_for_a_steer_codex_has_not_yet_answered(
@@ -1239,7 +1239,7 @@ def test_the_stop_answer_waits_for_a_steer_codex_has_not_yet_answered(
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
         gate.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_steer_the_endpoint_tied_before_the_stop_and_sent_after_it_waits(
@@ -1273,7 +1273,7 @@ def test_a_steer_the_endpoint_tied_before_the_stop_and_sent_after_it_waits(
         assert _turn_texts(app) == ["first"] and app.absorbed == []
     finally:
         gate.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_start_absorbed_into_a_turn_already_reported_reads_lost_at_once(
@@ -1298,7 +1298,7 @@ def test_a_start_absorbed_into_a_turn_already_reported_reads_lost_at_once(
         facts = endpoint.facts()
         assert not facts.turn_open and facts.turn_number == epoch
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_an_interrupt_ends_the_turn_at_its_completion_not_at_the_ping(
@@ -1316,7 +1316,7 @@ def test_an_interrupt_ends_the_turn_at_its_completion_not_at_the_ping(
         assert bare(first.wait_ended(2)) == Ended("turn-1", "aborted")
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_codex_going_idle_without_completing_ends_the_turn_after_the_grace(
@@ -1333,7 +1333,7 @@ def test_codex_going_idle_without_completing_ends_the_turn_after_the_grace(
         assert bare(first.wait_ended(2)) == Ended("turn-1", "error")
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_completion_or_a_return_to_active_inside_the_grace_stops_its_timer(
@@ -1359,7 +1359,7 @@ def test_a_completion_or_a_return_to_active_inside_the_grace_stops_its_timer(
         app.complete()
         assert bare(second.wait_ended(2)) == Ended("turn-2", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 _RAISES = [
@@ -1402,7 +1402,7 @@ def test_a_raising_turn_start_reads_refused_only_when_codex_did_not_take_it(
         _check(session.deliver("hello", only_if_idle=True), reading)
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("make,reading", _RAISES)
@@ -1426,7 +1426,7 @@ def test_a_raising_turn_steer_reads_refused_only_when_codex_did_not_take_it(
         app.complete()
         assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_raising_turns_list_after_an_absorbed_start_reads_lost(monkeypatch, turns_env):
@@ -1452,7 +1452,7 @@ def test_a_raising_turns_list_after_an_absorbed_start_reads_lost(monkeypatch, tu
         assert isinstance(started, Lost) and started.untied
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_load_that_shows_the_turn_running_stops_the_grace(monkeypatch, turns_env):
@@ -1492,7 +1492,7 @@ def test_a_load_that_shows_the_turn_running_stops_the_grace(monkeypatch, turns_e
         made[1].complete()
         assert bare(running.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_noreply_after_turn_started_claimed_the_delivery_leaves_it_on_that_turn(
@@ -1522,7 +1522,7 @@ def test_noreply_after_turn_started_claimed_the_delivery_leaves_it_on_that_turn(
         app.complete()
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 class _ActiveResume(FakeClient):
@@ -1586,7 +1586,7 @@ def test_a_reconnect_inside_the_started_wait_ties_the_delivery_to_the_turn_it_sh
         made[1].complete()
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_start(
@@ -1623,7 +1623,7 @@ def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_s
             time.sleep(0.02)
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- the internal sockets' paths ------------------------------------------------------
@@ -1635,7 +1635,7 @@ def test_the_codex_sockets_sit_in_the_endpoint_directory_when_their_paths_are_sh
         assert harness.app_socket == endpoint.dir / protocol.CODEX_APP_SOCK
         assert harness.hook_server.socket_path == endpoint.dir / protocol.CODEX_HOOKS_SOCK
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
@@ -1669,5 +1669,5 @@ def test_a_long_runtime_root_puts_the_codex_sockets_on_the_short_path(
         app.complete()
         assert delivery.wait_ended(2).outcome == "answer"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
     assert not os.path.lexists(harness.hook_server.socket_path)

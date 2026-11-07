@@ -13,7 +13,7 @@ from moxi_turns import codex_hooks, listeners
 from moxi_turns.client import Session
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import StopFacts
-from conftest import write_config
+from conftest import end_endpoint, write_config
 
 
 class HookHarness(FakeHarness):
@@ -81,7 +81,7 @@ def test_session_hooks_render_listener_context_through_turns_hook_code(
             "context at prompt"
     finally:
         server.stop()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_stop_blocks_only_after_the_ping_prints_the_reason(monkeypatch, turns_env):
@@ -115,7 +115,7 @@ def test_stop_blocks_only_after_the_ping_prints_the_reason(monkeypatch, turns_en
     finally:
         hold.close()
         server.stop()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_an_interrupt_ping_closes_no_turn(monkeypatch, turns_env):
@@ -131,7 +131,7 @@ def test_an_interrupt_ping_closes_no_turn(monkeypatch, turns_env):
         assert harness.ending == []
     finally:
         server.stop()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_each_hook_is_hashed_and_must_be_trusted():
@@ -195,7 +195,7 @@ def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_e
     finally:
         hold.close()
         server.stop()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
@@ -226,7 +226,7 @@ def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
     finally:
         hold.close()
         server.stop()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
@@ -256,5 +256,5 @@ def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
         assert [e.source for e in events] == ["clear", "auto"]
     finally:
         server.stop()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
