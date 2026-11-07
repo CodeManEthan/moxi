@@ -1675,8 +1675,14 @@ def launch(cwd, *, instructions: str | None = None, env=None,
 
 
 def _launch(cwd, *, instructions=None, env=None, window=True, options=None, verify=None,
-            additions=None, resume=None):
-    """`launch`, returning the endpoint beside the session, for the host entry."""
+            additions=None, resume=None, opened: list | None = None):
+    """`launch`, returning the endpoint beside the session, for the host entry.
+
+    With `opened`, the endpoint is appended to it as soon as it is open. A stop asked
+    (an exception that is not an ``Exception``) after the first load was accepted then
+    leaves the endpoint up: the session is ready and other processes may hold it, so the
+    caller ends it as it ends any stop. Without `opened`, or before that point, the
+    endpoint is stopped as a failed launch."""
     from .additions import for_host
 
     path = Path(cwd).resolve()
@@ -1686,13 +1692,18 @@ def _launch(cwd, *, instructions=None, env=None, window=True, options=None, veri
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
                            options=options, verify=verify, resume=resume)
     endpoint = Endpoint(harness, env=harness.env).open()
+    if opened is not None:
+        opened.append(endpoint)
     try:
         harness.start()
         session = (turns_client.find(session_id=harness.session_id)
                    if harness.session_id else turns_client.find(pid=harness.pid))
         if session is None:
             raise RuntimeError("the Codex endpoint opened but could not be found")
-    except BaseException:
+    except BaseException as exc:
+        if (opened is not None and harness._accepted.is_set()
+                and not isinstance(exc, Exception)):
+            raise
         endpoint.stop("the Codex launch failed")
         raise
     with _HOSTS_LOCK:

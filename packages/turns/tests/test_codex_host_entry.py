@@ -576,6 +576,46 @@ def test_a_codex_without_inject_exits_1_with_the_line_and_sends_no_turn(rig):
 
 
 @LINUX
+def test_a_stop_once_the_first_load_is_accepted_ends_the_session_with_0(
+        rig, monkeypatch, capsys, caplog):
+    """The first load raises Ready before the launch returns, and a caller may hold the
+    session from then on. A SIGTERM in that gap, here while the launch looks its own
+    session up, is an ordinary stop: exit 0, and the endpoint ends as stopped, not as a
+    failed launch."""
+    for key in ("PATH", "FAKE_CODEX_DIR"):
+        monkeypatch.setenv(key, rig.env[key])
+    monkeypatch.delenv(moxi_proc.LIFELINE_ENV, raising=False)
+    real_find = turns_client.find
+    ready = []
+
+    def find(**kwargs):
+        session = real_find(**kwargs)
+        ready.append(session.facts().ready)
+        session.close()
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(WAIT)                    # the handler raises out of this
+        return session
+
+    monkeypatch.setattr(turns_client, "find", find)
+    names = ("SIGTERM", "SIGINT", "SIGHUP")
+    handlers = {name: signal.getsignal(getattr(signal, name)) for name in names}
+    try:
+        with caplog.at_level(logging.INFO, logger="moxi.turns"):
+            status = main(["--cwd", str(rig.work), "--no-window"])
+    finally:
+        for name, handler in handlers.items():
+            signal.signal(getattr(signal, name), handler)
+    err = capsys.readouterr().err
+    assert ready and ready[0] is not None and ready[0].source == "startup"
+    assert status == 0, err
+    assert "before the session was ready" not in err
+    assert "the session ended: the Codex host was stopped (SIGTERM)" in caplog.text
+    assert "the Codex launch failed" not in caplog.text
+    server = rig.app_server()
+    assert _until(lambda: _gone(server["pid"]), 15.0)
+
+
+@LINUX
 def test_the_window_shares_the_hosts_terminal_and_its_close_ends_the_host(rig):
     import fcntl
     import termios

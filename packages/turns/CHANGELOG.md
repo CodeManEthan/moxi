@@ -18,6 +18,9 @@
 - A Codex thread reloaded before its first turn is treated as a start: its Ready reads
   `startup`, and the first turn's SessionStart `resume` reaches the listeners as
   `startup`. Each resumed load makes one more `thread/turns/list` call.
+- `moxi-turns-codex-host` stopped once its first load is accepted, while the launch
+  is still finishing, ends the session and exits 0. It used to exit 1, saying the
+  launch was stopped before the session was ready.
 - turns needs moxi 0.1.6 or later.
 
 ## 0.2.1 (2026-11-07)
