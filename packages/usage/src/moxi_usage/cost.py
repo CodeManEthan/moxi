@@ -14,6 +14,12 @@ group here, through the model table (`moxi_usage.models`):
 Prices are dollars per million tokens. The floors are taken per request, in SQL, before
 the sums.
 
+**Terms.** A priced group keeps each of the five products as a `Term`: the class, its
+tokens, the price it paid, the dollars (`tokens x price / 1,000,000`) and where the price
+came from. The group's cost is the sum of its terms' costs, so the terms always add up to
+the cost. Nothing else in usage multiplies a token count by a price: a report that splits a
+cost by class adds terms up and never shares a figure out by rates.
+
 **Tiers.** A model's row may carry tiers (`above_200k`, `priority`, `flex`, `fast`,
 `above_272k_priority`...), each with the conditions it applies under (`above_tokens`,
 `service_tier`, `speed`) and its own prices. A group takes the tier whose conditions all
@@ -43,6 +49,9 @@ from .models import CACHE_FIELDS, ModelFacts
 
 #: The price fields a term reads, in the order of the cost's terms.
 PRICE_TERMS = ("input", "cache_read", "cache_write_5m", "cache_write_1h", "output")
+#: Where a term's price came from: the model's own row, the tier's own price, or the
+#: tier's input price times the provider's default multiplier.
+FROM_ROW, FROM_TIER, FROM_TIER_INPUT = "row", "tier", "tier-input"
 #: The conditions a tier can carry, and the request field each is matched against.
 CONDITIONS = ("above_tokens", "service_tier", "speed")
 PER_MILLION = 1_000_000
@@ -91,11 +100,31 @@ class Sums:
 
 
 @dataclass(frozen=True, slots=True)
+class Term:
+    """One term of a group's cost. `cls` is the class (`PRICE_TERMS`); `price` is dollars
+    per million tokens or `UNKNOWN`; `cost` is dollars, or `UNKNOWN` in an unpriced group;
+    `price_from` is `FROM_ROW`, `FROM_TIER` or `FROM_TIER_INPUT`, or None when the model
+    table does not know the model."""
+
+    cls: str
+    tokens: int
+    price: Any
+    cost: Any
+    price_from: str | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"class": self.cls, "tokens": self.tokens, "price": self.price,
+                "cost": self.cost, "price_from": self.price_from}
+
+
+@dataclass(frozen=True, slots=True)
 class Priced:
     """One group's price. `cost` is dollars, or `UNKNOWN` when the group is unpriced, and
     `why` then says what was missing. `unknown_rows` counts the requests with an unknown
     count the group sums. `rule` names the provider rule that stood in for an unknown
-    cache-write count, or None."""
+    cache-write count, or None. `terms` are the five terms of the cost, in `PRICE_TERMS`
+    order; `cost` is their sum. In an unpriced group each term keeps its tokens and the
+    price where known, and every term's cost is `UNKNOWN`."""
 
     cost: Any
     unpriced_tokens: int
@@ -103,6 +132,7 @@ class Priced:
     prices: Prices | None
     rule: str | None = None
     why: str | None = None
+    terms: tuple[Term, ...] = ()
 
     @property
     def priced(self) -> bool:
@@ -187,6 +217,23 @@ def rule_name(provider: str) -> str:
     return f"{provider}: an unknown cache-write count is billed as input"
 
 
+def price_from(paid: Prices, field: str) -> str:
+    """Where the price `paid` gives for `field` came from (`FROM_ROW`, `FROM_TIER`,
+    `FROM_TIER_INPUT`)."""
+    if paid.tier is None or field in paid.from_row:
+        return FROM_ROW
+    if field in paid.from_tier_input:
+        return FROM_TIER_INPUT
+    return FROM_TIER
+
+
+def term_tokens(sums: Sums) -> tuple[tuple[str, int], ...]:
+    """Each term's class and tokens, in `PRICE_TERMS` order."""
+    return (("input", sums.fresh), ("cache_read", sums.cache_read),
+            ("cache_write_5m", sums.write_5m), ("cache_write_1h", sums.cache_write_1h),
+            ("output", sums.output))
+
+
 def price(sums: Sums, facts: ModelFacts, defaults: Mapping[str, Any] | None, *,
           size: int = 0, service_tier: str | None = None,
           speed: str | None = None) -> Priced:
@@ -197,23 +244,30 @@ def price(sums: Sums, facts: ModelFacts, defaults: Mapping[str, Any] | None, *,
         rule = rule_name(str(facts.provider))
         unknown_rows = sums.unknown_core
     if not facts.known:
+        terms = tuple(Term(field, tokens, UNKNOWN, UNKNOWN, None)
+                      for field, tokens in term_tokens(sums))
         return Priced(UNKNOWN, sums.tokens, unknown_rows, None, rule,
-                      why="the model table does not know the model")
+                      why="the model table does not know the model", terms=terms)
     paid = prices(facts, defaults, size=size, service_tier=service_tier, speed=speed)
-    terms = (("input", sums.fresh), ("cache_read", sums.cache_read),
-             ("cache_write_5m", sums.write_5m), ("cache_write_1h", sums.cache_write_1h),
-             ("output", sums.output))
-    total = 0.0
+    found: list[tuple[str, int, Any, Any]] = []
     missing = []
-    for field, tokens in terms:
-        if not tokens:
-            continue
+    for field, tokens in term_tokens(sums):
         value = getattr(paid, field)
-        if value is UNKNOWN or not _number(value):
+        known = value is not UNKNOWN and _number(value)
+        if not tokens:
+            # a term with no tokens costs nothing, whatever its price
+            found.append((field, tokens, value if known else UNKNOWN, 0.0))
+        elif not known:
             missing.append(field)
-            continue
-        total += tokens * value
+            found.append((field, tokens, UNKNOWN, UNKNOWN))
+        else:
+            found.append((field, tokens, value, tokens * value / PER_MILLION))
     if missing:
+        terms = tuple(Term(field, tokens, value, UNKNOWN, price_from(paid, field))
+                      for field, tokens, value, _ in found)
         return Priced(UNKNOWN, sums.tokens, unknown_rows, paid, rule,
-                      why=f"no {', '.join(missing)} price")
-    return Priced(total / PER_MILLION, 0, unknown_rows, paid, rule)
+                      why=f"no {', '.join(missing)} price", terms=terms)
+    terms = tuple(Term(field, tokens, value, amount, price_from(paid, field))
+                  for field, tokens, value, amount in found)
+    return Priced(sum(term.cost for term in terms), 0, unknown_rows, paid, rule,
+                  terms=terms)

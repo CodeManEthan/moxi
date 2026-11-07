@@ -12,9 +12,12 @@ returns a `Report`:
   model: the main file as agent `main`, each subagent or workflow file under its own
   agent id. Its sessions are the `sessions` report's, so its totals equal that
   session's `sessions` row over the same range and filters.
+* `terms`: every term of a cost (`moxi_usage.cost`), by model, day, month or, with
+  `session=`, by the session's agents (`by=`): each row's price groups with their five
+  terms, and its cost split by token class and price tier.
 * `status`: the index itself, by lane: its state at the last pass, its files, excluded,
   held and duplicate counts, the held rows' reasons, the last pass and the schema
-  version. It counts no tokens, so the sections below are about the other six.
+  version. It counts no tokens, so the sections below are about the others.
 
 **What a report reads.** Only the requests that hold their key's claim (`won = 1`), joined
 to their files, through the `requests_won_ts` index for a time range (the `session`
@@ -64,7 +67,8 @@ if TYPE_CHECKING:
 
     from .models import Table
 
-KINDS = ("daily", "monthly", "sessions", "models", "projects", "session", "status")
+KINDS = ("daily", "monthly", "sessions", "models", "projects", "session", "terms",
+         "status")
 HARNESSES = ("claude", "codex", "opencode")
 
 #: The model a request names: the one asked for, else the one that answered.
@@ -134,6 +138,11 @@ def _json(row: Mapping[str, Any]) -> dict[str, Any]:
     for name, value in row.items():
         if value is UNKNOWN:
             unknown.append(name)
+        elif isinstance(value, Mapping):
+            out[name] = _json(value)
+        elif isinstance(value, list):
+            out[name] = [_json(item) if isinstance(item, Mapping) else item
+                         for item in value]
         else:
             out[name] = value
     if unknown:
@@ -396,8 +405,9 @@ def grouped(conn: sqlite3.Connection, query: _Query, keys: Mapping[str, str],
 
     `keys` maps a name to its SQL expression over `r` (requests) and `f` (files). Each
     result is `(key values, the group's price, the group's facts)`, where the facts hold
-    its model, provider, provenance, first and last time and harness cost. `span` is
-    the range `_span` gives, when the caller has it already.
+    its model, provider, provenance, first and last time, harness cost, prompt-size
+    bound (`size`) and price period (`period`, an index into this call's edges). `span`
+    is the range `_span` gives, when the caller has it already.
     """
     lo, hi = span if span is not None else _span(conn, query)
     edges = _periods(table, lo, hi)
@@ -416,7 +426,8 @@ def grouped(conn: sqlite3.Connection, query: _Query, keys: Mapping[str, str],
         values = {name: row[f"k_{n}"] for n, name in enumerate(names)}
         extra = {"model": model, "provider": provider, "facts": facts, "sums": sums,
                  "first_ts": row["first_ts"], "last_ts": row["last_ts"],
-                 "harness_cost": row["harness_cost"]}
+                 "harness_cost": row["harness_cost"], "size": row["g_size"],
+                 "period": row["g_period"]}
         out.append((values, priced, extra))
     return out
 
@@ -509,14 +520,15 @@ def _label(model: Any) -> str:
 
 def _fold(groups, key: Callable[[Mapping[str, Any], Mapping[str, Any]], tuple],
           values: Callable[[Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]],
+          make: Callable[[Mapping[str, Any]], _Row] = _Row, total: _Row | None = None,
           ) -> tuple[dict[tuple, _Row], _Row]:
     rows: dict[tuple, _Row] = {}
-    total = _Row({})
+    total = make({}) if total is None else total
     for found, priced, extra in groups:
         k = key(found, extra)
         row = rows.get(k)
         if row is None:
-            row = rows[k] = _Row(values(found, extra))
+            row = rows[k] = make(values(found, extra))
         row.add(priced, extra)
         total.add(priced, extra)
     return rows, total
@@ -722,6 +734,162 @@ def projects(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
     return _report("projects", query, out, total)
 
 
+# --- the cost terms -------------------------------------------------------------------
+
+#: What a `terms` report's rows can be keyed by.
+TERMS_BY = ("model", "day", "month", "agent")
+
+
+def _terms_by(by: Any, session: str | None) -> str:
+    """`by` as the `terms` report takes it: `model` when None. `agent` needs `session`,
+    since an agent id names an agent only within its session."""
+    if by is None:
+        return "model"
+    if by not in TERMS_BY:
+        raise ReportError(f"{by!r} is not a way to group the terms ({', '.join(TERMS_BY)})")
+    if by == "agent" and not session:
+        raise ReportError("the terms report by agent needs a session id: an agent id names "
+                          "an agent only within its session")
+    return by
+
+
+class _TermsRow(_Row):
+    """A `terms` row being summed: a report row with its price groups and its cost split
+    by class and tier. A price group here is one model, provider, tier, prompt-size bound
+    and price period; the grouped query's groups that pay the same prices fold into it,
+    the priced and the unpriced apart, so its cost is still the sum of its terms."""
+
+    def __init__(self, values: Mapping[str, Any]):
+        super().__init__(values)
+        self.groups: dict[tuple, dict[str, Any]] = {}
+        self.split: dict[tuple[str, str | None], list] = {}
+        self.with_groups = True
+
+    def add(self, priced: cost.Priced, extra: Mapping[str, Any]) -> None:
+        super().add(priced, extra)
+        paid = priced.prices
+        tier = None if paid is None else paid.tier
+        if priced.priced:
+            for term in priced.terms:
+                if term.tokens:
+                    slot = self.split.setdefault((term.cls, tier), [0, 0.0])
+                    slot[0] += term.tokens
+                    slot[1] += term.cost
+        if not self.with_groups:
+            return
+        model, facts = extra["model"], extra["facts"]
+        key = (_label(model), repr(extra["provider"]), extra["period"], tier, paid,
+               priced.priced, priced.why if paid is None else None)
+        group = self.groups.get(key)
+        if group is None:
+            tiers = facts.tiers if isinstance(facts.tiers, Mapping) else {}
+            above = (tiers.get(tier) or {}).get("above_tokens") if tier is not None else None
+            period = facts.provenance.period
+            self.groups[key] = {
+                "model": model, "provider": extra["provider"], "tier": tier,
+                "above": int(above) if isinstance(above, (int, float)) else 0,
+                "period": None if period is None else dict(period),
+                "provenance": facts.provenance.as_dict(), "requests": extra["sums"].requests,
+                "terms": [term.as_dict() for term in priced.terms], "cost": priced.cost,
+                "unpriced_tokens": priced.unpriced_tokens,
+                "unknown_rows": priced.unknown_rows, "rule": priced.rule, "why": priced.why}
+            return
+        group["requests"] += extra["sums"].requests
+        group["unpriced_tokens"] += priced.unpriced_tokens
+        group["unknown_rows"] += priced.unknown_rows
+        group["rule"] = group["rule"] or priced.rule
+        for slot, term in zip(group["terms"], priced.terms, strict=True):
+            slot["tokens"] += term.tokens
+            if slot["cost"] is not UNKNOWN:
+                slot["cost"] += term.cost
+        if priced.priced:
+            group["cost"] += priced.cost
+        elif paid is not None:
+            missing = [slot["class"] for slot in group["terms"]
+                       if slot["tokens"] and slot["price"] is UNKNOWN]
+            group["why"] = f"no {', '.join(missing)} price"
+
+    def done(self, **kwargs: Any) -> dict[str, Any]:
+        row = super().done(**kwargs)
+        if self.with_groups:
+            row["groups"] = [self.groups[k] for k in sorted(
+                self.groups, key=lambda k: (k[0], k[1], k[2], k[3] is not None, k[3] or "",
+                                            not k[5]))]
+        order = {name: n for n, name in enumerate(cost.PRICE_TERMS)}
+        row["split"] = [{"class": cls, "tier": tier, "tokens": tokens, "cost": amount}
+                        for (cls, tier), (tokens, amount) in sorted(
+                            self.split.items(),
+                            key=lambda item: (order[item[0][0]], item[0][1] is not None,
+                                              item[0][1] or ""))]
+        return row
+
+
+def _terms_total() -> _TermsRow:
+    total = _TermsRow({})
+    total.with_groups = False
+    return total
+
+
+def terms(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
+          harness: str | None = None, project: str | None = None, model: str | None = None,
+          tz: Any = None, table: Table | None = None, by: str | None = "model",
+          session: str | None = None) -> Report:
+    """Every term of a cost: one row per key `by` names (`TERMS_BY`), a model, a day, a
+    month, or an agent of the one session `session` names (it needs `session`; `session`
+    alone narrows the other keys to that session).
+
+    A row carries the sums every report row carries, `groups` (its price groups, each with
+    its model, provider, `tier`, `above` (the tier's prompt-size bound, 0 for none),
+    `period` (the dated override row's `from` and `to`, or None), `provenance`, `requests`,
+    the five `terms` of `moxi_usage.cost`, `cost`, `unpriced_tokens`, `unknown_rows`,
+    `rule` and `why`) and `split`: `{class, tier, tokens, cost}` summed over its priced
+    groups, by class and then tier (None first). An unpriced group adds nothing to `split`.
+    A row's cost is the sum of its groups' costs and of its split's. `total` carries the
+    sums and `split` over every row.
+
+    Each `by` groups its requests as the report it reads beside does, so their costs
+    agree: `model` as `models`, `day` and `month` as `daily` and `monthly`, `agent` as
+    `session`. Rows by model come by cost, highest first, then any wholly unpriced; by day
+    or month oldest first; by agent as the `session` report orders its agents."""
+    by = _terms_by(by, session)
+    query = _query(since, until, harness, project, model, tz, session)
+    current = _table(table)
+    if by in ("day", "month"):
+        span = _span(conn, query)
+        offset = offset_sql(query.zone, *span)
+        fmt = "%Y-%m-%d" if by == "day" else "%Y-%m"
+        groups = grouped(conn, query, {by: f"strftime('{fmt}', r.ts + {offset}, 'unixepoch')"},
+                         current, span=span)
+        rows, total = _fold(groups, lambda k, e: (k[by],), lambda k, e: {by: k[by]},
+                            _TermsRow, _terms_total())
+        ordered = [rows[k].done() for k in sorted(rows, key=lambda k: k[0] or "")]
+    elif by == "agent":
+        groups = grouped(conn, query, {"agent": _AGENT_SQL, "kind": "f.kind",
+                                       "title": "f.title"}, current)
+        rows, total = _fold(groups, lambda k, e: (k["agent"], k["kind"]),
+                            lambda k, e: {"agent": k["agent"], "kind": k["kind"]},
+                            _TermsRow, _terms_total())
+        ordered = [row.done(times=True) for row in rows.values()]
+        starts: dict[str, float] = {}
+        for row in ordered:
+            if row["first_ts"] is not None:
+                starts[row["agent"]] = min(starts.get(row["agent"], row["first_ts"]),
+                                           row["first_ts"])
+        ordered.sort(key=lambda r: (r["agent"] != "main", r["agent"] not in starts,
+                                    starts.get(r["agent"], 0.0), r["agent"],
+                                    r["first_ts"] is None, r["first_ts"] or 0.0, r["kind"]))
+    else:
+        groups = grouped(conn, query, {}, current)
+        rows, total = _fold(groups, lambda k, e: (_label(e["model"]),),
+                            lambda k, e: {"model": e["model"]}, _TermsRow,
+                            _terms_total())
+        ordered = [row.done() for row in rows.values()]
+        ordered.sort(key=lambda r: (r["cost"] is UNKNOWN,
+                                    0.0 if r["cost"] is UNKNOWN else -r["cost"],
+                                    _label(r["model"])))
+    return _report("terms", query, ordered, total)
+
+
 #: How many held rows `status` names before it only counts them.
 HELD_SHOWN = 20
 #: How many duplicate files `status` names before it only counts them.
@@ -833,21 +1001,39 @@ def _status_total(rows: list[dict[str, Any]], held_rows: list[dict[str, Any]], *
 
 REPORTS: dict[str, Callable[..., Report]] = {
     "daily": daily, "monthly": monthly, "sessions": sessions, "models": models_report,
-    "projects": projects, "session": session, "status": status,
+    "projects": projects, "session": session, "terms": terms, "status": status,
+}
+
+#: The keywords beyond the filters that some reports read: per kind, the ones it takes
+#: and, of those, the ones it needs. Every other kind refuses them, so a caller never
+#: reads an unfiltered answer as a filtered one.
+_KEYWORDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "session": (("session",), ("session",)),
+    "terms": (("by", "session"), ()),
+    "requests": (("session", "agent"), ("session",)),
 }
 
 
-def _session_arg(kind: str, session_id: str | None) -> dict[str, Any]:
-    """The `session` argument as the report `kind` takes it: the `session` report needs
-    it and no other report takes it."""
-    if kind == "session":
-        if not session_id:
-            raise ReportError("the session report needs a session id")
-        return {"session": session_id}
-    if session_id is not None:
-        raise ReportError(f"the {kind} report takes no session; only the session "
-                          "report does")
-    return {}
+def _kind_args(kind: str, **given: Any) -> dict[str, Any]:
+    """The keywords `given` (`session`, `by`, `agent`) as the report `kind` takes them:
+    each it needs must be there, and one it does not take is refused."""
+    takes, needs = _KEYWORDS.get(kind, ((), ()))
+    for name in needs:
+        if not given.get(name):
+            raise ReportError(f"the {kind} report needs a {name} id")
+    for name, value in given.items():
+        if value is not None and name not in takes:
+            others = [k for k in KINDS if name in _KEYWORDS.get(k, ((), ()))[0]]
+            if not others:
+                only = "no report does"
+            elif len(others) == 1:
+                only = f"only the {others[0]} report does"
+            else:
+                only = f"only the {' and '.join(others)} reports do"
+            raise ReportError(f"the {kind} report takes no {name}; {only}")
+    if kind == "terms":
+        _terms_by(given.get("by"), given.get("session"))
+    return {name: given[name] for name in takes if given.get(name) is not None}
 
 
 # --- a report from the API ------------------------------------------------------------
@@ -863,17 +1049,20 @@ def run_pass(*, env: Mapping[str, str] | None = None) -> None:
 def report(kind: str, *, since: Any = None, until: Any = None, harness: str | None = None,
            project: str | None = None, model: str | None = None, tz: Any = None,
            fresh: bool = True, env: Mapping[str, str] | None = None,
-           table: Table | None = None, session: str | None = None) -> Report:
+           table: Table | None = None, session: str | None = None, by: str | None = None,
+           agent: str | None = None) -> Report:
     """One report by `kind` (`KINDS`). With `fresh`, the pass runs first, and when
     another pass holds the index past the wait the report reads the index as it is and
     says so in `Report.index["note"]`. With no index yet, the report is empty and says so.
-    `session` is the session the `session` report reads; that report needs it and the
-    others refuse it. Raises `ReportError` for an argument it cannot use."""
+    `session` is the session the `session` report reads; that report needs it, `terms`
+    may take it, and the others refuse it. `by` is how `terms` groups its rows, and the
+    others refuse it; `agent` is refused by every report here. Raises `ReportError` for an
+    argument it cannot use, before any pass runs."""
     from moxi.files import LockTimeout
 
     if kind not in REPORTS:
         raise ReportError(f"{kind!r} is not a report ({', '.join(KINDS)})")
-    _session_arg(kind, session)
+    _kind_args(kind, session=session, by=by, agent=agent)
     passed, note = False, None
     if fresh:
         try:
@@ -886,14 +1075,15 @@ def report(kind: str, *, since: Any = None, until: Any = None, harness: str | No
         note = "no pass ran first; this report reads the index as it is"
     return read(kind, since=since, until=until, harness=harness, project=project,
                 model=model, tz=tz, passed=passed, note=note, env=env, table=table,
-                session=session)
+                session=session, by=by, agent=agent)
 
 
 def read(kind: str, *, since: Any = None, until: Any = None, harness: str | None = None,
          project: str | None = None, model: str | None = None, tz: Any = None,
          passed: bool = False, note: str | None = None,
          env: Mapping[str, str] | None = None, table: Table | None = None,
-         session: str | None = None) -> Report:
+         session: str | None = None, by: str | None = None,
+         agent: str | None = None) -> Report:
     """One report by `kind` from the index as it is, running no pass: what `report`
     does after its pass. `passed` and `note` go into `Report.index` as given, for a
     caller that ran the pass itself (`moxi usage index`)."""
@@ -902,7 +1092,7 @@ def read(kind: str, *, since: Any = None, until: Any = None, harness: str | None
     fn = REPORTS.get(kind)
     if fn is None:
         raise ReportError(f"{kind!r} is not a report ({', '.join(KINDS)})")
-    extra = _session_arg(kind, session)
+    extra = _kind_args(kind, session=session, by=by, agent=agent)
     path = store.index_path(env)
     if not path.exists():
         empty = _empty(kind, since, until, harness, project, model, tz, session=session)
@@ -942,4 +1132,4 @@ def _empty(kind: str, since: Any, until: Any, harness: str | None, project: str 
                       total=_status_total([], [], last_pass=None, version=version),
                       filters={} if harness is None else {"harness": harness})
     query = _query(since, until, harness, project, model, tz, session)
-    return _report(kind, query, [], _Row({}))
+    return _report(kind, query, [], _terms_total() if kind == "terms" else _Row({}))

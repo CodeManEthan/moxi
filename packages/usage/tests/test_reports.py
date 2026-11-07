@@ -593,7 +593,7 @@ def test_report_takes_a_session_for_the_session_kind_only(conn, passes):
     with pytest.raises(ValueError):
         api.report("session", fresh=False)
     for kind in api.KINDS:
-        if kind != "session":
+        if kind not in ("session", "terms"):
             with pytest.raises(ValueError):
                 api.report(kind, session="s1", fresh=False)
             with pytest.raises(ValueError):
@@ -610,6 +610,267 @@ def test_the_session_report_refuses_without_a_session_on_no_index(monkeypatch):
         api.report("session", fresh=False)
     report = api.report("session", session="s1", fresh=False)
     assert report.rows == [] and "no index yet" in report.index["note"]
+
+
+# --- the cost terms ------------------------------------------------------------------------
+
+#: When the dated override row of `terms_index` starts: m-a is cheaper from then on.
+CHANGE = at("2026-10-02T06:00")
+CHEAPER = Override(id="m-a", prices={"input": 1.0, "output": 5.0}, start=CHANGE, number=1)
+#: The sums a `terms` row shares with the report it is checked against.
+TERM_SUMS = ("requests", "input", "fresh_input", "cache_read", "cache_write",
+             "cache_write_1h", "output", "tokens", "unpriced_tokens", "unknown_rows",
+             "complete", "unpriced_models", "rules")
+
+
+def terms_index(conn):
+    """A Claude session over three days with a fast-mode group, requests on both sides
+    of a dated override row, an unknown model and an unknown output count, and a subagent;
+    and a Codex session on a priority tier."""
+    day1, day2, day3 = (at(f"2026-10-0{d}T12:00") for d in (1, 2, 3))
+    source(conn, "/p/s1.jsonl", [
+        request("r1", day1, cache_read=200, cache_write=300, cache_write_1h=100),
+        request("r2", day1 + 60, speed="fast", cache_read=500, output=400),
+        request("r3", day2, output=UNKNOWN),
+        request("r4", day2 + 60, model="mystery-9"),
+        request("r5", day3, speed="fast")], session_id="s1", title="Main")
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [
+        request("a1", day2 + 120, model="m-b"), request("a2", day3 + 60, speed="fast")],
+        session_id="s1", kind="subagent", agent_id="a", title="Helper")
+    source(conn, "/c/r.jsonl", [
+        request("t1", day1, harness="codex", model="gpt-x", service_tier="priority",
+                cache_read=400),
+        request("t2", day3, harness="codex", model="gpt-x")],
+        lane="codex", harness="codex", session_id="s2", rank=1)
+
+
+def assert_adds_up(report):
+    """Each group's terms add to its cost, and each row's groups and split to the row's."""
+    for row in report.rows:
+        priced = [g for g in row["groups"] if g["cost"] is not UNKNOWN]
+        for group in priced:
+            assert group["cost"] == pytest.approx(sum(t["cost"] for t in group["terms"]),
+                                                  abs=1e-12)
+        if row["cost"] is UNKNOWN:
+            assert priced == [] and row["split"] == []
+            continue
+        assert abs(row["cost"] - sum(g["cost"] for g in priced)) < 1e-9
+        assert abs(row["cost"] - sum(e["cost"] for e in row["split"])) < 1e-9
+    total = report.total
+    assert abs(total["cost"] - sum(e["cost"] for e in total["split"])) < 1e-9
+
+
+def assert_same_row(found, expected):
+    for name in TERM_SUMS:
+        assert found[name] == expected[name], name
+    if expected["cost"] is UNKNOWN:
+        assert found["cost"] is UNKNOWN
+    else:
+        assert found["cost"] == pytest.approx(expected["cost"], abs=1e-9)
+
+
+def test_terms_by_model_equals_the_models_report(conn):
+    terms_index(conn)
+    current = table(CHEAPER)
+    for filters in ({}, {"since": "2026-10-02"}, {"harness": "claude"}, {"model": "m-a"}):
+        report = reports.terms(conn, tz="UTC", table=current, **filters)
+        models_ = reports.models_report(conn, tz="UTC", table=current, **filters)
+        assert {r["model"] for r in report.rows} == {r["model"] for r in models_.rows}
+        for row in models_.rows:
+            assert_same_row(one(report, model=row["model"]), row)
+        assert_same_row({**report.total, "unpriced_models": report.unpriced_models,
+                         "rules": report.rules},
+                        {**models_.total, "unpriced_models": models_.unpriced_models,
+                         "rules": models_.rules})
+        assert_adds_up(report)
+    report = reports.terms(conn, tz="UTC", table=current)
+    # by cost, highest first; the wholly unpriced model last
+    costs = [r["cost"] for r in report.rows]
+    assert costs[-1] is UNKNOWN and costs[:-1] == sorted(costs[:-1], reverse=True)
+    json.dumps(report.as_dict())
+
+
+@pytest.mark.parametrize("by, kind", [("day", "daily"), ("month", "monthly")])
+def test_terms_by_day_or_month_equals_daily_or_monthly_summed_over_models(conn, by, kind):
+    terms_index(conn)
+    current = table(CHEAPER)
+    for tz in ("UTC", "Asia/Tokyo"):
+        report = reports.terms(conn, by=by, tz=tz, table=current)
+        periods = reports.REPORTS[kind](conn, tz=tz, table=current)
+        keys = sorted({r[by] for r in periods.rows})
+        assert [r[by] for r in report.rows] == keys
+        for key in keys:
+            rows = [r for r in periods.rows if r[by] == key]
+            found = one(report, **{by: key})
+            for name in ("requests", "input", "output", "tokens", "unpriced_tokens",
+                         "unknown_rows"):
+                assert found[name] == sum(r[name] for r in rows), name
+            priced = [r["cost"] for r in rows if r["cost"] is not UNKNOWN]
+            if priced:
+                assert found["cost"] == pytest.approx(sum(priced), abs=1e-9)
+            else:
+                assert found["cost"] is UNKNOWN
+        assert_adds_up(report)
+
+
+def test_terms_by_agent_equals_the_session_report_per_agent(conn):
+    terms_index(conn)
+    current = table(CHEAPER)
+    for filters in ({}, {"since": "2026-10-02"}, {"model": "m-a"}):
+        report = reports.terms(conn, by="agent", session="s1", tz="UTC", table=current,
+                               **filters)
+        session = reports.session(conn, session="s1", tz="UTC", table=current, **filters)
+        agents = list(dict.fromkeys(r["agent"] for r in session.rows))
+        assert [r["agent"] for r in report.rows] == agents
+        for agent in agents:
+            rows = [r for r in session.rows if r["agent"] == agent]
+            found = one(report, agent=agent)
+            assert found["kind"] == rows[0]["kind"]
+            for name in ("requests", "input", "output", "tokens", "unpriced_tokens",
+                         "unknown_rows"):
+                assert found[name] == sum(r[name] for r in rows), name
+            priced = [r["cost"] for r in rows if r["cost"] is not UNKNOWN]
+            assert found["cost"] == pytest.approx(sum(priced), abs=1e-9)
+        assert report.total["cost"] == pytest.approx(session.total["cost"], abs=1e-9)
+        assert_adds_up(report)
+    # `session` alone narrows the model rows to that session
+    narrow = reports.terms(conn, session="s1", tz="UTC", table=current)
+    assert narrow.filters == {"session": "s1"} and "gpt-x" not in {
+        r["model"] for r in narrow.rows}
+
+
+def test_terms_groups_are_the_reconcile_lines(conn):
+    terms_index(conn)
+    report = reports.terms(conn, tz="UTC", table=table(CHEAPER))
+    m_a = one(report, model="m-a")
+    lines = {(g["tier"], g["period"] and g["period"].get("from")): g for g in m_a["groups"]}
+    # standard and fast before the dated row; after it, the row's own prices (the row
+    # gives no tiers), its three requests standard and fast alike: three lines
+    assert set(lines) == {(None, None), ("fast", None), (None, "2026-10-02T06:00:00Z")}
+    early_fast = lines[("fast", None)]
+    assert early_fast["requests"] == 1 and early_fast["above"] == 0
+    # the provider the requests named (Claude's name none), as the lookup takes it
+    assert early_fast["provider"] is None and early_fast["model"] == "m-a"
+    assert early_fast["provenance"]["layer"] == "shipped"
+    assert {t["class"]: t["price_from"] for t in early_fast["terms"]} == {
+        "input": "tier", "cache_read": "tier-input", "cache_write_5m": "tier-input",
+        "cache_write_1h": "tier-input", "output": "tier"}
+    # fresh 500 x 6, read 500 x 0.6, out 400 x 30
+    assert early_fast["cost"] == pytest.approx((500 * 6 + 500 * 0.6 + 400 * 30) / 1e6)
+    late = lines[(None, "2026-10-02T06:00:00Z")]
+    assert late["provenance"]["layer"] == "override" and late["requests"] == 3
+    assert late["unknown_rows"] == 1                     # r3's output was not reported
+    assert {t["class"]: t["price"] for t in late["terms"]}["input"] == 1.0
+    # the fast-mode output is its own entry in the split
+    split = {(e["class"], e["tier"]): e for e in m_a["split"]}
+    assert split[("output", "fast")]["tokens"] == 400
+    assert split[("output", None)]["tokens"] == 100 + 100 + 100
+    assert [(e["class"], e["tier"]) for e in m_a["split"]] == [
+        ("input", None), ("input", "fast"), ("cache_read", None), ("cache_read", "fast"),
+        ("cache_write_5m", None), ("cache_write_1h", None), ("output", None),
+        ("output", "fast")]
+    assert_adds_up(report)
+
+
+def test_an_unpriced_model_adds_nothing_to_the_split(conn):
+    terms_index(conn)
+    report = reports.terms(conn, tz="UTC", table=table(CHEAPER))
+    mystery = one(report, model="mystery-9")
+    assert mystery["cost"] is UNKNOWN and mystery["split"] == []
+    (group,) = mystery["groups"]
+    assert group["cost"] is UNKNOWN and group["why"] == "the model table does not know the model"
+    assert all(t["cost"] is UNKNOWN for t in group["terms"])
+    assert report.total["unpriced_tokens"] == 1100
+    # the split holds every priced token: fresh input, cache reads and writes and output
+    priced = [r for r in report.rows if r["cost"] is not UNKNOWN]
+    assert sum(e["tokens"] for e in report.total["split"]) == sum(
+        r["fresh_input"] + r["cache_read"] + r["cache_write"] + r["output"] for r in priced)
+    data = report.as_dict()
+    row = next(r for r in data["rows"] if r["model"] == "mystery-9")
+    assert row["unknown"] == ["cost"] and row["groups"][0]["unknown"] == ["cost"]
+    assert row["groups"][0]["terms"][0] == {"class": "input", "tokens": 1000,
+                                            "price_from": None,
+                                            "unknown": ["price", "cost"]}
+    json.dumps(data)
+
+
+def test_terms_by_agent_matches_the_session_report_where_one_file_is_unpriced(conn):
+    # one agent of two titled files; only the first file's requests have tokens in the
+    # term `half` has no price for, so the session report prices the second file's group
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/s9.jsonl", [request("m1", t)], session_id="s9", title="Main")
+    source(conn, "/p/s9/x-1.jsonl", [request("x1", t + 60, model="half", cache_write=100)],
+           session_id="s9", kind="subagent", agent_id="x", title="Wrote the plan")
+    source(conn, "/p/s9/x-2.jsonl", [request("x2", t + 120, model="half")],
+           session_id="s9", kind="subagent", agent_id="x", title="Applied the plan")
+    report = reports.terms(conn, by="agent", session="s9", tz="UTC", table=table())
+    session = reports.session(conn, session="s9", tz="UTC", table=table())
+    x = one(report, agent="x")
+    assert x["cost"] == pytest.approx(one(session, agent="x")["cost"])
+    assert x["cost"] == pytest.approx((1000 * 1 + 100 * 2) / 1e6)
+    assert x["unpriced_tokens"] == one(session, agent="x")["unpriced_tokens"] == 1100
+    priced, unpriced = sorted(x["groups"], key=lambda g: g["cost"] is UNKNOWN)
+    assert unpriced["why"] == "no cache_write_5m price" and priced["requests"] == 1
+    assert_adds_up(report)
+    # by model, the two files' requests are one group, which the missing price unprices
+    assert one(reports.terms(conn, tz="UTC", table=table()), model="half")["cost"] is UNKNOWN
+
+
+def test_terms_show_a_prefix_row_with_a_digit_in_provenance(conn):
+    row = Override(id="m-c1-", match="prefix", prices={"input": 2.0, "output": 4.0},
+                   number=1)
+    source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"), model="m-c1-mini")])
+    report = reports.terms(conn, tz="UTC", table=table(row))
+    (group,) = one(report, model="m-c1-mini")["groups"]
+    assert group["provenance"]["rule"] == "prefix" and group["provenance"]["row"] == "m-c1-"
+    assert group["provenance"]["layer"] == "override"
+    assert group["cost"] == pytest.approx((1000 * 2 + 100 * 4) / 1e6)
+
+
+def test_terms_refuse_what_they_cannot_use(conn):
+    terms_index(conn)
+    with pytest.raises(reports.ReportError, match="needs a session"):
+        reports.terms(conn, by="agent", table=table())
+    with pytest.raises(reports.ReportError):
+        reports.terms(conn, by="week", table=table())
+
+
+def test_report_takes_by_for_terms_and_agent_for_none_yet(conn, passes):
+    terms_index(conn)
+    report = api.report("terms", by="day", tz="UTC", fresh=False)
+    assert [r["day"] for r in report.rows] == ["2026-10-01", "2026-10-02", "2026-10-03"]
+    assert {r["model"] for r in api.report("terms", fresh=False).rows} == {
+        "m-a", "m-b", "gpt-x", "mystery-9"}
+    by_agent = api.report("terms", by="agent", session="s1", fresh=False)
+    assert [r["agent"] for r in by_agent.rows] == ["main", "a"]
+    for kind in api.KINDS:
+        given = {"session": "s1"} if kind == "session" else {}
+        if kind != "terms":
+            with pytest.raises(ValueError, match="takes no by"):
+                api.report(kind, by="model", fresh=False, **given)
+        with pytest.raises(ValueError, match="takes no agent"):
+            api.report(kind, agent="a", fresh=False, **given)
+    with pytest.raises(ValueError):
+        api.report("terms", by="agent", fresh=False)
+    with pytest.raises(ValueError):
+        reports.read("terms", by="agent")
+    with pytest.raises(ValueError):
+        api.report("terms", by="year", fresh=False)
+    # the refusals come before the pass
+    with pytest.raises(ValueError):
+        api.report("terms", by="agent")
+    with pytest.raises(ValueError):
+        api.report("daily", by="day")
+    assert passes == []
+
+
+def test_terms_on_no_index_are_empty_with_a_split(monkeypatch):
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    report = api.report("terms", fresh=False)
+    assert report.rows == [] and report.total["split"] == [] and report.total["cost"] == 0
+    assert "no index yet" in report.index["note"]
+    with pytest.raises(ValueError):
+        api.report("terms", by="agent", fresh=False)
 
 
 # --- the API -----------------------------------------------------------------------------
@@ -667,9 +928,9 @@ def test_report_with_no_index_is_empty_and_says_so(monkeypatch):
         api.report("weekly", fresh=False)
 
 
-def test_report_kinds_are_the_designed_seven():
+def test_report_kinds_are_the_designed_eight():
     assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects", "session",
-                         "status")
+                         "terms", "status")
     assert tuple(reports.REPORTS) == api.KINDS
 
 
@@ -725,3 +986,73 @@ def test_report_verbs_pass_their_filters(monkeypatch, capsys):
                     "fresh": True}
     cli.main(["daily", "--no-pass"])
     assert seen["fresh"] is False and seen["tz"] is None
+
+
+def test_terms_verb_prints_each_groups_terms_adding_up_to_its_cost(conn, monkeypatch,
+                                                                   capsys):
+    write_config('[[model]]\nid = "test-model-1"\ninput = 3.0\noutput = 15.0\n'
+                 'cache_read = 0.3\ncache_write_5m = 3.75\ncache_write_1h = 6.0\n'
+                 'tiers.fast = {speed = "fast", input = 6.0, output = 30.0}\n')
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [
+        request("r1", t, model="test-model-1", input=1_234_567, cache_read=200_000,
+                output=4_567),
+        request("r2", t + 60, model="test-model-1", speed="fast", input=2_000_000,
+                cache_read=1_500_000, cache_write=300_000, output=10_000),
+        request("r3", at("2026-10-02T12:00"), model="mystery-9")])
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    assert cli.main(["terms", "--no-pass", "--utc"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("test-model-1  override exact") and lines[0].endswith(
+        " 1 request")
+    assert lines[1].split() == ["input", "1,034,567", "x", "$3.00/M", "=", "$3.10", "(your",
+                                "config)"]
+    fast = lines.index(next(line for line in lines if "tier fast" in line))
+    assert lines[fast + 2].split()[:7] == ["cache", "read", "1,500,000", "x", "$0.30/M",
+                                           "=", "$0.4500"]
+    assert lines[fast + 6].split() == ["cost", "$3.08"]
+    assert lines[fast + 7].split() == ["test-model-1", "total", "$6.31"]
+    assert "  unpriced: the model table does not know the model" in lines
+    assert lines[lines.index("  by class and tier:") - 1] == "total: 3 requests, $6.31 u"
+    assert "    output, fast" in "\n".join(lines) and lines[-1].startswith("no pass ran")
+    # by day: a heading per day, its groups under it
+    assert cli.main(["terms", "--by", "day", "--no-pass", "--utc"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "2026-10-01: 2 requests, $6.31"
+    assert lines[1].startswith("  test-model-1  override exact")
+    assert "2026-10-02: 1 request, unpriced u" in lines
+    assert "days in UTC" in lines
+    # --model, --since and --until: one model's terms on one day
+    assert cli.main(["terms", "--model", "test-model-1", "--since", "2026-10-01", "--until",
+                     "2026-10-01", "--no-pass", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    (row,) = data["rows"]
+    assert row["model"] == "test-model-1" and len(row["groups"]) == 2
+    assert sum(t["cost"] for g in row["groups"] for t in g["terms"]) == pytest.approx(
+        row["cost"])
+    assert data["total"]["split"][0] == {"class": "input", "tier": None,
+                                         "tokens": 1_034_567, "cost": pytest.approx(3.103701)}
+
+
+def test_terms_verb_refuses_agent_without_a_session_with_exit_2(monkeypatch, capsys):
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    assert cli.main(["terms", "--by", "agent", "--no-pass"]) == 2
+    assert "needs a session id" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["terms", "--by", "week", "--no-pass"])
+    assert caught.value.code == 2
+
+
+def test_terms_verb_passes_by_and_session(monkeypatch, capsys):
+    seen = {}
+
+    def fake(kind, **kwargs):
+        seen.update(kwargs, kind=kind)
+        return reports.Report(kind=kind, rows=[], total=reports._terms_total().done())
+
+    monkeypatch.setattr(reports, "report", fake)
+    assert cli.main(["terms", "--by", "agent", "--session", "s1", "--harness", "claude"]) == 0
+    assert seen == {"kind": "terms", "since": None, "until": None, "harness": "claude",
+                    "project": None, "model": None, "tz": None, "fresh": True,
+                    "by": "agent", "session": "s1"}
+    assert "no requests in range" in capsys.readouterr().out

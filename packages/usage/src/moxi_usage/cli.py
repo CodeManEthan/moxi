@@ -8,6 +8,8 @@
     moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
         [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
+    moxi usage terms [--by model|day|month|agent] [--session ID] [--since DATE]
+        [--until DATE] [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
     moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
 
 `prices MODEL` prints the model's facts and where each came from, and exits 1 when the
@@ -39,6 +41,12 @@ The report verbs run the index's pass first, unless `--no-pass`, and print token
 from the index (`moxi_usage.reports`). Days are local time, or UTC with `--utc`; `--since`
 and `--until` are dates (`YYYY-MM-DD`), both included. A cost the model table cannot give
 is never printed as $0: the row is marked and the tokens are counted as unpriced.
+
+`terms` prints every term of each cost: per price group, each token class's tokens, the
+price it paid and the dollars, adding up to the group's cost; then the total and the cost
+split by class and price tier. `--by` groups by model (the default), day, month or, with
+`--session`, the session's agents. A group it can't price prints its tokens, the prices
+it has, and why it is unpriced.
 
 `index` runs the token index's pass (`moxi_usage.index`), prints what it did in one line,
 then the index's `status` report, lane by lane (with `--json`, both). It exits 75 when
@@ -104,7 +112,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
             return _restart_point(parsed, prog)
         if parsed.verb == "marks":
             return _marks_verb(parsed)
-        if parsed.verb in REPORT_VERBS:
+        if parsed.verb in REPORT_VERBS or parsed.verb == "terms":
             return _report(parsed, prog)
         if parsed.verb == "index":
             return _index(parsed, prog)
@@ -570,21 +578,36 @@ def _report_verbs(verbs: Any) -> None:
     for verb, text in REPORT_VERBS.items():
         parser = verbs.add_parser(verb, help=text, description=f"Print {text}, from the "
                                   "token index. The index's pass runs first.")
-        parser.add_argument("--since", metavar="DATE",
-                            help="the first day to count (YYYY-MM-DD)")
-        parser.add_argument("--until", metavar="DATE",
-                            help="the last day to count (YYYY-MM-DD), included")
-        parser.add_argument("--harness", choices=("claude", "codex", "opencode"),
-                            help="count one harness only")
-        parser.add_argument("--project", metavar="KEY",
-                            help="count one project: its key, or the directory a row "
-                                 "with no project shows")
-        parser.add_argument("--model", metavar="MODEL", help="count one model only")
-        parser.add_argument("--utc", action="store_true",
-                            help="cut days in UTC, not local time")
-        parser.add_argument("--no-pass", action="store_true",
-                            help="read the index as it is, without running its pass")
-        parser.add_argument("--json", action="store_true", help="print one JSON object")
+        _report_args(parser)
+    terms = verbs.add_parser(
+        "terms", help="every term of each cost: tokens x price per class, by model, day, "
+                      "month or agent",
+        description="Print every term of each cost from the token index: per price "
+                    "group, each class's tokens, the price paid and the dollars, then the "
+                    "cost split by class and price tier. The index's pass runs first.")
+    terms.add_argument("--by", choices=("model", "day", "month", "agent"), default="model",
+                       help="group by model (the default), day, month, or the agents of "
+                            "--session")
+    terms.add_argument("--session", metavar="ID", help="count one session only")
+    _report_args(terms)
+
+
+def _report_args(parser: Any) -> None:
+    parser.add_argument("--since", metavar="DATE",
+                        help="the first day to count (YYYY-MM-DD)")
+    parser.add_argument("--until", metavar="DATE",
+                        help="the last day to count (YYYY-MM-DD), included")
+    parser.add_argument("--harness", choices=("claude", "codex", "opencode"),
+                        help="count one harness only")
+    parser.add_argument("--project", metavar="KEY",
+                        help="count one project: its key, or the directory a row "
+                             "with no project shows")
+    parser.add_argument("--model", metavar="MODEL", help="count one model only")
+    parser.add_argument("--utc", action="store_true",
+                        help="cut days in UTC, not local time")
+    parser.add_argument("--no-pass", action="store_true",
+                        help="read the index as it is, without running its pass")
+    parser.add_argument("--json", action="store_true", help="print one JSON object")
 
 
 def _report(args: argparse.Namespace, prog: str) -> int:
@@ -593,11 +616,12 @@ def _report(args: argparse.Namespace, prog: str) -> int:
 
     from . import reports
 
+    extra = {"by": args.by, "session": args.session} if args.verb == "terms" else {}
     try:
         found = reports.report(args.verb, since=args.since, until=args.until,
                                harness=args.harness, project=args.project,
                                model=args.model, tz="UTC" if args.utc else None,
-                               fresh=not args.no_pass)
+                               fresh=not args.no_pass, **extra)
     except reports.ReportError as exc:
         print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
         return codes.USAGE
@@ -609,6 +633,9 @@ def _report(args: argparse.Namespace, prog: str) -> int:
         return getattr(exc, "exit_code", codes.ERROR)
     if args.json:
         print(json.dumps(found.as_dict(), indent=2))
+    elif found.kind == "terms":
+        for line in terms_lines(found, args.by):
+            print(line)
     else:
         _print_report(found)
     return codes.OK
@@ -643,12 +670,7 @@ def _tokens(value: int) -> str:
 
 
 def _cost(row: dict[str, Any]) -> str:
-    from moxi_sessions.api import UNKNOWN
-
-    if row["cost"] is UNKNOWN:
-        return "unpriced"
-    value = row["cost"]
-    return f"${value:,.2f}" if value >= 1 or value == 0 else f"${value:.4f}"
+    return _dollars(row["cost"])
 
 
 def _marks(row: dict[str, Any]) -> str:
@@ -674,21 +696,129 @@ def _print_report(found: Any) -> None:
         print("  ".join(cells))
     else:
         print("no requests in range")
+    for line in _footnotes(found, days=found.kind in ("daily", "monthly")):
+        print(line)
+
+
+def _footnotes(found: Any, *, days: bool) -> list[str]:
+    """What a report's figures leave out, the rules that applied, and how it read the
+    index."""
+    total = found.total
+    lines = []
     if total.get("unpriced_tokens"):
-        print(f"u: {_tokens(total['unpriced_tokens'])} tokens are unpriced and not in the "
-              f"cost; the model table has no price for {', '.join(found.unpriced_models)}. "
-              "Add a [[model]] row to usage's config to price them.")
+        lines.append(f"u: {_tokens(total['unpriced_tokens'])} tokens are unpriced and not "
+                     "in the cost; the model table has no price for "
+                     f"{', '.join(found.unpriced_models)}. Add a [[model]] row to usage's "
+                     "config to price them.")
     if total.get("unknown_rows"):
-        print(f"?: {total['unknown_rows']} requests had a token count their harness did "
-              "not report; those totals are at least the sums shown.")
-    for rule in found.rules:
-        print(f"rule: {rule}")
+        lines.append(f"?: {total['unknown_rows']} requests had a token count their harness "
+                     "did not report; those totals are at least the sums shown.")
+    lines.extend(f"rule: {rule}" for rule in found.rules)
     zone = "local time" if found.tz == "local" else found.tz
-    where = f"days in {zone}" if found.kind in ("daily", "monthly") else None
-    note = found.index.get("note")
-    for line in (where, note):
-        if line:
-            print(line)
+    lines.extend(line for line in (f"days in {zone}" if days else None,
+                                   found.index.get("note")) if line)
+    return lines
+
+
+#: Where the dollars start on a line of `terms`'s text.
+_COST_AT = 49
+#: Each term's label in `terms`'s text.
+TERM_LABELS = {"input": "input", "cache_read": "cache read",
+               "cache_write_5m": "cache write 5m", "cache_write_1h": "cache write 1h",
+               "output": "output"}
+
+
+def terms_lines(found: Any, by: str = "model") -> list[str]:
+    """The text of `moxi usage terms`: each row's price groups as a cost's terms (under a
+    heading per row, except by model, where the group names its model), a model's total
+    under two groups or more, then the total and the split by class and tier."""
+    lines: list[str] = []
+    indent = "" if by == "model" else "  "
+    for row in found.rows:
+        if by != "model":
+            label = (row[by] if by in ("day", "month")
+                     else f"agent {row['agent']} ({row['kind']})")
+            lines.append(f"{label}: {_requests(row['requests'])}, "
+                         f"{_dollars(row['cost'])} {_marks(row)}".rstrip())
+        for group in row["groups"]:
+            lines.extend(indent + line for line in _group_lines(group))
+        if by == "model" and len(row["groups"]) > 1:
+            label = f"{_model(row['model'])} total"
+            lines.append(f"{label:<{_COST_AT}}{_dollars(row['cost']):>10}")
+    if not found.rows:
+        lines.append("no requests in range")
+        return lines + _footnotes(found, days=by in ("day", "month"))
+    total = found.total
+    lines.append(f"total: {_requests(total['requests'])}, {_dollars(total['cost'])} "
+                 f"{_marks(total)}".rstrip())
+    if total["split"]:
+        lines.append("  by class and tier:")
+    for entry in total["split"]:
+        label = TERM_LABELS[entry["class"]] + (f", {entry['tier']}" if entry["tier"] else "")
+        lines.append(f"    {label:<24} {entry['tokens']:>15,}  {_dollars(entry['cost']):>12}")
+    return lines + _footnotes(found, days=by in ("day", "month"))
+
+
+def _group_lines(group: dict[str, Any]) -> list[str]:
+    """One price group as a cost's terms: its heading, a line per term, then its cost or
+    why it is unpriced."""
+    from moxi_sessions.api import UNKNOWN
+
+    provenance = group["provenance"]
+    where = [str(group["provider"])] if group["provider"] else []
+    if group["tier"]:
+        where.append(f"tier {group['tier']}")
+    layer = " ".join(str(part) for part in (provenance.get("layer"),
+                                            provenance.get("snapshot")) if part)
+    where.append(f"{layer} {provenance['rule']}".strip())
+    if provenance.get("row") and provenance["row"] != group["model"]:
+        where.append(f"row {provenance['row']}")
+    if group["period"]:
+        period = group["period"]
+        where.append(f"from {period.get('from', 'the start')} to {period.get('to', 'now')}")
+    head = f"{_model(group['model'])}  {', '.join(where)}"
+    lines = [f"{head:<62} {_requests(group['requests']):>17}"]
+    filled = set(provenance.get("filled", ()))
+    overridden = set(provenance.get("overridden", ()))
+    paid = {term["class"]: term for term in group["terms"]}
+    for term in group["terms"]:
+        price = term["price"]
+        rate = "?" if price is UNKNOWN else _rate(price)
+        amount = "?" if term["cost"] is UNKNOWN else _dollars(term["cost"])
+        how = ""
+        if term["price_from"] == "tier-input":
+            base = paid["input"]["price"]
+            how = (f"   (tier input x {price / base:.6g})"
+                   if base is not UNKNOWN and base else "   (tier input)")
+        elif term["price_from"] == "row" and group["tier"]:
+            how = "   (the row's own price)"
+        elif term["price_from"] == "row" and term["class"] in filled:
+            how = "   (provider default)"
+        elif term["price_from"] == "row" and term["class"] in overridden:
+            how = "   (your config)"
+        lines.append(f"  {TERM_LABELS[term['class']]:<14} {term['tokens']:>15,} x "
+                     f"{rate:>9}/M = {amount:>10}{how}")
+    if group["cost"] is UNKNOWN:
+        lines.append(f"  unpriced: {group['why']}")
+    else:
+        lines.append(f"{'  cost':<{_COST_AT}}{_dollars(group['cost']):>10}")
+    return lines
+
+
+def _requests(count: int) -> str:
+    return f"{count:,} request{'' if count == 1 else 's'}"
+
+
+def _rate(price: float) -> str:
+    return f"${price:,.2f}" if round(price, 2) == price else f"${price:,.6g}"
+
+
+def _dollars(value: Any) -> str:
+    from moxi_sessions.api import UNKNOWN
+
+    if value is UNKNOWN:
+        return "unpriced"
+    return f"${value:,.2f}" if value >= 1 or value == 0 else f"${value:.4f}"
 
 
 def _cut(text: str, width: int) -> str:
