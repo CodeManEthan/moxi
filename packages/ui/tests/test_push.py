@@ -307,7 +307,10 @@ def test_two_streams_make_one_upstream_with_the_union_and_a_late_joiner_gets_val
         assert len(client.live()) == 1
 
         late = Reader(push, ask("fx.one,fx.two")).start()
-        got = [await late.next(timeout=0.04) for _ in range(3)]
+        # Nothing is published from here on and the upstream never reopens (asserted
+        # below), so these can only come from what the push already holds. The bound only
+        # limits how long a failure waits; a tight one fails on a busy machine.
+        got = [await late.next(timeout=2.0) for _ in range(3)]
         assert ("fx.one", {"n": 1}) in got and ("fx.two", {"n": 2}) in got
         assert ("moxi.state", {"module": "fx", "state": "up", "detail": None}) in got
         await settle()

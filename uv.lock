@@ -1243,13 +1243,16 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
 ]
 
 [package.optional-dependencies]
+secrets = [
+    { name = "moxi-secrets" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1265,9 +1268,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-secrets", marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["ui"]
+provides-extras = ["ui", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -53,6 +53,7 @@ from __future__ import annotations
 from moxi import modules
 
 from .shape import HARNESSES
+from .view import TEXT_MAX  # the most of one message's text an answer carries, in bytes
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -64,8 +65,6 @@ ID_MAX = 256
 #: The most turns one answer holds, and how many it holds unless asked.
 TURNS_MAX = 50
 TURNS_DEFAULT = 5
-#: The most of one message's text an answer carries, in UTF-8 bytes.
-TEXT_MAX = 65536
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)

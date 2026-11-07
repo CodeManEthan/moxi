@@ -444,19 +444,25 @@ def _output(payload: dict) -> tuple[str, Any]:
     return _text_of(output)[0], is_error
 
 
+def summary_input(tool_input: Any) -> Any:
+    """What a call's summary is made from: its input, or, when the input is JSON text
+    that holds an object (a `function_call`'s `arguments`), that object."""
+    if isinstance(tool_input, str):
+        decoded = parse_line(tool_input)
+        if decoded is not None:
+            return decoded
+    return tool_input
+
+
 def _call(common: dict, sub: str, payload: dict) -> tuple[ToolCall, str | None]:
     name = payload.get("name")
     if not isinstance(name, str):
         name = sub.removesuffix("_call")
     key = next((k for k in CALL_INPUT_KEYS if k in payload), None)
     tool_input = payload.get(key) if key is not None else None
-    shown = tool_input
-    if isinstance(tool_input, str):
-        decoded = parse_line(tool_input)
-        if decoded is not None:
-            shown = decoded
+    summary = tool_summary(name, summary_input(tool_input))
     return ToolCall(**common, call_id=_said(payload, "call_id"), name=name,
-                    input=tool_input, summary=tool_summary(name, shown)), key
+                    input=tool_input, summary=summary), key
 
 
 def _marker(common: dict, name: str, **fields: Any) -> Marker:

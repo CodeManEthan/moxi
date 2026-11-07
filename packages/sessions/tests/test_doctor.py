@@ -26,7 +26,8 @@ def home(tmp_path, monkeypatch):
 
 
 def by_name() -> dict[str, doctor.Row]:
-    return {row.name: row for row in doctor.rows()}
+    """The root rows by name, without the `retention` row (see `test_retention.py`)."""
+    return {row.name: row for row in doctor.rows() if row.name != "retention"}
 
 
 def test_the_rows_are_the_cores_doctor_rows():
@@ -40,7 +41,7 @@ def test_one_row_per_harness_off_when_no_root_is_there(home):
     rows = list(doctor.rows())
     assert [(r.module, r.name, r.state) for r in rows] == [
         ("sessions", "claude", "off"), ("sessions", "codex", "off"),
-        ("sessions", "opencode", "off")]
+        ("sessions", "opencode", "off"), ("sessions", "retention", "ok")]
     assert str(home / ".claude" / "projects") in rows[0].detail
 
 
@@ -121,7 +122,7 @@ def test_a_file_that_is_not_a_database_warns(home):
 
 def test_a_config_file_that_cannot_be_read_warns_on_every_row(home, own_config):
     write_config(own_config, "[claude]\nunknown = 1\n")
-    rows = list(doctor.rows())
+    rows = list(doctor.rows())[:3]
     assert [r.state for r in rows] == ["warn"] * 3
     assert all("config file cannot be read" in r.detail for r in rows)
     assert all(r.fix == "moxi config sessions" for r in rows)

@@ -113,6 +113,26 @@ sign-in (`CLAUDE_CONFIG_DIR`, the provider switches such as `CLAUDE_CODE_USE_BED
 module's own session stamps. A scratch launch works in a folder of its own under
 `moxi-scratch-<uid>` in the system's temporary folder, which only you may use.
 
+Another module can ask the launch log how a session was launched. The launcher offers
+interface 1, `moxi.modules.load("launcher", interface=1).api`, whose
+`launch_kind(session_id)` answers one of four kinds, the first that holds:
+
+| Kind | When |
+|---|---|
+| `scratch` | the launch works in a scratch folder, whatever its preset |
+| `seat` | the launch names a seat preset |
+| `project` | the launch names a project, by a project preset or a project key |
+| `one-off` | any other launch |
+
+It answers None for a session the launcher didn't start: one started by hand or by a
+script, or from inside a launched session. It also answers None for a launch whose session
+id it never learned, which is a Codex launch without turns or in `exec` mode. The launcher
+learns some ids after the session starts (a Codex launch's, the new one after a `/clear`),
+so an id that answers None may answer a kind later. `launch_kinds(session_ids)` answers
+many ids in one read. Neither writes to the log, except to bring an older one's
+schema up to date; a log held past the wait (1 second)
+raises `Busy`, and the caller asks again.
+
 ## Handoffs
 
 A handoff is a short file a session writes for the next session of its seat. Its key is

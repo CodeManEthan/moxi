@@ -179,6 +179,17 @@ def test_the_read_changes_nothing(rig):
     assert wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
     d = rig.daemon
 
+    def routed():
+        """Both sends have finished routing. The daemon hands a message to its
+        recipients' rows first, then feeds the sent index and fills in the rows'
+        times, so a row can be there while its send still moves the state below."""
+        with d._lock:
+            return ({msg.id, pend.id} <= set(d.sent_by_id)
+                    and all(at is not None for rows in d.queue.values()
+                            for at in rows.values()))
+
+    assert wait_until(routed)
+
     def state():
         with d._lock:
             return ({k: dict(v) for k, v in d.queue.items()},
