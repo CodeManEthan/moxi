@@ -153,6 +153,20 @@ def test_a_time_that_is_not_one_is_refused(env, capsys):
     assert code == 2 and out == "" and "is not a time" in err
 
 
+@pytest.mark.parametrize("at", ["99999999999999999999", "9" * 400, "253402300800"],
+                         ids=["past-time_t", "past-float", "year-10000"])
+def test_a_time_out_of_range_is_refused(env, capsys, at):
+    t = claude(env)
+    code, out, err = run(capsys, "read", t.session_id, "--around", at)
+    assert code == 2 and out == "" and "is not a time" in err
+
+
+def test_the_last_second_of_year_9999_is_a_time(env, capsys):
+    t = claude(env)
+    code, out, _ = run(capsys, "read", t.session_id, "--around", "253402300799")
+    assert code == 0 and "around 9999-12-31T23:59:59Z" in out
+
+
 def test_all_is_the_whole_session(env, capsys):
     t = claude(env)
     code, out, _ = run(capsys, "read", t.session_id, "--all")

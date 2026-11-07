@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -149,12 +150,14 @@ def _root(args) -> int:
 
 def parse_time(text: str) -> float:
     """`--around`'s TIME as epoch seconds: ISO 8601, a time with no zone read as local
-    time, or a number of epoch seconds. Raises ValueError for anything else."""
+    time, or a number of epoch seconds. Raises ValueError for anything else, and for a
+    time past the end of year 9999, which the read could not print back as ISO 8601."""
     value = text.strip()
     try:
-        if value.replace(".", "", 1).isdigit():
-            return float(value)
-        return _iso(value)
+        seconds = float(value) if value.replace(".", "", 1).isdigit() else _iso(value)
+        if time.gmtime(seconds).tm_year > 9999:
+            raise ValueError(value)
+        return seconds
     except (ValueError, OverflowError, OSError):
         raise ValueError(f"{text!r} is not a time: give ISO 8601 "
                          "(2026-11-06T14:03:22Z) or epoch seconds") from None
