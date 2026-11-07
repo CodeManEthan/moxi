@@ -28,6 +28,9 @@ from moxi.units import _backend
 from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 #: How an install records itself in `direct_url.json`; one from an index writes none.
 FROM_INDEX = None
 FROM_WHEEL = {"url": "file:///wheels/x-1.0.0-py3-none-any.whl", "archive_info": {}}
@@ -56,7 +59,8 @@ SYSTEMCTL = '#!/bin/sh\necho "$*" >> "{log}"\nexit 0\n'
 @pytest.fixture(params=sorted(DAEMONS))
 def box(request, tmp_path, monkeypatch):
     """One module's daemon, a scripts directory holding its console script, its roots
-    and the user unit folder in tmp, and the fake backend over that folder."""
+    (the default home's, `default_home`) and the user unit folder in tmp, and the fake
+    backend over that folder."""
     module = request.param
     if importlib.util.find_spec(f"moxi_{module}") is None:
         pytest.skip(f"moxi-{module} is not installed in this environment")
@@ -68,7 +72,8 @@ def box(request, tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
-    monkeypatch.setenv(f"MOXI_{module.upper()}_HOME", str(tmp_path / f"{module}-home"))
+    # The module's roots are the default home's, in tmp: a locator of its own would have
+    # the plan refuse its units.
     root = home / ".config" / "systemd" / "user"
     root.mkdir(parents=True)
     supervisor = FakeSupervisor(root)

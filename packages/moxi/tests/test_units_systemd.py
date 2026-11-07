@@ -26,6 +26,9 @@ from moxi.units._systemd import SystemdBackend, quote
 from moxi.units._types import Wrapped
 from moxi_dev.testing import console_script
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 SETTINGS = """
 [relay.enabled]
 type = "bool"

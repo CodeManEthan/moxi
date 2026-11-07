@@ -1,7 +1,9 @@
 """The launchd backend: a module's units as launch agents in the user's `gui/<uid>` domain.
 
 Each unit is one plist, `~/Library/LaunchAgents/moxi.<module>.<name>.plist`, with the label
-`moxi.<module>.<name>`, written 0644 with `atomic_write`. The mark is the XML comment
+`moxi.<module>.<name>`, written 0644 with `atomic_write`. A home given by `MOXI_HOME` puts
+its tag in the label, `moxi.<tag>.<module>.<name>` (`moxi.units.home_tag`), and its plists
+carry `MOXI_HOME` in EnvironmentVariables. The mark is the XML comment
 `<!-- moxi unit: <module>/<name> -->` before the `<plist>` element, and a unit declared
 `enabled = false` carries `<!-- moxi: enabled = false -->` under it.
 
@@ -10,7 +12,8 @@ A daemon:
     Label, ProgramArguments (the absolute command), WorkingDirectory (a run-time `cwd`),
     RunAtLoad, KeepAlive {SuccessfulExit: false}, ThrottleInterval 2,
     ProcessType Background, StandardOutPath and StandardErrorPath (the unit's log file,
-    `STATE/<module>/logs/<name>.log`), EnvironmentVariables {MOXI_LOG_FILE: that file},
+    `STATE/<module>/logs/<name>.log`), EnvironmentVariables {MOXI_LOG_FILE: that file, and
+    MOXI_HOME for a tagged home},
     and AbandonProcessGroup (only with `stop = "process"`).
 
 A daemon with a `socket` adds Sockets, one key per address written: `Listeners` for the
@@ -64,6 +67,7 @@ from pathlib import Path
 from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, socket_name
 from ._fence import Fence, Ran
 from ._fence import argv as _argv
+from ._home import home_tag
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
 #: The mark's comment, around `<module>/<name>`.
@@ -122,7 +126,9 @@ class LaunchdBackend:
 
     @staticmethod
     def label(module: str, name: str) -> str:
-        return f"moxi.{module}.{name}"
+        """`moxi.<module>.<name>`, or `moxi.<tag>.<module>.<name>` for a tagged home."""
+        tag = home_tag()
+        return f"moxi.{module}.{name}" if tag is None else f"moxi.{tag}.{module}.{name}"
 
     def plist(self, label: str) -> Path:
         return self.agents / f"{label}.plist"
@@ -159,7 +165,7 @@ class LaunchdBackend:
         body["ProcessType"] = "Background"
         body["StandardOutPath"] = log
         body["StandardErrorPath"] = log
-        body["EnvironmentVariables"] = {"MOXI_LOG_FILE": log}
+        body["EnvironmentVariables"] = {"MOXI_LOG_FILE": log, **dict(spec.environment)}
         if spec.kind == "daemon" and spec.stop == "process":
             body["AbandonProcessGroup"] = True
         if spec.kind == "daemon" and spec.socket is not None:
@@ -193,7 +199,7 @@ class LaunchdBackend:
 
     def marked(self, module: str) -> tuple[UnitRef, ...]:
         out = []
-        for path in sorted(self.agents.glob(f"moxi.{module}.*.plist")):
+        for path in sorted(self.agents.glob(f"{self.label(module, '')}*.plist")):
             if not path.is_file():
                 continue
             try:
@@ -202,6 +208,9 @@ class LaunchdBackend:
                 continue
             mark = self.mark(text)
             if mark is None or mark.partition("/")[0] != module:
+                continue
+            # Only a plist at the name `render` gives this mark is the writer's.
+            if path.name != f"{self.label(module, mark.partition('/')[2])}.plist":
                 continue
             kind = "timer" if _TIMER_KEY.search(text) else "daemon"
             out.append(UnitRef(module, mark.partition("/")[2], kind,

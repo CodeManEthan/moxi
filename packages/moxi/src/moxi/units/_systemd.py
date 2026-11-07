@@ -2,10 +2,14 @@
 
 Files go in the user unit directory (`$XDG_CONFIG_HOME`, else `~/.config`, then
 `/systemd/user`), 0644, each written in one step. A daemon is `moxi-<module>-<name>.service`;
-a timer is a `.service` and `.timer` pair whose service runs the gate, `moxi run`. Every
-file starts with the mark `# moxi unit: <module>/<name>`, and a unit declared `enabled =
-false` carries a second line `# moxi: enabled = false`. The text uses absolute paths
-resolved now, no specifier, and copies no variable of this shell.
+a timer is a `.service` and `.timer` pair whose service runs the gate, `moxi run`. A home
+given by `MOXI_HOME` puts its tag in every name, `moxi-<tag>-<module>-<name>`, so two homes'
+files sit apart in the one unit directory (`moxi.units.home_tag`). Every file starts with
+the mark `# moxi unit: <module>/<name>`, and a unit declared `enabled = false` carries a
+second line `# moxi: enabled = false`. The text uses absolute paths resolved now, no
+specifier, and copies no variable of this shell but one: a tagged home's services carry
+`Environment="MOXI_HOME=<path>"`, the home's real path, so the unit runs with the home it
+was written from.
 
 A daemon with a `socket` gets one socket unit per address, `<stem>.socket` for the first
 address and `<stem>-<k>.socket` for the k-th after it, so one address that can't be bound
@@ -33,8 +37,10 @@ enabled or disabled (without `--now`) and a running one goes on.
 Every supervisor call goes through the systemd fence (`systemctl --user`, always), so the
 verbs here are the fence's closed set. A wrap of a foreign timer is the one file this
 backend writes for a unit it did not write: a marked drop-in on the service the timer
-triggers, `<service>.d/50-moxi-<module>.conf`, which puts the timer's runs behind one of
-the module's switches and records each run, and copies nothing of the foreign unit.
+triggers, `<service>.d/50-moxi-<module>.conf` (`50-moxi-<tag>-<module>.conf` for a tagged
+home), which puts the timer's runs behind one of the module's switches and records each
+run, and copies nothing of the foreign unit. A tagged home's drop-in gives its gate the
+home with `--home`, so the foreign service's own command is not given `MOXI_HOME`.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, enabled_by_socket,
     socket_name, socket_place, socket_state)
 from ._fence import Fence, Ran
+from ._home import environment, home_tag
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
 MARK = "# moxi unit: "
@@ -113,6 +120,26 @@ def quote(arg: str) -> str:
         else:
             out.append(ch)
     return '"' + "".join(out) + '"'
+
+
+def environment_line(name: str, value: str) -> str:
+    """One `Environment=` line setting `name` to `value`, by that setting's rules: the
+    assignment in double quotes, `\\` and `"` escaped, a control character written as a
+    C escape, `%` doubled (a specifier), and `$` left alone, since systemd expands no
+    variable there. `quote`, which is the `Exec*=` quoting, would double the `$`."""
+    out = []
+    for ch in f"{name}={value}".replace("%", "%%"):
+        if ch in '\\"':
+            out.append("\\" + ch)
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return 'Environment="' + "".join(out) + '"'
 
 
 def command_line(argv: Sequence[str]) -> str:
@@ -244,7 +271,9 @@ class SystemdBackend:
         return self._root if self._root is not None else unit_dir()
 
     def _stem(self, module: str, name: str) -> str:
-        return f"moxi-{module}-{name}"
+        """`moxi-<module>-<name>`, or `moxi-<tag>-<module>-<name>` for a tagged home."""
+        tag = home_tag()
+        return f"moxi-{module}-{name}" if tag is None else f"moxi-{tag}-{module}-{name}"
 
     # -- writing ---------------------------------------------------------------------------
 
@@ -268,7 +297,8 @@ class SystemdBackend:
                                "WantedBy=sockets.target"]
                     sockets.append((root / unit, _text(socket)))
             service = head + ["[Unit]", f"Description={_value(doc)}", "", "[Service]",
-                              "Type=simple", f"ExecStart={command_line(spec.command)}"]
+                              "Type=simple", *_environment(spec),
+                              f"ExecStart={command_line(spec.command)}"]
             if sockets:
                 # By default a service is handed only the socket unit of its own name.
                 service.append("Sockets=" + " ".join(path.name for path, _ in sockets))
@@ -290,7 +320,7 @@ class SystemdBackend:
                 out.append(Rendered("socket", tuple(sockets)))
             return tuple(out)
         service = head + ["[Unit]", f"Description={_value(doc)}", "", "[Service]",
-                          "Type=oneshot",
+                          "Type=oneshot", *_environment(spec),
                           f"ExecStart={command_line(_gate_argv(spec))}"]
         if spec.cwd:
             service.append(f"WorkingDirectory={_path_value(spec.cwd, 'cwd')}")
@@ -320,7 +350,7 @@ class SystemdBackend:
 
     def marked(self, module: str) -> tuple[UnitRef, ...]:
         root = self.root
-        prefix = f"moxi-{module}-"
+        prefix = self._stem(module, "")
         found: dict[tuple[str, str], Path] = {}
         sockets: dict[str, list[tuple[int, Path]]] = {}
         texts: dict[Path, str] = {}
@@ -763,7 +793,7 @@ class SystemdBackend:
     # -- a foreign timer's wrap ----------------------------------------------------------------
 
     def _dropin(self, service: str, module: str) -> Path:
-        return self.root / f"{service}.d" / f"50-moxi-{module}.conf"
+        return self.root / f"{service}.d" / dropin_name(module)
 
     def _wrapped(self, ref: str, paths: Sequence[str]) -> Wrapped | None:
         for path in paths:
@@ -845,6 +875,9 @@ class SystemdBackend:
             mark = _read_wrap(Path(other))
             if mark and mark[0] != module:
                 return no(f"{service} is wrapped by {mark[0]}")
+            if mark:
+                return no(f"{service} is wrapped by {module} of another Moxi home "
+                          f"({os.path.basename(other)})")
         if path.exists() or path.is_symlink():
             mark = _read_wrap(path)
             if mark is None:
@@ -857,13 +890,17 @@ class SystemdBackend:
             return no("no moxi in this environment, and a wrap runs its gate, `moxi run`")
         switch = f"{module}.{key}"
         record = f"{module}/{name}"
+        # The gate is told the home rather than the service given `MOXI_HOME`, which
+        # would reach the foreign unit's own command too.
+        home = environment(module).get("MOXI_HOME")
+        run = [gate, "run"] + (["--home", home] if home else [])
         text = _text([
             f"{WRAP_MARK}{record}",
             f"# moxi: timer = {ref}, if = {switch}",
             "[Service]",
-            "ExecCondition=" + command_line([gate, "run", "--if", switch, "--record",
-                                             record, "--condition"]),
-            "ExecStopPost=" + command_line([gate, "run", "--record", record, "--result"]),
+            "ExecCondition=" + command_line([*run, "--if", switch, "--record", record,
+                                             "--condition"]),
+            "ExecStopPost=" + command_line([*run, "--record", record, "--result"]),
         ])
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         files.atomic_write(path, text, mode=0o644)
@@ -877,7 +914,7 @@ class SystemdBackend:
 
     def _drop_ins(self, module: str) -> list[tuple[Path, tuple[str, str, str, str]]]:
         out = []
-        for path in sorted(self.root.glob(f"*.d/50-moxi-{module}.conf")):
+        for path in sorted(self.root.glob(f"*.d/{dropin_name(module)}")):
             mark = _read_wrap(path)
             if mark and mark[0] == module:
                 out.append((path, mark))
@@ -908,6 +945,18 @@ class SystemdBackend:
         ran = fence.run("daemon-reload")
         lines = () if ran.ok else (ran.failure(),)
         return [Acted(None, mark[1], "unwrap", ran.ok, lines) for _, mark in found]
+
+
+def dropin_name(module: str) -> str:
+    """The file name of `module`'s wrap drop-in: `50-moxi-<module>.conf`, or
+    `50-moxi-<tag>-<module>.conf` for a tagged home."""
+    tag = home_tag()
+    return f"50-moxi-{module}.conf" if tag is None else f"50-moxi-{tag}-{module}.conf"
+
+
+def _environment(spec: Spec) -> list[str]:
+    """A service's `Environment=` lines: one per variable the unit runs with."""
+    return [environment_line(name, value) for name, value in spec.environment]
 
 
 def _read_wrap(path: Path) -> tuple[str, str, str, str] | None:

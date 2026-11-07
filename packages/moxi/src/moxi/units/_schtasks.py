@@ -1,12 +1,17 @@
 """The Windows Task Scheduler backend: `schtasks.exe` with a task XML, no pywin32.
 
 Each unit is one task, `\\Moxi\\<module>-<name>`, registered from an XML file the core
-keeps as `STATE/moxi/units/<module>-<name>.xml` (UTF-16 with a byte-order mark). That file
-is what `plan` compares, so `plan` reads no supervisor. The mark is the `\\Moxi\\` folder
-together with the XML's `<Source>moxi unit: <module>/<name></Source>` line.
+keeps as `STATE/moxi/units/<module>-<name>.xml` (UTF-16 with a byte-order mark). That
+file is what `plan` compares, so `plan` reads no supervisor. A home given by `MOXI_HOME`
+puts its tasks in a folder of its tag, `\\Moxi\\<tag>\\<module>-<name>`
+(`moxi.units.home_tag`); its XML, runtime files and logs are under its own roots already.
+The mark is the `\\Moxi\\` folder together with the XML's `<Source>moxi unit:
+<module>/<name></Source>` line.
 
 The action is the gate under a window-less interpreter, so no console window opens at
 logon: `pythonw.exe -m moxi run --record <module>/<name> --log <log> ... -- <command>`.
+A task has no environment of its own, so a tagged home's gate is given `--home <path>`, the
+home's real path, and sets `MOXI_HOME` for itself and the command.
 A daemon's task starts at logon and its gate runs with `--restart` and `--runtime`; a
 timer's task fires on a time or calendar trigger and its gate runs with `--if` when the
 timer has a switch. A daemon's `socket` is skipped here, with one line, and the daemon runs
@@ -33,6 +38,7 @@ from xml.sax.saxutils import escape
 
 from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
 from ._fence import Fence, Ran, task_refs_env
+from ._home import home_tag
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
 #: The task folder that is moxi's namespace on this backend.
@@ -68,8 +74,15 @@ class SchtasksBackend:
     # -- where things are ------------------------------------------------------------------
 
     def task(self, module: str, name: str) -> str:
-        """The task's path, `\\Moxi\\<module>-<name>`."""
-        return f"{self.folder}{module}-{name}"
+        """The task's path, `\\Moxi\\<module>-<name>`, or `\\Moxi\\<tag>\\<module>-<name>`
+        for a tagged home."""
+        return f"{self.home_folder()}{module}-{name}"
+
+    def home_folder(self) -> str:
+        """The folder this home's tasks are in: the folder itself, or its subfolder of
+        this home's tag."""
+        tag = home_tag()
+        return self.folder if tag is None else f"{self.folder}{tag}\\"
 
     @staticmethod
     def xml_path(module: str, name: str) -> Path:
@@ -109,6 +122,9 @@ class SchtasksBackend:
         daemon = spec.kind == "daemon"
         log = self.log_path(spec.module, spec.name)
         gate = ["-m", "moxi", "run"]
+        home = dict(spec.environment).get("MOXI_HOME")
+        if home:
+            gate += ["--home", home]
         if not daemon and spec.switch:
             gate += ["--if", f"{spec.module}.{spec.switch}"]
         gate += ["--record", spec.unit, "--log", str(log)]
@@ -279,8 +295,9 @@ class SchtasksBackend:
         return UnitRef(None, ref, "timer", (_path(ref),))
 
     def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
-        """The task path `\\Moxi\\<module>-<name>`, for a daemon and a timer alike, whether
-        or not the task is registered. No supervisor call."""
+        """The task path `\\Moxi\\<module>-<name>` (with this home's tag folder), for a
+        daemon and a timer alike, whether or not the task is registered. No supervisor
+        call."""
         return (self.task(module, name),)
 
     def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
@@ -310,12 +327,13 @@ class SchtasksBackend:
         not running. A runtime file that is there and cannot be read, or holds no
         `{"pid", "started"}`, raises `ReadError`: it may name a daemon that runs."""
         out = set()
+        folder = self.home_folder()
         for task in ids:
             path = _path(task)
-            if not path.casefold().startswith(self.folder.casefold()):
+            if not path.casefold().startswith(folder.casefold()):
                 continue
-            module, dash, name = path[len(self.folder):].partition("-")
-            if not dash:
+            module, dash, name = path[len(folder):].partition("-")
+            if not dash or "\\" in module:
                 continue
             file = self.runtime_file(module, name)
             try:

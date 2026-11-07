@@ -25,6 +25,9 @@ from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
 from moxi_dev.testing import console_script
 
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
+
 UID = 501
 DOMAIN = f"gui/{UID}"
 
