@@ -296,15 +296,16 @@ def _turn(record: Record) -> Any:
 
 @dataclass
 class _Group:
-    rows: list[dict[str, Any]]
+    records: list[Record]
     turn: Any = None
     start: float | None = None
 
 
-def _groups(records: Iterator[Record], redact: Redact | None) -> Iterator[_Group]:
-    """The records as turns, oldest first, each record made a row as it is read. A record
-    of a turn already passed (a Claude request comes where it ended, after the next turn's
-    first line) joins the run it falls in, as `window` counts it."""
+def _groups(records: Iterator[Record]) -> Iterator[_Group]:
+    """The records as turns, oldest first. A record of a turn already passed (a Claude
+    request comes where it ended, after the next turn's first line) joins the run it falls
+    in, as `window` counts it. A group's `start` is the first time its records say, the
+    time its rows would carry."""
     group = _Group([])
     seen: set[Any] = set()
     for record in records:
@@ -316,16 +317,16 @@ def _groups(records: Iterator[Record], redact: Redact | None) -> Iterator[_Group
             else:
                 yield group
                 group = _Group([], turn)
-        row = view_row(record, redact=redact)
-        if group.start is None and isinstance(row.get("time"), (int, float)):
-            group.start = row["time"]
-        group.rows.append(row)
-    if group.rows:
+        if group.start is None and fits(record.time, FLOAT):
+            group.start = record.time
+        group.records.append(record)
+    if group.records:
         yield group
 
 
 def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> Shown:
-    """`turns` turns around the time `at` (epoch seconds), read forward."""
+    """`turns` turns around the time `at` (epoch seconds), read forward. Only the turns
+    chosen are made rows, so the turns passed over on the way cost no redaction."""
     from .read import records
 
     before = (turns - 1) // 2
@@ -335,7 +336,7 @@ def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> 
     dropped = later = placed = False
     with records(source) as read:
         header = read.header
-        for group in _groups(iter(read), redact):
+        for group in _groups(iter(read)):
             if not placed:
                 if kept and group.start is not None and group.start > at:
                     placed = True
@@ -349,10 +350,11 @@ def around(source: Any, at: float, turns: int, redact: Redact | None = None) -> 
                 later = True
                 break
             after.append(group)
-    take = min(len(kept) - 1, turns - 1 - len(after))
-    first = len(kept) - 1 - take
-    chosen = list(kept)[first:] + after
-    rows = [row for group in chosen for row in group.rows]
+        take = min(len(kept) - 1, turns - 1 - len(after))
+        first = len(kept) - 1 - take
+        chosen = list(kept)[first:] + after
+        rows = [view_row(record, redact=redact) for group in chosen
+                for record in group.records]
     return Shown("around", rows, lambda: header, turns=turns, around=at,
                  earlier=dropped or first > 0, later=later)
 

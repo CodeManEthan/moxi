@@ -138,6 +138,25 @@ def test_around_takes_epoch_seconds_and_a_local_time(env, capsys):
     assert questions(by_epoch[1]) == questions(by_local[1]) == ["question 3"]
 
 
+def test_around_makes_rows_only_for_the_turns_it_shows(env, capsys, monkeypatch):
+    """Redaction runs once per row made, so a row made for a turn the read then drops is
+    work wasted on every record from the session's start."""
+    t = claude(env, turns=20)
+    made = []
+    real = view.view_row
+
+    def counted(record, **kwargs):
+        made.append(record)
+        return real(record, **kwargs)
+
+    monkeypatch.setattr(view, "view_row", counted)
+    data = json.loads(run(capsys, "read", t.session_id, "--json", "--around",
+                          str(START + 4 * 17 + 1), "--turns", "1")[1])
+    assert questions("\n".join(r.get("text", "") for r in data["records"])) == [
+        "question 17"]
+    assert len(made) == len(data["records"])
+
+
 def test_around_near_an_end_fills_from_the_other_side(env, capsys):
     t = claude(env)
     before = run(capsys, "read", t.session_id, "--around", str(START - 1000), "--turns", "3")
