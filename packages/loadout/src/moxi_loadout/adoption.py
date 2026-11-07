@@ -12,7 +12,11 @@ Three rules decide every case:
 
 `take(modules)` lists each module's own placements (made after a yes at its question) in
 the manifest's `[user] skills` with the harnesses they were placed for, then hands them to
-loadout, unseeded. It writes the manifest first and places nothing.
+loadout, unseeded. It writes the manifest first and places nothing. Only a placement at
+its harness row's folder is taken (`at_its_folder`), which is where a module's skills
+step puts one. A placement a module made at a path of its own choosing (with `dest`, as
+turns' setup places its Claude Code folder) stays with that module: its teardown and its
+uninstall remove it, and loadout never holds it.
 
 `place_seeded(module, item)` places a skill nobody has placed (a second machine, the
 cloud): planned and applied as the module, its `add` step alone, then handed over seeded.
@@ -46,8 +50,9 @@ class Taken:
 def take(modules: Iterable[str] | None = None, *, folder=None,
          say: Callable[[str], object] = print) -> list[Taken]:
     """Hand every placement of each module in `modules` (every installed module but
-    loadout when None) to loadout, unseeded, and list each in the manifest with the
-    harnesses taken. Returns what was taken.
+    loadout when None) at its harness row's folder (`at_its_folder`) to loadout,
+    unseeded, and list each in the manifest with the harnesses taken. A placement made
+    with `dest` is left to the module. Returns what was taken.
 
     The manifest is written first, listing what is about to be handed over: one that
     doesn't read raises its `ManifestError`, and a write that fails raises (the lock held
@@ -65,7 +70,9 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
         from moxi.modules import installed
 
         modules = sorted({e.name for e in installed()} - {OWNER})
-    theirs = {module: place.status(module) for module in modules if module != OWNER}
+    table, _ = place.harnesses()
+    theirs = {module: [p for p in place.status(module) if at_its_folder(p, table)]
+              for module in modules if module != OWNER}
     skills: dict[str, list[str]] = {}
     for module, mine in theirs.items():
         for p in mine:
@@ -77,6 +84,25 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
         if mine:
             taken += [Taken(module, p) for p in place.adopt(module, OWNER, mine, say=say)]
     return taken
+
+
+def at_its_folder(placed, table=None) -> bool:
+    """Whether `placed` (a `moxi.place.Placed`) sits at its harness row's folder for its
+    kind, `<folder>/<name>`, which is where a module's skills step places an item.
+
+    A placement anywhere else was made with `dest`, by a module's own code, and is left to
+    whoever made it: loadout never takes it over. A placement whose harness has no row
+    now, or whose row has no folder for its kind, reads False too. `table` is
+    `moxi.place.harnesses()`'s first value, read when None."""
+    from moxi import place
+
+    if table is None:
+        table, _ = place.harnesses()
+    row = table.get(placed.harness)
+    folder = None if row is None else row.folder(placed.kind)
+    if folder is None:
+        return False
+    return place.target_key(folder / placed.name) == place.target_key(placed.path)
 
 
 @dataclass(frozen=True)
@@ -165,4 +191,5 @@ def deferred_signals():
             signal.raise_signal(got[0])
 
 
-__all__ = ["OWNER", "Taken", "Seeded", "take", "place_seeded", "deferred_signals"]
+__all__ = ["OWNER", "Taken", "Seeded", "take", "at_its_folder", "place_seeded",
+           "deferred_signals"]

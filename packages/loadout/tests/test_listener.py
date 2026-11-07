@@ -102,6 +102,35 @@ def test_a_disabled_skill_the_module_places_again_is_removed_in_that_run(demo, f
     assert install.status().code == 0
 
 
+def place_at_dest(skills, dest, name="moxi-other"):
+    """What a module's own setup does when it places a folder at a path it chooses: a
+    copy, with `dest`, as the module."""
+    from moxi import place
+    from moxi.place import Item
+
+    item = Item(skills / name, "claude", name, dest=dest)
+    step = next(s for s in place.plan("demo", [item], form="copy") if s.item == item)
+    place.apply([step], say=lambda line: None)
+
+
+def test_a_placement_the_module_made_with_dest_stays_the_modules(demo, folder, tmp_path):
+    dest = tmp_path / "demo-data" / "moxi-other"
+    place_at_dest(demo, dest)
+    module_install(demo)
+    said, say = lines()
+    listener.on_install("demo", found(), say=say)
+    assert kit.owner_of(kit.claude() / "moxi-demo") == "loadout"
+    assert kit.owner_of(dest) == "demo"
+    assert str(dest) not in kit.handed("demo")
+    assert said == ["loadout: took over demo/moxi-demo for claude"]
+    assert load(folder).user.names("skill") == ("demo/moxi-demo",)
+    # loadout's own install and the module's uninstall leave it too.
+    assert install.install().code == 0
+    listener.on_uninstall("demo", say=say)
+    assert kit.owner_of(dest) == "demo"
+    assert (dest / "SKILL.md").is_file()
+
+
 def test_a_module_install_with_nothing_disabled_removes_nothing(demo, folder):
     module_install(demo)
     assert install.install().code == 0

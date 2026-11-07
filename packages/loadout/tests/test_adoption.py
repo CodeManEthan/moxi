@@ -223,6 +223,33 @@ def test_take_lists_every_module_placement_in_one_write(demo, folder):
     assert not os.path.lexists(folder / "loadout.toml.lock")
 
 
+def test_take_leaves_a_placement_the_module_made_with_dest(demo, folder, tmp_path):
+    from moxi import place
+
+    dest = tmp_path / "demo-data" / "moxi-demo"
+    mine = item(demo)
+    there = place.Item(mine.source, "claude", "moxi-demo", dest=dest)
+    place.apply(place.plan("demo", [mine, there], form="copy"), say=lambda line: None)
+    by_path = {str(p.path): p for p in place.status("demo")}
+    at_folder = by_path[place.target_key(kit.claude() / "moxi-demo")]
+    at_dest = by_path[place.target_key(dest)]
+    assert adoption.at_its_folder(at_folder) and not adoption.at_its_folder(at_dest)
+    taken = adoption.take(["demo"], folder=folder, say=lambda line: None)
+    assert [str(t.placed.path) for t in taken] == [str(at_folder.path)]
+    assert kit.owner_of(dest) == "demo"
+    assert load(folder).harnesses("skill", "demo/moxi-demo") == ("claude",)
+
+
+def test_a_placement_whose_harness_row_is_gone_is_not_at_its_folder():
+    from pathlib import Path
+
+    from moxi.place import Placed
+
+    placed = Placed("demo", "skill", "nowhere", "moxi-demo", Path("/x/moxi-demo"), "link",
+                    "ok")
+    assert not adoption.at_its_folder(placed, {})
+
+
 def test_signals_wait_for_the_span_to_end():
     seen = []
     with pytest.raises(KeyboardInterrupt):

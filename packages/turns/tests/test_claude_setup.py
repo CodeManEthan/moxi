@@ -345,14 +345,8 @@ def test_a_changed_copy_is_moved_aside_and_placed_again(placed, fake_claude, cap
 # -- a whole settle ----------------------------------------------------------------------
 
 
-def _loadout_listens() -> bool:
-    from moxi import modules
-
-    return any(e.name == "loadout" for e in modules.extensions("moxi.installs"))
-
-
 def test_a_whole_settle_of_turns_keeps_the_copy_and_its_endpoint_json(
-        turns_env, fake_claude, request):
+        turns_env, fake_claude):
     """The settle step runs turns' SETUP, its units (none) and its skills (none): the
     skills step finds the copy in turns' ledger and leaves it, the first time and the
     next. It runs in the child `moxi install` starts, in this test's home, so its copy's
@@ -361,13 +355,6 @@ def test_a_whole_settle_of_turns_keeps_the_copy_and_its_endpoint_json(
     import sys
 
     from moxi import modules
-
-    if _loadout_listens():
-        # loadout's install listener hands every placement of the module just installed
-        # to loadout, the copy SETUP placed at a dest among them. Until it leaves such a
-        # placement to the module, turns' ledger loses the copy here.
-        request.applymarker(pytest.mark.xfail(
-            strict=True, reason="loadout takes over the copy turns' SETUP placed"))
 
     placed = claude_setup.placed_root()
     package = Path(claude_setup.__file__).resolve().parent / "claude"
