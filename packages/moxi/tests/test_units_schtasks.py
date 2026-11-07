@@ -1581,4 +1581,10 @@ def test_a_real_foreign_task_read_as_a_daemon_tracks_its_process(tmp_path, recor
     finally:
         fence.run("/end", task)
         fence.run("/delete", task)
+        # Ending or deleting the task leaves a running or queued copy alive, so stop
+        # every Start-Sleep this run's tag names.
+        for pid in _sleepers(tag):
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                            f"Stop-Process -Id {pid} -Force"], capture_output=True,
+                           timeout=60)
     assert not wrong, wrong

@@ -578,8 +578,8 @@ class SchtasksBackend:
     def _read_tasks(self, refs: Sequence[str], fence: Fence
                     ) -> tuple[dict[str, dict] | None, str | None]:
         """The PowerShell read of `refs` (task paths): a map of each found task's path,
-        case-folded, to `{path, name, state, last_run, last_result}`; or None and the
-        reason when PowerShell is missing or the call fails."""
+        case-folded, to `{path, name, state, last_run, last_result, enabled}`; or None
+        and the reason when PowerShell is missing or the call fails."""
         found: dict[str, dict] = {}
         for env in task_refs_env([_split(r) for r in refs]):
             ran = fence.run("tasks", env=env)
