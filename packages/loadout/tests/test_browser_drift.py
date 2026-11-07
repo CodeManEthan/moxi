@@ -1,6 +1,7 @@
 """loadout's drift block and page in a browser, through a real shell that starts loadout's
 real page server: the contract check on both, the count of items that aren't ok and the
-harness homes' note, both gone once the user installs in a terminal, a manifest that
+note that there is no record of the user's terminal, both gone once the user installs in
+a terminal, a manifest that
 can't be read, the block's link to the page from the shell's home, and the 360 px width
 check.
 
@@ -58,6 +59,15 @@ def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         raise AssertionError(f"moxi {' '.join(args)} failed ({done.returncode}):\n"
                              f"{done.stdout}{done.stderr}")
     return done
+
+
+def typed(shell) -> None:
+    """Moxi's record of the terminal, as a command typed in the user's own terminal with
+    the shell's environment makes it (`moxi` run here has no keyboard, so it records
+    nothing itself)."""
+    from moxi import paths, terminal
+
+    terminal.write(shell.env, path=paths.terminal_record(shell.env))
 
 
 def skill(folder: Path, name: str) -> None:
@@ -122,11 +132,12 @@ def test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs(folder, u
     drift = block.locator(".drift")
     expect(drift).to_have_attribute("data-count", "3")
     expect(block.locator('[data-line="count"]')).to_have_text(count_line(3))
-    # No terminal run has recorded the harness homes yet, so the block says so, and the
-    # line is never counted.
+    # No terminal has been recorded yet, so the block says so, and the line is never
+    # counted.
     expect(block.locator('[data-line="note"]')).to_contain_text(
-        "run moxi loadout install once in a terminal")
+        "Moxi has no record of the environment your terminal uses")
 
+    typed(ui_shell)
     moxi(ui_shell, "loadout", "install")
     assert not_ok(ui_shell) == []
     ui_page.evaluate(f"() => document.dispatchEvent(new CustomEvent('{CHANGED}'))")
