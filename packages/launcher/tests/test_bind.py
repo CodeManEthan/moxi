@@ -1,7 +1,12 @@
 """comms' wrapper's bind: a launch with an identity waits until the wrapper has bound the
 name or ended, and an end before the bind ends the row `failed` with its cause, from the
 exit status where the target can read it (a slot's pane) and from comms' state of the
-name where it can't (this terminal, through the detached deliverer)."""
+name where it can't (this terminal, through the detached deliverer). The wait lasts
+comms' own `BIND_WAIT` and a margin; a wrapper still alive when it runs out ends the row
+only when comms lists its harness as one whose wrapper ends the launch on an unanswered
+bind (`ENDS_ON_BIND_TIMEOUT`) and comms says the name isn't this launch's. Each case that
+depends on that list runs with both lists comms could give: Claude's and Codex's
+wrappers both in it, and Claude's alone."""
 
 from __future__ import annotations
 
@@ -19,7 +24,7 @@ from moxi import modules, proc
 
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
-from moxi_launcher import api, first, slots, store, targets
+from moxi_launcher import api, first, presets, slots, store, targets
 from moxi_launcher.api import LaunchRequest
 
 TESTS = Path(__file__).resolve().parent
@@ -35,9 +40,18 @@ class DaemonError(Exception):
     """Stands in for comms' DaemonError."""
 
 
-def comms(*answers):
+#: The harnesses comms could list in `ENDS_ON_BIND_TIMEOUT`: both its wrappers, or
+#: Claude's alone.
+BOTH = frozenset({"claude", "codex"})
+CLAUDE_ONLY = frozenset({"claude"})
+LISTS = pytest.mark.parametrize("ends", [BOTH, CLAUDE_ONLY], ids=["both", "claude-only"])
+
+
+def comms(*answers, ends=None, bind_wait=None):
     """A comms whose `identity_state` gives `answers` in turn, the last repeated (a state
-    name, a state, or an error it raises), and the asks it was given."""
+    name, a state, or an error it raises), and the asks it was given. `ends` and
+    `bind_wait` are its `ENDS_ON_BIND_TIMEOUT` and `BIND_WAIT`; left None, it is a comms
+    older than both."""
     asked = []
 
     def identity_state(name, scope=None):
@@ -47,8 +61,19 @@ def comms(*answers):
             raise answer
         return state(answer) if isinstance(answer, str) else answer
 
-    return SimpleNamespace(identity_state=identity_state, DaemonError=DaemonError,
-                           asked=asked)
+    api = SimpleNamespace(identity_state=identity_state, DaemonError=DaemonError,
+                          asked=asked)
+    if ends is not None:
+        api.ENDS_ON_BIND_TIMEOUT = ends
+    if bind_wait is not None:
+        api.BIND_WAIT = bind_wait
+    return api
+
+
+def ticking():
+    """A clock that reads 0, 1, 2 and on, one tick a read."""
+    ticks = iter(range(1000))
+    return lambda: next(ticks)
 
 
 def state(name, **fields):
@@ -114,18 +139,22 @@ def test_a_name_held_before_its_holder_reports_an_id_is_bound(conn, monkeypatch)
     assert settle(conn, comms(state("held", holder=Holder(None))), monkeypatch) is None
 
 
-def test_a_name_held_by_another_session_is_not_this_launch_bind(conn, monkeypatch):
+@LISTS
+def test_a_name_held_by_another_session_is_not_this_launch_bind(conn, monkeypatch, ends):
     launch_row(conn)
-    ticks = iter(range(100))
     slept = []
-    fake_comms = comms(state("held", holder=Holder("someone-else")))
-    got = settle(conn, fake_comms, monkeypatch, wait_s=3, clock=lambda: next(ticks),
+    fake_comms = comms(state("held", holder=Holder("someone-else")), ends=ends,
+                       bind_wait=15.0)
+    got = settle(conn, fake_comms, monkeypatch, wait_s=3, clock=ticking(),
                  sleep=slept.append)
     # Another session's hold is no bind, so the wait runs to its bound, asking at each
     # tick: the deadline is tick 3 and the clock is read at ticks 1, 2 and 3.
     assert len(fake_comms.asked) == 3 and slept == [targets.BIND_POLL_S] * 2
-    # It runs out with the process alive: the wrapper starts the harness anyway.
-    assert got is None and row(conn).state == "started"
+    # It runs out with Claude's wrapper alive, which never starts Claude without the name.
+    assert (got.state, got.reason, got.exit_code) == ("failed", targets.COMMS_FAILED,
+                                                      exits.ERROR)
+    assert row(conn).reason == targets.COMMS_FAILED
+    assert "held by claude session someone-else" in got.line
 
 
 def test_a_ready_session_ends_the_wait(conn, monkeypatch):
@@ -139,6 +168,86 @@ def test_a_launch_without_an_identity_does_not_wait(conn, monkeypatch):
     launch_row(conn, identity=None, scope=None)
     fake_comms = comms("free")
     assert settle(conn, fake_comms, monkeypatch) is None and fake_comms.asked == []
+
+
+# -- how long, and what a wait that runs out means ------------------------------------------
+
+
+def test_the_bind_wait_is_comms_wait_and_a_margin():
+    assert targets.bind_wait(comms(bind_wait=15.0)) == 15.0 + targets.BIND_MARGIN_S == 20.0
+    assert targets.bind_wait(comms(bind_wait=12)) == 17.0
+
+
+@pytest.mark.parametrize("api", [comms(), None, comms(bind_wait="soon", ends="claude")],
+                         ids=["older-comms", "no-comms", "unreadable"])
+def test_a_comms_that_does_not_say_gives_the_old_wait_and_no_list(api):
+    assert targets.bind_wait(api) == targets.BIND_WAIT_S == 15.0
+    assert targets.ends_on_bind_timeout(api) == frozenset()
+
+
+def test_the_list_is_read_from_comms():
+    assert targets.ends_on_bind_timeout(comms(ends=BOTH)) == BOTH
+    assert targets.ends_on_bind_timeout(comms(ends=["claude"])) == CLAUDE_ONLY
+
+
+@LISTS
+def test_a_claude_wrapper_alive_past_the_wait_ends_the_launch(conn, monkeypatch, ends):
+    launch_row(conn)
+    fake_comms = comms("free", ends=ends, bind_wait=15.0)
+    got = settle(conn, fake_comms, monkeypatch, clock=ticking())
+    # The wait is comms' 15 s and the margin: the deadline is tick 20, the last ask there.
+    assert len(fake_comms.asked) == 20
+    assert (got.state, got.reason, got.exit_code) == ("failed", targets.COMMS_FAILED,
+                                                      exits.ERROR)
+    assert "comms' wrapper neither bound coder@moxi nor ended in 20 s" in got.line
+    assert "identity coder@moxi is free" in got.line
+    assert row(conn).state == "failed"
+    [event] = [e for e in store.events(conn, "r1") if e.kind == "start-failed"]
+    assert event.detail["reason"] == targets.COMMS_FAILED
+
+
+@LISTS
+def test_a_bind_at_the_last_ask_is_a_late_bind(conn, monkeypatch, ends):
+    launch_row(conn)
+    fake_comms = comms("free", "free", state("held", holder=Holder(SID)), ends=ends,
+                       bind_wait=15.0)
+    got = settle(conn, fake_comms, monkeypatch, wait_s=3, clock=ticking())
+    assert len(fake_comms.asked) == 3
+    assert got is None and row(conn).state == "started"
+
+
+@LISTS
+def test_a_last_ask_comms_does_not_answer_leaves_the_row_started(conn, monkeypatch, ends):
+    # Without comms' answer a wrapper that bound and started Claude can't be told from a
+    # stuck one.
+    launch_row(conn)
+    fake_comms = comms("free", "free", DaemonError("no answer"), ends=ends,
+                       bind_wait=15.0)
+    got = settle(conn, fake_comms, monkeypatch, wait_s=3, clock=ticking())
+    assert len(fake_comms.asked) == 3
+    assert got is None and row(conn).state == "started"
+
+
+@LISTS
+def test_a_codex_wrapper_alive_past_the_wait_ends_only_if_listed(conn, monkeypatch, ends):
+    launch_row(conn, harness="codex")
+    got = settle(conn, comms("free", ends=ends, bind_wait=15.0), monkeypatch,
+                 clock=ticking())
+    if "codex" in ends:
+        assert (got.reason, got.exit_code) == (targets.COMMS_FAILED, exits.ERROR)
+        assert "neither bound coder@moxi nor ended in 20 s" in got.line
+    else:
+        # Not listed: the wrapper started Codex after its own wait, the name unbound.
+        assert got is None and row(conn).state == "started"
+
+
+def test_an_older_comms_leaves_a_live_wrapper_started(conn, monkeypatch):
+    launch_row(conn)
+    fake_comms = comms("free")
+    got = settle(conn, fake_comms, monkeypatch, clock=ticking())
+    # The wait is the launcher's own 15 s, and nothing is listed.
+    assert len(fake_comms.asked) == 15
+    assert got is None and row(conn).state == "started"
 
 
 # -- an end before the bind ----------------------------------------------------------------
@@ -182,6 +291,41 @@ def test_an_end_with_an_exit_status_takes_its_cause_from_the_status(conn, monkey
     assert targets.failed_exit(reason) == code
 
 
+@LISTS
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_75_while_comms_answers_is_no_answer_from_a_listed_wrapper(conn, monkeypatch,
+                                                                     ends, harness):
+    launch_row(conn, pid=ended_pid(), harness=harness)
+    got = settle(conn, comms("free", ends=ends, bind_wait=15.0), monkeypatch,
+                 status=lambda: 75, where="on slot 4's pane")
+    assert got.exit_code == exits.TEMPFAIL
+    if harness in ends:
+        assert got.reason == targets.COMMS_NO_ANSWER
+        assert (f"the comms daemon did not answer the bind for coder@moxi in time, and "
+                f"{harness} did not start (exit 75); try again") in got.line
+    else:
+        # A wrapper that isn't listed exits 75 only when its adapter found no daemon.
+        assert got.reason == targets.COMMS_OFFLINE
+    assert "on slot 4's pane" in got.line and row(conn).reason == got.reason
+
+
+@LISTS
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_75_while_comms_says_offline_is_offline(conn, monkeypatch, ends, harness):
+    launch_row(conn, pid=ended_pid(), harness=harness)
+    got = settle(conn, comms(state("offline"), ends=ends, bind_wait=15.0), monkeypatch,
+                 status=lambda: 75)
+    assert (got.reason, got.exit_code) == (targets.COMMS_OFFLINE, exits.TEMPFAIL)
+    assert "the comms daemon is not running" in got.line
+
+
+def test_no_answer_is_a_try_again():
+    assert targets.COMMS_NO_ANSWER == "comms-no-answer"
+    assert targets.COMMS_NO_ANSWER in targets.TRY_AGAIN_REASONS
+    assert targets.failed_exit(targets.COMMS_NO_ANSWER) == exits.TEMPFAIL
+    assert exits.TEMPFAIL not in targets.WRAPPER_EXITS
+
+
 def test_a_codex_launch_names_codex(conn, monkeypatch):
     launch_row(conn, pid=ended_pid(), harness="codex")
     got = settle(conn, comms(state("offline")), monkeypatch)
@@ -213,29 +357,42 @@ def test_the_deliverer_goes_on_to_the_first_turn_once_bound(conn, monkeypatch):
     assert first.deliver("r1", pid=os.getpid(), out=out) == exits.OK and sent == ["r1"]
 
 
-@pytest.mark.parametrize("ready_s, bind_bound, left", [(60, 15.0, 50.0), (8, 8.0, 0.0)])
-def test_the_bind_wait_comes_out_of_the_ready_wait(conn, monkeypatch, ready_s, bind_bound,
-                                                   left):
-    """The deliverer never runs longer than `ready.wait_s` plus `first.wait_s`: the bind
-    wait is bounded by `ready.wait_s` too, and the ready wait gets what is left."""
+@LISTS
+def test_the_deliverer_records_a_wrapper_end_comms_cannot_explain(conn, monkeypatch, ends):
+    # No exit status here: a wrapper that ended while comms answers `free` is a failure
+    # the launcher can't name, and comms' words are in the terminal.
+    launch_row(conn, pid=ended_pid(), brief="go")
+    monkeypatch.setattr(targets, "_comms", lambda: comms("free", ends=ends,
+                                                         bind_wait=15.0))
+    monkeypatch.setattr(first, "send", lambda *a, **k: pytest.fail("sent"))
+    out = []
+    code = first.deliver("r1", pid=row(conn).pid,
+                         out=SimpleNamespace(write=out.append, flush=lambda: None))
+    assert code == exits.ERROR and row(conn).reason == targets.COMMS_FAILED
+    assert "comms' own words are in the terminal it ran in" in "".join(out)
+
+
+@pytest.mark.parametrize("ready_s", [60, 8])
+def test_the_deliverer_waits_the_whole_bind_then_the_whole_ready_wait(conn, monkeypatch,
+                                                                      ready_s):
+    """A short `ready.wait_s` doesn't cut the bind wait, and the ready wait counts from
+    the bind."""
     launch_row(conn, brief="go")
-    now = [100.0]
     seen = {}
 
-    def settle_bind(conn, rid, *, pid=None, wait_s):
-        seen["bind"] = wait_s
-        now[0] += 10.0
+    def settle_bind(conn, rid, **kw):
+        seen["bind"] = kw
         return None
 
     monkeypatch.setattr(first, "_waits", lambda r, f: (float(ready_s), 120.0))
-    monkeypatch.setattr(first, "_clock", lambda: now[0])
     monkeypatch.setattr(targets, "settle_bind", settle_bind)
     monkeypatch.setattr(first, "send", lambda conn, rid, **k: seen.update(k) or
                         first.Outcome(rid, "sent", "first-sent"))
     out = SimpleNamespace(write=lambda text: None, flush=lambda: None)
     assert first.deliver("r1", pid=os.getpid(), out=out) == exits.OK
-    assert seen["bind"] == bind_bound
-    assert (seen["ready_wait_s"], seen["first_wait_s"]) == (left, 120.0)
+    # No wait given: `settle_bind` waits comms' bind wait and its margin.
+    assert "wait_s" not in seen["bind"]
+    assert (seen["ready_wait_s"], seen["first_wait_s"]) == (float(ready_s), 120.0)
 
 
 def test_a_terminal_launch_with_an_identity_starts_the_deliverer(tmp_path, monkeypatch):
@@ -272,14 +429,20 @@ def rig(tmp_path, monkeypatch):
     return SimpleNamespace(plan=lambda **keys: script.write_text(json.dumps(keys)))
 
 
-def slot_launch(tmp_path, monkeypatch, ask):
+def slot_launch(tmp_path, monkeypatch, ask, harness="claude"):
     if not modules.available("comms"):
         pytest.skip("comms is not installed")
     monkeypatch.setattr(api, "_comms_api", lambda: comms("free"))
     monkeypatch.setattr(targets, "_comms", lambda: ask)
     monkeypatch.setattr(targets, "find", lambda command, env: command)
+    if harness == "codex":
+        # turns is hidden from this file; the Codex host is stood in for, as it would be
+        # found with turns installed.
+        links = slots.links
+        monkeypatch.setattr(slots, "links", lambda name: name == "turns" or links(name))
+        monkeypatch.setattr(presets, "codex_host", lambda: "/env/bin/moxi-turns-codex-host")
     return api.launch(LaunchRequest(typed={"identity": "coder", "scope": "moxi",
-                                           "target": "slot"},
+                                           "target": "slot", "harness": harness},
                                     cwd=str(tmp_path), request_id="r1", session_id=SID,
                                     actor="ann"))
 
@@ -301,6 +464,18 @@ def test_a_slot_whose_wrapper_found_no_daemon_fails_comms_offline(tmp_path, monk
     rig.plan(placed=4, pane_pid=ended_pid(), exec="started", dead_status=75)
     got = slot_launch(tmp_path, monkeypatch, comms(state("offline")))
     assert (got.reason, got.exit_code) == (targets.COMMS_OFFLINE, exits.TEMPFAIL)
+
+
+@LISTS
+def test_a_slot_whose_codex_wrapper_had_no_answer_fails_with_its_cause(tmp_path,
+                                                                       monkeypatch, rig,
+                                                                       ends):
+    rig.plan(placed=4, pane_pid=ended_pid(), exec="started", dead_status=75)
+    got = slot_launch(tmp_path, monkeypatch, comms("free", ends=ends, bind_wait=15.0),
+                      harness="codex")
+    want = targets.COMMS_NO_ANSWER if "codex" in ends else targets.COMMS_OFFLINE
+    assert (got.reason, got.exit_code) == (want, exits.TEMPFAIL)
+    assert "codex did not start (exit 75)" in got.line and got.slot == "4"
 
 
 def test_a_slot_whose_wrapper_bound_the_name_is_started(tmp_path, monkeypatch, rig):
