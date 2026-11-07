@@ -152,6 +152,48 @@ read, or `cleanupPeriodDays` is not a whole number of days, 1 or more. Neither c
 Three settings name a root when it is not the usual one: `claude.projects`,
 `codex.sessions` and `opencode.database`. `moxi config sessions` shows them.
 
+## The transcript-read guard
+
+With turns installed (the `turns` extra), sessions offers turns a guard,
+`sessions.transcript-read`, that keeps agents out of harness transcripts. It is off until
+you turn it on, with `guard.transcript_read` (the install asks) or by adding
+`sessions.transcript-read` to turns' `guards.on`:
+
+    moxi config set sessions guard.transcript_read true
+
+When it is on, turns refuses, before it runs, an agent's call that names a path under a
+transcript root: Claude Code's Read, Grep and Glob, and a shell command on Claude Code or
+Codex. A shell command is split into simple commands, each judged on its own, and one is
+refused when one of its words is such a path. The refusal points the agent to `moxi
+sessions read <session>`. The roots are each harness's root, the configured one included.
+
+A simple command that runs this environment's own `moxi sessions` or `moxi memory` passes
+whatever paths it names. The command after it on the same line is judged on its own, so
+`moxi sessions root; cat <transcript>` is refused.
+
+A call it can't judge runs, so one fault never refuses every read; `moxi doctor sessions`
+shows the fault in its `guard` row. That row is `off` when the guard is off, `ok` when it
+is on and turns is there to enforce it, and `warn` when it is on and turns is not
+installed, since then nothing enforces it.
+
+The guard is a nudge, not a boundary. Its known gaps:
+
+- A relative path after `cd`, a variable, or a path a script builds gets past it.
+- A path counts only when it is a transcript root or lies under one, so a search that
+  starts above a root passes: `grep -r x ~/.claude`, Grep with the path `~/.claude` and
+  the glob `projects/**`, or Glob with the path `~/.claude` and the pattern
+  `**/projects/*.jsonl`.
+- A shell's `-c` script is read only when the options before it are short ones:
+  `bash -l -c '...'` and `bash -lc '...'` are read, `bash --login -c '...'` is not.
+- OpenCode's root is its database file, so the `opencode.db-wal` and `opencode.db-shm`
+  files beside it are not under it.
+- The doctor's `ok` means the switch is on and turns is installed. It doesn't check that
+  turns' guard loader has the guard on, so a loader that misses it without reporting a
+  problem still reads `ok`.
+- A word that starts with `/` is read as a path even when it is text, quotes or not: a
+  heredoc line naming a transcript, or `echo '<transcript path>'`, is refused. A quoted
+  sentence that holds such a path is one word that doesn't start with `/`, and passes.
+
 ## The page
 
 With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), sessions has a page in the shell
@@ -206,7 +248,8 @@ the other modules.
 
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
 UI shell, whose page-server base sessions' page server runs on. The optional extra
-`secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with.
+`secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with. The optional
+extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
 
 ## Interfaces
 

@@ -4,7 +4,9 @@ It offers interfaces 2 and 3, the read API in `moxi_sessions.api` (interface 3 i
 `retention()`), the verb `moxi sessions`, a setup that prints how long each harness keeps
 its transcripts, and, with the `ui` extra, a page in the browser UI shell that shows one
 session's last turns and a block other pages may place for the same view. With the
-`secrets` extra, `moxi sessions read` redacts what it prints.
+`secrets` extra, `moxi sessions read` redacts what it prints. With the `turns` extra, turns
+enforces sessions' transcript-read guard, off until the install's question or its switch
+turns it on.
 """
 
 INTERFACES = frozenset({2, 3})
@@ -18,16 +20,27 @@ OPTIONAL = {
     "secrets": "Redaction for `moxi sessions read`: each message and tool call line passes "
                "through secrets' credentials and broad sets before it is printed. Without "
                "it the read prints as written and says so.",
+    "turns": "The transcript-read guard: turns refuses an agent's Read, Grep, Glob or shell "
+             "read of a harness transcript and points it to `moxi sessions read`, once "
+             "guard.transcript_read is on.",
 }
 GATED = {}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
+#: The install question: the transcript-read guard's switch, asked as
+#: "sessions: <text>? [y/N]".
+QUESTIONS = {
+    "guard.transcript_read": "the transcript-read guard (refuse an agent's Read, Grep, "
+                             "Glob or shell read of a harness transcript and point it to "
+                             "moxi sessions read; turns enforces it)",
+}
 #: Prints each harness's transcript retention; asks nothing and changes nothing.
 SETUP = "moxi_sessions.setup:setup"
 SEGMENT = None
 # The announcement's version, and the optional names it declares. sessions keeps no state
 # of its own, so it declares no store; it runs no process, so no daemon, timer or health
-# check. Its doctor rows check each harness's root and report each harness's retention.
+# check. Its doctor rows check each harness's root, report each harness's retention and
+# say whether the transcript-read guard is on and enforced.
 ANNOUNCES = 1
 STORES = {}
 DOCTOR = "moxi_sessions.doctor:rows"

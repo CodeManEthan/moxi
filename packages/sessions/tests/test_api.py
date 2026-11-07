@@ -28,7 +28,7 @@ def test_the_announcement_offers_interfaces_2_and_3():
     assert module.SETUP == "moxi_sessions.setup:setup"
     target, _, name = module.SETUP.partition(":")
     assert callable(getattr(importlib.import_module(target), name))
-    assert set(module.OPTIONAL) == {"ui", "secrets"}
+    assert set(module.OPTIONAL) == {"ui", "secrets", "turns"}
     assert module.GATED == {} and module.INTERNAL_ENV == {}
 
 
@@ -95,12 +95,15 @@ def test_interface_2_finds_and_lists():
     assert list(inspect.signature(api.subagents).parameters) == ["source"]
 
 
-def test_the_schema_holds_the_three_roots():
+def test_the_schema_holds_the_three_roots_and_the_guards_switch():
     schema = Schema.from_resource("moxi_sessions", "settings.toml")
-    assert list(schema.keys) == ["claude.projects", "codex.sessions", "opencode.database"]
-    for name in schema.keys:
+    assert list(schema.keys) == ["claude.projects", "codex.sessions", "opencode.database",
+                                 "guard.transcript_read"]
+    for name in ("claude.projects", "codex.sessions", "opencode.database"):
         key = schema.keys[name]
         assert (key.type, key.default, key.read, key.env) == ("path", "", "use", None)
+    key = schema.keys["guard.transcript_read"]
+    assert (key.type, key.default, key.read, key.env) == ("bool", False, "use", None)
 
 
 READ_NAMES = {"records", "records_back", "last_request", "records_since", "window", "Read",

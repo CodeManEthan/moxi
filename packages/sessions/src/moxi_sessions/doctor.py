@@ -13,6 +13,15 @@ The `retention` row (`retention.retention()`) is `ok` with each harness's settin
 detail, and `warn` when a harness's settings file can't be read, Codex's compression
 switch is on, or a setting holds a value that isn't one. It never changes a setting.
 
+The `guard` row is the transcript-read guard's (`moxi_sessions.readguard`):
+
+* `off`: neither `guard.transcript_read` nor turns' `guards.on` turns it on.
+* `ok`: it is on and turns is installed to enforce it; the detail names what turned it on
+  and the roots it keeps agents out of.
+* `warn`: it is on and turns is absent, so nothing enforces it; or turns' guard loader
+  reports a problem with it; or the switch or the roots can't be read. The guard lets
+  every call through on a fault, so a fault shows here, not as a refusal.
+
 sessions writes nothing, so no check changes anything.
 """
 
@@ -127,12 +136,77 @@ def retention_row() -> Row:
     return Row(MODULE, "retention", "ok", detail)
 
 
+#: The fix the `guard` row's warning names when turns is absent.
+GUARD_FIX = "moxi install sessions --with turns"
+
+
+def guard_row(env=None) -> Row:
+    """The transcript-read guard: `off`, `ok` when on and turns enforces it, `warn` when
+    on and nothing does, or on a fault."""
+    import moxi.modules
+
+    from .readguard import GUARD_ID, SWITCH, transcript_roots
+    from .settings import current
+
+    try:
+        switched = bool(current()[SWITCH])
+    except ConfigError as exc:
+        return Row(MODULE, "guard", "warn",
+                   f"the transcript-read guard's switch {SWITCH} cannot be read: {exc}",
+                   "moxi config sessions")
+    turns = moxi.modules.available("turns")
+    found, problem = _in_turns(GUARD_ID, env) if turns else (None, None)
+    by = [f"sessions' {SWITCH}"] if switched else []
+    if found is not None and "list" in found.by:
+        by.append("turns' guards.on")
+    if not by:
+        return Row(MODULE, "guard", "off",
+                   "the transcript-read guard is off; turn it on with: moxi config set "
+                   f"sessions {SWITCH} true")
+    on = " and ".join(by)
+    if not turns:
+        return Row(MODULE, "guard", "warn",
+                   f"the transcript-read guard is on ({on}) but turns is not installed, "
+                   "so nothing enforces it", GUARD_FIX)
+    if problem is not None:
+        return Row(MODULE, "guard", "warn",
+                   f"the transcript-read guard is on ({on}) but turns' guard loader "
+                   f"reports: {problem}")
+    try:
+        roots = sorted({r for _, r in transcript_roots(env)})
+    except ConfigError as exc:
+        return Row(MODULE, "guard", "warn",
+                   f"the transcript-read guard is on ({on}) but its roots cannot be named: "
+                   f"{exc}; it lets every call through", "moxi config sessions")
+    return Row(MODULE, "guard", "ok",
+               f"the transcript-read guard is on ({on}); turns refuses agents' reads under "
+               + ", ".join(roots))
+
+
+def _in_turns(guard_id: str, env) -> tuple[object | None, str | None]:
+    """The guard as turns' guard loader reports it: `(On or None, problem or None)`.
+
+    turns' public names offer no read of which guards are on, so this imports turns' guard
+    loader, `moxi_turns.guards`, and reads `load(env=)`. A loader that can't be read is the
+    problem."""
+    import importlib
+
+    try:
+        loaded = importlib.import_module("moxi_turns.guards").load(env=env)
+    except Exception as exc:  # noqa: BLE001 - a loader that can't be read is the problem
+        return None, f"{type(exc).__name__}: {exc}"
+    problems = [p.reason for p in loaded.problems
+                if p.id in (guard_id, guard_id.partition(".")[0])]
+    return loaded.get(guard_id), ("; ".join(problems) if problems else None)
+
+
 def rows() -> Iterator[Row]:
     """One row per harness root, in the order Claude Code, Codex, OpenCode, then
-    `retention`."""
+    `retention` and `guard`."""
     for harness in HARNESSES:
         yield check(harness)
     yield retention_row()
+    yield guard_row()
 
 
-__all__ = ["rows", "check", "retention_row", "MODULE"]
+__all__ = ["rows", "check", "retention_row", "guard_row", "GUARD_FIX", "MODULE"]
