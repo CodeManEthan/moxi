@@ -310,6 +310,20 @@ def test_every_flag_redacts_messages_calls_and_titles(env, capsys, flags):
     assert "[REDACTED:github-pat]" in out
 
 
+@pytest.mark.parametrize("flags", [f for f in FLAGS if "--json" in f],
+                         ids=lambda f: " ".join(f))
+def test_json_redacts_a_tool_calls_name_and_server(env, capsys, flags):
+    t = ClaudeTranscript(env / ".claude" / "projects")
+    t.user("go")
+    call = t.request().tool_use(f"mcp__{TOKEN}__tool", {"query": "x"})
+    t.tool_result(call, "ok")
+    t.write()
+    code, out, _ = run(capsys, "read", t.session_id, *flags)
+    assert code == 0 and TOKEN_HEAD not in out
+    row = next(r for r in json.loads(out)["records"] if r["kind"] == "tool_call")
+    assert row["server"].startswith("[REDACTED") and row["name"].startswith("[REDACTED")
+
+
 def test_the_summary_is_redacted_before_it_is_cut(env):
     """A token that crosses the 160-character cut: cut first, its first part would no
     longer match the token's pattern and would print."""

@@ -12,7 +12,8 @@ value of a type the row does not carry.
 message's whole text, each tool call's name and whole argument, and each title through it
 before any cut, so a cut never leaves part of a secret that no longer matches its pattern.
 A tool call's summary is then made again from its input (`shape.tool_summary`), redacted
-before its 160-character cut. Without `redact` the row is the record's own.
+before its 160-character cut, and the row's `name` and `server` are redacted too. Without
+`redact` the row is the record's own.
 
 `redactor()` is the redaction `moxi sessions read` uses: secrets' `credentials` and `broad`
 sets (`SETS`), fixed, through the secrets module when it loads, reached through
@@ -176,6 +177,8 @@ def view_row(record: Record, *, redact: Redact | None = None) -> dict[str, Any]:
         value = getattr(record, name)
         if kind == "tool_call" and name == "summary":
             value = summary(record, redact)
+        elif kind == "tool_call" and name in ("name", "server"):
+            value = _redacted(value, redact)
         put(row, unknown, name, value, typed)
     if kind == "message":
         text = record.text if isinstance(record.text, str) else ""
