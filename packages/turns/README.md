@@ -29,13 +29,20 @@ moxi install turns
 ```
 
 `moxi install turns` installs turns with `moxi`, runs its setup, and offers the `codex`
-extra. The setup writes the Claude plugin's `endpoint.json` and installs both Claude Code
-plugins at user scope with `claude plugin`, so it needs `claude` on PATH for that step.
+extra. The setup copies the Claude plugin's folder into turns' data directory, writes
+the plugin's `endpoint.json` into that copy, and installs both Claude Code plugins from
+it at user scope with `claude plugin`. It writes nothing into turns' package. When
+`claude` is not on PATH the setup skips that step with one line and the install still
+succeeds; run `moxi install turns` again once Claude Code is installed. An older user-scope
+install made from the package's own folder is moved to the copy. `moxi uninstall turns`
+removes the marketplace and the copy.
+
 Only a user-scope install reads `endpoint.json`. A launcher can instead load the plugins
 for one launch with `--plugin-dir`: the argv `moxi_turns.launch_additions("claude", ...)`
 returns carries both, and its environment names the endpoint command in
-`MOXI_TURNS_ENDPOINT`. Such a launch writes nothing into turns' package, so it works from
-a read-only install and many can start at once.
+`MOXI_TURNS_ENDPOINT`. It names the copy's folders when the copy is current, and the
+package's own otherwise. Such a launch writes nothing, so it works from a read-only
+install with no setup run, and many can start at once.
 
 ### Before turns is on PyPI
 
