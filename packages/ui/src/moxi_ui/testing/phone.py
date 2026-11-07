@@ -156,20 +156,29 @@ class PhoneBridge:
         return self
 
     def stop(self) -> None:
-        """Close both listeners and every connection through them."""
+        """Close both listeners and end every connection through them. A connection is
+        only shut down, as `cut` does; the thread that serves it closes it."""
         with self._lock:
-            held = self._listeners + list(self._open)
+            listeners, held = self._listeners, list(self._open)
             self._listeners, self._open = [], set()
+        for listener in listeners:
+            _close(listener)
         for sock in held:
-            _close(sock)
+            _shut(sock)
 
     def cut(self) -> None:
-        """Close every open connection through the bridge, as a provider that restarts
-        does; the listeners stay."""
+        """End every open connection through the bridge, as a provider that restarts
+        does; the listeners stay.
+
+        It shuts each socket down, which ends every read and write on it at once, and
+        leaves the closing to the threads that serve it (`_pump`). A socket closed here
+        could give its number to the next connection the bridge accepts while a pump
+        thread is still on its way to read the old one; that thread would then take the
+        new connection's bytes, and the new connection's TLS would fail."""
         with self._lock:
             held, self._open = list(self._open), set()
         for sock in held:
-            _close(sock)
+            _shut(sock)
 
     # -- browsers -------------------------------------------------------------------------
 
@@ -268,16 +277,18 @@ class PhoneBridge:
 
     def _terminate(self, raw: socket.socket) -> None:
         tls = self._tls.wrap_socket(raw, server_side=True)
-        self._keep(tls)
-        upstream = self._upstream()
-        if upstream is None:
-            _read_head(tls)
-            tls.sendall(_BAD_GATEWAY)
+        try:
+            self._keep(tls)
+            upstream = self._upstream()
+            if upstream is None:
+                _read_head(tls)
+                tls.sendall(_BAD_GATEWAY)
+                return
+            upstream.settimeout(None)
+            self._keep(upstream)
+            _pump(tls, upstream)
+        finally:
             _close(tls)
-            return
-        upstream.settimeout(None)
-        self._keep(upstream)
-        _pump(tls, upstream)
 
     def _connect(self, client: socket.socket) -> None:
         head = _read_head(client)
@@ -289,9 +300,12 @@ class PhoneBridge:
             _close(client)
             return
         upstream = socket.create_connection(("127.0.0.1", self.terminator_port))
-        self._keep(upstream)
-        client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-        _pump(client, upstream)
+        try:
+            self._keep(upstream)
+            client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            _pump(client, upstream)
+        finally:
+            _close(upstream)
 
 
 def _read_head(sock: socket.socket) -> bytes:
@@ -305,27 +319,44 @@ def _read_head(sock: socket.socket) -> bytes:
 
 
 def _pump(one: socket.socket, other: socket.socket) -> None:
-    """Copy bytes both ways until either side ends, then close both."""
+    """Copy bytes both ways until either side ends, then close both.
+
+    The direction that ends first only shuts both sockets down, which ends the other
+    direction's read or write; the sockets are closed here once both directions have
+    stopped. Closed any sooner, a socket's number can go to the next connection the bridge
+    accepts while the other direction is still about to use it (`PhoneBridge.cut`)."""
     def copy(src: socket.socket, dst: socket.socket) -> None:
         try:
             while data := src.recv(65536):
                 dst.sendall(data)
-        except OSError:
+        except (OSError, ValueError):
             pass
         finally:
-            _close(src)
-            _close(dst)
+            _shut(src)
+            _shut(dst)
 
-    threading.Thread(target=copy, args=(other, one), daemon=True,
-                     name="moxi-ui-phone-bridge-pump").start()
+    back = threading.Thread(target=copy, args=(other, one), daemon=True,
+                            name="moxi-ui-phone-bridge-pump")
+    back.start()
     copy(one, other)
+    back.join()
+    _close(one)
+    _close(other)
+
+
+def _shut(sock: socket.socket) -> None:
+    """End every read and write on `sock`, from any thread, without closing it. For a TLS
+    socket this is the plain socket's shutdown: `SSLSocket.shutdown` would also drop the
+    TLS state a pump thread may be reading through."""
+    try:
+        socket.socket.shutdown(sock, socket.SHUT_RDWR)
+    except (OSError, ValueError):
+        pass
 
 
 def _close(sock: socket.socket) -> None:
-    try:
-        sock.shutdown(socket.SHUT_RDWR)
-    except OSError:
-        pass
+    """Shut `sock` down and close it; only the thread that serves it calls this."""
+    _shut(sock)
     try:
         sock.close()
     except OSError:
