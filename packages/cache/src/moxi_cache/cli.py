@@ -4,7 +4,6 @@ check cache's own state.
     moxi cache read SESSION... [--harness claude|codex|opencode] [--source PATH] [--json]
     moxi cache segment SESSION [--color|--json]
     moxi cache watch
-    moxi cache service install|remove|status
     moxi cache timers [--json]
     moxi cache doctor
 
@@ -18,8 +17,8 @@ writes nothing. `--source` is where the record is read from: the Claude projects
 (`cache:12m3s`), nothing when there is none. It installs the render audit hook before it
 loads the segment module, so the render can read and do nothing else.
 
-`watch` runs the watcher in the foreground; `service` installs it as a systemd user unit,
-removes it, or says how it stands.
+`watch` runs the watcher in the foreground. `moxi install cache` writes it as a unit of
+the system's supervisor, through the core.
 
 `timers` lists the timer's subscriptions (the modules' and your config's), the refused
 ones and why, the live sessions in the watcher's records, and when each subscription
@@ -28,22 +27,21 @@ load, in this environment, and reads the records and the timer log; it starts no
 
 `doctor` shows the config file, the lifetime table's load, the drift record and whether a
 process is learning into it, the Claude projects root, whether a watcher is keeping
-clock records, and the timer's subscriptions with the refused ones. It exits 1 when
-something there stops reads.
+clock records, the watcher's unit and its state, and the timer's subscriptions with the
+refused ones. It exits 1 when something there stops reads.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from collections.abc import Sequence
 
 from moxi.config import ConfigError
 
-from . import api, drift, records, service, table
+from . import api, drift, records, table
 from . import timer as _timer
 from .clock import COLD, WARM, Clock
 from .settings import current
@@ -81,11 +79,6 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi cache") -> int:
                      description="Keep a clock record for every live Claude session, in "
                                  "the foreground, until SIGTERM or Ctrl-C.")
 
-    svc = verbs.add_parser("service", help="the watcher as a systemd user service",
-                           description="Install, remove or show the watcher's systemd user "
-                                       "unit, moxi-cache-watch.service.")
-    svc.add_argument("action", choices=service.ACTIONS)
-
     tim = verbs.add_parser("timers", help="list the timer's subscriptions and next asks",
                            description="List the timer's subscriptions, the refused ones, "
                                        "the live sessions in the watcher's records, and "
@@ -106,8 +99,6 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi cache") -> int:
         from . import watch
 
         return watch.main([])
-    if args.verb == "service":
-        return service.run(args.action)
     if args.verb == "timers":
         return _timers(args)
     return _doctor()
@@ -351,12 +342,34 @@ def _doctor() -> int:
         print(f"  claude projects root: sessions' config cannot be read: {e}")
 
     print("  watcher: " + _watcher_line())
-    unit = service.unit_path(os.environ)
-    print(f"  service: {unit} " + ("(installed)" if unit.exists() else
-                                   "(not installed: moxi cache service install)"))
+    print("  unit: " + _unit_line())
     for line_ in _timer_lines():
         print(f"  {line_}")
     return 1 if bad else 0
+
+
+#: The watcher, as cache's announcement declares it among its `DAEMONS`.
+WATCHER = "watch"
+
+
+def _unit_line() -> str:
+    """The watcher's unit, as the core's writer reads it (`moxi.units.status`): its name and
+    state, or how to install it when there is none."""
+    from moxi import units
+
+    unit = f"cache/{WATCHER}"
+    state = next((row for row in units.status("cache")
+                  if row.name == WATCHER and row.kind == "daemon"), None)
+    if state is None or state.state == "missing":
+        return f"{unit}: not installed: moxi install cache"
+    line = f"{unit}: {state.state}"
+    if state.pid:
+        line += f", pid {state.pid}"
+    if state.state in ("failed", "unknown", "off", "nobackend") and state.detail:
+        line += f" ({state.detail})"
+    if state.state == "failed" and state.log:
+        line += f"; its log: {state.log}"
+    return line
 
 
 def _timer_lines() -> list[str]:

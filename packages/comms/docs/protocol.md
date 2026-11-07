@@ -422,7 +422,9 @@ its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `con
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the
-daemon (`moxi comms service restart`) when it is the older, or relaunch the session or
+daemon (`moxi services restart comms/daemon` when services is installed, else the
+supervisor's own restart of the daemon's unit, `systemctl --user restart` on systemd) when
+it is the older, or relaunch the session or
 update the install when the program is. Nothing of comms 0.2's wire is served: a first
 line that isn't JSON-RPC 2.0 gets the JSON-RPC error and the connection closes.
 

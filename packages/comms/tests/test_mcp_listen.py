@@ -567,7 +567,7 @@ def test_bind_failed_revokes_nothing_and_the_doctor_fails_it(serving, sessions):
     assert len(daemon.mcp_tokens.active()) == 1
     row = checks.endpoint_row(answer)
     assert row.state == "fail" and "no token was revoked" in row.detail
-    assert row.fix == checks.RESTART
+    assert row.fix == checks.restart()
 
 
 def test_a_daemon_beside_its_active_socket_unit_is_supervised_and_revokes_nothing(
@@ -716,7 +716,27 @@ def test_the_endpoint_rows_follow_the_daemons_answer():
     assert checks.port_row({"served": True, "url": url, "held": True}, on) is None
     moved = checks.port_row({"served": True, "url": url, "held": False},
                             type("Mcp", (), {"enabled": True, "port": 8451})())
-    assert moved.state == "warn" and moved.fix == checks.RESTART
+    assert moved.state == "warn" and moved.fix == checks.restart()
+
+
+@pytest.mark.parametrize(("state", "fix"), [
+    ("present", "moxi services restart comms/daemon"),
+    ("absent", "systemctl --user restart"), ("broken", "systemctl --user restart")])
+def test_the_restart_fix_names_services_when_it_is_installed_else_the_supervisor(
+        monkeypatch, state, fix):
+    """comms writes no unit of its own: the core does, so the restart is services' verb or
+    the supervisor's own, never a comms verb."""
+    from moxi import modules
+
+    def load(name, **kw):
+        assert name == "services"
+        return SimpleNamespace(state=state)
+
+    monkeypatch.setattr(modules, "load", load)
+    assert fix in checks.restart()
+    assert "moxi comms" not in checks.restart()
+    row = checks.endpoint_row({"served": False, "why": "bind-failed"})
+    assert row.fix == checks.restart()
 
 
 @pytest.mark.parametrize(("unit", "install"), [
@@ -731,7 +751,7 @@ def test_the_port_taken_fix_names_moxi_install_comms_when_a_socket_unit_is_insta
         del answer["unit"]                      # an older daemon's answer
     fix = checks.endpoint_row(answer).fix
     assert fix.startswith("free the port") and "moxi config set comms mcp.port N" in fix
-    assert fix.endswith(f"then: {checks.RESTART}, then relaunch the sessions")
+    assert fix.endswith(f"then: {checks.restart()}, then relaunch the sessions")
     if install == "names":
         assert ("mcp.port N and moxi install comms, which moves the socket unit to that "
                 "port") in fix
@@ -813,7 +833,7 @@ def test_doctor_rows_ask_the_running_daemon(serving):
     daemon.stop()
     assert "mcp endpoint" not in {r.name for r in checks.mcp_rows()}
     health = checks.health()
-    assert health.state == "fail" and health.fix == checks.RESTART
+    assert health.state == "fail" and health.fix == checks.restart()
 
 
 # ==================================================================== idle cost

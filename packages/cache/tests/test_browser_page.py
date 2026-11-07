@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.browser,
 A = "aaaaaaaa-1111-4111-8111-111111111111"
 B = "bbbbbbbb-2222-4222-8222-222222222222"
 EMPTY = ("No live Claude Code session has a cache record. The watcher writes one for each: "
-         "moxi cache watch, or moxi cache service install.")
+         "moxi cache watch, or moxi install cache.")
 STOPPED = "The cache watcher has stopped, so these readings may be old."
 UNEXPECTED = "cache's page server hit an unexpected error (ValueError); its log has the details"
 

@@ -16,8 +16,12 @@ MODULE = "comms"
 ASK_WAIT = 2.0
 #: The window the `mcp tokens` row counts revocations over, in seconds.
 REVOKED_WINDOW = 24 * 3600
-#: The fix of a row that a restart of the daemon cures.
-RESTART = "moxi comms service restart"
+#: How to restart comms' daemon when the services module is installed.
+RESTART = "moxi services restart comms/daemon"
+#: How to restart it without services: the supervisor's own restart of the unit the core
+#: wrote for it. Unit names are the core's to build, so this names the unit by what it is.
+SUPERVISOR_RESTART = ("restart the unit `moxi install comms` wrote for comms/daemon with "
+                      "its supervisor (systemctl --user restart on systemd)")
 #: The fix of a live session that has lost its tool token.
 RELAUNCH = "relaunch that session to give it comms' tools"
 #: The fix when comms' socket unit holds the port and this daemon runs outside it.
@@ -37,6 +41,15 @@ def doctor_rows(env=None) -> list:
             + mcp_rows(env=env))
 
 
+def restart() -> str:
+    """The fix of a row that a restart of the daemon cures: services' restart when services
+    is installed, else the supervisor's own."""
+    from moxi import modules
+
+    present = modules.load("services").state == modules.PRESENT
+    return RESTART if present else SUPERVISOR_RESTART
+
+
 def health():
     """The daemon's `HEALTH` row: it answers on its socket, and whether it serves
     comms' tools (the `mcp endpoint` row says how)."""
@@ -48,7 +61,7 @@ def health():
     answer = ask_endpoint()
     if answer is None:
         return Row(MODULE, "daemon", "fail",
-                   f"the daemon doesn't answer on {where} within {ASK_WAIT:g} s", RESTART)
+                   f"the daemon doesn't answer on {where} within {ASK_WAIT:g} s", restart())
     tools = (f"comms' tools served at {answer.get('url')}" if answer.get("served")
              else f"comms' tools not served ({answer.get('why')})")
     return Row(MODULE, "daemon", "ok", f"answers on {where}; {tools}")
@@ -127,9 +140,9 @@ def endpoint_row(answer: Mapping, configured=None):
     if why == "bind-failed":
         return Row(MODULE, name, "fail",
                    f"{detail or 'the port could not be bound'}; no token was revoked",
-                   RESTART)
+                   restart())
     first = detail.splitlines()[0] if detail else "the endpoint didn't start"
-    return Row(MODULE, name, "fail", first, RESTART)
+    return Row(MODULE, name, "fail", first, restart())
 
 
 def port_taken_fix(unit: str | None) -> str:
@@ -144,7 +157,7 @@ def port_taken_fix(unit: str | None) -> str:
     else:
         move = ("free the port, or moxi config set comms mcp.port N (and moxi install "
                 "comms, if comms' socket unit is installed)")
-    return f"{move}; then: {RESTART}, then relaunch the sessions"
+    return f"{move}; then: {restart()}, then relaunch the sessions"
 
 
 def port_row(answer: Mapping, configured):
@@ -165,7 +178,7 @@ def port_row(answer: Mapping, configured):
                    "moxi install comms")
     return Row(MODULE, "mcp port", "warn",
                f"the daemon serves on port {served}, [mcp] port is now {want}: it reads "
-               "the port at its start", RESTART)
+               "the port at its start", restart())
 
 
 def tokens_row(*, env=None, now: Callable[[], float] = time.time):
