@@ -8,6 +8,7 @@ is judged as it comes."""
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -418,3 +419,96 @@ def test_worst():
 
 def test_rows_module_is_services():
     assert rows.MODULE == "services"
+
+
+# --- a Windows task adopted as a daemon or a timer --------------------------------------
+
+AGENT = "\\Vendor\\agent"
+CRASH = "Ready, last result 0x00000001"
+
+
+@pytest.fixture
+def on_windows(monkeypatch):
+    """Rows added on Windows, read there."""
+    monkeypatch.setattr(rows, "sys", SimpleNamespace(platform="win32"))
+
+
+def task(state="active", detail="Running", *, enabled=True, code=0x41301):
+    """A foreign task's state as the core reads one named a daemon."""
+    return UnitState(None, AGENT, "daemon", "schtasks", state, detail=detail,
+                     enabled=enabled,
+                     last={"supervisor": {"last_run": "2026-11-07T09:30:00.1234567",
+                                          "last_result": code}})
+
+
+@pytest.mark.parametrize("read, flag, verdict_, reason", [
+    (task(), True, "ok", "running"),
+    (task(), False, "warn", "running, off at next login"),
+    (task(enabled=False), True, "warn", "won't start at login"),
+    (task(enabled=False), False, "warn", "running, off at next login"),
+    (task("failed", CRASH, code=1), True, "fail", f"not running (failed: {CRASH})"),
+    (task("failed", CRASH, code=1), False, "warn", "starts at login, flag off"),
+    (task("failed", CRASH, enabled=False, code=1), False, "off", "off"),
+    (task("inactive", "Ready, last result 0x00000000", code=0), True, "fail",
+     "not running"),
+    (task("inactive", "Ready, last result 0x00041303", code=0x41303), True, "fail",
+     "not running"),
+    (task("inactive", "Ready, last result 0x00041306", code=0x41306), True, "fail",
+     "not running"),
+    (task("inactive", "Queued, last result 0x00041325", code=0x41325), True, "fail",
+     "not running"),
+    (task("inactive", "Disabled, last result 0x00041306", enabled=False, code=0x41306),
+     True, "fail", "not running"),
+    (task("inactive", "Disabled, last result 0x00041306", enabled=False, code=0x41306),
+     False, "off", "off"),
+])
+def test_an_adopted_windows_daemon_is_judged_by_whether_its_task_runs(read, flag,
+                                                                      verdict_, reason):
+    row = user(form="adopted", name="agent", kind="daemon", unit=AGENT, enabled=flag)
+    found = judge(row, read, flag)
+    assert (found.state, found.reason) == (verdict_, reason)
+
+
+def test_an_adopted_windows_daemon_stopped_by_hand_warns():
+    row = user(form="adopted", name="agent", kind="daemon", unit=AGENT,
+               stopped="2026-11-07T09:00:00Z")
+    found = judge(row, task("inactive", "Ready, last result 0x00041306", code=0x41306),
+                  True)
+    assert (found.state, found.reason) == ("warn", "stopped by hand at "
+                                                   "2026-11-07T09:00:00Z")
+
+
+def test_a_timer_whose_last_result_is_task_scheduler_queued_is_ok():
+    last = {"supervisor": {"last_run": None, "last_result": 0x41325}}
+    found = judge(timer_row(enabled=True), st("timer", backend="schtasks", last=last), True)
+    assert found.state == "ok"
+
+
+def windows_timer(code, name="agent"):
+    row = user(form="adopted", name=name, kind="timer", unit=AGENT, enabled=True,
+               platform="win32")
+    read = UnitState(None, AGENT, "timer", "schtasks", "active", detail="Ready",
+                     enabled=True, last={"supervisor": {"last_run": "2026-11-07T09:30:00",
+                                                        "last_result": code}})
+    return judge(row, read, True)
+
+
+def test_a_windows_task_adopted_as_a_timer_keeps_its_timer_verdict(on_windows):
+    """As every Windows row adopted before tasks could be daemons: a crashed logon task
+    reads as a failed run, and says it is judged as a timer and how to change that."""
+    found = windows_timer(1)
+    assert found.state == "warn"
+    assert found.reason == ("last run failed (result 0x00000001 at 2026-11-07T09:30:00); "
+                            "judged as a timer, so if it should keep running, remove it "
+                            "and add it again without --timer")
+    assert windows_timer(0, "agent2").reason == "armed"
+
+
+def test_only_an_adopted_windows_timer_says_how_it_is_judged():
+    found = judge(timer_row(enabled=True),
+                  st("timer", backend="schtasks", last=SUPERVISOR_FAILED["schtasks"]), True)
+    assert found.state == "warn" and "judged as a timer" not in found.reason
+    row = user(form="adopted", name="nightly", kind="timer", enabled=True)
+    found = judge(row, st("timer", backend="systemd", last=SUPERVISOR_FAILED["systemd"]),
+                  True)
+    assert found.state == "warn" and "judged as a timer" not in found.reason

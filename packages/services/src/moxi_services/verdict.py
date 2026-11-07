@@ -28,7 +28,8 @@ The first case that matches gives the verdict:
     a daemon that is off                            running or starting at login: warn;
                                                     else off
     a timer that is on                              not armed: fail; last run failed:
-                                                    warn; else ok
+                                                    warn (an adopted Windows task's says
+                                                    it is judged as a timer); else ok
     a timer that is off                             a module or adopted Linux timer: off
                                                     (its gate holds the runs); else armed:
                                                     warn, not armed: off
@@ -55,9 +56,15 @@ Row = UserRow | ModuleRow
 
 #: The verdicts, best first.
 STATES = ("ok", "off", "warn", "fail")
-#: Task Scheduler's own status codes (0x41300 to 0x4131F, "ready", "running", "has not
-#: yet run" and the like), which a task's last result may hold. None is a failure.
-_SCHED_STATUS = range(0x41300, 0x41320)
+#: Task Scheduler's own success codes (0x41300 to 0x413FF: "ready", "running", "has not
+#: yet run", "queued" and the like), which a task's last result may hold. None is a
+#: failure.
+_SCHED_STATUS = units.TASK_STATUS_CODES
+#: What an adopted Windows timer whose last run failed adds to its reason: a task adopted
+#: before Windows tasks could be daemons is a timer, and a crashed logon task then reads
+#: only as a failed run.
+AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add it again "
+            "without --timer")
 
 
 @dataclass(frozen=True)
@@ -335,10 +342,18 @@ def _timer(row: Row, st, flag: bool) -> Verdict:
     last = last_run(st)
     if last is not None and last.failed:
         at = f" at {last.at}" if last.at else ""
-        return Verdict("warn", f"last run failed ({last.text}{at})", st.log)
+        hint = f"; {AS_TIMER}" if _adopted_task(row, st) else ""
+        return Verdict("warn", f"last run failed ({last.text}{at}){hint}", st.log)
     if last is None:
         return Verdict("ok", "armed, no run yet")
     return Verdict("ok", "armed")
+
+
+def _adopted_task(row: Row, st) -> bool:
+    """An adopted Task Scheduler task: a row whose kind the user chose, since a task
+    doesn't say whether it is meant to keep running."""
+    return (isinstance(row, UserRow) and row.form == "adopted"
+            and st is not None and st.backend == "schtasks")
 
 
 # --- every row at once ------------------------------------------------------------------
