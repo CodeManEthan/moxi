@@ -38,7 +38,7 @@ from .common import (Additions, Composition, Context, NoBrief, NotYet, PromptFil
 
 MODULE = "launcher"
 #: The optional links a launch may use, as `Context.modules` names them.
-LINKS = ("turns", "comms", "slots", "projects", "notes", "usage", "loadout")
+LINKS = ("turns", "comms", "slots", "projects", "notes", "usage")
 #: The turns interface whose names the launcher calls (launch additions, the ready wait,
 #: delivery, the Codex host). An older turns counts as absent.
 TURNS_INTERFACE = 2

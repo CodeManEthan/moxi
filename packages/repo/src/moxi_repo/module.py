@@ -8,7 +8,11 @@ INTERFACES = frozenset({1})
 API = "moxi_repo.api"
 CLI = "moxi_repo.cli:main"
 SUMMARY = "Git hooks run as declared pieces, and the one shared committer."
-OPTIONAL = {"ui": "The git hooks page in the browser UI shell."}
+OPTIONAL = {
+    "ui": "The git hooks page in the browser UI shell.",
+    "projects": "Project keys: a project key works where a command takes a path, and "
+                "listings show each repo's key. Without it repos are named by path.",
+}
 GATED = {}
 INTERNAL_ENV = {
     "MOXI_REPO_COMMITTER": "set by the committer on its own commits, so a git hook piece "
