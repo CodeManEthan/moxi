@@ -4,8 +4,9 @@ them out; `pytest -m slow -s` runs them and shows what each measured.
 
 The corpus is built once per module, under the run's tmp, with sessions' testing
 builders: Claude main transcripts with their subagent files, a few sessions that repeat
-another's opening requests (so claims have work to do), and Codex rollouts, some of them
-imported, every request carrying its limits. Each file's mtime is its last line's time.
+another's opening requests (so claims have work to do), one long session whose main agent
+makes 6,000 requests across three compactions, and Codex rollouts, some of them imported,
+every request carrying its limits. Each file's mtime is its last line's time.
 The first pass over it is made once too; each test starts from a copy of that index.
 """
 
@@ -41,14 +42,22 @@ write_imports = sessions.testing.write_imports
 HOUR = 3600.0
 DAY = 86_400.0
 
-#: The corpus: Claude main transcripts, their subagent files, Codex rollouts (of which
-#: some are imported), and the Claude requests spread over the Claude files.
+#: The corpus: Claude main transcripts, their subagent files, one long session (below),
+#: Codex rollouts (of which some are imported), and the Claude requests spread over the
+#: Claude files.
 MAINS = 3_350
 SUBAGENTS = 4_600
 ROLLOUTS = 350
 IMPORTED = 140
-FILES = MAINS + SUBAGENTS + ROLLOUTS
+FILES = MAINS + SUBAGENTS + 1 + ROLLOUTS
 CLAUDE_REQUESTS = 276_000
+#: The long session: one main transcript of `LONG_REQUESTS` requests (of the Claude
+#: requests above) in `LONG_PARTS` runs with a compaction between each two, started
+#: `LONG_AGO` before now.
+LONG_SESSION = "0190b000-0000-7000-9000-000000006000"
+LONG_REQUESTS = 6_000
+LONG_PARTS = 4
+LONG_AGO = 10 * DAY
 #: Main sessions that open by repeating the first requests of an earlier session.
 REPEATS = 100
 #: How far back the corpus reaches.
@@ -168,7 +177,7 @@ def build(root: Path, now: float) -> Corpus:
     ids = iter(range(1, 10**9))
     start = time.perf_counter()
 
-    per_file = _split(CLAUDE_REQUESTS, MAINS + SUBAGENTS, rnd)
+    per_file = _split(CLAUDE_REQUESTS - LONG_REQUESTS, MAINS + SUBAGENTS, rnd)
     owners = sorted(rnd.randrange(MAINS) for _ in range(SUBAGENTS))
     children: dict[int, int] = {}
     for owner in owners:
@@ -197,6 +206,18 @@ def build(root: Path, now: float) -> Corpus:
         if n >= MAINS - GROWN * 7 and n % 7 == 0 and len(corpus.grow) < GROWN:
             corpus.grow.append(t)
         corpus.files += 1 + len(kids)
+
+    # its own random, so the files after it draw what they drew without it
+    long_rnd = random.Random(LONG_REQUESTS)
+    t = ClaudeTranscript(claude, session_id=LONG_SESSION, project="-work-long",
+                         cwd="/work/long", start=now - LONG_AGO, step=10.0)
+    for part in range(LONG_PARTS):
+        if part:
+            t.compaction(trigger="auto", pre_tokens=160_000)
+        _claude_requests(t, LONG_REQUESTS // LONG_PARTS, long_rnd, ids, CLAUDE_MODELS[0])
+    t.write()
+    _settle(t.path, t.clock - t.step)
+    corpus.files += 1
 
     imported = []
     picked = set(rnd.sample(range(ROLLOUTS), IMPORTED))
@@ -360,6 +381,54 @@ def test_a_30_day_daily_over_the_stored_claims_takes_under_300_ms(bench):
 
 
 @pytest.mark.timed
+@pytest.mark.parametrize("by", reports.TERMS_BY)
+def test_a_30_day_terms_takes_under_300_ms_by_any_key(bench, by):
+    since = bench.now - 30 * DAY
+    session = LONG_SESSION if by == "agent" else None   # by agent reads one session
+
+    def terms():
+        return reports.report("terms", since=since, by=by, session=session, fresh=False)
+
+    first = terms()
+    assert first.rows and all(row["groups"] for row in first.rows)
+    taken = median_ms(terms, 7)
+    print(f"\n30-day terms by {by}: {taken:.0f} ms through report(), {len(first.rows)} rows")
+    assert taken < 300
+
+
+@pytest.mark.timed
+def test_terms_over_all_time_by_model_takes_under_1_5_s(bench):
+    def terms():
+        return reports.report("terms", by="model", fresh=False)
+
+    first = terms()
+    models = reports.report("models", fresh=False)
+    assert {row["model"] for row in first.rows} == {row["model"] for row in models.rows}
+    assert first.total["requests"] == models.total["requests"] > 250_000
+    taken = median_ms(terms, 5)
+    print(f"\nterms by model over all time, {first.total['requests']} claimed requests: "
+          f"{taken:.0f} ms through report()")
+    assert taken < 1500
+
+
+@pytest.mark.timed
+def test_the_requests_of_an_agent_of_6000_requests_take_under_150_ms(bench):
+    def requests():
+        return reports.report("requests", session=LONG_SESSION, fresh=False)
+
+    first = requests()
+    assert [row["n"] for row in first.rows] == list(range(1, LONG_REQUESTS + 1))
+    assert all(row["split"] for row in first.rows)
+    assert [mark["after"] for mark in first.total["marks"]] == [
+        part * LONG_REQUESTS // LONG_PARTS for part in range(1, LONG_PARTS)]
+    assert first.total["turns"] and first.total["marks_known"]
+    taken = median_ms(requests, 7)
+    print(f"\nrequests of one agent, {len(first.rows)} rows, {first.total['turns']} turns, "
+          f"{len(first.total['marks'])} compactions: {taken:.0f} ms through report()")
+    assert taken < 150
+
+
+@pytest.mark.timed
 def test_the_status_over_the_corpus_takes_under_1_s(bench):
     # the index pass, `moxi usage status` and the doctor all print it; a query that reads
     # every claimed row once per file takes minutes here
@@ -458,6 +527,52 @@ def test_a_rebuild_on_4_workers_takes_under_half_of_one_workers(bench, monkeypat
               f"process: {parts}", end="")
     print(f"\nratio 4/1: {taken[4] / taken[1]:.2f}")
     assert taken[4] < taken[1] / 2
+
+
+def to_version_1() -> None:
+    """Take the test's index back to version 1, as usage 0.1.0 left it: no marks table,
+    no `files.marks_read`, no `requests.context_window`."""
+    conn = store.connect(create=False)
+    try:
+        conn.execute("DROP TABLE marks")
+        conn.execute("ALTER TABLE files DROP COLUMN marks_read")
+        conn.execute("ALTER TABLE requests DROP COLUMN context_window")
+        conn.execute("UPDATE meta SET value = '1' WHERE key = 'index_version'")
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _marks() -> int:
+    conn = store.connect(create=False)
+    try:
+        assert store.check(conn) == []
+        return conn.execute("SELECT count(*) FROM marks").fetchone()[0]
+    finally:
+        conn.close()
+
+
+@pytest.mark.timed
+def test_the_first_pass_after_the_upgrade_takes_under_1_2_times_a_rebuild(bench):
+    """The upgrade's pass is a rebuild that also writes the marks; both run with the
+    configured workers over the same files, already in the page cache."""
+    start = time.perf_counter()
+    rebuilt = _pass(bench, rebuild=True)
+    rebuild = time.perf_counter() - start
+    assert (rebuilt.read, rebuilt.excluded) == (FILES - IMPORTED, IMPORTED)
+    assert _marks() == LONG_PARTS - 1
+    to_version_1()
+    start = time.perf_counter()
+    upgraded = _pass(bench)
+    upgrade = time.perf_counter() - start
+    assert upgraded.migrated == (1, 2) and upgraded.rebuild
+    assert upgraded.read == FILES - IMPORTED
+    assert _marks() == LONG_PARTS - 1
+    print(f"\nrebuild ({rebuilt.workers} workers) {rebuild:.1f} s; the first pass after "
+          f"the upgrade ({upgraded.workers} workers) {upgrade:.1f} s; "
+          f"ratio {upgrade / rebuild:.2f}")
+    assert upgrade < 1.2 * rebuild
 
 
 @pytest.mark.timed
