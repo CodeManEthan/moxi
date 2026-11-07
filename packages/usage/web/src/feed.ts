@@ -94,14 +94,160 @@ export interface ModelRow extends RowSums {
   provenance: Provenance[];
 }
 
+/** One term of a price group's cost: a token class's tokens, the price they paid
+ * (dollars per million, null when unknown) and the dollars (null when unpriced). */
+export interface Term {
+  class: string;
+  tokens: number;
+  price: number | null;
+  cost: number | null;
+  /** `row`, `tier` or `tier-input`; null for a model the table doesn't know. */
+  price_from: string | null;
+  unknown: string[];
+}
+
+/** One price group of a cost-terms row: a line of the Reconcile table. */
+export interface Group {
+  model: string | null;
+  /** The requests' own provider, null where the harness gives none. */
+  provider: string | null;
+  tier: string | null;
+  above: number;
+  period: { from: string | null; to: string | null } | null;
+  provenance: Provenance;
+  requests: number;
+  terms: Term[];
+  cost: number | null;
+  unpriced_tokens: number;
+  unknown_rows: number;
+  rule: string | null;
+  why: string | null;
+  unknown: string[];
+}
+
+/** A cost's dollars for one token class under one price tier (null: the row's prices). */
+export interface SplitItem {
+  class: string;
+  tier: string | null;
+  tokens: number;
+  cost: number;
+}
+
+/** A row of `/api/terms`: its key is `model`, `period` or `agent`, as `by` says. */
+export interface TermsRow extends RowSums {
+  model: string | null;
+  period: string | null;
+  agent: string | null;
+  kind: string | null;
+  groups: Group[];
+  split: SplitItem[];
+}
+
+/** `/api/terms`' total. */
+export interface TermsTotal extends Sums {
+  split: SplitItem[];
+}
+
+/** A row of `/api/requests`: one request, `n` its place on the request axis. */
+export interface RequestRow {
+  n: number;
+  ts: number | null;
+  model: string | null;
+  tier: string | null;
+  turn: number | null;
+  turn_start: boolean;
+  /** The whole prompt; null when unknown. */
+  context: number | null;
+  window: number | null;
+  fresh_input: number;
+  cache_read: number;
+  cache_write_5m: number;
+  cache_write_1h: number;
+  output: number;
+  unknown: string[];
+  synthetic: boolean;
+  cost: number | null;
+  split: { class: string; cost: number | null }[];
+}
+
+/** A compaction, between request `after` and the next one. */
+export interface Mark {
+  after: number;
+  ts: number | null;
+  trigger: string | null;
+  pre_tokens: number | null;
+}
+
+/** `/api/requests`' total: the sums, the compactions, and what it can't show. */
+export interface RequestsTotal extends Sums {
+  marks: Mark[];
+  turns: number | null;
+  claimed_elsewhere: number;
+  copied_marks: number;
+  marks_known: boolean;
+}
+
+/** A price set: dollars per million tokens, null where unknown. */
+export interface PriceSet {
+  input: number | null;
+  output: number | null;
+  cache_read: number | null;
+  cache_write_5m: number | null;
+  cache_write_1h: number | null;
+}
+
+/** A tier's conditions. */
+export interface Conditions {
+  above_tokens: number | null;
+  service_tier: string | null;
+  speed: string | null;
+}
+
+/** One model's rates now, from `/api/prices`. */
+export interface Rate extends PriceSet {
+  model: string | null;
+  asked_provider: string | null;
+  window: number | null;
+  max_output: number | null;
+  provider: string | null;
+  tiers: { name: string; conditions: Conditions; prices: PriceSet; from_tier_input: string[]; from_row: string[] }[];
+  provenance: Provenance;
+  unknown: string[];
+}
+
+/** One `[[model]]` row of usage's config. */
+export interface Override {
+  id: string;
+  match: string;
+  prices: PriceSet;
+  window: number | null;
+  max_output: number | null;
+  tiers: { name: string; conditions: Conditions; prices: PriceSet }[];
+  provider: string | null;
+  from: string | null;
+  to: string | null;
+  note: string | null;
+}
+
+/** `/api/prices`. */
+export interface Prices {
+  effective_date: string | null;
+  rows: number;
+  layers: { layer: string; date: string | null; rows: number }[];
+  overrides: Override[];
+  problems: string[];
+  models: Rate[];
+  matched: number;
+}
+
 /** Every report route's answer: the rows, their total and the index's facts. */
-export interface Report<R> {
+export interface Report<R, T extends Sums = Sums> {
   since: number | null;
   until: number | null;
   tz: string;
   filters: { name: string; value: string }[];
   rows: R[];
-  total: Sums;
+  total: T;
   unpriced_models: string[];
   rules: string[];
   index: IndexFacts;
@@ -197,11 +343,18 @@ const isNumOrNull = (value: unknown): boolean => value === null || isNum(value);
 
 /** A report's value, or null when it isn't one. The server declares the shape, so only
  * what the page reads before drawing is checked. */
-export function parseReport<R>(data: unknown): Report<R> | null {
+export function parseReport<R, T extends Sums = Sums>(data: unknown): Report<R, T> | null {
   if (!isRow(data) || !isList(data.rows) || !data.rows.every(isRow)) return null;
   if (!isRow(data.total) || !isRow(data.index) || !isList(data.filters)) return null;
   if (!isList(data.unpriced_models) || typeof data.tz !== "string") return null;
-  return data as unknown as Report<R>;
+  return data as unknown as Report<R, T>;
+}
+
+/** `/api/prices`' value, or null. */
+export function parsePrices(data: unknown): Prices | null {
+  if (!isRow(data) || !isList(data.models) || !data.models.every(isRow)) return null;
+  if (!isList(data.layers) || !isList(data.overrides) || !isNum(data.matched)) return null;
+  return data as unknown as Prices;
 }
 
 /** `/api/status`'s value, or null. */

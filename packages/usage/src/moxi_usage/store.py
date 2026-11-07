@@ -8,9 +8,11 @@
 **Tables.** `files` holds one row per source the pass read (a transcript, a rollout, or one
 OpenCode session under the database's path), with its lane, rank, header facts, reuse
 keys and sessions' cursor. `requests` holds one row per request per file, keyed on
-`(file_id, key)`, with its token counts. An unknown count is NULL and its column is named
-in `unknown`; 0 means the harness wrote 0. `meta` holds `index_version`, the last pass and
-the lanes.
+`(file_id, key)`, with its token counts and the window the harness reported. An unknown
+count is NULL and its column is named in `unknown`; 0 means the harness wrote 0. `marks`
+holds the compaction markers the harness wrote, one row per `(file_id, seq, kind)`, and
+`files.marks_read` is 1 when the index holds every marker of the reads that gave the
+file's requests. `meta` holds `index_version`, the last pass and the lanes.
 
 **The claim.** One request can sit in several files: an archive copy of a transcript, a
 resumed session that repeats its parent's requests. Each key is counted once, by the copy
@@ -124,6 +126,22 @@ WHERE claim_n = 1;
 """
 
 
+#: Version 2: the window a harness reports per request, and its compaction markers. A
+#: row's `marks_read` starts at 0, so the next read of that source is from no cursor and
+#: brings in every marker; an excluded row holds no requests, so it is settled at once.
+SCHEMA_2 = """
+ALTER TABLE requests ADD COLUMN context_window INTEGER;
+ALTER TABLE files ADD COLUMN marks_read INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE marks (
+  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  ts REAL, trigger TEXT, pre_tokens INTEGER,
+  PRIMARY KEY (file_id, seq, kind)) WITHOUT ROWID;
+UPDATE files SET marks_read = 1 WHERE excluded IS NOT NULL;
+"""
+
+
 @dataclass(frozen=True)
 class Step:
     """One schema step. `drops` is true for a step that removes indexed rows, which
@@ -135,7 +153,7 @@ class Step:
 
 
 #: The schema steps, in order; the store's version is how many have run.
-STEPS: tuple[Step, ...] = (Step(SCHEMA_1),)
+STEPS: tuple[Step, ...] = (Step(SCHEMA_1), Step(SCHEMA_2))
 INDEX_VERSION = len(STEPS)
 
 
@@ -284,7 +302,7 @@ def all_meta(conn: sqlite3.Connection) -> dict[str, str]:
 FILE_COLUMNS = ("lane", "harness", "path", "part", "rank", "kind", "session_id", "agent_id",
                 "parent_session", "cwd", "title", "origin", "originator", "project", "size",
                 "mtime_ns", "dev", "ino", "cursor", "first_ts", "last_ts", "excluded",
-                "held", "read_at")
+                "held", "read_at", "marks_read")
 #: The columns that place a file in the claim's order or take it out of the claim.
 ORDER_COLUMNS = frozenset({"first_ts", "size", "rank", "path", "part", "excluded"})
 
@@ -411,6 +429,7 @@ class RequestRow(NamedTuple):
     turn_id: str | None
     agent_id: str | None
     unknown: str | None
+    context_window: int | None = None
 
 
 #: The token columns and the sessions `Request` field each is read from.
@@ -437,8 +456,9 @@ def request_row(request: Request, *, lane: str, path: str) -> RequestRow:
     `seq` orders the source's requests as sessions' `at` does: a file's request takes its
     line number; an OpenCode request (no line) takes its `start_time` in milliseconds,
     else its `time`, else 0. A token count sessions reports unknown, or as null, is NULL
-    and named in `unknown`; 0 stays 0. Every other unknown fact is NULL, and an unknown
-    `sidechain` or `synthetic` is 0.
+    and named in `unknown`; 0 stays 0. `context_window` is the window the harness
+    reported, when it gave a whole number. Every other unknown fact is NULL, and an
+    unknown `sidechain` or `synthetic` is 0.
     """
     unknown = [column for column, name in TOKEN_COLUMNS.items()
                if not _is_count(getattr(request, name))]
@@ -458,6 +478,7 @@ def request_row(request: Request, *, lane: str, path: str) -> RequestRow:
         turn_id=_text(request.turn_id),
         agent_id=_text(request.agent_id),
         unknown=",".join(unknown) or None,
+        context_window=_count(request.context_window),
     )
 
 
@@ -529,6 +550,70 @@ def delete_requests(conn: sqlite3.Connection, file_ids: Iterable[int], *,
         touched.update(file_keys(conn, file_id))
         count += conn.execute("DELETE FROM requests WHERE file_id = ?", (file_id,)).rowcount
     return count
+
+
+# --- marks ----------------------------------------------------------------------------
+
+#: The one marker kind the index keeps.
+COMPACTION = "compaction"
+
+
+class MarkRow(NamedTuple):
+    """One `marks` row, less its file: where it sits among the file's requests (`seq`, on
+    the same scale as theirs), its kind, its time and, for a compaction, its trigger and
+    the context it began with, each None when the harness did not say."""
+
+    seq: int
+    kind: str
+    ts: float | None
+    trigger: str | None
+    pre_tokens: int | None
+
+
+def mark_row(marker: Any, *, seq: int) -> MarkRow:
+    """The row a sessions compaction `Marker` becomes, at `seq`."""
+    fields = getattr(marker, "fields", None) or {}
+    return MarkRow(seq=seq, kind=COMPACTION, ts=_number(marker.time),
+                   trigger=_text(fields.get("trigger")),
+                   pre_tokens=_count(fields.get("pre_tokens")))
+
+
+def marker_line(marker: Any) -> int | None:
+    """A file's marker's line, the `seq` its row takes; None outside a file."""
+    line = marker.at.get("line") if marker.at else None
+    return line if isinstance(line, int) and not isinstance(line, bool) else None
+
+
+_UPSERT_MARK = ("INSERT INTO marks (file_id, seq, kind, ts, trigger, pre_tokens) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (file_id, seq, kind) DO UPDATE SET "
+                "ts = excluded.ts, trigger = excluded.trigger, "
+                "pre_tokens = excluded.pre_tokens")
+
+
+def upsert_marks(conn: sqlite3.Connection, file_id: int, marks: Iterable[MarkRow]) -> int:
+    """Write each mark under `file_id`, replacing one already at its `(seq, kind)`, so a
+    marker read twice leaves one row. Returns how many were written."""
+    _require_transaction(conn)
+    rows = [(file_id, *mark) for mark in marks]
+    conn.executemany(_UPSERT_MARK, rows)
+    return len(rows)
+
+
+def delete_marks(conn: sqlite3.Connection, file_ids: Iterable[int]) -> int:
+    """Delete every mark of the given files; the rows stay. Returns how many went."""
+    _require_transaction(conn)
+    count = 0
+    for file_id in set(file_ids):
+        count += conn.execute("DELETE FROM marks WHERE file_id = ?", (file_id,)).rowcount
+    return count
+
+
+def settle_marks(conn: sqlite3.Connection, *, lane: str) -> None:
+    """Every row of `lane` holds its markers: `marks_read = 1`, for a read of the lane's
+    one source from no cursor."""
+    _require_transaction(conn)
+    conn.execute("UPDATE files SET marks_read = 1 WHERE lane = ? AND marks_read != 1",
+                 (lane,))
 
 
 # --- the claim --------------------------------------------------------------------------
@@ -664,5 +749,6 @@ __all__ = [
     "cursor_meta_key", "get_meta", "set_meta", "all_meta",
     "get_file", "files", "upsert_file", "update_file", "delete_files", "file_keys",
     "request_row", "unknown_columns", "upsert_requests", "delete_requests",
-    "claim", "claim_all", "check",
+    "COMPACTION", "MarkRow", "mark_row", "marker_line", "upsert_marks", "delete_marks",
+    "settle_marks", "claim", "claim_all", "check",
 ]

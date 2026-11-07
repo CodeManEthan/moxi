@@ -491,6 +491,26 @@ def table(env: Mapping[str, str] | None = None) -> Table:
     return built
 
 
+def summary(current: Table) -> dict[str, Any]:
+    """What the table `current` is made of: its effective date, how many model ids it
+    answers for exactly, each layer (`{layer, date, rows}`, the snapshot's with its
+    `path`, the override layer's with each `[[model]]` row as `Override.as_dict()` gives
+    it), its prefix and variant rows, and the problems skipped when it was built."""
+    layers: list[dict[str, Any]] = [{"layer": SHIPPED_LAYER,
+                                     "date": current.dates.get(SHIPPED_LAYER),
+                                     "rows": len(current.shipped.get("models", {}))}]
+    if current.snapshot is not None:
+        layers.append({"layer": SNAPSHOT_LAYER, "date": current.dates.get(SNAPSHOT_LAYER),
+                       "rows": len(current.snapshot.get("models", {})),
+                       "path": str(snapshot_path())})
+    if current.overrides:
+        layers.append({"layer": OVERRIDE_LAYER, "rows": len(current.overrides),
+                       "overrides": [row.as_dict() for row in current.overrides]})
+    return {"effective_date": current.effective_date, "rows": len(current.rows),
+            "layers": layers, "prefixes": sorted(current.prefixes),
+            "variants": sorted(current.variants), "problems": list(current.problems)}
+
+
 def model_facts(model: Any, *, provider: Any = None, at: float | None = None,
                 env: Mapping[str, str] | None = None) -> ModelFacts:
     """`model`'s facts from the table in effect (`table`), by the ladder."""

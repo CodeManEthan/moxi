@@ -10,6 +10,8 @@ Model facts (`moxi_usage.models`):
 * `context_window(model, reported=None)`: the window the harness reported when it gave
   one, else the table's, else `UNKNOWN`.
 * `table()`: the table in effect (`Table`), for a caller that looks up many models.
+* `summary(table)`: what a table is made of: its effective date, its row count, each
+  layer with its date and rows, the config's `[[model]]` rows, and what was skipped.
 
 Limits (`moxi_usage.limits`):
 
@@ -50,16 +52,24 @@ The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
 Reports (`moxi_usage.reports`):
 
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
-  tz=None, fresh=True, session=None)`: tokens and cost from the token index, `kind`
-  one of `KINDS` (`daily`, `monthly`, `sessions`, `models`, `projects`, `session`), as a
-  `Report`. With `fresh` the index's pass runs first. `tz` is the zone days are cut in,
-  local time when None. Cost is worked out when the report runs; tokens the table cannot
-  price are counted in `unpriced_tokens`, never as $0. The `session` kind is one
-  session, the one `session` names (an id a `sessions` row gives, with `harness` to
-  tell two harnesses apart), by agent and model; it needs `session`, and every other
-  kind refuses it. The last kind, `status`, is the index itself: one row per lane with
-  its state, files, excluded, held and duplicate counts, and the last pass and schema
-  version in `total`; it takes only `harness`.
+  tz=None, fresh=True, session=None, by=None, agent=None)`: tokens and cost from the
+  token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`, `models`,
+  `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the index's
+  pass runs first. `tz` is the zone days are cut in, local time when None. Cost is worked out when
+  the report runs; tokens the table cannot price are counted in `unpriced_tokens`, never
+  as $0. The `session` kind is one session, the one `session` names (an id a `sessions`
+  row gives, with `harness` to tell two harnesses apart), by agent and model; it needs
+  `session`. The `terms` kind prints every term of each cost, by `model` (the default),
+  `day`, `month` or, with `session`, `agent` (`by`): each row's price groups with each
+  token class's tokens, price and dollars, and its cost split by class and price tier;
+  `session` alone narrows it to one session. The `requests` kind is one row per request
+  of one session's agent (`session`, which it needs, and `agent`, `main` by default):
+  its tokens by class, cost and its split, its context against the model's window, its
+  turn, and the agent's compactions placed between the rows. A keyword a kind does not
+  read is refused, so an unfiltered answer is never read as a filtered one.
+  The last kind, `status`, is the index itself: one row per lane with its state, files,
+  excluded, held and duplicate counts, and the last pass and schema version in `total`;
+  it takes only `harness`.
 
 `UNKNOWN` is sessions' sentinel: a fact the table does not know. It is neither None nor
 0, and refuses to be read as true or false, so an unknown price never turns into $0.
@@ -76,8 +86,8 @@ from typing import Any
 
 #: Each name's home module, under this package; `UNKNOWN` is sessions'.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("model_facts", "models", "context_window", "table", "ModelFacts",
-                     "Provenance", "Table", "STEPS"), "models"),
+    **dict.fromkeys(("model_facts", "models", "context_window", "table", "summary",
+                     "ModelFacts", "Provenance", "Table", "STEPS"), "models"),
     **dict.fromkeys(("limits", "Limits", "Row", "Pull"), "limits"),
     **dict.fromkeys(("report", "Report", "ReportError", "KINDS"), "reports"),
     **dict.fromkeys(("context", "Context"), "context"),

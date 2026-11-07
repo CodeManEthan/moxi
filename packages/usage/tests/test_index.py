@@ -830,7 +830,8 @@ def test_the_index_verb_runs_the_pass_and_checks_the_claims(roots, capsys):
     out = capsys.readouterr().out
     assert "1 read" in out and "agree" in out
     assert "claude           online   1 files, 2 requests" in out
-    assert "index: 1 files, 2 requests, 0 duplicates" in out and "version 1" in out
+    assert "index: 1 files, 2 requests, 0 duplicates" in out
+    assert f"version {store.INDEX_VERSION}" in out
 
     conn = store.connect()
     try:
@@ -974,3 +975,264 @@ def test_the_config_check_refuses_an_archive_root_usage_could_not_read(rows, pro
 
     with pytest.raises(ConfigError, match=problem):
         settings.check(rows)
+
+
+# --- index version 2: compactions and windows -------------------------------------------
+
+def to_version_1():
+    """Take the index back to version 1, as usage 0.1.0 left it."""
+    conn = store.connect()
+    try:
+        conn.execute("DROP TABLE marks")
+        conn.execute("ALTER TABLE files DROP COLUMN marks_read")
+        conn.execute("ALTER TABLE requests DROP COLUMN context_window")
+        conn.execute("UPDATE meta SET value = '1' WHERE key = 'index_version'")
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def marks(path=None):
+    sql = ("SELECT f.lane, f.path, f.part, m.seq, m.ts, m.trigger, m.pre_tokens FROM marks m"
+           " JOIN files f ON f.id = m.file_id")
+    if path is not None:
+        return rows(sql + " WHERE f.path = ? ORDER BY m.seq", str(path))
+    return rows(sql + " ORDER BY f.lane, f.path, f.part, m.seq")
+
+
+def harness_of(source):
+    """The harness of what a read hands sessions: a listing entry or a source."""
+    return getattr(source, "harness", None) or source.source.harness
+
+
+def flags(lane):
+    return {(row["path"], row["part"]): row["marks_read"] for row in files(lane)}
+
+
+def three_lanes(roots):
+    """A Claude transcript with a compaction, a Codex rollout with one, an imported
+    rollout, and an OpenCode session whose compaction message has its own request."""
+    t = transcript(roots["claude"], SESSION_A)
+    t.compaction(trigger="manual", pre_tokens=167_412)
+    t.user("after")
+    t.assistant("three", usage=usage(output=33))
+    t.write()
+    r = CodexRollout(roots["codex"], thread_id=THREAD_A)
+    r.turn()
+    r.user("go")
+    r.request(token_usage(output=40), response_id="resp_c1")
+    r.compaction("compacted")
+    r.compaction("context_compacted")
+    r.request(token_usage(output=41), response_id="resp_c2")
+    r.turn_end()
+    r.write()
+    skipped = CodexRollout(roots["codex"], thread_id=THREAD_B, imported=True)
+    skipped.turn()
+    skipped.request(token_usage(output=9))
+    skipped.write()
+    db = opencode(roots)
+    session = db.session()
+    session.user("go")
+    reply = session.assistant()
+    reply.step(output=40)
+    reply.complete()
+    summary = session.assistant(agent="compaction", summary=True)
+    summary.step(output=50)
+    summary.complete()
+    db.write()
+    return t, r, db, session
+
+
+def test_a_version_1_index_migrates_in_a_pass_that_runs_as_a_rebuild(readings, roots,
+                                                                      monkeypatch):
+    three_lanes(roots)
+    run(readings)
+    before = (files(), requests())
+    to_version_1()
+    conn = store.connect()
+    try:
+        assert store.migrate(conn).after == 2      # the step alone: no row lost
+        assert flags("codex") == {(path, ""): int(row["excluded"] is not None)
+                                  for path, row in ((r["path"], r) for r in files("codex"))}
+        assert set(flags("claude").values()) == {0} and marks() == []
+    finally:
+        conn.close()
+    to_version_1()
+    reads = []
+    real = sessions.records_since
+    monkeypatch.setattr(sessions, "records_since", lambda source, cursor, **kw: (
+        reads.append((harness_of(source), cursor)), real(source, cursor, **kw))[1])
+    result = run(readings)
+    assert result.migrated == (1, 2) and result.rebuild
+    assert [f["path"] for f in files()] == [f["path"] for f in before[0]]
+    assert requests() == before[1]
+    assert {lane: set(flags(lane).values()) for lane in ("claude", "codex", "opencode")} == {
+        "claude": {1}, "codex": {1}, "opencode": {1}}
+    assert {harness for harness, cursor in reads if cursor is not None} == set()
+    assert result.read == 3                       # the transcript, the rollout, the session
+
+    # a second pass reads nothing on any lane, and the imported rollout is reused
+    reads.clear()
+    again = run(readings)
+    assert again.read == 0 and again.reused == 3 and not again.rebuild
+    assert [h for h, cursor in reads if cursor is None] == []
+
+
+def test_each_harness_compaction_gives_one_mark_placed_after_its_requests(readings,
+                                                                          roots):
+    from moxi_usage import reports
+
+    t, r, db, session = three_lanes(roots)
+    run(readings)
+    (claude,) = marks(t.path)
+    assert (claude["trigger"], claude["pre_tokens"]) == ("manual", 167_412)
+    assert len(marks(r.path)) == 2                # two lines, merged by the report
+    (oc,) = marks(roots["opencode"])
+    own = max(req["seq"] for req in requests(roots["opencode"]))
+    assert oc["seq"] == own                       # its own compaction request's place
+    conn = store.connect()
+    try:
+        found = reports.requests(conn, session=session.id)
+        assert found.total["marks"][0]["after"] == 2 and found.total["marks_known"]
+        found = reports.requests(conn, session=THREAD_A)
+        assert len(found.total["marks"]) == 1 and found.total["marks"][0]["after"] == 1
+        found = reports.requests(conn, session=SESSION_A)
+        assert found.total["marks"][0]["after"] == 2 and found.total["turns"] == 3
+    finally:
+        conn.close()
+
+
+def test_an_opencode_compaction_keeps_its_place_on_a_read_from_the_cursor(readings, roots):
+    db = opencode(roots)
+    session = db.session()
+    session.user("go")
+    reply = session.assistant()
+    reply.step(output=40)
+    reply.complete()
+    db.write()
+    run(readings)
+    summary = session.assistant(agent="compaction", summary=True)   # no request of its own
+    db.write()
+    run(readings)
+    (first,) = marks(roots["opencode"])
+    summary.update({"summary": True})              # the message is read again, by cursor
+    db.write()
+    run(readings)
+    assert marks(roots["opencode"]) == [first]
+    run(readings, rebuild=True)                    # and a whole read gives the same seq
+    assert marks(roots["opencode"]) == [first]
+
+
+def test_a_lanes_pass_migrates_and_the_next_full_pass_reads_the_rest_from_no_cursor(
+        readings, roots, monkeypatch):
+    three_lanes(roots)
+    run(readings)
+    to_version_1()
+    result = run(readings, lanes=["claude"])
+    assert result.rebuild and set(flags("claude").values()) == {1}
+    codex = {row["excluded"]: row["marks_read"] for row in files("codex")}
+    assert codex == {None: 0, "imported": 1}
+    reads = []
+    real = sessions.records_since
+    monkeypatch.setattr(sessions, "records_since", lambda source, cursor, **kw: (
+        reads.append((harness_of(source), cursor)), real(source, cursor, **kw))[1])
+    after = run(readings)
+    assert not after.rebuild and ("codex", None) in reads and ("opencode", None) in reads
+    assert len(marks()) == 4 and {row["marks_read"] for row in files()} == {1}
+
+
+def test_a_new_opencode_session_read_from_the_cursor_is_settled(readings, roots):
+    db = opencode(roots)
+    first = db.session()
+    first.user("go")
+    first.assistant().step(output=40)
+    db.write()
+    run(readings)
+    later = db.session()
+    later.user("hi")
+    later.assistant().step(output=7)
+    db.write()
+    run(readings)
+    assert set(flags("opencode").values()) == {1}
+    assert run(readings).read == 0
+
+
+def test_an_opencode_gone_message_takes_its_mark_with_its_requests(readings, roots):
+    db = opencode(roots)
+    session = db.session()
+    session.user("go")
+    session.assistant().step(output=40)
+    summary = session.assistant(agent="compaction", summary=True)
+    summary.step(output=50)
+    db.write()
+    run(readings)
+    assert len(marks()) == 1
+    db.delete(summary.id)
+    db.write()
+    run(readings)
+    assert marks() == [] and [r["output"] for r in won()] == [40]
+
+
+def test_a_reset_drops_a_files_marks_and_a_reset_batch_drops_those_read_before_it(
+        readings, roots, monkeypatch):
+    t = transcript(roots["claude"], SESSION_A)
+    t.compaction()
+    t.user("after")
+    t.assistant("three", usage=usage(output=33))
+    t.write()
+    run(readings)
+    assert len(marks()) == 1
+    t.lines = t.lines[:2]                         # rewritten shorter, without it
+    t.write()
+    run(readings)
+    assert marks() == []
+
+    class Batch:
+        def __init__(self, records, *, reset, complete):
+            self.records, self.reset, self.complete = records, reset, complete
+            self.header, self.cursor = None, "c"
+
+    def marker(line):
+        return sessions.Marker(harness="claude", at={"line": line}, time=1.0,
+                               marker="compaction", fields={"trigger": "auto"})
+
+    batches = iter([Batch([marker(3)], reset=False, complete=False),
+                    Batch([marker(9)], reset=True, complete=True)])
+    monkeypatch.setattr(sessions, "records_since", lambda *a, **kw: next(batches))
+    got = index.read_source(index.Task("claude", "/p", None, None))
+    assert list(got.marks) == [(9, "compaction")] and got.reset
+
+
+def test_a_rollout_that_flips_to_imported_loses_its_marks_and_is_settled(readings, roots):
+    three_lanes(roots)
+    run(readings)
+    write_imports(roots["codex"], [THREAD_A])
+    run(readings)
+    row = {r["session_id"]: r for r in files("codex")}[THREAD_A]
+    assert row["excluded"] == "imported" and row["marks_read"] == 1
+    assert marks(row["path"]) == []
+    assert run(readings).read == 0
+
+
+def test_a_held_archive_file_keeps_0_and_its_marks_are_not_known(readings, tmp_path):
+    from moxi_usage import reports
+
+    archive = tmp_path / "old-machine"
+    transcript(archive / "projects", SESSION_A).write()
+    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "old"\n')
+    run(readings)
+    to_version_1()
+    shutil.move(archive / "projects", tmp_path / "away")
+    (archive / "projects").mkdir()                # the archive lists empty: held
+    result = run(readings)
+    assert result.rebuild
+    [row] = files("archive:old")
+    assert row["held"] and row["marks_read"] == 0
+    conn = store.connect()
+    try:
+        found = reports.requests(conn, session=SESSION_A)
+        assert found.total["requests"] == 2 and found.total["marks_known"] is False
+    finally:
+        conn.close()
+    assert cli.main(["index", "--check", "--no-wait"]) == 0

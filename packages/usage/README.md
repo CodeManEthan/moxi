@@ -149,6 +149,18 @@ and its subagents together; `models` shows where each price came from; `projects
 by the project each session was recorded under, or by its directory when none was.
 `--since` and `--until` are dates, both included.
 
+    moxi usage terms [--by model|day|month|agent] [--session ID] [common flags]
+    moxi usage requests SESSION [--agent ID] [common flags]
+
+`terms` prints every term of each cost: for each price group (a model, provider, price
+tier, prompt-size bound and price period), the tokens of fresh input, cache read, the two
+cache writes and output, the price each paid and the dollars, which add up to the cost. By
+model it is a reconciliation table; by day, month or (with `--session`) a session's agents
+it gives cost by token class and by price tier. `requests` gives one line per request of a
+session's agent (`main` unless `--agent` names another): its tokens by class, cost,
+context against the model's window, its turn, and a line where a compaction fell. It
+exits 1 when no request of that agent is in range.
+
 Cost is worked out when the report runs, from the model table, so a new price or a
 `[[model]]` row applies to past requests too, each priced on its own time when the row has
 a price period. Tiers apply as the table gives them: a long prompt's price, a priority or
@@ -304,12 +316,20 @@ the keys that differ.
 
 With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there: tokens and cost by day or month, by session (each session split
 by agent and model), by project and by model with where its price came from, with the
-limits meters and a strip about the index above them. Two blocks go on the shell's home
+limits meters and a strip about the index above them. The Cost terms view gives each
+model's cost split by class and tier, the Reconcile table (every term of each price group,
+a subtotal per model of several groups, and the total) and a Rates section with the rates
+of the models in use and a search over the whole model table. The daily view can stack
+cost by class. A session's view charts its main agent's requests, or any agent's, on one
+request axis: tokens or cost by class per request, and the context against the window,
+with turn and compaction marks. Two blocks go on the shell's home
 view: the limits, one meter per window, and the cost of today and the last 7 days, with
 how old the index behind it is, flagged once its last pass is over 10 minutes old. Without
 the extra, nothing of usage changes.
 
-The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
+Its reads include `GET /api/terms` (the `terms` report), `GET /api/requests` (the
+`requests` report) and `GET /api/prices` (the model table's rates, for some models or a
+search; it reads no index). The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
 "Read new sessions" runs one in the page server, which the page also asks for when it opens
 and the last pass is over 10 minutes old. With no index yet, or one an older usage wrote,
 the page says to run `moxi usage index`, and it builds or migrates nothing itself. Days are
