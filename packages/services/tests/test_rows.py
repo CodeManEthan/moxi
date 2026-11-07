@@ -55,7 +55,8 @@ def test_is_user_names_only_the_services_half():
     ("web.service", "systemd", False, "daemon"),
     ("com.example.web", "launchd", False, "daemon"),
     ("com.example.nightly", "launchd", True, "timer"),
-    ("\\Backups\\nightly", "schtasks", False, "timer"),
+    ("\\Backups\\nightly", "schtasks", True, "timer"),
+    ("\\X\\y", "schtasks", False, "daemon"),
 ])
 def test_a_foreign_unit_takes_its_kind(ref, backend, timer, kind):
     assert rows.check_ref(ref, backend, timer=timer) == kind

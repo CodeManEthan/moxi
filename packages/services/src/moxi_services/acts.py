@@ -14,8 +14,10 @@ writer, `moxi.units`, does the rest):
 - a written row N: `units.<act>("services", [N])`; enable and disable set the store's
   flag, then `apply(plan("services", only=[N]))`; add writes the row, then its unit;
   remove takes the unit, then the row.
-- an adopted row N of unit REF: `units.<act>("services", [REF], foreign=True)`, enable
-  and disable included, after the flag; an adopted Linux timer's on/off is its key
+- an adopted row N of unit REF: `units.<act>("services", [REF], foreign=True,
+  kinds={REF: <its kind>})`, enable and disable included, after the flag (only Task
+  Scheduler reads the kind; a task adopted without --timer is a daemon there, judged by
+  whether its process runs); an adopted Linux timer's on/off is its key
   `adopted.N` in services' config instead. add records the row and makes the unit match
   it; remove forgets the row and leaves the unit as it was.
 
@@ -266,6 +268,12 @@ def _check_enabled(row: Row, on: bool, lines: list[str], *, wrapped: bool = Fals
     raise _Done(moxi.exit.ERROR, (), _log_fix(st))
 
 
+def _kinds(row: UserRow) -> dict[str, str]:
+    """The `kinds` an adopted row's acts pass: its unit read as the row's kind. Only Task
+    Scheduler reads it, where a task doesn't say its own kind."""
+    return {row.unit: row.kind}
+
+
 def _word(on: bool) -> str:
     return "on" if on else "off"
 
@@ -328,7 +336,8 @@ def _run_body(ident: str, act: str, *, by: str, lines: list[str]):
             if row.form == "written":
                 ok = _acted(call(MODULE, [row.name]), lines)
             else:
-                ok = _acted(call(MODULE, [row.unit], foreign=True), lines)
+                ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)),
+                            lines)
     if not ok:
         return moxi.exit.ERROR, None
     if row.kind == "daemon":
@@ -417,7 +426,7 @@ def _switch_adopted(row: UserRow, on: bool, by: str, lines: list[str]):
     with _locked():
         _set_flag(row, on, by)
         call = units.enable if on else units.disable
-        ok = _acted(call(MODULE, [row.unit], foreign=True), lines)
+        ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)), lines)
     if not ok:
         return moxi.exit.ERROR, f"moxi services {'enable' if on else 'disable'} {row.name}"
     return _check_enabled(row, on, lines), None
@@ -437,7 +446,8 @@ def _switch_wrapped(row: UserRow, on: bool, by: str, lines: list[str]):
         if on:
             st = state.read_one(row)
             if st is not None and st.enabled is False:
-                if not _acted(units.enable(MODULE, [row.unit], foreign=True), lines):
+                if not _acted(units.enable(MODULE, [row.unit], foreign=True,
+                                           kinds=_kinds(row)), lines):
                     return moxi.exit.ERROR, retry
     return _check_enabled(row, on, lines, wrapped=True), None
 
@@ -597,7 +607,8 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
     # Other rows' timers here are read with the REF, in the same status call, for what
     # their Triggers name.
     timers = _timers(name) if backend == "systemd" else []
-    read = {s.name: s for s in units.status([], foreign=[ref, *timers])}
+    kinds = {ref: kind}
+    read = {s.name: s for s in units.status([], foreign=[ref, *timers], kinds=kinds)}
     st = read.get(ref)
     triggers = {unit: read[unit].triggers for unit in timers if unit in read}
     _held(name, ref, st, triggers)
@@ -619,13 +630,14 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
             if not _set_key(probe, enable, by, lines):
                 return moxi.exit.ERROR, retry
             if enable and st.enabled is False:
-                if not _acted(units.enable(MODULE, [ref], foreign=True), lines):
+                if not _acted(units.enable(MODULE, [ref], foreign=True, kinds=kinds),
+                              lines):
                     return moxi.exit.ERROR, retry
         else:
             call = units.enable if enable else units.disable
-            if not _acted(call(MODULE, [ref], foreign=True), lines):
+            if not _acted(call(MODULE, [ref], foreign=True, kinds=kinds), lines):
                 return moxi.exit.ERROR, retry
-    lines.append(f"{rows.row_id(MODULE, name)} adopts {ref}, {_word(enable)}")
+    lines.append(f"{rows.row_id(MODULE, name)} adopts {ref} as a {kind}, {_word(enable)}")
     return _check_enabled(store.get(name), enable, lines, wrapped=wrapped), None
 
 
@@ -701,8 +713,21 @@ def _adoptable(ref: str, kind: str, st: units.UnitState | None,
                       + (f" ({st.detail})" if st.detail else "")
                       + ", so a row could not record it", None)
     if enable is None:
-        raise Usage(f"{ref}: {_reads(kind, st)}; adopt it with --enable to keep it on, "
-                    "or --disable to turn it off", None)
+        raise Usage(f"{ref}: {_reads(kind, st)}; {_how(kind, st)}", None)
+
+
+def _how(kind: str, st: units.UnitState) -> str:
+    """How to adopt a unit, for the usage line. On Task Scheduler it names the kind the
+    task is adopted as and what that means, since a task doesn't say its kind and a
+    daemon is the default there."""
+    if st.backend != "schtasks":
+        return "adopt it with --enable to keep it on, or --disable to turn it off"
+    if kind == "daemon":
+        return ("adopt it as a daemon (judged by whether its process runs; --enable also "
+                "starts it now) with --enable or --disable, or add --timer for a "
+                "scheduled task or one whose action starts a program and exits")
+    return ("adopt it as a timer (judged by its schedule and last run) with --enable to "
+            "keep it on, or --disable to turn it off")
 
 
 def _reads(kind: str, st: units.UnitState) -> str:
@@ -714,7 +739,11 @@ def _reads(kind: str, st: units.UnitState) -> str:
             return f"{said}, no run known"
         return f"{said}, last run {'failed, ' if last.failed else ''}{last.text}"
     said = "starts at login" if st.enabled else "does not start at login"
-    return f"{said}, {'running' if st.state == 'active' else st.state}"
+    if st.state == "active":
+        return f"{said}, running"
+    if st.state == "inactive":
+        return f"{said}, not running"
+    return f"{said}, not running ({st.state}" + (f": {st.detail})" if st.detail else ")")
 
 
 def _wrap_refused(row: UserRow, lines: list[str]) -> int:
@@ -829,7 +858,8 @@ def _remove_wrapped(row: UserRow, by: str, lines: list[str]):
                 lines.append(f"{row.unit} is gone from the supervisor, so there is no "
                              "schedule to disable")
             else:
-                acted = units.disable(MODULE, [row.unit], foreign=True)
+                acted = units.disable(MODULE, [row.unit], foreign=True,
+                                      kinds=_kinds(row))
                 lines.append(f"{row.unit}: its key was off, so its schedule is disabled "
                              "first; without the gate it would run")
                 if not _acted(acted, lines):

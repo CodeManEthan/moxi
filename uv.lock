@@ -750,7 +750,7 @@ wheels = [
 
 [[package]]
 name = "moxi"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/moxi" }
 dependencies = [
     { name = "psutil" },
@@ -1231,7 +1231,7 @@ dev = [
 
 [[package]]
 name = "moxi-services"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/services" }
 dependencies = [
     { name = "moxi" },
