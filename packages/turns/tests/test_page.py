@@ -579,15 +579,19 @@ def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypa
             await asyncio.to_thread(watched, ep)
             failing.set()
             fake.start_turn()
-            data = await stream.until(lambda d: row_of(d, key)["read_error"] is not None, 1.5)
+            # A read pass can be under way on either side of each step here: one the watch
+            # queued before the turn opened can fail on agents while facts still say turn 0,
+            # and one the opening queued can read agents again after `failing` clears while
+            # the turn is still open. So each wait is for the error and the turn together.
+            data = await stream.until(lambda d: row_of(d, key)["read_error"] is not None
+                                      and turn(d, key) == (1, True), 5)
             assert row_of(data, key)["read_error"] == (
                 "turns could not read this session's agents; what is shown may be old")
             assert row_of(data, key)["agents"] == {"entries": [], "complete": True}
-            assert turn(data, key) == (1, True)
             failing.clear()
             fake.end_turn()
-            data = await stream.until(lambda d: row_of(d, key)["read_error"] is None, 1.5)
-            assert turn(data, key) == (1, False)
+            await stream.until(lambda d: row_of(d, key)["read_error"] is None
+                               and turn(d, key) == (1, False), 5)
         finally:
             await stream.close()
 

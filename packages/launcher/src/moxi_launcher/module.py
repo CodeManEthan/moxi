@@ -7,8 +7,10 @@ browser UI shell starts and loopback stops when idle. Every other Moxi module it
 is an optional link, asked through `moxi.modules.load` where the feature needs it.
 """
 
-#: The API module: `launch`, `check` and `preview`. No interface number is offered yet.
-INTERFACES = frozenset()
+#: The API module: `launch`, `check` and `preview`. Interface 1 is `launch_kind` and
+#: `launch_kinds`: the launch kind (`scratch`, `seat`, `project` or `one-off`) of a
+#: session the launcher started, read from the launch log by session id.
+INTERFACES = frozenset({1})
 API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
 CLI = "moxi_launcher.cli:main"
