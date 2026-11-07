@@ -55,9 +55,6 @@ def w(site, tmp_path, monkeypatch):
     console_script(scripts, "moxi-demo-shell")
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
     monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
-    # Nothing listens on a port here unless a test says so: the plan's connect never
-    # reaches this machine's own listeners.
-    monkeypatch.setattr(_plan, "answers", lambda address, port, timeout=0.5: False)
     root = tmp_path / "units"
     root.mkdir()
     supervisor = FakeSupervisor(root)

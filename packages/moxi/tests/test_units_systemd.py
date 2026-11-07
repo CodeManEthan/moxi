@@ -393,9 +393,6 @@ def w(site, tmp_path, unit_root, bin_dir, monkeypatch):
     sup = FakeSupervisor(unit_root, linger=True)
     lines: list[str] = []
     monkeypatch.setattr(_systemd, "_user", lambda: "ana")
-    # Nothing listens on a port here unless a test says so: the plan's connect never
-    # reaches this machine's own listeners.
-    monkeypatch.setattr(units._plan, "answers", lambda address, port, timeout=0.5: False)
 
     def module(name="demo", **names):
         pkg = f"moxi_{name}"

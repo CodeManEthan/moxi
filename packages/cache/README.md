@@ -57,9 +57,11 @@ the other modules.
 
 ## Dependencies
 
-`moxi`, Moxi's core, and `moxi-sessions`. cache has no optional extras. The watcher lists
+`moxi`, Moxi's core, and `moxi-sessions`. One optional extra, `ui`, shows cache's panel
+and its chip in the browser UI shell (`moxi install cache --with ui`). The watcher lists
 live sessions with Claude Code's `claude agents --json`, so it needs `claude` on PATH or
-at `~/.local/bin/claude`, and the watcher's unit needs a systemd user manager.
+at `~/.local/bin/claude`. Its unit is written by the core, so it needs a supervisor the
+core writes units for: a systemd user manager, launchd or Task Scheduler.
 
 ## License
 

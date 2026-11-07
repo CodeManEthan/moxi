@@ -1131,7 +1131,6 @@ def _copy(item: Item, source: str, key: str, owner: str) -> None:
         raise
 
 
-
 def _own_writable(root: str) -> None:
     """Give the owner write access to each folder and file of a fresh copy. A source in a
     read-only install copies read-only, and its owner could then neither write a volatile

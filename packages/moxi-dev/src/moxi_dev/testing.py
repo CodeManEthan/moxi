@@ -108,9 +108,9 @@ port, another run's server) never decides a test. A test that wants a listener s
 either says so through its own stand-in or is marked `honest_ports` and listens for real.
 
 Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding`,
-`timed`, `honest_fsync` and `honest_ports`. A package's `addopts` deselects the four tiers in `TIERS`; a
-`live` test also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it
-is skipped.
+`timed`, `honest_fsync` and `honest_ports`. A package's `addopts` deselects the four
+tiers in `TIERS`; a `live` test also needs `MOXI_TEST_LIVE=1` in the environment pytest
+starts with, else it is skipped.
 
 Timed tests. A test that asserts a wall-clock budget (a median under so many
 milliseconds, an import under its share of a hook's ceiling) is marked `timed`, whatever
