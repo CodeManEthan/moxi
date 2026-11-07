@@ -40,8 +40,21 @@ would run in a terminal, and refuses where that command refuses, before it makes
 
 - **Where this page acts.** The store file the page reads and writes, and the git a create
   would run, or none. Both are the shell's, found from the environment the shell was
-  started with, and can differ from your terminal's. The page doesn't compare them with
-  anything: a different store shows as a different list and path.
+  started with, and can differ from your terminal's.
+- **The page writes only where your terminal does.** When you type a `moxi` command in a
+  terminal of your own, Moxi records the environment variables that place its folders
+  (projects records nothing itself; `moxi paths moxi` names the file). Before every
+  change, the page places each folder the change reads or writes twice, once from that
+  record and once from the shell's environment, and refuses while any differs: the store
+  file, your home folder, and for an add, a set or a remove the data, state and config
+  folders of each module that contributes to projects (services' and notes', say). It
+  refuses too while nothing is recorded yet. The refusal names what differs, the variables
+  to set for the browser shell and their values in your terminal, where to set them so
+  the shell has them at every login, and the step that restarts it; or run the command in
+  a terminal. The same line shows as a note under "Where this page acts", and the list
+  still reads. Commands in a terminal never refuse over the record. The check is ui's, so
+  the page needs a `moxi-ui` that offers it; with an older one every change is refused
+  with the step that updates it.
 - **The list.** Every project with its key, kind and root, filtered by kind as `moxi
   projects list --kind` filters it. A contribution that won't load, or a kind that is
   blocked, is named beside the filter until it is repaired or uninstalled. While a

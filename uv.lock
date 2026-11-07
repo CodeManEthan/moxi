@@ -1004,7 +1004,7 @@ dev = [
 
 [[package]]
 name = "moxi-loadout"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/loadout" }
 dependencies = [
     { name = "moxi" },
@@ -1119,7 +1119,7 @@ dev = [
 
 [[package]]
 name = "moxi-projects"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/projects" }
 dependencies = [
     { name = "moxi" },

@@ -2,7 +2,10 @@
 //
 // - The store file and the git the page server acts with, as `/api/where` gives them. The
 //   server takes the browser shell's environment, not the terminal's, so these can differ
-//   from what `moxi projects` uses in a terminal; the page shows them and compares nothing.
+//   from what `moxi projects` uses in a terminal. Before every change the server compares
+//   the folders the change reads or writes (the store, the home folder, a contribution's
+//   folders) with where the user's last run in a terminal placed them, and refuses while
+//   any differs or nothing is recorded; the same line shows here as a note.
 // - The list, by key, with a kind filter (read through `/api/projects?kind=`) and, beside
 //   it, every contribution or kind that can't be used until it is fixed: a module that
 //   won't load blocks a remove and an add or set of a kind no loaded module declares, and
@@ -53,6 +56,7 @@ const STYLES = [BASE, css`
   section[data-part="add"] > div { min-width: 0; }
   .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
   .bar label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+  .note { margin: 0; padding-left: 8px; border-left: 3px solid var(--moxi-warn); overflow-wrap: anywhere; }
   .broken { padding-left: 8px; border-left: 3px solid var(--moxi-error); font-size: var(--moxi-font-size-sm); }
   ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
   .project { display: grid; gap: 6px; min-width: 0; padding: 4px 0 4px 8px; border-left: 3px solid var(--moxi-border); }
@@ -296,6 +300,7 @@ export class ProjectsPage extends LitElement {
         <p>Git: ${view.git !== null ? html`<code data-line="git">${view.git}</code>`
           : html`<span class="warn" data-line="git">${NO_GIT}</span>`}</p>
         <p class="dim">${WHERE_LINE}</p>` : nothing}
+      ${view.note !== null ? html`<p class="note" data-line="note" role="status">${view.note}</p>` : nothing}
       ${view.line !== null ? html`<p class="problem" data-line="failed">${view.line}</p>` : nothing}
     </section>`;
   }

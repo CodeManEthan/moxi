@@ -1,11 +1,11 @@
 [project]
 name = "moxi-loadout"
-version = "0.1.0"
+version = "0.1.1"
 description = "Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode."
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1,<0.2", "pyyaml>=6.0,<7"]
+dependencies = ["moxi>=0.1.4,<0.2", "pyyaml>=6.0,<7"]
 
 [project.optional-dependencies]
 # Project sections named by key: loadout resolves a key to its root through projects'
@@ -16,7 +16,7 @@ projects = ["moxi-projects>=0.1,<0.2"]
 repo = ["moxi-repo>=0.1,<0.2"]
 # The browser UI shell: with it, loadout's page shows there. Loopback, which loadout's
 # page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+ui = ["moxi-ui>=0.1.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

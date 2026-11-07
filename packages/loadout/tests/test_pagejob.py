@@ -1,11 +1,10 @@
-"""Page jobs and the harness homes: an act from the page runs as the same verb in a
-terminal, or refuses before writing; its record always ends."""
+"""Page jobs: an act from the page runs as the same verb in a terminal, or refuses before
+writing; its record always ends. What the check compares is `test_homes.py`'s."""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -32,11 +31,11 @@ def page(monkeypatch):
     monkeypatch.setenv(homes.MARKER, "test")
 
 
-def recorded_homes(monkeypatch) -> dict:
-    """Run the user's own install once, which records the homes; return them."""
-    monkeypatch.delenv(homes.MARKER, raising=False)
-    assert install.install().code == 0
-    return ledger.read()[homes.KEY]
+@pytest.fixture
+def recorded(terminal_record):
+    """Moxi's record of the terminal, made from this process's environment, as a command
+    typed in the user's own terminal makes it."""
+    return terminal_record()
 
 
 def end(job: str) -> dict:
@@ -54,66 +53,14 @@ GLOBS = ("packages/loadout/src/moxi_loadout/homes.py",
          "packages/loadout/tests/test_pagejob.py")
 
 
-def hide_git(monkeypatch):
-    real = shutil.which
-    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: None if n == "git"
-                        else real(n, *a, **k))
-
-
-@pytest.mark.parametrize("variable, harness_name", [
-    ("CLAUDE_CONFIG_DIR", "Claude Code"), ("CODEX_HOME", "Codex"),
-    ("XDG_CONFIG_HOME", "OpenCode"), ("HOME", "the home folder")])
-def test_a_job_under_another_home_is_refused_with_nothing_written(
-        lo, monkeypatch, tmp_path, page, variable, harness_name):
-    recorded_homes(monkeypatch)
-    before_ledger = ledger.read()
-    before = manifest_bytes(lo)
-    monkeypatch.setenv(variable, str(tmp_path / "elsewhere"))
-    assert pagejob.run("j1", ["add", "skill", "review"]) == 3
-    record = end("j1")
-    assert record["exit"] == 3 and record["outcome"] is None
-    [line] = record["lines"]
-    assert harness_name in line and variable in line and str(tmp_path / "elsewhere") in line
-    assert "moxi ui stop" in line and "terminal" in line
-    assert manifest_bytes(lo) == before
-    assert ledger.read() == before_ledger
-    assert not (kit.claude() / "review").exists()
-
-
-def test_a_job_whose_path_has_no_git_is_refused_when_the_terminals_had_it(
-        lo, monkeypatch, page):
-    recorded_homes(monkeypatch)
-    assert ledger.read()[homes.GIT] is True
-    before_ledger = ledger.read()
-    before = manifest_bytes(lo)
-    hide_git(monkeypatch)
-    assert pagejob.run("j1", ["add", "skill", "review"]) == 3
-    [line] = end("j1")["lines"]
-    assert "git isn't on PATH here, but the last run in a terminal found it" in line
-    assert "Set PATH, with git's folder on it," in line and "moxi ui stop" in line
-    assert manifest_bytes(lo) == before
-    assert ledger.read() == before_ledger
-    assert not (kit.claude() / "review").exists()
-
-
-def test_a_job_with_git_runs_when_the_terminal_had_none(lo, monkeypatch, page):
-    real = shutil.which
-    hide_git(monkeypatch)
-    recorded_homes(monkeypatch)
-    monkeypatch.setattr(shutil, "which", real)
-    monkeypatch.setenv(homes.MARKER, "test")
-    assert pagejob.run("j1", ["add", "skill", "review"]) == 0
-
-
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
 def test_a_job_with_no_git_places_nothing_in_a_project_work_tree(
-        lo, monkeypatch, tmp_path, page):
+        lo, monkeypatch, tmp_path, page, recorded):
     root = tmp_path / "app"
     root.mkdir()
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
     kit.manifest(lo, f'[user]\n[project."{root}"]\nskills = []\n')
-    recorded_homes(monkeypatch)
     before = manifest_bytes(lo)
     before_ledger = ledger.read()
     # The job's PATH holds the fake CLIs and nothing else: no git.
@@ -128,50 +75,48 @@ def test_a_job_with_no_git_places_nothing_in_a_project_work_tree(
     assert sorted(p.name for p in root.iterdir()) == [".git"]
 
 
-def test_a_job_with_no_record_of_the_homes_is_refused(lo, page):
+def test_a_job_with_no_record_is_refused(lo, page):
     before = manifest_bytes(lo)
     assert pagejob.run("j1", ["add", "skill", "review"]) == 3
     [line] = end("j1")["lines"]
-    assert "moxi loadout install once in a terminal" in line
+    assert "Moxi has no record of the environment your terminal uses" in line
     assert manifest_bytes(lo) == before
     assert not (kit.claude() / "review").exists()
 
 
-def test_a_job_runs_the_verb_and_writes_its_outcome(lo, monkeypatch, page):
-    first = recorded_homes(monkeypatch)
-    monkeypatch.setenv(homes.MARKER, "test")
+def test_a_job_runs_the_verb_and_writes_its_outcome(lo, page, recorded):
     assert pagejob.run("j1", ["add", "skill", "review"]) == 0
     record = end("j1")
     assert record["exit"] == 0 and record["outcome"]["exit"] == 0
     assert "listed skill review in user" in record["outcome"]["lines"]
     assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
     assert os.environ[homes.MARKER] == pagejob.CALLER
-    assert ledger.read()[homes.KEY] == first
+    assert not {"homes", "git"} & set(ledger.read())
     assert pagejob.read("j1")["state"] == "done"
 
 
-def test_a_job_that_fails_writes_exit_1(lo, monkeypatch, page):
-    recorded_homes(monkeypatch)
-    monkeypatch.setenv(homes.MARKER, "test")
+def test_a_job_that_fails_writes_exit_1(lo, page, recorded):
     kit.manifest(lo, '[user]\nskills = ["nowhere"]\n')
     assert pagejob.run("j1", ["install"]) == 1
     record = end("j1")
     assert record["exit"] == 1 and record["outcome"]["exit"] == 1
 
 
-def test_an_error_in_the_check_is_written_as_exit_1(lo, page):
-    from moxi_loadout import stores
+def test_an_error_in_the_check_is_written_as_exit_1(lo, page, recorded):
+    from moxi import paths
 
-    stores.state_dir(create=True)
-    stores.ledger_path().write_text("not json")
-    assert pagejob.run("j1", ["install"]) == 1
+    # Moxi's settings file, which places the harness rows' folders, doesn't read.
+    settings = paths.core().config_file()
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text("harnesses = [\n")
+    before = manifest_bytes(lo)
+    assert pagejob.run("j1", ["add", "skill", "review"]) == 1
     [line] = end("j1")["lines"]
-    assert "ledger.json" in line and "can't be read" in line
+    assert line.startswith("loadout: the page job failed:") and str(settings) in line
+    assert manifest_bytes(lo) == before
 
 
-def test_an_error_outside_the_cli_is_written_as_exit_1(lo, monkeypatch, page):
-    recorded_homes(monkeypatch)
-    monkeypatch.setenv(homes.MARKER, "test")
+def test_an_error_outside_the_cli_is_written_as_exit_1(lo, monkeypatch, page, recorded):
 
     def broken(argv=None, **kw):
         raise RuntimeError("sample failure")
@@ -197,9 +142,7 @@ with files.lock(paths.core_lock()):
 
 
 def test_a_job_that_waits_past_the_core_lock_exits_75_with_the_waiting_line(
-        lo, monkeypatch, page):
-    recorded_homes(monkeypatch)
-    monkeypatch.setenv(homes.MARKER, "test")
+        lo, monkeypatch, page, recorded):
     monkeypatch.setattr(install, "CORE_WAIT", 0.3)
     holder = subprocess.Popen([sys.executable, "-c", HOLD], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, text=True)
@@ -215,13 +158,12 @@ def test_a_job_that_waits_past_the_core_lock_exits_75_with_the_waiting_line(
                for line in record["outcome"]["lines"]), record
 
 
-def test_a_job_with_no_claude_on_path_writes_the_rest(lo, monkeypatch, page):
+def test_a_job_with_no_claude_on_path_writes_the_rest(lo, monkeypatch, page, recorded):
     import shutil
 
-    recorded_homes(monkeypatch)
-    monkeypatch.setenv(homes.MARKER, "test")
     real = shutil.which
-    monkeypatch.setattr(shutil, "which", lambda n: None if n == "claude" else real(n))
+    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: None if n == "claude"
+                        else real(n, *a, **k))
     kit.manifest(lo, '[user]\nskills = ["review"]\nmcp = ["docs"]\n'
                      '[mcp.docs]\ncommand = "uvx"\n')
     pagejob.run("j1", ["install"])
@@ -373,8 +315,7 @@ def test_a_record_with_its_end_reads_done(lo):
     assert pagejob.read("../j1") is None
 
 
-def test_a_spawned_job_runs_to_its_end(lo, monkeypatch):
-    recorded_homes(monkeypatch)
+def test_a_spawned_job_runs_to_its_end(lo, recorded):
     started = pagejob.start(["add", "skill", "review"])
     deadline = time.monotonic() + 60
     while (found := pagejob.read(started.job))["state"] == "running":
