@@ -479,6 +479,13 @@ def test_install_refuses_a_bad_name_or_a_verb(fake, capsys):
     assert "a name moxi keeps for itself" in moxi_install(capsys, "installs")[2]
 
 
+def test_install_refuses_test_saying_why(fake, capsys):
+    code, _, err = moxi_install(capsys, "test")
+    assert code == 1 and fake.runs == []
+    assert ("'test' is a name moxi keeps for itself, not a module: its variables would "
+            "start MOXI_TEST_, which moxi-dev's test tiers use") in err
+
+
 def test_install_from_puts_every_spec_into_the_same_run(fake, capsys):
     code, _, err = moxi_install(capsys, "comms", "--none",
                                 "--from", "moxi-comms @ git+https://h/comms@main",

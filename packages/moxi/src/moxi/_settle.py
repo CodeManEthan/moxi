@@ -857,7 +857,11 @@ def _skills(step: Settle) -> bool:
     module's own package (`moxi.place.from_package`). The owner's other placements (one
     another module handed it, a project's skill it placed for a user) are left exactly as
     they are: the plan treats `items` as the owner's whole set, so their `remove` steps
-    are dropped before `apply`. When the module has none of its own placements (none
+    are dropped before `apply`. A placement made with `dest` is never this step's, even
+    when its source lies in the package: a module's `SETUP` that places a copy of a
+    folder of its own (`moxi.place.Item(..., dest=...)`) keeps it through this step and
+    every later one, and only its `TEARDOWN` and the uninstall's placement step remove
+    it. When the module has none of its own placements (none
     placed, and none handed over unless seeded), `skills_wanted` asks first, naming only
     the skills the plan would place, and a no places nothing. When it has some, there is
     no question: the plan updates, adds and removes them as the package's `SKILLS` say now,
@@ -879,7 +883,13 @@ def _skills(step: Settle) -> bool:
 
     module, found = step.module, step.found
     try:
-        placed = place.status(module)
+        record = place._read_ledger().get(module, {})
+        handed = record.get("handed", {})
+        # Placed with `dest`: by the module's `SETUP` or another caller, never by this
+        # step, which makes no such item. Left to whoever made it (see above).
+        by_dest = {key for key, entry in record.get("placed", {}).items()
+                   if isinstance(entry, dict) and entry.get("dest")}
+        placed = [p for p in place.status(module) if str(p.path) not in by_dest]
         if found.skills is None and not placed:
             return True
         skills, source = _skill_folders(found)
@@ -894,13 +904,13 @@ def _skills(step: Settle) -> bool:
         items = [place.Item(source / name, harness, name)
                  for name in skills for harness in harnesses]
         planned = place.plan(module, items)
-        handed = place._read_ledger().get(module, {}).get("handed", {})
     except Exception as exc:  # noqa: BLE001 - a broken core config or ledger
         say(f"{module}: skills not placed: {_one_line(exc)}", err=True)
         return False
     steps = planned[:len(items)] + [
         s for s in planned[len(items):]
-        if s.action == "remove" and place.from_package(found, s.item.source)]
+        if s.action == "remove" and place.from_package(found, s.item.source)
+        and str(s.target) not in by_dest]
     held_now = {str(p.path) for p in placed}
     labels = {(p.harness, p.kind, p.name) for p in placed}
     # A hand-over counts as the module's own only when it was not seeded, whether it

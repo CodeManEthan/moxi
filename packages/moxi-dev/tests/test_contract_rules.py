@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from moxi import names
 from moxi_dev import contract
 from moxi_dev.contract import CheckError, check
 from moxi_dev.testing import need_symlinks
@@ -537,13 +538,26 @@ def test_a_newer_schema_is_one_finding(repo):
         "knows up to 2; upgrade moxi"]
 
 
-@pytest.mark.parametrize("name", ["installs", "runtime", "set", "unset"])
+@pytest.mark.parametrize("name", ["installs", "runtime", "set", "unset", "test"])
 def test_a_module_named_by_a_name_the_core_keeps(tmp_path, name):
     r = Repo(tmp_path / name, name)
     r.write("pyproject.toml", pyproject(f"moxi-{name}"))
     r.src("__init__.py")
     r.src("module.py", announcement())
-    assert "a name the core keeps for itself" in r.findings("7")[0]
+    finding = r.findings("7")[0]
+    assert "a name moxi keeps for itself, not a module" in finding
+    assert names.reserved_why(name) in finding
+
+
+def test_a_module_named_test_says_why(tmp_path):
+    r = Repo(tmp_path / "test", "test")
+    r.write("pyproject.toml", pyproject("moxi-test"))
+    r.src("__init__.py")
+    r.src("module.py", announcement())
+    assert r.findings("7")[0] == (
+        "pyproject.toml:0: names the module 'test': 'test' is a name moxi keeps for "
+        "itself, not a module: its variables would start MOXI_TEST_, which moxi-dev's "
+        "test tiers use; the module needs another name")
 
 
 def test_a_module_named_by_a_new_verb(tmp_path):
