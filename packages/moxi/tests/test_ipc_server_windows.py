@@ -201,12 +201,21 @@ def test_a_pipe_peer_of_another_user_is_dropped_unread(monkeypatch, caplog, user
 
 # -- the lock goes with the last pipe instance (any system) ----------------------------------
 
-class FakePipeServer:
+class FakeInstance:
+    """A stand-in for the pipe instance waiting for a client."""
+
     def __init__(self):
         self.closed = False
 
     def close(self):
         self.closed = True
+
+
+def on_fake_pipe(server) -> FakeInstance:
+    """Put `server` on a pipe whose listening instance is a stand-in, and return it."""
+    server._on_pipe = True
+    server._listening = FakeInstance()
+    return server._listening
 
 
 def test_the_lock_is_let_go_only_once_the_last_pipe_instance_has_closed(tmp_path):
@@ -216,8 +225,7 @@ def test_the_lock_is_let_go_only_once_the_last_pipe_instance_has_closed(tmp_path
         server = _server.Server("x", echo, hello=None, max_line=100, write_deadline=1.0,
                                 queue=4, legacy=None, on_close=None)
         server._hold.enter_context(files.lock(lock, timeout=0))
-        listener = FakePipeServer()
-        server._pipes = [listener]
+        listener = on_fake_pipe(server)
         one = _server._PipeProtocol(server, asyncio.StreamReader())
         two = _server._PipeProtocol(server, asyncio.StreamReader())
         assert server._pipes_open == 2
@@ -243,11 +251,11 @@ def test_a_closed_pipe_server_with_no_instance_open_lets_the_lock_go_at_once(tmp
         server = _server.Server("x", echo, hello=None, max_line=100, write_deadline=1.0,
                                 queue=4, legacy=None, on_close=None)
         server._hold.enter_context(files.lock(lock, timeout=0))
-        server._pipes = [FakePipeServer()]
+        listener = on_fake_pipe(server)
         server.close()
-        return held(lock)
+        return listener.closed, server._listening, held(lock)
 
-    assert asyncio.run(main()) is False
+    assert asyncio.run(main()) == (True, None, False)
 
 
 def held(lock) -> bool:
@@ -259,6 +267,77 @@ def held(lock) -> bool:
     out = subprocess.run([sys.executable, "-c", code, str(lock)], capture_output=True,
                          timeout=30, check=True).stdout
     return out.strip() == b"held"
+
+
+# -- what a failure to make the pipe at start raises (any system) ----------------------------
+
+@pytest.fixture
+def pipe_start(fake_windows, runtime, monkeypatch):
+    """`serve` taken down its Windows path on any system, up to the pipe's first
+    instance: `pipe_start.fail(where, exc)` makes `access_list` or `server_instance`
+    raise `exc`, and `pipe_start.serve()` starts a server at a demo address."""
+    import types
+
+    from moxi.ipc import _pipe
+
+    monkeypatch.setattr(_server, "_PLATFORM", "win32")
+    monkeypatch.setattr(_pipe, "access_list", lambda: "D:P(A;;FA;;;S-1-5-18)")
+    made = []
+
+    def fail(where, exc):
+        def raises(*args, **kwargs):
+            made.append((args, kwargs))
+            raise exc
+        monkeypatch.setattr(_pipe, where, raises)
+
+    def serve():
+        return asyncio.run(ipc.serve(ipc.address("demo", "a"), echo))
+
+    return types.SimpleNamespace(fail=fail, serve=serve, made=made,
+                                 lock=runtime / "demo" / "a.lock")
+
+
+def win_error(code: int, text: str) -> OSError:
+    """An `OSError` as a failed Windows call raises it, with Windows error `code`."""
+    if sys.platform == "win32":
+        return OSError(0, text, None, code)
+    exc = OSError(0, text)
+    exc.winerror = code
+    return exc
+
+
+def test_a_pipe_name_another_process_made_is_already_serving(pipe_start):
+    pipe_start.fail("server_instance", win_error(5, "CreateNamedPipeW for x failed"))
+    with pytest.raises(ipc.AlreadyServing) as caught:
+        pipe_start.serve()
+    assert caught.value.holder is None
+    # The first instance, asked for as the first, with the access list.
+    assert pipe_start.made == [((ipc.address("demo", "a"), "D:P(A;;FA;;;S-1-5-18)"),
+                                {"first": True})]
+    assert not held(pipe_start.lock)
+
+
+@pytest.mark.parametrize("where, text", [
+    ("server_instance", "CreateNamedPipeW for x failed: no resources"),
+    ("access_list", "OpenProcessToken failed: no token"),
+])
+def test_a_pipe_that_cant_be_made_at_start_raises_the_failed_call(pipe_start, where, text):
+    pipe_start.fail(where, win_error(1450, text))
+    with pytest.raises(OSError) as caught:
+        pipe_start.serve()
+    assert not isinstance(caught.value, ipc.IpcError)
+    assert text in str(caught.value)
+    assert not held(pipe_start.lock)
+
+
+def test_the_access_list_is_owned_by_the_tokens_user(monkeypatch):
+    from moxi.ipc import _pipe
+
+    # Owned by the user, not left to the token's default owner, which for an elevated
+    # process is the Administrators group and could rewrite the list.
+    sid = "S-1-5-21-1111-2222-3333-1001"
+    monkeypatch.setattr(_win, "user_sid", lambda: sid)
+    assert _pipe.access_list() == f"O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;S-1-5-18)"
 
 
 # -- real pipes (Windows) --------------------------------------------------------------------
@@ -693,3 +772,295 @@ def test_async_with_closes_the_server(pipe):
         return connect_fails(pipe)
 
     assert asyncio.run(main()) == 2
+
+
+# -- the pipe's access list, its refusal of the network, its own accept loop (Windows) -------
+
+FILE_ALL_ACCESS = 0x1F01FF
+
+
+def access_list(handle: int) -> tuple[bool, list[tuple[int, int, str]]]:
+    """The access list of the pipe instance behind `handle`, read back with
+    `GetSecurityInfo`: whether it is protected, and its entries as (type, mask, SID)."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    api = _win._bind()
+    PP = ctypes.POINTER(ctypes.c_void_p)
+    get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
+    get.restype = w.DWORD
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    code = get(handle, _win._SE_FILE_OBJECT, _win._DACL_SECURITY_INFORMATION, None, None,
+               ctypes.byref(dacl), None, ctypes.byref(descriptor))
+    assert code == 0, f"GetSecurityInfo failed with {code}"
+    try:
+        control, revision = w.WORD(), w.DWORD()
+        assert api.GetSecurityDescriptorControl(descriptor, ctypes.byref(control),
+                                                ctypes.byref(revision))
+        assert dacl.value, "no access list at all"
+        entries = []
+        count = ctypes.cast(dacl, ctypes.POINTER(api.ACL)).contents.AceCount
+        for index in range(count):
+            ace = ctypes.c_void_p()
+            assert api.GetAce(dacl, index, ctypes.byref(ace))
+            kind = ctypes.cast(ace, ctypes.POINTER(api.ACE_HEADER)).contents.AceType
+            # An allowed or denied entry: the header (4 bytes), the mask (4), the SID.
+            mask = ctypes.cast(ace.value + 4, ctypes.POINTER(ctypes.c_uint32)).contents.value
+            entries.append((kind, mask, _win._sid_text(ace.value + 8)))
+        return bool(control.value & _win._SE_DACL_PROTECTED), entries
+    finally:
+        api.LocalFree(descriptor)
+
+
+@WINDOWS
+def test_every_pipe_instance_admits_only_this_user_and_system(pipe_serving):
+    srv = pipe_serving(echo)
+    first, second = PipeRaw(srv.address), PipeRaw(srv.address)
+    for i, raw in enumerate((first, second)):
+        raw.send(req(i, "go"))
+        assert raw.json()["id"] == i
+    listening = srv.call(lambda: srv.server._listening.fileno())
+    want = sorted([(_win._ACCESS_ALLOWED_ACE_TYPE, FILE_ALL_ACCESS, _win.user_sid()),
+                   (_win._ACCESS_ALLOWED_ACE_TYPE, FILE_ALL_ACCESS, "S-1-5-18")])
+    # The first instance, the one made after it, and the one listening now.
+    for handle in (first.handle, second.handle, listening):
+        protected, entries = access_list(handle)
+        assert protected and sorted(entries) == want
+
+
+def owner_of(handle: int) -> str:
+    """The owner SID of the pipe instance behind `handle`, read back with
+    `GetSecurityInfo`."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    api = _win._bind()
+    PP = ctypes.POINTER(ctypes.c_void_p)
+    get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
+    get.restype = w.DWORD
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    code = get(handle, _win._SE_FILE_OBJECT, _win._OWNER_SECURITY_INFORMATION,
+               ctypes.byref(owner), None, None, None, ctypes.byref(descriptor))
+    assert code == 0, f"GetSecurityInfo failed with {code}"
+    try:
+        return _win._sid_text(owner.value)
+    finally:
+        api.LocalFree(descriptor)
+
+
+@WINDOWS
+def test_every_pipe_instance_is_owned_by_this_user(pipe_serving):
+    # The owner may always rewrite the list, so it is this user, not the token's default
+    # owner (the Administrators group for an elevated process).
+    srv = pipe_serving(echo)
+    first, second = PipeRaw(srv.address), PipeRaw(srv.address)
+    for i, raw in enumerate((first, second)):
+        raw.send(req(i, "go"))
+        assert raw.json()["id"] == i
+    listening = srv.call(lambda: srv.server._listening.fileno())
+    for handle in (first.handle, second.handle, listening):
+        assert owner_of(handle) == _win.user_sid()
+
+
+@WINDOWS
+def test_the_access_list_names_this_tokens_user_as_owner():
+    # The read-back above can't tell a named owner from the token's default owner when
+    # the two are the same user, as they are for a process that isn't elevated. The
+    # descriptor itself must carry the owner.
+    import ctypes
+    from ctypes import wintypes as w
+
+    from moxi.ipc import _pipe
+
+    api = _win._bind()
+    get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityDescriptorOwner
+    get.restype = w.BOOL
+    get.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(w.BOOL)]
+    descriptor = _win._descriptor(_pipe.access_list())
+    try:
+        owner, defaulted = ctypes.c_void_p(), w.BOOL()
+        assert get(descriptor, ctypes.byref(owner), ctypes.byref(defaulted)), \
+            ctypes.get_last_error()
+        assert owner.value, "the descriptor names no owner"
+        assert _win._sid_text(owner.value) == _win.user_sid()
+    finally:
+        api.LocalFree(descriptor)
+
+
+def from_the_network(address: str) -> str:
+    """Pipe `address` named the way a client on another machine names it, through the
+    loopback address."""
+    return "\\\\127.0.0.1\\pipe\\" + address[len("\\\\.\\pipe\\"):]
+
+
+def admitting_the_network(name: str) -> int:
+    """A first instance of pipe `name` made as the server makes one, with the same
+    access list, but admitting clients on other machines."""
+    import ctypes
+
+    from moxi.ipc import _pipe
+
+    api = _win._bind()
+    descriptor = _win._descriptor(_pipe.access_list())
+    try:
+        attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
+                                             descriptor, False)
+        handle = _pipe._bind_create()(
+            name, _pipe._PIPE_ACCESS_DUPLEX | _pipe._FILE_FLAG_OVERLAPPED
+            | _pipe._FILE_FLAG_FIRST_PIPE_INSTANCE, 0, 1, 8192, 8192, 0,
+            ctypes.byref(attributes))
+        assert handle and handle != ctypes.c_void_p(-1).value, ctypes.get_last_error()
+        return handle
+    finally:
+        api.LocalFree(descriptor)
+
+
+#: What opening a pipe that refuses clients on other machines fails with from one.
+REFUSED_REMOTE = 5  # ERROR_ACCESS_DENIED
+
+
+@WINDOWS
+def test_an_open_from_the_network_is_refused(pipe_serving):
+    import _winapi
+
+    # A pipe with the server's own access list but without the refusal of remote
+    # clients. The loopback path reaches it only where the Server service serves pipes;
+    # elsewhere the row skips. (Whether that service runs can't be asked directly: a
+    # non-admin's query of it may be refused.) Opened, it also shows that the list alone
+    # admits this user coming from the network, so what refuses the server's pipe below
+    # is the refusal of remote clients.
+    control = rf"\\.\pipe\moxi-test-remote-{uuid.uuid4().hex}"
+    instance = admitting_the_network(control)
+    try:
+        try:
+            opened = _winapi.CreateFile(
+                from_the_network(control), _winapi.GENERIC_READ | _winapi.GENERIC_WRITE, 0,
+                _winapi.NULL, _winapi.OPEN_EXISTING, 0, _winapi.NULL)
+        except OSError as exc:
+            pytest.skip(f"\\\\127.0.0.1\\pipe\\ reaches no pipe here, even one that "
+                        f"admits the network ({exc}): the Server service isn't serving")
+        _winapi.CloseHandle(opened)
+    finally:
+        _winapi.CloseHandle(instance)
+    srv = pipe_serving(echo)
+    assert connect_fails(from_the_network(srv.address)) == REFUSED_REMOTE
+    raw = PipeRaw(srv.address)  # and it serves on, to clients on this machine
+    raw.send(req(1, "go"))
+    assert raw.json()["id"] == 1
+
+
+@WINDOWS
+def test_a_server_that_cant_make_its_next_instance_logs_it_once_and_closes(
+        pipe_serving, monkeypatch, caplog):
+    from moxi.ipc import _pipe
+
+    real = _pipe.server_instance
+
+    def server_instance(address, sddl, *, first):
+        if first:
+            return real(address, sddl, first=first)
+        raise OSError(0, "CreateNamedPipeW failed: patched", None, 1450)
+
+    monkeypatch.setattr(_pipe, "server_instance", server_instance)
+    srv = pipe_serving(echo)
+    raw = PipeRaw(srv.address)
+    wait_for(lambda: not srv.server.is_serving(), what="the server's close")
+    srv.run(srv.server.wait_closed())
+    assert raw.closed()
+    said = [r.getMessage() for r in caplog.records if r.name == "moxi.ipc"
+            and r.levelno >= logging.ERROR]
+    assert len(said) == 1 and "next instance could not be made" in said[0]
+    assert "patched" in said[0]
+    assert connect_fails(srv.address) == 2
+    assert not held(_sweep.lock_path(srv.address))
+
+
+@WINDOWS
+def test_a_client_before_the_next_instance_is_made_is_busy_then_served(pipe_serving,
+                                                                       monkeypatch):
+    from moxi.ipc import _pipe
+
+    srv = pipe_serving(echo)
+    holding = threading.Event()
+
+    def hold_the_loop():
+        holding.set()
+        time.sleep(0.5)
+
+    srv.loop.call_soon_threadsafe(hold_the_loop)
+    assert holding.wait(10)
+    start = time.monotonic()
+    first = PipeRaw(srv.address)  # takes the one listening instance; none is made yet
+    refused = []
+    real = _pipe.open_pipe
+
+    def open_pipe(address):
+        try:
+            return real(address)
+        except OSError as exc:
+            refused.append(exc.winerror)
+            raise
+
+    monkeypatch.setattr(_pipe, "open_pipe", open_pipe)
+    with ipc.connect(srv.address, timeout=10) as client:
+        assert client.call("go", timeout=10) == {"method": "go", "params": None}
+    assert time.monotonic() - start >= 0.3
+    assert refused and set(refused) == {231}  # ERROR_PIPE_BUSY, tried again
+    first.send(req(1, "go"))
+    assert first.json()["id"] == 1
+
+
+@WINDOWS
+def test_a_client_gone_before_its_accept_costs_that_instance_and_the_server_serves_on(
+        pipe_serving, monkeypatch, caplog):
+    import _winapi
+
+    from moxi.ipc import _pipe
+
+    real = _pipe.server_instance
+    made = []
+
+    def server_instance(address, sddl, *, first):
+        handle = real(address, sddl, first=first)
+        made.append(first)
+        if first:
+            # A client opens the first instance and closes it before the server's loop
+            # has asked for a client on it, so that wait fails.
+            gone = _winapi.CreateFile(address, _winapi.GENERIC_READ | _winapi.GENERIC_WRITE,
+                                      0, _winapi.NULL, _winapi.OPEN_EXISTING, 0, _winapi.NULL)
+            _winapi.CloseHandle(gone)
+        return handle
+
+    monkeypatch.setattr(_pipe, "server_instance", server_instance)
+    caplog.set_level(logging.DEBUG, logger="moxi.ipc")
+    srv = pipe_serving(echo)
+    for i in range(2):
+        raw = PipeRaw(srv.address)
+        raw.send(req(i, "go"))
+        assert raw.json()["id"] == i
+        raw.close()
+    assert srv.server.is_serving()
+    # The spent first instance was replaced, then one more for each client served.
+    assert made[:2] == [True, False]
+    said = [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "moxi.ipc"]
+    assert any("went before it was accepted" in text for _, text in said), said
+    assert not [text for level, text in said if level >= logging.ERROR]
+
+
+@WINDOWS
+def test_a_pipe_whose_list_doesnt_admit_this_user_refuses_connect(pipe):
+    from moxi.ipc import _pipe
+
+    # SYSTEM alone: this user's open is refused as another user's would be.
+    instance = _pipe.server_instance(pipe, f"D:P(A;;FA;;;{_pipe.SYSTEM})", first=True)
+    try:
+        with pytest.raises(ipc.IpcError) as caught:
+            ipc.connect(pipe, timeout=2)
+    finally:
+        import _winapi
+
+        _winapi.CloseHandle(instance)
+    assert type(caught.value) is ipc.IpcError
+    assert pipe in str(caught.value) and "access denied" in str(caught.value)

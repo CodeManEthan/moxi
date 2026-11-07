@@ -8,11 +8,18 @@ and binds. Only a live server makes a second one refuse; a sweep's short hold is
 out.
 
 On Windows `serve` makes the module's runtime directory private (an access list that
-grants only this user), takes the lock `<name>.lock` there, and serves the pipe on the
-proactor loop's pipe server. The pipe's first instance is created with
-`FILE_FLAG_FIRST_PIPE_INSTANCE`, so a pipe of that name that another process already made
-refuses the server too. The lock is let go only once every instance of the pipe has
-closed, so a free lock always means a free name.
+grants only this user), takes the lock `<name>.lock` there, and serves the pipe from an
+accept loop of its own on the proactor loop. It makes every pipe instance itself
+(`_pipe.server_instance`), so each one admits only this user and SYSTEM and refuses
+clients on other machines, as a Unix socket in a private directory admits only its user
+and root; asyncio's own pipe server would give each instance Windows' default list, which
+lets every local user open it for reading, so it is not used. The loop waits for a client
+on one instance, makes the next instance before it hands the connected one on, so one
+instance is always listening, and wraps each connection in the `StreamReaderProtocol`
+that sockets get, so the connection code after accept is the same. The pipe's first
+instance is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so a pipe of that name that
+another process already made refuses the server too. The lock is let go only once every
+instance of the pipe has closed, so a free lock always means a free name.
 
 Each connection gets one reader, which hands the handler one message at a time in order,
 and one writer, which drains a bounded queue of frames with a deadline on each write. A
@@ -39,7 +46,7 @@ from .. import names as _names
 from .. import paths as _paths
 from .. import proc as _proc
 from ..modules import _Frozen
-from . import _users, _wire
+from . import _pipe, _users, _wire
 from ._sweep import lock_path
 from ._wire import AlreadyServing, Hello, Message, Reply
 
@@ -327,9 +334,13 @@ class Server:
         self._hold = ExitStack()
         self._listener: asyncio.Server | None = None
         self._inode: tuple[int, int] | None = None
-        # Windows: the pipe servers, the pipe instances open now, and whether the lock
-        # was let go.
-        self._pipes: list | None = None
+        # Windows: whether this server is on a pipe, the access list of its instances,
+        # the instance waiting for a client, the accept loop, the instances handed on
+        # and open now, and whether the lock was let go.
+        self._on_pipe = False
+        self._sddl = ""
+        self._listening = None
+        self._accepting: asyncio.Task | None = None
         self._pipes_open = 0
         self._released = asyncio.Event()
         self._connections: set[Connection] = set()
@@ -367,24 +378,84 @@ class Server:
             raise
 
     async def _start_pipe(self) -> None:
-        """Hold the lock, then serve the pipe."""
+        """Hold the lock, make the pipe's first instance, and start the accept loop."""
         await self._take_lock()
-        loop = self._loop
-
-        def protocol() -> _PipeProtocol:
-            reader = asyncio.StreamReader(limit=self._max_line, loop=loop)
-            return _PipeProtocol(self, reader)
-
         try:
-            self._pipes = await loop.start_serving_pipe(protocol, self.address)
-        except PermissionError as exc:
-            # The first instance is made with FILE_FLAG_FIRST_PIPE_INSTANCE, which is
-            # refused when a pipe of this name exists: another process made it without
-            # the lock.
-            self._release()
-            raise AlreadyServing(self.address, None) from exc
+            self._sddl = _pipe.access_list()
+            try:
+                first = _pipe.server_instance(self.address, self._sddl, first=True)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) != _pipe.TAKEN:
+                    raise
+                # The lock is ours, so a pipe of this name was made by a process that
+                # doesn't take it: another user's, or one that isn't moxi's.
+                raise AlreadyServing(self.address, None) from exc
         except BaseException:
             self._release()
+            raise
+        from asyncio import windows_utils
+
+        self._on_pipe = True
+        self._listening = windows_utils.PipeHandle(first)
+        self._accepting = self._loop.create_task(self._accept_loop(),
+                                                 name="moxi.ipc pipe accept")
+
+    async def _accept_loop(self) -> None:
+        """Wait for a client on the listening instance, make the next one, hand the
+        connected one on; until the server closes. An instance that can't be made ends
+        the loop and closes the server, as any failure of the loop does."""
+        from asyncio import windows_utils
+
+        loop = self._loop
+        try:
+            while True:
+                pipe = self._listening
+                try:
+                    await loop._proactor.accept_pipe(pipe)
+                except OSError as exc:
+                    # The client went before it was connected: this instance is spent.
+                    _log.debug("a pipe client went before it was accepted: %s", exc)
+                    pipe.close()
+                    connected = None
+                else:
+                    connected = pipe
+                self._listening = None
+                try:
+                    handle = _pipe.server_instance(self.address, self._sddl, first=False)
+                except OSError as exc:
+                    _log.error("closing the server at %s: the pipe's next instance "
+                               "could not be made: %s", self.address, exc)
+                    if connected is not None:
+                        connected.close()
+                    self.close()
+                    return
+                self._listening = windows_utils.PipeHandle(handle)
+                if connected is not None:
+                    self._hand_on(connected)
+                else:
+                    await asyncio.sleep(0)  # never hold the loop through failed accepts
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _log.error("closing the server at %s: its accept loop failed", self.address,
+                       exc_info=True)
+            self.close()
+        finally:
+            if self._listening is not None and self._closed.is_set():
+                self._listening.close()
+                self._listening = None
+
+    def _hand_on(self, pipe) -> None:
+        """Serve connected instance `pipe`: a duplex transport on the proactor with a
+        `StreamReaderProtocol`, as `start_server` makes for a socket."""
+        reader = asyncio.StreamReader(limit=self._max_line, loop=self._loop)
+        protocol = _PipeProtocol(self, reader)
+        try:
+            self._loop._make_duplex_pipe_transport(pipe, protocol,
+                                                   extra={"addr": self.address})
+        except BaseException:
+            self._pipes_open -= 1
+            pipe.close()
             raise
 
     def _pipe_closed(self) -> None:
@@ -500,19 +571,23 @@ class Server:
         self._closed.set()
         if self._listener is not None:
             self._listener.close()
-        for pipe in self._pipes or ():
-            pipe.close()
         try:
             me = asyncio.current_task()
         except RuntimeError:
             me = None
+        if self._accepting is not None and self._accepting is not me:
+            # Cancelling the task cancels the instance's wait for a client at once.
+            self._accepting.cancel()
+        if self._listening is not None:
+            self._listening.close()
+            self._listening = None
         for conn in list(self._connections):
             conn.close()
             # A handler still running is cancelled, unless it is the one closing.
             if conn._task is not None and conn._task is not me:
                 conn._task.cancel()
         self._unlink()
-        if self._pipes is None or self._pipes_open <= 0:
+        if not self._on_pipe or self._pipes_open <= 0:
             self._release()
         # Otherwise the last pipe instance to close lets the lock go (`_pipe_closed`).
 
@@ -522,7 +597,9 @@ class Server:
         await self._closed.wait()
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
-        if self._pipes is not None:
+        if self._on_pipe:
+            if self._accepting is not None:
+                await asyncio.gather(self._accepting, return_exceptions=True)
             await self._released.wait()
 
     async def serve_forever(self) -> None:
@@ -635,8 +712,14 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     raises `ValueError`), and the module's runtime directory, where the lock is, is made
     private.
 
+    On Windows each pipe instance admits only this user and SYSTEM, and no client on
+    another machine. There is no fallback to Windows' default list for a pipe.
+
     Raises `AlreadyServing` when another server still holds the address's lock after a
-    one-second wait, and on Windows also when a pipe of that name already exists.
+    one-second wait, and on Windows also when a pipe of that name already exists. On
+    Windows an access list or a first pipe instance that can't be made raises `OSError`
+    naming the call that failed. A running server that can't make its next instance
+    logs it and closes.
     """
     if not callable(handler):
         raise TypeError("handler must be callable")

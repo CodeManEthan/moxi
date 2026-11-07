@@ -8,8 +8,9 @@
 import type { ComponentInfo } from "./client.ts";
 import { freshN } from "./passkey.ts";
 import type { UpstreamState } from "./push.ts";
+import { placeOnceMore, scriptFailure } from "./place-model.ts";
+import type { Named } from "./place-model.ts";
 import { NAME } from "./rules.ts";
-import { failurePanel } from "./views.ts";
 
 /** One installed module as the menu sees it. */
 export interface PanelModule {
@@ -54,24 +55,23 @@ export function menuEntries(modules: PanelModule[], desk = true): Array<{ module
   return entries;
 }
 
-/** The error panel for a page script at `url` that did not load, from a fetch of it
- * (an asset needs the cookie only), or null when the answer names no failure. */
-async function failure(url: string): Promise<{ title: string; lines: string[] } | null> {
-  const module = where(new URL(url, location.origin).pathname)?.module ?? "";
-  let answer: Response;
-  try {
-    answer = await fetch(url, { credentials: "same-origin", cache: "no-store" });
-  } catch {
-    return failurePanel(module, 0, null);
-  }
-  if (answer.ok) return null;
-  let data: unknown = null;
-  try {
-    data = await answer.json();
-  } catch {
-    data = null;
-  }
-  return failurePanel(module, answer.status, data);
+/** What a panel load came to: the element placed, or the error panel to show; null when
+ * another load began meanwhile. */
+export type PanelLoad = { placed: Element } | { error: Named } | null;
+
+/**
+ * Places `module`'s panel with `place`, with `check` asking a fetch of its script why it
+ * gave no element, and one more try when the script answers fine (`placeOnceMore`). A
+ * failure `check` names is the error panel; after the second try it is that the panel did
+ * not load.
+ */
+export async function loadPanel(module: string, place: () => Promise<Element | null>,
+                                check: () => Promise<Named | null>,
+                                current: () => boolean): Promise<PanelLoad> {
+  const load = await placeOnceMore(place, check, current);
+  if (load === null || "placed" in load) return load;
+  return { error: load.failure ?? { title: `${module}'s panel did not load`,
+    lines: [`${module}'s panel script could not be loaded. Run moxi doctor ${module} to see why.`] } };
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
@@ -145,24 +145,13 @@ export function boot(deps: ShellDeps): void {
     const mine = seq;
     panel.replaceChildren();
     document.title = `${item.page.title} - Moxi`;
-    let placed: Element | null = null;
-    try {
-      placed = await deps.place(panel, module, "page", { route });
-    } catch (err) {
-      console.error(err);
-    }
-    if (mine !== seq) {
-      placed?.remove();
-      return;
-    }
-    if (placed !== null) return;
+    const url = item.page.url;
     // A script that did not load may be a start that failed: the proxy answers its 502
     // with the exit and the log, and a second fetch within 10 s gets the same answer
     // with no new start.
-    const panelFailure = await failure(item.page.url);
-    if (mine !== seq) return;
-    if (panelFailure !== null) say(panelFailure.title, ...panelFailure.lines);
-    else say(`${module}'s panel did not load`, `${module}'s panel script could not be loaded. Run moxi doctor ${module} to see why.`);
+    const load = await loadPanel(module, () => deps.place(panel, module, "page", { route }),
+                                 () => scriptFailure(module, url), () => mine === seq);
+    if (load !== null && "error" in load) say(load.error.title, ...load.error.lines);
   };
 
   const renderMenu = (): void => {
