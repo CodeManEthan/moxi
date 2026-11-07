@@ -19,10 +19,11 @@ import moxi.paths
 from moxi import config, units
 from moxi.units import _backend, _plan
 from moxi.units._backend import Socket, Spec
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._launchd import LaunchdBackend
 from moxi.units._systemd import SystemdBackend
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeBackend, FakeSupervisor
 
 #: Every test starts in the default home; one that wants a tagged home sets `MOXI_HOME`.
 pytestmark = pytest.mark.usefixtures("default_home")
@@ -353,6 +354,7 @@ def test_this_process_is_read_as_listening(listener):
     assert _plan.listening(os.getpid(), "127.0.0.2", listener) is False
 
 
+@pytest.mark.honest_ports
 def test_a_connect_is_answered_only_where_something_listens(listener):
     assert _plan.answers("127.0.0.1", listener) is True
     with closing(socket.socket()) as sock:

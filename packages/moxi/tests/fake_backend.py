@@ -22,6 +22,9 @@ The texts are not the systemd backend's: they carry the mark, the command, the s
 and a tagged home's `env = MOXI_HOME=<path>` in a form this module reads back, and nothing
 else. Names follow the home as systemd's do: `moxi-<tag>-<module>-<name>` and
 `50-moxi-<tag>-<module>.conf` for a home given by `MOXI_HOME`.
+
+It lives beside the core's tests, not in the installed package, so a test imports it by
+its file name (`from fake_backend import FakeBackend`), as `settle_procs.py` does too.
 """
 
 from __future__ import annotations
@@ -29,13 +32,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ._backend import (
+from moxi.units._backend import (
     ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, listen_address,
     socket_name, socket_place, socket_state)
-from ._fence import Fence, Ran
-from ._home import environment, home_tag
-from ._systemd import SocketStarts, dropin_name
-from ._types import Acted, UnitChange, UnitState, Wrapped
+from moxi.units._fence import Fence, Ran
+from moxi.units._home import environment, home_tag
+from moxi.units._systemd import SocketStarts, dropin_name
+from moxi.units._types import Acted, UnitChange, UnitState, Wrapped
 
 MARK = "# moxi unit: "
 DISABLED = "# moxi: enabled = false"
@@ -569,7 +572,7 @@ class FakeBackend:
         return self.root / f"{service}.d" / dropin_name(module)
 
     def _wrapped(self, shown: Mapping):
-        from ._types import Wrapped
+        from moxi.units._types import Wrapped
 
         for path in (shown.get("DropInPaths") or "").split():
             try:
@@ -594,7 +597,7 @@ class FakeBackend:
                       f"ExecStopPost={run} --record {record} --result"])
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
-        from .. import files
+        from moxi import files
 
         def no(line: str) -> Acted:
             return Acted(None, ref, "wrap", False, (line,))

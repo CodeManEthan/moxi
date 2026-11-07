@@ -16,8 +16,9 @@ import moxi.paths
 from moxi import config, units
 from moxi.units import _backend, _plan
 from moxi.units._backend import UnitRef, socket_name, socket_place, socket_state
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeBackend, FakeSupervisor
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
 pytestmark = pytest.mark.usefixtures("default_home")

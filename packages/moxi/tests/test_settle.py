@@ -19,8 +19,9 @@ import moxi.paths
 from conftest import WINDOWS, drop_modules, is_link, link_text
 from moxi import _settle, config, doctor, files, home, units
 from moxi.units import _backend, _declare, _plan, _state
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script, need_symlinks
+
+from fake_backend import FakeBackend, FakeSupervisor
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
 pytestmark = pytest.mark.usefixtures("default_home")

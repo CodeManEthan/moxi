@@ -10,8 +10,9 @@ import pytest
 from moxi import units
 from moxi.units import _backend, _fence
 from moxi.units._backend import Backend, UnitRef
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._fence import Fence, FenceError, argv
+
+from fake_backend import FakeBackend, FakeSupervisor
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
 pytestmark = pytest.mark.usefixtures("default_home")

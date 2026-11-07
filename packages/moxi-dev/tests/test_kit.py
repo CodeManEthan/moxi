@@ -1,5 +1,5 @@
-"""The kit's helpers: served, wait_for, param ids, the fsync seam, the SQLite writer,
-the symlink probe, the markers, and the contract module's public names."""
+"""The kit's helpers: served, wait_for, param ids, the fsync and port seams, the SQLite
+writer, the symlink probe, the markers, and the contract module's public names."""
 
 from __future__ import annotations
 
@@ -196,6 +196,32 @@ def test_an_honest_fsync_reaches_the_disk(tmp_path):
     assert got == data
 
 
+# --- the port seam ---------------------------------------------------------------------
+
+@pytest.fixture
+def listener():
+    """A socket of this process listening on a free loopback port."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen()
+        yield sock.getsockname()[1]
+
+
+def test_the_plans_connect_finds_nothing_in_a_plain_test(listener):
+    from moxi.units import _plan
+
+    assert _plan.answers is testing._nothing_answers
+    assert _plan.answers("127.0.0.1", listener) is False
+
+
+@pytest.mark.honest_ports
+def test_an_honest_ports_test_has_the_plans_real_connect(listener):
+    from moxi.units import _plan
+
+    assert _plan.answers is not testing._nothing_answers
+    assert _plan.answers("127.0.0.1", listener) is True
+
+
 # --- the SQLite writer -----------------------------------------------------------------
 
 SCHEMA = """
@@ -292,7 +318,7 @@ def test_the_kit_registers_its_markers(pytestconfig):
     registered = {line.split(":", 1)[0].split("(", 1)[0]
                   for line in pytestconfig.getini("markers")}
     assert {"browser", "live", "slow", "build", "touches", "finding",
-            "honest_fsync"} <= registered
+            "honest_fsync", "honest_ports"} <= registered
     assert set(testing.TIERS) <= registered
 
 
