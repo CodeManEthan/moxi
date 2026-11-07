@@ -1,12 +1,13 @@
 """The announcement of Moxi's ui module, which moxi.modules reads."""
 
-#: The component contract this module's shell places, and its own components are written
-#: for.
-INTERFACES = frozenset({1})
+#: 1 is the component contract this module's shell places, and its own components are
+#: written for. 2 is 1 plus the API: the check a page part makes before it writes.
+INTERFACES = frozenset({1, 2})
 #: The announcement schema this file is written to: 2 lets a socket daemon's `start` follow
 #: a bool setting.
 ANNOUNCES = 2
-API = None
+#: Imports only the standard library, since every `moxi.modules.load("ui")` imports it.
+API = "moxi_ui.api"
 CLI = "moxi_ui.cli:main"
 SUMMARY = "The browser shell: one origin for every module's page"
 #: The `testing` extra brings only what moxi_ui.testing's browser fixtures need.

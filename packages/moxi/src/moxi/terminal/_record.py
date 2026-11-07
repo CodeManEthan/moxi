@@ -79,6 +79,17 @@ def in_set(name: str, *, fold: bool = _WINDOWS) -> bool:
     return name not in _NOT_PREFIXED and _PREFIXED.fullmatch(name) is not None
 
 
+def anchor_set(env: Mapping[str, str] | None = None, *, fold: bool = _WINDOWS) -> bool:
+    """True when `env` (None: this process's environment) sets `MOXI_ANCHOR_HOME` to a
+    value, which only test kits do. With `fold` (the default on Windows) any spelling of
+    the name counts. The doctor's terminal record row and ui's check both ask this, so they
+    can't disagree."""
+    source = os.environ if env is None else env
+    if fold:
+        return any(k.upper() == paths.ANCHOR_HOME and v for k, v in source.items())
+    return bool(source.get(paths.ANCHOR_HOME))
+
+
 def of(env: Mapping[str, str] | None = None, *, fold: bool = _WINDOWS) -> dict[str, str]:
     """The record's `env` for `env` (None: this process's environment): each name of the
     core set it holds, with its exact value, sorted by name. With `fold` (the default on
@@ -495,7 +506,7 @@ def _reason(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
-__all__ = ["FORMAT", "FIXED", "in_set", "of", "Record", "NoRecord", "Unreadable",
-           "NewerFormat", "Read", "read", "parse", "text", "write", "version", "keyboard",
-           "console", "pty_pipe", "is_pty_pipe", "Outcome", "step", "row", "SAME", "WRITTEN",
-           "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE", "FAILED"]
+__all__ = ["FORMAT", "FIXED", "in_set", "anchor_set", "of", "Record", "NoRecord",
+           "Unreadable", "NewerFormat", "Read", "read", "parse", "text", "write", "version",
+           "keyboard", "console", "pty_pipe", "is_pty_pipe", "Outcome", "step", "row", "SAME",
+           "WRITTEN", "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE", "FAILED"]

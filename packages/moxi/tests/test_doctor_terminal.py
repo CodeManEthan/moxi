@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import pytest
 
-from moxi import _win, paths, terminal
+from moxi import _win, cli, paths, terminal
 from moxi.doctor import _run
 from moxi.terminal import Evidence, Undecided, _lines, _record, _walk
 
@@ -177,3 +177,35 @@ def test_the_doctor_run_has_the_row_on_module_moxi(acct):
     assert ("moxi", "terminal record") in rows
     assert ("moxi", "terminal record") not in {
         (r.module, r.name) for r in _run.run(["projects"])}
+
+
+# -- what ui's check reads of the core ------------------------------------------------------
+
+@pytest.mark.parametrize("command", [terminal.RECORD_COMMAND, terminal.DOCTOR_COMMAND])
+def test_each_command_a_line_names_is_a_core_verb(command):
+    program, verb = command.split()
+    assert program == "moxi" and verb in cli._VERBS
+    assert verb not in cli._NO_STRAY_CHECK
+
+
+@pytest.mark.parametrize("fold", [False, True])
+def test_anchor_set_answers_as_the_row_reads_it(acct, monkeypatch, fold):
+    assert not terminal.anchor_set({}, fold=fold)
+    assert not terminal.anchor_set({paths.ANCHOR_HOME: ""}, fold=fold)
+    assert terminal.anchor_set({paths.ANCHOR_HOME: "/t"}, fold=fold)
+    assert terminal.anchor_set({paths.ANCHOR_HOME.lower(): "/t"}, fold=fold) is fold
+    assert not terminal.anchor_set() and row().name == "terminal record"
+    assert row().detail.startswith("the record at")
+    monkeypatch.setenv(paths.ANCHOR_HOME, str(acct.parent))
+    assert terminal.anchor_set()
+    assert row().detail.startswith("MOXI_ANCHOR_HOME is set")
+
+
+def test_the_core_offers_no_page_check():
+    # The check a page makes before it writes is ui's (moxi_ui.api); the core keeps the
+    # record, the resolvers and this row.
+    import importlib.util
+
+    for name in ("check", "where", "Where"):
+        assert not hasattr(terminal, name)
+    assert importlib.util.find_spec("moxi.terminal._check") is None
