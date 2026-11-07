@@ -402,22 +402,48 @@ def test_live_a_pipe_on_the_input_records_nothing(fence):
     assert recorded() is None
 
 
+#: A parent of the run's own that started with the mark: it prints its pid, then runs its
+#: arguments with the mark taken out of their environment, so the run's own start
+#: environment has none and only the walk can find it.
+MARKED_PARENT = textwrap.dedent("""\
+    import os, subprocess, sys
+    print("parent", os.getpid(), file=sys.stderr, flush=True)
+    env = {k: v for k, v in os.environ.items() if k != "MOXI_STARTED_BY"}
+    sys.exit(subprocess.run(sys.argv[1:], env=env).returncode)
+    """)
+
+REAL_WALK = textwrap.dedent("""\
+    import sys
+    from moxi import cli, terminal
+    sys.argv = ["moxi", "modules"]
+    code = cli.main()
+    last = terminal.last
+    print("outcome", last.kind, file=sys.stderr)
+    if last.found is not None:
+        print("found", last.found.kind, last.found.pid, file=sys.stderr)
+    sys.exit(code)
+    """)
+
+
 @posix_only
 def test_live_the_real_walk_above_a_test_records_nothing(fence):
-    """Unpatched, the walk above a test's child finds the pytest process, which started
-    with the mark (or an agent running the tests)."""
+    """Unpatched, the walk above the run finds its parent, which started with the mark,
+    though the run's own environment holds none. The parent is the test's own, so this
+    holds whatever runs the tests: an agent, `moxi-dev check`, or a terminal with no
+    marked process above it."""
     leader, follower = os.openpty()
     try:
         done = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; from moxi import cli, terminal; sys.argv = ['moxi', 'modules'];"
-             " code = cli.main(); print('outcome', terminal.last.kind, file=sys.stderr);"
-             " sys.exit(code)"],
+            [sys.executable, "-c", MARKED_PARENT, sys.executable, "-c", REAL_WALK],
+            env={**os.environ, "MOXI_STARTED_BY": "a test"},
             stdin=follower, capture_output=True, text=True, timeout=120)
     finally:
         os.close(leader)
         os.close(follower)
+    parent = next(line.split()[1] for line in done.stderr.splitlines()
+                  if line.startswith("parent "))
     assert done.returncode == 0 and "outcome found" in done.stderr, done.stderr
+    assert f"found E4 {parent}" in done.stderr, done.stderr
     assert recorded() is None
 
 
