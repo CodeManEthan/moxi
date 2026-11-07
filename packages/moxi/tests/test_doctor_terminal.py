@@ -7,7 +7,12 @@ real account's record.
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
+import textwrap
+
 import pytest
 
 from moxi import _win, cli, paths, terminal
@@ -170,6 +175,80 @@ def test_a_differing_record_with_no_step_names_the_command(acct, monkeypatch):
     assert got.state == "warn"
     assert "doesn't hold this terminal's environment" in got.detail
     assert got.fix == "type moxi modules in this terminal"
+
+
+#: The row in a fresh interpreter with no module installed: every `moxi.modules` entry
+#: point hidden, and every module's package refused (and noted) on import. Its walk runs
+#: over a view where the run's parent is a tmux server, so it asks whether slots is
+#: there. It prints the row before and after a record is written, and what was imported.
+CORE_ONLY = textwrap.dedent("""\
+    import importlib.abc, importlib.metadata, json, os, sys
+
+    asked = []
+
+    class Refused(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name.partition(".")[0].startswith("moxi_"):
+                asked.append(name)
+                raise ImportError(f"no module named {name!r}")
+            return None
+
+    sys.meta_path.insert(0, Refused())
+    every = importlib.metadata.entry_points
+
+    def entry_points(**params):
+        if params.get("group") == "moxi.modules":
+            return importlib.metadata.EntryPoints(())
+        return every(**params)
+
+    importlib.metadata.entry_points = entry_points
+
+    folder = sys.argv[1]
+    os.environ.pop("MOXI_ANCHOR_HOME", None)
+    from moxi import _win, modules, paths
+    if os.name == "nt":
+        real = _win.known_folder
+        _win.known_folder = lambda name: folder if name == "local" else real(name)
+    else:
+        paths._account_home = lambda: folder
+    from moxi.doctor import _run
+    from moxi.terminal import _record, _view, _walk
+
+    class UnderTmux(_view._View):
+        def read(self, pid):
+            if pid == os.getpid():
+                return _view.Proc(pid, 2, 2.0, ("moxi", "doctor"), {})
+            if pid == 2:
+                return _view.Proc(2, 0, 1.0, ("tmux",), {})
+            raise _view.Gone(pid)
+
+    run = _walk.Run(os.getpid(), sys.executable, "moxi", None)
+    rows = [_run.terminal_row(keyboard=True, view=UnderTmux(), run=run)._asdict()]
+    _record.write(None)
+    rows.append(_run.terminal_row(keyboard=True, view=UnderTmux(), run=run)._asdict())
+    print(json.dumps({"installed": [e.name for e in modules.installed()], "rows": rows,
+                      "asked": asked,
+                      "loaded": sorted(n for n in sys.modules if n.startswith("moxi_"))}))
+    """)
+
+
+def test_the_row_runs_with_no_module_installed(tmp_path):
+    """No module installed, ui and slots included: the row imports none, and a tmux
+    server above the run is passed, since no slots server can run there."""
+    folder = tmp_path / "acct"
+    folder.mkdir()
+    done = subprocess.run([sys.executable, "-c", CORE_ONLY, str(folder)],
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout)
+    assert got["installed"] == [] and got["asked"] == [] and got["loaded"] == [], got
+    unrecorded, recorded = got["rows"]
+    assert (unrecorded["module"], unrecorded["name"]) == ("moxi", "terminal record")
+    assert unrecorded["state"] == "warn", unrecorded
+    assert "doesn't hold this terminal's environment" in unrecorded["detail"], unrecorded
+    assert unrecorded["fix"] == "type moxi modules in this terminal"
+    assert recorded["state"] == "ok", recorded
+    assert recorded["detail"].startswith("the record at "), recorded
 
 
 def test_the_doctor_run_has_the_row_on_module_moxi(acct):
