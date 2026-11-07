@@ -354,6 +354,7 @@ def test_this_process_is_read_as_listening(listener):
     assert _plan.listening(os.getpid(), "127.0.0.2", listener) is False
 
 
+@pytest.mark.honest_ports
 def test_a_connect_is_answered_only_where_something_listens(listener):
     assert _plan.answers("127.0.0.1", listener) is True
     with closing(socket.socket()) as sock:
