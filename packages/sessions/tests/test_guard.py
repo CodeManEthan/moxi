@@ -198,7 +198,8 @@ def test_the_command_after_the_escape_is_judged_on_its_own(home):
     t = transcript(home)
     for command in (f"moxi sessions root; cat {t}", f"moxi sessions root && cat {t}",
                     f"moxi sessions read {SESSION} | tee {t}",
-                    f"moxi sessions root\ncat {t}"):
+                    f"moxi sessions root\ncat {t}",
+                    f"moxi sessions find `cat {t}`", f"moxi sessions find $(cat {t})"):
         assert refused("Bash", {"command": command}, home), command
 
 
