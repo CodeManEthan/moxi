@@ -136,9 +136,9 @@ TERMS: tuple[Entry, ...] = (
         "no session running, when its prompt cache has gone cold, or when the sender "
         "passed `--held`. Held mail waits in one queue with no time limit and goes out at "
         "the recipient's next chance: a new session starting, `/clear`, a compaction, or "
-        "the turn after a cold cache is warm again. `--held` mail to an agent whose cache "
-        "is warm goes out after its next turn. A message that waited arrives marked "
-        "`[held]`, with when it was sent and how long it waited.",
+        "the end of its next turn, since a turn warms a cold cache again. `--held` mail "
+        "to an agent whose cache is warm goes out after its next turn. A message that "
+        "waited arrives marked `[held]`, with when it was sent and how long it waited.",
         aliases=("--held", "pending", "cold"),
     ),
     Entry(
