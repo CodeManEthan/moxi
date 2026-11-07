@@ -607,6 +607,32 @@ def test_a_socket_unit_the_set_dropped_leaves_the_record(w, capsys, monkeypatch)
     assert w.active("moxi-demo-relay.socket") and w.active(SERVICE)
 
 
+#: Shaped like ui's shell: two addresses, started by a connection while its switch is off.
+STARTED_BY_A_CONNECTION = (
+    "{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+    "'addresses': ['127.0.0.1', '::1'], 'start': {'login': 'relay.enabled'}}}}")
+
+
+def test_a_reinstall_with_the_ipv6_socket_unit_failed_is_not_refused_for_its_port(
+        w, capsys, monkeypatch):
+    """127.0.0.1 answers, held by this home's own active socket unit, while the `::1`
+    unit has failed and the daemon is idle: the settle step keeps the units and exits 0."""
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    w.module(DAEMONS=STARTED_BY_A_CONNECTION, ANNOUNCES="2")
+    for change in units.plan("demo"):
+        if change.digest is not None:
+            _state.record("demo", change.name, change.digest)
+    assert all(a.ok for a in units.apply(units.plan("demo"), say=w.lines.append))
+    _settle.record_setup("demo", "0.1.0")
+    w.sup.state(SERVICE)["active"] = False
+    w.sup.props["moxi-demo-relay-1.socket"] = {"ActiveState": "failed"}
+    monkeypatch.setattr(_plan, "answers",
+                        lambda address, port, timeout=0.5: address == "127.0.0.1")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert "another port" not in out and "listens on" not in out
+
+
 def test_a_dropped_socket_unit_takes_its_own_entry_out():
     def entry(unit):
         return units.Stopped("demo", "relay", unit, "fake", True)

@@ -273,6 +273,31 @@ def test_an_active_own_socket_naming_the_address_passes_without_a_connect(w):
     assert w.connects == [("127.0.0.1", 8470)]
 
 
+@pytest.mark.parametrize("down", ["failed", "inactive"])
+def test_an_active_socket_unit_holds_its_address_while_the_sets_other_unit_is_down(w, down):
+    """Two addresses, the `::1` unit down, the `127.0.0.1` unit active and the daemon idle
+    (it starts on a connection): 127.0.0.1 is this home's own, held by its own unit, so
+    nothing connects there. `::1` is held by nothing, so the plan connects; free, it
+    passes, and answered there it is refused."""
+    w.module("127.0.0.1", "::1")
+    w.home(w.tmp / "scratch")
+    w.apply()
+    [second] = [p.name for p in w.root.glob("*-1.socket")]
+    if down == "failed":
+        w.sup.props[second] = {"ActiveState": "failed"}
+    else:
+        w.sup.state(second)["active"] = False
+    w.sup.state(second.replace("-1.socket", ".service"))["active"] = False
+    w.listening.add(("127.0.0.1", 8470))
+    assert {c.action for c in w.plan().values()} == {"keep"}
+    assert w.connects == [("::1", 8470)]
+    w.connects.clear()
+    w.listening.add(("::1", 8470))
+    assert ("something that is not this home's demo/shell listens on [::1]:8470, and "
+            "this home's demo/shell isn't running") in refused(w.plan())
+    assert w.connects == [("::1", 8470)]
+
+
 def test_a_free_address_is_planned_with_no_supervisor_read(w):
     w.sup.calls.clear()
     assert {c.action for c in w.plan().values()} == {"add"}

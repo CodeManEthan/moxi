@@ -39,11 +39,12 @@ checks run, after `foreign` is decided (a daemon refused `foreign` gets neither)
    names are the ones it gives itself, so for a home given by `MOXI_HOME` the default
    home's untagged file is another's, and for the default home every tagged one is.
 2. A listener that isn't this home's daemon (`_Listeners`). Nothing connects when this
-   home's own socket unit or job names the address and is `active`; else a TCP connect
-   that nothing answers leaves the address free; else this home's daemon must be running
-   with a process (or one under it) that listens there, or the address is refused. When
-   the supervisor's read is `unknown` or the process can't be read, the plan says so in
-   one line on stderr and doesn't refuse.
+   home's own socket unit or job names the address and that unit or job is `active`,
+   whatever the set's other units do; else a TCP connect that nothing answers leaves the
+   address free; else this home's daemon must be running with a process (or one under
+   it) that listens there, or the address is refused. When the supervisor's read is
+   `unknown` or the process can't be read, the plan says so in one line on stderr and
+   doesn't refuse.
 
 Task Scheduler writes no socket files, so there a stopped daemon of another home is seen by
 neither check: the start that comes second fails on the port.
@@ -427,14 +428,15 @@ class _Planner:
 class _Listeners:
     """What listens on one daemon's addresses, and whether it is this home's own daemon.
 
-    For each address, in order: this home's own socket unit or job names it and its
-    socket state is `active` (the supervisor holds it for this home: nothing connects);
-    else a TCP connect that nothing answers (free); else this home's daemon `active` with
-    a pid whose process, or one under it, listens on it (`listening`). Anything else that
-    answers is another's. When the daemon's state is `unknown` or its process can't be
-    read, the plan can't tell: it says so in one line on stderr and doesn't refuse, and a
-    real clash shows as the daemon's start failing on the port. The supervisor is read
-    once, and only when one of these steps needs it."""
+    For each address, in order: this home's own socket unit or job names it and that
+    unit's or job's own state is `active` (the supervisor holds it for this home: nothing
+    connects, so a set whose other units are down still holds the addresses its active
+    units name); else a TCP connect that nothing answers (free); else this home's daemon
+    `active` with a pid whose process, or one under it, listens on it (`listening`).
+    Anything else that answers is another's. When the daemon's state is `unknown` or its
+    process can't be read, the plan can't tell: it says so in one line on stderr and
+    doesn't refuse, and a real clash shows as the daemon's start failing on the port. The
+    supervisor is read once, and only when one of these steps needs it."""
 
     def __init__(self, planner: _Planner, name: str, refs: list[UnitRef]):
         self.planner = planner
@@ -445,12 +447,16 @@ class _Listeners:
     def elsewhere(self, wanted) -> str | None:
         unit = f"{self.planner.module}/{self.name}"
         paths = {path for ref in self.refs for path in ref.paths}
-        named = {listen for path, _, listens in self.planner.socket_files()
-                 if path in paths for listen in listens}
+        named: dict[tuple[str, int], list[Path]] = {}
+        for path, _, listens in self.planner.socket_files():
+            if path in paths:
+                for listen in listens:
+                    named.setdefault(listen, []).append(path)
         for address, port in wanted:
             if (address, port) in named:
-                socket = self.states()[1]
-                if socket is not None and socket.state == "active":
+                sockets = self.states()[1]
+                if any(sockets.get(path) is not None and sockets[path].state == "active"
+                       for path in named[(address, port)]):
                     continue
             if not answers(address, port):
                 continue
@@ -477,20 +483,28 @@ class _Listeners:
         return None
 
     def states(self):
-        """`(daemon, socket)`: the `UnitState`s of this home's daemon and its socket, read
-        in one supervisor call; None for one that has nothing written."""
+        """`(daemon, sockets)`, read in one supervisor call: the `UnitState` of this home's
+        daemon (None when it has nothing written), and the socket state of each of its
+        socket files by path. Each socket unit is read on its own, so an address is held
+        by the unit that names it whatever its set's other units do; a job's one state is
+        every path's."""
         if self._read:
             return self._read[0]
         planner = self.planner
         impl, module, name = planner.impl, planner.module, self.name
         daemon = next((ref for ref in self.refs if ref.kind == "daemon"), None)
-        socket = None
+        sockets: list[UnitRef] = []
         if daemon is not None and impl.sockets == "job":
-            socket = UnitRef(module, name, "socket", daemon.ids, daemon.paths,
-                             daemon.enabled)
+            sockets = [UnitRef(module, name, "socket", daemon.ids, daemon.paths,
+                               daemon.enabled)]
         elif impl.sockets == "units":
             socket = next((ref for ref in self.refs if ref.kind == "socket"), None)
-        refs = [ref for ref in (daemon, socket) if ref is not None]
+            if socket is not None and len(socket.ids) == len(socket.paths):
+                sockets = [UnitRef(module, name, "socket", (one,), (path,), socket.enabled)
+                           for one, path in zip(socket.ids, socket.paths)]
+            elif socket is not None:
+                sockets = [socket]
+        refs = [ref for ref in (daemon, *sockets) if ref is not None]
         read: list = []
         if refs:
             from ._apply import fence
@@ -501,8 +515,12 @@ class _Listeners:
             except Exception as exc:  # noqa: BLE001 - a failed read is `unknown`
                 read = [UnitState(module, name, ref.kind, impl.name, "unknown",
                                   detail=str(exc) or type(exc).__name__) for ref in refs]
-        states = dict(zip((ref.kind for ref in refs), read))
-        self._read.append((states.get("daemon"), states.get("socket")))
+        if daemon is not None and read:
+            daemon_state, read = read[0], read[1:]
+        else:
+            daemon_state = None
+        by_path = {path: state for ref, state in zip(sockets, read) for path in ref.paths}
+        self._read.append((daemon_state, by_path))
         return self._read[0]
 
 

@@ -574,6 +574,30 @@ def test_a_failed_socket_unit_is_a_fail_socket_row_naming_it(d, ipv6):
     assert cli.main(["doctor", "demo"]) == 1
 
 
+#: Shaped like ui's shell: two addresses, started by a connection while its switch is off.
+STARTED_BY_A_CONNECTION = (
+    "{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+    "'addresses': ['127.0.0.1', '::1'], 'start': {'login': 'relay.enabled'}}}}")
+
+
+def test_a_failed_ipv6_socket_unit_leaves_the_idle_daemons_row_unrefused(d, ipv6,
+                                                                         monkeypatch):
+    """127.0.0.1 answers, its own socket unit holding it, while the `::1` unit has
+    failed and the daemon is idle: the daemon's row isn't refused for its port; the
+    socket's row fails naming the failed unit."""
+    d.installed(DAEMONS=STARTED_BY_A_CONNECTION, ANNOUNCES="2")
+    d.sup.state(f"{STEM}.service")["active"] = False
+    d.sup.props[f"{STEM}-1.socket"] = {"ActiveState": "failed"}
+    monkeypatch.setattr(units._plan, "answers",
+                        lambda address, port, timeout=0.5: address == "127.0.0.1")
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert "another port" not in (relay.fix or "") and "listens on" not in relay.detail
+    assert relay.detail.startswith("up to date; inactive")
+    sock = got[("demo", "socket relay")]
+    assert (sock.state, sock.detail) == ("fail", f"up to date; failed: {STEM}-1.socket")
+
+
 def test_an_inactive_socket_names_the_units_not_active(d, ipv6):
     d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
     d.sup.state(f"{STEM}-1.socket")["active"] = False

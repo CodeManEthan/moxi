@@ -18,7 +18,9 @@
   this home's own daemon listens on it. The refusal names what holds it and the setting
   to change. A home re-installed while its own daemon runs is never refused for its
   port. To tell whose listener holds an address, the plan makes one supervisor status
-  read, and a short TCP connect when its own socket doesn't hold it.
+  read, and a short TCP connect when its own socket doesn't hold it. Each address is
+  judged by the socket unit that names it, so a home whose `::1` socket unit is down
+  while its `127.0.0.1` one listens is still not refused for `127.0.0.1`.
 - One-time cleanup: a unit an earlier `MOXI_HOME` install wrote has the default home's
   name, and only its owner can tell it apart, so disable and remove it by hand.
 - `place.Item` gains `volatile`: paths inside a copied folder that the copy's and the
