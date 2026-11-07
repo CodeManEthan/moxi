@@ -225,11 +225,13 @@ def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
         assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 10)
         binding = rig.daemon.bindings[IDENTITY]
         assert (binding.session_id, binding.new_session) == (thread_id, False)
-        assert binding.turned is True, "comms counts every resumed thread as turned"
         record = wait_until(lambda: (lambda r: r if r.get("launch") != first_launch
                                      else None)(codex_threads.read_meta(IDENTITY) or {}),
                             10)
         assert record["thread_id"] == thread_id and record["layer_one"], record
+        # The first launch ran no turn: the resumed thread reads as one with none yet.
+        assert rig.daemon.bindings[IDENTITY].turned is False, \
+            "a resumed thread with no turn is not counted as turned"
         assert second.poll() is None
     finally:
         output = stop(second)

@@ -37,8 +37,9 @@ from .terminal import (ENTER_ALT_SCREEN, JOB_CONTROL_SIGNALS, LEAVE_ALT_SCREEN,
 
 log = logging.getLogger("comms.window")
 
-#: How long a wait for a ready generation lasts before the wrapper gives up. A priming
-#: turn takes a few seconds; the deadline covers a slow first start with room to spare.
+#: How long a wait for a ready generation lasts before the wrapper gives up. A generation
+#: is ready once its server answers and its event stream is open; the deadline covers a
+#: slow first server start with room to spare.
 READY_WAIT = 180.0
 #: How long the generation check waits for an answer before it reads the generation as
 #: lost.

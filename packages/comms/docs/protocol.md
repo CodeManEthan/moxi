@@ -536,6 +536,10 @@ its own thread or session, as a Claude launch does: neither adapter reads its re
 every launch's `bind` reports `new_session: true` and its `turned` is false until its own
 first turn ends; a `bind` later in the same launch reports the held id with
 `new_session: false`, and no reconnect or restart inside the launch makes it fresh again.
+A Codex launch told to resume a thread reports that id from its first `bind`, with
+`new_session: false`, and leaves `turned` out until the host's ready for the first load
+says whether the thread has had a turn: a thread can be resumed before its first turn,
+and then reads as one with no turn until a turn of this launch ends.
 The OpenCode adapter adds `agent_model`, `{"agent": <name>, "model": "<provider>/<model>"
 or null}`, the default agent it named from `opencode debug config` and that agent's model,
 or `null` when it could not name one (which withdraws an earlier report). A `ready` with

@@ -66,7 +66,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import hooktimes, protocol
-from .results import StopFacts
 
 log = logging.getLogger("moxi.turns.codex.hooks")
 
