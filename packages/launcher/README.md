@@ -129,7 +129,8 @@ script, or from inside a launched session. It also answers None for a launch who
 id it never learned, which is a Codex launch without turns or in `exec` mode. The launcher
 learns some ids after the session starts (a Codex launch's, the new one after a `/clear`),
 so an id that answers None may answer a kind later. `launch_kinds(session_ids)` answers
-many ids in one read. Neither writes to the log; a log held past the wait (1 second)
+many ids in one read. Neither writes to the log, except to bring an older one's
+schema up to date; a log held past the wait (1 second)
 raises `Busy`, and the caller asks again.
 
 ## Handoffs
