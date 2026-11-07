@@ -63,7 +63,8 @@ cheap import check) or `load` where it needs it, and is off when the answer is n
 
 `extensions(group)` reads the behaviour one module offers another, an entry-point group
 named `moxi.<module>` or `moxi.<module>.<part>`. `session_env()` collects every present
-module's `SESSION_ENV`. A `TEARDOWN` raises `Refused` to stop an uninstall.
+module's `SESSION_ENV`. `setup_ran(module)` says whether the core records that the
+module's `SETUP` has run in this home. A `TEARDOWN` raises `Refused` to stop an uninstall.
 
 A hook may import this module and call `available` and `load`: neither they nor the
 import load `importlib.metadata`, `dataclasses`, `inspect`, `typing`, `zipfile` or `json`
@@ -522,6 +523,23 @@ def session_env() -> frozenset[str]:
     return frozenset(keys)
 
 
+def setup_ran(module: str) -> bool:
+    """Whether the core records that `module`'s settle step has run its `SETUP` here, in
+    this home, at any version: True once a `moxi install` of it ran its `SETUP` to the
+    end (or found it declares none), until `moxi uninstall` forgets it. False for a
+    module installed without its settle step (a plain wheel install), one whose `SETUP`
+    has only failed, and any name the record lacks. Reads the core's state file alone,
+    imports nothing of the module, and never raises: an unreadable record reads False.
+    A module's doctor asks it to tell "not set up yet" from "broken"."""
+    try:
+        from . import _settle
+
+        return isinstance(_settle.setup_versions().get(module), dict)
+    except Exception as exc:  # noqa: BLE001 - never raises
+        _debug(f"reading the setup record failed: {_describe(exc)}")
+        return False
+
+
 def reset() -> None:
     """Forget every record, so the next `load` reads the environment again (for tests)."""
     with _lock:
@@ -570,8 +588,9 @@ class _Record:
                                     "module needs another name"))
         if name in names.RESERVED:
             return cls(Found(state=BROKEN, **where,
-                             reason=f"{name!r} is a name the core keeps for itself; the "
-                                    "module needs another name"))
+                             reason=f"{name!r} is a name moxi keeps for itself, not a "
+                                    f"module: {names.reserved_why(name)}; the module "
+                                    "needs another name"))
         if ":" in value:
             return cls(Found(state=BROKEN, **where,
                              reason=f"the entry point {value!r} names an attribute; "
@@ -1341,4 +1360,4 @@ def _debug(line: str) -> None:
 
 __all__ = ["GROUP", "PRESENT", "ABSENT", "BROKEN", "ANNOUNCES", "KNOWN", "Entry", "Found",
            "Refused", "Extension", "ExtensionError", "installed", "present", "available",
-           "load", "scan", "extensions", "session_env", "reset"]
+           "load", "scan", "extensions", "session_env", "setup_ran", "reset"]

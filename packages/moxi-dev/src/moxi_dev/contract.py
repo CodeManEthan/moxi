@@ -1051,8 +1051,10 @@ class _Repo:
             self.add(here, 0, "7", f"names the module {name!r}, one of the umbrella's own "
                                    "verbs; `moxi " + name + "` could never reach it")
         elif name in names.RESERVED:
-            self.add(here, 0, "7", f"names the module {name!r}, a name the core keeps for "
-                                   "itself; the module needs another name")
+            self.add(here, 0, "7", f"names the module {name!r}: {name!r} is a name moxi "
+                                   f"keeps for itself, not a module: "
+                                   f"{names.reserved_why(name)}; the module needs another "
+                                   "name")
         if name and self.own_import not in self.src_tops:
             self.add(here, 0, "7", f"has no src/{self.own_import}: module {name!r} is "
                                    f"imported as {self.own_import}")
