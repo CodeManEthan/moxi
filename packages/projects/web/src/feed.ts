@@ -54,11 +54,14 @@ export interface Kinds {
   broken: Broken[];
 }
 
-/** `/api/where`: the store file the page server reads and writes, and the git a create
- * would run there, null when it finds none. */
+/** `/api/where`: the store file the page server reads and writes, the git a create would
+ * run there, null when it finds none, and `note`, the line a change would be refused with
+ * now (the page server would write elsewhere than the user's terminal, or can't tell),
+ * null when a change would go ahead. */
 export interface Where {
   store: string;
   git: string | null;
+  note: string | null;
 }
 
 /** An add's or a set's answer: the project as it now stands, and notes that refuse
@@ -174,8 +177,10 @@ export function parseKinds(data: unknown): Kinds | null {
 
 /** `/api/where`'s value, or null when it isn't one. */
 export function parseWhere(data: unknown): Where | null {
-  if (!isObj(data) || !isStr(data.store) || !isStrOrNull(data.git)) return null;
-  return { store: data.store, git: data.git };
+  if (!isObj(data) || !isStr(data.store) || !isStrOrNull(data.git) || !isStrOrNull(data.note)) {
+    return null;
+  }
+  return { store: data.store, git: data.git, note: data.note };
 }
 
 /** An add's or a set's answer, or null when it isn't one. */

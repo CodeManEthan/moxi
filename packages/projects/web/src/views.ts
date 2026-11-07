@@ -330,8 +330,9 @@ export function projectFields(project: Project): Field[] {
 }
 
 /** The line under the store and the git: why they are shown. */
-export const WHERE_LINE = "These are the browser shell's, which can differ from your terminal's: "
-  + "a different store shows here as a different list.";
+export const WHERE_LINE = "These are the browser shell's, which can differ from your terminal's. "
+  + "Before each change the page compares the folders it would read and write with the last "
+  + "run in a terminal, and refuses while they differ.";
 /** The git line when the page server finds none. */
 export const NO_GIT = "none on this server's PATH, so create is refused for a kind made with git";
 
@@ -342,6 +343,8 @@ export interface WhereView {
   store: string | null;
   /** The git a create would run, or null for none (with `up`) or not known. */
   git: string | null;
+  /** The line a change would be refused with now, as the server last said it, or null. */
+  note: string | null;
   line: string | null;
 }
 
@@ -349,10 +352,13 @@ export interface WhereView {
 export function whereView(data: FeedState<Where>): WhereView {
   const store = data.value?.store ?? null;
   const git = data.value?.git ?? null;
-  if (data.gone) return { state: "gone", store: null, git: null, line: null };
-  if (data.failure !== null) return { state: "failed", store, git, line: failureLine(data.failure) };
-  if (data.loading || data.value === null) return { state: "loading", store: null, git: null, line: null };
-  return { state: "up", store, git, line: null };
+  const note = data.value?.note ?? null;
+  if (data.gone) return { state: "gone", store: null, git: null, note: null, line: null };
+  if (data.failure !== null) return { state: "failed", store, git, note, line: failureLine(data.failure) };
+  if (data.loading || data.value === null) {
+    return { state: "loading", store: null, git: null, note: null, line: null };
+  }
+  return { state: "up", store, git, note, line: null };
 }
 
 /** The edit form, as typed. */

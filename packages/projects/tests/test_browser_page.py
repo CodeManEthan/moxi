@@ -1,6 +1,8 @@
 """projects' page in a browser, through a real shell that starts projects' real page
 server: the contract check; the store file and the git the page acts with, and a shell
-whose PATH has no git; the list and its kind filter; a contribution that won't load,
+whose PATH has no git; a terminal whose last run placed the store elsewhere than the
+shell does, after which the page's add refuses with the store line and the where block
+shows it as a note; the list and its kind filter; a contribution that won't load,
 named beside the filter and in the add form, which an add goes ahead without and whose
 warning the form shows beside the success; an add with create in a
 real git; a topic added with no root, whose answer is lost, after which the page reads its
@@ -13,7 +15,9 @@ px width check.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
 store is the one the page server reads, under the shell's home, and every check reads it
-back the same way. A fake module on the shell's site refuses to remove a project while a
+back the same way. Those runs have no keyboard, so they record nothing; each shell is
+given the core's record of a terminal with its own environment before the page writes,
+as a person's own terminal run would leave it. A fake module on the shell's site refuses to remove a project while a
 file named `HOLD` is in its root. git runs with a global config of the test's own and no
 system config.
 """
@@ -104,6 +108,23 @@ def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return done
 
 
+def record_terminal(shell, **changes: str) -> None:
+    """The core's record of a terminal whose environment is the shell's with `changes`,
+    written where the shell's page server reads it. A module's shell keeps the anchor of
+    the test that started it, so the record goes there and not to this test's anchor."""
+    from moxi import paths, terminal
+
+    terminal.write({**shell.env, **changes}, path=paths.terminal_record(shell.env))
+
+
+def store_of(env: dict) -> str:
+    """The store file `moxi projects` resolves with environment `env`."""
+    return subprocess.run([sys.executable, "-c",
+                           "from moxi_projects import store; print(store.path())"],
+                          env=env, capture_output=True, text=True, check=True,
+                          timeout=60).stdout.strip()
+
+
 def root(shell, name: str) -> str:
     return str(Path(shell.env["HOME"]) / "work" / name)
 
@@ -128,6 +149,7 @@ def seeded(ui_shell) -> dict[str, str]:
     roots = {"alpha": add(ui_shell, "alpha", "--lead", "lead-a"),
              "scout-home": add(ui_shell, "scout-home", "--kind", "agent")}
     moxi(ui_shell, "projects", "agents", "add", "alpha", "helper")
+    record_terminal(ui_shell)
     return roots
 
 
@@ -176,8 +198,7 @@ def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
 
 
 def test_the_page_shows_the_store_and_the_git_it_acts_with(seeded, ui_shell, ui_page):
-    store = subprocess.run([sys.executable, "-c", "from moxi_projects import store; print(store.path())"],
-                           env=ui_shell.env, capture_output=True, text=True, check=True).stdout.strip()
+    store = store_of(ui_shell.env)
     git = shutil.which("git", path=ui_shell.env["PATH"])
     assert git is not None
     panel = open_panel(ui_page)
@@ -186,6 +207,40 @@ def test_the_page_shows_the_store_and_the_git_it_acts_with(seeded, ui_shell, ui_
     expect(where.locator('[data-line="store"]')).to_have_text(store)
     expect(where.locator('[data-line="git"]')).to_have_text(git)
     assert Path(store).is_relative_to(Path(ui_shell.env["MOXI_HOME"]))
+    # The terminal's last run placed this same store, so there is no note.
+    expect(where.locator('[data-line="note"]')).to_have_count(0)
+
+
+def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_and_shows_the_note(
+        ui_shells, ui_shell_options, ui_contexts, tmp_path_factory):
+    shell = ui_shells(**ui_shell_options)
+    moved = str(tmp_path_factory.mktemp("terminal-data"))
+    record_terminal(shell, MOXI_PROJECTS_DATA_HOME=moved)
+    here = store_of(shell.env)
+    there = store_of({**shell.env, "MOXI_PROJECTS_DATA_HOME": moved})
+    assert here != there
+    page = ui_contexts(shell).pages[0]
+    page.goto("/m/projects/")
+    panel = page.locator("#moxi-panel > moxi-projects-page")
+    line = f"the projects store here is {here}, but the last run in a terminal used {there}"
+    note = panel.locator('section[data-part="where"] [data-line="note"]')
+    expect(note).to_be_visible()
+    expect(note).to_contain_text(line)
+    expect(note).to_contain_text(f"Set MOXI_PROJECTS_DATA_HOME to {moved}")
+    # The list still reads: the shell's store, which has no rows.
+    expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
+
+    form = panel.locator("moxi-projects-add")
+    where_to = root(shell, "pagerow")
+    form.get_by_label("Key", exact=True).fill("pagerow")
+    form.get_by_label(re.compile(r"^Root")).fill(where_to)
+    form.get_by_role("button", name="Add").click()
+    said = form.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-tone", "error")
+    expect(said).to_contain_text(line)
+    expect(said).to_contain_text("moxi ui stop")
+    # Neither store was made.
+    assert not os.path.exists(here) and not os.path.exists(there)
 
 
 def test_a_shell_with_no_git_says_so_and_a_create_names_the_lasting_fix(
@@ -198,6 +253,7 @@ def test_a_shell_with_no_git_says_so_and_a_create_names_the_lasting_fix(
     shell = ui_shells(**{**ui_shell_options,
                          "env": {**ui_shell_options["env"], "PATH": str(tools)}})
     assert shutil.which("git", path=shell.env["PATH"]) is None
+    record_terminal(shell)
     page = ui_contexts(shell).pages[0]
     page.goto("/m/projects/")
     panel = page.locator("#moxi-panel > moxi-projects-page")
@@ -243,6 +299,7 @@ def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_w
         ui_shells, ui_contexts, tmp_path_factory):
     site = fake_site(tmp_path_factory.mktemp("broken"), "fake_broken", "broken", BROKEN)
     shell = ui_shells(site=[str(site)])
+    record_terminal(shell)
     page = ui_contexts(shell).pages[0]
     page.goto("/m/projects/")
     panel = page.locator("#moxi-panel > moxi-projects-page")
