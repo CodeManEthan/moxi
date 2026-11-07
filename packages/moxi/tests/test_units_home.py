@@ -160,6 +160,15 @@ def test_units_ids_is_the_public_name_of_a_unit_in_this_home(w, monkeypatch):
     assert units.ids("demo", "relay") == ()
 
 
+def test_units_ids_is_empty_for_a_supervisor_with_no_writer(monkeypatch):
+    def no_writer():
+        raise NotImplementedError("this moxi has no launchd writer yet")
+
+    monkeypatch.setattr(_backend, "implementation", no_writer)
+    assert units.ids("demo", "relay") == ()
+    assert units.ids("demo", "snap", "timer") == ()
+
+
 # -- the home a unit runs with ------------------------------------------------------------------
 
 def test_environment_is_quoted_by_its_own_rules():

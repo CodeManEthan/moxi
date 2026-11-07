@@ -20,6 +20,8 @@ OPTIONAL = {
     "ui": "The comms panel and its roster of agents in the browser UI shell.",
     "connector": "comms' tools in the Claude apps, text chat and voice mode, through the "
                  "public MCP host",
+    "services": "One list of every daemon and timer: with it, a doctor row whose cure is a "
+                "restart of comms' daemon names `moxi services restart comms/daemon`.",
 }
 GATED = {"moxi-comms-codex": "codex"}
 #: Each variable of comms' prefix it reads outside moxi.paths and moxi.config, and why.

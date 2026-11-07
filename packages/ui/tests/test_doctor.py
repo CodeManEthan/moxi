@@ -211,6 +211,9 @@ def test_a_socket_not_all_listening_makes_no_connect(monkeypatch, listener, stat
                                                       row):
     """[::1] alone not held: the shell still starts on 127.0.0.1 and refuses localhost, a
     warn; 127.0.0.1 not held is the fail row, naming the unit."""
+    from moxi import units
+
+    monkeypatch.setattr(units, "ids", lambda module, name, kind="daemon": (V4, V6))
     monkeypatch.setattr(health, "_units_status", lambda: [_socket_unit(state, detail)])
     found = health.probe(wait=0)
     assert found.state == ("partial" if row == "warn" else "socket")

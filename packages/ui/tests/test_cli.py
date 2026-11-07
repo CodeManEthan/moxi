@@ -9,6 +9,7 @@ import stat
 import time
 
 import pytest
+from moxi import units
 from moxi.paths import Layout, python
 from moxi.units import Acted, UnitState
 from moxi_ui import cli
@@ -20,6 +21,23 @@ def task(state="inactive", enabled=True, last=None):
 
 
 V4, V6 = "moxi-ui-shell.socket", "moxi-ui-shell-1.socket"
+#: A tagged home's names for them, as the core gives them.
+TAGGED = ("moxi-h3f9a2c1d-ui-shell.socket", "moxi-h3f9a2c1d-ui-shell-1.socket")
+
+
+def ids_of(*sockets):
+    """A stand-in for `moxi.units.ids` on systemd that gives the shell `sockets` and its
+    service; the core's own tests hold the names it builds."""
+    def ids(module, name, kind="daemon"):
+        assert (module, name, kind) == ("ui", "shell", "daemon")
+        return (*sockets, sockets[0].replace(".socket", ".service"))
+    return ids
+
+
+@pytest.fixture(autouse=True)
+def default_ids(monkeypatch):
+    """The default home's socket units, unless a test names others."""
+    monkeypatch.setattr(units, "ids", ids_of(V4, V6))
 
 
 def socket_unit(state="active", detail="", backend="systemd"):
@@ -288,24 +306,66 @@ def _plain():
     return {key: value for key, value in os.environ.items() if key not in names}
 
 
-def test_a_locator_that_moves_the_runtime_dir_is_refused_under_a_socket(monkeypatch, tmp_path):
+@pytest.mark.parametrize("home", [False, True], ids=["default home", "tagged home"])
+def test_a_locator_that_moves_the_runtime_dir_is_refused_under_a_socket(monkeypatch, tmp_path,
+                                                                        home):
+    sockets = TAGGED if home else (V4, V6)
+    monkeypatch.setattr(units, "ids", ids_of(*sockets))
+    base = {**_plain(), "MOXI_HOME": str(tmp_path / "h")} if home else _plain()
     world = World(monkeypatch, [socket_unit("active")])
-    environ = {**_plain(), "MOXI_HOME": str(tmp_path / "elsewhere")}
-    with pytest.raises(Refused, match="MOXI_HOME") as caught:
-        world.ensure(environ)
-    assert "systemctl --user stop moxi-ui-shell.socket" in str(caught.value)
-    World(monkeypatch, [socket_unit("active")]).ensure(_plain())
+    with pytest.raises(Refused, match="MOXI_UI_HOME") as caught:
+        world.ensure({**base, "MOXI_UI_HOME": str(tmp_path / "elsewhere")})
+    assert f"systemctl --user stop {' '.join(sockets)}`" in str(caught.value)
+    World(monkeypatch, [socket_unit("active")]).ensure(base)
+
+
+def test_a_tagged_home_opens_through_its_own_socket(monkeypatch, tmp_path):
+    """The unit a tagged home wrote runs with that `MOXI_HOME`, so the shell it starts reads
+    the runtime dir this shell does, under any spelling of the home."""
+    monkeypatch.setattr(units, "ids", ids_of(*TAGGED))
+    home = tmp_path / "h"
+    home.mkdir()
+    (tmp_path / "link").symlink_to(home)
+    monkeypatch.chdir(tmp_path)
+    for spelling in (str(home), str(tmp_path / "link"), "h"):
+        environ = {**_plain(), "MOXI_HOME": spelling}
+        assert units.environment("ui", environ) == {"MOXI_HOME": os.path.realpath(home)}
+        world = World(monkeypatch, [socket_unit("active")], probes=("down",))
+        assert world.ensure(environ) is None and world.spawned == []
+
+
+def test_the_fix_line_names_only_the_socket_units_the_core_gives(monkeypatch, tmp_path):
+    monkeypatch.setattr(units, "ids", ids_of(V4))
+    world = World(monkeypatch, [socket_unit("active")])
+    with pytest.raises(Refused) as caught:
+        world.ensure({**_plain(), "MOXI_UI_HOME": str(tmp_path / "elsewhere")})
+    assert f"systemctl --user stop {V4}`" in str(caught.value)
+    monkeypatch.setattr(units, "ids", lambda module, name, kind="daemon": ())
+    world = World(monkeypatch, [socket_unit("active")])
+    with pytest.raises(Refused) as caught:
+        world.ensure({**_plain(), "MOXI_UI_HOME": str(tmp_path / "elsewhere")})
+    assert "systemctl" not in str(caught.value)
+    assert "after stopping the shell's socket units" in str(caught.value)
 
 
 def test_on_windows_the_stored_environment_counts(monkeypatch, tmp_path):
     moved = str(tmp_path / "elsewhere")
-    environ = {**_plain(), "MOXI_HOME": moved}
+    environ = {**_plain(), "MOXI_UI_HOME": moved}
     world = World(monkeypatch, [task("active")], platform="win32")
-    with pytest.raises(Refused, match="MOXI_HOME") as caught:
+    with pytest.raises(Refused, match="MOXI_UI_HOME") as caught:
         world.ensure(environ)
     assert "moxi ui stop" in str(caught.value)
     world = World(monkeypatch, [task("active")], platform="win32")
-    monkeypatch.setattr(cli, "_stored_environment", lambda: {"Moxi_Home": moved})
+    monkeypatch.setattr(cli, "_stored_environment", lambda: {"Moxi_Ui_Home": moved})
+    world.ensure(environ)
+
+
+def test_on_windows_a_tagged_homes_task_runs_with_its_home(monkeypatch, tmp_path):
+    """The task's gate sets the home it was written from over the stored environment's."""
+    environ = {**_plain(), "MOXI_HOME": str(tmp_path / "h")}
+    world = World(monkeypatch, [task("active")], platform="win32")
+    monkeypatch.setattr(cli, "_stored_environment",
+                        lambda: {"MOXI_HOME": str(tmp_path / "other")})
     world.ensure(environ)
 
 

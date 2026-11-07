@@ -74,9 +74,6 @@ _NOT_INSTALLED = ("missing", "nobackend")
 #: A socket state that holds nothing: none written, no backend, or `off` (the daemon is
 #: switched off, or Windows, where the socket is skipped and the shell binds its own).
 _NO_SOCKET = (*_NOT_INSTALLED, "off")
-#: systemd's socket unit for the shell's first address, `127.0.0.1`; the one for `::1`
-#: is `moxi-ui-shell-1.socket`.
-FIRST_SOCKET_UNIT = f"moxi-{MODULE}-{DAEMON}.socket"
 
 
 class Refused(Exception):
@@ -112,6 +109,21 @@ def _units_status() -> list[Any] | None:
         return list(units.status([MODULE]))
     except Exception:  # noqa: BLE001 - the caller says it could not read them
         return None
+
+
+def _socket_units() -> tuple[str, ...]:
+    """The shell's socket units as the core names them in this home (`moxi.units.ids`),
+    first address first; empty where the supervisor has no socket units."""
+    from moxi import units
+
+    return tuple(unit for unit in units.ids(MODULE, DAEMON) if unit.endswith(".socket"))
+
+
+def first_socket_unit() -> str | None:
+    """systemd's socket unit for the shell's first address, `127.0.0.1`, in this home;
+    None where there is none."""
+    found = _socket_units()
+    return found[0] if found else None
 
 
 def _units_start() -> list[Any]:
@@ -307,7 +319,8 @@ def socket_holds_v4(row: Any | None) -> bool:
     if found is None:
         return False
     named = {unit for group in found.groups() if group for unit in group.split(", ")}
-    return FIRST_SOCKET_UNIT not in named
+    first = first_socket_unit()
+    return first is not None and first not in named
 
 
 def task_row(rows: Sequence[Any]) -> Any | None:
@@ -320,14 +333,25 @@ def task_row(rows: Sequence[Any]) -> Any | None:
 
 def locator_problem(environ: Mapping[str, str], unit_environ: Mapping[str, str]) -> list[str]:
     """The locator variables whose values differ between `environ` and the environment a
-    unit's shell starts with, when the runtime dir they give differs; else []."""
+    unit's shell starts with, when the runtime dir they give differs; else []. Two
+    spellings of one folder (a relative path, a link) are one runtime dir."""
     here = layout()
-    if here.runtime_dir(environ) == here.runtime_dir(unit_environ):
+    if _same_dir(here.runtime_dir(environ), here.runtime_dir(unit_environ)):
         return []
     return [name for name in here.locators() if environ.get(name) != unit_environ.get(name)]
 
 
+def _same_dir(one: Path, other: Path) -> bool:
+    return os.path.realpath(one) == os.path.realpath(other)
+
+
 def _unit_environ(environ: Mapping[str, str], stored: Mapping[str, str] | None) -> dict[str, str]:
+    """The environment the unit's shell starts with: `environ` less the locators, then on
+    Windows the user's stored environment's locators (`stored`), then the variables the
+    core writes the ui's units with (`moxi.units.environment`), which a tagged home's
+    unit carries as `MOXI_HOME` and which win over the stored ones."""
+    from moxi import units
+
     names = set(layout().locators())
     out = {key: value for key, value in environ.items() if key not in names}
     if stored is not None:
@@ -336,6 +360,7 @@ def _unit_environ(environ: Mapping[str, str], stored: Mapping[str, str] | None) 
         for name in names:
             if name.upper() in folded:
                 out[name] = folded[name.upper()]
+    out.update(units.environment(MODULE, environ))
     return out
 
 
@@ -358,9 +383,14 @@ def _check_locators(rows: Sequence[Any], environ: Mapping[str, str]) -> None:
                "or run `moxi ui stop` and then `moxi ui serve` in this shell")
         where = "the logon task's shell"
     else:
-        stop = ("launchctl bootout the shell's agent" if _platform() == "darwin"
-                else f"systemctl --user stop {FIRST_SOCKET_UNIT} moxi-ui-shell-1.socket")
-        fix = f"unset {variables}, or run `moxi ui serve` in this shell after `{stop}`"
+        sockets = " ".join(_socket_units())
+        if _platform() == "darwin":
+            stop = "after `launchctl bootout the shell's agent`"
+        elif sockets:
+            stop = f"after `systemctl --user stop {sockets}`"
+        else:
+            stop = "after stopping the shell's socket units"
+        fix = f"unset {variables}, or run `moxi ui serve` in this shell {stop}"
         where = "the socket-started shell"
     raise Refused(f"{variables} moves the shell's runtime directory, so {where} would read "
                   f"its sign-in tickets elsewhere; {fix}")

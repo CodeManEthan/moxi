@@ -8,18 +8,21 @@ MCP libraries.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable, Mapping
 
 MODULE = "comms"
+#: comms' daemon, as its announcement declares it among its `DAEMONS`.
+DAEMON = "daemon"
 #: Seconds the daemon gets to answer a check.
 ASK_WAIT = 2.0
 #: The window the `mcp tokens` row counts revocations over, in seconds.
 REVOKED_WINDOW = 24 * 3600
 #: How to restart comms' daemon when the services module is installed.
 RESTART = "moxi services restart comms/daemon"
-#: How to restart it without services: the supervisor's own restart of the unit the core
-#: wrote for it. Unit names are the core's to build, so this names the unit by what it is.
+#: How to restart it without services where the core names no unit for it here (no
+#: supervisor): the unit by what it is, since unit names are the core's to build.
 SUPERVISOR_RESTART = ("restart the unit `moxi install comms` wrote for comms/daemon with "
                       "its supervisor (systemctl --user restart on systemd)")
 #: The fix of a live session that has lost its tool token.
@@ -47,7 +50,25 @@ def restart() -> str:
     from moxi import modules
 
     present = modules.load("services").state == modules.PRESENT
-    return RESTART if present else SUPERVISOR_RESTART
+    return RESTART if present else supervisor_restart()
+
+
+def supervisor_restart() -> str:
+    """The supervisor's own restart of the daemon's unit, by the id the core gives that unit
+    in this home (`moxi.units.ids`); `SUPERVISOR_RESTART` where it gives none."""
+    from moxi import units
+
+    found = units.ids(MODULE, DAEMON)
+    backend = units.backend()
+    if not found:
+        return SUPERVISOR_RESTART
+    if backend == "systemd":
+        return f"systemctl --user restart {found[-1]}"
+    if backend == "launchd":
+        return f"launchctl kickstart -k gui/{os.getuid()}/{found[0]}"
+    if backend == "schtasks":
+        return f'schtasks /End /TN "{found[0]}", then schtasks /Run /TN "{found[0]}"'
+    return SUPERVISOR_RESTART
 
 
 def health():

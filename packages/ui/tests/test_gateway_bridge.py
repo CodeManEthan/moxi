@@ -122,7 +122,8 @@ def test_the_usual_test_environment_takes_no_hold(tmp_path_factory, fixture_site
         assert phone_kit.hold_port(shell) is None
         with __import__("socket").socket() as free:
             free.bind(("127.0.0.1", shell.gateway_port))  # the port stays free
-        assert any("takes no hold" in line for line in shell.stderr())
+        # Its config lives under its own MOXI_HOME, where the gateway's switch is off.
+        assert not any("takes no hold" in line for line in shell.stderr())
     finally:
         shell.stop()
 

@@ -726,7 +726,9 @@ def test_the_restart_fix_names_services_when_it_is_installed_else_the_supervisor
         monkeypatch, state, fix):
     """comms writes no unit of its own: the core does, so the restart is services' verb or
     the supervisor's own, never a comms verb."""
-    from moxi import modules
+    from moxi import modules, units
+
+    monkeypatch.setattr(units, "ids", lambda module, name, kind="daemon": ())
 
     def load(name, **kw):
         assert name == "services"
@@ -737,6 +739,39 @@ def test_the_restart_fix_names_services_when_it_is_installed_else_the_supervisor
     assert "moxi comms" not in checks.restart()
     row = checks.endpoint_row({"served": False, "why": "bind-failed"})
     assert row.fix == checks.restart()
+
+
+#: The ids the core gives comms' daemon in a tagged home, per supervisor.
+TAGGED_IDS = {
+    "systemd": ("moxi-h3f9a2c1d-comms-daemon.socket", "moxi-h3f9a2c1d-comms-daemon.service"),
+    "launchd": ("moxi.h3f9a2c1d.comms.daemon",),
+    "schtasks": ("\\Moxi\\h3f9a2c1d\\comms-daemon",),
+}
+
+
+@pytest.mark.parametrize(("backend", "fix"), [
+    ("systemd", "systemctl --user restart moxi-h3f9a2c1d-comms-daemon.service"),
+    ("launchd", "launchctl kickstart -k gui/{uid}/moxi.h3f9a2c1d.comms.daemon"),
+    ("schtasks", 'schtasks /End /TN "\\Moxi\\h3f9a2c1d\\comms-daemon", '
+                 'then schtasks /Run /TN "\\Moxi\\h3f9a2c1d\\comms-daemon"'),
+    (None, checks.SUPERVISOR_RESTART)])
+def test_the_supervisors_restart_names_the_unit_id_the_core_gives(monkeypatch, backend, fix):
+    from moxi import modules, units
+
+    asked = []
+
+    def ids(module, name, kind="daemon"):
+        asked.append((module, name, kind))
+        return TAGGED_IDS.get(backend, ())
+
+    monkeypatch.setattr(modules, "load", lambda name, **kw: SimpleNamespace(state="absent"))
+    monkeypatch.setattr(units, "ids", ids)
+    monkeypatch.setattr(units, "backend", lambda: backend)
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    if backend == "launchd" and not hasattr(os, "getuid"):
+        pytest.skip("launchd's domain names a POSIX uid")
+    assert checks.restart() == fix.format(uid=uid)
+    assert asked == [("comms", "daemon", "daemon")]
 
 
 @pytest.mark.parametrize(("unit", "install"), [

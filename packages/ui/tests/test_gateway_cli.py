@@ -177,8 +177,8 @@ def test_pair_with_the_shell_stopped_mints_a_code_a_later_shell_redeems(env, mon
 
 def test_pair_refuses_with_the_locator_text_and_without_an_address(env, tmp_path, monkeypatch):
     monkeypatch.setattr(verbs, "_address", lambda: Address())
-    moved = {**env, "MOXI_HOME": str(tmp_path / "moved")}
-    with pytest.raises(cli.Refused, match="MOXI_HOME"):
+    moved = {**env, "MOXI_UI_HOME": str(tmp_path / "moved")}
+    with pytest.raises(cli.Refused, match="MOXI_UI_HOME"):
         verbs.cmd_pair(_ns(), print, environ=moved)
     monkeypatch.setattr(verbs, "_address", lambda: None)
     with pytest.raises(cli.Refused, match="moxi ui gateway on"):
@@ -276,8 +276,8 @@ class World:
 
 def test_on_checks_in_order_and_names_each_fix(env, tmp_path, monkeypatch):
     World(monkeypatch, env, extra=False)
-    with pytest.raises(cli.Refused, match="MOXI_HOME"):
-        verbs.cmd_on(_ns(), print, environ={**env, "MOXI_HOME": str(tmp_path / "m")})
+    with pytest.raises(cli.Refused, match="MOXI_UI_HOME"):
+        verbs.cmd_on(_ns(), print, environ={**env, "MOXI_UI_HOME": str(tmp_path / "m")})
     with pytest.raises(cli.Refused, match="moxi install ui --with gateway"):
         verbs.cmd_on(_ns(), print, environ=env)
     World(monkeypatch, env, state=("absent", "tunnel isn't installed"))
