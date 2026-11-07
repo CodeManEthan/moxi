@@ -9,7 +9,9 @@ shell whose site holds a contribution that won't load, which adds the row and sh
 warning beside the success.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
-store is the one the page server reads, under the shell's home. A fake module on the
+store is the one the page server reads, under the shell's home. Those runs have no
+keyboard, so they record nothing; each shell is given the core's record of a terminal
+with its own environment before the page writes. A fake module on the
 shell's site contributes the kind `shelf`, whose mint is `refuse`.
 """
 
@@ -98,6 +100,15 @@ def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return done
 
 
+def record_terminal(shell) -> None:
+    """The core's record of a terminal whose environment is the shell's, written where the
+    shell's page server reads it (a module's shell keeps the anchor of the test that
+    started it)."""
+    from moxi import paths, terminal
+
+    terminal.write(shell.env, path=paths.terminal_record(shell.env))
+
+
 def root(shell, name: str) -> str:
     return str(Path(shell.env["HOME"]) / "work" / name)
 
@@ -111,6 +122,7 @@ def seeded(ui_shell) -> dict[str, str]:
     moxi(ui_shell, "projects", "agents", "add", "alpha", "helper")
     moxi(ui_shell, "projects", "add", "scout-home", "--root", roots["scout-home"],
          "--kind", "agent")
+    record_terminal(ui_shell)
     return roots
 
 
@@ -250,6 +262,7 @@ def test_the_add_form_past_a_contribution_that_wont_load_adds_with_its_warning(
         ui_shells, ui_contexts, ui_component_check, tmp_path_factory):
     site = fake_site(tmp_path_factory.mktemp("broken"), "fake_broken", "broken", BROKEN)
     shell = ui_shells(site=[str(site)])
+    record_terminal(shell)
     page = ui_contexts(shell).pages[0]
     add = ui_component_check(page, "projects", "add", keep=True).locator
     expect(add.locator('[data-line="broken"]')).to_contain_text("broken:")
