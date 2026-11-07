@@ -325,8 +325,9 @@ already handed, oldest first, with `held: true` on the payload:
 | `bind` | yes | rows of unflagged messages if it passes; flagged rows wait |
 | a live message to the name, an `activity` | - | nothing |
 
-A turn end is a release point that stays open for a short window, not an instant. The
-harness can write the turn's own record after the turn's end reaches the daemon (Claude
+A turn end is a release point that stays open for a short window, not an instant. So
+held mail goes out at the end of the recipient's next turn, including the turn that
+warmed a cold cache. The harness can write the turn's own record after the turn's end reaches the daemon (Claude
 Code drains its transcript writes on a 100 ms timer), so the read at the frame can judge
 the cache as it was before the turn, and the turn that warmed a cold cache would not
 count. When a `turn_ended`'s read does not pass, whatever the queue holds, the daemon
@@ -337,7 +338,10 @@ rows of the digests that report named unhandled, which wait for the next release
 A newer `turn_ended` of the binding, or the binding's end, closes the window early; a `ready`, `look` or
 bind takes its own single read and leaves it open. A window whose last read still
 does not pass logs one line naming the binding, the read and the window's length, and
-the rows wait for the next release point. Only cache's read of the harness's record says
+the rows wait for the next release point. That line, and the line a release point's
+read that does not pass logs, are written only when rows wait for the name; a turn end
+with an empty queue still reads and opens its window, for a send that queues inside it,
+but logs nothing. Only cache's read of the harness's record says
 a cache is warm: a turn end alone never releases. A window lives in the daemon's memory,
 so a restart loses it; a `[held]` row then waits for the next turn end, and nothing goes
 out cold.
