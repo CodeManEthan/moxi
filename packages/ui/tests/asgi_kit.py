@@ -13,8 +13,8 @@ import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from moxi_loopback.headers import SECURITY_HEADERS
-from moxi_loopback.server import CHECKED
+from moxi_ui.loopback.headers import SECURITY_HEADERS
+from moxi_ui.loopback.server import CHECKED
 
 TOKEN = "T" * 43
 NONCE = "N" * 43
@@ -192,7 +192,7 @@ import asyncio
 import threading
 import time
 
-from moxi_loopback.server import Accepted, Conflict, Refused, Topics
+from moxi_ui.loopback.server import Accepted, Conflict, Refused, Topics
 
 TOPICS = Topics("today", "log")
 STATE = {}
@@ -295,7 +295,7 @@ def handlers():
 
 
 def make_page(**overrides):
-    from moxi_loopback.routes import Field, Out, Page, Route
+    from moxi_ui.loopback.routes import Field, Out, Page, Route
 
     h = f"{PACKAGE}.handlers"
     routes = (

@@ -9,7 +9,7 @@ import socket
 import sys
 
 import pytest
-from moxi_loopback.api import bind_browser
+from moxi_ui.loopback.api import bind_browser
 
 from moxi_ui import listen
 
@@ -77,7 +77,7 @@ def test_systemds_sockets_are_taken_with_their_names_and_the_variables_go(passed
 
 def test_only_the_ipv4_socket_passed_refuses_localhost_where_ipv6_loopback_exists(
         passed, monkeypatch):
-    monkeypatch.setattr("moxi_loopback.transport._no_ipv6_loopback", lambda: False)
+    monkeypatch.setattr("moxi_ui.loopback.transport._no_ipv6_loopback", lambda: False)
     if passed.count == 2:
         os.close(FIRST + 1)
     got = listen.take(1, environ=passed.systemd(count=1), platform="linux")

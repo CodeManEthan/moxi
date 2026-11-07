@@ -1,20 +1,23 @@
-"""The announcement and interface 1, as page modules, the shell and tests reach them."""
+"""loopback's API, as page modules (through ui's interface 3), the shell and tests reach
+it."""
 
 from __future__ import annotations
 
 import importlib
 import inspect
 import pkgutil
+import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 from moxi import modules
 
 import asgi_kit
-import moxi_loopback
-from moxi_loopback import api, check, headers, module, routes, runtime, serve, server, transport
+import moxi_ui.loopback
+from moxi_ui.loopback import api, check, headers, routes, runtime, serve, server, transport
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,7 +26,7 @@ THREAT_MODEL = (
     "network and other users on the machine, not a module you chose to install."
 )
 
-# Each name of interface 1 and the file that defines it; `api` re-exports the same object.
+# Each name of the API and the file that defines it; `api` re-exports the same object.
 SURFACE = {
     routes: {"Field", "Out", "Page", "PageError", "Route", "Entry", "Table", "build_table",
              "export"},
@@ -40,30 +43,53 @@ SURFACE = {
 }
 
 
-# --- the announcement --------------------------------------------------------------
+# --- how a page module reaches it ---------------------------------------------------
 
 
-def test_the_announcement_offers_interface_1_and_nothing_else():
-    assert module.INTERFACES == frozenset({1})
-    assert module.API == "moxi_loopback.api"
-    assert module.CLI is None and module.SETTINGS is None and module.SETUP is None
-    assert module.OPTIONAL == {} and module.GATED == {} and module.INTERNAL_ENV == {}
-
-
-def test_load_finds_the_module_and_its_api():
+def test_ui_at_interface_3_reaches_the_api():
     modules.reset()
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found
-    assert found.api is api
+    assert found.api.loopback is api
     modules.reset()
-    assert not modules.load("loopback", interface=2).ok
-    modules.reset()
+
+
+def test_ui_offers_interface_3_and_names_loopback_in_its_api():
+    from moxi_ui import api as ui_api
+    from moxi_ui import module as ui_module
+
+    assert ui_module.INTERFACES == frozenset({1, 2, 3})
+    assert "loopback" in ui_api.__all__
+
+
+def test_loading_ui_imports_the_base_only_when_loopback_is_read():
+    # Every `load("ui")` imports ui's API module, so the base waits for the first read
+    # of `api.loopback`; after it the name is a plain attribute holding the same module.
+    code = ("import sys, moxi.modules\n"
+            "found = moxi.modules.load('ui', interface=3)\n"
+            "assert found.ok, found\n"
+            "print(sorted(m for m in sys.modules if m.startswith('moxi_ui.loopback')))\n"
+            "first = found.api.loopback\n"
+            "print(first is sys.modules['moxi_ui.loopback.api'])\n"
+            "print(found.api.loopback is first)\n")
+    done = subprocess.run([sys.executable, "-P", "-c", code], capture_output=True, text=True,
+                          timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split("\n")[:3] == ["[]", "True", "True"], done.stdout
+
+
+def test_ui_requires_the_server_libraries_and_not_the_old_distribution():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    names = {re.split(r"[<>=!~;\[ ]", spec, maxsplit=1)[0]
+             for spec in project["project"]["dependencies"]}
+    assert {"starlette", "uvicorn", "h11"} <= names
+    assert "moxi-loopback" not in names
 
 
 # --- the surface -------------------------------------------------------------------
 
 
-def test_interface_1_holds_exactly_its_names():
+def test_the_api_holds_exactly_its_names():
     expected = set().union(*SURFACE.values()) | {"gate_matrix"}
     assert set(api.__all__) == expected
     assert len(api.__all__) == len(expected)
@@ -77,8 +103,8 @@ def test_every_name_is_the_defining_files_own_object():
 
 
 def test_every_public_name_of_the_package_is_reachable_from_the_api():
-    for info in pkgutil.iter_modules(moxi_loopback.__path__):
-        home = importlib.import_module(f"moxi_loopback.{info.name}")
+    for info in pkgutil.iter_modules(moxi_ui.loopback.__path__):
+        home = importlib.import_module(f"moxi_ui.loopback.{info.name}")
         for name in getattr(home, "__all__", ()):
             assert name in api.__all__ and getattr(api, name) is getattr(home, name), \
                 f"{home.__name__} lists {name}, which the api does not reach"
@@ -147,24 +173,26 @@ def test_app_and_serve_keep_the_in_process_signatures():
     assert inspect.iscoroutinefunction(api.open_connection)
 
 
-def test_importing_the_api_loads_no_server_library():
-    # A hook or a page module that imports the api pays for no HTTP server; uvicorn,
-    # Starlette and h11 load only inside `app`, `serve` and `call`.
-    code = ("import sys, moxi_loopback.api\n"
+def test_reaching_the_api_loads_no_server_library():
+    # A page module that reaches the api through ui pays for no HTTP server and none of
+    # the shell's process tools; uvicorn, Starlette and h11 load only inside `app`,
+    # `serve` and `call`.
+    code = ("import sys, moxi.modules\n"
+            "moxi.modules.load('ui', interface=3).api.loopback\n"
             "print(sorted({m.split('.')[0] for m in sys.modules} & "
-            "{'uvicorn', 'starlette', 'h11', 'anyio'}))\n")
+            "{'uvicorn', 'starlette', 'h11', 'anyio', 'psutil'}))\n")
     done = subprocess.run([sys.executable, "-P", "-c", code], capture_output=True, text=True,
                           timeout=60, check=True)
     assert done.stdout.strip() == "[]", done.stdout + done.stderr
 
 
-def test_the_api_docstring_says_how_a_module_without_loopback_reaches_it():
-    assert 'moxi.modules.load("loopback", interface=1).api' in api.__doc__
+def test_the_api_docstring_says_how_a_page_module_reaches_it():
+    assert 'moxi.modules.load("ui", interface=3).api.loopback' in api.__doc__
 
 
-def test_the_threat_model_rides_verbatim_in_the_package_and_the_readme():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert THREAT_MODEL in " ".join(moxi_loopback.__doc__.split())
+def test_the_threat_model_rides_verbatim_in_the_package_and_its_doc():
+    readme = (ROOT / "docs" / "loopback.md").read_text(encoding="utf-8")
+    assert THREAT_MODEL in " ".join(moxi_ui.loopback.__doc__.split())
     assert THREAT_MODEL in " ".join(readme.split())
 
 

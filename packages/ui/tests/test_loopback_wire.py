@@ -18,11 +18,11 @@ from moxi_dev.testing import short_dir, wait_for
 
 import asgi_kit
 from asgi_kit import SERVER_ID, TOKEN, Answer, assert_header_set
-from moxi_loopback import server
-from moxi_loopback.check import upstream
-from moxi_loopback.serve import serve
-from moxi_loopback.server import app, guard, prove
-from moxi_loopback.transport import bind_unix
+from moxi_ui.loopback import server
+from moxi_ui.loopback.check import upstream
+from moxi_ui.loopback.serve import serve
+from moxi_ui.loopback.server import app, guard, prove
+from moxi_ui.loopback.transport import bind_unix
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets")
 

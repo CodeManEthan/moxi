@@ -33,7 +33,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from moxi.names import is_module_name
-from moxi_loopback.api import Out, Table
+from moxi_ui.loopback.api import Out, Table
 
 __all__ = [
     "BODY_LIMIT", "BadBody", "acts_of", "canonical", "check_body", "gateway_problem",

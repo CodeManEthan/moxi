@@ -82,7 +82,7 @@ def test_sign_in_needs_only_a_ticket(shell):
 def _with_own_page(shell):
     """`shell` with the shell's own page export mounted, as the shell mounts it, and a
     recorder answering for the page."""
-    from moxi_loopback.api import export
+    from moxi_ui.loopback.api import export
     from moxi_ui.page import PAGE
     from moxi_ui.router import shell_profile, shell_table
     from shell_kit import FIXTURE_EXPORT, Recorder

@@ -13,11 +13,11 @@ import textwrap
 import pytest
 
 from asgi_kit import PORT, SERVER_ID, TOKEN, drive, scope
-from moxi_loopback import server
-from moxi_loopback.api import gate_matrix
-from moxi_loopback.check import upstream
-from moxi_loopback.routes import Field, Out, Page, PageError, Route, Table, build_table, export
-from moxi_loopback.server import app, guard, prove
+from moxi_ui.loopback import server
+from moxi_ui.loopback.api import gate_matrix
+from moxi_ui.loopback.check import upstream
+from moxi_ui.loopback.routes import Field, Out, Page, PageError, Route, Table, build_table, export
+from moxi_ui.loopback.server import app, guard, prove
 
 
 async def until(condition, seconds: float = 5.0) -> None:
@@ -32,7 +32,7 @@ PACKAGE = "lbconfirmed"
 HANDLERS = '''
 import asyncio
 
-from moxi_loopback.server import Accepted, Conflict, Refused
+from moxi_ui.loopback.server import Accepted, Conflict, Refused
 
 STATE = {}
 CALLS = []

@@ -26,10 +26,10 @@ from asgi_kit import (
     make_page,
     scope,
 )
-from moxi_loopback import server
-from moxi_loopback.check import proof, upstream
-from moxi_loopback.routes import PageError, Route, Table, build_table, export
-from moxi_loopback.server import (
+from moxi_ui.loopback import server
+from moxi_ui.loopback.check import proof, upstream
+from moxi_ui.loopback.routes import PageError, Route, Table, build_table, export
+from moxi_ui.loopback.server import (
     CHECKED,
     HANDED,
     Accepted,
@@ -562,7 +562,7 @@ def test_asset_traversal_forms_are_404(pages, path):
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
                     reason="a file mode that refuses reading")
 def test_an_asset_that_cannot_be_read_is_a_refused_page(tmp_path, monkeypatch):
-    from moxi_loopback.routes import Page
+    from moxi_ui.loopback.routes import Page
 
     web = tmp_path / "pagepkg_unreadable" / "web"
     web.mkdir(parents=True)
@@ -840,7 +840,7 @@ def test_importing_the_server_loads_neither_starlette_nor_uvicorn():
     import subprocess
     import sys
 
-    code = ("import sys, moxi_loopback.server; "
+    code = ("import sys, moxi_ui.loopback.server; "
             "print(sorted(m for m in sys.modules if m.split('.')[0] in ('starlette', 'uvicorn')))")
     out = subprocess.run([sys.executable, "-P", "-c", code], capture_output=True, text=True,
                          check=True)

@@ -40,7 +40,8 @@ from moxi.paths import Layout
 
 from .check import TOKEN_PATTERN
 
-# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
+# Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
+# package's own.
 __all__ = [
     "RuntimeInfo",
     "read_runtime",

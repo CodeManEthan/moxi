@@ -1,10 +1,11 @@
-"""Serving a page: `serve`, and the page-server runner `python -P -m moxi_loopback.serve`.
+"""Serving a page: `serve`, and the page-server runner
+`python -P -m moxi_ui.loopback.serve`.
 
 `serve(app, sockets, *, should_exit, ...)` runs uvicorn in h11 mode on sockets the caller
 bound, inside the caller's `moxi.aio.run`, until `should_exit` is set. The UI shell serves
 its own listener with it; the runner serves a module's page with it.
 
-The runner, `python -P -m moxi_loopback.serve <module> [--tcp] [--idle-s SECONDS]
+The runner, `python -P -m moxi_ui.loopback.serve <module> [--tcp] [--idle-s SECONDS]
 [--no-lifeline]`, is the one way a module's page server starts:
 
 1. It refuses to run without `python -P`, before it imports anything outside the standard
@@ -42,8 +43,8 @@ from __future__ import annotations
 import sys
 
 if __name__ == "__main__" and not sys.flags.safe_path:
-    sys.stderr.write("moxi_loopback.serve must be started with python -P, which keeps the "
-                     "working directory off the import path\n")
+    sys.stderr.write("moxi_ui.loopback.serve must be started with python -P, which keeps "
+                     "the working directory off the import path\n")
     sys.exit(3)
 
 import asyncio  # noqa: E402 - imported after the check above, on purpose
@@ -59,7 +60,8 @@ import time  # noqa: E402
 from collections.abc import Awaitable, Callable, Iterable  # noqa: E402
 from typing import Any  # noqa: E402
 
-# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
+# Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
+# package's own.
 __all__ = [
     "serve",
 ]
@@ -496,8 +498,8 @@ def _protocol_class(stop: _Stop) -> type:
     from uvicorn.protocols.http.flow_control import HIGH_WATER_LIMIT, service_unavailable
     from uvicorn.protocols.http.h11_impl import H11Protocol, RequestResponseCycle
 
-    from moxi_loopback.routes import PROVE_PATH
-    from moxi_loopback.server import settle
+    from moxi_ui.loopback.routes import PROVE_PATH
+    from moxi_ui.loopback.server import settle
 
     prove_raw = PROVE_PATH.encode("ascii")
 
@@ -671,7 +673,7 @@ def _arguments(argv: list[str] | None) -> Any:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="python -P -m moxi_loopback.serve",
+        prog="python -P -m moxi_ui.loopback.serve",
         description="Serve a module's page until it is idle, its lifeline closes or a "
                     "signal stops it.")
     parser.add_argument("module", help="the module whose PAGE to serve")
@@ -715,12 +717,12 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
     from moxi import files, modules, proc
     from moxi.paths import Layout
 
-    from moxi_loopback.check import upstream
-    from moxi_loopback.export import PageLoadError, load_page
-    from moxi_loopback.routes import PageError
-    from moxi_loopback.runtime import remove_runtime, write_runtime
-    from moxi_loopback.server import app, guard, prove
-    from moxi_loopback.transport import NotPrivate, bind_tcp, bind_unix
+    from moxi_ui.loopback.check import upstream
+    from moxi_ui.loopback.export import PageLoadError, load_page
+    from moxi_ui.loopback.routes import PageError
+    from moxi_ui.loopback.runtime import remove_runtime, write_runtime
+    from moxi_ui.loopback.server import app, guard, prove
+    from moxi_ui.loopback.transport import NotPrivate, bind_tcp, bind_unix
 
     module = args.module
     try:

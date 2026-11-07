@@ -38,7 +38,7 @@ from typing import Any
 from moxi import proc
 from moxi.names import HARNESS, is_module_name
 from moxi.paths import python
-from moxi_loopback.api import Conflict, Field, Out, Refused, Route
+from moxi_ui.loopback.api import Conflict, Field, Out, Refused, Route
 
 __all__ = [
     "CHANGE_SHAPE",

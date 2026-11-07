@@ -19,7 +19,7 @@ import sys
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 
-from moxi_loopback.api import NotLoopback, bind_browser, browser_names
+from moxi_ui.loopback.api import NotLoopback, bind_browser, browser_names
 
 __all__ = ["LISTENERS", "Listeners", "NotLoopback", "PortInUse", "bind", "take"]
 

@@ -39,9 +39,16 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from moxi_loopback.check import TOKEN_PATTERN, Profile, RequestView, check, proof, prove_nonce
-from moxi_loopback.headers import NO_CACHE, NO_STORE, response_headers
-from moxi_loopback.routes import (
+from moxi_ui.loopback.check import (
+    TOKEN_PATTERN,
+    Profile,
+    RequestView,
+    check,
+    proof,
+    prove_nonce,
+)
+from moxi_ui.loopback.headers import NO_CACHE, NO_STORE, response_headers
+from moxi_ui.loopback.routes import (
     CONTENT_TYPES,
     HEALTH_PATH,
     PROVE_PATH,
@@ -56,7 +63,8 @@ from moxi_loopback.routes import (
     project,
 )
 
-# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
+# Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
+# package's own.
 __all__ = [
     "Accepted",
     "Call",
@@ -609,7 +617,7 @@ def _view(scope: Mapping[str, Any]) -> RequestView:
 
 # --- guard and prove -----------------------------------------------------------------
 
-_guard_log = logging.getLogger("moxi.loopback.guard")
+_guard_log = logging.getLogger("moxi.ui.loopback.guard")
 
 
 def guard(inner: Callable[..., Any], profile: Callable[[], Profile]) -> Callable[..., Any]:

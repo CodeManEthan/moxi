@@ -17,12 +17,12 @@ import pytest
 from moxi_dev.testing import short_dir, wait_for
 
 import asgi_kit
-from moxi_loopback import serve as serve_mod
-from moxi_loopback.check import proof, upstream
-from moxi_loopback.runtime import RuntimeInfo
-from moxi_loopback.serve import serve
-from moxi_loopback.server import app, guard, prove
-from moxi_loopback.transport import bind_browser, bind_tcp, bind_unix, call
+from moxi_ui.loopback import serve as serve_mod
+from moxi_ui.loopback.check import proof, upstream
+from moxi_ui.loopback.runtime import RuntimeInfo
+from moxi_ui.loopback.serve import serve
+from moxi_ui.loopback.server import app, guard, prove
+from moxi_ui.loopback.transport import bind_browser, bind_tcp, bind_unix, call
 
 posix = pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets")
 

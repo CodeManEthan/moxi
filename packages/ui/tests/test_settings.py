@@ -9,7 +9,7 @@ import socket
 import subprocess
 
 import pytest
-from moxi_loopback.api import Conflict, Refused
+from moxi_ui.loopback.api import Conflict, Refused
 from moxi.paths import Layout, python
 from moxi_ui import settings
 from moxi_ui.page import PAGE

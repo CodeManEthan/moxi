@@ -48,7 +48,7 @@ from typing import Any
 
 from moxi import files
 from moxi.paths import Layout
-from moxi_loopback.api import (
+from moxi_ui.loopback.api import (
     Page,
     RuntimeInfo,
     Table,

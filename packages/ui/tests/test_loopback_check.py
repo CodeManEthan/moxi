@@ -6,7 +6,7 @@ import secrets
 
 import pytest
 
-from moxi_loopback.check import (
+from moxi_ui.loopback.check import (
     Refusal,
     RequestView,
     browser,
@@ -16,7 +16,7 @@ from moxi_loopback.check import (
     token_matches,
     upstream,
 )
-from moxi_loopback.routes import Entry, Field, Out, Page, Route, Table, build_table, export
+from moxi_ui.loopback.routes import Entry, Field, Out, Page, Route, Table, build_table, export
 
 # Fixed, not minted: both appear in parametrized test ids, which every pytest-xdist worker
 # must collect alike.

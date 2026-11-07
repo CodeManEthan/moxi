@@ -1,13 +1,13 @@
-# moxi-loopback
+# Page servers: loopback
 
-Moxi's loopback module is the base every Moxi page server is built on. A module that
-shows a page in the browser declares its routes as data, and loopback serves them: it
-checks every request, dispatches it to the module's handler, cuts the answer to the
-declared shape, serves the page's static files, and starts, idles out and stops the server
-the same way for every module. Moxi's UI shell, the one origin the browser talks to, uses
-the same check on its own listener and reaches each module's page server through the
-runtime file and the connection functions here. loopback is a library: it has no `moxi`
-command and no settings.
+loopback (`moxi_ui.loopback`), ui's page-server base, is what every Moxi page server is
+built on. A module that shows a page in the browser declares its routes as data, and
+loopback serves them: it checks every request, dispatches it to the module's handler, cuts
+the answer to the declared shape, serves the page's static files, and starts, idles out
+and stops the server the same way for every module. Moxi's UI shell, the one origin the
+browser talks to, uses the same check on its own listener and reaches each module's page
+server through the runtime file and the connection functions here. It has no command and
+no settings of its own.
 
 The threat model: module pages are trusted code like their Python half; Moxi defends
 against the network and other users on the machine, not a module you chose to install.
@@ -75,22 +75,27 @@ A module announces its page with one line in its announcement (the module named 
 PAGE = "moxi_usage.page:PAGE"
 ```
 
-and declares it in a module that imports only `moxi_loopback.api`:
+and declares it in a module that reaches only this base, through ui's API:
 
 ```python
 # moxi_usage/page.py
-from moxi_loopback.api import Field, Out, Page, Route
+from moxi import modules
 
-PAGE = Page(
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"usage's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
+
+PAGE = lb.Page(
     routes=(
-        Route("/api/summary", "read", "moxi_usage.pagehandlers:summary",
-              query={"days": Field("int", required=False, max=366)},
-              returns={"total": Out("int"), "log": Out("string", mark="path")}),
-        Route("/api/refresh", "act", "moxi_usage.pagehandlers:refresh",
-              body={"force": Field("bool", required=False)},
-              returns={"ok": Out("bool")}),
-        Route("/api/events", "read", "moxi_usage.pagehandlers:events", stream=True,
-              topics={"today": Out("table", items={"total": Out("int")})}),
+        lb.Route("/api/summary", "read", "moxi_usage.pagehandlers:summary",
+                 query={"days": lb.Field("int", required=False, max=366)},
+                 returns={"total": lb.Out("int"), "log": lb.Out("string", mark="path")}),
+        lb.Route("/api/refresh", "act", "moxi_usage.pagehandlers:refresh",
+                 body={"force": lb.Field("bool", required=False)},
+                 returns={"ok": lb.Out("bool")}),
+        lb.Route("/api/events", "read", "moxi_usage.pagehandlers:events", stream=True,
+                 topics={"today": lb.Out("table", items={"total": lb.Out("int")})}),
     ),
     assets="web",
     health="moxi_usage.pagehandlers:health",
@@ -166,9 +171,8 @@ Route("/api/stop", "act", "moxi_usage.pagehandlers:stop",
 - The export carries `confirmed` and `status` for every route, so the shell reads them as
   data. A route without `confirmed` works exactly as before, and ignores the header.
 
-A page module whose distribution doesn't require `moxi-loopback` reaches the same module
-as `moxi.modules.load("loopback", interface=1).api`, and imports nothing else outside the
-standard library and the core.
+A page module reaches this as `moxi.modules.load("ui", interface=3).api.loopback`, and
+imports nothing else outside the standard library and the core.
 
 The runner and the export command load each page through `moxi.modules.load`, which
 imports the module's package `__init__`, its announcement and its `API` module, and listing
@@ -185,12 +189,12 @@ refused at the Host, OPTIONS and Origin gates), checks each status, and runs no 
 A page server is started one way:
 
 ```sh
-python -P -m moxi_loopback.serve <module>
+python -P -m moxi_ui.loopback.serve <module>
 ```
 
 with the environment's own Python, from a working directory that exists and that only you
 can write. The shell starts it on the first request for the module's page. `-P` keeps the
-working directory off the import path, so a planted `moxi_loopback/` or `uvicorn/` there is
+working directory off the import path, so a planted `moxi_ui/` or `uvicorn/` there is
 never loaded. Started without `-P`, the runner exits 3 before it imports anything outside
 the standard library.
 
@@ -267,7 +271,7 @@ link; `NotPrivate` otherwise) and unlinks a stale socket, or from `bind_tcp(port
 ## The export command
 
 ```sh
-python -P -m moxi_loopback.export <module>...
+python -P -m moxi_ui.loopback.export <module>...
 ```
 
 prints one JSON object, keyed by module: `{"ok": true, "export": {...}}` with the module's
@@ -297,17 +301,8 @@ socket; Windows serves on loopback TCP.
 
 ## Install
 
-loopback comes with a module that serves a page: that module requires `moxi-loopback`,
-so `moxi install <module>` brings it in. The front door's README, at
-[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
-the other modules.
-
-## Dependencies
-
-`moxi`, Moxi's core; `starlette` and `uvicorn`, which serve the requests; and `h11`, which
-uvicorn parses HTTP with, at 0.16 or later for its request-smuggling fix. loopback has no
-optional extras.
+It comes with moxi-ui.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../LICENSE).

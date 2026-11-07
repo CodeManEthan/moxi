@@ -9,11 +9,11 @@ import ast
 import pathlib
 import sys
 
-import moxi_loopback
+import moxi_ui.loopback
 
-SRC = pathlib.Path(moxi_loopback.__file__).parent
+SRC = pathlib.Path(moxi_ui.loopback.__file__).parent
 FILES = [SRC / "check.py", SRC / "routes.py", SRC / "headers.py"]
-OWN = {"moxi_loopback.check", "moxi_loopback.routes", "moxi_loopback.headers"}
+OWN = {"moxi_ui.loopback.check", "moxi_ui.loopback.routes", "moxi_ui.loopback.headers"}
 
 
 def _tree(path):

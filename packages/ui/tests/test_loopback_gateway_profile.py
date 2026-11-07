@@ -2,8 +2,8 @@
 
 import pytest
 
-from moxi_loopback.check import Refusal, RequestView, check, gateway
-from moxi_loopback.routes import Entry, Field, Out, Page, Route, Table, export
+from moxi_ui.loopback.check import Refusal, RequestView, check, gateway
+from moxi_ui.loopback.routes import Entry, Field, Out, Page, Route, Table, export
 
 HOST = "box.example-net.ts.net"
 PORT = 8443

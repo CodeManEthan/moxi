@@ -44,9 +44,10 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
-from moxi_loopback.routes import PROVE_PATH, Entry, Table
+from moxi_ui.loopback.routes import PROVE_PATH, Entry, Table
 
-# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
+# Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
+# package's own.
 __all__ = [
     "Profile",
     "Refusal",

@@ -1,26 +1,31 @@
-"""loopback's interface 1, the module page modules, the UI shell and tests reach
-(`moxi_loopback.api`).
+"""The API of loopback, ui's page-server base (`moxi_ui.loopback.api`), which page modules,
+the UI shell and tests reach.
 
-A page is declared once, as data, in a module that imports only this one:
+A page is declared once, as data, in a module that reaches only this one:
 
     # moxi_usage/page.py
-    from moxi_loopback.api import Field, Out, Page, Route
+    from moxi import modules
 
-    PAGE = Page(
+    _ui = modules.load("ui", interface=3)
+    if not _ui.ok:
+        raise ImportError(f"usage's page needs the ui module: {_ui.reason}")
+    lb = _ui.api.loopback
+
+    PAGE = lb.Page(
         routes=(
-            Route("/api/summary", "read", "moxi_usage.pagehandlers:summary",
-                  query={"days": Field("int", required=False, max=366)},
-                  returns={"total": Out("int"), "log": Out("string", mark="path")}),
-            Route("/api/refresh", "act", "moxi_usage.pagehandlers:refresh",
-                  body={"force": Field("bool", required=False)},
-                  returns={"ok": Out("bool")}),
+            lb.Route("/api/summary", "read", "moxi_usage.pagehandlers:summary",
+                     query={"days": lb.Field("int", required=False, max=366)},
+                     returns={"total": lb.Out("int"), "log": lb.Out("string", mark="path")}),
+            lb.Route("/api/refresh", "act", "moxi_usage.pagehandlers:refresh",
+                     body={"force": lb.Field("bool", required=False)},
+                     returns={"ok": lb.Out("bool")}),
         ),
         assets="web",
     )
 
-A page module whose distribution doesn't require loopback may instead reach this same
-module object as `moxi.modules.load("loopback", interface=1).api`, provided it imports
-nothing else outside the standard library and the core.
+A page module reaches this same module object as
+`moxi.modules.load("ui", interface=3).api.loopback`, and imports nothing else outside the
+standard library and the core. ui's own code imports it directly.
 
 Handlers are named by `"pkg.mod:fn"` target strings, so the shell, the gateway and tests
 read a page as data without importing handler code.
@@ -178,7 +183,7 @@ __all__ = [
 
 _UNKNOWN_KEYS = tuple("xyzwvuts")
 _reached: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
-    "moxi_loopback_matrix", default=None)
+    "moxi_ui_loopback_matrix", default=None)
 
 
 async def _matrix_handler(call: Call) -> dict[str, Any]:

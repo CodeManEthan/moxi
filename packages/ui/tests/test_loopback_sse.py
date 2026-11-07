@@ -10,10 +10,10 @@ import threading
 import pytest
 
 from asgi_kit import PORT, SERVER_ID, TOKEN, StreamClient, assert_header_set, drive, make_page, scope
-from moxi_loopback import server
-from moxi_loopback.check import upstream
-from moxi_loopback.routes import BadRequest, build_table
-from moxi_loopback.server import Snapshot, Topics, app, guard, read_topics
+from moxi_ui.loopback import server
+from moxi_ui.loopback.check import upstream
+from moxi_ui.loopback.routes import BadRequest, build_table
+from moxi_ui.loopback.server import Snapshot, Topics, app, guard, read_topics
 
 
 def run(coro):

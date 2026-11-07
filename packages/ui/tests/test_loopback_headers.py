@@ -2,8 +2,8 @@
 
 import pytest
 
-from moxi_loopback import headers
-from moxi_loopback.headers import CSP, NO_CACHE, SECURITY_HEADERS, complete, csp, response_headers
+from moxi_ui.loopback import headers
+from moxi_ui.loopback.headers import CSP, NO_CACHE, SECURITY_HEADERS, complete, csp, response_headers
 
 EXPECTED_CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "

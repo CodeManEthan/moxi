@@ -555,7 +555,7 @@ def test_aclose_ends_every_stream_and_upstream_and_refuses_new_ones():
 
 
 PAGE = '''
-from moxi_loopback.routes import Field, Out, Page, Route
+from moxi_ui.loopback.routes import Field, Out, Page, Route
 
 H = "moxi_NAME.handlers"
 PAGE = Page(
@@ -570,7 +570,7 @@ PAGE = Page(
 '''
 
 HANDLERS = '''
-from moxi_loopback.server import Topics
+from moxi_ui.loopback.server import Topics
 
 TOPICS = Topics("alpha", "beta")
 TOPICS.publish("alpha", {"n": 0})

@@ -17,7 +17,7 @@ import pytest
 from moxi.paths import Layout, socket_path
 from moxi_dev.testing import wait_for
 
-from moxi_loopback.check import (
+from moxi_ui.loopback.check import (
     RequestView,
     browser,
     check,
@@ -26,9 +26,9 @@ from moxi_loopback.check import (
     token_matches,
     upstream,
 )
-from moxi_loopback.routes import Table
-from moxi_loopback.runtime import RuntimeInfo, read_runtime, write_runtime
-from moxi_loopback.transport import (
+from moxi_ui.loopback.routes import Table
+from moxi_ui.loopback.runtime import RuntimeInfo, read_runtime, write_runtime
+from moxi_ui.loopback.transport import (
     NotOurServer,
     bind_tcp,
     bind_unix,

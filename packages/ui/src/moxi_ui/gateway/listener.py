@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi.paths import Layout
-from moxi_loopback.api import (
+from moxi_ui.loopback.api import (
     Entry,
     NotPrivate,
     Profile,

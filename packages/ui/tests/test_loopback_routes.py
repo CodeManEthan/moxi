@@ -7,7 +7,7 @@ import textwrap
 
 import pytest
 
-from moxi_loopback.routes import (
+from moxi_ui.loopback.routes import (
     BUDGET,
     BadRequest,
     Entry,
@@ -453,7 +453,7 @@ def test_build_table_refuses_an_asset_that_collides_with_a_route(make_package):
 def test_a_page_built_in_a_package_module_finds_its_own_assets(make_package, tmp_path):
     package = make_package("pagepkg_own", ["index.html"])
     (tmp_path / package / "page.py").write_text(textwrap.dedent("""
-        from moxi_loopback.routes import Page
+        from moxi_ui.loopback.routes import Page
         PAGE = Page(routes=(), assets="web")
     """))
     import importlib

@@ -12,10 +12,10 @@ import pytest
 from moxi import paths
 from moxi.paths import Layout, socket_path
 
-from moxi_loopback import transport
-from moxi_loopback.check import RequestView, browser, check
-from moxi_loopback.routes import Table
-from moxi_loopback.transport import (
+from moxi_ui.loopback import transport
+from moxi_ui.loopback.check import RequestView, browser, check
+from moxi_ui.loopback.routes import Table
+from moxi_ui.loopback.transport import (
     BrowserSockets,
     NotLoopback,
     NotPrivate,

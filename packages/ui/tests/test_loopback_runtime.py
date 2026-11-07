@@ -11,9 +11,9 @@ import threading
 import pytest
 from moxi.paths import Layout
 
-from moxi_loopback import runtime
-from moxi_loopback.check import TOKEN_PATTERN
-from moxi_loopback.runtime import (
+from moxi_ui.loopback import runtime
+from moxi_ui.loopback.check import TOKEN_PATTERN
+from moxi_ui.loopback.runtime import (
     RUNTIME_FILE,
     SIZE_MAX,
     RuntimeInfo,

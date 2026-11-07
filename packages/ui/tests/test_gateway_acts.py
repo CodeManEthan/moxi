@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from moxi_loopback.api import (
+from moxi_ui.loopback.api import (
     Accepted, Field, Out, Page, Route, app, build_table, export, guard, upstream,
 )
 

@@ -1401,13 +1401,14 @@ dev = [
 
 [[package]]
 name = "moxi-ui"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "packages/ui" }
 dependencies = [
     { name = "h11" },
     { name = "moxi" },
-    { name = "moxi-loopback" },
     { name = "psutil" },
+    { name = "starlette" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -1437,12 +1438,13 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'testing'", specifier = ">=46" },
     { name = "h11", specifier = ">=0.16,<1" },
     { name = "moxi", editable = "packages/moxi" },
-    { name = "moxi-loopback", editable = "packages/loopback" },
     { name = "moxi-tunnel", marker = "extra == 'tunnel'", editable = "packages/tunnel" },
     { name = "platformdirs", marker = "sys_platform == 'win32' and extra == 'testing'", specifier = ">=4.11.3" },
     { name = "playwright", marker = "extra == 'testing'", specifier = ">=1.56,<2" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8" },
+    { name = "starlette", specifier = ">=1.10,<2" },
+    { name = "uvicorn", specifier = ">=0.54,<1" },
     { name = "webauthn", marker = "extra == 'gateway'", specifier = ">=2.5,<3" },
 ]
 provides-extras = ["testing", "gateway", "tunnel"]

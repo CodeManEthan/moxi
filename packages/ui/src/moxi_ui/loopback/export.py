@@ -1,4 +1,4 @@
-"""The export command: `python -P -m moxi_loopback.export <module>...`.
+"""The export command: `python -P -m moxi_ui.loopback.export <module>...`.
 
 It prints each named module's route table export as one JSON object on stdout, keyed by
 module: `{"ok": true, "export": {...}}`, or `{"ok": false, "error": "<one line>"}` for a
@@ -22,8 +22,8 @@ from __future__ import annotations
 import sys
 
 if __name__ == "__main__" and not sys.flags.safe_path:
-    sys.stderr.write("moxi_loopback.export must be started with python -P, which keeps the "
-                     "working directory off the import path\n")
+    sys.stderr.write("moxi_ui.loopback.export must be started with python -P, which keeps "
+                     "the working directory off the import path\n")
     sys.exit(3)
 
 import importlib  # noqa: E402 - imported after the check above, on purpose
@@ -34,10 +34,10 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from .routes import Page
 
-# `moxi_loopback.api` re-exports nothing from the command, so it has no public names.
+# `moxi_ui.loopback.api` re-exports nothing from the command, so it has no public names.
 __all__: list[str] = []
 
-_USAGE = "usage: python -P -m moxi_loopback.export <module>...\n"
+_USAGE = "usage: python -P -m moxi_ui.loopback.export <module>...\n"
 
 
 class PageLoadError(Exception):

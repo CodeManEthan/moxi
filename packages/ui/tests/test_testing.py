@@ -23,7 +23,7 @@ def test_loading_the_plugin_imports_no_moxi_ui_submodule_and_no_playwright(tmp_p
         def test_plain(request):
             assert request.config.pluginmanager.has_plugin("moxi_ui")
             loaded = sorted(m for m in sys.modules if m.split(".")[0] in ("moxi_ui", "moxi",
-                            "moxi_loopback", "playwright"))
+                            "playwright"))
             assert loaded == ["moxi_ui", "moxi_ui.testing"]
     """))
     done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",

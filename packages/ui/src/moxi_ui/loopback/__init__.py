@@ -1,4 +1,4 @@
-"""moxi-loopback: the base every Moxi page server is built on.
+"""moxi_ui.loopback: ui's page-server base, the base every Moxi page server is built on.
 
 It holds the request check, the runtime file, the route table and the page-server base.
 The threat model: module pages are trusted code like their Python half; Moxi defends

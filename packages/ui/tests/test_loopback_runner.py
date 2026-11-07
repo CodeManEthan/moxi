@@ -1,4 +1,4 @@
-"""The runner, spawned as `python -P -m moxi_loopback.serve <module>` with a stdin
+"""The runner, spawned as `python -P -m moxi_ui.loopback.serve <module>` with a stdin
 lifeline, over a fake module installed in a site directory of the test's own.
 
 Each stop case times the decision (a lifeline close or a signal, so the moment is known),
@@ -28,11 +28,11 @@ from moxi import proc
 from moxi.paths import Layout
 from moxi_dev.testing import short_dir, wait_for
 
-from moxi_loopback import serve
-from moxi_loopback.check import proof
-from moxi_loopback.runtime import read_runtime, runtime_path
-from moxi_loopback.serve import CLOSE_DEADLINE, EXIT_DEADLINE, LOCK_WAIT, PROMISE
-from moxi_loopback.transport import call
+from moxi_ui.loopback import serve
+from moxi_ui.loopback.check import proof
+from moxi_ui.loopback.runtime import read_runtime, runtime_path
+from moxi_ui.loopback.serve import CLOSE_DEADLINE, EXIT_DEADLINE, LOCK_WAIT, PROMISE
+from moxi_ui.loopback.transport import call
 
 posix = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals or Unix sockets")
 
@@ -40,7 +40,7 @@ SLACK = 0.25
 MODULE = "prun"
 
 PAGE = """
-from moxi_loopback.routes import Field, Out, Page, Route
+from moxi_ui.loopback.routes import Field, Out, Page, Route
 
 H = "moxi_prun.handlers"
 PAGE = Page(
@@ -65,8 +65,8 @@ import asyncio
 import os
 import time
 
-import moxi_loopback
-from moxi_loopback.server import Topics
+import moxi_ui.loopback
+from moxi_ui.loopback.server import Topics
 
 TOPICS = Topics("tick")
 
@@ -76,7 +76,7 @@ def echo(call):
 
 
 def where(call):
-    return {"cwd": os.getcwd(), "package": os.path.dirname(moxi_loopback.__file__)}
+    return {"cwd": os.getcwd(), "package": os.path.dirname(moxi_ui.loopback.__file__)}
 
 
 def printing(call):
@@ -160,7 +160,7 @@ class Runner:
     """One spawned runner, its stdout a pipe and its stderr a file."""
 
     def __init__(self, site, cwd, log, *args, module=MODULE, safe=True, env=None):
-        argv = [sys.executable, *(["-P"] if safe else []), "-m", "moxi_loopback.serve",
+        argv = [sys.executable, *(["-P"] if safe else []), "-m", "moxi_ui.loopback.serve",
                 module, *args]
         environ = {**os.environ, "PYTHONPATH": str(site),
                    f"MOXI_{module.upper()}_LOG_LEVEL": "info", **(env or {})}
@@ -706,11 +706,11 @@ def _plant(directory: Path, package: str, marker: Path) -> None:
 
 
 @posix
-def test_a_planted_moxi_loopback_in_the_working_directory_is_never_imported(spawn, cwd,
-                                                                           tmp_path):
+def test_a_planted_moxi_ui_in_the_working_directory_is_never_imported(spawn, cwd, tmp_path):
     marker = tmp_path / "imported"
-    _plant(cwd, "moxi_loopback", marker)
-    (cwd / "moxi_loopback" / "serve.py").write_text(
+    _plant(cwd, "moxi_ui", marker)
+    _plant(cwd / "moxi_ui", "loopback", marker)
+    (cwd / "moxi_ui" / "loopback" / "serve.py").write_text(
         f"open({str(marker)!r}, 'a').write('serve\\n')\n")
     runner = spawn()
     assert runner.ready()
@@ -765,7 +765,7 @@ def test_a_runtime_dir_that_is_a_symlink_exits_3(spawn, tmp_path):
 @pytest.mark.parametrize("argv", [[], ["prun", "--idle-s", "0"], ["prun", "--idle-s", "nan"],
                                   ["prun", "--bogus"]])
 def test_usage_exits_2(argv, capsys):
-    from moxi_loopback.serve import main
+    from moxi_ui.loopback.serve import main
 
     with pytest.raises(SystemExit) as stopped:
         main(argv)
@@ -773,6 +773,6 @@ def test_usage_exits_2(argv, capsys):
 
 
 def test_a_name_that_is_not_a_module_name_is_usage(capsys):
-    from moxi_loopback.serve import main
+    from moxi_ui.loopback.serve import main
 
     assert main(["Not-A-Module"]) == 2

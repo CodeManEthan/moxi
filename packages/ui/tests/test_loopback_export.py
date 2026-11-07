@@ -1,4 +1,4 @@
-"""The export command: spawned as `python -P -m moxi_loopback.export`, over fake modules
+"""The export command: spawned as `python -P -m moxi_ui.loopback.export`, over fake modules
 installed in a site directory of the test's own."""
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from pathlib import Path
 import moxi.modules
 import pytest
 
-from moxi_loopback import export as export_command
-from moxi_loopback.routes import PageError, build_table, export
+from moxi_ui.loopback import export as export_command
+from moxi_ui.loopback.routes import PageError, build_table, export
 
 ANNOUNCEMENT = {
     "INTERFACES": "frozenset({1})", "API": "None", "CLI": "None",
@@ -24,7 +24,7 @@ ANNOUNCEMENT = {
 }
 
 GOOD_PAGE = """
-from moxi_loopback.routes import Field, Out, Page, Route
+from moxi_ui.loopback.routes import Field, Out, Page, Route
 
 PAGE = Page(
     routes=(
@@ -45,21 +45,21 @@ PAGE = Page(
 """
 
 BAD_ASSETS_PAGE = """
-from moxi_loopback.routes import Out, Page, Route
+from moxi_ui.loopback.routes import Out, Page, Route
 
 PAGE = Page(routes=(Route("/api/x", "read", "moxi_passets.handlers:x",
                           returns={"n": Out("int")}),), assets="web")
 """
 
 REFUSED_PAGE = """
-from moxi_loopback.routes import Page
+from moxi_ui.loopback.routes import Page
 
 PAGE = Page(routes=(), idle_s=1)
 """
 
 PRINTING_PAGE = """
 import os
-from moxi_loopback.routes import Page
+from moxi_ui.loopback.routes import Page
 
 print("printed while imported")
 os.write(1, b"written to fd 1 while imported\\n")
@@ -141,7 +141,7 @@ def cwd(tmp_path):
 
 
 def run(site, cwd, *modules, safe=True):
-    argv = [sys.executable, *(["-P"] if safe else []), "-m", "moxi_loopback.export", *modules]
+    argv = [sys.executable, *(["-P"] if safe else []), "-m", "moxi_ui.loopback.export", *modules]
     env = {**os.environ, "PYTHONPATH": str(site.root)}
     return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=60)
 
@@ -236,10 +236,10 @@ def test_started_without_safe_path_it_exits_3_before_importing_anything(modules,
     assert not marker.exists(), marker.read_text()
 
 
-def test_a_planted_moxi_loopback_in_the_working_directory_is_never_imported(modules, cwd,
-                                                                           marker):
-    _plant(cwd, "moxi_loopback", marker)
-    (cwd / "moxi_loopback" / "export.py").write_text(
+def test_a_planted_moxi_ui_in_the_working_directory_is_never_imported(modules, cwd, marker):
+    _plant(cwd, "moxi_ui", marker)
+    _plant(cwd / "moxi_ui", "loopback", marker)
+    (cwd / "moxi_ui" / "loopback" / "export.py").write_text(
         f"open({str(marker)!r}, 'a').write('export\\n')\n")
     done = run(modules, cwd, "pgood")
     assert done.returncode == 0, done.stderr

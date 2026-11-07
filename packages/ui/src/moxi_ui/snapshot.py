@@ -5,7 +5,7 @@ shell's runtime dir as their working directory, so the shell imports no module's
 an upgraded module is read as it now is:
 
 1. `moxi modules --json`, every module's announcement;
-2. `moxi_loopback.export <module>...` for every present module that declares `PAGE`
+2. `moxi_ui.loopback.export <module>...` for every present module that declares `PAGE`
    (the shell's own page is served in process and exported in process).
 
 From the two the shell builds a new route table, gives the starters each module's
