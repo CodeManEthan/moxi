@@ -1,6 +1,6 @@
 [project]
 name = "moxi-launcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "Launch Claude Code and Codex sessions from presets over a per-harness flag catalog, in this terminal, headless or in a tmux slot, and log every launch."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -70,7 +70,8 @@ packages = ["src/moxi_launcher"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_launcher", "tests", "web"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
+                "src/moxi_launcher", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

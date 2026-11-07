@@ -113,8 +113,9 @@ moxi comms claude --name reviewer
 and starts `claude`; everything after `--` goes to `claude` unchanged. A name another
 session holds, or one a module reserved, is refused before `claude` starts: the wrapper
 prints why and exits 3. With the daemon not running it starts nothing and exits 75, so
-try again once the daemon is up. The launch names
-its session id to `claude`: the one after `--` (`--session-id <uuid>`, or `--resume <uuid>`
+try again once the daemon is up. A bind the daemon doesn't answer in 15 seconds also ends
+the launch with 75, before `claude` starts, and the Codex wrapper does the same. The
+launch names its session id to `claude`: the one after `--` (`--session-id <uuid>`, or `--resume <uuid>`
 without `--fork-session`), else the wrapper's own `--session-id <uuid>`, else a new one,
 added as `--session-id`. A resume that names no id (`--continue`, `--resume` with no id,
 `--from-pr`, `--teleport`) goes through with nothing added, and a send to that session is
