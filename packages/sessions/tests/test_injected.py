@@ -309,6 +309,7 @@ def test_codex_s_own_instructions_are_injected(rollout):
     assert codex_user(rollout, "permissions", role="developer",
                       kinds=["permissions.instructions"]).injected is True
     assert codex_user(rollout, "instructions", role="developer").injected is True
+    assert codex_user(rollout, "instructions", role="system").injected is True
 
 
 def test_the_model_s_codex_messages_and_thoughts_are_not_injected(rollout):
