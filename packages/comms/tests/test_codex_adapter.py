@@ -334,7 +334,7 @@ def test_the_first_turn_end_sets_turned(rig, launch):
 
 
 def test_a_turn_that_ended_before_the_watch_sets_turned(rig, launch):
-    """The host's priming turn can end before the adapter subscribes. turns' watch
+    """A quick first turn can end before the adapter subscribes. turns' watch
     replays nothing, so only the facts' turn count says the thread has turned, and the
     ready report the launch sends carries it."""
     session = FakeSession()

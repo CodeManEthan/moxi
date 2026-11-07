@@ -86,7 +86,6 @@ sees the same thing on both harnesses, directive standing for the roster's decla
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from pathlib import Path
@@ -439,7 +438,7 @@ class CodexAdapter(HarnessAdapter):
             self._first_resume_unseen = self.resume is not None and raised is None
             if raised is not None:
                 self._learn_turned(getattr(raised, "source", None))
-            # A turn that ended before the subscription (the host's priming turn can)
+            # A turn that ended before the subscription (a quick first turn can)
             # reaches no event: the facts' count says the thread has turned, whatever a
             # ready said, and the ready report below carries it.
             if facts.turn_number - (1 if facts.turn_open else 0) > 0:
