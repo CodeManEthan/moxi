@@ -62,12 +62,6 @@ def test_the_verbs_that_act_stay_four():
     `claude --version`, `codex --version` and `opencode --version`, and reads the config; it posts nothing,
     writes nothing, and reaches no credential, so the acting four are still four.
 
-    `service` is the one MACHINE verb, neither acting on comms nor reading it: it writes or
-    removes one systemd user unit and runs `systemctl --user`. It reaches no daemon, no
-    record, no directory, no network and no credential, and it posts nothing, so the fence
-    is
-    untouched and the acting four are still four.
-
     `owner` reads which identity owns one session id and whom it awaits, so a wrapper
     that keeps sessions warm can tell whether a session it may nudge has an ask out. It
     reaches the daemon
@@ -94,22 +88,19 @@ def test_the_verbs_that_act_stay_four():
     sub = [a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.dest
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
-                                "explain", "cache", "doctor", "owner", "service",
-                                "whoami", "claude", "codex", "migrate", "delete",
-                                "reserved"}
+                                "explain", "cache", "doctor", "owner", "whoami",
+                                "claude", "codex", "migrate", "delete", "reserved"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
-    machine = {"service"}
     claim = {"whoami"}
     wrapper = {"claude", "codex"}
     store_verb = {"migrate", "reserved"}
     # `delete` acts only on the sender's own message, taking back what it sent.
     withdraw = {"delete"}
-    assert (acting | reading | machine | claim | wrapper | store_verb | withdraw
+    assert (acting | reading | claim | wrapper | store_verb | withdraw
             == set(sub.choices)) \
         and len(acting) == 4
     assert sub.choices["whoami"].get_default("func") is cli.cmd_whoami
-    assert sub.choices["service"].get_default("func") is cli.cmd_service
     assert sub.choices["migrate"].get_default("func") is cli.cmd_migrate
     assert {sub.choices[v].get_default("func") for v in reading} == {cli.cmd_help,
                                                                     cli.cmd_whois,

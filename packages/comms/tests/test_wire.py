@@ -22,7 +22,7 @@ from conftest import (projects_root, queued, record_rows, wait_for_queue, wait_u
 
 from moxi import ipc
 
-from moxi_comms import directory, machine_line, wire
+from moxi_comms import checks, directory, machine_line, wire
 from moxi_comms.daemon import WINDOW, Daemon
 from moxi_comms.paths import comms_db, daemon_socket, old_daemon_socket
 
@@ -229,8 +229,8 @@ def test_no_common_version_is_refused_naming_both_ranges(rig, monkeypatch, lines
     text = wire.version_text(refused["data"], ours=offer)
     if older == "daemon":
         assert text == ("the comms daemon running speaks comms wire 1-1 and this comms "
-                        "speaks 2-2: the daemon is older. Restart it (`moxi comms service "
-                        "restart`), then run this again. Nothing was sent.")
+                        f"speaks 2-2: the daemon is older. Restart it ({checks.restart()}), "
+                        "then run this again. Nothing was sent.")
     else:
         assert text == ("this comms speaks comms wire 1-1 and its daemon speaks 2-2: this "
                         "program is older than the daemon. Relaunch the session (an "

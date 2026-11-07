@@ -1,5 +1,6 @@
 """`moxi cache read`, `moxi cache doctor`, and the verbs' wiring (`segment`'s render is in
-test_render, the watcher in test_watch, the service in test_service)."""
+test_render, the watcher in test_watch). The watcher's unit is the core's to write; the
+doctor reads it through `moxi.units.status`, which these tests stand in for."""
 
 from __future__ import annotations
 
@@ -9,10 +10,29 @@ import pytest
 from conftest import assistant_line, claude_config, write_cache_config, write_transcript
 
 from moxi import cli as umbrella
+from moxi import units
 from moxi_cache import cli, drift
 
 SID = "aaaaaaaa-1111-4111-8111-111111111111"
 SID_B = "bbbbbbbb-2222-4222-8222-222222222222"
+
+
+@pytest.fixture(autouse=True)
+def unit_states(monkeypatch) -> list:
+    """What `moxi.units.status` answers here: the rows a test puts in the list, read for
+    module cache alone. Empty, the watcher has no unit. No supervisor is reached."""
+    rows: list = []
+
+    def status(modules=None, **kw):
+        assert modules == "cache" and not kw
+        return list(rows)
+
+    monkeypatch.setattr(units, "status", status)
+    return rows
+
+
+def watcher(state, **kw) -> units.UnitState:
+    return units.UnitState("cache", "watch", "daemon", "systemd", state, **kw)
 
 
 def run(capsys, *argv):
@@ -83,7 +103,27 @@ def test_doctor_on_a_clean_box(capsys):
     assert "drift record:" in out and "absent: no lowering" in out
     assert "learner: no process has learned on this device" in out
     assert "no watcher is running" in out
-    assert "service:" in out and "not installed: moxi cache service install" in out
+    assert "  unit: cache/watch: not installed: moxi install cache" in out.splitlines()
+
+
+@pytest.mark.parametrize(("state", "line"), [
+    (watcher("missing", detail="cache/watch is not installed"),
+     "cache/watch: not installed: moxi install cache"),
+    (watcher("active", pid=4242, since=1.0), "cache/watch: active, pid 4242"),
+    (watcher("inactive", enabled=False), "cache/watch: inactive"),
+    (watcher("failed", detail="exit-code",
+             log="journalctl --user -u the-watchers-unit"),
+     "cache/watch: failed (exit-code); its log: journalctl --user -u the-watchers-unit"),
+    (units.UnitState("cache", "watch", "daemon", None, "nobackend",
+                     detail="no supervisor on this system"),
+     "cache/watch: nobackend (no supervisor on this system)"),
+])
+def test_doctor_reads_the_watchers_unit_from_the_core(capsys, unit_states, state, line):
+    unit_states += [units.UnitState("cache", "other", "timer", "systemd", "active"), state]
+    code, out, _ = run(capsys, "doctor")
+    assert code == 0
+    assert f"  unit: {line}" in out.splitlines()
+    assert "cache service" not in out
 
 
 def test_doctor_names_a_learner_and_the_lowerings(capsys):
@@ -174,14 +214,14 @@ def test_doctor_names_records_an_older_watcher_wrote(capsys):
     assert "the watcher has stopped" in out and "1 lack warn_before" in out
 
 
-def test_service_and_watch_are_wired(monkeypatch, capsys):
-    from moxi_cache import service, watch
+def test_watch_is_wired_and_there_is_no_service_verb(monkeypatch, capsys):
+    from moxi_cache import watch
 
     seen = []
-    monkeypatch.setattr(service, "run", lambda action: seen.append(action) or 0)
     monkeypatch.setattr(watch, "main", lambda argv: seen.append(("watch", argv)) or 0)
-    assert run(capsys, "service", "status")[0] == 0
     assert run(capsys, "watch")[0] == 0
-    assert seen == ["status", ("watch", [])]
-    with pytest.raises(SystemExit):
-        cli.main(["service", "start"], prog="moxi cache")
+    assert seen == [("watch", [])]
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["service", "install"], prog="moxi cache")
+    assert stopped.value.code == 2
+    assert "invalid choice: 'service'" in capsys.readouterr().err

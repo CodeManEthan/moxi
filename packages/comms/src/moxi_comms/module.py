@@ -76,7 +76,7 @@ STORES = {
                  "retention": "keep", "rebuildable": False, "lazy": True},
 }
 #: The delivery daemon, which `moxi install comms` writes as a unit through the core's
-#: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
+#: writer.
 #: Its socket is the loopback port of comms' tools, `[mcp] port`: the supervisor holds it
 #: while the daemon restarts, so a session that calls in that gap waits instead of being
 #: refused, and no other local user can take the port meanwhile. The daemon still starts
