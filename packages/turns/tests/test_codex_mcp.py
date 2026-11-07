@@ -397,6 +397,17 @@ def test_the_host_settles_at_its_load_and_offers_mcp_reload(turns_env):
         endpoint.stop("the test ended")
 
 
+class _Conn:
+    """A hook connection that keeps what the server sends: a SessionStart's answer
+    goes out from inside the dispatch."""
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, frame):
+        self.sent.append(frame)
+
+
 def test_a_hook_ready_settles_and_a_loads_session_start_does_not(turns_env):
     app = App(comms="connected")
     endpoint, harness, records, thread_ids = _host(turns_env, app)
@@ -404,12 +415,12 @@ def test_a_hook_ready_settles_and_a_loads_session_start_does_not(turns_env):
         _wait_for(lambda: harness.mcp.settles == 1 and harness.mcp._running is None)
         server = harness.hook_server
         server._dispatch({"event": "SessionStart", "session_id": "thread-1",
-                          "source": "startup"}, None)
+                          "source": "startup"}, _Conn())
         time.sleep(0.1)
         assert harness.mcp.settles == 1
         for event, source in (("PostCompact", "compact"), ("SessionStart", "compact")):
             server._dispatch({"event": event, "session_id": "thread-1",
-                              "source": source}, None)
+                              "source": source}, _Conn())
             _wait_for(lambda: harness.mcp._running is None)
         assert harness.mcp.settles in (2, 3)
         assert app.calls.count(RELOAD) == 0
