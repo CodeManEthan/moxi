@@ -52,7 +52,8 @@ under `auto` it is copied, until Claude Code and Codex are seen reading a skill 
 junction (`_AUTO_JUNCTION`). A single file on Windows links when a test symlink in the
 target's folder succeeds, and is otherwise copied with one note. A link is made directly
 at the target, so an existing path makes it fail. A copy is made beside the target as
-`.<name>.moxi-tmp` and renamed into place.
+`.<name>.moxi-tmp` and renamed into place. A copied folder's folders and files are made
+writable by their owner, so a copy of a read-only install can be written into and removed.
 
 Ownership is by mark. A link or junction is the owner's when the ledger names the owner
 for it and it points at the source (or at the source the ledger recorded, a source that
@@ -1062,6 +1063,7 @@ def _copy(item: Item, source: str, key: str, owner: str) -> None:
         if os.path.isdir(source):
             source_hash = _hash(source, volatile=item.volatile)
             shutil.copytree(source, tmp, symlinks=True)
+            _own_writable(tmp)
             mark = {"owner": owner, "source": source, "source_hash": source_hash,
                     "hash": _hash(tmp, skip_mark=True, volatile=item.volatile)}
             if item.held:
@@ -1079,6 +1081,25 @@ def _copy(item: Item, source: str, key: str, owner: str) -> None:
         if os.path.lexists(tmp):
             _remove_path(tmp)
         raise
+
+
+
+def _own_writable(root: str) -> None:
+    """Give the owner write access to each folder and file of a fresh copy. A source in a
+    read-only install copies read-only, and its owner could then neither write a volatile
+    path into the copy nor remove it; the copy's hash reads no mode, so nothing else
+    changes. Links are left as they are."""
+    import stat
+
+    for folder, dirs, files in os.walk(root):
+        for name in [None, *files]:
+            path = folder if name is None else os.path.join(folder, name)
+            if os.path.islink(path):
+                continue
+            mode = os.stat(path).st_mode
+            want = mode | (stat.S_IRWXU if name is None else stat.S_IRUSR | stat.S_IWUSR)
+            if want != mode:
+                os.chmod(path, stat.S_IMODE(want))
 
 
 def _remove_path(path: str) -> None:

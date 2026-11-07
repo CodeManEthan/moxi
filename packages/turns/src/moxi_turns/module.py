@@ -45,6 +45,8 @@ QUESTIONS = {
                             "where you typed something about a question)",
 }
 SETUP = "moxi_turns.claude_setup:setup"
+#: Removes the Claude Code marketplace SETUP added from turns' placed copy, then the copy.
+TEARDOWN = "moxi_turns.claude_setup:teardown"
 SEGMENT = None
 #: turns' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_turns.page:PAGE"

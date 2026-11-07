@@ -315,6 +315,32 @@ def test_writes_to_volatile_paths_never_read_as_a_change(plugin):
     assert (dest / "endpoint.json").read_text() == '{"port": 1}\n'
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_a_read_only_source_copies_writable_and_removes(tmp_path, skill):
+    """A source in a read-only install: its owner still writes into the copy, and the
+    copy still goes at removal. The source stays as it was."""
+    src = skill("plugin")
+    (src / "sub").mkdir()
+    (src / "sub" / "f.txt").write_text("x\n")
+    paths_ = [src, *src.rglob("*")]
+    modes = {p: p.stat().st_mode for p in paths_}
+    for p in paths_:
+        p.chmod(0o555 if p.is_dir() else 0o444)
+    try:
+        dest = tmp_path / "data" / "turns" / "claude"
+        item = Item(src, "claude", "claude", dest=dest, volatile=("sub/endpoint.json",))
+        place.apply(place.plan("turns", [item], form="copy"))
+        (dest / "sub" / "endpoint.json").write_text("{}\n")
+        (dest / "sub" / "f.txt").write_text("x\n")
+        assert [p.state for p in place.status("turns")] == ["ok"]
+        assert [p.state for p in place.remove("turns", say=lambda line: None)] == ["ok"]
+        assert not dest.exists()
+        assert all(p.stat().st_mode & 0o222 == 0 for p in paths_)
+    finally:
+        for p, mode in modes.items():
+            p.chmod(mode)
+
+
 def test_a_change_outside_the_volatile_paths_still_reads_modified(plugin):
     src, dest, item = plugin
     write_volatile(dest)
