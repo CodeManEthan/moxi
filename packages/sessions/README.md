@@ -83,7 +83,7 @@ setting that names it was written before the turn the read reached.
 ## Use
 
 Other Moxi modules use it through `moxi_sessions.api` (cache reads its transcripts this
-way), and it adds two commands:
+way), and it adds three commands:
 
 - `moxi sessions find SESSION [--harness claude|codex|opencode] [--root PATH] [--json]`
   prints where a session's records are, or every root it looked in and why each held none,
@@ -91,8 +91,46 @@ way), and it adds two commands:
   database).
 - `moxi sessions root [--json]` prints the root each harness is read from and where that
   root came from: a config key, an environment variable, or the harness's default.
+- `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]`
+  prints part of one session, the way the page below shows it: the last five turns, or
+  `--turns` of them (at most 50); with `--around TIME` (ISO 8601 such as
+  `2026-11-06T14:03:22Z`, a time with no zone read as local time, or epoch seconds) the
+  turns around that time; with `--all` the whole session. Each line starts with its time
+  in UTC, in the form `--around` takes. A message shows as its text, cut at 64 KiB with
+  the cut said; a tool call as one line naming the tool and what it was called on, cut at
+  160 characters; a tool result as its size and whether it failed. No flag prints more of
+  a tool's input than that line, or any of a tool's output. A session no root holds, or
+  a source that can't be read, exits 1 with the reason.
 
 With `--json`, each command prints one JSON object that starts with the shape version.
+`read --json` holds the same rows the page is sent, under `records`, with the header and
+whether earlier or later turns were left out.
+
+**Redaction.** When the secrets module is installed (the `secrets` extra), `read` passes
+each message's text, each tool call's line and each title through secrets' `credentials`
+and `broad` sets before it is cut, so a cut never leaves part of a secret that no longer
+matches. The sets are fixed. Without secrets, `read` prints as written and says so once on
+stderr, and `read --json` says `"redacted": false`. `read` keeps no secret-path rule: a
+shell command that reads a secret file shows its first 160 characters, redacted.
+
+## How long transcripts last
+
+sessions reads transcripts where each harness keeps them, so nothing outlives a harness's
+own cleanup. `retention()` (interface 3) reads each harness's setting as it is set:
+
+- Claude Code: `cleanupPeriodDays` in `settings.json` under
+  `${CLAUDE_CONFIG_DIR:-~/.claude}`. Claude Code deletes transcripts older than that many
+  days; unset, 30.
+- Codex: no setting deletes rollouts by age. The switch
+  `features.local_thread_store_compression` in `${CODEX_HOME:-~/.codex}/config.toml`
+  compresses rollouts to `.jsonl.zst`, which sessions finds but can't read, and an
+  archived thread's rollout moves under `archived_sessions/`, which sessions doesn't read.
+- OpenCode: sessions reads no retention setting for it.
+
+sessions' setup prints these lines at install, and `moxi doctor sessions` shows them in its
+`retention` row, which warns when Codex compresses rollouts or a settings file can't be
+read. Neither changes a setting: to keep Claude Code's transcripts longer, raise
+`cleanupPeriodDays` yourself.
 
 Three settings name a root when it is not the usual one: `claude.projects`,
 `codex.sessions` and `opencode.database`. `moxi config sessions` shows them.
@@ -150,7 +188,14 @@ the other modules.
 ## Dependencies
 
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
-UI shell, which brings loopback, the base sessions' page server runs on.
+UI shell, which brings loopback, the base sessions' page server runs on. The optional
+extra `secrets` adds `moxi-secrets`, which `moxi sessions read` redacts with.
+
+## Interfaces
+
+`moxi_sessions.api` offers interfaces 2 and 3. Interface 3 is interface 2 plus
+`retention()` and `Retention`; a module that calls them loads sessions with
+`interface=3`.
 
 ## License
 

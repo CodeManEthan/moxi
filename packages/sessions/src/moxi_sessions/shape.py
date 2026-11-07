@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any, ClassVar
 
@@ -339,30 +339,42 @@ SUMMARY_KEYS = ("file_path", "path", "notebook_path", "command", "pattern", "url
 SUMMARY_CHARS = 160
 
 
-def _flat(text: str, limit: int) -> str:
-    """One line, cut at `limit` characters, the cut admitted."""
-    text = " ".join(str(text).split())
+def _flat(text: str, limit: int, redact: Callable[[str], str] | None = None) -> str:
+    """One line, cut at `limit` characters, the cut admitted. With `redact`, the whole
+    text is redacted first and cut after, so no secret is cut short of the shape that
+    would match it."""
+    text = str(text)
+    if redact is not None:
+        text = redact(text)
+    text = " ".join(text.split())
     if len(text) <= limit:
         return text
     return f"{text[:limit]}... [+{len(text) - limit} chars]"
 
 
-def tool_summary(name: Any, tool_input: Any) -> str:
+def tool_summary(name: Any, tool_input: Any, *,
+                 redact: Callable[[str], str] | None = None) -> str:
     """`name(argument)` on one line: the tool's name and the first of `SUMMARY_KEYS` its
     input holds as non-blank text, else its input as compact JSON, the argument cut at
-    `SUMMARY_CHARS` characters."""
+    `SUMMARY_CHARS` characters.
+
+    `redact`, a function from text to text, is applied to the name and to the whole
+    argument before the cut. A record's own `summary` is made without it."""
     label = name if isinstance(name, str) else "?"
+    if redact is not None:
+        label = redact(label)
     if isinstance(tool_input, dict):
-        arg = next((_flat(tool_input[key], SUMMARY_CHARS) for key in SUMMARY_KEYS
+        arg = next((_flat(tool_input[key], SUMMARY_CHARS, redact) for key in SUMMARY_KEYS
                     if isinstance(tool_input.get(key), str) and tool_input[key].strip()),
                    None)
         if arg is None:
-            arg = (_flat(json.dumps(tool_input, default=str, sort_keys=True), SUMMARY_CHARS)
+            arg = (_flat(json.dumps(tool_input, default=str, sort_keys=True), SUMMARY_CHARS,
+                         redact)
                    if tool_input else "")
     elif tool_input is None:
         arg = ""
     else:
-        arg = _flat(json.dumps(tool_input, default=str), SUMMARY_CHARS)
+        arg = _flat(json.dumps(tool_input, default=str), SUMMARY_CHARS, redact)
     return f"{label}({arg})"
 
 
