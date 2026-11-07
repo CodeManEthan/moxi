@@ -43,7 +43,7 @@ RUNS = "runs.jsonl"
 
 
 def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str] = (),
-           runner=None) -> list[UnitState]:
+           kinds: Mapping[str, str] | None = None, runner=None) -> list[UnitState]:
     """The state of every unit of `modules` (every module present when None), then of
     each foreign unit in `foreign`, in that order.
 
@@ -56,6 +56,16 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
     On every backend a timer's state is its schedule, never its last run, whose result is
     in `last` (`UnitState` gives its shape per backend); and when a backend's supervisor
     read fails, every unit that read covers is `unknown` with the failure in `detail`.
+
+    `kinds` maps a foreign name to the kind the caller reads it as, `"daemon"` or
+    `"timer"`; any other value raises `ValueError`, and a name that is not in `foreign`
+    is ignored, so one mapping may serve several calls. Only Task Scheduler honours it,
+    being the one backend that can't tell a unit's kind from the unit (systemd reads the
+    suffix, launchd the plist): a task named `"daemon"` is `active` only while it runs,
+    and `failed` when its last result is a failure. A task with no kind given is a
+    timer, as before. A foreign name decided without a read (`nobackend`, or `unknown`
+    for an empty name, one in moxi's own namespace or one the fence refuses) takes its
+    kind from `kinds` when given, else from its suffix.
     """
     from .. import modules as _modules
 
@@ -64,6 +74,7 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
     if isinstance(foreign, str):
         foreign = [foreign]
     foreign = list(foreign)
+    kinds = check_kinds(kinds)
     names = (sorted({entry.name for entry in _modules.installed()}) if modules is None
              else list(modules))
     impl = _implementation()
@@ -85,7 +96,8 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
     for ref in foreign:
         if not isinstance(ref, str):
             raise ValueError(f"a foreign unit's name is a string, not {ref!r}")
-        kind = "timer" if ref.endswith(".timer") else "daemon"
+        hint = kinds.get(ref)
+        kind = hint or ("timer" if ref.endswith(".timer") else "daemon")
         backend = None if isinstance(impl, str) else impl.name
         if not ref:
             rows.append(UnitState(None, ref, kind, backend, "unknown",
@@ -99,7 +111,7 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
                                   detail=f"{ref} is in moxi's own unit namespace; read it "
                                          "through the module whose mark it carries"))
             continue
-        unit = impl.foreign(ref, None)
+        unit = impl.foreign(ref, None) if hint is None else impl.foreign(ref, None, kind=hint)
         refused = _refused(impl, unit)
         if refused is not None:
             rows.append(UnitState(None, ref, kind, backend, "unknown",
@@ -115,6 +127,19 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
         for slot, ref, state in zip(slots, refs, read_states):
             rows[slot] = _with_last(state, ref, runs)
     return [row for row in rows if row is not None]
+
+
+def check_kinds(kinds: Mapping[str, str] | None) -> dict[str, str]:
+    """`kinds` as a dict, checked: each value `"daemon"` or `"timer"`, else
+    `ValueError`."""
+    if kinds is None:
+        return {}
+    if not isinstance(kinds, Mapping):
+        raise ValueError(f"kinds maps a foreign unit's name to its kind, not {kinds!r}")
+    for ref, kind in kinds.items():
+        if kind not in ("daemon", "timer"):
+            raise ValueError(f"kinds[{ref!r}] is 'daemon' or 'timer', not {kind!r}")
+    return dict(kinds)
 
 
 def _refused(impl, unit: UnitRef) -> str | None:

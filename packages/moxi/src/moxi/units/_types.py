@@ -19,6 +19,11 @@ CAUSES = ("editable", "foreign", "command", "switch", "socket", "declaration", "
 KINDS = ("daemon", "timer", "socket")
 #: What `status` may read for one unit.
 STATES = ("active", "inactive", "failed", "missing", "nobackend", "off", "unknown")
+#: Task Scheduler's own success codes, which a task's `LastTaskResult` may hold: every
+#: `SCHED_S_*` code (0x41300 to 0x41308 "ready", "running", "has not yet run" and the like,
+#: 0x4131B, 0x4131C, and 0x41325 "queued") lies in this band. A result that is non-zero and
+#: outside it is a run that failed or was refused.
+TASK_STATUS_CODES = range(0x41300, 0x41400)
 
 _EMPTY: Mapping = MappingProxyType({})
 
@@ -174,7 +179,9 @@ class UnitState:
                       LastTaskResult} (Task Scheduler's own status codes, such as
                       0x41303 for "has not yet run", are among its values)
 
-    A daemon has no `"supervisor"` entry, nor does a marked Task Scheduler unit. To tell
+    A foreign Task Scheduler task read as a daemon (`status(..., kinds=...)`) keeps that
+    `{"last_run", "last_result"}` entry. Any other daemon has no `"supervisor"` entry, nor
+    does a marked Task Scheduler unit. To tell
     whether a timer's last run failed the same way on every backend, read the run line
     (`exit`, `result`), as the doctor does, or `last_runs`.
     """

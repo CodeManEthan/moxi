@@ -39,7 +39,9 @@ moxi services watch [ID...] [--every SECONDS] [--json]
 A command you add starts off unless you give `--enable`. `stop` stops a daemon until the
 next login or start, and is remembered; it changes nothing about whether the service is
 on. Adopting a unit takes `--enable` or `--disable`, so the row says what is true; with
-neither, `add` tells you what the supervisor reads now.
+neither, `add` tells you what the supervisor reads now. On Windows an adopted task is a
+daemon, judged by whether its process runs, unless you give `--timer`; give it for a
+scheduled task, or for a launcher whose action starts a program and exits.
 
 Exit codes: 0 done; 1 an act failed, or the state read after it doesn't match; 2 asked
 wrongly; 3 refused; 75 busy, try again. Given several ids, a verb acts on each and exits

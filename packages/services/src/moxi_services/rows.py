@@ -105,9 +105,9 @@ def check_ref(ref: object, backend: str, *, timer: bool = False) -> str:
     on the supervisor `backend` ("systemd", "launchd" or "schtasks").
 
     A systemd unit takes its kind from its suffix, `.service` or `.timer`; `timer`
-    (the `--timer` flag) must agree with it. On launchd a label is a daemon unless
-    `timer` says it is a timer. A Task Scheduler task is always a timer. A ref in moxi's
-    own namespace is refused (exit 3): those units are the core's, marked or not."""
+    (the `--timer` flag) must agree with it. On launchd and Task Scheduler a label or a
+    task is a daemon unless `timer` says it is a timer. A ref in moxi's own namespace is
+    refused (exit 3): those units are the core's, marked or not."""
     if not isinstance(ref, str) or not ref.strip() or ref != ref.strip() or "\n" in ref:
         raise Usage(f"{ref!r} is not a unit name", None)
     if is_own_ref(ref):
@@ -124,10 +124,8 @@ def check_ref(ref: object, backend: str, *, timer: bool = False) -> str:
         if timer and kind != "timer":
             raise Usage(f"{ref} is a service, not a timer; leave out --timer", None)
         return kind
-    if backend == "launchd":
+    if backend in ("launchd", "schtasks"):
         return "timer" if timer else "daemon"
-    if backend == "schtasks":
-        return "timer"
     raise Refused(f"no supervisor here ({backend!r}) to adopt {ref} from", None)
 
 

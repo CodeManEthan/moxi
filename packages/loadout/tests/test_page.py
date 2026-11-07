@@ -269,8 +269,9 @@ def test_global_answers_what_global_show_json_prints_and_whether_the_mode_is_cho
     assert any(f["changes"] for f in body["files"])
 
 
-def test_drift_counts_the_items_not_ok_and_notes_other_homes_without_counting_them(
-        lo, monkeypatch, tmp_path):
+def test_drift_counts_the_items_not_ok_and_notes_a_difference_without_counting_it(
+        lo, monkeypatch, tmp_path, terminal_record):
+    terminal_record()
     # review is missing for claude and for codex: one item, however many harnesses.
     assert read("/api/status")["counts"] == {"missing": 2}
     assert read("/api/drift")["count"] == 1
@@ -278,12 +279,12 @@ def test_drift_counts_the_items_not_ok_and_notes_other_homes_without_counting_th
     assert read("/api/drift") == {"problem": None, "count": 0, "note": None}
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "elsewhere"))
     body = read("/api/drift")
-    assert "Codex" in body["note"] and "CODEX_HOME" in body["note"]
+    assert "Codex's home" in body["note"] and "CODEX_HOME" in body["note"]
     assert body["count"] == len({(r["scope"], r["kind"], r["name"])
                                  for r in read("/api/status")["rows"]
                                  if r["state"] not in ("ok", "off")})
     # The page's reads word the note for the page, as a job's refusal is worded.
-    assert body["note"].endswith("then run moxi ui stop, or run the command in a terminal")
+    assert "; or run the command in a terminal." in body["note"]
     assert body["note"] in read("/api/status")["notes"]
 
 
@@ -563,10 +564,10 @@ def test_a_retry_after_a_restart_finds_its_job(lo, spawned):
 
 # -- /api/job -------------------------------------------------------------------------------
 
-def test_a_job_read_through_to_its_end_does_what_the_verb_does(lo, spawned, monkeypatch):
-    monkeypatch.delenv(homes.MARKER, raising=False)
-    assert install.install().code == 0           # the user's own run records the homes
-    monkeypatch.setenv(homes.MARKER, "test")      # set back after the test
+def test_a_job_read_through_to_its_end_does_what_the_verb_does(
+        lo, spawned, monkeypatch, terminal_record):
+    terminal_record()                             # a command typed in the user's terminal
+    assert install.install().code == 0
     kit.skill(lo / "skills", "lint")
     status, answer = post("/api/add", {"kind": "skill", "name": "lint"})
     assert status == 202
@@ -583,10 +584,10 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(lo, spawned, monk
 def test_a_refused_job_reads_done_with_its_line(lo, spawned):
     status, answer = post("/api/install", {})
     job = job_of(answer)
-    assert pagejob.run(job, ["install"]) == 3      # no homes recorded yet
+    assert pagejob.run(job, ["install"]) == 3      # no terminal recorded yet
     body = read("/api/job", f"job={job}")
     assert (body["state"], body["exit"], body["outcome"]) == ("done", 3, None)
-    assert "moxi loadout install once in a terminal" in body["lines"][0]
+    assert "Type moxi modules in a terminal of your own" in body["lines"][0]
 
 
 def test_a_job_whose_process_is_gone_reads_interrupted(lo, monkeypatch):

@@ -69,6 +69,8 @@ class FakeUnits:
     probe: object = None
     #: what `probe` said, by call, in order.
     locked: list = field(default_factory=list)
+    #: the `kinds` each status read and act was given, by call, in order: (call, kinds).
+    kinds: list = field(default_factory=list)
 
     # -- the calls services makes ------------------------------------------------------
 
@@ -128,20 +130,20 @@ class FakeUnits:
             out.append(Applied(change, True, (f"{change.unit} {change.action}",)))
         return out
 
-    def start(self, module, names, *, foreign=False, runner=None):
-        return self._act("start", module, names, foreign)
+    def start(self, module, names, *, foreign=False, kinds=None, runner=None):
+        return self._act("start", module, names, foreign, kinds)
 
-    def stop(self, module, names, *, foreign=False, runner=None):
-        return self._act("stop", module, names, foreign)
+    def stop(self, module, names, *, foreign=False, kinds=None, runner=None):
+        return self._act("stop", module, names, foreign, kinds)
 
-    def restart(self, module, names, *, foreign=False, runner=None):
-        return self._act("restart", module, names, foreign)
+    def restart(self, module, names, *, foreign=False, kinds=None, runner=None):
+        return self._act("restart", module, names, foreign, kinds)
 
-    def enable(self, module, names, *, foreign=False, runner=None):
-        return self._act("enable", module, names, foreign)
+    def enable(self, module, names, *, foreign=False, kinds=None, runner=None):
+        return self._act("enable", module, names, foreign, kinds)
 
-    def disable(self, module, names, *, foreign=False, runner=None):
-        return self._act("disable", module, names, foreign)
+    def disable(self, module, names, *, foreign=False, kinds=None, runner=None):
+        return self._act("disable", module, names, foreign, kinds)
 
     def _table(self, module, foreign):
         if foreign:
@@ -150,8 +152,11 @@ class FakeUnits:
             return self.written, lambda name: name
         return self.modules, lambda name: (module, name)
 
-    def _act(self, act, module, names, foreign):
+    def _act(self, act, module, names, foreign, kinds=None):
+        if kinds is not None and not foreign:
+            raise ValueError("kinds is for foreign=True")
         self.calls.append((act, module, tuple(names), foreign))
+        self.kinds.append((act, kinds))
         self._held()
         table, key = self._table(module, foreign)
         out = []
@@ -176,10 +181,11 @@ class FakeUnits:
             out.append(Acted(owner, name, act, True, (f"{name} {act}ed",)))
         return out
 
-    def status(self, modules=None, *, foreign=(), runner=None):
+    def status(self, modules=None, *, foreign=(), kinds=None, runner=None):
         modules = [modules] if isinstance(modules, str) else list(modules or ())
         foreign = [foreign] if isinstance(foreign, str) else list(foreign)
         self.calls.append(("status", tuple(modules), tuple(foreign)))
+        self.kinds.append(("status", kinds))
         out = []
         for module in modules:
             if module == "services":

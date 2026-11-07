@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   actedOf, actSaid, agentBody, clearLeadBody, editBody, editForm, editing, filterChoices, kindChoices, leadBody,
   listView, MAY_HAVE_ACTED, NO_GIT, projectFields, removedSaid, removeSheet, removeStatusPath, reread, touched,
-  whereView,
+  WHERE_LINE, whereView,
 } from "../src/views.ts";
 import { parseOne, parseWritten } from "../src/feed.ts";
 
@@ -63,14 +63,25 @@ test("a project's fields are the card's, with its notes root when it has one", (
 
 test("the store and git line shows what the server gives, and says when there is no git", () => {
   assert.equal(whereView(state({ loading: true })).state, "loading");
-  assert.deepEqual(whereView(state({ value: { store: "/h/projects.db", git: "/usr/bin/git" } })),
-                   { state: "up", store: "/h/projects.db", git: "/usr/bin/git", line: null });
-  const none = whereView(state({ value: { store: "/h/projects.db", git: null } }));
+  assert.deepEqual(whereView(state({ value: { store: "/h/projects.db", git: "/usr/bin/git", note: null } })),
+                   { state: "up", store: "/h/projects.db", git: "/usr/bin/git", note: null, line: null });
+  const none = whereView(state({ value: { store: "/h/projects.db", git: null, note: null } }));
   assert.equal(none.git, null);
   assert.match(NO_GIT, /create is refused/);
-  const failed = whereView(state({ value: { store: "/h/projects.db", git: null },
+  const failed = whereView(state({ value: { store: "/h/projects.db", git: null, note: null },
                                    failure: { status: 0, why: "no answer from the shell", said: null } }));
   assert.deepEqual([failed.state, failed.store, failed.line], ["failed", "/h/projects.db", "no answer from the shell"]);
+});
+
+test("the where block carries the server's note, kept while a read again fails", () => {
+  const LINE = "The projects store here is /h/projects.db, but the last run in a terminal used /t/projects.db";
+  assert.equal(whereView(state({ value: { store: "/h/projects.db", git: null, note: LINE } })).note, LINE);
+  const failed = whereView(state({ value: { store: "/h/projects.db", git: null, note: LINE },
+                                   failure: { status: 0, why: "no answer from the shell", said: null } }));
+  assert.deepEqual([failed.state, failed.note], ["failed", LINE]);
+  assert.equal(whereView(state({ loading: true })).note, null);
+  assert.equal(whereView(state({ gone: true, value: { store: "/h", git: null, note: LINE } })).note, null);
+  assert.match(WHERE_LINE, /compares the folders it would read and write/);
 });
 
 // -- the edit form --------------------------------------------------------------------------------

@@ -1,11 +1,11 @@
 [project]
 name = "moxi-loadout"
-version = "0.1.1"
+version = "0.1.2"
 description = "Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode."
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1,<0.2", "pyyaml>=6.0,<7"]
+dependencies = ["moxi>=0.1.4,<0.2", "pyyaml>=6.0,<7"]
 
 [project.optional-dependencies]
 # Project sections named by key: loadout resolves a key to its root through projects'

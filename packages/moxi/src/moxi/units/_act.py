@@ -11,7 +11,10 @@ With `foreign=True` the names are the backend's own names of units moxi did not 
 (`backup.timer`, a launchd label, a task path). The acts only act on them: nothing writes,
 plans or removes one. A name in moxi's own namespace (systemd `moxi-*`, launchd `moxi.*`,
 a task under `\\Moxi\\`), marked or not, and a unit whose file carries a moxi mark are
-refused, so `foreign=True` never reaches a unit the writer may own or displace.
+refused, so `foreign=True` never reaches a unit the writer may own or displace. With
+`foreign=True` an act also takes `kinds`, the kind each name is acted on as, which only
+Task Scheduler honours (see `status`): a task named `"daemon"` gets a daemon's steps, read
+around `/run` and `/end`.
 
 The stop record. `stop(module, names, record=[])` first reads, in one supervisor call,
 which of the units are running, and stops only those; before it asks the supervisor to
@@ -38,6 +41,7 @@ from . import _backend
 from ._apply import core_lock, fence as _fence
 from ._backend import ReadError, UnitRef
 from ._fence import Fence, FenceError
+from ._status import check_kinds
 from ._types import Acted, Stopped
 
 #: The acts on named units.
@@ -52,30 +56,34 @@ _tokens: dict[int, object] = {}
 _tokens_lock = threading.Lock()
 
 
-def start(module: str, names, *, foreign: bool = False, runner=None) -> list[Acted]:
+def start(module: str, names, *, foreign: bool = False, kinds=None,
+          runner=None) -> list[Acted]:
     """Start each named unit: a daemon now, a timer's run now through its gate."""
-    return _act("start", module, names, foreign, runner)
+    return _act("start", module, names, foreign, runner, kinds)
 
 
-def restart(module: str, names, *, foreign: bool = False, runner=None) -> list[Acted]:
+def restart(module: str, names, *, foreign: bool = False, kinds=None,
+            runner=None) -> list[Acted]:
     """Restart each named unit: a daemon, or a timer's run (`stop` then `start`)."""
-    return _act("restart", module, names, foreign, runner)
+    return _act("restart", module, names, foreign, runner, kinds)
 
 
-def enable(module: str, names, *, foreign: bool = False, runner=None) -> list[Acted]:
+def enable(module: str, names, *, foreign: bool = False, kinds=None,
+           runner=None) -> list[Acted]:
     """Enable each named unit, taking effect now: a daemon runs, a timer's schedule is
     armed."""
-    return _act("enable", module, names, foreign, runner)
+    return _act("enable", module, names, foreign, runner, kinds)
 
 
-def disable(module: str, names, *, foreign: bool = False, runner=None) -> list[Acted]:
+def disable(module: str, names, *, foreign: bool = False, kinds=None,
+            runner=None) -> list[Acted]:
     """Disable each named unit, taking effect now: a daemon is stopped, a timer's schedule
     is off (on Windows a timer's run in progress goes on; `stop` ends it)."""
-    return _act("disable", module, names, foreign, runner)
+    return _act("disable", module, names, foreign, runner, kinds)
 
 
 def stop(module: str, names=None, *, replace: bool = False, record: list | None = None,
-         foreign: bool = False, runner=None) -> list[Acted]:
+         foreign: bool = False, kinds=None, runner=None) -> list[Acted]:
     """Stop each named unit: a daemon, or a timer's run in progress.
 
     `names=None` takes every daemon `declarations(module)` reads, its rejected run-time
@@ -87,6 +95,7 @@ def stop(module: str, names=None, *, replace: bool = False, record: list | None 
     never stopped without an entry that starts it again, and raises `ValueError`
     without one. `foreign=True` takes no record.
     """
+    _kinds(kinds, foreign)
     if replace and record is None:
         raise ValueError("stop(replace=True) needs a record, so an unmarked unit is never "
                          "stopped without an entry that starts it again")
@@ -102,7 +111,7 @@ def stop(module: str, names=None, *, replace: bool = False, record: list | None 
         names = list(decl.daemons) + [name for kind, name in decl.rejected
                                       if kind == "daemon" and name not in decl.daemons]
     if record is None:
-        return _act("stop", module, names, foreign, runner)
+        return _act("stop", module, names, foreign, runner, kinds)
     return _stop_recorded(module, _names(names), replace, record, runner)
 
 
@@ -214,8 +223,18 @@ def _names(names) -> list[str]:
     return out
 
 
-def _act(act: str, module: str, names, foreign: bool, runner) -> list[Acted]:
+def _kinds(kinds, foreign: bool) -> dict[str, str]:
+    """The acts' `kinds`, checked as `status` checks it; given without `foreign=True` it
+    raises `ValueError`, since a module's own units carry their kind in their files."""
+    if kinds is not None and not foreign:
+        raise ValueError("kinds names the kind of foreign units; give it with "
+                         "foreign=True")
+    return check_kinds(kinds)
+
+
+def _act(act: str, module: str, names, foreign: bool, runner, kinds=None) -> list[Acted]:
     names = _names(names)
+    kinds = _kinds(kinds, foreign)
     owner = None if foreign else module
     with core_lock():
         impl = _implementation()
@@ -227,7 +246,7 @@ def _act(act: str, module: str, names, foreign: bool, runner) -> list[Acted]:
         marked = () if foreign else impl.marked(module)
         out = []
         for name in names:
-            unit = (foreign_unit(impl, name, fence) if foreign
+            unit = (foreign_unit(impl, name, fence, kinds.get(name)) if foreign
                     else _marked_unit(marked, module, name))
             if isinstance(unit, str):
                 out.append(Acted(owner, name, act, False, (unit,)))
@@ -262,14 +281,16 @@ def _marked_unit(marked: Sequence[UnitRef], module: str, name: str) -> UnitRef |
             "the units the module declares")
 
 
-def foreign_unit(impl, ref: str, fence) -> UnitRef | str:
+def foreign_unit(impl, ref: str, fence, kind: str | None = None) -> UnitRef | str:
     """The `UnitRef` of foreign unit `ref`, or the line refusing it: a name in moxi's
-    own namespace, a name the fence refuses, or a unit whose file carries a moxi mark."""
+    own namespace, a name the fence refuses, or a unit whose file carries a moxi mark.
+    `kind` is the caller's hint, passed to the backend only when given."""
     if impl.own(ref):
         return (f"{ref} is in moxi's own unit namespace; foreign=True takes only units "
                 "moxi did not write")
     try:
-        unit = impl.foreign(ref, fence)
+        unit = (impl.foreign(ref, fence) if kind is None
+                else impl.foreign(ref, fence, kind=kind))
     except FenceError as exc:
         return f"{ref}: {exc}"
     for path in unit.paths:

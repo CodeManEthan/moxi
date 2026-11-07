@@ -59,7 +59,9 @@ POWERSHELL = "powershell.exe"
 #: The fixed PowerShell script of the foreign task read. It reads its refs from
 #: `$env:MOXI_TASK_REFS`, lists the tasks once, keeps those whose folder and name equal a
 #: ref's (`-eq`, never a wildcard or a parsed string) and prints one JSON array, in UTF-8
-#: without a byte-order mark whatever the console's code page. The refs are parsed with
+#: without a byte-order mark whatever the console's code page. Each item is the task's
+#: folder and name, its `State`, its own `Enabled` setting (which a running task keeps
+#: whatever `State` says), and its `LastRunTime` and `LastTaskResult`. The refs are parsed with
 #: `-InputObject` and enumerated by `foreach`: Windows PowerShell 5.1 emits a parsed JSON
 #: array as one object, so wrapping it in `@(...)` would give a list of one list.
 TASKS_SCRIPT = (
@@ -73,6 +75,7 @@ TASKS_SCRIPT = (
     "$i = $t | Get-ScheduledTaskInfo; "
     "$out += [pscustomobject]@{ path = $t.TaskPath; name = $t.TaskName; "
     "state = [string]$t.State; "
+    "enabled = [bool]$t.Settings.Enabled; "
     "last_run = $(if ($i.LastRunTime) { $i.LastRunTime.ToString('o') } else { $null }); "
     "last_result = $i.LastTaskResult } } } }; "
     "ConvertTo-Json -InputObject @($out) -Compress -Depth 3")

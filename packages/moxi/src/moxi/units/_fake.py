@@ -374,7 +374,7 @@ class FakeBackend:
     def own(self, ref: str) -> bool:
         return ref.startswith("moxi-")
 
-    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None, kind: str | None = None) -> UnitRef:
         if ref.endswith(".timer"):
             if fence is None:
                 return UnitRef(None, ref, "timer", (ref,))

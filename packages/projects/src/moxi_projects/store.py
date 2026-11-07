@@ -36,7 +36,7 @@ import json
 import os
 import sqlite3
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TypeVar
 
@@ -92,9 +92,10 @@ FIELDS = ("root", "kind", "lead", "notes_root")
 TIMEOUT = 5.0
 
 
-def path() -> str:
-    """The store's file."""
-    return api._store_path()
+def path(env: Mapping[str, str] | None = None) -> str:
+    """The store's file, placed from `env` alone (this process's environment without
+    one), so a page can place it from another environment too."""
+    return api._store_path(env)
 
 
 def now() -> str:

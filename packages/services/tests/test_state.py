@@ -34,6 +34,8 @@ def test_read_asks_the_supervisor_once_for_every_form(fake):
     read = state.read([row("web"), row("backup"), row("site"), module_row])
     assert [c for c in fake.calls if c[0] == "status"] == [
         ("status", ("notes", "services"), ("backup.timer", "site.service"))]
+    # One mapping names each adopted unit's kind, as its row has it.
+    assert fake.kinds == [("status", {"backup.timer": "timer", "site.service": "daemon"})]
     assert read["services/web"].state == "active"
     assert read["services/backup"].state == "active" and read["services/backup"].enabled
     assert read["services/site"].state == "missing"
@@ -63,7 +65,8 @@ def test_sockets_are_not_rows(fake, monkeypatch):
     add(**written("web"))
     socket = UnitState("services", "web", "socket", "systemd", "active")
     daemon = UnitState("services", "web", "daemon", "systemd", "inactive")
-    monkeypatch.setattr(fake, "status", lambda modules, foreign=(): [socket, daemon])
+    monkeypatch.setattr(fake, "status",
+                        lambda modules, foreign=(), kinds=None: [socket, daemon])
     assert state.read_one(row("web")) is daemon
 
 
