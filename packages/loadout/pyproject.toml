@@ -1,6 +1,6 @@
 [project]
 name = "moxi-loadout"
-version = "0.1.0"
+version = "0.1.1"
 description = "Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode."
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,9 +14,8 @@ projects = ["moxi-projects>=0.1,<0.2"]
 # A commit or a merge that changes the loadout folder reinstalls it: loadout registers
 # its two git hook pieces with repo, reached only through moxi.modules.load("repo").
 repo = ["moxi-repo>=0.1,<0.2"]
-# The browser UI shell: with it, loadout's page shows there. Loopback, which loadout's
-# page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+# The browser UI shell: with it, loadout's page shows there.
+ui = ["moxi-ui>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

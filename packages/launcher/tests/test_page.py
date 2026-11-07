@@ -43,9 +43,9 @@ NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief"
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 @pytest.fixture(autouse=True)
@@ -676,8 +676,7 @@ WITHOUT_UI = textwrap.dedent("""\
     import json
     import sys
 
-    # As if neither loopback nor the UI shell were installed.
-    sys.modules["moxi_loopback"] = None
+    # As if the UI shell weren't installed.
     sys.modules["moxi_ui"] = None
 
     import moxi_launcher.api
@@ -694,7 +693,7 @@ WITHOUT_UI = textwrap.dedent("""\
     rows = len(json.loads(printed.getvalue()))
     loaded = sorted(name for name in sys.modules
                     if name in ("moxi_launcher.page", "moxi_launcher.pagehandlers")
-                    or name.startswith(("moxi_loopback.", "moxi_ui.")))
+                    or name.startswith("moxi_ui."))
     try:
         import moxi_launcher.page
     except ImportError as err:
@@ -714,5 +713,5 @@ def test_the_launcher_works_without_the_ui(tmp_path):
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["code"] == 0 and out["rows"] > 0
     assert out["loaded"] == []
-    assert out["refused"].startswith("the launcher's page needs the loopback module")
+    assert out["refused"].startswith("the launcher's page needs the ui module")
     assert out["findings"] == []

@@ -118,10 +118,10 @@ from .compose import common
 from .page import LAUNCH, LIMIT, RUN
 from .resume import sessions as past_sessions
 
-_loopback = modules.load("loopback", interface=1)
-if not _loopback.ok:
-    raise ImportError(f"the launcher's page needs the loopback module: {_loopback.reason}")
-lb = _loopback.api
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"the launcher's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
 
 #: The detail of a read that failed in a way it did not expect.
 UNEXPECTED = "the launcher's page server hit an unexpected error ({}); its log has the details"

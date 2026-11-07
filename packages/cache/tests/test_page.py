@@ -37,9 +37,9 @@ UNEXPECTED = "cache's page server hit an unexpected error ({}); its log has the 
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 @pytest.fixture(autouse=True)
@@ -400,8 +400,7 @@ WITHOUT_UI = textwrap.dedent("""
     import json
     import sys
 
-    # As if neither loopback nor the UI shell were installed.
-    sys.modules["moxi_loopback"] = None
+    # As if the UI shell weren't installed.
     sys.modules["moxi_ui"] = None
 
     import moxi_cache.api
@@ -416,7 +415,7 @@ WITHOUT_UI = textwrap.dedent("""
                                prog="moxi cache")
     loaded = sorted(name for name in sys.modules
                     if name in ("moxi_cache.page", "moxi_cache.pagehandlers")
-                    or name.startswith(("moxi_loopback.", "moxi_ui.")))
+                    or name.startswith("moxi_ui."))
     try:
         import moxi_cache.page
     except ImportError as err:
@@ -436,8 +435,7 @@ def test_cache_works_without_the_ui(tmp_path):
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["code"] == 0
     assert out["loaded"] == []
-    assert out["refused"].startswith("cache's page needs the loopback module")
-    assert "loopback" in out["refused"]
+    assert out["refused"].startswith("cache's page needs the ui module")
     assert out["findings"] == []
 
 

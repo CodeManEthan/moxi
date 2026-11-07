@@ -9,19 +9,19 @@ route is a read, and none is the gateway's.
 The browser UI shell starts the page server on the first request for cache's page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in cache's announcement, API,
-CLI or console scripts does. cache's distribution doesn't require loopback, which comes
-with the `ui` extra, so this module reaches it only through `moxi.modules.load` and raises
-`ImportError` when that fails.
+CLI or console scripts does. cache's distribution doesn't require ui, which comes with the
+`ui` extra, so this module reaches loopback, ui's page-server base, only through
+`moxi.modules.load("ui", ...)` and raises `ImportError` when that fails.
 """
 
 from __future__ import annotations
 
 from moxi import modules
 
-_loopback = modules.load("loopback", interface=1)
-if not _loopback.ok:
-    raise ImportError(f"cache's page needs the loopback module: {_loopback.reason}")
-lb = _loopback.api
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"cache's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
 
 #: One clock record as the page sends it. The values a record may hold as null, or lack
 #: (a record an older watcher wrote has no `warn_before` or `stale_after`), are nullable.

@@ -18,7 +18,6 @@ members = [
     "packages/repo",
     "packages/secrets",
     "packages/projects",
-    "packages/loopback",
     "packages/slots",
     "packages/services",
     "packages/ui",
@@ -40,7 +39,6 @@ moxi-launcher = { workspace = true }
 moxi-repo = { workspace = true }
 moxi-secrets = { workspace = true }
 moxi-projects = { workspace = true }
-moxi-loopback = { workspace = true }
 moxi-slots = { workspace = true }
 moxi-services = { workspace = true }
 moxi-ui = { workspace = true }

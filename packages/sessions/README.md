@@ -167,7 +167,7 @@ the other modules.
 ## Dependencies
 
 `moxi`, Moxi's core, and nothing else. The optional extra `ui` adds `moxi-ui`, the browser
-UI shell, which brings loopback, the base sessions' page server runs on.
+UI shell, whose page-server base sessions' page server runs on.
 
 ## License
 

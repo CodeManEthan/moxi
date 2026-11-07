@@ -15,7 +15,6 @@ members = [
     "moxi-dev",
     "moxi-launcher",
     "moxi-loadout",
-    "moxi-loopback",
     "moxi-notes",
     "moxi-projects",
     "moxi-repo",
@@ -773,7 +772,7 @@ dev = [
 
 [[package]]
 name = "moxi-cache"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/cache" }
 dependencies = [
     { name = "moxi" },
@@ -811,7 +810,7 @@ dev = [
 
 [[package]]
 name = "moxi-comms"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/comms" }
 dependencies = [
     { name = "keyring" },
@@ -952,7 +951,7 @@ dev = [{ name = "pytest" }]
 
 [[package]]
 name = "moxi-launcher"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/launcher" }
 dependencies = [
     { name = "moxi" },
@@ -1004,7 +1003,7 @@ dev = [
 
 [[package]]
 name = "moxi-loadout"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/loadout" }
 dependencies = [
     { name = "moxi" },
@@ -1049,37 +1048,6 @@ dev = [
 ]
 
 [[package]]
-name = "moxi-loopback"
-version = "0.1.0"
-source = { editable = "packages/loopback" }
-dependencies = [
-    { name = "h11" },
-    { name = "moxi" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "moxi-dev" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "h11", specifier = ">=0.16,<1" },
-    { name = "moxi", editable = "packages/moxi" },
-    { name = "starlette", specifier = ">=1.10,<2" },
-    { name = "uvicorn", specifier = ">=0.54,<1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "moxi-dev", editable = "packages/moxi-dev" },
-    { name = "pytest" },
-]
-
-[[package]]
 name = "moxi-notes"
 version = "0.1.0"
 source = { editable = "packages/notes" }
@@ -1119,7 +1087,7 @@ dev = [
 
 [[package]]
 name = "moxi-projects"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/projects" }
 dependencies = [
     { name = "moxi" },
@@ -1155,7 +1123,7 @@ dev = [
 
 [[package]]
 name = "moxi-repo"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/repo" }
 dependencies = [
     { name = "moxi" },
@@ -1231,7 +1199,7 @@ dev = [
 
 [[package]]
 name = "moxi-services"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/services" }
 dependencies = [
     { name = "moxi" },
@@ -1275,7 +1243,7 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
@@ -1357,7 +1325,7 @@ dev = [
 
 [[package]]
 name = "moxi-turns"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/turns" }
 dependencies = [
     { name = "moxi" },
@@ -1459,7 +1427,7 @@ dev = [
 
 [[package]]
 name = "moxi-usage"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/usage" }
 dependencies = [
     { name = "moxi" },

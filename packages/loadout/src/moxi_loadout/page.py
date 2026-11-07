@@ -38,19 +38,19 @@ into this package's `web/`: `page.js`, the page, and `drift.js`, the drift block
 The browser UI shell starts the page server on the first request for loadout's page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in loadout's announcement, CLI,
-install listener or git hook pieces does. loadout's distribution doesn't require
-loopback, which comes with the `ui` extra, so this module reaches it only through
-`moxi.modules.load` and raises `ImportError` when that fails.
+install listener or git hook pieces does. loadout's distribution doesn't require ui, which
+comes with the `ui` extra, so this module reaches loopback, ui's page-server base, only
+through `moxi.modules.load("ui", ...)` and raises `ImportError` when that fails.
 """
 
 from __future__ import annotations
 
 from moxi import modules
 
-_loopback = modules.load("loopback", interface=1)
-if not _loopback.ok:
-    raise ImportError(f"loadout's page needs the loopback module: {_loopback.reason}")
-lb = _loopback.api
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"loadout's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
 
 #: The item kinds, the global modes and the states, as the manifest and the planner name
 #: them (a test holds them equal), written out so this module imports none of loadout's.

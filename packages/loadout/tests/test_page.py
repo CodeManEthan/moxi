@@ -35,9 +35,9 @@ OTHER_KEY = "L" * 43
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 LB = loopback()
@@ -220,7 +220,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert "ui" in module.OPTIONAL
     probe = ("import sys, moxi_loadout.module, moxi_loadout.cli, moxi_loadout.listener, "
              "moxi_loadout.gitpiece\n"
-             "print(sorted(m for m in sys.modules if m.startswith(('moxi_loopback', "
+             "print(sorted(m for m in sys.modules if m.startswith(('moxi_ui', "
              "'moxi_loadout.page'))))")
     done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                           timeout=60, check=True)

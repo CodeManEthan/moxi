@@ -1,6 +1,6 @@
 [project]
 name = "moxi-comms"
-version = "0.2.0"
+version = "0.2.1"
 description = "Messages between coding-agent sessions, delivered into their turns."
 requires-python = ">=3.12"
 license = "MIT"
@@ -35,8 +35,7 @@ codex = ["moxi-turns[codex]>=0.2,<0.3"]
 # optional Moxi module comms reaches only through moxi.modules.load("cache").
 cache = ["moxi-cache>=0.1,<0.2"]
 # The browser UI shell: with it, comms' panel and its roster of agents show there.
-# Loopback, which comms' page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+ui = ["moxi-ui>=0.2,<0.3"]
 # The public MCP host: with it, comms' four tools reach the Claude apps through the host,
 # as its provider `moxi_comms.connector`, which only the host loads.
 connector = ["moxi-connector>=0.1,<0.2"]
