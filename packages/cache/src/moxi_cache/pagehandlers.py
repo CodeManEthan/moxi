@@ -30,10 +30,10 @@ from moxi import modules
 from . import api
 from .page import ROW
 
-_loopback = modules.load("loopback", interface=1)
-if not _loopback.ok:
-    raise ImportError(f"cache's page needs the loopback module: {_loopback.reason}")
-lb = _loopback.api
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"cache's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
 
 #: Seconds between the poller's gathers. A record changes at each of the watcher's ticks
 #: (10 s by default), so the topic publishes about once a tick.

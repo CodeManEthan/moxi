@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.5 (2026-11-07)
+## 0.1.6 (2026-11-07)
 
 - Unit names carry the home. With `MOXI_HOME` set, units are named
   `moxi-<tag>-<module>-<name>` (systemd), `moxi.<tag>.<module>.<name>` (launchd) and
@@ -35,6 +35,15 @@
   has run in this home.
 - The fake units backend, a test helper, is no longer part of the installed package
   (`moxi.units._fake` is gone); it lives in the core's tests.
+
+## 0.1.5 (2026-11-07)
+
+- `units.status` and the five acts take `kinds`, a mapping of a foreign unit to
+  `"daemon"` or `"timer"`. Only Task Scheduler reads it: a foreign task read as a
+  daemon is active only while it runs, failed when its last result is outside Task
+  Scheduler's success band, and its acts wait for the task's state around `/run` and
+  `/end`. With no kinds every row and act is as before.
+- New `units.TASK_STATUS_CODES`, Task Scheduler's success band (0x41300-0x413FF).
 
 ## 0.1.4 (2026-11-07)
 

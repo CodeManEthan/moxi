@@ -4,8 +4,9 @@
     GET  /api/project        one project, by `key` (matched ignoring case)
     GET  /api/kinds          the kinds a project may have, and every contribution or kind
                              that can't be used, with why
-    GET  /api/where          the store file this server reads and writes, and the git it
-                             would run for a create (or none)
+    GET  /api/where          the store file this server reads and writes, the git it
+                             would run for a create (or none), and the line a write
+                             would be refused with now (or none)
     GET  /api/remove-status  what the remove request `job` came to: removed, or refused
                              with each sentence
     POST /api/add            `moxi projects add KEY [--root DIR] [--create] [--kind KIND]
@@ -19,8 +20,10 @@
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before it makes anything.** Each handler calls the act the verb calls
-(`moxi_projects.acts`), and each read the read API's function. The one difference is the
-mint's bound: a create from the page gives `git init` 20 seconds, not the verb's 30, so
+(`moxi_projects.acts`), and each read the read API's function. Every act first asks ui's
+check whether this server would write where the user's terminal does
+(`moxi_projects.pagecheck`), and refuses while it would not or can't tell. The other
+difference is the mint's bound: a create from the page gives `git init` 20 seconds, not the verb's 30, so
 the answer, the failure message included, comes inside the shell's 30 second deadline for
 it.
 
@@ -35,19 +38,19 @@ the components other pages may place.
 The browser UI shell starts the page server on the first request for projects' page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
 import this module, each in a process of its own: nothing in projects' announcement, read
-API or CLI does. projects' distribution doesn't require loopback, which comes with the
-`ui` extra, so this module reaches it only through `moxi.modules.load` and raises
-`ImportError` when that fails.
+API or CLI does. projects' distribution doesn't require ui, which comes with the `ui` extra,
+so this module reaches loopback, ui's page-server base, only through
+`moxi.modules.load("ui", ...)` and raises `ImportError` when that fails.
 """
 
 from __future__ import annotations
 
 from moxi import modules
 
-_loopback = modules.load("loopback", interface=1)
-if not _loopback.ok:
-    raise ImportError(f"projects' page needs the loopback module: {_loopback.reason}")
-lb = _loopback.api
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"projects' page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
 
 #: Where a remove request's outcome is read.
 STATUS_ROUTE = "/api/remove-status"
@@ -90,8 +93,10 @@ PROJECTS = {"projects": lb.Out("list", items=PROJECT)}
 ONE = {"project": PROJECT}
 KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BROKEN)}
 #: `store` is the store file; `git` the git a create would run, null when there is none
-#: on this server's PATH.
-WHERE = {"store": _PATH, "git": _MAYBE_PATH}
+#: on this server's PATH; `note` the line an add, a set or a remove would be refused with
+#: now, since this server would write elsewhere than the user's terminal or can't tell,
+#: or null.
+WHERE = {"store": _PATH, "git": _MAYBE_PATH, "note": _MAYBE_SAYS}
 #: An add or a set: the project as it now stands, and notes that refuse nothing (a root
 #: that doesn't exist yet, what a create made).
 WRITTEN = {"project": PROJECT, "notes": lb.Out("list", items=_SAYS)}

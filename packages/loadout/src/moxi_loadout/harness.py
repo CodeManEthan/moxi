@@ -1,6 +1,9 @@
 """Where each harness keeps its files, and how loadout reads and rewrites them.
 
-Homes, honouring the harnesses' own variables:
+Homes, honouring the harnesses' own variables. Each resolver takes the environment to read
+(`os.environ` without one) and reads it only by name, so a page can resolve the homes the
+user's terminal would (`moxi_loadout.homes`); `~` is the home folder that environment
+places (`moxi.paths.home`):
 
 - Claude Code: `$CLAUDE_CONFIG_DIR`, else `~/.claude`: `settings.json` (hooks and
   permission rules) and `CLAUDE.md` (the global file). Its MCP servers are in
@@ -31,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 HARNESSES = ("claude", "codex", "opencode")
@@ -38,28 +42,29 @@ HARNESSES = ("claude", "codex", "opencode")
 GLOBAL_NAMES = {"claude": "CLAUDE.md", "codex": "AGENTS.md", "opencode": "AGENTS.md"}
 
 
-def claude_home() -> Path:
-    given = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(given) if given else Path.home() / ".claude"
+def claude_home(env: Mapping[str, str] | None = None) -> Path:
+    given = _environ(env).get("CLAUDE_CONFIG_DIR")
+    return Path(given) if given else _home(env) / ".claude"
 
 
-def claude_json() -> Path:
-    given = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(given) / ".claude.json" if given else Path.home() / ".claude.json"
+def claude_json(env: Mapping[str, str] | None = None) -> Path:
+    given = _environ(env).get("CLAUDE_CONFIG_DIR")
+    return Path(given) / ".claude.json" if given else _home(env) / ".claude.json"
 
 
-def codex_home() -> Path:
-    given = os.environ.get("CODEX_HOME")
-    return Path(given) if given else Path.home() / ".codex"
+def codex_home(env: Mapping[str, str] | None = None) -> Path:
+    given = _environ(env).get("CODEX_HOME")
+    return Path(given) if given else _home(env) / ".codex"
 
 
-def opencode_home() -> Path:
-    given = os.environ.get("XDG_CONFIG_HOME")
-    return (Path(given) if given else Path.home() / ".config") / "opencode"
+def opencode_home(env: Mapping[str, str] | None = None) -> Path:
+    given = _environ(env).get("XDG_CONFIG_HOME")
+    return (Path(given) if given else _home(env) / ".config") / "opencode"
 
 
-def home(harness: str) -> Path:
-    return {"claude": claude_home, "codex": codex_home, "opencode": opencode_home}[harness]()
+def home(harness: str, env: Mapping[str, str] | None = None) -> Path:
+    return {"claude": claude_home, "codex": codex_home,
+            "opencode": opencode_home}[harness](env)
 
 
 def settings_file(harness: str) -> Path | None:
@@ -67,6 +72,16 @@ def settings_file(harness: str) -> Path | None:
     Codex's `hooks.json`, OpenCode's `opencode.json`."""
     return {"claude": claude_home() / "settings.json", "codex": codex_home() / "hooks.json",
             "opencode": opencode_home() / "opencode.json"}.get(harness)
+
+
+def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
+    return os.environ if env is None else env
+
+
+def _home(env: Mapping[str, str] | None) -> Path:
+    from moxi import paths
+
+    return paths.home(env)
 
 
 def global_file(harness: str) -> Path:

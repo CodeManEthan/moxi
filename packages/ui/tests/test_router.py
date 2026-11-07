@@ -167,7 +167,7 @@ def test_a_held_request_ends_when_its_session_does(tmp_path, path, finished, end
 
 
 def test_the_fallback_answers_navigations_only():
-    from moxi_loopback.api import RequestView
+    from moxi_ui.loopback.api import RequestView
 
     nav = RequestView("GET", b"/m/x/y", NAVIGATE, "tcp", 4321)
     assert fallback(nav).kind == "builtin"

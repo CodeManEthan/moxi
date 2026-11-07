@@ -10,8 +10,8 @@ in with a one-use ticket from `moxi ui open`, and serves each module's page unde
 An act the user should confirm a second time, such as stopping a service or removing a
 project, is a confirmed act: it runs at most once, and only after the user says yes on a
 sheet the shell draws. The page declares it in its route table with `confirmed=True` and
-the status route it reports on; moxi-loopback's README, "Confirmed acts", has the route's
-whole shape. For example:
+the status route it reports on; [docs/loopback.md](docs/loopback.md), "Confirmed acts",
+has the route's whole shape. For example:
 
 ```python
 Route("/api/status", "read", "moxi_usage.pagehandlers:status",
@@ -121,6 +121,14 @@ they agree; otherwise the line names each difference and the variables to set, w
 and refuses with the line. A page part that can't load ui at interface 2 refuses its write
 too, and names the step: install or update moxi-ui.
 
+## Page servers
+
+The shell starts each module's page server on the first request for its page, as
+`python -P -m moxi_ui.loopback.serve <module>`, and reads every module's route table with
+`python -P -m moxi_ui.loopback.export <module>...`. Both run on loopback, ui's
+page-server base: [docs/loopback.md](docs/loopback.md) has the request check, how a page
+is declared, and the runner's rules.
+
 ## Testing a module's pages
 
 `moxi_ui.testing` is a pytest plugin, installed with moxi-ui and loaded in every pytest run
@@ -134,8 +142,15 @@ docstring lists every fixture.
 A page module whose UI is optional:
 
 - declares an extra `ui = ["moxi-ui>=V,<W"]` and an `OPTIONAL` sentence for it;
-- reaches loopback in `page.py` and its handlers only through
-  `moxi.modules.load("loopback", interface=1)`, and raises `ImportError` when that fails;
+- reaches loopback, ui's page-server base, in `page.py` and its handlers only through
+  `moxi.modules.load("ui", interface=3).api.loopback`, and raises `ImportError` when the
+  load fails;
 - imports neither from its announcement, API, CLI or console scripts;
 - gets the contract check in its suite through the plugin's fixtures, by name, and never
   imports `moxi_ui`.
+
+## Dependencies
+
+`moxi`, Moxi's core; `starlette` and `uvicorn`, which serve every page server's requests;
+`h11`, which uvicorn parses HTTP with, at 0.16 or later for its request-smuggling fix;
+and `psutil`, which the shell uses to watch its page servers.

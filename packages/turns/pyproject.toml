@@ -1,16 +1,16 @@
 [project]
 name = "moxi-turns"
-version = "0.2.1"
+version = "0.2.2"
 description = "Drive a coding-agent session's turns: start, hold, steer and read a turn on any harness."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1.5,<0.2", "psutil>=5.9"]
+dependencies = ["moxi>=0.1.6,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 codex = ["websockets>=17.0.1"]
-ui = ["moxi-ui>=0.1,<0.2"]
+ui = ["moxi-ui>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

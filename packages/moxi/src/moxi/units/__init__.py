@@ -14,11 +14,12 @@ file it did not mark unless told to move it aside (`replace=True`).
     plan(module, only=None)        what writing them would change (`UnitChange` per unit)
     apply(changes, replace=False, restart=False)   carry a plan out (`Applied` per change)
     remove(module)                 remove every unit the module's mark is on (uninstall)
-    start|stop|restart|enable|disable(module, names, foreign=False)
+    start|stop|restart|enable|disable(module, names, foreign=False, kinds=None)
                                    act on named units now (`Acted` per name)
     stop(module, names, record=[]) and resume(record)
                                    stop what runs, with a record, and start exactly that
-    status(modules, foreign=())    what the supervisor says (`UnitState` per unit)
+    status(modules, foreign=(), kinds=None)
+                                   what the supervisor says (`UnitState` per unit)
     starts(found)                  what starts each socket daemon now: login or connection
     last_runs(module, timer, n=1)  the gate's newest run lines of a timer
     wrap(ref, module=, key=, name=) and unwrap(ref, module=)
@@ -71,8 +72,8 @@ from ._home import environment, home_tag
 from ._plan import plan
 from ._status import last_runs, status
 from ._types import (
-    Acted, Applied, DeclarationError, Declarations, Stopped, UnitChange, UnitState,
-    Wrapped)
+    TASK_STATUS_CODES, Acted, Applied, DeclarationError, Declarations, Stopped, UnitChange,
+    UnitState, Wrapped)
 from ._wrap import unwrap, wrap, wraps
 
 
@@ -184,8 +185,8 @@ def apply_switch(module: str, key: str, *, runner=None,
 
 __all__ = [
     "Acted", "Applied", "Backend", "DeclarationError", "Declarations", "Stopped",
-    "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped", "apply", "apply_switch",
-    "backend", "core_lock", "declarations", "digest", "disable", "enable", "environment",
-    "home_tag", "ids", "last_runs",
-    "plan", "remove", "restart", "resume", "start", "starts", "status", "stop",
-    "switch_problem", "switched_daemons", "unwrap", "wrap", "wraps"]
+    "TASK_STATUS_CODES", "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped",
+    "apply", "apply_switch", "backend", "core_lock", "declarations", "digest", "disable",
+    "enable", "environment", "home_tag", "ids", "last_runs", "plan", "remove", "restart",
+    "resume", "start", "starts", "status", "stop", "switch_problem", "switched_daemons",
+    "unwrap", "wrap", "wraps"]

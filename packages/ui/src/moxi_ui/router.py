@@ -36,7 +36,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
 from moxi.names import is_module_name
-from moxi_loopback.api import (
+from moxi_ui.loopback.api import (
     Entry,
     Profile,
     RequestView,

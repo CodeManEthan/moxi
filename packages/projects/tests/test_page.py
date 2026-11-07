@@ -7,7 +7,8 @@ so a handler that sends a key its route doesn't declare, or a value of another t
 here. A new app stands for the page server after a restart: its key table is empty.
 
 Every test runs with the site fixture, so the only contributions are the ones a test
-installs.
+installs, and with the core's record of a terminal whose environment is this process's, so
+a write isn't refused for want of one; a test of the comparison writes another.
 """
 
 from __future__ import annotations
@@ -23,11 +24,13 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 
 import pytest
 
-from moxi import modules
-from moxi_projects import acts, api, page, pagehandlers, rules, store
+import moxi.modules
+from moxi import modules, paths
+from moxi_projects import acts, api, cli, page, pagecheck, pagehandlers, rules, store
 
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
@@ -40,9 +43,9 @@ posix_only = pytest.mark.skipif(sys.platform == "win32",
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 LB = loopback()
@@ -52,6 +55,13 @@ LB = loopback()
 def only_the_tests_contributions(site):
     """No installed module's contribution reaches these tests."""
     return site
+
+
+@pytest.fixture(autouse=True)
+def a_terminal_has_recorded(terminal_record):
+    """The user's own terminal last ran with this process's environment, so the page
+    server's places agree with it."""
+    return terminal_record()
 
 
 def served():
@@ -202,7 +212,7 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
         "/api/where store", "/api/where git"}
     assert {k for k, v in marks.items() if v == "redact"} == {
         "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
-        "/api/set notes[]",
+        "/api/set notes[]", "/api/where note",
         "/api/remove-status reason", "/api/remove-status fix",
         "/api/remove-status sentences[]"}
 
@@ -214,7 +224,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
     assert "ui" in module.OPTIONAL
     assert not hasattr(module, "BUDGETS")
     probe = ("import sys, moxi_projects.module, moxi_projects.cli, moxi_projects.api\n"
-             "print(sorted(m for m in sys.modules if m.startswith(('moxi_loopback', "
+             "print(sorted(m for m in sys.modules if m.startswith(('moxi_ui', "
              "'moxi_projects.page'))))")
     done_ = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                            timeout=60, check=True)
@@ -284,7 +294,8 @@ def test_kinds_names_what_loaded_and_what_did_not(site):
 def test_where_names_the_store_file_and_the_git_found(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", fake_git(tmp_path / "bin", "exit 0"))
     body = read("/api/where")
-    assert body == {"store": store.path(), "git": str(tmp_path / "bin" / "git")}
+    assert body == {"store": store.path(), "git": str(tmp_path / "bin" / "git"),
+                    "note": None}
     empty = tmp_path / "nothing-here"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
@@ -721,3 +732,258 @@ def test_a_status_read_of_a_version_1_store_answers_no_such_request(v1_copy, sto
 def test_the_store_the_page_acts_on_is_the_verbs(golden_copy):
     assert read("/api/where")["store"] == api._store_path()
     assert shutil.which("git") == read("/api/where")["git"]
+
+
+# --- the terminal comparison ----------------------------------------------------------------
+
+#: Every write route, with a body it would otherwise act on in the golden store, and
+#: whether it consults the contributions. The add with create names a root that doesn't
+#: exist yet, so nothing being made is seen.
+WRITES = (
+    ("/api/add", lambda base: {"key": "new", "root": os.path.join(base, "new")}, True),
+    ("/api/add", lambda base: {"key": "minted", "root": os.path.join(base, "minted"),
+                               "create": True}, True),
+    ("/api/set", lambda base: {"key": "gamma", "lead": "lead-b"}, True),
+    ("/api/agents-add", lambda base: {"key": "gamma", "name": "helper"}, False),
+    ("/api/agents-remove", lambda base: {"key": "alpha", "name": "helper"}, False),
+    ("/api/remove", lambda base: {"key": "gamma"}, True),
+)
+WRITE_IDS = ["add", "add-create", "set", "agents-add", "agents-remove", "remove"]
+#: A folder no test makes, under the file system's root.
+ELSEWHERE = os.path.join(os.path.abspath(os.sep), "elsewhere")
+
+
+def terminal(**changes: str | None) -> dict[str, str]:
+    """This process's environment with `changes` (None takes a name out): what a terminal
+    that differs in those names would have recorded."""
+    env = dict(os.environ)
+    for name, value in changes.items():
+        if value is None:
+            env.pop(name, None)
+        else:
+            env[name] = value
+    return env
+
+
+def store_moved(terminal_record) -> str:
+    """A terminal whose projects store is elsewhere. Returns the line's first words."""
+    terminal_record(terminal(MOXI_PROJECTS_DATA_HOME=ELSEWHERE))
+    return (f"the projects store here is {store.path()}, but the last run in a terminal "
+            f"used {os.path.join(ELSEWHERE, 'projects', 'projects.db')}")
+
+
+def no_record(terminal_record) -> str:
+    os.unlink(paths.terminal_record())
+    return "Moxi has no record of the environment your terminal uses"
+
+
+def home_moved(terminal_record) -> str:
+    """A terminal whose home folder is elsewhere, the projects store pinned in both."""
+    assert os.environ.get("MOXI_PROJECTS_HOME")
+    terminal_record(terminal(HOME=ELSEWHERE))
+    return f"the home folder here is {paths.home()}, but the last run in a terminal used"
+
+
+def submit(route: str, body: dict) -> tuple[int, dict | None]:
+    return post(route, body, key=KEY if route == "/api/remove" else None)
+
+
+@pytest.mark.parametrize("differs", [store_moved, no_record, home_moved],
+                         ids=["store", "no-record", "home"])
+@pytest.mark.parametrize("route, body, consults", WRITES, ids=WRITE_IDS)
+def test_every_write_route_refuses_with_the_line_and_writes_nothing(
+        golden_copy, store_path, terminal_record, route, body, consults, differs):
+    words = differs(terminal_record)
+    before = store_path.read_bytes()
+    sent = body(golden_copy)
+    said = refused(submit(route, sent))
+    assert said.startswith(words), said
+    assert said == pagecheck.line()
+    assert store_path.read_bytes() == before
+    if "root" in sent:
+        assert not os.path.lexists(sent["root"])
+    # A remove refused this way keeps no row, and its repeat is answered the same.
+    assert acts.remove_status(KEY) is None
+    assert refused(submit(route, sent)) == said
+
+
+@pytest.fixture
+def services_moved(site, monkeypatch, terminal_record) -> str:
+    """A contribution from `services`, whose folders a terminal with another `MOXI_HOME`
+    placed elsewhere, while the projects store is pinned in both. Returns the line's
+    first words."""
+    site.contribution("services", "INTERFACE = 2\nKINDS = {'svc': ('a service', "
+                                  "lambda fields: None, 'dir')}\n")
+    monkeypatch.delenv("MOXI_SERVICES_HOME", raising=False)
+    monkeypatch.setenv("MOXI_HOME", os.path.join(str(paths.home()), "page-moxi"))
+    assert os.environ.get("MOXI_PROJECTS_HOME")
+    terminal_record(terminal(MOXI_HOME=ELSEWHERE))
+    here = os.path.join(str(paths.home()), "page-moxi", "data", "services")
+    return (f"services' data folder here is {here}, but the last run in a terminal used "
+            f"{os.path.join(ELSEWHERE, 'data', 'services')}")
+
+
+@pytest.mark.parametrize("route, body, consults", WRITES, ids=WRITE_IDS)
+def test_a_contributions_folder_that_differs_refuses_the_routes_that_consult_it(
+        golden_copy, store_path, services_moved, route, body, consults):
+    sent = body(golden_copy)
+    if not consults:
+        status, answer = submit(route, sent)
+        assert status == 200, answer
+        return
+    before = store_path.read_bytes()
+    said = refused(submit(route, sent))
+    assert services_moved in said, said
+    assert "Set MOXI_HOME to " + ELSEWHERE in said
+    assert store_path.read_bytes() == before
+
+
+def test_the_line_names_the_variable_and_the_restart(golden_copy, terminal_record):
+    store_moved(terminal_record)
+    said = refused(post("/api/set", {"key": "gamma", "lead": "lead-b"}))
+    assert f"Set MOXI_PROJECTS_DATA_HOME to {ELSEWHERE}" in said
+    assert "moxi ui stop" in said
+
+
+def test_the_comparison_comes_before_a_removes_kept_row(golden_copy, terminal_record):
+    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+    store_moved(terminal_record)
+    # A repeat of the accepted remove, at a fresh page server, is refused now ...
+    assert refused(post("/api/remove", {"key": "gamma"}, key=KEY)) == pagecheck.line()
+    # ... though its status link, a read, still gives the kept outcome.
+    assert status_of()["state"] == "removed"
+
+
+def test_a_write_goes_ahead_once_the_record_agrees_again(golden_copy, terminal_record):
+    store_moved(terminal_record)
+    refused(post("/api/set", {"key": "gamma", "lead": "lead-b"}))
+    terminal_record()
+    assert done("/api/set", {"key": "gamma", "lead": "lead-b"})["project"]["lead"] == "lead-b"
+
+
+@pytest.mark.parametrize("differs", [store_moved, no_record], ids=["store", "no-record"])
+def test_reads_go_on_and_where_carries_the_line_as_a_note(golden_copy, terminal_record,
+                                                          differs):
+    assert read("/api/where")["note"] is None
+    words = differs(terminal_record)
+    note = read("/api/where")["note"]
+    assert note is not None and note.startswith(words)
+    assert note == pagecheck.line()
+    assert [p["key"] for p in read("/api/projects")["projects"]] == [
+        "alpha", "Beta", "delta.web", "gamma"]
+    assert read("/api/project", "key=gamma")["project"]["key"] == "gamma"
+
+
+def test_where_notes_a_contributions_folder_that_differs(golden_copy, services_moved):
+    assert services_moved in read("/api/where")["note"]
+
+
+def test_the_page_server_never_records(golden_copy, terminal_record):
+    record = paths.terminal_record()
+    no_record(terminal_record)
+    for path, query in (("/api/projects", ""), ("/api/where", ""), ("/api/kinds", "")):
+        get(path, query)
+    refused(post("/api/set", {"key": "gamma", "lead": "lead-b"}))
+    assert not os.path.exists(record)
+
+
+def test_the_verbs_record_nothing_themselves(tmp_path, capsys):
+    record = paths.terminal_record()
+    os.unlink(record)
+    where = tmp_path / "termrow"
+    assert cli.main(["add", "termrow", "--root", str(where)]) == 0
+    assert cli.main(["set", "termrow", "--lead", "lead-a"]) == 0
+    assert cli.main(["remove", "termrow"]) == 0
+    assert not os.path.exists(record)
+    found = modules.load("projects", interface=1)
+    assert found.setup == "moxi_projects.store:setup"
+    assert set(found.stores) == {"projects"} and not found.internal_env
+
+
+def ui_found(**changes):
+    """What loading ui gives, with `changes`."""
+    found = modules.load("ui")
+    assert found.ok, found.reason
+    return found._replace(**changes)
+
+
+@pytest.mark.parametrize("found, fix", [
+    (lambda: ui_found(state=moxi.modules.BROKEN, interfaces=frozenset({1}),
+                      reason="moxi-ui 0.1.0 offers interfaces {1}; the caller speaks 2"),
+     "update moxi-ui to a release that offers interface 2"),
+    (lambda: ui_found(state=moxi.modules.ABSENT, reason="moxi-ui is not installed"),
+     "install it with moxi install ui"),
+    (lambda: ui_found(state=moxi.modules.BROKEN,
+                      reason="importing its API module moxi_ui.api failed: ImportError"),
+     "repair or reinstall moxi-ui"),
+], ids=["older", "absent", "broken"])
+def test_without_ui_at_interface_2_every_write_refuses_with_the_reason(
+        golden_copy, store_path, monkeypatch, found, fix):
+    gives = found()
+    real = moxi.modules.load
+    monkeypatch.setattr(moxi.modules, "load",
+                        lambda name, **kw: gives if name == "ui" else real(name, **kw))
+    before = store_path.read_bytes()
+    for route, body, _ in WRITES:
+        said = refused(submit(route, body(golden_copy)))
+        assert gives.reason in said and fix in said and "moxi ui stop" in said, said
+    assert store_path.read_bytes() == before
+    assert read("/api/where")["note"] == pagecheck.unchecked(gives)
+
+
+def test_a_place_read_outside_the_core_set_refuses(golden_copy, store_path, monkeypatch):
+    places = pagecheck.places
+
+    def reads_too_much(env, modules=()):
+        env.get("EDITOR")
+        return places(env, modules)
+
+    monkeypatch.setattr(pagecheck, "places", reads_too_much)
+    before = store_path.read_bytes()
+    said = refused(post("/api/set", {"key": "gamma", "lead": "lead-b"}))
+    assert "EDITOR" in said and "refuses to write" in said
+    assert store_path.read_bytes() == before
+
+
+class Noting(Mapping):
+    """A mapping that notes each name read and refuses to be listed, as ui's check hands
+    a place resolver."""
+
+    def __init__(self, data: dict[str, str]):
+        self.data, self.read = data, []
+
+    def __getitem__(self, name):
+        self.read.append(name)
+        return self.data[name]
+
+    def __iter__(self):
+        raise TypeError("a place resolver listed the environment")
+
+    def __len__(self):
+        raise TypeError("a place resolver measured the environment")
+
+
+def test_the_places_follow_the_mapping_alone(tmp_path, monkeypatch):
+    from moxi.terminal import in_set
+
+    given = {"HOME": str(tmp_path / "h"), "USERPROFILE": str(tmp_path / "h"),
+             "MOXI_HOME": str(tmp_path / "m"),
+             "XDG_DATA_HOME": str(tmp_path / "xd"), "XDG_STATE_HOME": str(tmp_path / "xs"),
+             "XDG_CONFIG_HOME": str(tmp_path / "xc")}
+    poison = str(tmp_path / "poison")
+    for name in ("HOME", "MOXI_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME",
+                 "MOXI_PROJECTS_HOME", "MOXI_PROJECTS_DATA_HOME", "MOXI_NOTES_HOME",
+                 "MOXI_NOTES_CONFIG_HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, poison)
+    env = Noting(given)
+    found = pagecheck.places(env, ["notes"])
+    assert found == {
+        "the projects store": str(tmp_path / "m" / "data" / "projects" / "projects.db"),
+        "the home folder": str(tmp_path / "h"),
+        "notes' data folder": str(tmp_path / "m" / "data" / "notes"),
+        "notes' state folder": str(tmp_path / "m" / "state" / "notes"),
+        "notes' config folder": str(tmp_path / "m" / "config" / "notes"),
+    }
+    assert not any(poison in path for path in found.values())
+    assert all(in_set(name) for name in env.read)
+    assert pagecheck.places(Noting(given), ["svc"])["svc's data folder"]

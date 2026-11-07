@@ -1,32 +1,46 @@
-"""The harness homes a run resolves, recorded in the ledger and compared by a page job.
+"""Whether a page act would write where the user's terminal does, through ui's check.
 
-A page job runs in the browser shell's environment, not the user's terminal's, and what
-decides where loadout writes may differ between the two:
+A page job runs in the browser shell's environment, not the user's terminal's, and the
+variables that decide where loadout reads and writes may differ between the two. The core
+keeps a record of the environment the user's last run of `moxi` in a terminal had, and ui
+offers the check that compares a page with it (`moxi.modules.load("ui", interface=2)`,
+its API's `check`). loadout records nothing itself.
 
-- the variables that place a harness's home (Claude Code's `CLAUDE_CONFIG_DIR`, Codex's
-  `CODEX_HOME`, OpenCode's `XDG_CONFIG_HOME`, each with its default under `HOME`);
-- `HOME` itself, which places Codex's skills folder and OpenCode's row folders;
-- whether `PATH` finds git: without git the would-commit check can't run, so a run
-  places where a run with git refuses.
+What loadout compares (`places`), each resolved by the resolver the code that reads or
+writes it uses, from the environment it is given:
 
-So the ledger's `homes` holds each harness's home and the home folder (`home`) as the
-user's own last run resolved them, and its `git` holds whether that run found git:
+- loadout's data folder, state folder and config file (`moxi.paths.Layout("loadout")`):
+  the ledger, the manifest's default folder, the generated files and the backups;
+- Moxi's state folder and settings file (`moxi.paths.core()`): the core lock, the
+  placer's ledger, the harness table and the opencode row loadout adds to it;
+- each harness row's skills and agents folders, as the placer resolves them
+  (`moxi.place.folders`);
+- Claude Code's, Codex's and OpenCode's homes (`moxi_loadout.harness`), which place the
+  harness files loadout writes;
+- projects' data, state and config folders when the act reads a project section named by
+  key, and repo's when the act registers or removes the git hook pieces with repo;
+- the home folder (`moxi.paths.home`).
 
-- `SETUP` records them under the core lock it already holds, so every `moxi install
-  loadout` and upgrade records them from the terminal;
-- every verb the user runs that installs records them (`install`, `add`, `remove`,
-  `enable`, `disable`, `global mode`, `global off`);
-- a run whose caller sets `MARKER` in its environment is not the user's own and leaves
-  them as they are: the git hook's child install and a page job set it.
+The program compared is git: the record's `PATH` finding it and the job's not would let
+the job place what a terminal's run refuses, since nothing could check what git would
+commit. The `claude` and `codex` programs are not compared: a page whose `PATH` finds no
+CLI does what a terminal without it does, which writes less.
 
-A page job compares what it resolves with the record before anything is written, and
-refuses with one line (`check`) when a home differs, when the record has git and the
-job's `PATH` finds none, or when nothing is recorded. A job that finds git where the
-record has none is let through: the check then refuses more, never less. `status` shows
-the same comparison as a note. Inside a page job, and on the page (`as_page`), the line
-says what to set for the browser shell; in a terminal it says what the page does. The
-`claude` and `codex` programs are never compared: a page whose `PATH` finds no CLI does
-what a terminal without it does, which writes less.
+Where ui is needed:
+
+- A page job calls `check` before anything is written and refuses (exit 3) with its line.
+  When ui can't be loaded at interface 2 the job refuses with the reason, and never writes
+  unchecked. An error the check raises refuses the job as an error.
+- The page server's reads (`status` and the drift block, inside `as_page`) show the line
+  as a note, or the reason ui can't be loaded.
+- `moxi loadout status` in a terminal shows the line, worded for a terminal, only when ui
+  loads at interface 2; without it there is no page to differ from, so no note. An older
+  or broken ui reads as absent here.
+- `path_fix`, the lasting fix for a program `PATH` doesn't find, names where to set it for
+  the browser shell only when ui loads at interface 2.
+
+`MARKER` set to `PAGE_JOB` in a page job's environment, or `as_page` in the page server's
+own threads, words the lines for the browser page.
 
 Standard library only at import.
 """
@@ -36,52 +50,26 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import os
-import shutil
-import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from pathlib import Path
 
-#: The variable a caller sets, to any value, when a run is not the user's own: the run
-#: then leaves the recorded homes as they are. Its value names the caller, for the log.
+#: The variable a page job sets so its lines are worded for the browser page.
 MARKER = "MOXI_LOADOUT_CALLER"
 #: The marker's value in a page job.
 PAGE_JOB = "page-job"
-#: The ledger's key for the homes.
-KEY = "homes"
-#: The ledger's key for whether the run found git.
-GIT = "git"
-#: The homes' key for the home folder itself.
-HOME = "home"
-#: The variable that places each home.
-VARIABLES = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME",
-             "opencode": "XDG_CONFIG_HOME", HOME: "HOME"}
+#: The ui interface whose API holds the check.
+UI_INTERFACE = 2
+#: The programs compared: whose absence on the page would let an act do what the
+#: terminal's run refuses.
+PROGRAMS = {"git": "nothing can check what git would commit"}
+#: The modules loadout reads in process, whose folders an act that reads them compares.
+READS = ("projects", "repo")
 #: Each harness by the name a person knows it by.
 NAMES = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
-#: The command that records the homes from a terminal.
-COMMAND = "moxi loadout install"
 
 _page = contextvars.ContextVar("moxi_loadout_page", default=False)
 
-
-def resolved() -> dict[str, str]:
-    """Each harness's home and the home folder, as this process's environment places
-    them, absolute."""
-    from pathlib import Path
-
-    from moxi_loadout import harness
-
-    found = {h: os.path.abspath(harness.home(h)) for h in harness.HARNESSES}
-    found[HOME] = os.path.abspath(Path.home())
-    return found
-
-
-def git_found() -> bool:
-    """Whether this process's `PATH` finds git."""
-    return shutil.which("git") is not None
-
-
-def users_own() -> bool:
-    """Whether this run is the user's own: no caller set `MARKER`."""
-    return not os.environ.get(MARKER)
+Places = Callable[[Mapping[str, str]], dict[str, Path]]
 
 
 def on_page() -> bool:
@@ -100,108 +88,150 @@ def as_page() -> Iterator[None]:
         _page.reset(token)
 
 
-def same(data: dict) -> bool:
-    """Whether ledger data `data` records what this run would."""
-    return data.get(KEY) == resolved() and data.get(GIT) is git_found()
+# -- ui -------------------------------------------------------------------------------------
+
+def ui():
+    """ui's API at interface 2, or why there is none: `(api, None)`, or `(None, (reason,
+    step))` with the step that fixes it."""
+    from moxi import modules
+
+    found = modules.load("ui", interface=UI_INTERFACE)
+    if found.ok and found.api is not None:
+        return found.api, None
+    if found.state == modules.ABSENT:
+        return None, ("the browser UI isn't installed", "moxi install ui")
+    if found.interfaces and UI_INTERFACE not in found.interfaces:
+        return None, (found.reason, "update moxi-ui")
+    return None, (found.reason, "moxi doctor says more")
 
 
-def record(data: dict) -> bool:
-    """Put this run's homes and whether it found git in ledger data `data`, unless the
-    run isn't the user's own. Returns whether it did. The caller writes the ledger."""
-    if not users_own():
-        return False
-    data[KEY] = resolved()
-    data[GIT] = git_found()
-    return True
+def unloadable(why: tuple[str, str]) -> str:
+    """The line a page part refuses with when ui's check can't be loaded (`ui`'s reason
+    and step)."""
+    reason, step = why
+    return ("this page can't tell whether it would write where your terminal does, "
+            f"because the browser UI's check can't be loaded ({reason}), so it refuses to "
+            f"write; {step}")
 
 
-def recorded(data: dict) -> dict[str, str] | None:
-    """The homes ledger data `data` holds, or None when it holds none for some home, or
-    no word on git (a lost ledger, or one older than this record)."""
-    found = data.get(KEY)
-    if not isinstance(found, dict) or not isinstance(data.get(GIT), bool):
-        return None
-    if not all(isinstance(found.get(h), str) and found.get(h) for h in VARIABLES):
-        return None
-    return {h: found[h] for h in VARIABLES}
+# -- the places -----------------------------------------------------------------------------
+
+def places(*, reads: Sequence[str] = ()) -> Places:
+    """The places a loadout act compares, as `places(env) -> {label: path}`, each read
+    from `env` alone by name. `reads` names the modules of `READS` the act reads in
+    process; their data, state and config folders are compared too."""
+    from moxi import place
+    from moxi.paths import Layout, core, home
+
+    from moxi_loadout import harness
+
+    modules = [m for m in READS if m in reads]
+
+    def resolve(env: Mapping[str, str]) -> dict[str, Path]:
+        mine = Layout("loadout")
+        found = {"loadout's data folder": mine.data_dir(env),
+                 "loadout's state folder": mine.state_dir(env),
+                 "loadout's config file": mine.config_file(env),
+                 "Moxi's state folder": core().state_dir(env),
+                 "Moxi's settings file": core().config_file(env)}
+        found.update(place.folders(env))
+        found.update({f"{NAMES[h]}'s home": harness.home(h, env)
+                      for h in harness.HARNESSES})
+        for m in modules:
+            theirs, whose = Layout(m), m + ("'" if m.endswith("s") else "'s")
+            found[f"{whose} data folder"] = theirs.data_dir(env)
+            found[f"{whose} state folder"] = theirs.state_dir(env)
+            found[f"{whose} config folder"] = theirs.config_dir(env)
+        found["the home folder"] = home(env)
+        return found
+
+    return resolve
 
 
-def check(data: dict, *, page: bool | None = None) -> str | None:
-    """The one line a page job refuses with, or None when this process places what the
-    user's own last run (ledger data `data`) placed. `page` words it for the browser
-    page (the default inside a page job or `as_page`) or for a terminal."""
-    page = on_page() if page is None else page
-    then = recorded(data)
-    if then is None:
-        why = ("loadout has no record of the harness homes your terminal uses (its ledger "
-               "is new, older than this record, or was lost)")
-        if page:
-            return (f"{why}, so it can't tell where this would write; run {COMMAND} once "
-                    "in a terminal, then try again")
-        return f"{why}, so the browser page refuses to write until {COMMAND} runs once here"
-    now = resolved()
-    differ = [h for h in now if os.path.normcase(now[h]) != os.path.normcase(then[h])]
-    parts = [f"{_label(h)} here is {now[h]}, but the last run in a terminal used "
-             f"{then[h]}" for h in differ]
-    names = [VARIABLES[h] for h in differ]
-    if data[GIT] and not git_found():
-        parts.append("git isn't on PATH here, but the last run in a terminal found it, "
-                     "so nothing can check what git would commit")
-        names.append("PATH, with git's folder on it,")
-    if not parts:
-        return None
-    said = "; ".join(parts) + ". "
-    them = "it" if len(names) == 1 else "them"
-    named = _and(names)
-    if page:
-        return (said + f"Set {named} {_where()}, so the browser shell has {them} at every "
-                f"login{_restart(True)}, or run the command in a terminal")
-    return (said + "The browser page refuses to write while its shell differs from the "
-            f"last run in a terminal; to give the browser shell {named} at every login, "
-            f"set {them} {_where()}{_restart(False)}")
+def reads(argv: Sequence[str] = ()) -> tuple[str, ...]:
+    """The modules of `READS` an act reads in process, as this process finds them:
+    projects when it is installed and the manifest, or a `--project` in `argv`, names a
+    project by key; repo when it is installed and the loadout folder is in a git work
+    tree, where every install registers or removes the git hook pieces with it. When
+    loadout's settings or the manifest can't be read, each installed one counts: the
+    check then compares more, never less.
+
+    It is read once, from this process's view: when the page's other places agree with
+    the terminal's, both resolve the same settings and manifest, and when they don't the
+    check refuses on those."""
+    from moxi import modules
+
+    from moxi_loadout import manifest, repo_link, settings
+
+    found = []
+    try:
+        source = settings.read().source
+    except Exception:  # noqa: BLE001 - unreadable settings: compare every module installed
+        return tuple(m for m in READS if modules.available(m))
+    if modules.available("projects") and _names_key(source, argv, manifest):
+        found.append("projects")
+    if modules.available("repo") and repo_link.in_work_tree(source):
+        found.append("repo")
+    return tuple(found)
+
+
+def _names_key(source, argv: Sequence[str], manifest) -> bool:
+    args = list(argv)
+    given = [args[i + 1] for i, a in enumerate(args[:-1]) if a == "--project"]
+    given += [a.split("=", 1)[1] for a in args if a.startswith("--project=")]
+    if any(not manifest.is_path_name(p) for p in given):
+        return True
+    try:
+        found = manifest.load(source)
+    except Exception:  # noqa: BLE001 - a manifest that doesn't read: compare projects too
+        return True
+    return any(s.key is not None for s in found.projects)
+
+
+# -- the check ------------------------------------------------------------------------------
+
+def check(argv: Sequence[str] = ()) -> str | None:
+    """The one line a page job refuses with before it writes, or None when it would
+    write where the user's last run in a terminal did. `argv` is the job's verb and its
+    arguments. When ui's check can't be loaded it is the reason, so the job never writes
+    unchecked. Raises `ValueError` (a place read outside the core's set) and
+    `moxi.config.ConfigError` (Moxi's settings don't read) for the job to fail on."""
+    api, why = ui()
+    if api is None:
+        return unloadable(why)
+    return api.check(places(reads=reads(argv)), programs=PROGRAMS, page=True)
+
+
+def note() -> str | None:
+    """The line `status` shows as a note: on the page (`on_page`), the check's line or
+    why ui's check can't be loaded; in a terminal, the check's line worded for a terminal
+    when ui loads at interface 2, else nothing. An error the check raises is the note."""
+    page = on_page()
+    api, why = ui()
+    if api is None:
+        return unloadable(why) if page else None
+    try:
+        return api.check(places(reads=reads()), programs=PROGRAMS, page=page)
+    except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
+        return f"loadout couldn't compare its folders with your terminal's: {exc}"
 
 
 def path_fix(program: str) -> str:
-    """The lasting fix for a `program` that `PATH` doesn't find, worded for the browser
-    page or for a terminal as `check` words its line."""
+    """The lasting fix for a `program` that `PATH` doesn't find. With ui loaded at
+    interface 2 it says where to set `PATH` for the browser shell, worded for the page or
+    for a terminal; without it, only to put the program's folder on `PATH`."""
+    api, _ = ui()
+    if api is None:
+        return f"put {program}'s folder on PATH"
+    where = api.where()
     if on_page():
-        return (f"set PATH, with {program}'s folder on it, {_where()}, so the browser "
-                f"shell finds {program} at every login{_restart(True)}, or run the command "
-                "in a terminal")
+        return (f"set PATH, with {program}'s folder on it, {where.place}, so the browser "
+                f"shell finds {program} at every login, then {where.step}; or run the "
+                "command in a terminal")
     return (f"put {program}'s folder on PATH; the browser page does the same until its "
             f"own PATH finds {program}, so to give the browser shell that PATH at every "
-            f"login, set it {_where()}{_restart(False)}")
+            f"login, set it {where.place}, then {where.step}")
 
 
-def _label(home: str) -> str:
-    return "the home folder" if home == HOME else f"{NAMES[home]}'s home"
-
-
-def _and(names: list[str]) -> str:
-    names = list(dict.fromkeys(names))
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-
-
-def _where() -> str:
-    """Where a variable is set so the browser shell sees it at every login."""
-    if sys.platform == "darwin":
-        return "in your LaunchAgent environment"
-    if sys.platform == "win32":
-        return "in your user environment variables"
-    return "in a file under ~/.config/environment.d/"
-
-
-def _restart(page: bool) -> str:
-    """The clause that restarts the page server so it sees the change: on the page
-    always, in a terminal only when the browser UI is installed."""
-    if not page:
-        from moxi import modules
-
-        if not modules.available("ui"):
-            return ""
-    return ", then run moxi ui stop"
-
-
-__all__ = ["MARKER", "PAGE_JOB", "KEY", "GIT", "HOME", "VARIABLES", "NAMES", "COMMAND",
-           "resolved", "git_found", "users_own", "on_page", "as_page", "same", "record",
-           "recorded", "check", "path_fix"]
+__all__ = ["MARKER", "PAGE_JOB", "UI_INTERFACE", "PROGRAMS", "READS", "NAMES", "on_page",
+           "as_page", "ui", "unloadable", "places", "reads", "check", "note", "path_fix"]

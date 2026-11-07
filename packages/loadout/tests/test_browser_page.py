@@ -1,7 +1,7 @@
 """loadout's page in a browser, through a real shell that starts loadout's real page server,
 whose acts run as real page jobs: the contract check; a toggle off and on again; add and
-remove; a page install refused while no terminal run has recorded the harness homes, and
-one refused when the shell's `PATH` has no git and the terminal's has;
+remove; a page install refused while Moxi has no record of the user's terminal, and one
+refused when the shell's `PATH` has no git and the terminal's has;
 Replace and Turn off through the confirm sheet, where Cancel sends nothing and each
 confirmation sends its own key; Replace over a project's copy that git tracks; every
 control off while a job runs, and still off after a reload; an interrupted job; a job
@@ -70,6 +70,15 @@ def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return done
 
 
+def typed(shell) -> None:
+    """Moxi's record of the terminal, as a command typed in the user's own terminal with
+    `shell`'s environment makes it (`moxi` run here has no keyboard, so it records nothing
+    itself)."""
+    from moxi import paths, terminal
+
+    terminal.write(shell.env, path=paths.terminal_record(shell.env))
+
+
 def skill(folder: Path, name: str) -> None:
     (folder / "skills" / name).mkdir(parents=True, exist_ok=True)
     (folder / "skills" / name / "SKILL.md").write_text(
@@ -90,13 +99,15 @@ def make_folder(shell) -> Path:
 
 @pytest.fixture(scope="module")
 def folder(ui_shell) -> Path:
+    """The loadout folder, with the user's terminal recorded as having the shell's own
+    environment, which the page's jobs compare with."""
+    typed(ui_shell)
     return make_folder(ui_shell)
 
 
 @pytest.fixture
 def installed(folder, ui_shell) -> Path:
-    """The folder with only `tidy-notes` listed and installed from a terminal, which also
-    records the harness homes the page's jobs compare."""
+    """The folder with only `tidy-notes` listed and installed from a terminal."""
     (folder / "loadout.toml").write_text(BASE, encoding="utf-8")
     moxi(ui_shell, "loadout", "install")
     return folder
@@ -213,7 +224,7 @@ def test_add_places_an_item_and_remove_takes_it_away(installed, ui_shell, ui_pag
     assert all(row["name"] != "fresh-skill" for row in status(ui_shell)["rows"])
 
 
-def test_a_page_install_is_refused_until_a_terminal_run_records_the_homes(
+def test_a_page_install_is_refused_while_no_terminal_is_recorded(
         ui_shells, ui_shell_options, ui_contexts):
     shell = ui_shells(**ui_shell_options)
     make_folder(shell)
@@ -223,7 +234,7 @@ def test_a_page_install_is_refused_until_a_terminal_run_records_the_homes(
     job = job_done(panel, 3)
     expect(job.locator('[data-line="job"]')).to_have_text(re.compile(r"^Refused"))
     expect(job.locator('[data-part="job-lines"]')).to_contain_text(
-        "run moxi loadout install once in a terminal")
+        "Type moxi modules in a terminal of your own")
     # Nothing was written: no placement, and the manifest as it was.
     assert {row["state"] for row in status(shell)["rows"]} == {"missing"}
     assert not (Path(shell.env["HOME"]) / ".claude" / "skills").exists()
@@ -261,6 +272,7 @@ def test_a_page_install_whose_path_has_no_git_is_refused_where_the_terminal_refu
                 '[skill.review-diff]\nharnesses = ["claude"]\n')
     (folder / "loadout.toml").write_text(manifest, encoding="utf-8")
     target = project / ".claude" / "skills" / "review-diff"
+    typed(terminal)
     done = moxi(terminal, "loadout", "install", check=False)
     assert done.returncode == 3 and "would-commit" in done.stdout + done.stderr, done
     assert not os.path.lexists(target)
@@ -340,6 +352,7 @@ def test_replace_over_a_copy_the_projects_git_tracks_says_git_will_show_it_delet
     git("init", "-q")
     git("add", "-A")
     git("commit", "-qm", "a skill")
+    typed(shell)
     folder = make_folder(shell)
     (folder / "loadout.toml").write_text(
         BASE + f'[project."{project}"]\nskills = ["review-diff"]\n'
@@ -379,6 +392,7 @@ def test_replace_over_a_copy_the_projects_git_tracks_says_git_will_show_it_delet
 def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
         ui_shells, ui_shell_options, ui_contexts):
     shell = ui_shells(**ui_shell_options)
+    typed(shell)
     folder = make_folder(shell)
     claude_md = Path(shell.env["HOME"]) / ".claude" / "CLAUDE.md"
     claude_md.parent.mkdir(parents=True, exist_ok=True)

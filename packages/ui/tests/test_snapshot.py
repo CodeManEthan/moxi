@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import files, modules
 from moxi.paths import Layout
-from moxi_loopback.api import call, read_runtime, write_runtime
+from moxi_ui.loopback.api import call, read_runtime, write_runtime
 
 from moxi_ui import health, listen
 from moxi_ui.page import PAGE
@@ -91,7 +91,7 @@ def test_a_refresh_reads_both_commands_in_fresh_processes_and_leaves_out_what_it
                           run=_fake_run(listing, {"usage": {"ok": True, "export": export}}, calls))
     view = snap.read()
     assert view.pages == ("usage",) and view.versions == {"usage": "1.2.0"}
-    assert [c[0][1:4] for c in calls] == [["-P", "-m", "moxi"], ["-P", "-m", "moxi_loopback.export"]]
+    assert [c[0][1:4] for c in calls] == [["-P", "-m", "moxi"], ["-P", "-m", "moxi_ui.loopback.export"]]
     assert all(c[1] == str(tmp_path) and c[2] == {"A": "1"} for c in calls)
     names = [m["name"] for m in view.value["modules"]]
     assert names == ["gone", "ui", "usage"]
@@ -400,7 +400,7 @@ def test_a_sample_over_the_budget_is_named():
 def test_the_announcement_declares_the_shell_its_page_and_components():
     found = modules.load("ui")
     assert found.state == modules.PRESENT, found.reason
-    assert found.interfaces == frozenset({1, 2}) and found.page == "moxi_ui.page:PAGE"
+    assert found.interfaces == frozenset({1, 2, 3}) and found.page == "moxi_ui.page:PAGE"
     shell = found.daemons["shell"]
     assert "win32" in shell["platforms"] and shell["socket"]["setting"] == "port"
     assert found.health == {"shell": "moxi_ui.health:check"} and not found.budgets

@@ -24,7 +24,7 @@ pytest.importorskip("cryptography")
 
 from gateway_kit import HOST, ORIGIN, Authenticator  # noqa: E402
 from moxi.paths import Layout  # noqa: E402
-from moxi_loopback.api import Refused, Table  # noqa: E402
+from moxi_ui.loopback.api import Refused, Table  # noqa: E402
 from moxi_ui import page  # noqa: E402
 from moxi_ui.gateway import Gateway, Parts, audit, desk, pairing  # noqa: E402
 from moxi_ui.gateway.access import COOKIE, Access  # noqa: E402

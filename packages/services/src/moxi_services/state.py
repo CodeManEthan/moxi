@@ -102,6 +102,7 @@ def read_with_sockets(rows: Iterable[Row]
     rows = list(rows)
     modules: set[str] = set()
     foreign: list[str] = []
+    kinds: dict[str, str] = {}
     for row in rows:
         if isinstance(row, ModuleRow):
             modules.add(row.module)
@@ -111,9 +112,11 @@ def read_with_sockets(rows: Iterable[Row]
             modules.add(MODULE)
         elif row.unit not in foreign:
             foreign.append(row.unit)
+            kinds[row.unit] = row.kind
     if not modules and not foreign:
         return {row.id: None for row in rows}, {}
-    states = units.status(sorted(modules), foreign=foreign)
+    # Each adopted unit is read as its row's kind; only Task Scheduler reads the hint.
+    states = units.status(sorted(modules), foreign=foreign, kinds=kinds)
     by_unit: dict[tuple[str | None, str], units.UnitState] = {}
     sockets: dict[tuple[str | None, str], units.UnitState] = {}
     for state in states:

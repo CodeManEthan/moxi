@@ -416,8 +416,9 @@ def test_adopt_without_enable_or_disable_says_what_the_supervisor_reads(fake, st
 def test_adopt_says_the_last_run_as_the_verdict_reads_it(fake, supervisor, ref, last, said):
     fake.supervisor = supervisor
     fake.foreign[ref] = Unit("timer", True, last=last)
-    out = acts.add_adopted("backup", ref, enable=None)
-    assert out.code == 2 and out.lines[0].startswith(f"{ref}: {said}; adopt it with")
+    out = acts.add_adopted("backup", ref, enable=None, timer=supervisor == "schtasks")
+    how = "adopt it as a timer" if supervisor == "schtasks" else "adopt it with"
+    assert out.code == 2 and out.lines[0].startswith(f"{ref}: {said}; {how}")
 
 
 def test_adopt_a_daemon_makes_the_unit_match_the_flag(fake):
@@ -500,13 +501,75 @@ def test_adopt_on_launchd_needs_the_agents_plist(fake, tmp_path, monkeypatch):
     assert out.code == 0, out
 
 
-def test_adopt_on_task_scheduler_is_a_timer(fake):
+@pytest.mark.parametrize("timer", [False, True])
+def test_adopt_on_task_scheduler_is_a_daemon_unless_timer(fake, timer):
+    ref = "\\Vendor\\agent"
+    kind = "timer" if timer else "daemon"
     fake.supervisor = "schtasks"
-    fake.foreign["\\Backups\\nightly"] = Unit("timer", True)
-    out = acts.add_adopted("nightly", "\\Backups\\nightly", enable=True)
+    fake.foreign[ref] = Unit(kind, False)
+    out = acts.add_adopted("agent", ref, enable=True, timer=timer)
     assert out.code == 0, out
-    assert store.get("nightly").kind == "timer"
+    assert store.get("agent").kind == kind
+    assert f"services/agent adopts {ref} as a {kind}, on" in out.lines
+    # The read before the add, the enable, and the read after it all name the kind.
+    assert fake.kinds[:2] == [("status", {ref: kind}), ("enable", {ref: kind})]
+    assert fake.kinds[2:] == [("status", {ref: kind})]
     assert not any(c[0] == "wrap" for c in fake.calls) and fake.wrapped == {}
+
+
+@pytest.mark.parametrize("active, said", [(False, "not running"), (True, "running")])
+def test_adopt_on_task_scheduler_without_enable_names_the_daemon_kind(fake, store_path,
+                                                                       active, said):
+    ref = "\\Vendor\\agent"
+    fake.supervisor = "schtasks"
+    fake.foreign[ref] = Unit("daemon", True, active=active)
+    out = acts.add_adopted("agent", ref, enable=None)
+    assert out.code == 2 and not store_path.exists()
+    assert out.lines == (
+        f"{ref}: starts at login, {said}; adopt it as a daemon (judged by whether its "
+        "process runs; --enable also starts it now) with --enable or --disable, or add "
+        "--timer for a scheduled task or one whose action starts a program and exits",)
+
+
+def test_adopt_on_task_scheduler_with_timer_names_the_timer_kind(fake):
+    ref = "\\Backups\\nightly"
+    fake.supervisor = "schtasks"
+    fake.foreign[ref] = Unit("timer", True)
+    out = acts.add_adopted("nightly", ref, enable=None, timer=True)
+    assert out.code == 2
+    assert out.lines == (f"{ref}: schedule armed, no run known; adopt it as a timer "
+                         "(judged by its schedule and last run) with --enable to keep it "
+                         "on, or --disable to turn it off",)
+
+
+def test_the_closing_line_of_an_adopt_names_the_kind_everywhere(fake):
+    fake.foreign["web.service"] = Unit("daemon", False)
+    out = acts.add_adopted("web", "web.service", enable=True)
+    assert "services/web adopts web.service as a daemon, on" in out.lines
+
+
+@pytest.mark.parametrize("act", ["start", "stop", "restart", "enable", "disable"])
+def test_the_acts_on_an_adopted_windows_daemon_pass_its_kind(fake, act):
+    ref = "\\Vendor\\agent"
+    fake.supervisor = "schtasks"
+    fake.foreign[ref] = Unit("daemon", True, active=act in ("stop", "disable"))
+    add(**adopted("agent", kind="daemon", unit=ref))
+    fake.kinds.clear()
+    out = getattr(acts, act)("agent")
+    assert out.code == 0, out
+    assert (act, {ref: "daemon"}) in fake.kinds
+    assert all(kinds == {ref: "daemon"} for _call, kinds in fake.kinds)
+
+
+def test_remove_of_an_adopted_windows_daemon_makes_no_act(fake):
+    ref = "\\Vendor\\agent"
+    fake.supervisor = "schtasks"
+    fake.foreign[ref] = Unit("daemon", True, active=True)
+    add(**adopted("agent", kind="daemon", unit=ref))
+    out = acts.remove("agent")
+    assert out.code == 0, out
+    assert store.get("agent") is None and fake.acts() == []
+    assert fake.foreign[ref].active
 
 
 def test_adopt_keeps_its_row_when_the_act_fails(fake):

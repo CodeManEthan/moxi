@@ -1,6 +1,6 @@
 [project]
 name = "moxi-launcher"
-version = "0.1.1"
+version = "0.1.2"
 description = "Launch Claude Code and Codex sessions from presets over a per-harness flag catalog, in this terminal, headless or in a tmux slot, and log every launch."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,9 +20,8 @@ comms = ["moxi-comms>=0.3,<0.4"]
 projects = ["moxi-projects>=0.1,<0.2"]
 # The tmux slot target, and the startup screens answered there.
 slots = ["moxi-slots>=0.1,<0.2"]
-# The browser UI shell: with it, the launcher's page shows there. Loopback, which the
-# launcher's page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+# The browser UI shell: with it, the launcher's page shows there.
+ui = ["moxi-ui>=0.2,<0.3"]
 # notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.
 notes = ["moxi-notes>=0.1,<0.2"]
 # cache's timer, for keep-warm and recycle on expiry.

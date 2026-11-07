@@ -12,7 +12,7 @@ from __future__ import annotations
 import functools
 import importlib.resources
 
-from moxi_loopback.api import response_headers
+from moxi_ui.loopback.api import response_headers
 
 from . import config
 from .session import Static

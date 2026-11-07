@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 (2026-11-07)
+## 0.1.2 (2026-11-07)
 
 - The bind wait for a launch under comms' wrapper is comms' own `BIND_WAIT` plus 5 s
   (15 s with a comms that doesn't say).
@@ -13,7 +13,12 @@
   bind.
 - New extras `notes`, `cache` and `usage`, for the handoff folder, the prompt cache rows
   and the context warning rows. The `comms` extra now needs moxi-comms 0.3.
+
+## 0.1.1 (2026-11-07)
+
 - The launcher offers interface 1: `launch_kind(session_id)` and `launch_kinds(ids)`
   answer scratch, seat, project or one-off from the launch log, or None for a session
   the launcher didn't start.
 - The launcher needs moxi 0.1.4 or later, for `moxi.terminal`.
+- The `ui` extra needs moxi-ui 0.2, where the page-server base now lives as
+  `moxi_ui.loopback`.

@@ -43,9 +43,9 @@ usage = sessions.testing.usage
 
 
 def loopback():
-    found = modules.load("loopback", interface=1)
+    found = modules.load("ui", interface=3)
     assert found.ok, found.reason
-    return found.api
+    return found.api.loopback
 
 
 @pytest.fixture(autouse=True)
@@ -305,7 +305,7 @@ def test_every_command_the_page_or_readme_names_is_a_verb_of_the_cli(capsys):
 
 
 def test_the_export_command_reads_the_page(tmp_path):
-    done = subprocess.run([sys.executable, "-P", "-m", "moxi_loopback.export", "usage"],
+    done = subprocess.run([sys.executable, "-P", "-m", "moxi_ui.loopback.export", "usage"],
                           cwd=tmp_path, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
     out = json.loads(done.stdout)["usage"]
@@ -813,8 +813,7 @@ WITHOUT_UI = textwrap.dedent("""
     import json
     import sys
 
-    # As if neither loopback nor the UI shell were installed.
-    sys.modules["moxi_loopback"] = None
+    # As if the UI shell weren't installed.
     sys.modules["moxi_ui"] = None
 
     import moxi_usage.api
@@ -830,7 +829,7 @@ WITHOUT_UI = textwrap.dedent("""
     code = moxi_usage.cli.main(["prices", "--json"], prog="moxi usage")
     loaded = sorted(name for name in sys.modules
                     if name in ("moxi_usage.page", "moxi_usage.pagehandlers")
-                    or name.startswith(("moxi_loopback.", "moxi_ui.")))
+                    or name.startswith("moxi_ui."))
     try:
         import moxi_usage.page
     except ImportError as err:
@@ -850,5 +849,5 @@ def test_usage_works_without_the_ui(tmp_path):
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["code"] == 0
     assert out["loaded"] == []
-    assert out["refused"].startswith("usage's page needs the loopback module")
+    assert out["refused"].startswith("usage's page needs the ui module")
     assert out["findings"] == []

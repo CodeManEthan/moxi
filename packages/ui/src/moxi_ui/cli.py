@@ -46,7 +46,7 @@ from typing import Any
 from moxi import files
 from moxi.config import ConfigError
 from moxi.paths import Layout, python
-from moxi_loopback.api import NotOurServer, RuntimeInfo, call, read_runtime
+from moxi_ui.loopback.api import NotOurServer, RuntimeInfo, call, read_runtime
 
 from . import config, session
 from .session import HEALTH_PATH, SERVERS_PATH, SIGNOUT_API, STOP_PATH, TICKETS_DIR

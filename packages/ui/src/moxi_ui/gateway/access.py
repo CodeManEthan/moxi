@@ -61,7 +61,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from importlib import resources
 from typing import Any
 
-from moxi_loopback.api import Entry, RequestView, Table, response_headers
+from moxi_ui.loopback.api import Entry, RequestView, Table, response_headers
 
 from .. import session as _session
 from ..router import NAVIGATION

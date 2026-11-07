@@ -101,18 +101,22 @@ until it ends; a new tab doesn't, and `moxi loadout status` shows where things s
 a change still running when the service stops, by `moxi ui stop` or because nothing has
 used the shell for a while, stops with it; run it again.
 
-A change from the page refuses before it writes anything when the shell's
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME` or `HOME` puts a home somewhere
-other than your last terminal run did, or when your last terminal run found git and the
-shell's `PATH` doesn't: without git, nothing could check what git would commit. The
-line names the variable. Set it where the shell gets it at every login (a file under
-`~/.config/environment.d/` on Linux, your LaunchAgent environment on macOS, your user
-environment variables on Windows), then run `moxi ui stop`, or run the command in a
-terminal. Until a terminal run has recorded the homes (`moxi install loadout` does, and
-so does every `moxi loadout` command that installs), every change from the page refuses
-and says so. `moxi loadout status` and the home's block show the same comparison as a
-note, which changes neither the exit code nor the count; in a terminal, the note says
-what the page does.
+A change from the page refuses before it writes anything when the shell would read or
+write somewhere other than your last `moxi` command in a terminal did. Moxi itself keeps a
+record of the environment that command ran in, and the page compares, through the shell's
+own check, every folder the change touches: loadout's data and state folders and config
+file, Moxi's state folder and settings file, each harness row's skills and agents
+folders, Claude Code's, Codex's and OpenCode's homes, projects' or repo's folders when the
+change reads them, and your home folder. It also refuses when your terminal found git and
+the shell's `PATH` doesn't: without git, nothing could check what git would commit. The
+line names each variable to set and its value. Set them where the shell gets them at every
+login (a file under `~/.config/environment.d/`, then `systemctl --user daemon-reload` and
+`moxi ui stop`, on Linux; your LaunchAgent environment on macOS or your user environment
+variables on Windows, then log out and back in), or run the command in a terminal. With
+no record yet, the line says to type `moxi modules` in a terminal of your own, which
+makes one. `moxi loadout status` and the home's block show the same comparison as a note,
+which changes neither the exit code nor the count; in a terminal, the note says what the
+page does, and it shows only when the browser UI is installed.
 
 MCP servers are added through the `claude` and `codex` CLIs, so the page needs them on
 the shell's `PATH`. Without one, a change from the page does what the terminal does

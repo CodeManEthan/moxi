@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from moxi_loopback.api import Table, gateway, guard
+from moxi_ui.loopback.api import Table, gateway, guard
 from moxi_ui.gateway.access import COOKIE, Access
 from moxi_ui.gateway.address import Kept
 

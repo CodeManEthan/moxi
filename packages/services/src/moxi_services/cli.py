@@ -48,6 +48,10 @@ from .verdict import View, last_run, views
 #: checks, in seconds.
 WATCH_EVERY = 5.0
 WATCH_HEALTH = 30.0
+#: What `show` says of an adopted Windows timer: how it is judged, and what to do when it
+#: is meant to keep running (a row adopted before Windows tasks could be daemons is one).
+AS_TIMER_SHOW = ("judged as a timer, by its schedule and last run; a task meant to keep "
+                 "running is adopted without --timer (remove it and add it again)")
 #: Exit codes from least to most severe, for a verb given several ids.
 _SEVERITY = (codes.OK, codes.TEMPFAIL, codes.REFUSED, codes.USAGE, codes.ERROR)
 
@@ -529,6 +533,9 @@ def _show(args, out) -> int:
         put("doc", row.doc)
         if row.launches_session:
             put("note", "launches an agent session, so its runs spend usage")
+        if (row.form == "adopted" and row.kind == "timer" and st is not None
+                and st.backend == "schtasks"):
+            put("note", AS_TIMER_SHOW)
         if row.stopped:
             put("stopped", f"by hand at {row.stopped}")
         put("added", f"{row.created} on {row.platform}")

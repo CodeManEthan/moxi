@@ -462,7 +462,7 @@ def test_open_print_starts_a_shell_and_its_ticket_signs_in(monkeypatch, capsys):
     import signal
     import socket
 
-    from moxi_loopback.api import read_runtime
+    from moxi_ui.loopback.api import read_runtime
 
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))

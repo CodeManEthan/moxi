@@ -44,7 +44,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from moxi_loopback.api import response_headers
+from moxi_ui.loopback.api import response_headers
 
 from ..session import Static, admitted
 from . import audit as _audit

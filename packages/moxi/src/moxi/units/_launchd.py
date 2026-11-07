@@ -367,10 +367,10 @@ class LaunchdBackend:
     def own(self, ref: str) -> bool:
         return ref.startswith("moxi.")
 
-    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None, kind: str | None = None) -> UnitRef:
         """A foreign label, its plist read from `~/Library/LaunchAgents/<label>.plist`
-        when there is one (a timer when it has a StartInterval or StartCalendarInterval).
-        No supervisor call, with a fence or without one."""
+        when there is one (a timer when it has a StartInterval or StartCalendarInterval,
+        whatever `kind` says). No supervisor call, with a fence or without one."""
         path = self.plist(ref)
         body = _load(path)
         kind = "timer" if body and ("StartInterval" in body

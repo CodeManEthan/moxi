@@ -53,10 +53,10 @@ from . import api, store
 from .limits import dollars
 from .page import TOP_DEFAULT, WINDOW
 
-_loopback = modules.load("loopback", interface=1)
-if not _loopback.ok:
-    raise ImportError(f"usage's page needs the loopback module: {_loopback.reason}")
-lb = _loopback.api
+_ui = modules.load("ui", interface=3)
+if not _ui.ok:
+    raise ImportError(f"usage's page needs the ui module: {_ui.reason}")
+lb = _ui.api.loopback
 
 #: Seconds between the limits poller's gathers.
 PERIOD = 60.0

@@ -56,10 +56,14 @@ test("kinds take only the three mints", () => {
   assert.equal(parseKinds({ found: [kind] }), null);
 });
 
-test("where: the store, and the git or none", () => {
-  assert.deepEqual(parseWhere({ store: "/d/projects.db", git: null }), { store: "/d/projects.db", git: null });
-  assert.deepEqual(parseWhere({ store: "/d/projects.db", git: "/usr/bin/git" }).git, "/usr/bin/git");
-  assert.equal(parseWhere({ store: null, git: null }), null);
+test("where: the store, the git or none, and the note or none", () => {
+  assert.deepEqual(parseWhere({ store: "/d/projects.db", git: null, note: null }),
+                   { store: "/d/projects.db", git: null, note: null });
+  assert.deepEqual(parseWhere({ store: "/d/projects.db", git: "/usr/bin/git", note: null }).git, "/usr/bin/git");
+  assert.equal(parseWhere({ store: "/d/projects.db", git: null, note: "differs" }).note, "differs");
+  assert.equal(parseWhere({ store: "/d/projects.db", git: null }), null);
+  assert.equal(parseWhere({ store: "/d/projects.db", git: null, note: 3 }), null);
+  assert.equal(parseWhere({ store: null, git: null, note: null }), null);
 });
 
 test("a remove's status: removed, or refused with its sentences", () => {

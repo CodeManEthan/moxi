@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 (2026-11-07)
+## 0.2.2 (2026-11-07)
 
 - Setup places a copy of the Claude marketplace in turns' data dir, writes
   `endpoint.json` there, and installs the plugins from it. It never writes into the
@@ -18,4 +18,9 @@
 - A Codex thread reloaded before its first turn is treated as a start: its Ready reads
   `startup`, and the first turn's SessionStart `resume` reaches the listeners as
   `startup`. Each resumed load makes one more `thread/turns/list` call.
-- turns needs moxi 0.1.5 or later.
+- turns needs moxi 0.1.6 or later.
+
+## 0.2.1 (2026-11-07)
+
+- The `ui` extra needs moxi-ui 0.2, where the page-server base now lives as
+  `moxi_ui.loopback`.

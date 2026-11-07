@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
-from moxi_loopback.api import Field, Out, Page, Route, export
+from moxi_ui.loopback.api import Field, Out, Page, Route, export
 
 from moxi_ui.gateway import audit as audit_mod
 from moxi_ui.gateway.outcome import outcome_of

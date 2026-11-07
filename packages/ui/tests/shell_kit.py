@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from moxi_loopback.api import Page, app, guard, prove
+from moxi_ui.loopback.api import Page, app, guard, prove
 from moxi_ui.router import Router, shell_profile, shell_table, worker_layer
 from moxi_ui.session import OwnerCheck, Sessions, Tickets, open_store
 
@@ -26,7 +26,7 @@ HOST = b"127.0.0.1:%d" % PORT
 CLIENT = ("127.0.0.1", 50000)
 SERVER = ("127.0.0.1", PORT)
 
-#: A module's export as `moxi_loopback.export` prints it: a read, an act, a stream and
+#: A module's export as `moxi_ui.loopback.export` prints it: a read, an act, a stream and
 #: two assets.
 FIXTURE_EXPORT = {
     "format": 1,

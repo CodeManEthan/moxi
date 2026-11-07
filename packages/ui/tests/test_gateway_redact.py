@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from moxi_loopback.api import Field, Out, Page, Route, export, gateway, guard
+from moxi_ui.loopback.api import Field, Out, Page, Route, export, gateway, guard
 
 from gateway_kit import HOST, Authenticator, Phone
 from moxi_ui import page as shell_page

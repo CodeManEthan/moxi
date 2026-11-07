@@ -34,7 +34,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from moxi_loopback.api import RequestView, Table, check, response_headers
+from moxi_ui.loopback.api import RequestView, Table, check, response_headers
 
 from .. import config
 from .. import document as _document

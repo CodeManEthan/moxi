@@ -601,9 +601,10 @@ class SystemdBackend:
     def own(self, ref: str) -> bool:
         return ref.startswith("moxi-")
 
-    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None, kind: str | None = None) -> UnitRef:
         """A foreign unit; a timer's ids are its `.timer` and the unit its `Triggers`
-        names, or, with `fence` None (no supervisor call), its `.timer` alone."""
+        names, or, with `fence` None (no supervisor call), its `.timer` alone. Its kind
+        is its suffix's, whatever `kind` says."""
         if ref.endswith(".timer"):
             if fence is None:
                 return UnitRef(None, ref, "timer", (ref,))

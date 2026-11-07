@@ -1,17 +1,16 @@
 [project]
 name = "moxi-cache"
-version = "0.1.2"
+version = "0.1.3"
 description = "Know when a session's prompt cache goes cold, and act before it does."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1.5,<0.2", "moxi-sessions>=0.2,<0.3"]
+dependencies = ["moxi>=0.1.6,<0.2", "moxi-sessions>=0.2,<0.3"]
 
 [project.optional-dependencies]
-# The browser UI shell: with it, cache's panel and its chip show there. Loopback, which
-# cache's page server runs on, comes with it.
-ui = ["moxi-ui>=0.1,<0.2"]
+# The browser UI shell: with it, cache's panel and its chip show there.
+ui = ["moxi-ui>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

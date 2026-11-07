@@ -125,6 +125,53 @@ def test_show_a_running_daemon(fake, no_modules, capsys):
     assert said["log"] == "journalctl --user -u web"
 
 
+AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add it again "
+            "without --timer")
+
+
+@pytest.fixture
+def windows_timer(fake, no_modules, monkeypatch):
+    """A Windows task adopted as a timer, as every row adopted before Windows tasks
+    could be daemons is, whose last run crashed."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(rows, "sys", SimpleNamespace(platform="win32"))
+    fake.supervisor = "schtasks"
+    ref = "\\Vendor\\agent"
+    add(**adopted("agent", unit=ref, enabled=True, platform="win32"))
+    fake.foreign[ref] = Unit("timer", True, last={"supervisor": {
+        "last_run": "2026-11-07T09:30:00", "last_result": 1}})
+    return ref
+
+
+def test_show_an_adopted_windows_timer_says_how_it_is_judged(windows_timer, capsys):
+    code, out, _ = run(capsys, "show", "agent")
+    assert code == 0
+    lines = out.splitlines()
+    assert ("  note             judged as a timer, by its schedule and last run; a task "
+            "meant to keep running is adopted without --timer (remove it and add it "
+            "again)") in lines
+    [verdict] = [line for line in lines if line.startswith("  verdict")]
+    assert verdict.endswith(AS_TIMER)
+
+
+@pytest.mark.parametrize("argv", [["list"], ["list", "--health"]])
+def test_list_says_a_crashed_windows_timer_is_judged_as_a_timer(windows_timer, capsys,
+                                                                argv):
+    code, out, _ = run(capsys, *argv)
+    assert code == 0
+    [line] = [line for line in out.splitlines() if line.startswith("services/agent")]
+    assert line.split()[:3] == ["services/agent", "timer", "warn"]
+    assert f"last run failed (result 0x00000001 at 2026-11-07T09:30:00); {AS_TIMER}" in line
+
+
+def test_show_a_timer_elsewhere_says_nothing_of_how_it_is_judged(fake, no_modules, capsys):
+    add(**written("nightly", kind="timer", every="1h", enabled=True))
+    fake.written["nightly"] = Unit("timer", True)
+    code, out, _ = run(capsys, "show", "nightly")
+    assert code == 0 and "judged" not in out
+
+
 def test_show_json_has_the_row_and_its_runs(fake, no_modules, capsys, monkeypatch):
     add(**written("job", kind="timer", every="5m"))
     fake.written["job"] = Unit("timer", False)

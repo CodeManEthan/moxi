@@ -26,14 +26,16 @@ version of projects raises `TooNew`, which is both an `Unreadable` and the core'
 A read never writes: it never creates the store, never migrates it and never changes a
 byte of it. Writes are not part of this API; projects' own verbs and page make them.
 
-This module sits on hook paths, so it imports `os` and `sqlite3` and the core's store
-helper, and nothing heavier: no `dataclasses`, `pathlib` or `typing` of its own.
+This module sits on hook paths, so it imports `os`, `sqlite3`, `collections.abc` (which
+`os` has loaded already) and the core's store helper, and nothing heavier: no
+`dataclasses`, `pathlib` or `typing` of its own.
 """
 
 from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Mapping
 
 import moxi.store
 
@@ -203,10 +205,11 @@ class Kinds(_Record):
 
 # --- reading the store ------------------------------------------------------------------
 
-def _store_path() -> str:
+def _store_path(env: Mapping[str, str] | None = None) -> str:
+    """The store's file, placed from `env` (this process's environment without one)."""
     import moxi.paths
 
-    return os.path.join(str(moxi.paths.Layout("projects").data_dir()), _FILE)
+    return os.path.join(str(moxi.paths.Layout("projects").data_dir(env)), _FILE)
 
 
 def _is_busy(exc: sqlite3.Error) -> bool:

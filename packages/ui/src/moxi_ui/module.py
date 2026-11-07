@@ -1,8 +1,9 @@
 """The announcement of Moxi's ui module, which moxi.modules reads."""
 
 #: 1 is the component contract this module's shell places, and its own components are
-#: written for. 2 is 1 plus the API: the check a page part makes before it writes.
-INTERFACES = frozenset({1, 2})
+#: written for. 2 is 1 plus the API: the check a page part makes before it writes. 3 is 2
+#: plus `api.loopback`, the page-server base every page module is built on.
+INTERFACES = frozenset({1, 2, 3})
 #: The announcement schema this file is written to: 2 lets a socket daemon's `start` follow
 #: a bool setting.
 ANNOUNCES = 2

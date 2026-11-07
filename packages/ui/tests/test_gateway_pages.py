@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-from moxi_loopback.api import response_headers
+from moxi_ui.loopback.api import response_headers
 from test_gateway_redact import Gate
 
 from moxi_ui.gateway.access import PAGES, Access, web_file

@@ -1851,6 +1851,16 @@ def test_status_gives_each_timer_the_unit_it_triggers_and_no_other_kind_one(w, v
     assert len(shows) == 2 and shows[1][2:] == ("backup-run.service",)
 
 
+def test_status_ignores_kinds_on_systemd_where_the_suffix_says_the_kind(w):
+    w.sup.extra |= {"web.service", "backup.timer", "backup.service"}
+    w.sup.reload()
+    rows = units.status([], foreign=["web.service", "backup.timer"],
+                        kinds={"web.service": "timer", "backup.timer": "daemon"},
+                        runner=w.sup)
+    assert [(r.name, r.kind) for r in rows] == [("web.service", "daemon"),
+                                                ("backup.timer", "timer")]
+
+
 def test_a_failed_show_reads_unknown_with_the_supervisors_text(unit_root):
     def fail(cmd, *, env=None, timeout=None):
         return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")

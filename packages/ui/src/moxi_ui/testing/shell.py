@@ -207,7 +207,7 @@ class TestShell:
         with the shell's stderr, when it doesn't start in `start_timeout` seconds."""
         from moxi import proc
         from moxi.paths import Layout, python
-        from moxi_loopback.api import RuntimeInfo
+        from moxi_ui.loopback.api import RuntimeInfo
 
         if self._process is not None:
             raise ShellError("the test shell is already started")
@@ -383,7 +383,7 @@ class TestShell:
              timeout: float = 10.0) -> tuple[int, Any]:
         """One request to a shell route with the runtime file's token, as `moxi ui status`
         sends it: `(status, data)`."""
-        from moxi_loopback.api import call
+        from moxi_ui.loopback.api import call
 
         if self.info is None:
             raise ShellError("the test shell is not running")

@@ -7,16 +7,27 @@ so every store call, contribution and `git init` here runs off the loop. None ca
 **Reads** call the read API's functions (`list_projects`, `get`, `kinds`) and the remove
 status read, and never write. `/api/where` names the store file this server reads and the
 git a create would run, since the page server takes the browser shell's environment and
-not the terminal's, and the two can differ. It compares nothing.
+not the terminal's, and the two can differ. Its `note` is the line a write would be
+refused with now (below), or null.
+
+**The terminal comparison.** Before anything else, the key lookup included, every write
+route (add, with or without create, set, agents add, agents remove and remove) asks
+`pagecheck.line()`: ui's check, over the store file, the home folder and the folders of
+every contribution the route consults, placed once from the core's record of the user's
+last run in a terminal and once from this server's environment. A difference, no record,
+or no ui check to ask is a 422 at once, whose text says what differs and the fix; nothing
+is made or written, a remove keeps no row for it, and a repeat is answered the same. An
+add, a set and a remove load the contributions once and hand the act the same ones they
+compared. This server never records.
 
 **Acts** call the acts the verbs call, with the body's values as the verb's flags:
 `acts.add`, `acts.set_fields`, `acts.add_agent`, `acts.remove_agent` and `acts.remove`.
 Each refuses before it makes anything, as the verb does. Paths are taken as sent and must
 be absolute: a relative one, or one starting with `~`, is refused, because this server's
-working directory and home are not the user's terminal's. The one change from the verb is
-a create's bound: `git init` gets `GIT_TIMEOUT`, 20 seconds, so a mint that hangs answers,
-with its message naming what is left and how to finish, inside the shell's 30 second
-deadline for an act.
+working directory and home are not the user's terminal's. Besides the terminal
+comparison, the one change from the verb is a create's bound: `git init` gets
+`GIT_TIMEOUT`, 20 seconds, so a mint that hangs answers, with its message naming what is
+left and how to finish, inside the shell's 30 second deadline for an act.
 
 **A refusal** is answered as the verb's exit code says: exit 1, 2 and 3 are a 422 whose
 text is the reason and the fix, and a store locked past the wait (exit 75) is a 409, try
@@ -28,8 +39,8 @@ status link, `/api/remove-status?job=<key>`, which gives the outcome. What a rem
 to is kept in the store under its key for a day (`acts.record_status`): removed, or
 refused for a reason about the project (associated agents, a contribution's sentences, a
 contribution that won't load or raises, the key not in the store). A repeat of the key
-finds that row first, after a restart too: for the same project (compared ignoring case)
-it answers 202 with the same link, for another a 422. A refusal that is the store's own
+finds that row first after the terminal comparison, after a restart too: for the same
+project (compared ignoring case) it answers 202 with the same link, for another a 422. A refusal that is the store's own
 (newer than this code, unreadable, locked, or no store file yet) can't be kept there, so
 it is answered at once by the map above, and nothing is written.
 """
@@ -39,7 +50,7 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
-from moxi_projects import acts, api, store
+from moxi_projects import acts, api, contributions, pagecheck, store
 from moxi_projects.api import DEFAULT_KIND, Busy, Project, ProjectsError
 from moxi_projects.errors import NoGit
 from moxi_projects.page import STATUS_ROUTE, lb
@@ -61,6 +72,15 @@ def _answer(exc: ProjectsError) -> Exception:
     if isinstance(exc, Busy):
         return lb.Conflict(text)
     return lb.Refused(text)
+
+
+def _compare(found: contributions.Contributions | None = None) -> None:
+    """Refuse the write, 422, while ui's check finds this server would write elsewhere
+    than the user's terminal, or can't tell. `found` is the contributions the route
+    consults (none for an agent's add or remove)."""
+    said = pagecheck.line(() if found is None else (c.module for c in found.loaded))
+    if said is not None:
+        raise lb.Refused(said)
 
 
 def _project(project: Project) -> dict[str, Any]:
@@ -97,9 +117,12 @@ def kinds(call: Any) -> dict[str, Any]:
 
 
 def where(call: Any) -> dict[str, Any]:
-    """`GET /api/where`: the store file this server acts on, and the git a create would
-    run here, or null."""
-    return {"store": store.path(), "git": shutil.which("git")}
+    """`GET /api/where`: the store file this server acts on, the git a create would run
+    here, or null, and `note`, the line an add, a set or a remove would be refused with
+    now, or null."""
+    found = contributions.load()
+    return {"store": store.path(), "git": shutil.which("git"),
+            "note": pagecheck.line(c.module for c in found.loaded)}
 
 
 def remove_status(call: Any) -> dict[str, Any]:
@@ -143,12 +166,15 @@ def add(call: Any) -> dict[str, Any]:
     """`POST /api/add`: `moxi projects add`, with `create` its `--create`, under the
     page's `git init` bound. `warnings` holds what the add went ahead without: a
     contribution skipped since it won't load, and the fix."""
+    found = contributions.load()
+    _compare(found)
     body = call.body
     try:
         added = acts.add(body["key"], root=body.get("root"),
                          kind=body.get("kind", DEFAULT_KIND), lead=body.get("lead"),
                          notes_root=body.get("notes_root"),
-                         create=bool(body.get("create", False)), git_timeout=GIT_TIMEOUT)
+                         create=bool(body.get("create", False)), contributions=found,
+                         git_timeout=GIT_TIMEOUT)
     except NoGit as exc:
         raise lb.Refused(f"{exc.reason}; fix: {exc.fix}; or, for good, "
                          f"{_no_git_fix(body)}") from None
@@ -161,6 +187,8 @@ def add(call: Any) -> dict[str, Any]:
 def set_fields(call: Any) -> dict[str, Any]:
     """`POST /api/set`: `moxi projects set`; `no_lead` and `no_notes_root` are its
     `--no-lead` and `--no-notes-root`."""
+    found = contributions.load()
+    _compare(found)
     body = call.body
     changes: dict[str, str | None] = {}
     for name in ("root", "kind"):
@@ -176,7 +204,7 @@ def set_fields(call: Any) -> dict[str, Any]:
         elif clear:
             changes[name] = None
     try:
-        project = acts.set_fields(body["key"], **changes)
+        project = acts.set_fields(body["key"], contributions=found, **changes)
     except ProjectsError as exc:
         raise _answer(exc) from None
     note = acts.root_note(project.root) if "root" in changes else None
@@ -185,6 +213,7 @@ def set_fields(call: Any) -> dict[str, Any]:
 
 def agents_add(call: Any) -> dict[str, Any]:
     """`POST /api/agents-add`: `moxi projects agents add KEY NAME`."""
+    _compare()
     try:
         return {"project": _project(acts.add_agent(call.body["key"], call.body["name"]))}
     except ProjectsError as exc:
@@ -193,6 +222,7 @@ def agents_add(call: Any) -> dict[str, Any]:
 
 def agents_remove(call: Any) -> dict[str, Any]:
     """`POST /api/agents-remove`: `moxi projects agents remove KEY NAME`."""
+    _compare()
     try:
         return {"project": _project(acts.remove_agent(call.body["key"], call.body["name"]))}
     except ProjectsError as exc:
@@ -206,7 +236,13 @@ def remove(call: Any) -> Any:
 
     Within one server's life loopback answers a repeat of the key itself, comparing the
     raw body, so the project's key is compared ignoring case only after a restart, when
-    the kept row answers; the page always resends the same bytes."""
+    the kept row answers; the page always resends the same bytes.
+
+    The terminal comparison comes first, before the kept row is looked up: while it
+    refuses, a repeat is refused too, though the status link still reads the kept
+    outcome."""
+    found = contributions.load()
+    _compare(found)
     key, job = call.body["key"], call.key
     link = lb.Accepted(f"{STATUS_ROUTE}?job={job}")
     try:
@@ -218,7 +254,7 @@ def remove(call: Any) -> Any:
             return link
         raise lb.Refused(KEY_REUSED)
     try:
-        acts.remove(key, record=acts.record_status(job))
+        acts.remove(key, contributions=found, record=acts.record_status(job))
     except ProjectsError as exc:
         # A refusal the store kept has its row; any other is answered here.
         try:

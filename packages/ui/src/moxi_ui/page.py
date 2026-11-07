@@ -33,7 +33,7 @@ import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from moxi_loopback.api import Field, Out, Page, Route
+from moxi_ui.loopback.api import Field, Out, Page, Route
 
 from . import settings as _settings
 from .gateway import desk as _desk

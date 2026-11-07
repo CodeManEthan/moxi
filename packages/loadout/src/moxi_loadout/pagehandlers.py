@@ -168,15 +168,16 @@ def projects(call: Any) -> dict[str, Any]:
 
 
 def drift(call: Any) -> dict[str, Any]:
-    """`GET /api/drift`: how many items aren't `ok` or `off`, and the harness homes'
-    note. An item counts once however many of its harnesses aren't ok (its rows share a
+    """`GET /api/drift`: how many items aren't `ok` or `off`, and the note that the
+    page would write elsewhere than the user's last run in a terminal (`moxi_loadout.homes`). An item counts once however many of its harnesses aren't ok (its rows share a
     section, a kind and a name). The note is never counted."""
-    from moxi_loadout import homes, ledger
+    from moxi_loadout import homes
     from moxi_loadout.planner import FINE
 
     try:
         outcome = _status()
-        note = homes.check(ledger.read(), page=True)
+        with homes.as_page():
+            note = homes.note()
     except Exception as err:  # noqa: BLE001
         return {"problem": _problem(err, "the status"), "count": 0, "note": None}
     items = {(r.scope, r.kind, r.name) for r in outcome.rows if r.state not in FINE}

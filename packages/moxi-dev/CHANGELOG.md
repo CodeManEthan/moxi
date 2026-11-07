@@ -10,4 +10,4 @@
 - The test fence answers the unit plan's listener connect with "nothing listens" in
   every test, so what listens on the machine's ports never decides a test. A test marked
   `honest_ports` (a new marker), or `live`, makes the real connect.
-- moxi-dev needs moxi 0.1.5 or later.
+- moxi-dev needs moxi 0.1.6 or later.

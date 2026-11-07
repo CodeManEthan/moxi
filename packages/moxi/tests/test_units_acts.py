@@ -242,8 +242,8 @@ def test_foreign_refuses_a_name_led_by_a_dash_without_a_supervisor_call(w, ref):
 
 def test_foreign_refuses_a_unit_whose_file_carries_a_mark(w):
     class Reading(FakeBackend):
-        def foreign(self, ref, fence):
-            unit = super().foreign(ref, fence)
+        def foreign(self, ref, fence, kind=None):
+            unit = super().foreign(ref, fence, kind)
             return _backend.UnitRef(None, ref, unit.kind, unit.ids, (self.root / ref,))
 
     w.module(DAEMONS="{}")
