@@ -54,6 +54,9 @@ def w(site, tmp_path, monkeypatch):
     console_script(scripts, "moxi-demo-shell")
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
     monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    # Nothing listens on a port here unless a test says so: the plan's connect never
+    # reaches this machine's own listeners.
+    monkeypatch.setattr(_plan, "answers", lambda address, port, timeout=0.5: False)
     root = tmp_path / "units"
     root.mkdir()
     supervisor = FakeSupervisor(root)
@@ -291,7 +294,8 @@ def test_a_v4_only_plan_and_a_backend_without_sockets_never_probe(w, monkeypatch
     assert calls == []
     w.module(shell("127.0.0.1", "::1"))
     monkeypatch.setattr(w.backend, "sockets", "none", raising=False)
-    assert len(w.plan()[("shell", "socket")].paths) == 2
+    plan = w.plan()
+    assert ("shell", "socket") not in plan and plan[("shell", "daemon")].action == "add"
     assert calls == []
 
 
@@ -433,8 +437,9 @@ def test_a_login_daemon_on_the_fake_is_enabled_acted_on_and_read_as_its_service(
     # Back to "connection": the link goes, the sockets carry the enable again.
     units.enable("demo", ["shell"])
     w.module(shell("127.0.0.1", "::1"))
+    changes = units.plan("demo")
     w.sup.calls.clear()
-    w.apply(units.plan("demo"))
+    w.apply(changes)
     assert w.sup.calls[0] == ("disable", f"{STEM}.service")
     rows = {r.kind: r for r in units.status(["demo"])}
     assert rows["daemon"].enabled is True and not w.sup.units[f"{STEM}.service"]["enabled"]

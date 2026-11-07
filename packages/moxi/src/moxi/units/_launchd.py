@@ -64,7 +64,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace as _replaced
 from pathlib import Path
 
-from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, socket_name
+from ._backend import (
+    ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, listen_address, socket_name)
 from ._fence import Fence, Ran
 from ._fence import argv as _argv
 from ._home import home_tag
@@ -216,6 +217,38 @@ class LaunchdBackend:
             out.append(UnitRef(module, mark.partition("/")[2], kind,
                                (path.name.removesuffix(".plist"),), (path,),
                                self.enabled(text)))
+        return tuple(out)
+
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        out = []
+        for path in sorted(self.agents.glob("*.plist")):
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            mark = self.mark(text)
+            if mark is None:
+                continue
+            body = _load(path)
+            sockets = body.get("Sockets") if body else None
+            if not isinstance(sockets, dict):
+                continue
+            listens = []
+            for value in sockets.values():
+                for entry in value if isinstance(value, list) else [value]:
+                    if not isinstance(entry, dict):
+                        continue
+                    node, service = entry.get("SockNodeName"), entry.get("SockServiceName")
+                    if not isinstance(node, str) or not isinstance(service, (str, int)):
+                        continue
+                    found = listen_address(f"[{node}]:{service}" if ":" in node
+                                           else f"{node}:{service}")
+                    if found is not None:
+                        listens.append(found)
+            if listens:
+                out.append((path, mark, tuple(listens)))
         return tuple(out)
 
     def apply(self, changes: Sequence[UnitChange], *, restart: bool, io: ApplyIO) -> None:

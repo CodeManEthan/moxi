@@ -30,8 +30,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ._backend import (
-    ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, socket_name,
-    socket_place, socket_state)
+    ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, listen_address,
+    socket_name, socket_place, socket_state)
 from ._fence import Fence, Ran
 from ._home import environment, home_tag
 from ._systemd import SocketStarts, dropin_name
@@ -58,7 +58,8 @@ class FakeSupervisor:
     with. `calls` lists every command as a tuple of its arguments after `systemctl
     --user`, without the `--` the fence puts before the units. `invocations` maps a unit
     id to its `InvocationID`, new at each start; `props` may set `InvocationID` to show
-    another.
+    another. `pid` is the `MainPID` every active service shows (a test sets its own
+    process's, so a check that reads the daemon's process reads the test's).
     """
 
     def __init__(self, root: Path, *, linger: bool = True):
@@ -73,6 +74,7 @@ class FakeSupervisor:
         self.calls: list[tuple[str, ...]] = []
         self.linger = linger
         self.invocations: dict[str, str] = {}
+        self.pid = 4242
         self._starts = 0
         self.reload()
 
@@ -169,12 +171,13 @@ class FakeSupervisor:
             execs = [f"ExecStart={{ path=/bin/true ; argv[]=/bin/true {i} }}"
                      for i in range(props.get("ExecStart", 1 if loaded else 0))]
             active = props.get("ActiveState", "active" if state["active"] else "inactive")
+            pid = self.pid
             blocks.append("\n".join([
                 f"Id={unit}",
                 f"LoadState={'loaded' if loaded else 'not-found'}",
                 f"ActiveState={active}",
                 f"SubState={'running' if state['active'] else 'dead'}",
-                f"MainPID={4242 if state['active'] and unit.endswith('.service') else 0}",
+                f"MainPID={pid if state['active'] and unit.endswith('.service') else 0}",
                 "ActiveEnterTimestampMonotonic=0",
                 f"Result={props.get('Result', 'success')}",
                 f"ExecMainStatus={props.get('ExecMainStatus', 0)}",
@@ -189,7 +192,10 @@ class FakeSupervisor:
 
 
 class FakeBackend:
-    """The `Backend` protocol over files in `root` and the systemd fence."""
+    """The `Backend` protocol over files in `root` and the systemd fence.
+
+    A test may set `sockets = "none"` on one: it then writes no socket units, as Task
+    Scheduler doesn't, and a daemon with a socket binds its own."""
 
     name = "fake"
     supervisor = "systemd"
@@ -219,7 +225,7 @@ class FakeBackend:
             if spec.cwd:
                 body.append(f"cwd = {spec.cwd}")
             sockets = []
-            if spec.socket is not None:
+            if spec.socket is not None and self.sockets != "none":
                 for place, address in spec.socket.listens:
                     unit = f"{socket_name(stem, place)}.socket"
                     listen = f"[{address}]" if ":" in address else address
@@ -288,6 +294,23 @@ class FakeBackend:
             elif (name, ".timer") not in found:
                 out.append(UnitRef(module, name, "daemon", (path.name,), (path,),
                                    self.enabled(texts[path])))
+        return tuple(out)
+
+    def socket_files(self) -> tuple[tuple[Path, str, tuple[tuple[str, int], ...]], ...]:
+        out = []
+        for path in sorted(self.root.glob("*.socket")):
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            mark = self.mark(text)
+            if not mark:
+                continue
+            listens = tuple(found for line in text.splitlines()
+                            if line.startswith("listen = ")
+                            and (found := listen_address(line[len("listen = "):]))
+                            is not None)
+            if listens:
+                out.append((path, mark, listens))
         return tuple(out)
 
     def _enable_id(self, change: UnitChange) -> str:

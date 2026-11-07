@@ -2,8 +2,8 @@
 
 `plan` reads the module's merged declarations, resolves each unit for writing (its command
 in this environment, its switch, its socket's port and what starts it), renders it through
-the backend, and compares the new text with what is on disk. It writes nothing and makes
-no supervisor call, so it takes no lock.
+the backend, and compares the new text with what is on disk. It writes nothing, so it
+takes no lock. Its only supervisor call is the read of one port check below.
 
 A unit's name says its home (`moxi.units.home_tag`) and nothing else, so a module's units
 are refused, cause `locator`, while this process's environment sets any of that module's
@@ -26,6 +26,27 @@ says so in its reason; any other error, or none, keeps them. An IPv4 address is 
 left out, and a daemon left with no address is refused, cause `socket`. Each address
 keeps its place, so the others keep their names and a later plan whose bind works adds
 the left-out ones back as a `change`.
+
+One port, one home. A daemon with a socket is refused, cause `socket`, only when the plan
+can show that what holds one of its addresses is not this home's own daemon, and never for
+the port alone, so a home re-installed while its daemon runs is never refused for it. Two
+checks run, after `foreign` is decided (a daemon refused `foreign` gets neither):
+
+1. Another marked socket file names the address. Every home's unit files share the
+   supervisor's directory, so the plan reads every marked socket file there
+   (`Backend.socket_files`), and one that is not this module's own (`marked()`) and names
+   the same address and port refuses it, whether its daemon runs or not. A home's own
+   names are the ones it gives itself, so for a home given by `MOXI_HOME` the default
+   home's untagged file is another's, and for the default home every tagged one is.
+2. A listener that isn't this home's daemon (`_Listeners`). Nothing connects when this
+   home's own socket unit or job names the address and is `active`; else a TCP connect
+   that nothing answers leaves the address free; else this home's daemon must be running
+   with a process (or one under it) that listens there, or the address is refused. When
+   the supervisor's read is `unknown` or the process can't be read, the plan says so in
+   one line on stderr and doesn't refuse.
+
+Task Scheduler writes no socket files, so there a stopped daemon of another home is seen by
+neither check: the start that comes second fails on the port.
 """
 
 from __future__ import annotations
@@ -99,7 +120,8 @@ def plan(module: str, *, only: Iterable[str] | None = None,
                   "environment")
         return _refuse_all(module, declared, marked, wanted, "editable", reason)
 
-    planner = _Planner(found, impl, env, environment(module))
+    own = frozenset(path for refs in marked.values() for ref in refs for path in ref.paths)
+    planner = _Planner(found, impl, env, environment(module), own)
     out: list[UnitChange] = []
     for kind, name, entry in declared:
         refs = marked.pop(name, [])
@@ -137,14 +159,17 @@ def _refuse_all(module, declared, marked, wanted, cause, reason) -> list[UnitCha
 class _Planner:
     """The per-unit half of `plan`, holding what one module's units share."""
 
-    def __init__(self, found, impl, env, environ=None):
+    def __init__(self, found, impl, env, environ=None, own=frozenset()):
         self.found = found
+        #: The files `marked()` gives this module here: this home's own.
+        self.own = frozenset(own)
         self.module = found.name
         self.impl = impl
         self.env = env
         self.environment = tuple(sorted((environ or {}).items()))
         self._schema: list = []
         self._ipv6: list[bool] = []
+        self._socket_files: list = []
 
     def ipv6(self) -> bool:
         """Whether this system has an IPv6 loopback, probed once per plan."""
@@ -229,12 +254,67 @@ class _Planner:
         written = {ref.kind: ref for ref in refs}
         out = [self._compare(name, group, entry, stamp, written.get(group.kind))
                for group in rendered]
+        if socket is not None and not any(c.cause == "foreign" for c in out):
+            # After `foreign`: an unmarked file at this home's name is that file's daemon,
+            # and only `--replace` gets past it.
+            clash = self._held_elsewhere(name, socket, refs)
+            if clash is not None:
+                out = [_replaced(c, action="refuse", cause="socket",
+                                 reason=f"{unit}: {clash}") for c in out]
         if note:
             out = [_replaced(c, reason=f"{c.reason}; {note}") for c in out]
         kinds = {group.kind for group in rendered}
         out += [_remove(module, ref, entry, "no longer declared")
                 for ref in refs if ref.kind not in kinds]
         return out
+
+    # -- one port, one home ---------------------------------------------------------------
+
+    def socket_files(self):
+        """`Backend.socket_files()`, read once per plan."""
+        if not self._socket_files:
+            read = getattr(self.impl, "socket_files", None)
+            self._socket_files.append(tuple(read()) if read is not None else ())
+        return self._socket_files[0]
+
+    def _held_elsewhere(self, name: str, socket: Socket, refs: list[UnitRef]) -> str | None:
+        """Why daemon `name`'s addresses are not free for it, or None. Its address is
+        refused only when the plan can show that what holds it is not this home's own
+        daemon: another home's marked socket file names it (`_named_elsewhere`), or a
+        listener answers on it that this home's daemon doesn't hold (`_Listeners`). The
+        port alone never refuses."""
+        wanted = [(_address(address), socket.port) for _, address in socket.listens]
+        fix = (f"fix: give this home's {self.module}/{name} another port: moxi config set "
+               f"{self.module} {socket.setting} <port>")
+        named = self._named_elsewhere(wanted)
+        if named is not None:
+            return f"{named}; {fix}"
+        held = _Listeners(self, name, refs).elsewhere(wanted)
+        return None if held is None else f"{held}; {fix}"
+
+    def _named_elsewhere(self, wanted) -> str | None:
+        """A marked socket file outside this module's own (`marked()`) that names one of
+        `wanted`, described, or None. Every home's files share the supervisor's unit
+        directory, so this sees another home's daemon whether it runs or not."""
+        for path, mark, listens in self.socket_files():
+            if path in self.own:
+                continue
+            for address, port in wanted:
+                if (address, port) in listens:
+                    whose = ("of this Moxi home" if self._this_home(path, mark)
+                             else "of another Moxi home; if that home is gone, remove the "
+                                  "file by hand")
+                    return (f"{_where(address, port)} is named by {path}, the socket of "
+                            f"{mark} {whose}")
+        return None
+
+    def _this_home(self, path: Path, mark: str) -> bool:
+        """Whether `path` is at a name this home gives the unit `mark` names."""
+        module, _, name = mark.partition("/")
+        try:
+            return path in self.impl.files(module, name, "daemon")
+        except Exception:  # noqa: BLE001 - a mark that names no unit names no home's
+            return False
 
     def _switch_problem(self, switch: str) -> str | None:
         schema = self.schema()
@@ -342,6 +422,166 @@ class _Planner:
             reason += f" (drops {', '.join(path.name for path in dropped)})"
         return UnitChange(module, name, group.kind, "change", None, reason=reason,
                           **common)
+
+
+class _Listeners:
+    """What listens on one daemon's addresses, and whether it is this home's own daemon.
+
+    For each address, in order: this home's own socket unit or job names it and its
+    socket state is `active` (the supervisor holds it for this home: nothing connects);
+    else a TCP connect that nothing answers (free); else this home's daemon `active` with
+    a pid whose process, or one under it, listens on it (`listening`). Anything else that
+    answers is another's. When the daemon's state is `unknown` or its process can't be
+    read, the plan can't tell: it says so in one line on stderr and doesn't refuse, and a
+    real clash shows as the daemon's start failing on the port. The supervisor is read
+    once, and only when one of these steps needs it."""
+
+    def __init__(self, planner: _Planner, name: str, refs: list[UnitRef]):
+        self.planner = planner
+        self.name = name
+        self.refs = refs
+        self._read: list = []
+
+    def elsewhere(self, wanted) -> str | None:
+        unit = f"{self.planner.module}/{self.name}"
+        paths = {path for ref in self.refs for path in ref.paths}
+        named = {listen for path, _, listens in self.planner.socket_files()
+                 if path in paths for listen in listens}
+        for address, port in wanted:
+            if (address, port) in named:
+                socket = self.states()[1]
+                if socket is not None and socket.state == "active":
+                    continue
+            if not answers(address, port):
+                continue
+            daemon = self.states()[0]
+            if daemon is not None and daemon.state == "unknown":
+                _say(f"{unit}: something listens on {_where(address, port)}, and the "
+                     f"supervisor read failed ({daemon.detail}), so the plan can't tell "
+                     "whether it is this home's daemon; not refused")
+                continue
+            if daemon is not None and daemon.state == "active" and daemon.pid:
+                held = listening(daemon.pid, address, port)
+                if held is True:
+                    continue
+                if held is None:
+                    _say(f"{unit}: something listens on {_where(address, port)}, and the "
+                         f"process of this home's daemon (pid {daemon.pid}) can't be read, "
+                         "so the plan can't tell whether it is that daemon; not refused")
+                    continue
+                return (f"something that is not this home's {unit} listens on "
+                        f"{_where(address, port)}, and the running daemon (pid "
+                        f"{daemon.pid}) doesn't hold it")
+            return (f"something that is not this home's {unit} listens on "
+                    f"{_where(address, port)}, and this home's {unit} isn't running")
+        return None
+
+    def states(self):
+        """`(daemon, socket)`: the `UnitState`s of this home's daemon and its socket, read
+        in one supervisor call; None for one that has nothing written."""
+        if self._read:
+            return self._read[0]
+        planner = self.planner
+        impl, module, name = planner.impl, planner.module, self.name
+        daemon = next((ref for ref in self.refs if ref.kind == "daemon"), None)
+        socket = None
+        if daemon is not None and impl.sockets == "job":
+            socket = UnitRef(module, name, "socket", daemon.ids, daemon.paths,
+                             daemon.enabled)
+        elif impl.sockets == "units":
+            socket = next((ref for ref in self.refs if ref.kind == "socket"), None)
+        refs = [ref for ref in (daemon, socket) if ref is not None]
+        read: list = []
+        if refs:
+            from ._apply import fence
+            from ._types import UnitState
+
+            try:
+                read = list(impl.status(refs, fence(impl)))
+            except Exception as exc:  # noqa: BLE001 - a failed read is `unknown`
+                read = [UnitState(module, name, ref.kind, impl.name, "unknown",
+                                  detail=str(exc) or type(exc).__name__) for ref in refs]
+        states = dict(zip((ref.kind for ref in refs), read))
+        self._read.append((states.get("daemon"), states.get("socket")))
+        return self._read[0]
+
+
+def answers(address: str, port: int, timeout: float = 0.5) -> bool:
+    """Whether a TCP connect to `address`:`port` is answered within `timeout` seconds.
+    The connect is closed at once and takes no port."""
+    import socket
+
+    try:
+        with socket.create_connection((address, port), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def listening(pid: int, address: str, port: int) -> bool | None:
+    """Whether process `pid`, or a process under it, has a listening TCP socket on
+    `address`:`port` (an unspecified address it bound counts for every address), read
+    through psutil's per-process read, which needs no privilege for a process of one's
+    own user. None when a process can't be read and none of the others listens there."""
+    import psutil
+
+    try:
+        top = psutil.Process(pid)
+        processes = [top, *top.children(recursive=True)]
+    except psutil.Error:
+        return None
+    unread = False
+    for process in processes:
+        read = getattr(process, "net_connections", None) or process.connections
+        try:
+            connections = read(kind="tcp")
+        except psutil.NoSuchProcess:
+            unread = unread or process is top
+            continue
+        except psutil.Error:
+            unread = True
+            continue
+        for connection in connections:
+            local = connection.laddr
+            if (connection.status == psutil.CONN_LISTEN and local and local.port == port
+                    and _covers(local.ip, address)):
+                return True
+    return None if unread else False
+
+
+def _covers(bound: str, address: str) -> bool:
+    """Whether a socket bound to `bound` takes connections to `address`."""
+    import ipaddress
+
+    try:
+        mine, theirs = ipaddress.ip_address(bound.split("%")[0]), ipaddress.ip_address(
+            address.split("%")[0])
+    except ValueError:
+        return bound == address
+    if mine.version == 6 and mine.ipv4_mapped is not None:
+        mine = mine.ipv4_mapped
+    if mine == theirs:
+        return True
+    # A wildcard bind: IPv4's takes IPv4 only; IPv6's may take both (dual stack).
+    return mine.is_unspecified and (mine.version == 6 or theirs.version == 4)
+
+
+def _address(address: str) -> str:
+    """`address` in `ipaddress`'s spelling, as `listen_address` gives it."""
+    import ipaddress
+
+    try:
+        return str(ipaddress.ip_address(address))
+    except ValueError:
+        return address
+
+
+def _where(address: str, port: int) -> str:
+    return f"[{address}]:{port}" if ":" in address else f"{address}:{port}"
+
+
+def _say(line: str) -> None:
+    print(line, file=sys.stderr)
 
 
 def ipv6_loopback() -> bool:
