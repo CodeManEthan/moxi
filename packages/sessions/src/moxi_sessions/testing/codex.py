@@ -277,11 +277,20 @@ class CodexRollout:
     def world_state(self) -> int:
         return self.line("world_state", {"full": True, "state": {"model": MODEL}})
 
-    def user(self, text: str = "Hello.", *, role: str = "user") -> int:
-        """A `response_item` message (`role` user, developer or assistant)."""
+    def user(self, text: str = "Hello.", *, role: str = "user",
+             kinds: Any = None) -> int:
+        """A `response_item` message (`role` user, developer or assistant). `kinds`, when
+        given, is written as the message's `content_item_kinds`, as newer Codex releases
+        write it on every message; None leaves it out, as older ones do."""
         kind = "output_text" if role == "assistant" else "input_text"
-        return self.item("message", id=f"msg_{self._serial():04d}", role=role,
-                         content=[{"type": kind, "text": text}])
+        payload: dict[str, Any] = {"id": f"msg_{self._serial():04d}", "role": role,
+                                   "content": [{"type": kind, "text": text}]}
+        if kinds is None:
+            return self.item("message", **payload)
+        meta = {**self._passthrough(), "content_item_kinds": kinds}
+        return self.line("response_item", {"type": "message", **payload,
+                                           "internal_chat_message_metadata_passthrough":
+                                               meta})
 
     def assistant(self, text: str = "Done.") -> int:
         return self.user(text, role="assistant")
