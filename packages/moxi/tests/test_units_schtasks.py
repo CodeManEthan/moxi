@@ -11,6 +11,7 @@ import subprocess
 import sys
 import types
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -51,10 +52,17 @@ class FakeSchtasks:
 
     `tasks` maps a task path to `{"enabled", "running"}`; `/create` reads `Enabled` from
     the XML it is given. `foreign` maps a task path to the read's
-    `{"state", "last_run", "last_result"}`. `/end` of a task that is not running fails, as
-    it may on Windows. `fail` maps `(verb, task)` to the stderr that command fails with;
-    `powershell=False` makes `powershell.exe` missing. `calls` lists each command as
-    `(verb, task[, arg])`, the read as `("tasks",)`.
+    `{"state", "last_run", "last_result"[, "enabled"]}`. `/end` of a task that is not
+    running fails, as it may on Windows. `fail` maps `(verb, task)` to the stderr that
+    command fails with; `powershell=False` makes `powershell.exe` missing. `calls` lists
+    each command as `(verb, task[, arg])`, the read as `("tasks",)`.
+
+    A foreign task takes `/run`, `/end` and `/change` too. As on Windows, `State` follows
+    `/run` and `/end` late: the read shows the change only after `lag[task]` reads (0 by
+    default) have still shown the task as it was. `/run` makes it `Running` with
+    `LastRunTime` `RUN_AT` and result 0x41301; `/end` makes it `Ready` with 0x41306. A
+    task in `stuck` never changes after `/run` or `/end`. `after_run[task]`, when set, is
+    the item the read shows once the lag has passed after `/run`, in place of `Running`.
     """
 
     def __init__(self):
@@ -64,6 +72,10 @@ class FakeSchtasks:
         self.calls: list[tuple[str, ...]] = []
         self.envs: list[dict] = []
         self.powershell = True
+        self.lag: dict[str, int] = {}
+        self.stuck: set[str] = set()
+        self.after_run: dict[str, dict] = {}
+        self._pending: dict[str, list] = {}
 
     def __call__(self, cmd, *, env=None, timeout=None):
         if cmd[0] == "powershell.exe":
@@ -77,6 +89,8 @@ class FakeSchtasks:
         if verb == "/query":
             rows = [f'"{t}","N/A","Bereit"' for t in [*self.tasks, *self.foreign]]
             return self._done(cmd, 0, "\r\n" + "\r\n".join(rows) + "\r\n")
+        if task in self.foreign:
+            return self._foreign_act(cmd, verb, task)
         if verb == "/create":
             root = ET.fromstring(Path(cmd[5]).read_bytes())
             enabled = root.find("t:Settings/t:Enabled", N).text == "true"
@@ -100,8 +114,37 @@ class FakeSchtasks:
             state["enabled"] = cmd[4] == "/enable"
         return self._done(cmd, 0, "SUCCESS")
 
+    def _foreign_act(self, cmd, verb, task):
+        info = self.foreign[task]
+        if verb == "/change":
+            on = cmd[4] == "/enable"
+            info["enabled"] = on
+            if info["state"] != "Running":
+                info["state"] = "Ready" if on else "Disabled"
+            return self._done(cmd, 0, "SUCCESS")
+        if verb == "/run":
+            if info.get("enabled") is False or info["state"] == "Disabled":
+                return self._done(cmd, 1, "", "ERROR: The task is disabled.")
+            after = self.after_run.get(task) or {"state": "Running", "last_run": RUN_AT,
+                                                 "last_result": 0x41301}
+        elif verb == "/end":
+            if info["state"] != "Running":
+                return self._done(cmd, 1, "", "ERROR: The task is not running.")
+            after = {"state": "Ready", "last_result": 0x41306}
+        else:
+            return self._done(cmd, 1, "", f"ERROR: {verb} of a foreign task")
+        if task not in self.stuck:
+            self._pending[task] = [self.lag.get(task, 0), after]
+        return self._done(cmd, 0, "SUCCESS")
+
     def _read(self, cmd, env):
         self.calls.append(("tasks",))
+        for task, pending in list(self._pending.items()):
+            if pending[0] > 0:
+                pending[0] -= 1
+            else:
+                self.foreign[task].update(pending[1])
+                del self._pending[task]
         if not self.powershell:
             raise FileNotFoundError(2, "No such file or directory", "powershell.exe")
         if ("tasks", None) in self.fail:
@@ -128,11 +171,31 @@ class FakeSchtasks:
         return subprocess.CompletedProcess(cmd, code, out, err)
 
 
+#: The `LastRunTime` a foreign task's `/run` gives in the fake, and an earlier one.
+RUN_AT = "2026-11-07T09:30:00.1234567+00:00"
+EARLIER = "2026-11-07T08:00:00.1234567+00:00"
+
+
+class Clock:
+    """A clock and a sleep for the backend that never wait: `sleep` moves `now` on."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
 @pytest.fixture
 def w(site, tmp_path, monkeypatch):
     """A fake module `demo`, a scripts directory with `pythonw.exe`, the backend as
-    `PC\\ana`, and the fake `schtasks.exe`. The scripts directory holds `python` under
-    both systems' names, so `moxi.paths.python` finds it on either."""
+    `PC\\ana` on a fake clock, and the fake `schtasks.exe`. The scripts directory holds
+    `python` under both systems' names, so `moxi.paths.python` finds it on either."""
     scripts = tmp_path / "Scripts"
     scripts.mkdir()
     monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
@@ -142,7 +205,8 @@ def w(site, tmp_path, monkeypatch):
         path.chmod(0o755)
     for name in ("moxi-demo-relay", "moxi-demo-snap"):
         console_script(scripts, name)
-    backend = SchtasksBackend(user="PC\\ana")
+    clock = Clock()
+    backend = SchtasksBackend(user="PC\\ana", clock=clock, sleep=clock.sleep)
     sup = FakeSchtasks()
     lines: list[str] = []
 
@@ -171,7 +235,8 @@ def w(site, tmp_path, monkeypatch):
     with _backend.use(backend):
         yield types.SimpleNamespace(scripts=scripts, backend=backend, sup=sup, lines=lines,
                                     module=module, plan=plan, apply=apply, ready=ready,
-                                    fence=Fence("schtasks", sup), tmp=tmp_path)
+                                    fence=Fence("schtasks", sup), tmp=tmp_path,
+                                    clock=clock)
 
 
 def spec(kind="daemon", **kw) -> Spec:
@@ -916,6 +981,328 @@ def test_status_through_the_core_adds_the_run_line(w):
     assert daily.last == {"supervisor": {"last_run": None, "last_result": 0}}
 
 
+# -- a foreign task read and acted on as a daemon --------------------------------------------
+
+DAILY = "\\Backups\\Daily"
+AGENT = "\\Vendor\\Agent"
+
+
+def test_foreign_takes_the_callers_kind_and_makes_no_call(w):
+    assert w.backend.foreign(AGENT, None, kind="daemon") == UnitRef(None, AGENT, "daemon",
+                                                                    (AGENT,))
+    assert w.backend.foreign(AGENT, w.fence, kind="timer").kind == "timer"
+    assert w.backend.foreign(AGENT, None).kind == "timer"
+    with pytest.raises(ValueError):
+        w.backend.foreign(AGENT, None, kind="service")
+    assert w.sup.calls == []
+
+
+def test_status_and_the_acts_without_kinds_call_an_old_foreign_without_the_keyword(w):
+    """A backend whose `foreign` has the signature from before the hint still serves every
+    caller that passes no `kinds`."""
+
+    class Old(SchtasksBackend):
+        def foreign(self, ref, fence):
+            return super().foreign(ref, fence)
+
+    w.sup.foreign[DAILY] = {"state": "Ready", "last_run": None, "last_result": 0}
+    with _backend.use(Old(user="PC\\ana")):
+        [row] = units.status([], foreign=[DAILY], runner=w.sup)
+        [acted] = units.enable("services", [DAILY], foreign=True, runner=w.sup)
+    assert (row.kind, row.state) == ("timer", "active")
+    assert acted.ok and ("/change", DAILY, "/enable") in w.sup.calls
+
+
+def daemon_read(w, info):
+    w.sup.foreign[AGENT] = info
+    [read] = w.backend.status([w.backend.foreign(AGENT, None, kind="daemon")], w.fence)
+    assert w.sup.calls == [("tasks",)]
+    assert (read.module, read.name, read.kind, read.pid) == (None, AGENT, "daemon", None)
+    assert read.last == {"last_run": info["last_run"], "last_result": info["last_result"]}
+    return read
+
+
+@pytest.mark.parametrize("state, code, read_as", [
+    ("Ready", 0, "inactive"),
+    ("Ready", None, "inactive"),
+    ("Ready", 1, "failed"),
+    ("Ready", 0x41303, "inactive"),       # has not yet run
+    ("Ready", 0x41306, "inactive"),       # terminated by /end
+    ("Ready", 0x41325, "inactive"),       # queued: outside the old 0x4131F bound
+    ("Ready", 0x80041320, "failed"),      # SCHED_E_TASK_NOT_READY
+    ("Ready", 0x80070002, "failed"),      # the action's file is not found
+    ("Ready", -2147024894, "failed"),     # the same code read as a signed int
+    ("Queued", 0x41325, "inactive"),
+    ("Queued", None, "inactive"),
+    ("Disabled", 1, "inactive"),
+])
+def test_a_foreign_task_read_as_a_daemon_runs_only_while_running(w, state, code, read_as):
+    info = {"state": state, "last_run": EARLIER, "last_result": code}
+    read = daemon_read(w, info)
+    assert read.state == read_as and read.since is None
+    assert read.enabled is (state != "Disabled")
+    if code is None:
+        assert read.detail == state
+    else:
+        assert read.detail == f"{state}, last result 0x{code & 0xFFFFFFFF:08X}"
+
+
+def test_a_running_foreign_daemon_task_is_active_since_its_last_run(w):
+    read = daemon_read(w, {"state": "Running", "last_run": RUN_AT, "last_result": 0x41301})
+    assert (read.state, read.enabled) == ("active", True)
+    assert read.detail == "Running, last result 0x00041301"
+    assert read.since == datetime(2026, 11, 7, 9, 30, 0, 123456, timezone.utc).timestamp()
+
+
+def test_a_running_daemon_task_with_an_unparseable_last_run_has_no_since(w):
+    read = daemon_read(w, {"state": "Running", "last_run": "soon", "last_result": 0})
+    assert read.state == "active" and read.since is None
+
+
+def test_a_daemon_tasks_unknown_state_is_unknown(w):
+    read = daemon_read(w, {"state": "Unknown", "last_run": None, "last_result": 0})
+    assert (read.state, read.detail) == ("unknown", "Task Scheduler reads Unknown")
+
+
+@pytest.mark.parametrize("state, enabled, read_as", [
+    ("Running", False, "active"),    # disabled outside moxi while it runs
+    ("Ready", False, "inactive"),
+    ("Disabled", True, "inactive"),  # the setting wins over State
+])
+def test_a_daemon_tasks_enabled_is_its_own_setting_apart_from_state(w, state, enabled,
+                                                                   read_as):
+    read = daemon_read(w, {"state": state, "last_run": EARLIER, "last_result": 0,
+                           "enabled": enabled})
+    assert (read.state, read.enabled) == (read_as, enabled)
+
+
+def test_a_timer_ignores_the_tasks_enabled_setting(w):
+    w.sup.foreign[DAILY] = {"state": "Ready", "last_run": None, "last_result": 0,
+                            "enabled": False}
+    [read] = w.backend.status([w.backend.foreign(DAILY, None)], w.fence)
+    assert (read.kind, read.state, read.enabled) == ("timer", "active", True)
+
+
+def test_task_status_codes_is_task_schedulers_success_band():
+    assert units.TASK_STATUS_CODES == range(0x41300, 0x41400)
+    for code in (0x41300, 0x41303, 0x41325, 0x413FF):
+        assert code in units.TASK_STATUS_CODES
+    for code in (0, 1, 0x412FF, 0x41400, 0x80041320):
+        assert code not in units.TASK_STATUS_CODES
+
+
+def test_the_task_read_script_reads_the_tasks_own_enabled_setting():
+    from moxi.units._fence import TASKS_SCRIPT
+
+    assert "enabled = [bool]$t.Settings.Enabled; " in TASKS_SCRIPT
+
+
+def agent(w, state="Ready", code=0x41303, last_run=EARLIER, **more):
+    w.sup.foreign[AGENT] = {"state": state, "last_run": last_run, "last_result": code,
+                            **more}
+    w.sup.calls.clear()
+    return w.backend.foreign(AGENT, None, kind="daemon")
+
+
+def test_start_of_a_running_daemon_task_only_reads_it(w):
+    acted = w.backend.act("start", agent(w, "Running", 0x41301), w.fence)
+    assert acted.ok and acted.lines == ()
+    assert w.sup.calls == [("tasks",)]
+
+
+def test_start_runs_the_task_and_reads_until_it_runs(w):
+    unit = agent(w)
+    w.sup.lag[AGENT] = 1
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok and acted.lines == ()
+    assert w.sup.calls == [("tasks",), ("/run", AGENT), ("tasks",), ("tasks",)]
+    assert w.sup.foreign[AGENT]["state"] == "Running"
+    assert w.clock.slept == [0.25]
+
+
+def test_start_of_a_crashed_task_waits_through_reads_of_the_old_crash(w):
+    """The two reads after `/run` still show the crash from before the act, `failed`
+    when read as a status; neither ends the wait."""
+    unit = agent(w, "Ready", 1)
+    w.sup.lag[AGENT] = 2
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/run", AGENT)] + [("tasks",)] * 3
+    assert w.sup.foreign[AGENT]["state"] == "Running"
+
+
+def test_a_run_that_started_and_ended_since_the_act_ends_the_wait(w):
+    """A newer `LastRunTime` ends it, though the task never read `Running`: the run
+    crashed at once."""
+    unit = agent(w, "Ready", 1)
+    w.sup.after_run[AGENT] = {"state": "Ready", "last_run": RUN_AT, "last_result": 1}
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok and w.sup.calls == [("tasks",), ("/run", AGENT), ("tasks",)]
+
+
+@pytest.mark.parametrize("mark", [None, "not a time"])
+def test_with_no_mark_any_last_run_that_parses_ends_the_wait(w, mark):
+    """A task that never ran has no `LastRunTime`, and one may not parse: then any
+    `LastRunTime` that parses shows a run since the act."""
+    unit = agent(w, "Ready", 0x41303, last_run=mark)
+    w.sup.after_run[AGENT] = {"state": "Ready", "last_run": RUN_AT, "last_result": 1}
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok and w.sup.calls == [("tasks",), ("/run", AGENT), ("tasks",)]
+
+
+def test_with_no_mark_a_last_run_that_still_doesnt_parse_doesnt_end_the_wait(w):
+    unit = agent(w, "Ready", 0x41303, last_run="not a time")
+    w.sup.stuck.add(AGENT)
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok and w.clock.now >= 5.0
+
+
+def test_start_of_a_task_that_never_reads_running_is_ok_after_five_seconds(w):
+    unit = agent(w)
+    w.sup.stuck.add(AGENT)
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok and acted.lines == ()
+    assert w.clock.now == pytest.approx(5.0)
+    reads = [c for c in w.sup.calls if c == ("tasks",)]
+    assert len(reads) == 1 + 21  # the one-copy read, then one each 0.25 s up to 5 s
+
+
+def test_restart_ends_waits_for_the_end_then_runs(w):
+    unit = agent(w, "Running", 0x41301)
+    w.sup.lag[AGENT] = 1
+    acted = w.backend.act("restart", unit, w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/end", AGENT), ("tasks",), ("tasks",),
+                           ("/run", AGENT), ("tasks",), ("tasks",)]
+    assert w.sup.foreign[AGENT]["state"] == "Running"
+
+
+def test_restart_whose_end_doesnt_settle_fails_and_never_runs(w):
+    unit = agent(w, "Running", 0x41301)
+    w.sup.stuck.add(AGENT)
+    acted = w.backend.act("restart", unit, w.fence)
+    assert not acted.ok
+    assert acted.lines == (f"{AGENT} still runs 5 s after /end; not started again",)
+    assert ("/run", AGENT) not in w.sup.calls
+
+
+def test_stop_whose_end_doesnt_settle_is_still_ok(w):
+    unit = agent(w, "Running", 0x41301)
+    w.sup.stuck.add(AGENT)
+    acted = w.backend.act("stop", unit, w.fence)
+    assert acted.ok and w.clock.now >= 5.0
+
+
+def test_stop_of_an_idle_daemon_task_is_done(w):
+    acted = w.backend.act("stop", agent(w), w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/end", AGENT), ("tasks",), ("tasks",)]
+
+
+def test_enable_turns_the_task_on_then_runs_it(w):
+    unit = agent(w, "Disabled", 0x41306, enabled=False)
+    acted = w.backend.act("enable", unit, w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/change", AGENT, "/enable"), ("/run", AGENT),
+                           ("tasks",)]
+    assert w.sup.foreign[AGENT]["state"] == "Running"
+
+
+def test_enable_of_a_task_running_while_disabled_doesnt_start_a_second_copy(w):
+    unit = agent(w, "Running", 0x41301, enabled=False)
+    acted = w.backend.act("enable", unit, w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/change", AGENT, "/enable")]
+
+
+def test_disable_turns_the_task_off_then_ends_it(w):
+    unit = agent(w, "Running", 0x41301)
+    acted = w.backend.act("disable", unit, w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/change", AGENT, "/disable"), ("/end", AGENT),
+                           ("tasks",)]
+    assert w.sup.foreign[AGENT]["state"] == "Ready" and not w.sup.foreign[AGENT]["enabled"]
+
+
+@pytest.mark.parametrize("missing_powershell", [True, False])
+def test_start_when_the_read_fails_runs_unchecked_and_says_so(w, missing_powershell):
+    unit = agent(w)
+    if missing_powershell:
+        w.sup.powershell = False
+    else:
+        w.sup.fail[("tasks", None)] = "Get-ScheduledTask : Access is denied."
+    acted = w.backend.act("start", unit, w.fence)
+    assert acted.ok and w.sup.calls == [("tasks",), ("/run", AGENT)]
+    [line] = acted.lines
+    assert line.startswith(f"{AGENT}'s state couldn't be read (")
+    assert ("did not run" if missing_powershell else "Access is denied") in line
+    assert line.endswith("; ran /run unchecked, so a task that allows parallel instances "
+                         "may now run a second copy")
+
+
+def test_restart_when_the_read_fails_runs_both_steps_unchecked(w):
+    unit = agent(w, "Running", 0x41301)
+    w.sup.fail[("tasks", None)] = "Get-ScheduledTask : Access is denied."
+    acted = w.backend.act("restart", unit, w.fence)
+    assert acted.ok
+    assert w.sup.calls == [("tasks",), ("/end", AGENT), ("/run", AGENT)]
+    assert "ran /end /run unchecked" in acted.lines[0]
+
+
+def test_a_timers_acts_on_a_foreign_task_are_as_before(w):
+    w.sup.foreign[DAILY] = {"state": "Running", "last_run": None, "last_result": 0}
+    w.sup.calls.clear()
+    acted = w.backend.act("start", w.backend.foreign(DAILY, None), w.fence)
+    assert acted.ok and w.sup.calls == [("/run", DAILY)]
+
+
+# -- kinds through the public API ------------------------------------------------------------
+
+def test_status_reads_a_task_named_a_daemon_by_kinds_and_others_as_timers(w):
+    w.sup.foreign[AGENT] = {"state": "Ready", "last_run": EARLIER, "last_result": 1}
+    w.sup.foreign[DAILY] = {"state": "Ready", "last_run": EARLIER, "last_result": 1}
+    rows = units.status([], foreign=[AGENT, DAILY], kinds={AGENT: "daemon", "x": "timer"},
+                        runner=w.sup)
+    assert [(r.name, r.kind, r.state) for r in rows] == [
+        (AGENT, "daemon", "failed"), (DAILY, "timer", "active")]
+    assert rows[0].last == {"supervisor": {"last_run": EARLIER, "last_result": 1}}
+    [same] = units.status([], foreign=[AGENT], runner=w.sup)
+    assert (same.kind, same.state) == ("timer", "active")
+
+
+def test_a_row_decided_without_a_read_takes_its_kind_from_kinds(w):
+    [own] = units.status([], foreign=["\\Moxi\\demo-x"], kinds={"\\Moxi\\demo-x": "daemon"},
+                         runner=w.sup)
+    assert (own.kind, own.state) == ("daemon", "unknown")
+    [own] = units.status([], foreign=["\\Moxi\\demo-x.timer"], runner=w.sup)
+    assert own.kind == "timer"
+
+
+def test_the_acts_act_on_a_task_named_a_daemon_by_kinds(w):
+    w.sup.foreign[AGENT] = {"state": "Running", "last_run": EARLIER, "last_result": 0x41301}
+    [acted] = units.start("services", [AGENT], foreign=True, kinds={AGENT: "daemon"},
+                          runner=w.sup)
+    assert acted.ok and w.sup.calls == [("tasks",)]  # running: one copy, no /run
+    [acted] = units.start("services", [AGENT], foreign=True, runner=w.sup)
+    assert acted.ok and w.sup.calls[-1] == ("/run", AGENT)  # a timer's run, as before
+
+
+@pytest.mark.parametrize("bad", [{AGENT: "service"}, {AGENT: None}, [AGENT]])
+def test_kinds_with_a_bad_value_raises(w, bad):
+    with pytest.raises(ValueError):
+        units.status([], foreign=[AGENT], kinds=bad, runner=w.sup)
+    with pytest.raises(ValueError):
+        units.start("services", [AGENT], foreign=True, kinds=bad, runner=w.sup)
+    assert w.sup.calls == []
+
+
+@pytest.mark.parametrize("act", ["start", "stop", "restart", "enable", "disable"])
+def test_kinds_on_an_act_without_foreign_raises(w, act):
+    with pytest.raises(ValueError, match="foreign=True"):
+        getattr(units, act)("demo", ["relay"], kinds={"relay": "daemon"}, runner=w.sup)
+    assert w.sup.calls == []
+
+
 # -- a socket daemon whose start follows a setting -------------------------------------------
 
 def test_a_switch_form_start_changes_no_task_and_its_key_writes_and_restarts_nothing(
@@ -1030,3 +1417,168 @@ def test_a_real_task_under_a_test_folder_is_created_run_read_ended_and_deleted(
     finally:
         fence.run("/end", task)
         fence.run("/delete", task)
+
+
+def _logged_on(account: str) -> bool | None:
+    """Whether `query user` lists `account` (its name without the domain) as logged on;
+    None when `query` can't run here."""
+    name = account.rpartition("\\")[2].casefold()
+    try:
+        done = subprocess.run(["query", "user"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in done.stdout.splitlines()[1:]:
+        words = line.lstrip(" >").split()
+        if words and words[0].casefold() == name:
+            return True
+    return False
+
+
+def _sleepers(tag: str) -> list[int]:
+    """The pids of the task's `Start-Sleep` processes, found by `tag` in their command
+    line (the PowerShell that looks is left out)."""
+    script = ("Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and "
+              f"$_.CommandLine -like '*Start-Sleep 3600 # {tag}*' }} | "
+              "ForEach-Object { $_.ProcessId }")
+    done = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                           script], capture_output=True, text=True, timeout=60)
+    return [int(word) for word in done.stdout.split() if word.isdigit()]
+
+
+@windows
+def test_a_real_foreign_task_read_as_a_daemon_tracks_its_process(tmp_path, record_property):
+    """Registers `\\\\MoxiTest\\\\<hex>-daemon`, an InteractiveToken task with policy
+    Parallel whose action is one `Start-Sleep` carrying the hex, and reads and acts on it
+    as a foreign daemon from a second backend. It records what Windows does where the
+    source can't settle it (a killed process's result, `State` of a running task disabled,
+    how long `State` takes to follow `/run` and `/end`, whether `Queued` can be made),
+    each in the JUnit report, and fails at the end naming every value that contradicts a
+    rule of the daemon read or its acts.
+
+    A non-admin account can register only an InteractiveToken task, which runs only while
+    that account is logged on interactively; an ssh session isn't one. So the row skips
+    unless `query user` lists the account, or when its first `/run` doesn't read
+    `Running` within 10 s."""
+    import secrets
+    import time
+
+    from moxi.units._fence import Fence as RealFence
+    from moxi.units._schtasks import SETTLE_SECONDS
+
+    owner = SchtasksBackend(folder="\\MoxiTest\\")
+    account = owner.user()
+    needs = (f"needs {account} logged on at the console: an InteractiveToken task runs "
+             "only in an interactive session")
+    if not _logged_on(account):
+        pytest.skip(needs)
+    fence = RealFence("schtasks")
+    tag = secrets.token_hex(4)
+    task = f"\\MoxiTest\\{tag}-daemon"
+    other = SchtasksBackend()
+    unit = other.foreign(task, None, kind="daemon")
+    found: dict[str, object] = {}
+    wrong: list[str] = []
+
+    def keep(key, value):
+        found[key] = value
+        record_property(key, value)
+        print(f"{key}: {value!r}")
+
+    def read():
+        [state] = other.status([unit], fence)
+        return state
+
+    def code(state):
+        return (state.last or {}).get("last_result")
+
+    def until(want, seconds):
+        """Read until `want(state)` or `seconds` pass: `(state, seconds taken)`."""
+        start = time.monotonic()
+        while True:
+            state = read()
+            if want(state) or time.monotonic() - start >= seconds:
+                return state, time.monotonic() - start
+            time.sleep(0.1)
+
+    def register(policy):
+        xml = tmp_path / f"{policy}.xml"
+        text = ('<?xml version="1.0" encoding="UTF-16"?>\n'
+                f'<Task version="1.2" xmlns="{NS}"><Principals><Principal id="Author">'
+                f"<UserId>{account}</UserId><LogonType>InteractiveToken</LogonType>"
+                "<RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings>"
+                f"<MultipleInstancesPolicy>{policy}</MultipleInstancesPolicy>"
+                "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
+                "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
+                "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"
+                "<Enabled>true</Enabled></Settings><Actions Context=\"Author\"><Exec>"
+                "<Command>powershell.exe</Command><Arguments>-NoProfile -Command "
+                f"\"Start-Sleep 3600 # {tag}\"</Arguments></Exec></Actions></Task>\n")
+        xml.write_bytes(text.encode("utf-16"))
+        assert fence.run("/create", task, str(xml)).ok
+
+    try:
+        register("Parallel")
+        # 1. Never run: inactive, "has not yet run".
+        state = read()
+        if (state.state, code(state)) != ("inactive", 0x41303):
+            wrong.append(f"before any run it read {state.state} ({state.detail})")
+        # 2. start runs it; a second start leaves one copy.
+        assert other.act("start", unit, fence).ok
+        state, _ = until(lambda s: s.state == "active", 10.0)
+        if state.state != "active":
+            pytest.skip(needs)
+        if state.since is None:
+            wrong.append("a running task read no since")
+        assert other.act("start", unit, fence).ok
+        copies = _sleepers(tag)
+        if len(copies) != 1:
+            wrong.append(f"a second start left {len(copies)} copies")
+        # 3. A killed process reads failed.
+        for pid in copies:
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                            f"Stop-Process -Id {pid} -Force"], capture_output=True,
+                           timeout=60)
+        state, _ = until(lambda s: s.state != "active", 10.0)
+        keep("killed_result", code(state))
+        if state.state != "failed":
+            wrong.append(f"a killed process read {state.state} ({state.detail})")
+        # 4. start again, through the stale crash read.
+        assert other.act("start", unit, fence).ok
+        if read().state != "active":
+            wrong.append("start after a crash did not read active")
+        # 5. stop: inactive with a code in the success band.
+        assert other.act("stop", unit, fence).ok
+        state = read()
+        keep("ended_result", code(state))
+        if state.state != "inactive" or code(state) not in units.TASK_STATUS_CODES:
+            wrong.append(f"stop read {state.state} ({state.detail})")
+        # 6. Disabled while it runs: what State reads.
+        assert other.act("start", unit, fence).ok
+        assert fence.run("/change", task, "/disable").ok
+        state = read()
+        keep("disabled_running_state", state.detail)
+        if (state.state, state.enabled) != ("active", False):
+            wrong.append(f"a running task disabled read {state.state}, enabled "
+                         f"{state.enabled} ({state.detail})")
+        assert fence.run("/change", task, "/enable").ok
+        assert other.act("stop", unit, fence).ok
+        # 7. How long State takes to follow /run and /end.
+        assert fence.run("/run", task).ok
+        _, took = until(lambda s: s.state == "active", 15.0)
+        keep("run_to_running_s", round(took, 2))
+        assert fence.run("/end", task).ok
+        _, took = until(lambda s: s.state != "active", 15.0)
+        keep("end_to_ready_s", round(took, 2))
+        for key in ("run_to_running_s", "end_to_ready_s"):
+            if found[key] > SETTLE_SECONDS:
+                wrong.append(f"{key} {found[key]} is over {SETTLE_SECONDS:g} s")
+        # 8. Whether a second /run under policy Queue reads Queued.
+        register("Queue")
+        fence.run("/run", task)
+        fence.run("/run", task)
+        seen, _ = until(lambda s: (s.detail or "").startswith("Queued"), 3.0)
+        keep("queued_seen", (seen.detail or "").startswith("Queued"))
+    finally:
+        fence.run("/end", task)
+        fence.run("/delete", task)
+    assert not wrong, wrong

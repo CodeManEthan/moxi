@@ -17,6 +17,14 @@ translated, so its text is never read), plus the gate's runtime file
 `RUNTIME/moxi/units/<module>-<name>.json` (`{"pid", "started"}`), which names the running
 daemon. A task's `enabled`, and a foreign task's state and last result, come from the
 fence's one PowerShell read (`Get-ScheduledTask` with `Get-ScheduledTaskInfo`, as JSON).
+
+A foreign task is read and acted on as a timer unless its caller says it is a daemon
+(`foreign(ref, fence, kind="daemon")`). Read as a daemon it is `active` only while its
+`State` is `Running`, and `failed` when it reads `Ready` with a last result outside
+Task Scheduler's success band (`TASK_STATUS_CODES`). Task Scheduler sees only the
+action's own process, so a task whose action starts a program and exits reads `inactive`
+while that program runs: such a task is a timer. Its acts read the task around `/run`
+and `/end`, which return before `State` changes (see `_act_foreign_daemon`).
 """
 
 from __future__ import annotations
@@ -26,14 +34,16 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import replace as _replaced
+from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
 from ._fence import Fence, Ran, task_refs_env
-from ._types import Acted, UnitChange, UnitState, Wrapped
+from ._types import TASK_STATUS_CODES, Acted, UnitChange, UnitState, Wrapped
 
 #: The task folder that is moxi's namespace on this backend.
 FOLDER = "\\Moxi\\"
@@ -41,6 +51,10 @@ FOLDER = "\\Moxi\\"
 NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 #: The schedule's anchor: a fixed day in the past, local time.
 ANCHOR = "2000-01-01"
+#: How long an act on a foreign daemon task waits for the task's `State` to follow a
+#: `/run` or an `/end`, and how often it reads the task meanwhile, in seconds.
+SETTLE_SECONDS = 5.0
+SETTLE_EVERY = 0.25
 
 _MARK = re.compile(r"<Source>\s*moxi unit: ([^<\s]+)\s*</Source>")
 _SETTINGS = re.compile(r"<Settings>(.*?)</Settings>", re.S)
@@ -53,7 +67,9 @@ class SchtasksBackend:
 
     `user` is the account the tasks run as and log on with, `DOMAIN\\user`; it is read
     from this process's token when first needed unless given. `folder` is the task
-    folder (`\\Moxi\\`; a proof row uses another).
+    folder (`\\Moxi\\`; a proof row uses another). `clock` (seconds, monotonic) and
+    `sleep` time the reads an act on a foreign daemon task makes while it waits for
+    `State` to follow; a test passes its own so nothing waits.
     """
 
     name = "schtasks"
@@ -61,9 +77,13 @@ class SchtasksBackend:
     encoding = "utf-16"
     sockets = "none"
 
-    def __init__(self, *, user: str | None = None, folder: str = FOLDER):
+    def __init__(self, *, user: str | None = None, folder: str = FOLDER,
+                 clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], object] | None = None):
         self._user = user
         self.folder = folder
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or time.sleep
 
     # -- where things are ------------------------------------------------------------------
 
@@ -272,11 +292,14 @@ class SchtasksBackend:
         path = _path(ref).casefold()
         return path.startswith(FOLDER.casefold()) or path.startswith(self.folder.casefold())
 
-    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
-        """The task `ref` (a leading `\\` added when it has none), read and acted on as a
-        timer: services adopts scheduled tasks, and a timer's acts never end a run the user
+    def foreign(self, ref: str, fence: Fence | None, kind: str | None = None) -> UnitRef:
+        """The task `ref` (a leading `\\` added when it has none), read and acted on as
+        `kind`: a timer when no kind is given, since a task's own definition doesn't say
+        whether it is meant to keep running, and a timer's acts never end a run the user
         started. No supervisor call, with a fence or without one."""
-        return UnitRef(None, ref, "timer", (_path(ref),))
+        if kind not in (None, "daemon", "timer"):
+            raise ValueError(f"a foreign unit is read as a daemon or a timer, not {kind!r}")
+        return UnitRef(None, ref, kind or "timer", (_path(ref),))
 
     def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
         """The task path `\\Moxi\\<module>-<name>`, for a daemon and a timer alike, whether
@@ -298,11 +321,98 @@ class SchtasksBackend:
         }.get(act)
         if steps is None:
             return Acted(unit.module, unit.name, act, False, (f"no such act {act!r}",))
+        if daemon and not unit.marked:
+            return self._act_foreign_daemon(act, unit, steps, fence)
         for verb, *rest in steps:
             ran = self._end(task, fence) if verb == "/end" else fence.run(verb, task, *rest)
             if not ran.ok:
                 return Acted(unit.module, unit.name, act, False, (ran.failure(),))
         return Acted(unit.module, unit.name, act, True)
+
+    def _act_foreign_daemon(self, act: str, unit: UnitRef, steps, fence: Fence) -> Acted:
+        """`act`'s steps on a foreign task read as a daemon, around reads of the task.
+
+        `/run` and `/end` return before `State` changes, and a foreign task's
+        `MultipleInstancesPolicy` is its owner's, so:
+
+        - One copy: a task that reads `Running` gets no `/run`.
+        - A settle accepts only a read newer than the act. After `/run` it ends when the
+          task reads `Running`, or when its `LastRunTime` is later than the mark (the
+          `LastRunTime` of the read just before `/run`), meaning a run started since and
+          may have ended already. When the mark is None (the task never ran, or its
+          `LastRunTime` doesn't parse), any `LastRunTime` that parses ends it. A read
+          that still shows the run from before the act doesn't, even when that run's
+          crash code reads `failed`. After `/end` it ends when the task stops reading
+          `Running`.
+        - A step a later step depends on must settle; the last step need not. `restart`
+          whose `/end` hasn't settled in `SETTLE_SECONDS` stops there with `ok=False`
+          and never runs `/run`. A last step that hasn't settled leaves the act `ok`:
+          the supervisor took the command, and the caller's own read says what it sees.
+        - When a read fails (no PowerShell, an error, or the task not found by it), the
+          steps from there on run unchecked, with one line saying so.
+        """
+        task = unit.ids[0]
+        info, why = self._read_one(task, fence)
+        unchecked: list[str] = []
+        for i, (verb, *rest) in enumerate(steps):
+            if info is None:
+                unchecked.append(verb)
+                ran = (self._end(task, fence) if verb == "/end"
+                       else fence.run(verb, task, *rest))
+                if not ran.ok:
+                    return Acted(unit.module, unit.name, act, False,
+                                 (ran.failure(), *_unchecked(task, why, unchecked)))
+                continue
+            if verb == "/change":
+                ran = fence.run(verb, task, *rest)
+            elif verb == "/run":
+                if info.get("state") == "Running":
+                    continue
+                mark = _epoch(info.get("last_run"))
+                ran = fence.run("/run", task)
+                if ran.ok:
+                    _, info, why = self._settle(
+                        task, fence, lambda read: read.get("state") == "Running"
+                        or _newer(_epoch(read.get("last_run")), mark))
+            else:
+                ran = self._end(task, fence)
+                if ran.ok:
+                    settled, info, why = self._settle(
+                        task, fence, lambda read: read.get("state") != "Running")
+                    if not settled and info is not None and i < len(steps) - 1:
+                        return Acted(unit.module, unit.name, act, False, (
+                            f"{task} still runs {SETTLE_SECONDS:g} s after /end; not "
+                            "started again",))
+            if not ran.ok:
+                return Acted(unit.module, unit.name, act, False, (ran.failure(),))
+        return Acted(unit.module, unit.name, act, True,
+                     _unchecked(task, why, unchecked))
+
+    def _settle(self, task: str, fence: Fence, done: Callable[[dict], bool]
+                ) -> tuple[bool, dict | None, str | None]:
+        """Read `task` every `SETTLE_EVERY` s until `done(read)` or `SETTLE_SECONDS` have
+        passed: `(settled, the last read, None)`, or `(False, None, why)` when a read
+        fails."""
+        deadline = self._clock() + SETTLE_SECONDS
+        while True:
+            info, why = self._read_one(task, fence)
+            if info is None:
+                return False, None, why
+            if done(info):
+                return True, info, None
+            if self._clock() >= deadline:
+                return False, info, None
+            self._sleep(SETTLE_EVERY)
+
+    def _read_one(self, task: str, fence: Fence) -> tuple[dict | None, str | None]:
+        """The PowerShell read of one task: `(item, None)`, or `(None, why)`."""
+        tasks, why = self._read_tasks([task], fence)
+        if tasks is None:
+            return None, why or "the task read failed"
+        info = tasks.get(task.casefold())
+        if info is None:
+            return None, f"the task read did not find {task}"
+        return info, None
 
     def running(self, ids: Sequence[str], fence: Fence) -> frozenset[str]:
         """The tasks of `ids` whose gate's runtime file names a live process, read from the
@@ -393,12 +503,13 @@ class SchtasksBackend:
                          log=self.log(unit), **more, **common)
 
     def _foreign_state(self, unit: UnitRef, tasks, info, why) -> UnitState:
-        """A task outside moxi's folder, read as a timer from the PowerShell read: `State`
-        `Disabled` is `inactive`, any other `active` with the raw `State` in `detail` (so a
-        run in progress still shows). `last` holds `LastRunTime` and `LastTaskResult` as
-        they came; whether that result is a failure is the caller's to judge, and no state
-        here is `failed`. A ref the read doesn't find is `missing`; no PowerShell, or a
-        failed read, `unknown`."""
+        """A task outside moxi's folder, from the PowerShell read. Read as a timer (the
+        kind with no hint): `State` `Disabled` is `inactive`, any other `active` with the
+        raw `State` in `detail` (so a run in progress still shows). `last` holds
+        `LastRunTime` and `LastTaskResult` as they came; whether that result is a failure
+        is the caller's to judge, and no timer state here is `failed`. Read as a daemon,
+        see `_foreign_daemon_state`. A ref the read doesn't find is `missing`; no
+        PowerShell, or a failed read, `unknown`."""
         common = dict(module=None, name=unit.name, kind=unit.kind, backend=self.name)
         if tasks is None:
             return UnitState(state="unknown", detail=why or "the task read failed", **common)
@@ -408,6 +519,8 @@ class SchtasksBackend:
         raw = info.get("state") or ""
         code = info.get("last_result")
         last = {"last_run": info.get("last_run"), "last_result": code}
+        if unit.kind == "daemon":
+            return _foreign_daemon_state(info, last, common)
         state = "inactive" if raw == "Disabled" else "active"
         detail = raw if not isinstance(code, int) else f"{raw}, last result 0x{code:08X}"
         return UnitState(state=state, detail=detail, last=last, enabled=raw != "Disabled",
@@ -541,6 +654,77 @@ def _triggers(spec: Spec) -> list[str]:
                 when,
                 "    </CalendarTrigger>"]
     return out
+
+
+def _foreign_daemon_state(info: dict, last: dict, common: dict) -> UnitState:
+    """A foreign task read as a daemon. Running and enabled are read apart: running from
+    `State`, `enabled` from the task's own setting (the read's `enabled`; `State` isn't
+    `Disabled` when the item has none).
+
+        State      LastTaskResult                     state     since
+        Running    any                                active    LastRunTime
+        Ready      0, None, or in TASK_STATUS_CODES   inactive  None
+        Ready      any other int                      failed    None
+        Queued     any                                inactive  None
+        Disabled   any                                inactive  None
+        other      any                                unknown   None
+
+    `detail` is `State`, with `, last result 0x...` when the result is an int; an unknown
+    `State` reads "Task Scheduler reads <State>". `pid` is None: the read names no
+    process."""
+    raw = info.get("state") or ""
+    code = info.get("last_result")
+    if isinstance(code, bool) or not isinstance(code, int):
+        code = None
+    flag = info.get("enabled")
+    enabled = flag if isinstance(flag, bool) else raw != "Disabled"
+    detail = raw if code is None else f"{raw}, last result 0x{code & 0xFFFFFFFF:08X}"
+    since = None
+    if raw == "Running":
+        state, since = "active", _epoch(info.get("last_run"))
+    elif raw == "Ready":
+        state = "failed" if _failure(code) else "inactive"
+    elif raw in ("Queued", "Disabled"):
+        state = "inactive"
+    else:
+        state, detail = "unknown", f"Task Scheduler reads {raw or 'no state'}"
+    return UnitState(state=state, detail=detail, last=last, enabled=enabled, since=since,
+                     **common)
+
+
+def _failure(code: int | None) -> bool:
+    """A task's last result is a failure exactly when it is non-zero and outside Task
+    Scheduler's success band."""
+    return code is not None and code != 0 and (code & 0xFFFFFFFF) not in TASK_STATUS_CODES
+
+
+def _epoch(value) -> float | None:
+    """A `LastRunTime` as the read gives it (PowerShell's `'o'` format) as seconds since
+    the epoch; one with no offset is local time. None for None or a value that doesn't
+    parse."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _newer(seen: float | None, mark: float | None) -> bool:
+    """Whether a `LastRunTime` read after `/run` shows a run that started since the
+    mark: later than the mark, or, with no mark, any that parses."""
+    return seen is not None and (mark is None or seen > mark)
+
+
+def _unchecked(task: str, why: str | None, verbs: list[str]) -> tuple[str, ...]:
+    """The line an act on a foreign daemon task adds when it ran `verbs` without reading
+    the task, or nothing when every step was checked."""
+    if not verbs:
+        return ()
+    line = (f"{task}'s state couldn't be read ({why}); ran {' '.join(verbs)} unchecked")
+    if "/run" in verbs:
+        line += ", so a task that allows parallel instances may now run a second copy"
+    return (line,)
 
 
 def _path(ref: str) -> str:

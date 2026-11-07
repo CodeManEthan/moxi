@@ -519,10 +519,15 @@ class Backend(Protocol):
         launchd `moxi.*`, a task under `\\Moxi\\`), marked or not."""
         ...
 
-    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None, kind: str | None = None) -> UnitRef:
         """The `UnitRef` of the foreign unit `ref` (a systemd unit name, a launchd label, a
         task path), `module` None. A foreign systemd timer's ids are its `.timer` and the
         unit its `Triggers` names, read with one `show`.
+
+        `kind` is the caller's hint, `"daemon"` or `"timer"`, and the core passes it only
+        when the caller gave one. Only Task Scheduler honours it, since a task doesn't
+        say its kind; a task with no hint is a timer. systemd takes the kind from the
+        suffix and launchd from the plist, and both ignore the hint.
 
         With `fence` None it makes no supervisor call and gives what the name and the files
         tell: a foreign systemd timer's ids are then its `.timer` alone, and `status`
