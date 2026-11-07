@@ -418,8 +418,14 @@ class CodexAdapter(HarnessAdapter):
         # The facts are read at the subscription: no turn event falls between them and
         # the first event the watch gives.
         watch = self._watch_handle = session.watch()
+        facts = watch.facts
         with self._lock:
-            self.turn_open = bool(watch.facts.turn_open)
+            self.turn_open = bool(facts.turn_open)
+            # A turn that ended before the subscription (the host's priming turn can)
+            # reaches no event: the facts' count says the thread has turned, and the
+            # ready report below carries it.
+            if facts.turn_number - (1 if facts.turn_open else 0) > 0:
+                self._own_turned = True
             # The watch replays nothing: turns' resume ready for the first load reaches
             # it only when no ready had been raised at the subscription.
             self._first_resume_unseen = (self.resume is not None

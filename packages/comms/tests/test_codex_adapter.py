@@ -333,6 +333,20 @@ def test_the_first_turn_end_sets_turned(rig, launch):
     assert wait_until(lambda: adapter.session_report(register=False)["turned"])
 
 
+def test_a_turn_that_ended_before_the_watch_sets_turned(rig, launch):
+    """The host's priming turn can end before the adapter subscribes. turns' watch
+    replays nothing, so only the facts' turn count says the thread has turned, and the
+    ready report the launch sends carries it."""
+    session = FakeSession()
+    session.start_turn()
+    session.end_turn("answer")
+    while not session._events.empty():        # a real watch replays nothing
+        session._events.get_nowait()
+    adapter = launch(session=session)
+    assert adapter.session_report(register=False)["turned"] is True
+    assert wait_until(lambda: rig.daemon.bindings["planner@proj-a"].turned)
+
+
 def test_a_register_before_the_launch_reports_a_new_session(rig, launch):
     adapter = launch(start=False)
     assert adapter.session_report(register=True)["new_session"] is True
