@@ -212,8 +212,9 @@ def test_shim_surfaces_comms_offline_and_reconnects(rig):
     b = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
                  backoff=itertools.repeat(0.02))
     rig.daemon.stop()
-    assert wait_until(lambda: b.offline)
-    assert any(OFFLINE_MESSAGE in s for s in b.statuses)
+    # The shim sets `offline` before it reports the line, so wait on the line itself.
+    assert wait_until(lambda: any(OFFLINE_MESSAGE in s for s in b.statuses))
+    assert b.offline
 
     fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     rig.daemon = fresh

@@ -9,6 +9,7 @@ from types import MappingProxyType
 import pytest
 
 import moxi.modules as modules
+from moxi import names
 from moxi.modules import ABSENT, BROKEN, PRESENT
 
 from conftest import ANNOUNCEMENT_DEFAULTS
@@ -414,11 +415,22 @@ def test_run_time_entries_take_their_own_forms():
 
 # --- names the core keeps ----------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["moxi", "set", "unset", "runtime", "installs", "anchor"])
+@pytest.mark.parametrize("name", ["moxi", "set", "unset", "runtime", "installs", "test",
+                                  "anchor"])
 def test_a_name_the_core_keeps_is_broken(site, name):
     site.module(name)
     found = modules.load(name)
     assert found.state == BROKEN and "keeps for itself" in found.reason
+    assert names.reserved_why(name) in found.reason
+
+
+def test_a_module_named_test_is_broken_saying_why(site):
+    site.module("test")
+    found = modules.load("test")
+    assert found.state == BROKEN
+    assert found.reason == ("'test' is a name moxi keeps for itself, not a module: its "
+                            "variables would start MOXI_TEST_, which moxi-dev's test tiers "
+                            "use; the module needs another name")
 
 
 @pytest.mark.parametrize("name", ["doctor", "uninstall", "run", "paths"])

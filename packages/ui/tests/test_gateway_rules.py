@@ -177,11 +177,21 @@ def plain(tmp_path):
     return {"HOME": str(tmp_path / "home"), "XDG_RUNTIME_DIR": str(tmp_path / "run")}
 
 
-@pytest.mark.parametrize("name", ["MOXI_HOME", "MOXI_UI_HOME", "MOXI_UI_RUNTIME_DIR"])
-def test_a_locator_that_moves_the_runtime_dir_is_named(plain, tmp_path, name):
-    moved = {**plain, name: str(tmp_path / "elsewhere")}
+@pytest.mark.parametrize("name", ["MOXI_UI_HOME", "MOXI_UI_RUNTIME_DIR"])
+@pytest.mark.parametrize("home", [False, True], ids=["default home", "tagged home"])
+def test_a_locator_that_moves_the_runtime_dir_is_named(plain, tmp_path, name, home):
+    base = {**plain, "MOXI_HOME": str(tmp_path / "h")} if home else plain
+    moved = {**base, name: str(tmp_path / "elsewhere")}
     text = endpoint.runtime_problem(moved, platform="linux")
     assert text and name in text and f"unset {name}" in text
+    assert "MOXI_HOME" not in text
+
+
+def test_a_tagged_home_moves_nothing(plain, tmp_path):
+    """A tagged home's units run with its `MOXI_HOME`, so the shell they start reads this
+    runtime directory."""
+    assert endpoint.runtime_problem({**plain, "MOXI_HOME": str(tmp_path / "h")},
+                                    platform="linux") is None
 
 
 def test_a_locator_that_leaves_the_runtime_dir_where_it_was_passes(plain):

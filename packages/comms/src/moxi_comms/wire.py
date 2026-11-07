@@ -116,9 +116,11 @@ def version_text(data: object, ours: tuple[int, int] = VERSIONS) -> str:
         return (f"the comms daemon refused this comms' wire {client[0]}-{client[1]}. "
                 "Nothing was sent.")
     if client[0] > server[1]:
+        from .checks import restart
+
         return (f"the comms daemon running speaks comms wire {server[0]}-{server[1]} and "
                 f"this comms speaks {client[0]}-{client[1]}: the daemon is older. Restart "
-                "it (`moxi comms service restart`), then run this again. Nothing was sent.")
+                f"it ({restart()}), then run this again. Nothing was sent.")
     return (f"this comms speaks comms wire {client[0]}-{client[1]} and its daemon speaks "
             f"{server[0]}-{server[1]}: this program is older than the daemon. Relaunch the "
             "session (an adapter) or update this install (a verb). Nothing was sent.")

@@ -367,7 +367,10 @@ class ClaudeAdapter:
 
     def _turn_ended(self, event) -> None:
         """A turn ended: each digest it names settles from its outcome, and the end is a
-        boundary, unless the boundary digest still waits behind it."""
+        boundary, unless the boundary digest still waits behind it. A turn that ended
+        with the model's answer made a request just now, and its `turn_ended` says so
+        (`answered`), so the daemon releases held mail without waiting on the
+        transcript."""
         handled = event.outcome == ANSWER
         with self._lock:
             self.turn_open = False
@@ -384,7 +387,7 @@ class ClaudeAdapter:
                     self.shim.settle_steered(hand.digest, handled=handled)
             if boundary_named:
                 # The boundary digest's own turn: it settles, and the next one goes in.
-                self.shim.on_turn_boundary(failed=not handled)
+                self.shim.on_turn_boundary(failed=not handled, answered=handled)
             elif self.boundary is not None:
                 # Another turn ended (the person's, or one the digest waits behind): the
                 # digest still awaits its own. The turn's block is over, and the daemon
@@ -392,11 +395,11 @@ class ClaudeAdapter:
                 self.shim._clear_block()
                 if self._current(event.session_id):
                     self.shim.note_turned()
-                self.shim._send_turn()
+                self.shim._send_turn(answered=handled)
             else:
                 # A boundary with no digest awaiting: it reports what settled, tells the
                 # daemon, and hands over what is queued.
-                self.shim.on_turn_boundary()
+                self.shim.on_turn_boundary(answered=handled)
 
     # ------------------------------------------------------------------ delivery
     def _handover(self, text: str, digest, *, steer: bool = False) -> None:
@@ -486,10 +489,10 @@ class ClaudeAdapter:
                 log.info("digest %s: its turn ended %s; it is %s", hand.digest,
                          result.outcome, "handled" if handled else "unhandled")
                 if hand.boundary:
-                    self.shim.on_turn_boundary(failed=not handled)
+                    self.shim.on_turn_boundary(failed=not handled, answered=handled)
                 else:
                     self.shim.settle_steered(hand.digest, handled=handled)
-                    self.shim._send_turn()
+                    self.shim._send_turn(answered=handled)
                 return
             reason = getattr(result, "reason", "")
             gone = ((isinstance(result, T.Lost) and not result.untied)
@@ -610,6 +613,13 @@ def wait_for_exit(fd: int, stop: threading.Event | None = None) -> None:
             return
 
 
+def ended(fd: int) -> bool:
+    """Whether the process `fd` (a pidfd) refers to has ended, without waiting."""
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+    return bool(poller.poll(0))
+
+
 def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
           turns=None) -> int:
     """The adapter process's life: bind, give the wrapper its word, deliver until
@@ -622,16 +632,29 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
     before `claude` starts. Once bound, the supervisor binds again whenever the daemon
     comes back from an outage.
 
+    `harness_fd` is a handle on the wrapper's own process, which becomes `claude` at its
+    exec. A wrapper that gave up waiting has ended, so this adapter serves nobody: it
+    ends without binding when the wrapper is gone before the bind starts, and when its
+    `BOUND` can't be delivered (`say` returns False) it lets go of the name and ends
+    with `moxi.exit.TEMPFAIL`, before it delivers anything. A `say` that returns
+    nothing counts as delivered.
+
     A launch that carries comms' tools has the session's token in this process's
     environment: the shim keeps its hash (the value leaves the environment) and registers
     it after every bind, the first before `BOUND` is said, so `claude` starts after it.
     The form of layer one the session was taught is read first, while the token is still
     there to show it."""
+    from moxi import exit as moxi_exit
+
     from ..context import layer_one_form
     from .binding import ToolToken
     from .word import BOUND, exit_of, word_for
 
     say = say or (lambda code, reason="": None)
+    if ended(harness_fd):
+        log.info("the wrapper of claude pid %d ended before the bind; nothing to serve",
+                 harness_pid)
+        return moxi_exit.TEMPFAIL
     if shim.tool_token is None:
         shim.layer_form = layer_one_form(os.environ)
         shim.tool_token = ToolToken.from_environ()
@@ -644,7 +667,11 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
         say(word, str(e))
         shim.stop(remove_claim_file=True)
         return exit_of(word)
-    say(BOUND)
+    if say(BOUND) is False:
+        log.warning("the wrapper of claude pid %d stopped waiting before the bind was "
+                    "answered; letting the name go", harness_pid)
+        adapter.stop(remove_claim_file=True)
+        return moxi_exit.TEMPFAIL
     log.info("adapter for claude pid %d is up (pid %d)", harness_pid, os.getpid())
     try:
         wait_for_exit(harness_fd)
@@ -654,4 +681,5 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
     return 0
 
 
-__all__ = ["ClaudeAdapter", "Hand", "LOOK_INTERVAL", "WAIT_RETRY", "serve", "wait_for_exit"]
+__all__ = ["ClaudeAdapter", "Hand", "LOOK_INTERVAL", "WAIT_RETRY", "ended", "serve",
+           "wait_for_exit"]

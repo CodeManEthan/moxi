@@ -10,8 +10,8 @@ from types import MappingProxyType
 #: What `plan` may decide for one unit.
 ACTIONS = ("add", "change", "keep", "remove", "refuse", "skip")
 #: The causes a `refuse`, `skip` or `remove` carries.
-CAUSES = ("editable", "foreign", "command", "switch", "socket", "declaration", "nobackend",
-          "platform")
+CAUSES = ("editable", "locator", "foreign", "command", "switch", "socket", "declaration",
+          "nobackend", "platform")
 #: A unit's kinds. A `socket` is a daemon's listening sockets, under its daemon's name. In
 #: a plan it is the socket units a backend writes apart from the daemon's own file
 #: (systemd's, one per address); in `status` every daemon with a `socket` has one, on every

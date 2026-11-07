@@ -42,7 +42,10 @@ What the wrapper does, in order:
   4. forks the session's adapter (`codex.CodexAdapter`). The adapter binds the name with
      the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with this
      process as the claim's root, then says so. The wrapper waits for its word, at most
-     `READY_WAIT` seconds;
+     `READY_WAIT` seconds, and says once that it is waiting when two seconds pass with no
+     word. A bind that isn't answered in that time ends the launch with `TEMPFAIL` (75):
+     the host never starts under a name the daemon hasn't bound, and the adapter, finding
+     nobody waiting for its word, lets the name go;
   5. writes layer one, the thread's developer instructions, to a 0600 file in that
      directory;
   6. execs `moxi-turns-codex-host` (found by `moxi.paths.script`, never on PATH) with
@@ -74,8 +77,8 @@ These give the thread parameters a roster row's `launch_options()` gives.
 
 Exit codes are `moxi.exit`'s. A bad flag, a bad roster row or a config file that doesn't
 load is `USAGE`; a name the daemon refuses (held, reserved, retired) is `REFUSED`, with
-the daemon's words; a daemon that isn't running is `TEMPFAIL`; all of them before Codex
-starts. A host that can't start is `ERROR`. Once the host runs, its exit status is the
+the daemon's words; a daemon that isn't running, or a bind it doesn't answer in
+`READY_WAIT`, is `TEMPFAIL`; all of them before Codex starts. A host that can't start is `ERROR`. Once the host runs, its exit status is the
 launch's.
 """
 
@@ -86,7 +89,6 @@ import json
 import logging
 import os
 import re
-import select
 import shutil
 import sys
 import threading
@@ -112,8 +114,9 @@ from .word import BOUND, FAILED, await_word, exit_of, teller, word_for
 PROG = "moxi-comms-codex"
 #: turns' Codex host, the console script the wrapper execs.
 HOST = "moxi-turns-codex-host"
-#: How long the wrapper waits for the adapter's word before it starts the host anyway.
-READY_WAIT = 10.0
+#: How long the wrapper waits for the adapter's word. A launch whose bind isn't answered
+#: in this time ends with `moxi.exit.TEMPFAIL` and never starts the host.
+READY_WAIT = 15.0
 #: The option comms always sets: Codex's multi-agent mode off.
 MULTI_AGENT_OFF = "agents.enabled=false"
 #: The sandbox a launch gets when it names neither a sandbox nor a profile.
@@ -581,8 +584,10 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     As the Claude wrapper does: this process takes a pidfd on itself first (it becomes
     the host at the exec, keeping its pid), and the adapter is forked twice over, in a
     session of its own, so it is never the host's child. A refusal the adapter reports
-    ends the launch here, with its exit code; past `ready_wait` the host starts anyway,
-    and the wrapper says so. `roster` stands in for the daemon's roster in layer one."""
+    ends the launch here, with its exit code. No word in `ready_wait` ends it too, with
+    `TEMPFAIL`, and the host never starts; the wrapper says once that it is waiting when
+    the word hasn't come after `word.NOTICE_AFTER`. `roster` stands in for the daemon's
+    roster in layer one."""
     from ..context import layer_one_form
     from .codex import fetch_roster, layer_one_text
     from .terminal import pidfd_open   # needs termios: not at the top
@@ -613,12 +618,17 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     os.close(w)
     os.waitpid(child, 0)
     os.close(handle)
-    word = await_word(r, ready_wait)
+    who = launch.agent.qualified
+    word = await_word(r, ready_wait, notice=lambda: print(
+        f"{prog}: waiting for the comms daemon to bind {who} (up to {ready_wait:g}s)",
+        file=sys.stderr, flush=True))
     os.close(r)
     if word is None:
-        print(f"{prog}: the session's comms adapter was not ready after {ready_wait:g}s; "
-              f"starting Codex anyway (its log: {launch.log_path()})", file=sys.stderr)
-    elif word[0] != BOUND:
+        print(f"{prog}: {who} was not launched: the comms daemon did not answer in "
+              f"{ready_wait:g}s; try again, or run moxi comms doctor (its log: "
+              f"{launch.log_path()})", file=sys.stderr)
+        return moxi_exit.TEMPFAIL
+    if word[0] != BOUND:
         code, why = word
         print(f"{prog}: {launch.agent.qualified} was not launched: "
               f"{why or 'the adapter ended before it bound'} (its log: "
@@ -635,11 +645,8 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     return exec_(str(host), argv, env)
 
 
-def _ended(handle: int) -> bool:
-    """Whether the process the pidfd `handle` refers to has ended."""
-    poller = select.poll()
-    poller.register(handle, select.POLLIN)
-    return bool(poller.poll(0))
+class NobodyWaits(RuntimeError):
+    """The wrapper stopped waiting for the adapter's word: no host will start."""
 
 
 def serve(adapter, handle: int, *, say=None) -> int:
@@ -649,6 +656,13 @@ def serve(adapter, handle: int, *, say=None) -> int:
     bind failed. A host that ended before its session was ready ends the adapter
     quietly: the host said why on its own terminal.
 
+    `handle` is a handle on the wrapper's own process, which becomes the host at its
+    exec. A wrapper that gave up waiting has ended, so this adapter serves nobody: it
+    ends without binding when the wrapper is gone before the bind starts, and when its
+    `BOUND` can't be delivered (`say` returns False) it lets go of the name and ends
+    with `moxi.exit.TEMPFAIL`, before it looks for a session or delivers anything. A
+    `say` that returns nothing counts as delivered.
+
     A launch that carries comms' tools has the session's token in this process's
     environment: the adapter keeps its hash (the value leaves the environment) and
     registers it after every bind, the first before `BOUND` is said. The form of layer
@@ -656,23 +670,36 @@ def serve(adapter, handle: int, *, say=None) -> int:
     thread record hashes that form, and the reply reminder follows it."""
     from ..context import layer_one_form
     from .binding import ToolToken
-    from .claude_adapter import wait_for_exit
+    from .claude_adapter import ended, wait_for_exit
     from .codex import HostGone
 
     say = say or (lambda code, reason="": None)
+    if ended(handle):
+        log.info("the wrapper of %s ended before the bind; nothing to serve",
+                 adapter.agent.qualified)
+        return moxi_exit.TEMPFAIL
+
+    def bound():
+        if say(BOUND) is False:
+            raise NobodyWaits(f"the wrapper of {adapter.agent.qualified} stopped waiting "
+                              "before the bind was answered; letting the name go")
+
     if adapter.tool_token is None:
         adapter.layer_form = layer_one_form(os.environ)
         adapter.tool_token = ToolToken.from_environ()
     stopping = threading.Event()
     adapter.exit_hook = stopping.set
-    adapter._on_bound = lambda: say(BOUND)
-    adapter._alive = lambda: not _ended(handle)
+    adapter._on_bound = bound
+    adapter._alive = lambda: not ended(handle)
     try:
         try:
             adapter.start()
         except HostGone as e:
             log.info("%s", e)
             return 0
+        except NobodyWaits as e:
+            log.warning("%s", e)
+            return moxi_exit.TEMPFAIL
         except Exception as e:                              # noqa: BLE001
             log.warning("the launch of %s failed: %s", adapter.agent.qualified, e)
             word = word_for(e)
@@ -728,10 +755,10 @@ def _remove(launch: Launch) -> None:
     remove_socket(launch.claim_socket)
 
 
-__all__ = ["HOST", "Launch", "MULTI_AGENT_OFF", "PROG", "READY_WAIT", "Refused",
-           "build_parser", "comms_flags", "launch_args", "main", "option", "plan",
-           "print_plan", "reach_note", "row_flags", "serve", "shell_reach_off", "start",
-           "toml_key", "toml_value"]
+__all__ = ["HOST", "Launch", "MULTI_AGENT_OFF", "NobodyWaits", "PROG", "READY_WAIT",
+           "Refused", "build_parser", "comms_flags", "launch_args", "main", "option",
+           "plan", "print_plan", "reach_note", "row_flags", "serve", "shell_reach_off",
+           "start", "toml_key", "toml_value"]
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,32 +1,32 @@
 """comms' and cache's daemons on the writer: an install from a release writes each unit
-through `moxi.units`, an editable install is refused, and each module's old `service`
-verb keeps writing today's unmarked unit, which the writer then refuses until
-`--replace`.
+through `moxi.units`, an editable install is refused, and the unmarked unit each
+module's old `service` verb wrote is refused until `--replace`.
 
 The modules are the real ones in this environment, reached the way the core reaches any
 module: by their `moxi.modules` entry point, never by an import. A stand-in `.dist-info`
 put first on `sys.path` names the real announcement and says, in its `direct_url.json`,
-how it was installed. Units go to the fake backend over a directory in tmp, and the old
-verbs run through `moxi <module> service install` against a stand-in `systemctl`.
-A module this environment does not hold is skipped.
+how it was installed. Units go to the fake backend over a directory in tmp. A module this
+environment does not hold is skipped.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import os
 from pathlib import Path
 
 import pytest
 
-import moxi.cli
 import moxi.modules
 import moxi.paths
 from moxi import units
 from moxi.units import _backend
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeBackend, FakeSupervisor
+
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
 
 #: How an install records itself in `direct_url.json`; one from an index writes none.
 FROM_INDEX = None
@@ -49,14 +49,11 @@ DAEMONS = {
 #: own beside the daemon's.
 SOCKETS = {"comms"}
 
-#: A `systemctl` that records its arguments and answers yes.
-SYSTEMCTL = '#!/bin/sh\necho "$*" >> "{log}"\nexit 0\n'
-
-
 @pytest.fixture(params=sorted(DAEMONS))
 def box(request, tmp_path, monkeypatch):
     """One module's daemon, a scripts directory holding its console script, its roots
-    and the user unit folder in tmp, and the fake backend over that folder."""
+    (the default home's, `default_home`) and the user unit folder in tmp, and the fake
+    backend over that folder."""
     module = request.param
     if importlib.util.find_spec(f"moxi_{module}") is None:
         pytest.skip(f"moxi-{module} is not installed in this environment")
@@ -68,7 +65,8 @@ def box(request, tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
-    monkeypatch.setenv(f"MOXI_{module.upper()}_HOME", str(tmp_path / f"{module}-home"))
+    # The module's roots are the default home's, in tmp: a locator of its own would have
+    # the plan refuse its units.
     root = home / ".config" / "systemd" / "user"
     root.mkdir(parents=True)
     supervisor = FakeSupervisor(root)
@@ -152,24 +150,14 @@ def test_an_editable_install_is_refused_and_nothing_is_written(box):
     assert box.sup.calls == []
 
 
-def test_the_old_verb_writes_its_unmarked_unit_and_the_writer_refuses_it(box, monkeypatch,
-                                                                       capsys):
-    """`moxi <module> service install` is unchanged: it writes today's unit, with no
-    mark, and enables it. The writer then refuses that file and names `--replace`, which
-    moves it to the displaced folder and writes the marked unit in its place."""
-    path = box.tmp / "path"
-    path.mkdir()
-    log = box.tmp / "systemctl.log"
-    systemctl = path / "systemctl"
-    systemctl.write_text(SYSTEMCTL.format(log=log))
-    systemctl.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{path}{os.pathsep}{os.environ.get('PATH', '')}")
-
-    assert moxi.cli.main([box.module, "service", "install"]) == 0, capsys.readouterr()
-    old = box.unit.read_text()
-    assert not old.startswith("# moxi unit:")
-    assert f"ExecStart={box.command}\n" in old
-    assert f"--user enable --now {box.unit.name}" in log.read_text().splitlines()
+def test_the_old_verbs_unmarked_unit_is_refused_until_replace(box):
+    """A unit the module's old `service install` verb wrote before it went: the same file
+    name, no mark. The writer refuses that file and names `--replace`, which moves it to
+    the displaced folder and writes the marked unit in its place."""
+    old = ("[Unit]\nDescription=the old verb's unit\n\n[Service]\nType=simple\n"
+           f"ExecStart={box.command}\nRestart=on-failure\n\n"
+           "[Install]\nWantedBy=default.target\n")
+    box.unit.write_text(old)
 
     box.install(FROM_INDEX)
     change = daemon_of(box, units.plan(box.module))
@@ -182,5 +170,5 @@ def test_the_old_verb_writes_its_unmarked_unit_and_the_writer_refuses_it(box, mo
     done = box.apply(units.plan(box.module), replace=True)
     assert all(d.ok for d in done), [d.lines for d in done]
     assert box.unit.read_text().startswith(f"# moxi unit: {box.module}/{box.name}\n")
-    [moved] = Path(os.environ["MOXI_HOME"]).rglob(f"displaced/*/{box.unit.name}")
+    [moved] = moxi.paths.core().data_dir().rglob(f"displaced/*/{box.unit.name}")
     assert moved.read_text() == old

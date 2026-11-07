@@ -1,6 +1,6 @@
 [project]
 name = "moxi"
-version = "0.1.5"
+version = "0.1.6"
 description = "Moxi's core: the names, paths, config and module discovery every Moxi module shares, and the moxi command"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -43,7 +43,8 @@ packages = ["src/moxi"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi", "tests", "tools"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi",
+                "tests", "tools"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

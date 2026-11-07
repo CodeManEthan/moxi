@@ -20,6 +20,8 @@ OPTIONAL = {
     "ui": "The comms panel and its roster of agents in the browser UI shell.",
     "connector": "comms' tools in the Claude apps, text chat and voice mode, through the "
                  "public MCP host",
+    "services": "One list of every daemon and timer: with it, a doctor row whose cure is a "
+                "restart of comms' daemon names `moxi services restart comms/daemon`.",
 }
 GATED = {"moxi-comms-codex": "codex"}
 #: Each variable of comms' prefix it reads outside moxi.paths and moxi.config, and why.
@@ -76,7 +78,7 @@ STORES = {
                  "retention": "keep", "rebuildable": False, "lazy": True},
 }
 #: The delivery daemon, which `moxi install comms` writes as a unit through the core's
-#: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
+#: writer.
 #: Its socket is the loopback port of comms' tools, `[mcp] port`: the supervisor holds it
 #: while the daemon restarts, so a session that calls in that gap waits instead of being
 #: refused, and no other local user can take the port meanwhile. The daemon still starts

@@ -17,6 +17,7 @@ from moxi_turns.client import Session, TurnsError
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import Failed, LeftShell, Ran, Refused, Shells
+from conftest import end_endpoint
 from test_codex_host import FakeAppServer, FakeClient
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="no pipe server yet")
@@ -130,7 +131,7 @@ def codex(turns_env, monkeypatch):
 
     yield make
     for endpoint in hosts:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def methods(app, *names):

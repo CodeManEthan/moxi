@@ -43,7 +43,6 @@ import logging
 import os
 import sqlite3
 import sys
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -431,21 +430,18 @@ def start_deliverer(request_id: str, *, pid: int | None = None,
                       output=run_log(request_id, env), env=env)
 
 
-#: The deliverer's clock, which a test may stand in for.
-_clock = time.monotonic
-
-
 def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = None,
             turns: Any | None = None) -> int:
     """`moxi launcher deliver REQUEST_ID --pid PID`: send the launch's first turn, write
     the outcome to its row, print one line and return the exit code.
 
     A launch with a comms identity first waits for comms' wrapper to bind its name
-    (`targets.settle_bind`), and one whose wrapper ended before that ends `failed` with
-    the cause and sends nothing; so this process is started for such a launch even when
-    no first turn is owed. That wait is part of the session getting ready: it is bounded
-    by `ready.wait_s` as well as its own bound, and the ready wait gets only what is left,
-    so a deliverer never runs longer than `ready.wait_s` plus `first.wait_s`.
+    (`targets.settle_bind`), and one whose wrapper ended before that, or never bound the
+    name, ends `failed` with the cause and sends nothing; so this process is started for
+    such a launch even when no first turn is owed. That wait runs its full length, which
+    outlasts the wrapper's own: a shorter `ready.wait_s` doesn't cut it, since a wrapper
+    still inside its own wait is not stuck. The ready wait counts from the bind, so a
+    deliverer never runs longer than the bind wait plus `ready.wait_s` plus `first.wait_s`.
 
     0 when the first turn was sent, is unconfirmed, or was not this deliverer's to send;
     1 when the session was not ready or nothing could be sent, or comms' wrapper failed;
@@ -465,14 +461,11 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
 
     try:
         ready_wait_s, first_wait_s = _waits(None, None)
-        began = _clock()
-        ended = targets.settle_bind(conn, request_id, pid=pid,
-                                    wait_s=min(targets.BIND_WAIT_S, ready_wait_s))
+        ended = targets.settle_bind(conn, request_id, pid=pid)
         if ended is not None:
             print(ended.line, file=out, flush=True)
             return ended.exit_code
-        left = max(ready_wait_s - (_clock() - began), 0.0)
-        outcome = send(conn, request_id, pid=pid, turns=turns, ready_wait_s=left,
+        outcome = send(conn, request_id, pid=pid, turns=turns, ready_wait_s=ready_wait_s,
                        first_wait_s=first_wait_s)
     except store.Busy as error:
         print(f"the launch log is busy: {error}", file=out, flush=True)

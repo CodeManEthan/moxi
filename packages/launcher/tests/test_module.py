@@ -28,7 +28,8 @@ def test_the_launcher_loads_present(found):
 
 
 def test_it_declares_its_optional_links_as_extras(found):
-    assert set(found.optional) == {"turns", "comms", "slots", "projects", "ui"}
+    assert set(found.optional) == {"turns", "comms", "slots", "projects", "ui", "notes",
+                                   "cache", "usage"}
     extras = set(metadata.distribution("moxi-launcher").metadata.get_all("Provides-Extra"))
     assert set(found.optional) == extras
 

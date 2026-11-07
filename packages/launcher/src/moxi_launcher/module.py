@@ -34,6 +34,15 @@ OPTIONAL = {
     "ui": "The launcher's page in the browser UI shell: launch from presets over the "
           "catalog, resume past sessions and watch each launched session's state. Without "
           "it the launcher is its command only.",
+    "notes": "Handoffs in notes: a launch's handoff folder is the one notes keeps for its "
+             "directory (or its notes_dir), where the handoff pointer looks and a "
+             "relaunch's handoff must be. Without it the launcher keeps its own folder.",
+    "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
+             "expires, and recycle_on_expiry clears or compacts an idle session once it "
+             "has. Without it those rows aren't offered.",
+    "usage": "Context warnings: warn_at sets the mark where usage warns the session, and "
+             "recycle_at_limit with limit_at relaunches or compacts a session past its "
+             "mark. Without it those rows aren't offered.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the

@@ -119,10 +119,11 @@ class Peer:
                            {"identity": self.q, **fields})
         self.sync()
 
-    def turn(self, handled=(), unhandled=()) -> dict:
+    def turn(self, handled=(), unhandled=(), answered=False) -> dict:
         """A turn end, as an adapter sends it: one digest opened for the `handled`
-        message ids and one for the `unhandled` ones, then `turn_ended` naming them.
-        Returns the daemon's answer."""
+        message ids and one for the `unhandled` ones, then `turn_ended` naming them,
+        marked `answered` when the turn ended with the model's answer. Returns the
+        daemon's answer."""
         def opened(ids) -> list:
             ids = [str(i) for i in ids]
             if not ids:
@@ -130,9 +131,11 @@ class Peer:
             return [self.client.call("open_digest", {"ids": ids}, timeout=5.0)["digest"]]
 
         handled_d, unhandled_d = opened(handled), opened(unhandled)
-        answer = self.client.call("turn_ended", {"identity": self.q, "turned": True,
-                                                 "handled": handled_d,
-                                                 "unhandled": unhandled_d}, timeout=5.0)
+        fields = {"identity": self.q, "turned": True, "handled": handled_d,
+                  "unhandled": unhandled_d}
+        if answered:
+            fields["answered"] = True
+        answer = self.client.call("turn_ended", fields, timeout=5.0)
         self.sync()
         return answer
 

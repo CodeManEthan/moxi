@@ -121,6 +121,17 @@ def start_params(thread_id: str, text: str) -> dict:
     return {"threadId": str(thread_id), "input": text_input(text)}
 
 
+def inject_params(thread_id: str, text: str) -> dict:
+    """`thread/inject_items` with one developer message: it is written into the thread's
+    model-visible history, which writes the rollout, and starts no turn. Codex refuses an
+    empty list, so `text` is never empty."""
+    if not text:
+        raise ValueError("an injected item needs text")
+    return {"threadId": str(thread_id),
+            "items": [{"type": "message", "role": "developer",
+                       "content": [{"type": "input_text", "text": text}]}]}
+
+
 def method_missing(exc: BaseException) -> bool:
     """Whether `exc` is the app-server's answer that it has no such method."""
     return isinstance(exc, CodexError) and exc.code == METHOD_NOT_FOUND
@@ -219,6 +230,13 @@ def thread_is_active(thread: dict | None) -> bool:
     return bool(thread and (thread.get("status") or {}).get("type") == "active")
 
 
+def no_turns(turns_result) -> bool:
+    """Whether a `thread/turns/list` answer shows a thread that has had no turn: its
+    list is empty. An answer of any other shape is not read as empty."""
+    data = turns_result.get("data") if isinstance(turns_result, dict) else None
+    return isinstance(data, list) and not data
+
+
 def active_turn_id(turns_result: dict | None) -> str | None:
     for turn in (turns_result or {}).get("data") or []:
         if turn.get("status") == STATUS_IN_PROGRESS:
@@ -233,9 +251,9 @@ __all__ = [
     "NoReply", "CodexError", "NoActiveTurn", "ActiveTurnMismatch", "classify_error",
     "request", "notification",
     "text_input", "initialize_params", "resume_params", "start_thread_params",
-    "steer_params", "start_params", "method_missing", "compact_params",
+    "steer_params", "start_params", "inject_params", "method_missing", "compact_params",
     "terminals_params", "terminate_params", "terminal_ids", "COLLAB_STATES", "COLLAB_ITEM",
     "SUBAGENT_ACTIVITY_ITEM",
     "read_params", "collab_state", "collab_notices", "thread_items", "thread_is_active",
-    "active_turn_id",
+    "no_turns", "active_turn_id",
 ]

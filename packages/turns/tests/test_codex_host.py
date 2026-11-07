@@ -19,7 +19,7 @@ from moxi_turns.client import Session
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import Ended, Lost, Refused, Started, StopFacts
-from conftest import bare
+from conftest import bare, end_endpoint
 from fake_codex import LIMITS
 
 
@@ -52,12 +52,11 @@ class FakeClient:
         if not hasattr(harness, "_fake_turns"):
             harness._fake_turns = itertools.count(1)
         self.turns = harness._fake_turns
-        if not hasattr(harness, "_fake_primes"):
-            harness._fake_primes = itertools.count(1)
-        self.primes = harness._fake_primes
+        if not hasattr(harness, "_fake_ran"):
+            harness._fake_ran = []   # the thread's turns, oldest first, across clients
+        self.ran = harness._fake_ran
         self.live_turn = None
         self.miss_steer = False
-        self.hold_priming = False   # a priming turn completes at once unless held
         self.absorbed = []          # turn/start texts taken into a running turn
 
     def connect(self):
@@ -84,18 +83,19 @@ class FakeClient:
             return {"thread": {"id": "thread-1"}}
         if method == "thread/resume":
             return {"thread": {"id": "thread-1", "status": {"type": "idle"}}}
+        if method == "thread/inject_items":
+            assert params["items"], "Codex refuses an empty item list"
+            return {}
         if method == "turn/start":
-            priming = params["input"][0]["text"] == codex_module.PRIMING_TEXT
-            if self.live_turn is not None and not priming:
+            if self.live_turn is not None:
                 # Codex takes a turn/start's input into the running turn: it answers
                 # with a phantom id that never starts, and sends no turn/started.
                 self.absorbed.append(params["input"][0]["text"])
                 return {"turn": {"id": f"phantom-{len(self.absorbed)}"}}
-            turn_id = f"prime-{next(self.primes)}" if priming else f"turn-{next(self.turns)}"
+            turn_id = f"turn-{next(self.turns)}"
             self.live_turn = turn_id
+            self.ran.append(turn_id)
             self.on_notification("turn/started", {"turn": {"id": turn_id}}, None)
-            if priming and not self.hold_priming:
-                self.complete()
             return {"turn": {"id": turn_id}}
         if method == "turn/steer":
             if self.miss_steer:
@@ -122,9 +122,12 @@ class FakeClient:
             return {"thread": {"id": "thread-1", "turns": [
                 {"id": "turn-0", "status": "completed", "items": items}]}}
         if method == "thread/turns/list":
-            data = [] if self.live_turn is None else [
-                {"id": self.live_turn, "status": "inProgress"}
-            ]
+            # Newest first, as Codex lists them by default. A test may set the live
+            # turn by hand; it is listed too.
+            ran = self.ran + ([self.live_turn] if self.live_turn is not None
+                              and self.live_turn not in self.ran else [])
+            data = [{"id": turn_id, "status": "inProgress" if turn_id == self.live_turn
+                     else "completed"} for turn_id in reversed(ran)]
             return {"data": data}
         raise AssertionError(f"unexpected app-server call {method}")
 
@@ -140,10 +143,9 @@ class FakeClient:
 
 
 def _turn_texts(app):
-    """The texts of the turns a client started, the priming turn left out."""
+    """The texts of the turns a client started."""
     return [params["input"][0]["text"] for method, params in app.calls
-            if method == "turn/start"
-            and params["input"][0]["text"] != codex_module.PRIMING_TEXT]
+            if method == "turn/start"]
 
 
 def _host(turns_env):
@@ -175,7 +177,7 @@ def test_a_submitted_delivery_is_tied_to_the_app_servers_turn(turns_env):
         ended = delivery.wait_ended(2)
         assert (ended.turn_id, ended.outcome) == ("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
@@ -190,13 +192,13 @@ def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
         app.complete("interrupted")
         assert steered.wait_ended(2).outcome == "aborted"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_stopping_the_endpoint_reaps_the_owned_children_and_runtime_dir(turns_env):
     endpoint, harness, _ = _host(turns_env)
     directory = endpoint.dir
-    endpoint.stop("the test ended")
+    end_endpoint(endpoint)
     assert not harness.app_server.alive
     assert not directory.exists()
 
@@ -213,7 +215,7 @@ def test_a_plain_steer_that_races_the_turn_end_refuses_idle(turns_env):
         assert delivery.wait_ended(2).reason == "idle"
         assert _turn_texts(app) == ["first"]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_supervision_reconnects_and_resumes_the_same_thread(turns_env):
@@ -231,7 +233,7 @@ def test_supervision_reconnects_and_resumes_the_same_thread(turns_env):
         assert harness.app_server.starts == 2
         assert endpoint.session()["session_id"] == "thread-1"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("key", sorted(codex_module.OWNED_OPTIONS))
@@ -279,7 +281,7 @@ def test_options_and_verifier_reach_start_and_every_resume(turns_env):
                             "developerInstructions": "rules"}] * 2
         assert len(answers) == 3
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_unaccepted_resume_gates_input_and_publishes_its_reason(turns_env):
@@ -316,16 +318,28 @@ def test_unaccepted_resume_gates_input_and_publishes_its_reason(turns_env):
         assert "trouble" not in endpoint.session()
     finally:
         accept_resume.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
-def test_fresh_window_primes_before_releasing_a_gated_delivery(turns_env):
+def _injects(app):
+    """The `thread/inject_items` calls a client made."""
+    return [params for method, params in app.calls if method == "thread/inject_items"]
+
+
+def test_fresh_window_injects_before_releasing_a_gated_delivery(turns_env):
     harness = None
     made = []
+    in_inject, release = threading.Event(), threading.Event()
+
+    class HoldInject(FakeClient):
+        def call(self, method, params=None, timeout=None):
+            if method == "thread/inject_items":
+                in_inject.set()
+                assert release.wait(5)
+            return super().call(method, params, timeout)
 
     def clients(**kwargs):
-        client = FakeClient(harness, **kwargs)
-        client.hold_priming = True
+        client = HoldInject(harness, **kwargs)
         made.append(client)
         return client
 
@@ -336,32 +350,123 @@ def test_fresh_window_primes_before_releasing_a_gated_delivery(turns_env):
     endpoint = Endpoint(harness).open()
     session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
     queued = session.deliver("real work")
+    loader = threading.Thread(target=harness._connect, daemon=True)
     try:
         harness.hook_server.start()
-        harness._connect()
-        assert made[0].live_turn == "prime-1"
+        loader.start()
+        assert in_inject.wait(2)
+        assert harness.loading() and not harness.generation.ready.is_set()
         with pytest.raises(TimeoutError):
             queued.wait_started(0.05)
-        made[0].complete()
+        release.set()
+        loader.join(2)
+        assert harness.generation.ready.is_set()
         assert queued.wait_started(2).turn_id == "turn-1"
+        assert _turn_texts(made[0]) == ["real work"]
     finally:
-        endpoint.stop("the test ended")
+        release.set()
+        end_endpoint(endpoint)
 
 
-def test_a_headless_start_primes_its_fresh_thread_and_a_resume_does_not(turns_env):
-    # A fresh thread has no rollout until its first turn, and `thread/resume`
-    # refuses it, so a thread launched without a window is primed too.
+def test_a_headless_start_injects_one_item_and_sends_no_turn(turns_env):
+    # A fresh thread has no rollout until something enters its history, and
+    # `thread/resume` refuses it, so a thread launched without a window gets the item too.
     endpoint, harness, first = _host(turns_env)
     try:
-        primes = [params for method, params in first.calls if method == "turn/start"]
-        assert [row["input"][0]["text"] for row in primes] == [codex_module.PRIMING_TEXT]
+        assert _injects(first) == [proto.inject_params("thread-1", codex_module.READY_ITEM)]
+        assert _turn_texts(first) == []
         assert harness.active_turn_id is None and harness.generation.ready.is_set()
+        assert not harness.loading()
         first.close()
         harness._connect()
         second = harness.ws
-        assert [method for method, _ in second.calls if method == "turn/start"] == []
+        assert _injects(second) == [] and _turn_texts(second) == []
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
+
+
+def test_the_injected_item_is_one_developer_message_with_text():
+    params = proto.inject_params("thread-9", codex_module.READY_ITEM)
+    assert params == {"threadId": "thread-9", "items": [{
+        "type": "message", "role": "developer",
+        "content": [{"type": "input_text", "text": codex_module.READY_ITEM}]}]}
+    with pytest.raises(ValueError):
+        proto.inject_params("thread-9", "")
+
+
+def _old_codex(base):
+    class OldCodex(base):
+        def call(self, method, params=None, timeout=None):
+            if method == "thread/inject_items":
+                self.calls.append((method, params))
+                raise proto.CodexError(proto.METHOD_NOT_FOUND,
+                                       "method not found: thread/inject_items")
+            return super().call(method, params, timeout)
+    return OldCodex
+
+
+def test_a_codex_without_inject_is_refused_with_no_turn_and_no_retry(turns_env):
+    harness = None
+    made = []
+
+    def clients(**kwargs):
+        client = _old_codex(FakeClient)(harness, **kwargs)
+        made.append(client)
+        return client
+
+    harness = CodexHarness(
+        turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
+        client_factory=clients, app_server_factory=FakeAppServer,
+        backoff_factory=lambda: itertools.repeat(0.001),
+    )
+    endpoint = Endpoint(harness, session_id=None).open()
+    try:
+        with pytest.raises(codex_module.CodexTooOld) as raised:
+            harness.start()
+        assert str(raised.value) == codex_module.INJECT_MISSING
+        assert "Codex 0.153.0" in str(raised.value)
+        assert harness.give_up_reason() == codex_module.INJECT_MISSING
+        time.sleep(0.1)
+        assert len(made) == 1 and not made[0].connected
+        assert _turn_texts(made[0]) == []
+        assert harness.session_id is None     # the unwritten thread is forgotten
+        assert harness._stop.is_set() and not harness.app_server.alive
+    finally:
+        end_endpoint(endpoint)
+
+
+def test_a_retry_that_meets_a_codex_without_inject_gives_up(turns_env):
+    # The first load fails as any load can; the supervisor's retry then finds the
+    # call missing, and the launch ends with the line instead of retrying again.
+    harness = None
+    made = []
+
+    def clients(**kwargs):
+        client = _old_codex(FakeClient)(harness, **kwargs)
+        if not made:
+            client.connect = lambda: (_ for _ in ()).throw(OSError("offline"))
+        made.append(client)
+        return client
+
+    harness = CodexHarness(
+        turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
+        client_factory=clients, app_server_factory=FakeAppServer,
+        backoff_factory=lambda: itertools.repeat(0.001),
+    )
+    endpoint = Endpoint(harness, session_id=None).open()
+    try:
+        harness.start()
+        deadline = time.monotonic() + 2
+        while not endpoint.is_gone and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert endpoint.is_gone
+        time.sleep(0.1)
+        assert len(made) == 2
+        assert harness.give_up_reason() == codex_module.INJECT_MISSING
+        assert all(_turn_texts(client) == [] for client in made)
+        assert harness.session_id is None
+    finally:
+        end_endpoint(endpoint)
 
 
 def test_start_warning_runs_but_resume_warning_fails_and_stops_its_process(turns_env):
@@ -394,7 +499,7 @@ def test_start_warning_runs_but_resume_warning_fails_and_stops_its_process(turns
         harness._load_failed(RuntimeError("resume differs"))
         assert endpoint.session()["trouble"] == "resume differs"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_real_host_builds_stop_facts_through_its_hook_server(monkeypatch, turns_env):
@@ -423,7 +528,7 @@ def test_real_host_builds_stop_facts_through_its_hook_server(monkeypatch, turns_
             StopFacts("turn-1", "thread-1", None, ("x",), 0)
     finally:
         hold.close()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_phantom_turn_start_id_is_never_reported(monkeypatch, turns_env):
@@ -448,7 +553,7 @@ def test_phantom_turn_start_id_is_never_reported(monkeypatch, turns_env):
         assert delivery.wait_ended(1) == started
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_exhausted_steer_mismatches_refuse_instead_of_claiming_delivery(turns_env):
@@ -473,7 +578,7 @@ def test_exhausted_steer_mismatches_refuse_instead_of_claiming_delivery(turns_en
         assert delivery.wait_ended(2).reason == "unsupported"
         assert _turn_texts(app) == ["first"]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("mode", ["raise", "timeout"])
@@ -507,7 +612,7 @@ def test_verifier_fault_fails_load_without_publishing(mode, turns_env):
         assert not harness.app_server.alive
         assert not made[0].connected
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_dead_process_open_turn_settles_error_before_resume(turns_env):
@@ -522,7 +627,7 @@ def test_dead_process_open_turn_settles_error_before_resume(turns_env):
         assert delivery.wait_ended(2).outcome == "error"
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_backoff_grows_caps_and_jitters():
@@ -573,7 +678,7 @@ def test_headless_first_failure_returns_and_retries_until_accepted(turns_env):
             time.sleep(0.01)
         assert backoff_starts >= 2  # initial retry sequence, then reset on acceptance
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_headless_first_accepted_load_after_a_failure_names_the_thread_in_ready(turns_env):
@@ -618,7 +723,7 @@ def test_headless_first_accepted_load_after_a_failure_names_the_thread_in_ready(
         assert readies == [("startup", "thread-1")]
     finally:
         retry.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_untrusted_hooks_give_up_on_the_first_load(turns_env):
@@ -645,7 +750,7 @@ def test_untrusted_hooks_give_up_on_the_first_load(turns_env):
         assert not harness.app_server.alive
         assert harness.ws is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_close_cleans_a_candidate_started_during_shutdown(turns_env):
@@ -700,14 +805,14 @@ def _capture_error(call, errors):
         errors.append(exc)
 
 
-def test_a_refused_priming_turn_closes_its_candidate_and_retries(turns_env):
+def test_a_refused_inject_closes_its_candidate_and_retries(turns_env):
     harness = None
     made = []
-    refusals = [proto.CodexError(-32603, "turn/start refused")]
+    refusals = [proto.CodexError(-32603, "inject refused")]
 
-    class RefusePrime(FakeClient):
+    class RefuseInject(FakeClient):
         def call(self, method, params=None, timeout=None):
-            if method == "turn/start" and refusals:
+            if method == "thread/inject_items" and refusals:
                 raise refusals.pop()
             return super().call(method, params, timeout)
 
@@ -722,7 +827,7 @@ def test_a_refused_priming_turn_closes_its_candidate_and_retries(turns_env):
             pass
 
     def clients(**kwargs):
-        client = RefusePrime(harness, **kwargs)
+        client = RefuseInject(harness, **kwargs)
         made.append(client)
         return client
 
@@ -735,31 +840,34 @@ def test_a_refused_priming_turn_closes_its_candidate_and_retries(turns_env):
         harness.start()
         assert not made[0].connected
         assert len(made) == 2 and harness.ws is made[1]
+        # The retry starts a thread again: the refused one has no rollout to resume.
+        assert [m for m, _ in made[1].calls if m.startswith("thread/")] == [
+            "thread/start", "thread/inject_items"]
         assert harness.generation.ready.is_set()
         assert "trouble" not in endpoint.session()
+        assert all(_turn_texts(client) == [] for client in made)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
-def test_a_delivery_made_during_the_priming_turn_waits_at_the_gate(turns_env):
-    # The priming turn is part of the load, so the gate stays shut while it runs.
-    # A delivery made then is not handed to the candidate; it starts on the next load.
+def test_a_delivery_made_during_the_inject_waits_at_the_gate(turns_env):
+    # The inject is part of the load, so the gate stays shut while it runs. A
+    # delivery made then is not handed to the candidate; it starts on the next load.
     harness = None
     made = []
-    in_priming, release = threading.Event(), threading.Event()
+    in_inject, release = threading.Event(), threading.Event()
 
-    class RefusePrime(FakeClient):
+    class RefuseInject(FakeClient):
         def call(self, method, params=None, timeout=None):
-            if (method == "turn/start"
-                    and params["input"][0]["text"] == codex_module.PRIMING_TEXT):
+            if method == "thread/inject_items":
                 self.calls.append((method, params))
-                in_priming.set()
+                in_inject.set()
                 assert release.wait(5)
-                raise proto.CodexError(-32603, "turn/start refused")
+                raise proto.CodexError(-32603, "inject refused")
             return super().call(method, params, timeout)
 
     def clients(**kwargs):
-        client = (FakeClient if made else RefusePrime)(harness, **kwargs)
+        client = (FakeClient if made else RefuseInject)(harness, **kwargs)
         made.append(client)
         return client
 
@@ -771,22 +879,22 @@ def test_a_delivery_made_during_the_priming_turn_waits_at_the_gate(turns_env):
     starter = threading.Thread(target=harness.start, daemon=True)
     try:
         starter.start()
-        assert in_priming.wait(2)
+        assert in_inject.wait(2)
         assert harness.loading()
         queued = session.deliver("mid-load")
         time.sleep(0.1)
         release.set()
         assert queued.wait_started(2).turn_id == "turn-1"
-        assert [params["input"][0]["text"] for method, params in made[0].calls
-                if method == "turn/start"] == [codex_module.PRIMING_TEXT]
+        assert _turn_texts(made[0]) == []
         assert _turn_texts(made[1]) == ["mid-load"]
     finally:
         release.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         starter.join(2)
 
 
-def test_accepted_start_and_resume_each_raise_one_ready(turns_env):
+def _watched_host(turns_env, registry=None):
+    """A host with a watcher on its events; the start is left to the test."""
     harness = None
     made = []
 
@@ -797,7 +905,81 @@ def test_accepted_start_and_resume_each_raise_one_ready(turns_env):
 
     harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
                            client_factory=clients, app_server_factory=FakeAppServer)
-    endpoint = Endpoint(harness, session_id=None).open()
+    endpoint = Endpoint(harness, session_id=None, registry=registry).open()
+    events = []
+    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    watcher = threading.Thread(target=lambda: events.extend(session.watch()), daemon=True)
+    watcher.start()
+    time.sleep(0.2)
+    return endpoint, harness, made, events, session, watcher
+
+
+def _readies(events, count):
+    def readies():
+        return [(e.source, e.session_id) for e in events if type(e).__name__ == "Ready"]
+
+    deadline = time.monotonic() + 2
+    while len(readies()) < count and time.monotonic() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.1)
+    return readies()
+
+
+def test_accepted_start_and_resume_each_raise_one_ready(turns_env):
+    endpoint, harness, made, events, session, watcher = _watched_host(turns_env)
+    try:
+        harness.start()
+        # A turn runs, so the thread is no longer unturned and the reload is a resume.
+        delivery = session.deliver("work", only_if_idle=True)
+        assert delivery.wait_started(2).turn_id == "turn-1"
+        made[-1].complete()
+        delivery.wait_ended(2)
+        made[-1].close()
+        harness._connect()
+        # The resume's own SessionStart hook asks the listeners but raises no second Ready.
+        assert endpoint.ready("resume", "thread-1", announce=False) is None
+        assert _readies(events, 2) == [("startup", "thread-1"), ("resume", "thread-1")]
+        # The start's Ready follows the inject, which belongs to the load; no turn
+        # comes before it.
+        names = [type(e).__name__ for e in events]
+        assert names.index("Ready") < names.index("TurnStarted")
+        assert [m for m, _ in made[0].calls].index("thread/inject_items") \
+            < [m for m, _ in made[0].calls].index("turn/start")
+    finally:
+        end_endpoint(endpoint)
+        watcher.join(2)
+
+
+def test_an_unturned_resume_raises_ready_startup(turns_env):
+    # A reload before the thread's first turn (a supervisor restart, or a launcher
+    # resume of that id): its turn list is empty, so the load is a start.
+    endpoint, harness, made, events, session, watcher = _watched_host(turns_env)
+    try:
+        harness.start()
+        made[-1].close()
+        harness._connect()
+        assert ("thread/turns/list", {"threadId": "thread-1", "limit": 1}) \
+            in made[-1].calls
+        assert _readies(events, 2) == [("startup", "thread-1"), ("startup", "thread-1")]
+        assert harness._unturned
+    finally:
+        end_endpoint(endpoint)
+        watcher.join(2)
+
+
+def test_a_launch_that_resumes_an_unturned_thread_raises_ready_startup(turns_env):
+    harness = None
+    made = []
+
+    def clients(**kwargs):
+        client = FakeClient(harness, **kwargs)
+        made.append(client)
+        return client
+
+    harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
+                           client_factory=clients, app_server_factory=FakeAppServer,
+                           resume="thread-1")
+    endpoint = Endpoint(harness, session_id="thread-1").open()
     events = []
     session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
     watcher = threading.Thread(target=lambda: events.extend(session.watch()), daemon=True)
@@ -805,41 +987,113 @@ def test_accepted_start_and_resume_each_raise_one_ready(turns_env):
     time.sleep(0.2)
     try:
         harness.start()
-        made[-1].close()
-        harness._connect()
-        # The resume's own SessionStart hook asks the listeners but raises no second Ready.
-        assert endpoint.ready("resume", "thread-1", announce=False) is None
-        def readies():
-            return [(e.source, e.session_id) for e in events
-                    if type(e).__name__ == "Ready"]
-
-        deadline = time.monotonic() + 2
-        while len(readies()) < 2 and time.monotonic() < deadline:
-            time.sleep(0.02)
-        time.sleep(0.1)
-        assert readies() == [
-            ("startup", "thread-1"), ("resume", "thread-1"),
-        ]
-        # The start's Ready follows its priming turn, which belongs to the load.
-        names = [type(e).__name__ for e in events]
-        assert names.index("Ready") > names.index("TurnStarted")
+        assert _injects(made[0]) == [] and _turn_texts(made[0]) == []
+        assert _readies(events, 1) == [("startup", "thread-1")]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
-def test_a_refused_priming_turn_raises_no_ready(turns_env):
-    # Only an accepted load raises Ready, and a refused priming turn fails the
-    # start. The refused thread has no rollout, so `thread/resume` would refuse it
-    # for good; the retry starts a new thread instead. The first thread's id, already
-    # named by `identify`, is abandoned, and the launch's one Ready names the new one.
+def test_the_first_turns_end_clears_the_unturned_mark(turns_env):
+    endpoint, harness, made, events, session, watcher = _watched_host(turns_env)
+    try:
+        harness.start()
+        assert harness._unturned
+        delivery = session.deliver("work", only_if_idle=True)
+        assert delivery.wait_started(2).turn_id == "turn-1"
+        # turn/started never clears it: the turn's SessionStart may still be to come.
+        assert harness._unturned
+        made[-1].complete()
+        delivery.wait_ended(2)
+        assert not harness._unturned
+    finally:
+        end_endpoint(endpoint)
+        watcher.join(2)
+
+
+def _start_listener():
+    from moxi_turns import listeners
+
+    asked = []
+
+    def answer(event):
+        asked.append(event.source)
+        return f"context at {event.source}"
+
+    listener = listeners.Listener("sample", frozenset({"start"}), "sample.module:answer",
+                                  _fn=answer)
+    return listeners.Registry((listener,), order=("sample",)), asked
+
+
+def _session_start(monkeypatch, harness, source):
+    import io
+    import json
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"session_id": "thread-1", "source": source})))
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    assert codex_hooks.main(["--socket", str(harness.hook_server.socket_path),
+                             "SessionStart"]) == 0
+    return json.loads(output.getvalue())["hookSpecificOutput"]["additionalContext"]
+
+
+def test_an_unturned_threads_session_start_resume_reads_startup_once(
+        monkeypatch, turns_env):
+    # Codex says `resume` at the first turn of a thread reloaded before it had any, and
+    # fires that SessionStart inside the turn, after `turn/started`.
+    registry, asked = _start_listener()
+    endpoint, harness, made, events, session, watcher = _watched_host(turns_env, registry)
+    try:
+        harness.start()
+        made[-1].close()
+        harness._connect()                      # the reload before any turn
+        assert harness._unturned
+        delivery = session.deliver("first", only_if_idle=True)
+        assert delivery.wait_started(2).turn_id == "turn-1"   # turn/started came first
+        assert _session_start(monkeypatch, harness, "resume") == "context at startup"
+        assert asked == ["startup"]
+        assert not harness._unturned            # cleared once the answer was out
+        # A later SessionStart of the same thread is what Codex says it is.
+        assert _session_start(monkeypatch, harness, "resume") == "context at resume"
+        assert asked == ["startup", "resume"]
+    finally:
+        end_endpoint(endpoint)
+        watcher.join(2)
+
+
+def test_a_turned_threads_session_start_resume_stays_resume(monkeypatch, turns_env):
+    registry, asked = _start_listener()
+    endpoint, harness, made, events, session, watcher = _watched_host(turns_env, registry)
+    try:
+        harness.start()
+        delivery = session.deliver("work", only_if_idle=True)
+        assert delivery.wait_started(2).turn_id == "turn-1"
+        assert _session_start(monkeypatch, harness, "startup") == "context at startup"
+        made[-1].complete()
+        delivery.wait_ended(2)
+        made[-1].close()
+        harness._connect()                      # the reload after a turn
+        assert not harness._unturned
+        assert _session_start(monkeypatch, harness, "resume") == "context at resume"
+        assert asked == ["startup", "resume"]
+    finally:
+        end_endpoint(endpoint)
+        watcher.join(2)
+
+
+def test_a_refused_inject_raises_no_ready(turns_env):
+    # Only an accepted load raises Ready, and a refused inject fails the start. The
+    # refused thread has no rollout, so `thread/resume` would refuse it for good; the
+    # retry starts a new thread instead. The first thread's id, already named by
+    # `identify`, is abandoned, and the launch's one Ready names the new one.
     harness = None
     made = []
 
-    class RefusePrime(FakeClient):
+    class RefuseInject(FakeClient):
         def call(self, method, params=None, timeout=None):
-            if method == "turn/start":
-                raise proto.CodexError(-32603, "turn/start refused")
+            if method == "thread/inject_items":
+                raise proto.CodexError(-32603, "inject refused")
             return super().call(method, params, timeout)
 
     class NewThread(FakeClient):
@@ -854,7 +1108,7 @@ def test_a_refused_priming_turn_raises_no_ready(turns_env):
             return super().call(method, params, timeout)
 
     def clients(**kwargs):
-        client = (NewThread if made else RefusePrime)(harness, **kwargs)
+        client = (NewThread if made else RefuseInject)(harness, **kwargs)
         made.append(client)
         return client
 
@@ -872,7 +1126,8 @@ def test_a_refused_priming_turn_raises_no_ready(turns_env):
         assert harness._accepted.wait(2)
         time.sleep(0.2)
         assert len(made) == 2
-        assert [m for m, _ in made[1].calls if m.startswith("thread/")] == ["thread/start"]
+        assert [m for m, _ in made[1].calls if m.startswith("thread/")] == [
+            "thread/start", "thread/inject_items"]
         assert harness.session_id == "thread-2"
         assert [(e.source, e.session_id) for e in events
                 if type(e).__name__ == "Ready"] == [("startup", "thread-2")]
@@ -880,7 +1135,7 @@ def test_a_refused_priming_turn_raises_no_ready(turns_env):
         assert hello["session_id"] == "thread-2" and hello["earlier"] == ["thread-1"]
         assert endpoint.facts().session_id == "thread-2"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
         watcher.join(2)
 
 
@@ -894,7 +1149,7 @@ def test_a_non_string_verify_answer_fails_the_load(turns_env, answer):
             harness._connect()
         assert not harness.app_server.alive and harness.loading()
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- A Codex turn closes only on Codex's own word ------------------------------------
@@ -929,7 +1184,7 @@ def test_a_plain_steer_after_an_unblocked_stop_reads_idle(monkeypatch, turns_env
         app.complete()
         assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_blocked_stop_leaves_the_turn_open_to_steers(monkeypatch, turns_env):
@@ -947,7 +1202,7 @@ def test_a_blocked_stop_leaves_the_turn_open_to_steers(monkeypatch, turns_env):
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
         hold.close()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_stop_answer_waits_for_a_steer_codex_has_not_yet_answered(
@@ -984,7 +1239,7 @@ def test_the_stop_answer_waits_for_a_steer_codex_has_not_yet_answered(
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
         gate.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_steer_the_endpoint_tied_before_the_stop_and_sent_after_it_waits(
@@ -1018,7 +1273,7 @@ def test_a_steer_the_endpoint_tied_before_the_stop_and_sent_after_it_waits(
         assert _turn_texts(app) == ["first"] and app.absorbed == []
     finally:
         gate.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_start_absorbed_into_a_turn_already_reported_reads_lost_at_once(
@@ -1043,7 +1298,7 @@ def test_a_start_absorbed_into_a_turn_already_reported_reads_lost_at_once(
         facts = endpoint.facts()
         assert not facts.turn_open and facts.turn_number == epoch
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_an_interrupt_ends_the_turn_at_its_completion_not_at_the_ping(
@@ -1061,7 +1316,7 @@ def test_an_interrupt_ends_the_turn_at_its_completion_not_at_the_ping(
         assert bare(first.wait_ended(2)) == Ended("turn-1", "aborted")
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_codex_going_idle_without_completing_ends_the_turn_after_the_grace(
@@ -1078,7 +1333,7 @@ def test_codex_going_idle_without_completing_ends_the_turn_after_the_grace(
         assert bare(first.wait_ended(2)) == Ended("turn-1", "error")
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_completion_or_a_return_to_active_inside_the_grace_stops_its_timer(
@@ -1104,7 +1359,7 @@ def test_a_completion_or_a_return_to_active_inside_the_grace_stops_its_timer(
         app.complete()
         assert bare(second.wait_ended(2)) == Ended("turn-2", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 _RAISES = [
@@ -1147,7 +1402,7 @@ def test_a_raising_turn_start_reads_refused_only_when_codex_did_not_take_it(
         _check(session.deliver("hello", only_if_idle=True), reading)
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("make,reading", _RAISES)
@@ -1171,7 +1426,7 @@ def test_a_raising_turn_steer_reads_refused_only_when_codex_did_not_take_it(
         app.complete()
         assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_raising_turns_list_after_an_absorbed_start_reads_lost(monkeypatch, turns_env):
@@ -1197,7 +1452,7 @@ def test_a_raising_turns_list_after_an_absorbed_start_reads_lost(monkeypatch, tu
         assert isinstance(started, Lost) and started.untied
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_load_that_shows_the_turn_running_stops_the_grace(monkeypatch, turns_env):
@@ -1237,7 +1492,7 @@ def test_a_load_that_shows_the_turn_running_stops_the_grace(monkeypatch, turns_e
         made[1].complete()
         assert bare(running.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_noreply_after_turn_started_claimed_the_delivery_leaves_it_on_that_turn(
@@ -1267,7 +1522,7 @@ def test_noreply_after_turn_started_claimed_the_delivery_leaves_it_on_that_turn(
         app.complete()
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 class _ActiveResume(FakeClient):
@@ -1331,7 +1586,7 @@ def test_a_reconnect_inside_the_started_wait_ties_the_delivery_to_the_turn_it_sh
         made[1].complete()
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_start(
@@ -1368,7 +1623,7 @@ def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_s
             time.sleep(0.02)
         assert not endpoint.facts().turn_open
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- the internal sockets' paths ------------------------------------------------------
@@ -1380,7 +1635,7 @@ def test_the_codex_sockets_sit_in_the_endpoint_directory_when_their_paths_are_sh
         assert harness.app_socket == endpoint.dir / protocol.CODEX_APP_SOCK
         assert harness.hook_server.socket_path == endpoint.dir / protocol.CODEX_HOOKS_SOCK
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
@@ -1414,5 +1669,5 @@ def test_a_long_runtime_root_puts_the_codex_sockets_on_the_short_path(
         app.complete()
         assert delivery.wait_ended(2).outcome == "answer"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
     assert not os.path.lexists(harness.hook_server.socket_path)

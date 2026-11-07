@@ -9,10 +9,16 @@ directory, forks the session's adapter, and execs `claude`:
     execs it), forks, and the child detaches (its own session, its standard streams to
     comms' log) with the environment `claude` gets. Before `claude` starts it binds the
     name with the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with
-    the `claude` process as the claim's root: the wrapper waits for its ready byte, at
-    most `READY_WAIT` seconds, so an in-session `moxi comms send` is answered from the
-    session's first command. It then finds the session's turns endpoint and delivers
-    through it, and ends when `claude` exits.
+    the `claude` process as the claim's root: the wrapper waits for its ready byte, so an
+    in-session `moxi comms send` is answered from the session's first command. It then
+    finds the session's turns endpoint and delivers through it, and ends when `claude`
+    exits.
+  * **No session starts under a name it doesn't hold.** The wrapper waits at most
+    `READY_WAIT` seconds for the adapter's word, and says it is waiting once two seconds
+    have passed. A bind that isn't answered in that time ends the launch: the wrapper
+    prints why, exits `moxi.exit.TEMPFAIL` (75), and never starts `claude`. Its adapter
+    then finds nobody waiting for its word and lets the name go, so a bind answered late
+    never serves a session.
   * **No hooks, no settings file, no plugin of comms' own.** turns is the one interface
     to the session: its plugins are the ones a session loads, and comms' context (layer
     one, the roster and its deltas) reaches the session through comms' listener, which
@@ -86,10 +92,10 @@ from .word import BOUND, FAILED, await_word, exit_of, teller
 #: does not inherit its parent's (no comms code reads it).
 SOCKET_ENV = "MOXI_COMMS_SHIM_SOCKET"
 
-#: How long the wrapper waits for the adapter's ready byte before it execs `claude`
-#: anyway (the adapter's bind and listen take well under a second; a daemon that is not
-#: there does not hold it up, since the adapter then binds when the daemon returns).
-READY_WAIT = 5.0
+#: How long the wrapper waits for the adapter's ready byte. The bind and listen take well
+#: under a second; a launch whose bind isn't answered in this time ends with
+#: `moxi.exit.TEMPFAIL` and never starts `claude`.
+READY_WAIT = 15.0
 #: The separator the native layer wears where the comms identity wears `@`.
 NATIVE_AT = "-at-"
 
@@ -696,11 +702,14 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     stand in for it. The adapter is forked twice over (its first parent leaves at once),
     so it is never `claude`'s child and is not left a zombie under it, and it runs in a
     session of its own. The wrapper waits for its word (`adapters.word`), at most
-    `ready_wait` seconds. Any word but `BOUND` ends the launch here, before `claude`
+    `ready_wait` seconds, and says once that it is waiting when the word hasn't come
+    after `word.NOTICE_AFTER`. Any word but `BOUND` ends the launch here, before `claude`
     starts, with its reason on stderr and its exit code: a refusal (the name held by
     another session, or reserved) is `REFUSED`, a daemon that is not running is
-    `TEMPFAIL`. Past the bound `claude` starts anyway, and the wrapper says so on
-    stderr."""
+    `TEMPFAIL`. No word in `ready_wait` ends it too, with `TEMPFAIL`: `claude` never
+    starts under a name the daemon hasn't bound. The wrapper closes its end of the pipe
+    and exits, so the adapter's `BOUND`, if it comes, reaches nobody, and the adapter
+    stops."""
     from .terminal import pidfd_open   # not at the top: it needs termios, and the listener
     #                                    imports this module
 
@@ -725,14 +734,18 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     os.close(w)
     os.waitpid(child, 0)
     os.close(handle)
-    word = await_word(r, ready_wait)
+    who = qualify(session.name, session.scope) if session.name else "the session"
+    word = await_word(r, ready_wait, notice=lambda: print(
+        f"{prog}: waiting for the comms daemon to bind {who} (up to {ready_wait:g}s)",
+        file=sys.stderr, flush=True))
     os.close(r)
     if word is None:
-        print(f"{prog}: the session's comms adapter was not ready after {ready_wait:g}s; "
-              f"starting claude anyway (its log: {session.log_path()})", file=sys.stderr)
-    elif word[0] != BOUND:
+        print(f"{prog}: {who} was not launched: the comms daemon did not answer in "
+              f"{ready_wait:g}s; try again, or run moxi comms doctor (its log: "
+              f"{session.log_path()})", file=sys.stderr)
+        return moxi_exit.TEMPFAIL
+    if word[0] != BOUND:
         code, why = word
-        who = qualify(session.name, session.scope) if session.name else "the session"
         print(f"{prog}: {who} was not launched: "
               f"{why or 'the adapter ended before it bound'} (its log: "
               f"{session.log_path()})", file=sys.stderr)

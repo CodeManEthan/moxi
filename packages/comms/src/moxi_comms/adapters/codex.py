@@ -28,9 +28,12 @@ resume thread T (the wrapper's `--resume T`, which the host also gets), every re
 adapter makes describes T as resumed, once: a register before the session is found
 gives `session_id` T with `new_session: false`; once found, the launch reports one
 `ready` with the resume source, the owed ledger hears that T resumed, and the thread
-record names T. turns raises its own resume `Ready` for that first load; when the watch
-gives it, it is not reported a second time. A host that ends before it has loaded T ends
-the launch, and the binding with it, as a failed first start does.
+record names T. turns raises its own `Ready` for that first load, `resume`, or
+`startup` when T has had no turn yet; when the watch gives it, it is not reported a
+second time. That ready also says whether T has had a turn, so a resumed launch leaves
+`turned` out of its reports until it comes: T may have been opened and never turned. A
+host that ends before it has loaded T ends the launch, and the binding with it, as a
+failed first start does.
 
 **Delivery.** Plain mail goes one digest at a time, at turn boundaries only: while no
 turn runs, by `deliver(text, ref=<digest>)`, which starts a turn. Mail that arrives
@@ -83,7 +86,6 @@ sees the same thing on both harnesses, directive standing for the roster's decla
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from pathlib import Path
@@ -276,8 +278,8 @@ class CodexAdapter(HarnessAdapter):
         self.layer_one = layer_one
         #: The thread this launch was told to resume, or None: it starts a new one.
         self.resume = resume or None
-        #: Whether the watch may still give turns' resume ready for the first load,
-        #: which the launch reported itself (`start_port`).
+        #: Whether the watch may still give turns' ready for the first load of a resumed
+        #: thread, which the launch reported itself (`start_port`).
         self._first_resume_unseen = False
 
         #: The turns session of this launch's thread, once launched.
@@ -296,8 +298,11 @@ class CodexAdapter(HarnessAdapter):
         #: The turn the reply reminder holds open, while it does.
         self._blocked_turn: str | None = None
         #: Whether a turn of this launch's thread has ended (the cache clock's `turned`).
-        #: A resumed thread has had its turns before this launch.
-        self._own_turned = self.resume is not None
+        #: A new thread starts False. A resumed thread is None, not known, until turns'
+        #: ready for a load says whether it has had a turn: `startup` for a thread with
+        #: none yet (turns opens a thread with an injected item, not a turn), and any
+        #: other source for one that has had turns.
+        self._own_turned: bool | None = False if self.resume is None else None
         #: Which launch wrote the thread record: `<pid>@<UTC start>`.
         self.launch = launch_stamp()
         #: What the thread record says the thread was born with (layer one's hash).
@@ -334,8 +339,11 @@ class CodexAdapter(HarnessAdapter):
         creation. A launch told to resume thread T reports T from its first `register`,
         `new_session: false`, before the session is found. A `register` that holds the
         launch's thread (a daemon reconnect inside the launch) reports it,
-        `new_session: false`. `turned` is false until a turn of a new thread ends, and
-        true for a resumed one, which had turns before this launch."""
+        `new_session: false`. `turned` is false until a turn of a new thread ends. A
+        resumed thread's `turned` is left out until turns' ready for a load says whether
+        the thread has had a turn, since a thread can be resumed before its first turn;
+        the daemon reads a left-out `turned` of a new session id as false, and never
+        lowers one it was told is true."""
         with self._lock:
             found = self.thread_id
             thread_id = found or self.resume
@@ -344,7 +352,9 @@ class CodexAdapter(HarnessAdapter):
             self.claims.note_session(found)
         report: dict = {}
         if thread_id:
-            report.update(session_id=thread_id, turned=turned)
+            report["session_id"] = thread_id
+            if turned is not None:
+                report["turned"] = turned
             if register:
                 report["new_session"] = False
         elif register:
@@ -419,17 +429,20 @@ class CodexAdapter(HarnessAdapter):
         # the first event the watch gives.
         watch = self._watch_handle = session.watch()
         facts = watch.facts
+        raised = getattr(facts, "ready", None)
         with self._lock:
             self.turn_open = bool(facts.turn_open)
-            # A turn that ended before the subscription (the host's priming turn can)
-            # reaches no event: the facts' count says the thread has turned, and the
-            # ready report below carries it.
+            # The watch replays nothing: turns' ready for the first load reaches it only
+            # when no ready had been raised at the subscription. One that had been says
+            # whether the resumed thread has had a turn.
+            self._first_resume_unseen = self.resume is not None and raised is None
+            if raised is not None:
+                self._learn_turned(getattr(raised, "source", None))
+            # A turn that ended before the subscription (a quick first turn can)
+            # reaches no event: the facts' count says the thread has turned, whatever a
+            # ready said, and the ready report below carries it.
             if facts.turn_number - (1 if facts.turn_open else 0) > 0:
                 self._own_turned = True
-            # The watch replays nothing: turns' resume ready for the first load reaches
-            # it only when no ready had been raised at the subscription.
-            self._first_resume_unseen = (self.resume is not None
-                                         and getattr(watch.facts, "ready", None) is None)
         self._watcher = threading.Thread(target=self._watch, args=(watch,),
                                          daemon=True, name="comms-codex-watch")
         self._watcher.start()
@@ -614,20 +627,38 @@ class CodexAdapter(HarnessAdapter):
         if first:
             self.report_refresh()          # `turned` changed: a report refresh
 
+    def _learn_turned(self, source) -> bool:
+        """A ready of a resumed thread whose `turned` is not known yet sets it: `startup`
+        is turns' ready for a thread with no turn yet, any other source one that has had
+        turns. True when `turned` became true, which the daemon must hear. Called under
+        the lock."""
+        if self._own_turned is not None or not source:
+            return False
+        self._own_turned = source != SOURCE_STARTUP
+        return self._own_turned
+
     def _ready(self, source, session_id) -> None:
         """A resume or a compaction of the thread. The startup was reported at launch,
-        and so was the first load's resume of a thread the launch was told to resume:
-        turns' resume ready for that load, when the watch gives it, is dropped, and every
-        later one (a reconnect's) is reported."""
-        if source == SOURCE_RESUME:
-            with self._lock:
-                first = self._first_resume_unseen and session_id in (None, self.resume)
-                if first:
-                    self._first_resume_unseen = False
+        and so was the first load of a thread the launch was told to resume: turns'
+        ready for that load, when the watch gives it, is dropped, and every later resume
+        (a reconnect's) is reported. turns says `startup`, not `resume`, for that first
+        load when the thread has had no turn yet; it is the same load's ready, and is
+        dropped the same way. Any later `startup` ready is a reload of a thread that
+        still has had no turn, and is not reported: the launch reported the thread's
+        start or resume already."""
+        with self._lock:
+            first = (source in (SOURCE_STARTUP, SOURCE_RESUME) and self._first_resume_unseen
+                     and session_id in (None, self.resume))
             if first:
-                self.log.info("the first load's resume of thread %s was reported at the "
-                              "launch", self.resume)
-                return
+                self._first_resume_unseen = False
+            turned = self._learn_turned(source)
+        if turned:
+            self.report_refresh()          # `turned` changed: a report refresh
+        if first:
+            self.log.info("the first load's %s ready of thread %s was reported at the "
+                          "launch", source, self.resume)
+            return
+        if source == SOURCE_RESUME:
             self.owed_session_changed(SOURCE_RESUME, session_id)
             self.report_ready(SOURCE_RESUME)
         elif source == SOURCE_COMPACT:

@@ -292,9 +292,9 @@ def test_a_gateway_port_equal_to_the_shells_takes_no_hold(env, loop):
 def test_a_shell_whose_environment_moves_its_runtime_dir_takes_no_hold(env, loop, tmp_path):
     world, hooks = World(switch=True), Hooks()
     world.address = address(world)
-    gw = _gateway(world, hooks, {**env, "MOXI_HOME": str(tmp_path / "moved")})
+    gw = _gateway(world, hooks, {**env, "MOXI_UI_HOME": str(tmp_path / "moved")})
     try:
-        assert gw.moved and "MOXI_HOME" in gw.moved
+        assert gw.moved and "MOXI_UI_HOME" in gw.moved
         loop.run(gw.tick())
         assert not gw.holding and gw.profile is None and _port_free(world.port)
     finally:

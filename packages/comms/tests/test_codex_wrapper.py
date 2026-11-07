@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import wait_until
 
+import bind_kit
 from moxi import exit as moxi_exit
 from moxi_comms import api, claimfile, cli, reserved, secrets
 from moxi_comms.adapters import codex_wrapper
@@ -365,3 +366,77 @@ def test_a_daemon_that_is_not_running_is_tempfail_before_the_host_starts(fake_ho
     assert proc.returncode == moxi_exit.TEMPFAIL, err
     assert not fake_host.out.exists()
     assert not any(codex_wrapper.sessions_dir().glob("codex-*"))
+
+
+# ------------------------------------------------------------- nobody waits for the word
+
+def codex_adapter(rig, tmp_path):
+    from moxi_comms import codex_threads
+    from moxi_comms.adapters.codex import CodexAdapter
+    from moxi_comms.adapters.codex_roster import CodexAgent
+
+    agent = CodexAgent(qualified="planner@proj-a", name="planner", scope="proj-a",
+                       cwd=str(tmp_path), thread_file=codex_threads.path("planner@proj-a"))
+    return CodexAdapter(agent, harness_pid=4242, autoreconnect=False, clock=rig.clock,
+                        status_sink=lambda text: None, exit_hook=lambda: None)
+
+
+def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig, tmp_path):
+    """The wrapper gave up waiting and ended: `BOUND` reaches nobody, so the adapter
+    unbinds, removes its claim file and ends with `TEMPFAIL`, before it looks for a
+    session."""
+    from moxi_comms.adapters import word
+
+    adapter = codex_adapter(rig, tmp_path)
+    looked = []
+    adapter.find_session = lambda: looked.append(1)
+    handle, alive = os.pipe()            # readable once `alive` closes: the wrapper runs
+    gone, w = os.pipe()
+    os.close(gone)                        # the wrapper's end of the word pipe is closed
+    tell = word.teller(w)
+    bound_when_told = []
+
+    def say(code, reason=""):
+        if code == word.BOUND:
+            with rig.daemon._lock:
+                bound_when_told.append("planner@proj-a" in rig.daemon.bindings)
+        return tell(code, reason)
+
+    try:
+        assert codex_wrapper.serve(adapter, handle, say=say) == moxi_exit.TEMPFAIL
+    finally:
+        os.close(alive)
+        os.close(handle)
+    assert bound_when_told == [True]
+    assert looked == [], "no session is looked for, and nothing delivered"
+    assert wait_until(lambda: "planner@proj-a" not in rig.daemon.bindings, 10), \
+        "the daemon sees the unbind"
+    assert claimfile.read(adapter.claims.key) is None
+
+
+def test_an_adapter_whose_wrapper_is_gone_before_it_starts_never_binds(rig, tmp_path):
+    adapter = codex_adapter(rig, tmp_path)
+    started = []
+    adapter.start = lambda: started.append(1)
+    handle, alive = os.pipe()
+    os.close(alive)                       # the wrapper has ended
+    try:
+        assert codex_wrapper.serve(adapter, handle,
+                                   say=lambda code, reason="": True) == moxi_exit.TEMPFAIL
+    finally:
+        os.close(handle)
+    assert started == []
+    assert "planner@proj-a" not in rig.daemon.bindings
+
+
+def test_a_bind_the_daemon_never_answers_ends_the_codex_launch(tmp_path):
+    """The Codex wrapper's wait runs out: 75, no host, the waiting line once."""
+    ran = bind_kit.silent_launch("codex", tmp_path, ready_wait=0.5, notice_after=0.1)
+    assert (ran.code, ran.execs) == (moxi_exit.TEMPFAIL, []), ran.err
+    err = ran.err
+    assert [ln for ln in err if "waiting for" in ln] == [
+        "moxi-comms-codex: waiting for the comms daemon to bind silent (up to 0.5s)"]
+    assert err[-1].startswith("moxi-comms-codex: silent was not launched: the "
+                              "comms daemon did not answer in 0.5s; try again, or run "
+                              "moxi comms doctor (its log: ")
+    assert codex_wrapper.READY_WAIT == 15.0

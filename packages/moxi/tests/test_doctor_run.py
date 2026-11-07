@@ -21,10 +21,14 @@ import moxi.paths
 from moxi import cli, doctor, files, modules, place, strays, units
 from moxi.doctor import Row, _run
 from moxi.units import _backend, _state
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeBackend, FakeSupervisor
+
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
 
 #: A platform this one isn't, for a unit declared for another system only.
 OTHER_PLATFORM = "linux" if sys.platform == "win32" else "win32"
@@ -570,6 +574,30 @@ def test_a_failed_socket_unit_is_a_fail_socket_row_naming_it(d, ipv6):
     assert cli.main(["doctor", "demo"]) == 1
 
 
+#: Shaped like ui's shell: two addresses, started by a connection while its switch is off.
+STARTED_BY_A_CONNECTION = (
+    "{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+    "'addresses': ['127.0.0.1', '::1'], 'start': {'login': 'relay.enabled'}}}}")
+
+
+def test_a_failed_ipv6_socket_unit_leaves_the_idle_daemons_row_unrefused(d, ipv6,
+                                                                         monkeypatch):
+    """127.0.0.1 answers, its own socket unit holding it, while the `::1` unit has
+    failed and the daemon is idle: the daemon's row isn't refused for its port; the
+    socket's row fails naming the failed unit."""
+    d.installed(DAEMONS=STARTED_BY_A_CONNECTION, ANNOUNCES="2")
+    d.sup.state(f"{STEM}.service")["active"] = False
+    d.sup.props[f"{STEM}-1.socket"] = {"ActiveState": "failed"}
+    monkeypatch.setattr(units._plan, "answers",
+                        lambda address, port, timeout=0.5: address == "127.0.0.1")
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert "another port" not in (relay.fix or "") and "listens on" not in relay.detail
+    assert relay.detail.startswith("up to date; inactive")
+    sock = got[("demo", "socket relay")]
+    assert (sock.state, sock.detail) == ("fail", f"up to date; failed: {STEM}-1.socket")
+
+
 def test_an_inactive_socket_names_the_units_not_active(d, ipv6):
     d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
     d.sup.state(f"{STEM}-1.socket")["active"] = False
@@ -715,7 +743,9 @@ def test_on_launchd_the_recorded_print_of_an_idle_label_gives_the_same_rows(d, t
     assert set(got) == {("demo", "daemon idle")}
     assert (got[("demo", "daemon idle")].state, got[("demo", "daemon idle")].detail) == (
         "ok", "up to date; idle, socket listening")
-    assert calls == [["launchctl", "print", f"gui/{UID}"]]
+    # One print is the doctor's status read; the other is its plan's, whose port check
+    # finds the daemon's own job naming the address and reads that it is loaded.
+    assert calls == [["launchctl", "print", f"gui/{UID}"]] * 2
 
 
 @pytest.mark.parametrize("seen, state", [("inactive", "warn"), ("active", "ok"),

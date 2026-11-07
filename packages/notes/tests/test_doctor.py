@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import moxi.modules
 import moxi.paths
 from moxi_notes import doctor, setup
 
@@ -43,10 +44,37 @@ def set_up(**values) -> Path:
 
 # -- root ---------------------------------------------------------------------------------
 
-def test_root_fails_when_the_folder_is_missing():
+def _setup_ran(monkeypatch, ran: bool) -> list[str]:
+    asked = []
+    monkeypatch.setattr(moxi.modules, "setup_ran", lambda m: asked.append(m) or ran)
+    return asked
+
+
+def test_root_fails_when_the_folder_is_missing_after_setup_ran(monkeypatch):
+    asked = _setup_ran(monkeypatch, True)
     row = rows()["root"]
     assert row.state == "fail" and "missing" in row.detail
     assert "moxi notes setup" in row.fix
+    assert asked == ["notes"]
+
+
+def test_a_missing_root_before_setup_ran_warns_and_names_the_install():
+    # The fence's home is fresh: the core's own record says notes' setup never ran here.
+    assert moxi.modules.setup_ran("notes") is False
+    found = rows()
+    row = found["root"]
+    assert row.state == "warn"
+    assert row.detail.startswith("notes' setup has not run here")
+    assert str(home() / "notes") in row.detail
+    assert row.fix == "moxi install notes"
+    assert not [r.name for r in found.values() if r.state == "fail"]
+
+
+def test_the_setup_record_is_read_only_for_a_missing_root(monkeypatch):
+    asked = _setup_ran(monkeypatch, False)
+    (home() / "notes").mkdir()
+    assert rows()["root"].state == "warn"
+    assert asked == []
 
 
 def test_root_warns_when_the_folder_is_no_git_repo_and_the_rest_is_off():

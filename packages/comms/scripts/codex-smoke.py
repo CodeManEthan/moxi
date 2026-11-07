@@ -10,7 +10,7 @@ Unix socket path has a length limit.
 ``--dry-run`` uses the repository's fake ``codex`` executable. It starts a real comms
 daemon and the roster form of ``moxi-comms-codex``, which binds the name and execs
 ``moxi-turns-codex-host``; the host spawns the fake app-server. It checks the thread's
-settings, waits for the launch's own priming turn to end, then sends mail with
+settings, waits for the launch to open its thread with no turn, then sends mail with
 ``moxi comms send`` from a sender that holds a binding of its own. The mail goes through
 the daemon and the wrapper's adapter into the thread; the script checks that the cursor
 moves only when the fake ends the turn, and that stopping the host ends the app-server.
@@ -191,13 +191,13 @@ def hosted_session(timeout: float):
                                     if item.harness == "codex"), None), timeout)
 
 
-def primed(session) -> bool:
-    """The launch's own priming turn has ended: a turn ran and none is open."""
+def opened(session) -> bool:
+    """The launch has opened its thread: the load's Ready came, and no turn is open."""
     try:
         facts = session.facts()
     except Exception:                                          # noqa: BLE001
         return False
-    return facts.turn_number >= 1 and not facts.turn_open
+    return facts.ready is not None and not facts.turn_open
 
 
 def sender_session():
@@ -323,8 +323,11 @@ def dry_run() -> int:
 
         session = hosted_session(20)
         check(session is not None, "turns published the hosted session through its API")
-        check(session is not None and bool(wait_until(lambda: primed(session), 20)),
-              "the launch's priming turn ended")
+        check(session is not None and bool(wait_until(lambda: opened(session), 20)),
+              "the launch opened its thread")
+        check(bool(fake_codex.calls(records, "thread/inject_items"))
+              and not fake_codex.calls(records, "turn/start"),
+              "the thread was opened with an injected item, not a turn")
         check(bool(wait_until(lambda: thread_id_of(IDENTITY), 10)),
               "the adapter recorded the hosted thread id")
 
@@ -396,7 +399,7 @@ def live_run(binary: str) -> int:
         check(session is not None, "turns published the hosted session through its API")
         if session is None:
             return report()
-        wait_until(lambda: primed(session), 300)
+        wait_until(lambda: opened(session), 60)
         delivery = session.deliver("Reply with a short acknowledgement, then stop.",
                                    ref="smoke-live")
         started = delivery.wait_started(60)

@@ -44,7 +44,8 @@ and `moxi loadout status` says what has drifted.
    manifest disables stays off when its module is installed again. Removing a module
    skill, or dropping one of its harnesses from the manifest, lasts only until the
    module's next `moxi install`, which places it again if you said yes at the module's
-   question.
+   question. A folder a module's own setup places at a path of its choosing (turns'
+   Claude Code plugins, say) is not a module skill: loadout leaves it to that module.
 8. On install it writes an example manifest, every item commented out, into an empty
    folder, adds an OpenCode row to the core's harness table, and asks for the global mode
    when the manifest sets none and someone is at the keyboard.

@@ -16,7 +16,7 @@ import pytest
 
 import moxi_turns as turns
 from claude_runner import FakeRunner, pipe_pair, post
-from conftest import bare, opener, write_config
+from conftest import bare, end_endpoint, opener, write_config
 from moxi_turns import claude_leg as leg
 from moxi_turns import client, listeners, protocol
 from moxi_turns.claude_endpoint import ClaudeHarness
@@ -45,7 +45,7 @@ def claude(turns_env):
 
     yield make
     for ep, w in made:
-        ep.stop("the test ended")
+        end_endpoint(ep)
         w.close()
 
 

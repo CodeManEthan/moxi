@@ -11,6 +11,8 @@ next `moxi loadout install` ends both.
 - **`on_install`** hands the module's own placements (made after a yes at its skills
   question) to loadout, unseeded, and lists each in the manifest with the harnesses it
   was placed for (`moxi_loadout.adoption.take`), so a yes is taken over in the same run.
+  A placement the module made with `dest` (its setup's own folder, say) is not one of
+  these: it is left to the module, whose teardown and uninstall remove it.
   Then each placement of that module's skills that the manifest disables is removed, by
   target, through the placer: its `remove` step out of `plan("loadout", [])`, applied
   alone. One line for each, `loadout: removed moxi-demo for codex (disabled)`. A skill

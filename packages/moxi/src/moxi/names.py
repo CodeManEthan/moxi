@@ -41,13 +41,27 @@ NAMESPACE = "moxi"
 VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", "version",
                    "doctor", "uninstall", "run", "paths"})
 
-#: Names the core uses for itself, so no module may take one: `moxi` is the core's own
-#: state directory, `set` and `unset` are the first words of `moxi config set` and
-#: `moxi config unset`, `runtime` holds every module's runtime directory where the system
-#: gives none, `installs` is the core's entry-point group `moxi.installs`, and `anchor`
-#: would give a module the home variable `MOXI_ANCHOR_HOME`, which is the test kits' own
-#: stand-in for the account's folder (`moxi.paths.anchor_dir`).
-RESERVED = frozenset({"moxi", "set", "unset", "runtime", "installs", "anchor"})
+#: Why the core keeps each name of `RESERVED`, one reason per name, as `reserved_why`
+#: gives it. `test` is kept because `MOXI_TEST_` is the prefix of the variables
+#: moxi-dev's test tiers read (moxi-dev's `contract.DEV_ENV_PREFIX`): a module named
+#: `test` would have that prefix for its own variables, and the two would collide.
+#: `anchor` is kept because a module of that name would have the home variable
+#: `MOXI_ANCHOR_HOME`, which is the test kits' own stand-in for the account's folder
+#: (`moxi.paths.anchor_dir`).
+_RESERVED_WHY = {
+    "moxi": "it is the core's own state directory",
+    "set": "it is the first word of `moxi config set`",
+    "unset": "it is the first word of `moxi config unset`",
+    "runtime": "it holds every module's runtime directory where the system gives none",
+    "installs": "it is the core's entry-point group moxi.installs",
+    "test": "its variables would start MOXI_TEST_, which moxi-dev's test tiers use",
+    "anchor": "its home variable would be MOXI_ANCHOR_HOME, the test kits' stand-in "
+              "for the account's folder",
+}
+
+#: Names the core uses for itself, so no module may take one; `reserved_why` says why,
+#: per name.
+RESERVED = frozenset(_RESERVED_WHY)
 
 _NAME = re.compile(r"[a-z0-9]+")
 
@@ -66,6 +80,14 @@ def is_module_name(name: object) -> bool:
 def is_reserved(name: object) -> bool:
     """True when no module may take `name`: a verb, or a name the core keeps for itself."""
     return isinstance(name, str) and (name in VERBS or name in RESERVED)
+
+
+def reserved_why(name: object) -> str | None:
+    """Why no module may take `name`, a name of `RESERVED`, as one clause; None for any
+    other name. Every refusal of a reserved name says it after the name:
+    `'test' is a name moxi keeps for itself, not a module: its variables would start
+    MOXI_TEST_, which moxi-dev's test tiers use`."""
+    return _RESERVED_WHY.get(name) if isinstance(name, str) else None
 
 
 def check_module_name(name: object) -> str:
@@ -123,6 +145,6 @@ def env_prefix(name: str) -> str:
 
 
 __all__ = ["HARNESS", "OWNER", "ORG", "NAMESPACE", "VERBS", "RESERVED", "SKILL_PREFIX",
-           "SKILL_NAME_MAX", "is_module_name", "is_reserved", "check_module_name",
-           "is_skill_folder", "is_skill_name", "check_skill_name", "distribution",
-           "import_name", "repo", "env_prefix"]
+           "SKILL_NAME_MAX", "is_module_name", "is_reserved", "reserved_why",
+           "check_module_name", "is_skill_folder", "is_skill_name", "check_skill_name",
+           "distribution", "import_name", "repo", "env_prefix"]

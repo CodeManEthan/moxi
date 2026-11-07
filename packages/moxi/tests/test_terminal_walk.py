@@ -388,6 +388,14 @@ def test_a_cgroup_naming_a_moxi_unit_stops_it():
     assert got == Evidence("E3", RUN + 2, "tmux", "moxi-slots-server.service", "slots")
 
 
+@pytest.mark.parametrize("unit", ["moxi-h3f9a2c1d-slots-server.service",
+                                  "moxi.h3f9a2c1d.slots.server"])
+def test_a_tagged_homes_unit_names_its_module_not_the_tag(unit):
+    tmux = p(["tmux"], unit=unit)
+    got = found(ME, SHELL, tmux, USER_MANAGER, INIT)
+    assert got == Evidence("E3", RUN + 2, "tmux", unit, "slots")
+
+
 def test_the_runs_own_unit_stops_it():
     me = p(ME["argv"], unit="moxi-slots-server.service")
     assert found(me, *PERSON).kind == "E3"

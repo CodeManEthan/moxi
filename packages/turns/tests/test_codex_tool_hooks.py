@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import moxi_turns
-from conftest import write_config
+from conftest import end_endpoint, write_config
 from moxi_turns import codex_hooks, listeners
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
@@ -312,7 +312,7 @@ def test_a_launch_with_no_codex_guard_and_no_after_tool_row_registers_neither(tu
         assert not {"PreToolUse", "PostToolUse"} & set(groups)
         assert len(harness.hook_keys) == len(codex_hooks.EVENTS)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_codex_guard_registers_pre_tool_use_with_its_matcher(turns_env):
@@ -328,7 +328,7 @@ def test_a_codex_guard_registers_pre_tool_use_with_its_matcher(turns_env):
         # The load checked the new key's trust with the others.
         assert harness.loading() is False
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_an_after_tool_row_registers_post_tool_use_for_every_tool(turns_env):
@@ -341,7 +341,7 @@ def test_an_after_tool_row_registers_post_tool_use_for_every_tool(turns_env):
         wait = f"--wait-seconds {endpoint.after_tool_wait_s + 1:g} PostToolUse"
         assert group["hooks"][0]["command"].endswith(wait)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_guard_list_in_turns_config_sets_the_matcher_and_the_pings_wait(turns_env):
@@ -357,7 +357,7 @@ def test_the_guard_list_in_turns_config_sets_the_matcher_and_the_pings_wait(turn
         harness.guards_ready()
         assert harness._guard_settings()[1] == 1200
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- PreToolUse --------------------------------------------------------------------------
@@ -406,7 +406,7 @@ def test_the_shared_codex_cases_through_the_host(monkeypatch, turns_env):
                     f"judged {case['tool']}" for _ in case["ask"]), case["name"]
                 assert len(CALLS) == len(case["ask"])
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_judge_gets_the_call_as_codex_gave_it(monkeypatch, turns_env):
@@ -430,7 +430,7 @@ def test_the_judge_gets_the_call_as_codex_gave_it(monkeypatch, turns_env):
         assert (sub.session_id, sub.agent_id, sub.cwd, sub.record_path) == (
             "thread-1", "sub-7", "/work/tree", "/codex/sessions/rollout-sub-7.jsonl")
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("given", [None, "", "moved", "./moved", 7])
@@ -447,7 +447,7 @@ def test_a_missing_or_relative_cwd_falls_back_to_the_launch_directory(
         ping(monkeypatch, harness, "PreToolUse", frame)
         assert CALLS[-1].cwd == harness.cwd == str(Path(turns_env).resolve())
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_deny_a_break_and_lines_in_codex_output(monkeypatch, turns_env):
@@ -472,7 +472,7 @@ def test_a_deny_a_break_and_lines_in_codex_output(monkeypatch, turns_env):
                 "t.loose", "it raised RuntimeError: boom")}}
         assert timed_count(harness, "guard", 3) == 3
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_another_threads_tool_hook_is_passed_untouched(monkeypatch, turns_env):
@@ -482,7 +482,7 @@ def test_another_threads_tool_hook_is_passed_untouched(monkeypatch, turns_env):
         assert ping(monkeypatch, harness, "PreToolUse",
                     pre("Bash", session_id="other-thread")) is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- a host that can't answer ------------------------------------------------------------
@@ -527,21 +527,21 @@ def test_the_refuse_table_holds_only_the_guards_that_declared_deny(turns_env):
         assert harness.hook_keys[codex_hooks.hook_key("pre_tool_use")] == \
             verified_hash("pre_tool_use", group["hooks"][0], group["matcher"])
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
     # Allow guards alone carry no table.
     endpoint, harness, _ = host(turns_env, guards=runner(
         found("t.loose", {"codex": ["Bash"]}, judge="judge_allow")))
     try:
         assert "--refuse-unanswered" not in registered_ping(harness)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_dead_host_refuses_a_call_a_deny_guard_covers_and_passes_the_rest(
         monkeypatch, turns_env):
     endpoint, harness, _ = host(turns_env, guards=strict_and_loose())
     words = registered_ping(harness)
-    endpoint.stop("the test ended")
+    end_endpoint(endpoint)
     assert not harness.hook_server.socket_path.exists()      # nothing listens now
     refused = {"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -565,7 +565,7 @@ def test_a_dead_host_with_only_allow_guards_passes_every_call(monkeypatch, turns
     endpoint, harness, _ = host(turns_env, guards=runner(
         found("t.loose", {"codex": ["Bash"]}, judge="judge_allow")))
     words = registered_ping(harness)
-    endpoint.stop("the test ended")
+    end_endpoint(endpoint)
     assert run_ping(monkeypatch, words, pre("Bash", {"command": "git push"})) is None
 
 
@@ -582,7 +582,7 @@ def test_a_host_fault_refuses_a_covered_call_and_passes_the_rest(monkeypatch, tu
             == codex_hooks.CANNOT_CHECK
         assert run_ping(monkeypatch, words, pre("Bash", {"command": "ls"})) is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_an_answering_host_decides_and_the_table_adds_nothing(monkeypatch, turns_env):
@@ -592,7 +592,7 @@ def test_an_answering_host_decides_and_the_table_adds_nothing(monkeypatch, turns
         out = run_ping(monkeypatch, words, pre("Bash", {"command": "git push"}))
         assert context_of(out) == "judged Bash\njudged Bash"
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 @pytest.mark.parametrize("table", ["not json", '{"calls": ["Bash"]}',
@@ -611,7 +611,7 @@ def test_a_guard_turned_off_at_a_ready_stops_covering(monkeypatch, turns_env):
              {"session_id": "thread-1", "source": "compact"})
         assert ping(monkeypatch, harness, "PreToolUse", pre("Bash")) is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_a_guard_that_did_not_load_is_named_in_the_next_ready(monkeypatch, turns_env):
@@ -628,7 +628,7 @@ def test_a_guard_that_did_not_load_is_named_in_the_next_ready(monkeypatch, turns
             time.sleep(0.05)
         assert "[turns] guard t.gone could not load" in context_of(out)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_parallel_subagent_calls_are_judged_together(monkeypatch, turns_env):
@@ -663,7 +663,7 @@ def test_parallel_subagent_calls_are_judged_together(monkeypatch, turns_env):
         assert answers == {f"a{i}": {"ok": True, "context": f"ok a{i}"} for i in range(4)}
     finally:
         gate.set()
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 # -- the prompt rule ---------------------------------------------------------------------
@@ -704,7 +704,7 @@ def test_a_subagents_prompt_gets_no_listener_text_and_raises_no_prompt_event(
         ping(monkeypatch, harness, "PreToolUse", pre("Bash", turn_id="turn-3"))
         assert CALLS[-1].prompts == (Prompt(None, "now ship it"),)
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_ping_forwards_agent_id_cwd_and_the_tool_fields():
@@ -755,7 +755,7 @@ def test_after_tool_text_reaches_codex_with_the_calls_facts(monkeypatch, turns_e
              "/codex/sessions/rollout-sub-2.jsonl", harness.cwd)]
         assert timed_count(harness, "after-tool", 2) == 2
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_the_floor_gates_only_the_main_loop_by_its_token_reading(monkeypatch, turns_env):
@@ -788,7 +788,7 @@ def test_the_floor_gates_only_the_main_loop_by_its_token_reading(monkeypatch, tu
         assert context_of(ping(monkeypatch, harness, "PostToolUse", post("Bash"))) == "mark"
         assert called == [None, "sub-1", None]
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)
 
 
 def test_with_no_after_tool_row_a_post_tool_ping_adds_nothing(monkeypatch, turns_env):
@@ -797,4 +797,4 @@ def test_with_no_after_tool_row_a_post_tool_ping_adds_nothing(monkeypatch, turns
         assert ping(monkeypatch, harness, "PostToolUse", post("Bash")) is None
         assert ping(monkeypatch, harness, "PreToolUse", pre("Bash")) is None
     finally:
-        endpoint.stop("the test ended")
+        end_endpoint(endpoint)

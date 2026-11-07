@@ -77,6 +77,22 @@ def test_a_unit_in_moxis_own_namespace_is_refused(ref, backend):
     assert "own unit namespace" in caught.value.reason
 
 
+@pytest.mark.parametrize("ref,backend", [
+    ("moxi-h3f9a2c1d-comms-daemon.service", "systemd"),
+    ("moxi-h3f9a2c1d-comms-daemon.socket", "systemd"),
+    ("moxi-h3f9a2c1d-notes-snapshot.timer", "systemd"),
+    ("moxi.h3f9a2c1d.comms.daemon", "launchd"),
+    ("\\Moxi\\h3f9a2c1d\\comms-daemon", "schtasks"),
+])
+def test_a_tagged_homes_unit_is_refused_as_moxis_own(ref, backend):
+    """A home given by MOXI_HOME puts its tag after the namespace prefix, so its units are
+    still moxi's own, whichever home wrote them."""
+    with pytest.raises(Refused) as caught:
+        rows.check_ref(ref, backend)
+    assert caught.value.exit_code == 3
+    assert "own unit namespace" in caught.value.reason
+
+
 def test_a_systemd_unit_of_another_type_is_refused():
     with pytest.raises(Refused):
         rows.check_ref("web.socket", "systemd")

@@ -363,7 +363,12 @@ launch is a try-again (75), since the wrapper would stop before the harness star
 Codex launch with an identity takes no extra flags, since comms' Codex wrapper takes only
 its own. When the wrapper ends before the harness starts (comms' daemon stopped after the
 check, say), its words show where it ran and the row ends `failed` with `comms-offline`
-(75), `identity-taken` (3) or `comms-failed` (1).
+(75), `comms-no-answer` (75: the daemon didn't answer the bind in the wrapper's wait),
+`identity-taken` (3) or `comms-failed` (1). The launcher waits for the bind as long as
+comms says its wrappers wait, and 5 s more. A wrapper that never starts the harness
+without the name and is still alive then, the name not its own, ends the row
+`comms-failed`. One that starts the harness anyway after its wait leaves the row
+`started`.
 
 ## Settings
 

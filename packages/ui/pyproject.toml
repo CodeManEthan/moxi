@@ -1,6 +1,6 @@
 [project]
 name = "moxi-ui"
-version = "0.2.0"
+version = "0.2.1"
 description = "The browser shell: one origin for every module's page"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -9,7 +9,7 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 # The server libraries are required: every page server runs on them, so an extra would
 # enable nothing. h11 is named for its floor, 0.16, which fixed a request-smuggling bug;
 # uvicorn alone allows older ones.
-dependencies = ["moxi>=0.1.4,<0.2", "starlette>=1.10,<2", "uvicorn>=0.54,<1", "h11>=0.16,<1",
+dependencies = ["moxi>=0.1.6,<0.2", "starlette>=1.10,<2", "uvicorn>=0.54,<1", "h11>=0.16,<1",
                 "psutil>=5.9"]
 
 # Only the core declares the `moxi` script; this is the shell's own entry point, the
@@ -65,8 +65,8 @@ packages = ["src/moxi_ui"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "docs", "src/moxi_ui", "tests",
-                "web"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "docs",
+                "src/moxi_ui", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium

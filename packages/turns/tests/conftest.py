@@ -20,6 +20,23 @@ from moxi_turns.endpoint import Endpoint
 
 
 @pytest.fixture(autouse=True)
+def no_installed_listeners(monkeypatch):
+    """The listener group reads empty, so no installed module's listener runs in a test.
+
+    The workspace installs modules (usage, comms and the rest) whose listeners keep their
+    own stores, and an endpoint built without a registry would load them. A listener call
+    can outlive the test that started it, and it finds its store from the environment of
+    the moment: past the test's end that is the real one. A test that wants rows passes a
+    registry, or sets `moxi.modules.extensions` itself."""
+    from moxi import modules
+    from moxi_turns import listeners
+
+    real = modules.extensions
+    monkeypatch.setattr(modules, "extensions",
+                        lambda group: [] if group == listeners.GROUP else real(group))
+
+
+@pytest.fixture(autouse=True)
 def state_home(monkeypatch, tmp_path_factory):
     """Every test keeps turns' state (the hook times among it) in a folder of its own."""
     root = tmp_path_factory.mktemp("state")
@@ -45,6 +62,20 @@ def short_runtime(turns_env, monkeypatch):
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(root / "rt"))
     yield root / "rt"
     shutil.rmtree(root, ignore_errors=True)
+
+
+#: How long a test's cleanup waits for an endpoint to finish ending.
+END_WAIT = 30.0
+
+
+def end_endpoint(ep) -> None:
+    """Stop `ep` and wait until it has ended. An endpoint that ended on its own thread
+    (its server or session went) may still be telling its listeners `gone` when the test
+    is done with it, and a second `stop` returns at once, so the cleanup waits for the
+    first to finish: a listener left running past the test runs in the next test's
+    environment, or in the real one between tests."""
+    ep.stop("the test ended")
+    assert ep.wait_closed(END_WAIT), "the endpoint did not finish ending"
 
 
 def bare(value):
@@ -79,7 +110,7 @@ def make_endpoint(turns_env):
 
     yield make
     for ep in made:
-        ep.stop("the test ended")
+        end_endpoint(ep)
 
 
 @pytest.fixture(autouse=True)

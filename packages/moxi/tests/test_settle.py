@@ -19,8 +19,12 @@ import moxi.paths
 from conftest import WINDOWS, drop_modules, is_link, link_text
 from moxi import _settle, config, doctor, files, home, units
 from moxi.units import _backend, _declare, _plan, _state
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi_dev.testing import console_script, need_symlinks
+
+from fake_backend import FakeBackend, FakeSupervisor
+
+#: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
+pytestmark = pytest.mark.usefixtures("default_home")
 
 SETTINGS = """
 [relay.enabled]
@@ -75,6 +79,14 @@ def signal_number():
 """
 
 
+class _Roots:
+    """The default home's roots by kind: `roots / "state"` is the state root `MOXI_HOME /
+    "state"` would be under a home of its own."""
+
+    def __truediv__(self, kind: str) -> Path:
+        return getattr(moxi.paths.Layout("demo"), f"{kind}_root")()
+
+
 @pytest.fixture
 def w(site, tmp_path, monkeypatch):
     """A module `demo` with a legacy state folder, its units written and running on the fake
@@ -91,7 +103,7 @@ def w(site, tmp_path, monkeypatch):
     supervisor = FakeSupervisor(root)
     backend = FakeBackend(root, runner=supervisor)
     lines: list[str] = []
-    home_dir = Path(os.environ["MOXI_HOME"])
+    home_dir = _Roots()
 
     def module(*, units_from=None, version="0.1.0", **names):
         site.write("moxi_demo/settings.toml", SETTINGS)
@@ -595,6 +607,32 @@ def test_a_socket_unit_the_set_dropped_leaves_the_record(w, capsys, monkeypatch)
     assert w.active("moxi-demo-relay.socket") and w.active(SERVICE)
 
 
+#: Shaped like ui's shell: two addresses, started by a connection while its switch is off.
+STARTED_BY_A_CONNECTION = (
+    "{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+    "'addresses': ['127.0.0.1', '::1'], 'start': {'login': 'relay.enabled'}}}}")
+
+
+def test_a_reinstall_with_the_ipv6_socket_unit_failed_is_not_refused_for_its_port(
+        w, capsys, monkeypatch):
+    """127.0.0.1 answers, held by this home's own active socket unit, while the `::1`
+    unit has failed and the daemon is idle: the settle step keeps the units and exits 0."""
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    w.module(DAEMONS=STARTED_BY_A_CONNECTION, ANNOUNCES="2")
+    for change in units.plan("demo"):
+        if change.digest is not None:
+            _state.record("demo", change.name, change.digest)
+    assert all(a.ok for a in units.apply(units.plan("demo"), say=w.lines.append))
+    _settle.record_setup("demo", "0.1.0")
+    w.sup.state(SERVICE)["active"] = False
+    w.sup.props["moxi-demo-relay-1.socket"] = {"ActiveState": "failed"}
+    monkeypatch.setattr(_plan, "answers",
+                        lambda address, port, timeout=0.5: address == "127.0.0.1")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert "another port" not in out and "listens on" not in out
+
+
 def test_a_dropped_socket_unit_takes_its_own_entry_out():
     def entry(unit):
         return units.Stopped("demo", "relay", unit, "fake", True)
@@ -872,6 +910,35 @@ def test_a_module_without_setup_still_settles_and_is_recorded(w, capsys, monkeyp
     assert code == 0, out
     assert "setup demo" not in out
     assert _settle.setup_version("demo") == "0.1.0"
+
+
+def test_setup_ran_reads_the_record_the_settle_step_keeps(w, capsys, monkeypatch):
+    """`moxi.modules.setup_ran` is the record made public: False before any settle and
+    after a failed one, True once `SETUP` ran (or there is none), False again once the
+    uninstall forgets the module."""
+    from moxi import modules
+
+    w.module(DAEMONS=ONE)
+    assert modules.setup_ran("demo") is False
+    code, _ = settle(w, capsys, monkeypatch, setup="fail")
+    assert code == 1 and modules.setup_ran("demo") is False
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and modules.setup_ran("demo") is True
+    assert modules.setup_ran("other") is False
+    _settle.forget_setup("demo")
+    assert modules.setup_ran("demo") is False
+    w.module(DAEMONS=ONE, SETUP="None")
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and modules.setup_ran("demo") is True
+
+
+@pytest.mark.parametrize("text", ["not json", "[1, 2]", '{"demo": "0.1.0"}'])
+def test_setup_ran_reads_a_broken_record_as_never_run(text):
+    from moxi import modules
+
+    _settle.setup_path().parent.mkdir(parents=True, exist_ok=True)
+    _settle.setup_path().write_text(text)
+    assert modules.setup_ran("demo") is False
 
 
 # -- the timer switches ------------------------------------------------------------------------
@@ -2012,6 +2079,90 @@ def test_a_misnamed_skill_an_earlier_install_placed_is_removed(sk, capsys, monke
     assert f"demo: removed skill b for claude ({sk.claude('b')})" in out
     assert not os.path.lexists(sk.claude("b")) and not os.path.lexists(sk.codex("b"))
     assert sorted(p.name for p in place.status("demo")) == ["moxi-a", "moxi-a"]
+
+
+COPY_SETUP = """
+import os
+from pathlib import Path
+
+from moxi import place
+
+def run():
+    source = Path(__file__).parent / "plugin"
+    dest = Path(os.environ["MOXITEST_DEST"])
+    item = place.Item(source, "claude", "plugin", dest=dest, volatile=("endpoint.json",))
+    # The plan treats its items as the owner's whole set: keep only this item's step,
+    # so the skills the settle step placed for the same owner stay.
+    place.apply([s for s in place.plan("demo", [item], form="copy") if s.item == item])
+    (dest / "endpoint.json").write_text(os.environ.get("MOXITEST_ENDPOINT", "{}"))
+"""
+
+
+@pytest.fixture
+def copying(sk, monkeypatch):
+    """`sk` with module demo's `SETUP` placing a copy of its package's `plugin/` folder at
+    a `dest` under tmp, as turns' places its Claude Code folder, then writing a file into
+    the copy."""
+    dest = sk.tmp / "data" / "demo" / "plugin"
+    monkeypatch.setenv("MOXITEST_DEST", str(dest))
+    sk.site.write("moxi_demo/placer.py", COPY_SETUP)
+    sk.site.write("moxi_demo/plugin/plugin.json", '{"name": "plugin"}\n')
+    sk.dest = dest
+    return sk
+
+
+def test_a_copy_setup_places_with_dest_survives_its_settle_and_the_next(
+        copying, capsys, monkeypatch):
+    """The module ships no `SKILLS`: the skills step finds the copy in the ledger, and
+    leaves it."""
+    copying.module(SETUP="'moxi_demo.placer:run'")
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    for endpoint in ('{"port": 1}', '{"port": 2}'):
+        monkeypatch.setenv("MOXITEST_ENDPOINT", endpoint)
+        code, out = place_settle(copying, capsys)
+        assert code == 0, out
+        assert "removed" not in out and "not placed" not in out
+        assert (copying.dest / "endpoint.json").read_text() == endpoint
+        assert [(p.path, p.state) for p in copying.place.status("demo")] == [
+            (copying.dest, "ok")]
+    assert not (copying.pkg / "plugin" / "endpoint.json").exists()
+
+
+def test_the_skills_step_keeps_a_dest_copy_and_still_removes_a_dropped_skill(
+        copying, capsys, monkeypatch):
+    copying.skills("moxi-demo-send", "moxi-demo-old", SETUP="'moxi_demo.placer:run'")
+    code, out = place_settle(copying, capsys, skills=True)
+    assert code == 0, out
+    assert is_link(copying.claude("moxi-demo-old"))
+    copying.skills("moxi-demo-send", SETUP="'moxi_demo.placer:run'")
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(copying, capsys)
+    assert code == 0, out
+    assert not os.path.lexists(copying.claude("moxi-demo-old"))
+    assert is_link(copying.claude("moxi-demo-send"))
+    assert (copying.dest / "plugin.json").exists()
+    assert (copying.dest / "endpoint.json").exists()
+    # `SKILLS` dropped altogether: every skill goes, and the copy stays.
+    copying.module(SETUP="'moxi_demo.placer:run'")
+    code, out = place_settle(copying, capsys)
+    assert code == 0, out
+    assert [p.path for p in copying.place.status("demo")] == [copying.dest]
+    assert not os.path.lexists(copying.claude("moxi-demo-send"))
+    ledger = owned(copying)["placed"]
+    assert list(ledger) == [str(copying.dest)] and ledger[str(copying.dest)]["dest"] is True
+
+
+def test_a_dest_placement_alone_asks_no_skills_question(copying, capsys, monkeypatch):
+    """A module whose only placement is a `dest` one has none of the step's own, so a
+    skill it ships later is asked about as for a first install."""
+    copying.module(SETUP="'moxi_demo.placer:run'")
+    place_settle(copying, capsys)
+    copying.skills("moxi-demo-send", SETUP="'moxi_demo.placer:run'")
+    asked = at_terminal(monkeypatch, "n")
+    code, out = place_settle(copying, capsys)
+    assert code == 0, out
+    assert len(asked) == 1
+    assert [p.path for p in copying.place.status("demo")] == [copying.dest]
 
 
 def test_the_step_counts_folders_only_and_reads_no_skill_md(sk, capsys):

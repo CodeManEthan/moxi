@@ -1,6 +1,6 @@
 [project]
 name = "moxi-repo"
-version = "0.1.1"
+version = "0.1.2"
 description = "Git hooks run as declared pieces, and the one shared committer."
 requires-python = ">=3.12"
 license = "MIT"
@@ -10,6 +10,8 @@ dependencies = ["moxi>=0.1,<0.2"]
 [project.optional-dependencies]
 # The browser UI shell: with it, repo's git hooks page shows there.
 ui = ["moxi-ui>=0.2,<0.3"]
+# Project keys: with projects, a key works where a command takes a path.
+projects = ["moxi-projects>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -43,7 +45,8 @@ packages = ["src/moxi_repo"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_repo", "tests", "web"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi_repo",
+                "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium

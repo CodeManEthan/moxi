@@ -91,26 +91,36 @@ RUN_FILES = (".log", ".prompt.md", REQUEST_FILE)
 SPAWN_FAILED = "spawn-failed"
 NO_DELIVERER = "no-deliverer"
 #: Reasons a launch with a comms identity ends `failed` with when comms' wrapper ends
-#: before the harness starts: comms' daemon is not running (the wrapper exits 75), comms
-#: refused the name (3), or the wrapper failed otherwise (1, or any other status).
+#: before the harness starts: comms' daemon is not running (the wrapper exits 75), it
+#: did not answer the bind in the wrapper's wait (75, from a wrapper that ends the launch
+#: then), comms refused the name (3), or the wrapper failed otherwise (1, or any other
+#: status). `COMMS_FAILED` is also the end of a wrapper that ends the launch on an
+#: unanswered bind but is still alive, the name unbound, when the bind wait runs out.
 COMMS_OFFLINE = "comms-offline"
+COMMS_NO_ANSWER = "comms-no-answer"
 IDENTITY_TAKEN = "identity-taken"
 COMMS_FAILED = "comms-failed"
-#: comms' wrapper's exit statuses for a bind that failed, by the reason they give.
-WRAPPER_EXITS = {exits.TEMPFAIL: COMMS_OFFLINE, exits.REFUSED: IDENTITY_TAKEN}
-#: How long comms' wrapper may take to bind the name: it waits at most 10 s for its
-#: adapter's word (5 s for Claude), then starts the harness or exits. With a margin.
+#: comms' wrapper's exit statuses for a bind that failed, by the reason they give. Its
+#: 75 is not here: its reason depends on the wrapper and on what comms says (see
+#: `settle_bind`).
+WRAPPER_EXITS = {exits.REFUSED: IDENTITY_TAKEN}
+#: How long the launcher waits for comms' wrapper to bind the name, with a comms whose
+#: API does not say how long its wrappers wait (`BIND_WAIT`): such a comms' wrappers wait
+#: at most 10 s for their adapter's word, then start the harness or exit.
 BIND_WAIT_S = 15.0
+#: What the launcher's bind wait adds to comms' `BIND_WAIT`, so that it outlasts every
+#: wrapper's own wait.
+BIND_MARGIN_S = 5.0
 #: How often the bind wait looks.
 BIND_POLL_S = 0.25
 #: Reasons a failed row exits 1 with; any other failed reason is a refusal (3), except
-#: `TRY_AGAIN` and `COMMS_OFFLINE` (75).
+#: those in `TRY_AGAIN_REASONS` (75).
 FAILED_ERRORS = frozenset({SPAWN_FAILED, NO_DELIVERER, first.NO_READY,
                            first.HANDOFF_UNREADABLE, first.NO_TURNS, startup.EXITED,
                            startup.SCREEN_MISMATCH, COMMS_FAILED})
 TRY_AGAIN = "try-again"
 #: Reasons a failed row exits 75 with: worth trying again as it was.
-TRY_AGAIN_REASONS = frozenset({TRY_AGAIN, COMMS_OFFLINE})
+TRY_AGAIN_REASONS = frozenset({TRY_AGAIN, COMMS_OFFLINE, COMMS_NO_ANSWER})
 #: slots' exec verdicts that start the row: the command started, or slots could not say
 #: (the row's reason then); `failed` is the third.
 STARTED = "started"
@@ -559,7 +569,7 @@ def request_file(request_id: str, env: Mapping[str, str] | None = None) -> Path:
 def exit_of(row: store.LaunchRow) -> int:
     """The code a launch exits with for its stored row: 0 unless it ended `failed`; then
     1 for a start or boot that failed, 75 for a lock held too long or comms' daemon not
-    running, and 3 for a refusal."""
+    running or not answering the bind, and 3 for a refusal."""
     return exits.OK if row.state != "failed" else failed_exit(row.reason)
 
 
@@ -593,7 +603,7 @@ def fail(conn: sqlite3.Connection, request_id: str, reason: str, why: str,
 def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = None,
                 status: Callable[[], int | None] | None = None,
                 where: str = "in the terminal it ran in",
-                wait_s: float = BIND_WAIT_S, poll_s: float = BIND_POLL_S,
+                wait_s: float | None = None, poll_s: float = BIND_POLL_S,
                 clock: Callable[[], float] = time.monotonic,
                 sleep: Callable[[float], None] = time.sleep) -> Started | None:
     """For a launch with a comms identity, wait until comms' wrapper has bound the name
@@ -602,12 +612,23 @@ def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = 
     The bind is through once comms says the name is held (by this launch's session, when
     both ids are known) or the row has moved past `started` (the session is ready). An end
     of the process (`pid`, default the row's) before that is the wrapper's, since it starts
-    the harness only after the bind: the row ends `failed` with `COMMS_OFFLINE`,
-    `IDENTITY_TAKEN` or `COMMS_FAILED`, read from the process's exit status when `status`
-    can give it (a slot's pane), else from what comms now says of the name. `where` says
-    where comms' own words are to read. Returns that failure, or None when the bind went
-    through, the row has no identity, or `wait_s` passed with the process alive (the
-    wrapper then starts the harness anyway)."""
+    the harness only after the bind: the row ends `failed` with the cause
+    (`_wrapper_ended`), read from the process's exit status when `status` can give it (a
+    slot's pane), else from what comms now says of the name. `where` says where comms' own
+    words are to read.
+
+    The wait lasts `wait_s`, by default `bind_wait()` of comms' API, which outlasts every
+    wrapper's own wait. When it runs out with the process alive, what that process is
+    depends on the wrapper. One whose harness comms lists as ending the launch on an
+    unanswered bind (`ends_on_bind_timeout()`) never starts the harness without the name,
+    so comms is asked once more: held by this launch, it bound late and the wait returns
+    None; any other answer ends the row `failed` with `COMMS_FAILED`, exit 1. When comms
+    doesn't answer that ask, or the wrapper is one that starts the harness anyway after its
+    wait, the live process can't be told from a running harness: the wait returns None and
+    the row stays `started`. No cause is read from timing alone, and no process is stopped.
+
+    Returns that failure, or None when the bind went through, the row has no identity, or
+    the wait ran out as above."""
     row = store.get(conn, request_id)
     if row is None or not row.identity:
         return None
@@ -619,6 +640,7 @@ def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = 
         return None if ended is None else _wrapper_ended(conn, row, comms, ended, where)
     ident = (proc.ProcId(pid, row.pid_started) if pid == row.pid and row.pid_started
              else proc.identity(pid))
+    wait_s = bind_wait(comms) if wait_s is None else wait_s
     deadline = clock() + wait_s
     while True:
         if ident is None or not proc.alive(ident):
@@ -627,11 +649,34 @@ def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = 
         now = store.get(conn, request_id)
         if now is None or now.state not in ("spawning", "started"):
             return None
-        if _bound(row, comms):
+        out = clock() >= deadline
+        try:
+            state = identity.ask(row.identity, row.scope, comms)
+        except Exception:  # noqa: BLE001  (an unanswered ask is not a bind; the wait goes on)
+            state = None
+        if state is not None and _held_here(row, state):
             return None
-        if clock() >= deadline:
-            return None
+        if out:
+            return _ran_out(conn, row, comms, state, wait_s)
         sleep(poll_s)
+
+
+def bind_wait(comms: Any) -> float:
+    """How long the launcher waits for comms' wrapper to bind the name: comms' own
+    `BIND_WAIT` (the longest wait of its wrappers) and `BIND_MARGIN_S`, or `BIND_WAIT_S`
+    with a comms whose API doesn't say."""
+    from . import presets
+
+    wrapper = presets.comms_bind_wait(comms)
+    return BIND_WAIT_S if wrapper is None else wrapper + BIND_MARGIN_S
+
+
+def ends_on_bind_timeout(comms: Any) -> frozenset[str]:
+    """The harnesses whose comms wrapper ends the launch when its bind isn't answered in
+    time, as comms' API lists them; empty with a comms that doesn't list them, or none."""
+    from . import presets
+
+    return presets.comms_ends_on_bind_timeout(comms)
 
 
 def _wrapped(composition: Composition) -> bool:
@@ -648,33 +693,59 @@ def _comms() -> Any:
     return presets.comms_api()
 
 
-def _bound(row: store.LaunchRow, comms: Any) -> bool:
-    """Whether comms says the launch's name is held, and not by another session."""
-    try:
-        state = identity.ask(row.identity, row.scope, comms)
-    except Exception:  # noqa: BLE001  (an unanswered ask is not a bind; the wait goes on)
-        return False
-    if state is None or state.state != "held":
+def _held_here(row: store.LaunchRow, state: Any) -> bool:
+    """Whether comms' `state` of the launch's name says it is held, and not by another
+    session."""
+    if state.state != "held":
         return False
     holder = getattr(getattr(state, "holder", None), "session_id", None)
     return not (holder and row.session_id and holder != row.session_id)
 
 
+def _comms_words(row: store.LaunchRow, state: Any) -> str:
+    """comms' words for its `state` of the launch's name."""
+    return identity.words(
+        getattr(state, "qualified", None) or identity.shown(row.identity, row.scope),
+        state.state, str(state.holder) if getattr(state, "holder", None) else None,
+        module=getattr(state, "module", None), reason=getattr(state, "reason", None))
+
+
+def _ran_out(conn: sqlite3.Connection, row: store.LaunchRow, comms: Any, state: Any,
+             wait_s: float) -> Started | None:
+    """The bind wait ran out with the wrapper alive, and comms' last answer (`state`,
+    None when it gave none) is not a bind of this launch: end the row `COMMS_FAILED` when
+    the wrapper is one that never starts the harness without the name, else None."""
+    if state is None or row.harness not in ends_on_bind_timeout(comms):
+        return None
+    name = identity.shown(row.identity, row.scope)
+    why = (f"comms' wrapper neither bound {name} nor ended in {wait_s:g} s: "
+           f"{_comms_words(row, state)}")
+    return fail(conn, row.request_id, COMMS_FAILED, why)
+
+
 def _wrapper_ended(conn: sqlite3.Connection, row: store.LaunchRow, comms: Any,
                    status: int | None, where: str) -> Started:
-    """End the row of a launch whose wrapper ended before the bind, with its cause."""
+    """End the row of a launch whose wrapper ended before the bind, with its cause.
+
+    With an exit status: 3 is `IDENTITY_TAKEN`. 75 from a wrapper that ends the launch on
+    an unanswered bind is `COMMS_OFFLINE` when comms now says its daemon is not running,
+    else `COMMS_NO_ANSWER`; 75 from any other wrapper is `COMMS_OFFLINE`, since such a
+    wrapper exits 75 only when its adapter found no daemon. Any other status is
+    `COMMS_FAILED`. Without one, the cause is what comms says of the name: not running is
+    `COMMS_OFFLINE`, taken is `IDENTITY_TAKEN`, and anything else `COMMS_FAILED`."""
     try:
         state = identity.ask(row.identity, row.scope, comms)
     except Exception as error:  # noqa: BLE001  (the cause is then the status's, or unknown)
         state, said = None, f"comms could not say why: {error}"
     else:
-        said = None if state is None else identity.words(
-            getattr(state, "qualified", None) or identity.shown(row.identity, row.scope),
-            state.state, str(state.holder) if getattr(state, "holder", None) else None,
-            module=getattr(state, "module", None), reason=getattr(state, "reason", None))
-    if status is not None:
+        said = None if state is None else _comms_words(row, state)
+    offline = state is not None and state.state == "offline"
+    if status == exits.TEMPFAIL:
+        ends = row.harness in ends_on_bind_timeout(comms)
+        reason = COMMS_NO_ANSWER if ends and not offline else COMMS_OFFLINE
+    elif status is not None:
         reason = WRAPPER_EXITS.get(status, COMMS_FAILED)
-    elif state is not None and state.state == "offline":
+    elif offline:
         reason = COMMS_OFFLINE
     elif state is not None and state.state in identity.TAKEN:
         reason = IDENTITY_TAKEN
@@ -682,14 +753,18 @@ def _wrapper_ended(conn: sqlite3.Connection, row: store.LaunchRow, comms: Any,
         reason = COMMS_FAILED
     name = identity.shown(row.identity, row.scope)
     cause = {COMMS_OFFLINE: f"the comms daemon is not running, so {name} was not bound",
+             COMMS_NO_ANSWER: (f"the comms daemon did not answer the bind for {name} "
+                               "in time"),
              IDENTITY_TAKEN: f"comms refused {name}",
              COMMS_FAILED: f"comms' wrapper could not start the session for {name}"}[reason]
     exited = f" (exit {status})" if status is not None else ""
     why = f"{cause}, and {row.harness} did not start{exited}"
-    agrees = state is None or (reason == COMMS_OFFLINE and state.state == "offline") or (
+    agrees = state is None or (reason == COMMS_OFFLINE and offline) or (
         reason == IDENTITY_TAKEN and state.state in identity.TAKEN)
     if said and agrees:
         why += f": {said}"
+    if reason == COMMS_NO_ANSWER:
+        why += "; try again"
     why += f"; comms' own words are {where}"
     return fail(conn, row.request_id, reason, why)
 
@@ -885,12 +960,14 @@ def _cut(path: Path, size: int, cap: int) -> None:
     files.atomic_write(path, head + tail, mode=0o600)
 
 
-__all__ = ["BIND_POLL_S", "BIND_WAIT_S", "COMMS_FAILED", "COMMS_OFFLINE", "CUT_LINE",
+__all__ = ["BIND_MARGIN_S", "BIND_POLL_S", "BIND_WAIT_S", "COMMS_FAILED",
+           "COMMS_NO_ANSWER", "COMMS_OFFLINE", "CUT_LINE",
            "FAILED_ERRORS", "IDENTITY_TAKEN", "LOG_CAP", "NO_DELIVERER", "OTHER_TARGETS",
            "REQUEST_FILE", "RUNS", "RUN_FILES", "SPAWN_FAILED", "TARGETS", "TRY_AGAIN",
            "TRY_AGAIN_REASONS", "WRAPPER_EXITS", "Headless", "Launch",
            "NoCommand", "NoSlots", "Slot", "SlotMissing", "SlotTaken", "SlotsBusy",
            "STARTED", "SlotsFailed", "SlotsUnsupported", "Started", "Swept", "Target",
            "Terminal", "UNCONFIRMED",
-           "exit_of", "fail", "failed_exit", "find", "get", "named_slot",
+           "bind_wait", "ends_on_bind_timeout", "exit_of", "fail", "failed_exit", "find",
+           "get", "named_slot",
            "request_file", "run_log", "runs_dir", "settle_bind", "sweep"]

@@ -368,3 +368,115 @@ def test_a_send_read_cold_before_the_pass_and_queued_after_it_is_not_left_behind
     assert wait_until(lambda: peer.handed() == [mid], timeout=3.0)
     assert wait_until(lambda: mid not in queued(rig.daemon, REVIEWER_Q))
     assert peer.payloads()[0].get("held") is None, "the second read went live"
+
+
+# ------------------------------------------------------------------ a one-request turn from cold
+
+def test_mail_queued_cold_goes_out_when_the_warming_turns_line_lands_after_its_end(
+        rig, peers, caplog):
+    """A session's last request is 1h16m old, so a send to it is queued cold. The
+    session then runs a turn of one request, whose end reaches the daemon 66 ms before
+    the transcript holds the request. The frame's own read is cold; the window's next
+    read finds the request and hands the row, with no closing line."""
+    peer = peers()
+    sid = rig.daemon.bindings[REVIEWER_Q].session_id
+    path = write_transcript(sid, 76 * 60)
+    mid = post(rig, [REVIEWER_Q], "while you were away")
+    row_for(rig, REVIEWER_Q, mid)
+    assert peer.handed() == []
+    with caplog.at_level(logging.INFO, logger="comms.daemon"):
+        peer.turn()
+        assert peer.held() == [], "the transcript did not hold the turn yet"
+        time.sleep(0.066)
+        with path.open("a") as f:
+            f.write(json.dumps(assistant_line(0)) + "\n")
+        assert wait_until(lambda: peer.held() == [mid], timeout=2.0)
+    assert still_lines(caplog) == []
+
+
+def test_a_cold_turn_end_with_nothing_queued_reads_but_logs_nothing(
+        rig, seam, peers, caplog, monkeypatch):
+    """No row waits for the name. The frame and its window still read (a send can queue
+    a row inside the window), but no line says a release waits, since nothing does."""
+    monkeypatch.setattr(daemon_mod, "RELEASE_SETTLE_STEPS", SHORT_STEPS, raising=False)
+    seam.table[REVIEWER_Q] = cache.COLD
+    peer = peers()
+    seam.calls.clear()
+    with caplog.at_level(logging.INFO, logger="comms.daemon"):
+        peer.turn()
+        assert wait_until(lambda: seam.reads(REVIEWER_Q) == 1 + len(SHORT_STEPS),
+                          timeout=2.0)
+        time.sleep(0.1)
+    assert [r.getMessage() for r in caplog.records
+            if r.getMessage().startswith(f"release for {REVIEWER_Q}")] == []
+    assert peer.handed() == []
+
+
+# ------------------------------------------------------------------ an answered turn end
+
+@pytest.mark.parametrize("answered", [True, False], ids=["answered", "not answered"])
+def test_an_answered_turn_end_releases_at_once_however_long_the_transcript_lags(
+        rig, peers, caplog, monkeypatch, answered):
+    """The incident's shape against the real Claude reader, with the turn's line landing
+    only after the whole settle window has run out. A turn that ended with the model's
+    answer made a request just now, so its end hands the queued row at once, with no
+    read. A turn end not marked answered (interrupted, failed) still reads the transcript:
+    the window runs out cold and the row waits."""
+    monkeypatch.setattr(daemon_mod, "RELEASE_SETTLE_STEPS", SHORT_STEPS, raising=False)
+    peer = peers()
+    sid = rig.daemon.bindings[REVIEWER_Q].session_id
+    path = write_transcript(sid, 76 * 60)
+    mid = post(rig, [REVIEWER_Q], "while you were away")
+    row_for(rig, REVIEWER_Q, mid)
+    assert peer.handed() == []
+    with caplog.at_level(logging.INFO, logger="comms.daemon"):
+        peer.turn(answered=answered)
+        if answered:
+            assert wait_until(lambda: peer.held() == [mid], timeout=1.0)
+        else:
+            assert wait_until(lambda: still_lines(caplog), timeout=2.0)
+        time.sleep(SHORT_STEPS[-1] + 0.1)
+        with path.open("a") as f:
+            f.write(json.dumps(assistant_line(0)) + "\n")
+        time.sleep(0.1)
+    if answered:
+        assert peer.held() == [mid]
+        assert [r.getMessage() for r in caplog.records
+                if r.getMessage().startswith(f"release for {REVIEWER_Q}")] == []
+    else:
+        assert peer.handed() == [], "the row waits for the next release point"
+        assert rows(rig, REVIEWER_Q) == {mid}
+
+
+def test_an_answered_turn_end_with_nothing_queued_reads_nothing_and_keeps_its_window(
+        rig, seam, peers):
+    """No row waits: the answered frame reads no cache. Its window still runs, so a send
+    whose gate read meets the record's lag 50 ms later is queued and goes at the
+    window's first passing read."""
+    peer = peers()
+    seam.cold_until(REVIEWER_Q, time.monotonic() + 0.3)
+    seam.calls.clear()
+    peer.turn(answered=True)
+    assert seam.reads(REVIEWER_Q) == 0, "the frame itself reads nothing"
+    time.sleep(0.05)
+    mid = post(rig, [REVIEWER_Q], "while the record lags")
+    row_for(rig, REVIEWER_Q, mid)
+    assert wait_until(lambda: peer.held() == [mid], timeout=2.0)
+
+
+def test_an_answered_turn_end_leaves_the_ids_it_reported_unhandled(rig, seam, peers):
+    """An answered frame's release hands the waiting rows but not the ids the same frame
+    reported unhandled: those wait for the next release point."""
+    seam.table[REVIEWER_Q] = cache.COLD
+    peer = peers()
+    first = post(rig, [REVIEWER_Q], "one", held=True)
+    second = post(rig, [REVIEWER_Q], "two", held=True)
+    row_for(rig, REVIEWER_Q, first)
+    row_for(rig, REVIEWER_Q, second)
+    peer.turn(answered=True)
+    assert wait_until(lambda: peer.held() == [first, second])
+    peer.turn(unhandled=[first], answered=True)
+    time.sleep(0.2)
+    assert peer.held() == [first, second], "the unhandled id is not handed again at once"
+    peer.turn(answered=True)
+    assert wait_until(lambda: peer.held() == [first, second, first])

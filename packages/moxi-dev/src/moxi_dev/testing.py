@@ -100,10 +100,17 @@ The fsync seam: `os.fsync` (and `os.fdatasync`) is a no-op in every test that is
 marked `honest_fsync`; the no-op still refuses a closed descriptor. Code must call
 `os.fsync(...)` through the module for the seam to reach it.
 
+The port seam: before the core's unit plan takes a daemon's socket address, it asks
+whether anything listens there with a TCP connect (`moxi.units._plan.answers`). In every
+test not marked `honest_ports` or `live` that connect is replaced by one that answers
+"nothing listens", so what happens to listen on this machine (a daemon on its default
+port, another run's server) never decides a test. A test that wants a listener seen
+either says so through its own stand-in or is marked `honest_ports` and listens for real.
+
 Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding`,
-`timed` and `honest_fsync`. A package's `addopts` deselects the four tiers in `TIERS`; a
-`live` test also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it
-is skipped.
+`timed`, `honest_fsync` and `honest_ports`. A package's `addopts` deselects the four
+tiers in `TIERS`; a `live` test also needs `MOXI_TEST_LIVE=1` in the environment pytest
+starts with, else it is skipped.
 
 Timed tests. A test that asserts a wall-clock budget (a median under so many
 milliseconds, an import under its share of a hook's ceiling) is marked `timed`, whatever
@@ -199,6 +206,8 @@ MARKERS = {
     "timed": "asserts a wall-clock budget; moxi-dev check runs it alone, in a serial "
              "pass after the parallel one",
     "honest_fsync": "os.fsync is the real one in this test",
+    "honest_ports": "the unit plan's listener check makes its real TCP connect in this "
+                    "test",
 }
 
 #: The variable a `live` test needs, set to 1.
@@ -649,6 +658,22 @@ def _quiet_fsync(fd: Any) -> None:
     os.fstat(fd if isinstance(fd, int) else fd.fileno())
 
 
+def _nothing_answers(address: str, port: int, timeout: float = 0.5) -> bool:
+    """The port seam's stand-in: no connect, and nothing listens anywhere."""
+    return False
+
+
+def _quiet_ports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the port seam's stand-in in place of the unit plan's connect, where the core
+    installed has one."""
+    try:
+        from moxi.units import _plan
+    except ImportError:
+        return
+    if hasattr(_plan, "answers"):
+        monkeypatch.setattr(_plan, "answers", _nothing_answers)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
@@ -997,6 +1022,9 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
         monkeypatch.setattr(os, "fsync", _quiet_fsync)
         if _REAL_FDATASYNC is not None:
             monkeypatch.setattr(os, "fdatasync", _quiet_fsync)
+    if not (request.node.get_closest_marker("honest_ports")
+            or request.node.get_closest_marker("live")):
+        _quiet_ports(monkeypatch)
     roots: list[str] = []
     for root in (basetemp, short):
         real = os.path.realpath(root)

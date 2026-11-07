@@ -109,14 +109,9 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
         assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 20), \
             proc.stdout.read() if proc.poll() is not None else "no binding"
         assert wait_until(lambda: rig.daemon.bindings[IDENTITY].session_id, 20)
-        # The launch primes its thread with a turn of its own, which the stub ends
-        # itself. Mail sent while that turn runs is steered into it, and the stub's end
-        # then races the `complete` below; under load the steer can also outlast the
-        # turns client's wait, so comms requeues the digest into a second turn nothing
-        # ends. That requeue is a race in turns' client, which reads a slow steer as
-        # refused; this test steers around it and does not cover it. The daemon marks the binding `turned` once the adapter reports the
-        # priming turn's end, so the mail starts a turn of its own.
-        assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned, 20)
+        # The launch opens its thread with an injected item, not a turn, so the mail
+        # starts the thread's first turn.
+        assert calls(records, "thread/inject_items") and not calls(records, "turn/start")
         code, out = rig.cli(["send", "--posture", "none", IDENTITY, "through the daemon"],
                              name="main", scope="proj-a")
         assert code == 0, out
@@ -172,10 +167,11 @@ def test_the_wrapper_runs_turns_real_host_and_passes_the_roster_options(
         settings = params["config"]["sandbox_workspace_write"]
         assert settings["network_access"] is True
         assert str(writable) in settings["writable_roots"]
-        # A launch with no window is primed too, with no mail sent, so its thread has a
-        # rollout that a later `thread/resume` can load; and the daemon has its id.
-        assert wait_until(lambda: calls(records, "turn/start"), 10)
-        thread_id = calls(records, "turn/start")[0]["params"]["threadId"]
+        # A launch with no window gets the injected item too, with no mail sent, so its
+        # thread has a rollout that a later `thread/resume` can load; and the daemon has
+        # its id. No turn runs.
+        assert wait_until(lambda: calls(records, "thread/inject_items"), 10)
+        thread_id = calls(records, "thread/inject_items")[0]["params"]["threadId"]
         assert wait_until(
             lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, 10)
         assert proc.poll() is None
@@ -189,22 +185,20 @@ def test_the_wrapper_runs_turns_real_host_and_passes_the_roster_options(
 
 def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
         rig, tmp_path, spawn):
-    """A first launch starts and primes a thread; a second, `--name ... --resume T`,
-    has turns' host resume T, and the name is bound to T as a resume."""
+    """A first launch starts a thread and injects its item; a second, `--name ...
+    --resume T`, has turns' host resume T, and the name is bound to T as a resume."""
     from moxi_comms import codex_threads
 
     records = tmp_path / "records"
     records.mkdir()
     first = wrapper(spawn, records, tmp_path)
     try:
-        assert wait_until(lambda: calls(records, "turn/start"), 20), \
-            first.stdout.read() if first.poll() is not None else "no priming turn"
-        thread_id = calls(records, "turn/start")[0]["params"]["threadId"]
+        # Once the item is in, the thread has a rollout, which `thread/resume` needs.
+        assert wait_until(lambda: calls(records, "thread/inject_items"), 20), \
+            first.stdout.read() if first.poll() is not None else "no injected item"
+        thread_id = calls(records, "thread/inject_items")[0]["params"]["threadId"]
         assert wait_until(
             lambda: rig.daemon.bindings[IDENTITY].session_id == thread_id, 10)
-        # Once the priming turn has ended the thread has a rollout, which
-        # `thread/resume` needs.
-        assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned, 20)
     finally:
         output = stop(first)
     assert first.returncode == 0, output
@@ -231,11 +225,13 @@ def test_a_launch_told_to_resume_resumes_the_thread_under_the_same_name(
         assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 10)
         binding = rig.daemon.bindings[IDENTITY]
         assert (binding.session_id, binding.new_session) == (thread_id, False)
-        assert binding.turned is True, "a resumed thread had turns before this launch"
         record = wait_until(lambda: (lambda r: r if r.get("launch") != first_launch
                                      else None)(codex_threads.read_meta(IDENTITY) or {}),
                             10)
         assert record["thread_id"] == thread_id and record["layer_one"], record
+        # The first launch ran no turn: the resumed thread reads as one with none yet.
+        assert rig.daemon.bindings[IDENTITY].turned is False, \
+            "a resumed thread with no turn is not counted as turned"
         assert second.poll() is None
     finally:
         output = stop(second)

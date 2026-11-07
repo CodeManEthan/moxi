@@ -17,10 +17,12 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 
 import pytest
 from conftest import wait_until
 
+import bind_kit
 from moxi import exit as moxi_exit
 from moxi_comms import claimfile, paths, reserved, secrets
 from moxi_comms.adapters import session, word
@@ -91,27 +93,67 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
     assert "claude pid" in log.read_text()
 
 
-def test_the_wrapper_waits_a_bounded_time_for_the_adapters_word():
-    """A word that never comes holds `claude` up by `ready_wait` and no more; a refusal
-    comes with its reason, and an adapter that ended without a word reads as failed."""
+def test_a_word_that_never_comes_ends_the_launch_and_starts_no_claude(tmp_path):
+    """An adapter that never gives its word holds the launch up by `ready_wait`, then
+    the wrapper ends it with `TEMPFAIL` and never execs `claude`. It says once that it
+    is waiting, and its last line says the daemon didn't answer, both with the wait's
+    own seconds."""
+    started = time.monotonic()
+    ran = bind_kit.silent_launch("claude", tmp_path, ready_wait=0.6, notice_after=0.2)
+    took = time.monotonic() - started
+    assert ran.code == moxi_exit.TEMPFAIL, ran.err
+    assert ran.execs == [], "claude never starts under a name the daemon hasn't bound"
+    assert 0.6 <= took < 10.0
+    err = ran.err
+    waiting = [ln for ln in err if "waiting for the comms daemon" in ln]
+    assert waiting == ["moxi-comms-claude: waiting for the comms daemon to bind silent "
+                       "(up to 0.6s)"]
+    assert err[-1].startswith("moxi-comms-claude: silent was not launched: the comms "
+                              "daemon did not answer in 0.6s; try again, or run moxi "
+                              "comms doctor (its log: ")
+    assert session.READY_WAIT == 15.0
+
+
+def test_the_wrapper_reads_the_adapters_word_in_a_bounded_time():
+    """A refusal comes with its reason, an adapter that ended without a word reads as
+    failed, and only the first word is said. A word the wrapper's end can't take any
+    more (it gave up waiting) is reported undelivered."""
     r, w = os.pipe()
     try:
         assert word.await_word(r, 0.05) is None
-        word.teller(w)(word.REFUSED, "console is reserved for launcher")
+        assert word.teller(w)(word.REFUSED, "console is reserved for launcher") is True
         assert word.await_word(r, 0.05) == (word.REFUSED,
                                             "console is reserved for launcher")
     finally:
         os.close(r)
     r, w = os.pipe()
     say = word.teller(w)
-    say(word.BOUND)
-    say(word.FAILED, "the adapter ended")
+    assert say(word.BOUND) is True
+    assert say(word.FAILED, "the adapter ended") is False
     assert word.await_word(r, 0.05) == (word.BOUND, "")
     os.close(r)
     r, w = os.pipe()
     os.close(w)
     assert word.await_word(r, 0.05) == (word.FAILED, "")
     os.close(r)
+    r, w = os.pipe()
+    os.close(r)                                 # the wrapper stopped waiting and ended
+    assert word.teller(w)(word.BOUND) is False
+
+
+def test_the_waiting_notice_comes_once_and_only_when_the_word_is_late():
+    notices = []
+    r, w = os.pipe()
+    try:
+        assert word.await_word(r, 0.3, notice=lambda: notices.append(1),
+                               notice_after=0.1) is None
+        assert notices == [1]
+        word.teller(w)(word.BOUND)
+        assert word.await_word(r, 0.3, notice=lambda: notices.append(2),
+                               notice_after=0.1) == (word.BOUND, "")
+        assert notices == [1], "a word already there says nothing of waiting"
+    finally:
+        os.close(r)
 
 
 def run_wrapper(script, name, sid, *extra):
@@ -604,3 +646,54 @@ def test_a_look_releases_held_mail_on_a_passing_read_and_is_no_turn(rig, monkeyp
     own_activity(reviewer, kind="look")
     assert wait_until(lambda: len(reviewer.queue) == 1), "the look released it"
     assert binding(rig, "reviewer@proj-a").turned is False, "a look is no turn"
+
+
+# ------------------------------------------------------------- nobody waits for the word
+
+def test_an_adapter_whose_bound_cant_be_delivered_lets_the_name_go(rig):
+    """The wrapper gave up waiting and ended: `BOUND` reaches nobody, so the adapter
+    unbinds, removes its claim file and ends with `TEMPFAIL`."""
+    from moxi_comms.adapters import claude_adapter
+
+    shim = rig.shim(name="reviewer", scope="proj-a", start=False)
+    handle, alive = os.pipe()            # readable once `alive` closes: the wrapper runs
+    gone, w = os.pipe()
+    os.close(gone)                        # the wrapper's end of the word pipe is closed
+    tell = word.teller(w)
+    bound_when_told = []
+
+    def say(code, reason=""):
+        if code == word.BOUND:
+            bound_when_told.append(binding(rig, "reviewer@proj-a") is not None)
+        return tell(code, reason)
+
+    turns = type("Turns", (), {"find": staticmethod(lambda pid: None),
+                               "TurnsError": RuntimeError})
+    try:
+        assert claude_adapter.serve(shim, os.getpid(), handle, say=say,
+                                    turns=turns) == moxi_exit.TEMPFAIL
+    finally:
+        os.close(alive)
+        os.close(handle)
+    assert bound_when_told == [True]
+    assert wait_until(lambda: binding(rig, "reviewer@proj-a") is None, timeout=10), \
+        "the daemon sees the unbind"
+    assert claimfile.read(shim.claims.key) is None
+
+
+def test_an_adapter_whose_wrapper_is_gone_before_it_starts_never_binds(rig, monkeypatch):
+    from moxi_comms.adapters import claude_adapter
+
+    shim = rig.shim(name="reviewer", scope="proj-a", start=False)
+    started = []
+    monkeypatch.setattr(claude_adapter.ClaudeAdapter, "start",
+                        lambda self, **kw: started.append(1))
+    handle, alive = os.pipe()
+    os.close(alive)                       # the wrapper has ended
+    try:
+        assert claude_adapter.serve(shim, os.getpid(), handle,
+                                    say=lambda code, reason="": True) == moxi_exit.TEMPFAIL
+    finally:
+        os.close(handle)
+    assert started == []
+    assert binding(rig, "reviewer@proj-a") is None
