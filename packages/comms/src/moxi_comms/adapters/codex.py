@@ -660,9 +660,11 @@ class CodexAdapter(HarnessAdapter):
         decision = self.reply_check(fields)
         if not decision.block:
             return None
-        self.mark_blocked(decision.names)
+        # One step under the lock: a turn start read between the mark and the turn's id
+        # would find a block with no turn and resolve it.
         with self._lock:
             self._blocked_turn = getattr(facts, "turn_id", None)
+            self.mark_blocked(decision.names)
         return decision.block
 
     def clear_block(self) -> None:
