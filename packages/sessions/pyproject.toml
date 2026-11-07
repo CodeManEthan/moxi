@@ -1,6 +1,6 @@
 [project]
 name = "moxi-sessions"
-version = "0.2.1"
+version = "0.2.3"
 description = "Read each harness's own session records in one shape: find a session and its subagents, list a root's sources, read records forward or back."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,8 @@ dependencies = ["moxi>=0.1,<0.2"]
 # The browser UI shell: with it, the sessions page and its window block show there.
 # Loopback, which sessions' page server runs on, comes with it.
 ui = ["moxi-ui>=0.1,<0.2"]
+# Redaction for `moxi sessions read`, through secrets' credentials and broad sets.
+secrets = ["moxi-secrets>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

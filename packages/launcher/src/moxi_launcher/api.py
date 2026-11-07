@@ -5,6 +5,8 @@
     preview(request) -> Composition     # resolve and compose; starts nothing
     open_hold(request_id, name)         # a keep-warm hold on a launch (`keepwarm`)
     release_hold(request_id, name)
+    launch_kind(session_id) -> str | None   # interface 1: how a session was launched
+    launch_kinds(session_ids) -> dict       # the same for many ids, in one read
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch or a resume, its values the stored row's).
@@ -56,6 +58,14 @@ caller's terminal names (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERS
 Then the scrub and the stamps. No other variable of the replaying process reaches the
 child.
 
+**A session's launch kind** (interface 1) is read from the launch log: `scratch`, `seat`,
+`project` or `one-off` for the launch a session id belongs to, by the order in
+`store.LaunchRow.kind`, and None for a session the launcher didn't start (`store.kinds`).
+A launch learns some ids after its session starts (a Codex launch's id, the new id after a
+`/clear`), so an id that answers None now may answer a kind later. The read writes
+nothing but an older log's schema update, as any opening does; a launch log held too long
+raises `Busy`, and the caller asks again.
+
 A launch in this terminal does not return on Linux and macOS: the process becomes the
 harness. On Windows it returns when the harness exits, with the harness's exit code; if
 the first turn's deliverer could not start, the row ended `failed` while the harness ran,
@@ -69,7 +79,7 @@ import logging
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
@@ -620,6 +630,29 @@ def release_hold(request_id: str, name: str, *,
     return keepwarm.release_hold(request_id, name, conn=conn)
 
 
+#: The launch kinds `launch_kind` answers, in the order it decides them.
+KINDS = store.KINDS
+#: The launch log held past a read's wait. Trying again may work.
+Busy = store.Busy
+
+
+def launch_kind(session_id: str, *, timeout: float = 1.0) -> str | None:
+    """The launch kind of the session `session_id`: `scratch` when its launch works in a
+    scratch folder, whatever its preset; else `seat` for a seat preset; else `project`
+    when the launch names a project (a project preset or a project key); else `one-off`.
+    None for a session the launcher didn't start (by hand, by a script, or from inside a
+    launched session), and for a launch whose session id it never learned (a Codex launch
+    without turns or in `exec` mode). Raises `Busy` when the launch log is held past
+    `timeout` seconds, and `moxi.store.StoreTooNew` when a newer launcher wrote it."""
+    return store.kinds((session_id,), timeout=timeout)[session_id]
+
+
+def launch_kinds(session_ids: Iterable[str], *,
+                 timeout: float = 1.0) -> dict[str, str | None]:
+    """`launch_kind` for each of `session_ids`, read in one opening of the launch log."""
+    return store.kinds(session_ids, timeout=timeout)
+
+
 def _result(composition: Composition, request_id: str, session_id: str | None,
             started: targets.Started, warnings: tuple[str, ...],
             base: str | None = None) -> LaunchResult:
@@ -643,7 +676,7 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
-           "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest",
-           "Replayed", "ScratchRoot", "check", "exit_code", "launch", "open_hold", "preview",
-           "release_hold"]
+__all__ = ["KINDS", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
+           "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
+           "ReplayRequest", "Replayed", "ScratchRoot", "check", "exit_code", "launch",
+           "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold"]

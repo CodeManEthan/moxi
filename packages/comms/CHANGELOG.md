@@ -23,7 +23,7 @@
   later reconnect.
 - Held mail's help says it goes out at the end of the recipient's next turn. The daemon
   logs that a release waits on a cold cache only when mail is waiting for that name.
-- comms needs moxi 0.1.4 or later, for the unit ids its fix lines name.
+- comms needs moxi 0.1.5 or later, for the unit ids its fix lines name.
 
 ## 0.2.0 (2026-10-27)
 

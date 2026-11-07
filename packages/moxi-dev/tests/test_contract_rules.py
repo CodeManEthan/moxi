@@ -141,7 +141,7 @@ def test_a_private_name_from_an_api_is_refused(repo):
 
 def test_the_core_modules_another_module_may_import(repo):
     shared = ("names", "paths", "config", "modules", "cli", "files", "store", "proc", "log",
-              "exit", "aio", "ipc", "units", "doctor", "place")
+              "exit", "aio", "ipc", "units", "doctor", "place", "terminal")
     assert contract.CORE_MODULES == frozenset(shared)
     repo.src("core.py", f"from moxi import {', '.join(shared)}\nfrom moxi.doctor import Row\n")
     assert repo.findings("1") == []
@@ -538,7 +538,7 @@ def test_a_newer_schema_is_one_finding(repo):
         "knows up to 2; upgrade moxi"]
 
 
-@pytest.mark.parametrize("name", ["installs", "runtime", "set", "unset", "test"])
+@pytest.mark.parametrize("name", ["installs", "runtime", "set", "unset", "test", "anchor"])
 def test_a_module_named_by_a_name_the_core_keeps(tmp_path, name):
     r = Repo(tmp_path / name, name)
     r.write("pyproject.toml", pyproject(f"moxi-{name}"))

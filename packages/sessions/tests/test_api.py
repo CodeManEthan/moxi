@@ -20,12 +20,15 @@ CODEX_NAMES = {"TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS", "META_KEYS", "HISTO
                "CHECKED_VERSIONS"}
 
 
-def test_the_announcement_offers_interface_2():
-    assert module.INTERFACES == frozenset({2})
+def test_the_announcement_offers_interfaces_2_and_3():
+    assert module.INTERFACES == frozenset({2, 3})
     assert module.API == "moxi_sessions.api"
     assert module.CLI == "moxi_sessions.cli:main"
     assert module.SETTINGS == "settings.toml"
-    assert set(module.OPTIONAL) == {"ui"}
+    assert module.SETUP == "moxi_sessions.setup:setup"
+    target, _, name = module.SETUP.partition(":")
+    assert callable(getattr(importlib.import_module(target), name))
+    assert set(module.OPTIONAL) == {"ui", "secrets"}
     assert module.GATED == {} and module.INTERNAL_ENV == {}
 
 
@@ -48,7 +51,15 @@ def test_load_finds_the_module_and_its_api():
     found = modules.load("sessions", interface=2)
     assert found.ok, found
     assert found.api is api
+    assert modules.load("sessions", interface=3).ok
     assert not modules.load("sessions", interface=1).ok
+
+
+def test_interface_3_adds_retention():
+    from moxi_sessions import retention
+    assert {"retention", "Retention"} <= set(api.__all__)
+    assert api.retention is retention.retention and api.Retention is retention.Retention
+    assert list(inspect.signature(api.retention).parameters) == ["environ"]
 
 
 def test_interface_2_keeps_what_cache_reads():

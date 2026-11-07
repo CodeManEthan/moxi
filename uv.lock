@@ -750,10 +750,9 @@ wheels = [
 
 [[package]]
 name = "moxi"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/moxi" }
 dependencies = [
-    { name = "platformdirs", marker = "sys_platform == 'win32'" },
     { name = "psutil" },
 ]
 
@@ -764,10 +763,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "platformdirs", marker = "sys_platform == 'win32'", specifier = ">=4" },
-    { name = "psutil", specifier = ">=5.9" },
-]
+requires-dist = [{ name = "psutil", specifier = ">=5.9" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1303,13 +1299,16 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.1"
+version = "0.2.3"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
 ]
 
 [package.optional-dependencies]
+secrets = [
+    { name = "moxi-secrets" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1325,9 +1324,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-secrets", marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["ui"]
+provides-extras = ["ui", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1429,7 +1429,7 @@ dev = [
 
 [[package]]
 name = "moxi-ui"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/ui" }
 dependencies = [
     { name = "h11" },

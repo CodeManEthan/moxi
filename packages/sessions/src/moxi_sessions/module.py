@@ -1,11 +1,13 @@
 """The announcement of Moxi's sessions module, which moxi.modules reads.
 
-It offers interface 2, the read API in `moxi_sessions.api`, the verb `moxi sessions`, and,
-with the `ui` extra, a page in the browser UI shell that shows one session's last turns
-and a block other pages may place for the same view.
+It offers interfaces 2 and 3, the read API in `moxi_sessions.api` (interface 3 is 2 plus
+`retention()`), the verb `moxi sessions`, a setup that prints how long each harness keeps
+its transcripts, and, with the `ui` extra, a page in the browser UI shell that shows one
+session's last turns and a block other pages may place for the same view. With the
+`secrets` extra, `moxi sessions read` redacts what it prints.
 """
 
-INTERFACES = frozenset({2})
+INTERFACES = frozenset({2, 3})
 API = "moxi_sessions.api"
 CLI = "moxi_sessions.cli:main"
 SUMMARY = ("Read each harness's own session records in one shape: find a session and its "
@@ -13,15 +15,19 @@ SUMMARY = ("Read each harness's own session records in one shape: find a session
 OPTIONAL = {
     "ui": "The sessions page in the browser UI shell: one session's last turns and its "
           "subagents, by harness and id, and the window block other pages place.",
+    "secrets": "Redaction for `moxi sessions read`: each message and tool call line passes "
+               "through secrets' credentials and broad sets before it is printed. Without "
+               "it the read prints as written and says so.",
 }
 GATED = {}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
-SETUP = None
+#: Prints each harness's transcript retention; asks nothing and changes nothing.
+SETUP = "moxi_sessions.setup:setup"
 SEGMENT = None
 # The announcement's version, and the optional names it declares. sessions keeps no state
 # of its own, so it declares no store; it runs no process, so no daemon, timer or health
-# check. Its doctor rows check each harness's root.
+# check. Its doctor rows check each harness's root and report each harness's retention.
 ANNOUNCES = 1
 STORES = {}
 DOCTOR = "moxi_sessions.doctor:rows"

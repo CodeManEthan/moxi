@@ -13,3 +13,7 @@
   bind.
 - New extras `notes`, `cache` and `usage`, for the handoff folder, the prompt cache rows
   and the context warning rows. The `comms` extra now needs moxi-comms 0.3.
+- The launcher offers interface 1: `launch_kind(session_id)` and `launch_kinds(ids)`
+  answer scratch, seat, project or one-off from the launch log, or None for a session
+  the launcher didn't start.
+- The launcher needs moxi 0.1.4 or later, for `moxi.terminal`.

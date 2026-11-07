@@ -429,15 +429,21 @@ class CodexAdapter(HarnessAdapter):
         # The facts are read at the subscription: no turn event falls between them and
         # the first event the watch gives.
         watch = self._watch_handle = session.watch()
-        raised = getattr(watch.facts, "ready", None)
+        facts = watch.facts
+        raised = getattr(facts, "ready", None)
         with self._lock:
-            self.turn_open = bool(watch.facts.turn_open)
+            self.turn_open = bool(facts.turn_open)
             # The watch replays nothing: turns' ready for the first load reaches it only
             # when no ready had been raised at the subscription. One that had been says
             # whether the resumed thread has had a turn.
             self._first_resume_unseen = self.resume is not None and raised is None
             if raised is not None:
                 self._learn_turned(getattr(raised, "source", None))
+            # A turn that ended before the subscription (the host's priming turn can)
+            # reaches no event: the facts' count says the thread has turned, whatever a
+            # ready said, and the ready report below carries it.
+            if facts.turn_number - (1 if facts.turn_open else 0) > 0:
+                self._own_turned = True
         self._watcher = threading.Thread(target=self._watch, args=(watch,),
                                          daemon=True, name="comms-codex-watch")
         self._watcher.start()
@@ -686,9 +692,11 @@ class CodexAdapter(HarnessAdapter):
         decision = self.reply_check(fields)
         if not decision.block:
             return None
-        self.mark_blocked(decision.names)
+        # One step under the lock: a turn start read between the mark and the turn's id
+        # would find a block with no turn and resolve it.
         with self._lock:
             self._blocked_turn = getattr(facts, "turn_id", None)
+            self.mark_blocked(decision.names)
         return decision.block
 
     def clear_block(self) -> None:

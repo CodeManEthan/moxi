@@ -115,7 +115,8 @@ GROUP = "moxi.modules"
 #: core's other modules (install, uninstall, run, catalogue, strays, home and the
 #: underscored ones) are its own.
 CORE_MODULES = frozenset({"names", "paths", "config", "modules", "cli", "files", "store",
-                          "proc", "log", "exit", "aio", "ipc", "units", "doctor", "place"})
+                          "proc", "log", "exit", "aio", "ipc", "units", "doctor", "place",
+                          "terminal"})
 #: Where the core keeps its vendored copies of released libraries, which no check reads.
 VENDORED = "src/moxi/_vendor/"
 #: The core's one console script.
@@ -124,7 +125,7 @@ CORE_SCRIPT = ("moxi", "moxi.cli:main")
 CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc",
                               "moxi.units._fence"})
 #: The core's own plumbing variables, which the core reads where check 5 applies.
-CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD"})
+CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD", "MOXI_STARTED_BY"})
 #: What a segment's closure may not import (top-level package names), besides turns.
 SEGMENT_IMPORTS = frozenset({"subprocess", "socket", "multiprocessing", "ctypes", "http",
                              "urllib"})

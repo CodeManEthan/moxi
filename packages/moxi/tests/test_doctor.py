@@ -17,7 +17,8 @@ from moxi import doctor
 def home(tmp_path, monkeypatch):
     """Every root under the test's tmp: no real home, no real state."""
     for name in list(os.environ):
-        if name.startswith("MOXI_") or name.startswith("XDG_"):
+        # The test kit's anchor stays: it keeps the core's record off the real account.
+        if (name.startswith(("MOXI_", "XDG_"))) and name != "MOXI_ANCHOR_HOME":
             monkeypatch.delenv(name)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MOXI_DEMO_STATE_HOME", str(tmp_path / "state"))

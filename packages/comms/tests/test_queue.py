@@ -203,15 +203,26 @@ def reboot(rig):
 def blocked(rig):
     """Routing off while the block holds: what is posted then reaches the record with no
     row and no delivery, so replay and a rescan are the first readers to find it. The
-    block lifts only once the daemon has seen every message posted under it."""
+    block lifts only once the daemon has skipped every message posted under it. Its
+    having seen one is not enough: the router counts an id as seen before it reads the
+    block, so a block lifted then lets that message route live."""
     class Block:
         def __enter__(self):
             write_config(None, "block = true\n")
+            self.start = rig.record.max_message_id() or "0"
+            with rig.daemon._lock:
+                self.skips = rig.daemon._skips
 
         def __exit__(self, *exc):
-            top = int(rig.record.max_message_id() or 0)
+            posted = [m for m in rig.record.history(rig.names_channel, after=self.start)
+                      if machine_line.parse(m.content) is not None]
+
+            def skipped():
+                with rig.daemon._lock:
+                    return rig.daemon._skips - self.skips >= len(posted)
+
             try:
-                assert wait_until(lambda: int(rig.daemon._seen_max) >= top)
+                assert wait_until(skipped)
             finally:
                 write_config(None, "block = false\n")
 

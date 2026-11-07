@@ -9,7 +9,7 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 # The launcher requires the core only. Every other module it works with (turns, comms,
 # slots, projects, notes, cache, usage, ui) is an optional link it reaches through
 # moxi.modules.load where a feature needs it, and never imports.
-dependencies = ["moxi>=0.1,<0.2"]
+dependencies = ["moxi>=0.1.4,<0.2"]
 
 [project.optional-dependencies]
 # The first turn, readiness, Codex ids, and the start listeners.

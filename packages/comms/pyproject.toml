@@ -24,7 +24,7 @@ classifiers = [
 # mcp is the SDK comms' tools are served with, from the daemon alone, and uvicorn the
 # HTTP server the daemon starts it on: required, since the tools are how a session's
 # model sends; `[mcp] enabled = false` turns them off.
-dependencies = ["moxi>=0.1.4,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9",
+dependencies = ["moxi>=0.1.5,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9",
                 "mcp>=2.3,<3", "uvicorn>=0.54,<1"]
 
 [project.optional-dependencies]

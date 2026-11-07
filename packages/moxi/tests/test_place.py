@@ -152,6 +152,50 @@ def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path
     assert not os.path.lexists(home / ".codex")
 
 
+def test_folders_names_each_rows_folders_as_the_placer_resolves_them(home):
+    rows, _ = place.harnesses()
+    assert place.folders() == {
+        "claude's skills folder": home / ".claude" / "skills",
+        "claude's agents folder": home / ".claude" / "agents",
+        "codex's skills folder": home / ".agents" / "skills",
+        "codex's agents folder": home / ".codex" / "agents"}
+    assert {f"{name}'s {kind} folder": row.skills if kind == "skills" else row.agents
+            for name, row in rows.items() for kind in ("skills", "agents")} == place.folders()
+
+
+def test_folders_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "process-cc"))
+    given = {"HOME": str(tmp_path / "given"), "USERPROFILE": str(tmp_path / "given"),
+             "CODEX_HOME": str(tmp_path / "cx"), "MOXI_HOME": str(tmp_path / "given-moxi")}
+    config = moxi.paths.core().config_file(given)
+    config.parent.mkdir(parents=True)
+    config.write_text('harnesses = [{ name = "claude", skills = "", agents = "" },\n'
+                      '             { name = "oc", skills = "~/.oc/skills", agents = "" }]\n')
+    assert place.folders(given) == {
+        "claude's skills folder": tmp_path / "given" / ".claude" / "skills",
+        "claude's agents folder": tmp_path / "given" / ".claude" / "agents",
+        "oc's skills folder": tmp_path / "given" / ".oc" / "skills"}
+    # The process's own table is untouched by the mapping's settings file.
+    assert "oc" not in place.harnesses()[0]
+    assert set(place.harnesses(env=given)[0]) == {"claude", "oc"}
+
+
+def test_folders_keeps_a_relative_value_that_harnesses_makes_absolute(home, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "relative-cc")
+    assert place.folders()["claude's skills folder"] == Path("relative-cc", "skills")
+    rows, _ = place.harnesses()
+    assert rows["claude"].skills == Path(os.path.abspath("relative-cc"), "skills")
+
+
+def test_a_row_folder_expands_its_tilde_from_the_mapping(home, tmp_path):
+    set_core("harnesses", [{"name": "oc", "skills": "~/.oc/skills", "agents": "~"}])
+    given = {**os.environ, "HOME": str(tmp_path / "given"),
+             "USERPROFILE": str(tmp_path / "given")}
+    assert place.folders(given) == {"oc's skills folder": tmp_path / "given" / ".oc" / "skills",
+                                    "oc's agents folder": tmp_path / "given"}
+    assert place.harnesses(env=given)[1] == []
+
+
 def test_a_dest_places_exactly_there_and_a_relative_one_raises(tmp_path, skill):
     src = skill()
     dest = tmp_path / "proj" / ".claude" / "skills" / "x"

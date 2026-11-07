@@ -15,6 +15,10 @@ its own pid to the row (exec keeps it) and `started`, starts the detached delive
 first turn is owed, then execs the harness in the launch's directory. On Windows, where
 there is no exec, the harness starts as a child with this terminal, its pid is recorded,
 the deliverer is given that pid, and the launcher waits and exits with the child's code.
+The environment it runs the harness in carries the start mark (`moxi.terminal.marked`),
+which a replayed launch's environment, rebuilt from the one recorded, would otherwise
+lack: a terminal the session hands out is then known as one Moxi started, even after
+the launcher has gone, so no command typed in it writes the account's terminal record.
 
 **Headless** (`headless`). The harness's non-interactive mode, with the brief as its
 prompt, started detached and left: a session of its own (a detached process group on
@@ -62,7 +66,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi import exit as exits
-from moxi import files, proc
+from moxi import files, proc, terminal
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
@@ -306,7 +310,7 @@ class Terminal(Target):
         sys.stderr.flush()
         try:
             os.chdir(launch.cwd)
-            _execve(launch.command, list(launch.argv), dict(launch.env))
+            _execve(launch.command, list(launch.argv), terminal.marked(launch.env))
         except OSError as error:
             os.chdir(here)
             return fail(launch.conn, rid, SPAWN_FAILED,
@@ -317,8 +321,8 @@ class Terminal(Target):
     def _start_child(self, launch: Launch) -> Started:
         rid = launch.request_id
         try:
-            child = _popen([launch.command, *launch.argv[1:]], env=dict(launch.env),
-                           cwd=launch.cwd)
+            child = _popen([launch.command, *launch.argv[1:]],
+                           env=terminal.marked(launch.env), cwd=launch.cwd)
         except OSError as error:
             return fail(launch.conn, rid, SPAWN_FAILED,
                            f"{launch.argv[0]} could not be started: {error}")

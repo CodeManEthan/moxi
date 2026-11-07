@@ -140,6 +140,22 @@ META_KEYS = ("session_id", "id", "timestamp", "cwd", "originator", "cli_version"
 #: The `history_mode` values line 1 can hold.
 HISTORY_MODES = ("legacy", "paginated")
 
+#: Who submitted a message (`Message.injected`). Codex writes no submitter on a message.
+#: What it does write, on a role-user message, is which kinds of content it holds, in
+#: `internal_chat_message_metadata_passthrough.content_item_kinds`. These kinds are
+#: content Codex added itself: a message whose kinds are all listed here is injected.
+#: Any other kind, `user.text` among them, names no submitter, so the message reads as
+#: unknown.
+INJECTED_KINDS = frozenset({"plugins.recommendations", "agents_md.instructions",
+                            "environments.environment_context", "generic.turn_aborted"})
+#: The opening tags of the blocks Codex adds as a user message in older rollouts, which
+#: write no content kinds: a role-user message with no kinds that opens with one of these
+#: is injected. Where the kinds are written, they decide alone.
+WRAPPER_TAGS = ("<recommended_plugins>", "<environment_context>", "<turn_aborted>")
+#: The roles of the messages Codex itself sends the model (its instructions), each
+#: injected whatever it holds.
+HARNESS_ROLES = frozenset({"developer", "system"})
+
 #: `response_item` types that are a tool call, and those that are a call's output.
 CALL_ITEMS = frozenset({"function_call", "custom_tool_call", "local_shell_call",
                         "web_search_call", "tool_search_call", "image_generation_call"})
@@ -428,19 +444,25 @@ def _output(payload: dict) -> tuple[str, Any]:
     return _text_of(output)[0], is_error
 
 
+def summary_input(tool_input: Any) -> Any:
+    """What a call's summary is made from: its input, or, when the input is JSON text
+    that holds an object (a `function_call`'s `arguments`), that object."""
+    if isinstance(tool_input, str):
+        decoded = parse_line(tool_input)
+        if decoded is not None:
+            return decoded
+    return tool_input
+
+
 def _call(common: dict, sub: str, payload: dict) -> tuple[ToolCall, str | None]:
     name = payload.get("name")
     if not isinstance(name, str):
         name = sub.removesuffix("_call")
     key = next((k for k in CALL_INPUT_KEYS if k in payload), None)
     tool_input = payload.get(key) if key is not None else None
-    shown = tool_input
-    if isinstance(tool_input, str):
-        decoded = parse_line(tool_input)
-        if decoded is not None:
-            shown = decoded
+    summary = tool_summary(name, summary_input(tool_input))
     return ToolCall(**common, call_id=_said(payload, "call_id"), name=name,
-                    input=tool_input, summary=tool_summary(name, shown)), key
+                    input=tool_input, summary=summary), key
 
 
 def _marker(common: dict, name: str, **fields: Any) -> Marker:
@@ -581,17 +603,45 @@ def _event(common: dict, sub: str, payload: dict, state: State, before: State,
     return [Other(**common, recognised=sub in EVENT_KINDS)]
 
 
+def _injected(payload: dict, role: Any, text: str) -> Any:
+    """Whether something other than the person at the prompt submitted a message.
+
+    The model's own message is false, and one of Codex's own roles (`HARNESS_ROLES`)
+    true. A user message's content kinds decide it when written: true when every kind is
+    one Codex added (`INJECTED_KINDS`), else unknown, an empty or unreadable list
+    included. With no kinds written, a fixed opening tag (`WRAPPER_TAGS`) makes it true;
+    anything else is unknown."""
+    if role == "assistant":
+        return False
+    if role in HARNESS_ROLES:
+        return True
+    if role != "user":
+        return UNKNOWN
+    passthrough = payload.get("internal_chat_message_metadata_passthrough")
+    if isinstance(passthrough, dict) and "content_item_kinds" in passthrough:
+        kinds = passthrough["content_item_kinds"]
+        injected = (isinstance(kinds, list) and bool(kinds)
+                    and all(isinstance(kind, str) and kind in INJECTED_KINDS
+                            for kind in kinds))
+        return True if injected else UNKNOWN
+    if text.lstrip().startswith(WRAPPER_TAGS):
+        return True
+    return UNKNOWN
+
+
 def _item(common: dict, sub: str, payload: dict) -> list[Record]:
     if sub == "message":
         text, kinds = _text_of(payload.get("content"))
-        return [Message(**common, role=_said(payload, "role"), text=text,
-                        content_kinds=kinds, synthetic=False)]
+        role = _said(payload, "role")
+        return [Message(**common, role=role, text=text, content_kinds=kinds,
+                        synthetic=False, injected=_injected(payload, role, text))]
     if sub == "reasoning":
         summary, summary_kinds = _text_of(payload.get("summary"))
         content, content_kinds = _text_of(payload.get("content"))
         return [Message(**common, role="assistant", reasoning=True,
                         text="\n".join(t for t in (summary, content) if t),
-                        content_kinds=summary_kinds + content_kinds, synthetic=False)]
+                        content_kinds=summary_kinds + content_kinds, synthetic=False,
+                        injected=False)]
     if sub in CALL_ITEMS:
         call, key = _call(common, sub, payload)
         named = {"type", "call_id", "name"} | ({key} if key else set())

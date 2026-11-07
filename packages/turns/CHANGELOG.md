@@ -18,4 +18,4 @@
 - A Codex thread reloaded before its first turn is treated as a start: its Ready reads
   `startup`, and the first turn's SessionStart `resume` reaches the listeners as
   `startup`. Each resumed load makes one more `thread/turns/list` call.
-- turns needs moxi 0.1.4 or later.
+- turns needs moxi 0.1.5 or later.

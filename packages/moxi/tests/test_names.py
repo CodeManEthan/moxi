@@ -45,8 +45,9 @@ def test_the_umbrellas_verbs_are_reserved():
     assert isinstance(names.VERBS, frozenset)
 
 
-def test_the_core_keeps_six_more_names():
-    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs", "test"}
+def test_the_core_keeps_seven_more_names():
+    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs", "test",
+                              "anchor"}
     assert not names.RESERVED & names.VERBS
     for name in ("doctor", "installs", "set", "moxi", "test"):
         assert names.is_reserved(name)

@@ -45,6 +45,9 @@ VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", 
 #: gives it. `test` is kept because `MOXI_TEST_` is the prefix of the variables
 #: moxi-dev's test tiers read (moxi-dev's `contract.DEV_ENV_PREFIX`): a module named
 #: `test` would have that prefix for its own variables, and the two would collide.
+#: `anchor` is kept because a module of that name would have the home variable
+#: `MOXI_ANCHOR_HOME`, which is the test kits' own stand-in for the account's folder
+#: (`moxi.paths.anchor_dir`).
 _RESERVED_WHY = {
     "moxi": "it is the core's own state directory",
     "set": "it is the first word of `moxi config set`",
@@ -52,6 +55,8 @@ _RESERVED_WHY = {
     "runtime": "it holds every module's runtime directory where the system gives none",
     "installs": "it is the core's entry-point group moxi.installs",
     "test": "its variables would start MOXI_TEST_, which moxi-dev's test tiers use",
+    "anchor": "its home variable would be MOXI_ANCHOR_HOME, the test kits' stand-in "
+              "for the account's folder",
 }
 
 #: Names the core uses for itself, so no module may take one; `reserved_why` says why,

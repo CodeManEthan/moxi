@@ -13,6 +13,7 @@ change to it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -519,8 +520,10 @@ def test_the_result_shapes_of_the_reads(connect):
 @_POSIX
 def test_environ_answers_the_names_asked_from_the_endpoints_environment(
         connect, make_endpoint):
+    # A session's environment is a whole one: it places the endpoint's own folders too.
     ep, _ = make_endpoint(FakeHarness(can=R.CAPABILITIES),
-                          env={"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "PATH": "/bin"})
+                          env={**os.environ, "MOXI_T_SET": "one", "MOXI_T_EMPTY": "",
+                               "PATH": "/bin"})
     client, _ = connect(ep=ep)
     answer = client.call("environ", {"names": ["MOXI_T_SET", "MOXI_T_EMPTY", "MOXI_T_NO"]},
                          timeout=5)

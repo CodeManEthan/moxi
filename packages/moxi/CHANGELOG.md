@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.4 (2026-11-07)
+## 0.1.5 (2026-11-07)
 
 - Unit names carry the home. With `MOXI_HOME` set, units are named
   `moxi-<tag>-<module>-<name>` (systemd), `moxi.<tag>.<module>.<name>` (launchd) and
@@ -35,3 +35,11 @@
   has run in this home.
 - The fake units backend, a test helper, is no longer part of the installed package
   (`moxi.units._fake` is gone); it lives in the core's tests.
+
+## 0.1.4 (2026-11-07)
+
+- New `moxi.terminal`: the front door records the terminal's environment and its launch
+  chain, and the doctor reports that record in its terminal row. The check that compares
+  a page's environment with the record lives in ui.
+- The Windows folders come from the shell through ctypes; the core no longer needs
+  platformdirs.
