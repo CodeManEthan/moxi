@@ -353,11 +353,15 @@ WATCHER = "watch"
 
 
 def _unit_line() -> str:
-    """The watcher's unit, as the core's writer reads it (`moxi.units.status`): its name and
-    state, or how to install it when there is none."""
+    """The watcher's unit, as the core's writer reads it (`moxi.units.status`): its name,
+    the id the supervisor knows it by in this home (`moxi.units.ids`) and its state, or how
+    to install it when there is none."""
     from moxi import units
 
     unit = f"cache/{WATCHER}"
+    found = units.ids("cache", WATCHER)
+    if found:
+        unit += f" ({found[-1]})"
     state = next((row for row in units.status("cache")
                   if row.name == WATCHER and row.kind == "daemon"), None)
     if state is None or state.state == "missing":

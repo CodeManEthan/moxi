@@ -40,6 +40,9 @@ ui = ["moxi-ui>=0.1,<0.2"]
 # The public MCP host: with it, comms' four tools reach the Claude apps through the host,
 # as its provider `moxi_comms.connector`, which only the host loads.
 connector = ["moxi-connector>=0.1,<0.2"]
+# The services module: with it, a doctor fix that restarts comms' daemon names services'
+# restart verb. comms reaches it only through moxi.modules.load("services").
+services = ["moxi-services>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

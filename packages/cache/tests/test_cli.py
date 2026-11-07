@@ -31,6 +31,20 @@ def unit_states(monkeypatch) -> list:
     return rows
 
 
+@pytest.fixture(autouse=True)
+def unit_ids(monkeypatch) -> list:
+    """What `moxi.units.ids` answers here: the ids a test puts in the list. Empty, there is
+    no supervisor."""
+    found: list = []
+
+    def ids(module, name, kind="daemon"):
+        assert (module, name, kind) == ("cache", "watch", "daemon")
+        return tuple(found)
+
+    monkeypatch.setattr(units, "ids", ids)
+    return found
+
+
 def watcher(state, **kw) -> units.UnitState:
     return units.UnitState("cache", "watch", "daemon", "systemd", state, **kw)
 
@@ -124,6 +138,23 @@ def test_doctor_reads_the_watchers_unit_from_the_core(capsys, unit_states, state
     assert code == 0
     assert f"  unit: {line}" in out.splitlines()
     assert "cache service" not in out
+
+
+@pytest.mark.parametrize(("ids", "name"), [
+    (("moxi-cache-watch.service",), "cache/watch (moxi-cache-watch.service)"),
+    (("moxi-h3f9a2c1d-cache-watch.socket", "moxi-h3f9a2c1d-cache-watch.service"),
+     "cache/watch (moxi-h3f9a2c1d-cache-watch.service)"),
+    (("moxi.h3f9a2c1d.cache.watch",), "cache/watch (moxi.h3f9a2c1d.cache.watch)"),
+])
+def test_doctor_names_the_watchers_unit_id_the_core_gives(capsys, unit_states, unit_ids,
+                                                          ids, name):
+    unit_ids += ids
+    unit_states.append(watcher("active", pid=4242))
+    code, out, _ = run(capsys, "doctor")
+    assert f"  unit: {name}: active, pid 4242" in out.splitlines()
+    unit_states.clear()
+    code, out, _ = run(capsys, "doctor")
+    assert f"  unit: {name}: not installed: moxi install cache" in out.splitlines()
 
 
 def test_doctor_names_a_learner_and_the_lowerings(capsys):

@@ -84,10 +84,14 @@ def ids(module: str, name: str, kind: str = "daemon") -> tuple[str, ...]:
     each further `<stem>-<k>.socket` whose file is there, then `<stem>.service`; a timer's
     are `<stem>.timer` then `<stem>.service`. On launchd it is the label, on Task Scheduler
     the task path. Reads no supervisor. The one way for code outside this package to
-    learn a unit's name."""
+    learn a unit's name. A supervisor this moxi has no writer for gives the empty tuple
+    too, since nothing here wrote a unit for it."""
     if kind not in ("daemon", "timer"):
         raise ValueError(f"kind is {kind!r}, not daemon or timer")
-    impl = _backend.implementation()
+    try:
+        impl = _backend.implementation()
+    except NotImplementedError:
+        return ()
     if impl is None:
         return ()
     return tuple(impl.ids(module, name, kind))
