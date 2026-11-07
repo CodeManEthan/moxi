@@ -440,6 +440,34 @@ def test_the_session_view_charts_each_request_its_turns_compaction_and_context(
     expect(readout).to_contain_text(MODEL)
 
 
+#: The labels the request charts draw beside their lines, each with whether its box lies
+#: inside its chart's viewBox, and its anchor.
+CHART_LABELS = """svgs => svgs.flatMap((svg) => [
+  ...svg.querySelectorAll("text.window-label, [data-rule=compaction] text")].map((text) => {
+    const box = text.getBBox(), view = svg.viewBox.baseVal;
+    return [text.textContent, text.getAttribute("text-anchor"),
+            box.x >= view.x && box.y >= view.y && box.x + box.width <= view.x + view.width
+            && box.y + box.height <= view.y + view.height];
+  }))"""
+
+
+def test_the_request_charts_keep_their_labels_inside_wide_and_on_a_phone(
+        charted, charted_page):
+    """The larger window is the top of its chart, so its label goes under its line; on a
+    phone the compaction's rule is near enough the right edge that its label goes left of
+    it."""
+    panel = open_view(charted_page, f"session/{CHARTED}")
+    charts = panel.locator("section[data-part=view] svg[data-chart]")
+    expect(context_chart(panel).locator("text.window-label")).to_have_count(2)
+    wide = charts.evaluate_all(CHART_LABELS)
+    assert [label for label, _anchor, inside in wide if not inside] == [], wide
+    charted_page.set_viewport_size({"width": 360, "height": 800})
+    expect(context_chart(panel)).to_have_attribute("viewBox", re.compile(r"^0 0 [23]\d\d "))
+    phone = charts.evaluate_all(CHART_LABELS)
+    assert [label for label, _anchor, inside in phone if not inside] == [], phone
+    assert ["compaction (auto)", "end", True] in phone, phone
+
+
 def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charted_page):
     panel = open_view(charted_page, f"session/{CHARTED}")
     expect(requests_chart(panel).locator("g[data-n]")).to_have_count(6)

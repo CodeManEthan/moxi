@@ -908,6 +908,17 @@ export function requestsChart(rows: RequestRow[], measure: RequestMeasure, width
   return { mode: "area", axis, bars: [], areas, ticks, tops };
 }
 
+/** A chart label's height (the 11px of the page's `svg text`), and a width per character
+ * at least as wide as the sans face's average, so a label placed by them stays inside. */
+export const LABEL_HEIGHT = 11;
+export const LABEL_CHAR = 6.5;
+
+/** Where a label beside the vertical line at `x` goes: 3px right of it, or, where that
+ * runs past `right`, 3px left of it, anchored at its end. */
+export function labelBeside(x: number, text: string, right: number): { x: number; anchor: "start" | "end" } {
+  return x + 3 + text.length * LABEL_CHAR <= right ? { x: x + 3, anchor: "start" } : { x: x - 3, anchor: "end" };
+}
+
 /** The context chart: the whole prompt per request against the window. */
 export interface ContextChart {
   axis: Axis;
@@ -915,9 +926,10 @@ export interface ContextChart {
   line: string;
   /** How many requests the line has a point for. */
   points: number;
-  /** The window's step line, and a label where each level starts. */
+  /** The window's step line, and a label where each level starts: its baseline above the
+   * line, or below it where the line is too near the top for the label to fit above. */
   window: string;
-  windowLabels: { x: number; y: number; text: string }[];
+  windowLabels: { x: number; y: number; anchor: "start" | "end"; text: string }[];
   /** "window unknown for <model>", or null. */
   unknownWindow: string | null;
   ticks: { value: number; y: number }[];
@@ -938,7 +950,10 @@ export function contextChart(rows: RequestRow[], width: number, height: number):
   const windowLabels: ContextChart["windowLabels"] = [];
   rows.forEach((row, i) => {
     if (row.window !== null && (i === 0 || rows[i - 1].window !== row.window)) {
-      windowLabels.push({ x: axis.edge(row.n - 1), y: y(row.window), text: `window ${row.window.toLocaleString("en-US")}` });
+      const text = `window ${row.window.toLocaleString("en-US")}`;
+      const at = y(row.window);
+      windowLabels.push({ ...labelBeside(axis.edge(row.n - 1), text, axis.right),
+                          y: at - 4 - LABEL_HEIGHT >= 0 ? at - 4 : at + LABEL_HEIGHT + 2, text });
     }
   });
   const unknown = [...new Set(rows.filter((row) => row.window === null).map((row) => row.model ?? UNKNOWN_MODEL))];
@@ -953,7 +968,8 @@ export function contextChart(rows: RequestRow[], width: number, height: number):
  * and a dashed one at each compaction, between request `after` and the next. */
 export interface Rules {
   turns: { n: number; x: number }[];
-  compactions: { after: number; x: number; label: string; title: string; dot: number | null }[];
+  compactions: { after: number; x: number; label: string; labelX: number; anchor: "start" | "end";
+                 title: string; dot: number | null }[];
 }
 
 export function requestRules(rows: RequestRow[], total: RequestsTotal, axis: Axis): Rules {
@@ -963,7 +979,9 @@ export function requestRules(rows: RequestRow[], total: RequestsTotal, axis: Axi
   const compactions = total.marks.map((mark: Mark) => {
     const label = mark.trigger ? `compaction (${mark.trigger})` : "compaction";
     const before = mark.pre_tokens === null ? "" : `, ${mark.pre_tokens.toLocaleString("en-US")} before`;
-    return { after: mark.after, x: axis.edge(mark.after), label,
+    const x = axis.edge(mark.after);
+    const beside = labelBeside(x, label, axis.right);
+    return { after: mark.after, x, label, labelX: beside.x, anchor: beside.anchor,
              title: `${label}${before}${mark.ts === null ? "" : ` at ${fmtMoment(mark.ts)}`}`,
              dot: mark.after < rows.length ? mark.after + 1 : null };
   });

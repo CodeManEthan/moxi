@@ -695,7 +695,7 @@ export class UsagePage extends LitElement {
       ${rules.turns.map((rule) => svg`<line class="turn" data-rule="turn" x1=${rule.x} x2=${rule.x} y1=${MARGIN.top} y2=${height - MARGIN.bottom}></line>`)}
       ${rules.compactions.map((rule) => svg`<g data-rule="compaction" data-after=${rule.after}><title>${rule.title}</title>
         <line class="compaction" x1=${rule.x} x2=${rule.x} y1=${MARGIN.top} y2=${height - MARGIN.bottom}></line>
-        ${labelled ? svg`<text x=${rule.x + 3} y=${MARGIN.top + 10}>${rule.label}</text>` : nothing}</g>`)}`;
+        ${labelled ? svg`<text x=${rule.labelX} y=${MARGIN.top + 10} text-anchor=${rule.anchor}>${rule.label}</text>` : nothing}</g>`)}`;
   }
 
   #hits(rows: RequestRow[], chart: { axis: RequestsChart["axis"] }, height: number) {
@@ -748,7 +748,7 @@ export class UsagePage extends LitElement {
           <line class="axis" x1=${MARGIN.left} x2=${width - MARGIN.right} y1=${tick.y} y2=${tick.y}></line>
           <text x=${MARGIN.left - 4} y=${tick.y + 4} text-anchor="end">${fmtTokens(tick.value)}</text>`)}
         ${context.window ? svg`<path class="window" data-part="window" d=${context.window}></path>` : nothing}
-        ${context.windowLabels.map((label) => svg`<text class="window-label" x=${label.x + 3} y=${label.y - 4}>${label.text}</text>`)}
+        ${context.windowLabels.map((label) => svg`<text class="window-label" x=${label.x} y=${label.y} text-anchor=${label.anchor}>${label.text}</text>`)}
         <path class="context" data-part="context" data-points=${context.points} d=${context.line}></path>
         ${rules.compactions.map((rule) => {
           const y = rule.dot === null ? null : context.ys[rule.dot - 1];

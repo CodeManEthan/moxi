@@ -7,7 +7,8 @@ import {
   labelEvery, MARGIN, menuPaths, meter, NO_FILTERS, parseRoute, projectMenu, provenanceLine,
   rangeFor, refusedLine, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay,
   shouldPass, strip, tickText, viewPath,
-  areaPath, BARS_UP_TO, classChart, classCosts, contextChart, linePath, pricesPath, rateAsks,
+  areaPath, BARS_UP_TO, classChart, classCosts, contextChart, LABEL_CHAR, LABEL_HEIGHT, linePath,
+  pricesPath, rateAsks,
   rateLine, readout, reconcileLines, requestAxis, requestNotes, requestRules, requestsChart,
   requestsPath, splitBars, splitKeys, splitLabel, stepPath, termCell, tierText,
 } from "../src/views.ts";
@@ -537,6 +538,21 @@ test("turn and compaction rules sit between the requests", () => {
   assert.deepEqual(requestRules(rows, total({ turns: 1 }), axis).turns, []);
 });
 
+test("a compaction label goes right of its rule, and left of it at the right edge", () => {
+  const rows = Array.from({ length: 10 }, (_, i) => req(i + 1));
+  const axis = requestAxis(10, 360);
+  const marks = [{ after: 1, ts: null, trigger: "auto", pre_tokens: null },
+                 { after: 10, ts: null, trigger: "auto", pre_tokens: null }];
+  const [first, last] = requestRules(rows, total({ marks }), axis).compactions;
+  assert.equal(first.anchor, "start");
+  assert.equal(first.labelX, first.x + 3);
+  assert.ok(first.labelX + first.label.length * LABEL_CHAR <= axis.right);
+  assert.equal(last.x, axis.right);
+  assert.equal(last.anchor, "end");
+  assert.equal(last.labelX, last.x - 3);
+  assert.ok(last.labelX - last.label.length * LABEL_CHAR >= 0);
+});
+
 test("the context line breaks where context is unknown or synthetic", () => {
   assert.equal(linePath([{ x: 1, y: 5 }, { x: 2, y: 6 }, { x: 3, y: null }, { x: 4, y: 7 }]), "M1,5L2,6M4,7");
   const chart = contextChart([req(1), req(2, { context: null }), req(3, { synthetic: true }), req(4)], 640, 200);
@@ -549,6 +565,16 @@ test("the window steps where it changes and the y domain reaches it", () => {
                "M0,50H10H20V20H30");
   const chart = contextChart([req(1, { window: 200000 }), req(2, { window: 1_000_000 })], 640, 200);
   assert.deepEqual(chart.windowLabels.map((label) => label.text), ["window 200,000", "window 1,000,000"]);
+  // the larger window's line is the top of the chart: its label goes under that line,
+  // and the smaller's above its own, both inside the chart
+  const [low, high] = chart.windowLabels;
+  assert.equal(chart.ticks.at(-1).y, MARGIN.top);
+  assert.equal(high.y, MARGIN.top + LABEL_HEIGHT + 2);
+  for (const label of chart.windowLabels) {
+    assert.ok(label.y - LABEL_HEIGHT >= 0 && label.y <= 200 - MARGIN.bottom);
+    assert.equal(label.anchor, "start");
+  }
+  assert.ok(low.y > high.y);
   const ys = [...chart.window.matchAll(/[MV]-?[\d.]+,?(-?[\d.]+)?/g)].map((m) => m[0]);
   assert.equal(ys.length, 2);
   // the top tick reaches the larger window
