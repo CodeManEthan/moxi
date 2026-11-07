@@ -44,10 +44,21 @@
    longer exists is never looked up and never guessed at; the row stays without a key and
    reports group it by its `cwd`.
 
+**Marks follow requests.** The pass keeps each source's compaction markers (`marks`)
+beside its requests: every path that writes, replaces, deletes or holds a source's
+requests does the same to its marks, in the same transaction. A row's `marks_read` is 1
+exactly when the index holds every marker of the reads that gave its requests; a source
+whose row is at 0 is read from no cursor, and that read sets it to 1. A file's marker sits
+at its line, as a request does. An OpenCode marker sits at the `seq` of the last request
+of its own message, else at the message's time in milliseconds: a message's records come
+whole in every read, so a read from the cursor places a marker where a whole read does.
+
 **Rebuild.** `rebuild=True` reads every listed source again from no cursor, keeps held
 rows as they are and every row's `project`, and ends with one claim over every key. A
 rebuild, or a pass with more than `POOL_ABOVE` sources to read from no cursor, reads them
-in `index.workers` processes; the workers return rows and this process alone writes.
+in `index.workers` processes; the workers return rows and this process alone writes. The
+pass whose schema step moves the index from version 1 runs as a rebuild, since every row
+then still lacks its markers and windows.
 
 **Cancellation.** `cancel()` is asked between sources; a cancelled pass keeps what it
 wrote and deletes nothing it did not reach.
@@ -203,11 +214,12 @@ class Task(NamedTuple):
 @dataclass
 class Got:
     """What reading one source gave: the request rows by key (a request that came twice
-    is here once, as its last copy), the limits records, the last title, the header
-    facts, the new cursor, whether sessions said to drop what the index holds, and the
-    reason it could not be read."""
+    is here once, as its last copy), the compaction marks by `(seq, kind)`, the limits
+    records, the last title, the header facts, the new cursor, whether sessions said to
+    drop what the index holds, and the reason it could not be read."""
 
     rows: dict[int, store.RequestRow] = field(default_factory=dict)
+    marks: dict[tuple[int, str], store.MarkRow] = field(default_factory=dict)
     limits: list[Any] = field(default_factory=list)
     title: str | None = None
     facts: dict[str, Any] = field(default_factory=dict)
@@ -230,6 +242,7 @@ def read_source(task: Task) -> Got:
             if batch.reset:
                 got.reset = True
                 got.rows.clear()
+                got.marks.clear()
                 got.limits.clear()
                 got.title = None
             _take(got, batch.records, lane=task.lane, path=task.path)
@@ -259,6 +272,11 @@ def _take(got: Got, records: Iterable[Any], *, lane: str, path: str) -> None:
             title = record.fields.get("title")
             if isinstance(title, str) and title:
                 got.title = title
+        elif kind == "marker" and record.marker == store.COMPACTION:
+            line = store.marker_line(record)
+            if line is not None:
+                mark = store.mark_row(record, seq=line)
+                got.marks[(mark.seq, mark.kind)] = mark
 
 
 def header_facts(header: Any) -> dict[str, Any]:
@@ -417,6 +435,9 @@ def pass_(*, lanes: Iterable[str] | None = None, rebuild: bool = False,
         migration = store.migrate(conn, offline=offline, force=force)
         if migration.after != migration.before:
             result.migrated = (migration.before, migration.after)
+        if migration.before == 1 and migration.after >= 2:
+            # every row lacks its markers and windows: read them all, the rebuild's way
+            rebuild = result.rebuild = True
         result.migration_dropped = migration.dropped
         run = _Pass(conn, now=started, rebuild=rebuild, readings=readings, env=env,
                     cancel=cancel, result=result)
@@ -638,7 +659,8 @@ def _file_lane(run: _Pass, lane: Lane, listing: Any) -> None:
             updates.append((-1, {"entry": entry, "row": row}))
             continue
         cursor = None
-        if row is not None and not run.rebuild and row["excluded"] is None:
+        if (row is not None and not run.rebuild and row["excluded"] is None
+                and row["marks_read"]):
             cursor = row["cursor"]
         run.tasks.append((lane, entry, row, cursor))
 
@@ -672,11 +694,11 @@ def _file_lane(run: _Pass, lane: Lane, listing: Any) -> None:
 
 
 def _reusable(lane: Lane, row: dict, entry: Any, excluded: str | None) -> bool:
-    """The row stands for the file as it is now: its reuse keys match and it was read
-    (or skipped as imported) and its import mark has not flipped."""
+    """The row stands for the file as it is now: its reuse keys match, it was read (or
+    skipped as imported), its import mark has not flipped and it holds its markers."""
     if row["excluded"] != excluded:
         return False
-    if excluded is None and row["cursor"] is None:
+    if excluded is None and (row["cursor"] is None or not row["marks_read"]):
         return False
     names = ("size", "mtime_ns") if lane.archive else ("dev", "ino", "size", "mtime_ns")
     return all(row[name] == getattr(entry, name) for name in names)
@@ -692,14 +714,16 @@ def _entry_fields(lane: Lane, entry: Any) -> dict[str, Any]:
 
 def _write_excluded(run: _Pass, lane: Lane, entry: Any, row: dict | None,
                     touched: set[int]) -> None:
-    """A rollout an import mark says was imported: its row, with no requests."""
+    """A rollout an import mark says was imported: its row, with no requests and no
+    marks, which holds every marker it could."""
     fields = _entry_fields(lane, entry)
     fields.update(header_facts(entry.header))
     fields.update(excluded=IMPORTED, held=None, cursor=None, read_at=run.now,
-                  first_ts=None, last_ts=None)
+                  first_ts=None, last_ts=None, marks_read=1)
     file_id = store.upsert_file(run.conn, lane=lane.id, path=str(entry.source.path),
                                 touched=touched, **fields)
     store.delete_requests(run.conn, [file_id], touched=touched)
+    store.delete_marks(run.conn, [file_id])
 
 
 # --- reads ------------------------------------------------------------------------------
@@ -815,12 +839,19 @@ def _write_read(run: _Pass, lane: Lane, entry: Any, row: dict | None, cursor: st
         fields.update(header_facts(entry.header))
     fields.update(got.facts)
     fields.update(cursor=got.cursor, held=None, excluded=None, read_at=run.now)
-    if got.title is not None or got.reset or cursor is None:
+    whole = got.reset or cursor is None
+    if got.title is not None or whole:
         fields["title"] = got.title
+    if whole:
+        # a read from the start holds every marker; one from a cursor keeps the 1 it has,
+        # since a row at 0 is never read from its cursor
+        fields["marks_read"] = 1
     file_id = store.upsert_file(conn, lane=lane.id, path=path, touched=touched, **fields)
-    if row is not None and (got.reset or cursor is None):
+    if row is not None and whole:
         store.delete_requests(conn, [file_id], touched=touched)
+        store.delete_marks(conn, [file_id])
     store.upsert_requests(conn, file_id, got.rows.values(), touched=touched)
+    store.upsert_marks(conn, file_id, got.marks.values())
     _settle_times(conn, [file_id], touched)
     _send_limits(run, got.limits)
 
@@ -850,8 +881,10 @@ def _send_limits(run: _Pass, records: list) -> None:
 
 def _opencode_lane(run: _Pass, lane: Lane, listing: Any, sessions: Any) -> None:
     """The OpenCode database: one source with one cursor (kept in `meta`), its requests
-    filed under one row per session. A batch that says messages are gone is followed by
-    one read from no cursor, which replaces every request of the lane."""
+    and compaction marks filed under one row per session. A batch that says messages are
+    gone is followed by one read from no cursor, which replaces every request and mark of
+    the lane. So does a lane with a row whose `marks_read` is 0; that read ends with every
+    row of the lane at 1."""
     import moxi.store
 
     conn, result = run.conn, run.result
@@ -872,11 +905,12 @@ def _opencode_lane(run: _Pass, lane: Lane, listing: Any, sessions: Any) -> None:
         return
     db = listing.root
     meta_key = store.cursor_meta_key(lane.id, db)
-    stored = None if run.rebuild else store.get_meta(conn, meta_key)
+    unsettled = any(not row["marks_read"] for row in rows.values())
+    stored = None if run.rebuild or unsettled else store.get_meta(conn, meta_key)
     source = sessions.Source(OPENCODE, db, None)
     try:
         batch = sessions.records_since(source, stored, kinds=KINDS)
-        whole = run.rebuild or batch.reset
+        whole = run.rebuild or unsettled or batch.reset
         if batch.gone:
             batch = sessions.records_since(source, None, kinds=KINDS)
             whole = True
@@ -886,43 +920,44 @@ def _opencode_lane(run: _Pass, lane: Lane, listing: Any, sessions: Any) -> None:
         _hold_all(run, lane, rows.values(), why, state)
         return
 
-    by_session: dict[str, dict[int, store.RequestRow]] = {}
-    for record in batch.records:
-        if record.kind != "request" or not isinstance(record.session_id, str):
-            continue
-        row = store.request_row(record, lane=lane.id, path=db)
-        by_session.setdefault(record.session_id, {})[row.key] = row
+    by_session, marks = _opencode_records(batch.records, lane=lane.id, path=db)
+    found = set(by_session) | set(marks)
     entries = {entry.source.session_id: entry for entry in listing}
     touched: set[int] = set()
-    changed = (batch.cursor != stored or by_session or whole
+    changed = (batch.cursor != stored or found or whole
                or any(_session_change(lane, entries[part], rows.get(part))
                       for part in entries)
-               or any(part not in entries and part not in by_session for part in rows))
+               or any(part not in entries and part not in found for part in rows))
     if not changed:
         return
     with moxi.store.transaction(conn):
         ids: dict[str, int] = {}
         for part, entry in entries.items():
             change = _session_change(lane, entry, rows.get(part))
+            # a row this lane inserts holds its markers: on a cursor read, the lane is
+            # settled and the cursor brings a new session's markers with its requests
             if rows.get(part) is None or change:
                 ids[part] = store.upsert_file(conn, lane=lane.id, path=db, part=part,
                                               touched=touched, read_at=run.now,
-                                              **_session_fields(lane, entry))
+                                              marks_read=1, **_session_fields(lane, entry))
             else:
                 ids[part] = rows[part]["id"]
-        for part in by_session:
+        for part in sorted(found):
             if part not in ids:
                 ids[part] = (rows[part]["id"] if part in rows else store.upsert_file(
                     conn, lane=lane.id, path=db, part=part, touched=touched,
                     harness=OPENCODE, rank=lane.rank, kind="main", session_id=part,
-                    read_at=run.now))
+                    read_at=run.now, marks_read=1))
         if whole:
-            store.delete_requests(conn, [row["id"] for row in rows.values()],
-                                  touched=touched)
-        for part, found in by_session.items():
-            store.upsert_requests(conn, ids[part], found.values(), touched=touched)
+            held = [row["id"] for row in rows.values()]
+            store.delete_requests(conn, held, touched=touched)
+            store.delete_marks(conn, held)
+        for part, requests in by_session.items():
+            store.upsert_requests(conn, ids[part], requests.values(), touched=touched)
+        for part, kept in marks.items():
+            store.upsert_marks(conn, ids[part], kept.values())
         gone = [row["id"] for part, row in rows.items()
-                if part not in entries and part not in by_session]
+                if part not in entries and part not in found]
         if gone:
             result.deleted += store.delete_files(conn, gone, touched=touched)
         settle = set(ids[part] for part in by_session)
@@ -931,8 +966,47 @@ def _opencode_lane(run: _Pass, lane: Lane, listing: Any, sessions: Any) -> None:
         _settle_times(conn, sorted(settle), touched)
         if by_session:
             result.read += len(by_session)
+        if whole:
+            store.settle_marks(conn, lane=lane.id)
         store.set_meta(conn, meta_key, batch.cursor)
         store.claim(conn, touched)
+
+
+def _opencode_records(records: Iterable[Any], *, lane: str, path: str,
+                      ) -> tuple[dict[str, dict[int, store.RequestRow]],
+                                 dict[str, dict[tuple[int, str], store.MarkRow]]]:
+    """The batch's requests by session and key, and its compaction marks by session and
+    `(seq, kind)`.
+
+    A compaction marker comes last among its message's records, after that message's
+    requests, and a message's records always come whole. So a mark takes the `seq` of the
+    request just before it when that request is of its own message (its `message_time`
+    is the marker's time), which sorts the mark after its own compaction request; else
+    the message's time in milliseconds. Either way the batch's other messages play no
+    part, so a read from the cursor gives a mark the `seq` a whole read gives it."""
+    by_session: dict[str, dict[int, store.RequestRow]] = {}
+    marks: dict[str, dict[tuple[int, str], store.MarkRow]] = {}
+    last: dict[str, tuple[Any, int]] = {}
+    for record in records:
+        session_id = record.session_id
+        if not isinstance(session_id, str):
+            continue
+        if record.kind == "request":
+            row = store.request_row(record, lane=lane, path=path)
+            by_session.setdefault(session_id, {})[row.key] = row
+            extra = record.extra if isinstance(record.extra, Mapping) else {}
+            last[session_id] = (extra.get("message_time"), row.seq)
+        elif record.kind == "marker":
+            if record.marker == store.COMPACTION:
+                mark = store.mark_row(record, seq=0)
+                before = last.pop(session_id, None)
+                if (before is not None and mark.ts is not None
+                        and isinstance(before[0], (int, float)) and before[0] == mark.ts):
+                    mark = mark._replace(seq=before[1])
+                elif mark.ts is not None:
+                    mark = mark._replace(seq=int(round(mark.ts * 1000)))
+                marks.setdefault(session_id, {})[(mark.seq, mark.kind)] = mark
+    return by_session, marks
 
 
 def _session_fields(lane: Lane, entry: Any) -> dict[str, Any]:

@@ -52,16 +52,19 @@ Reports (`moxi_usage.reports`):
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
   tz=None, fresh=True, session=None, by=None, agent=None)`: tokens and cost from the
   token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`, `models`,
-  `projects`, `session`, `terms`), as a `Report`. With `fresh` the index's pass runs
-  first. `tz` is the zone days are cut in, local time when None. Cost is worked out when
+  `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the index's
+  pass runs first. `tz` is the zone days are cut in, local time when None. Cost is worked out when
   the report runs; tokens the table cannot price are counted in `unpriced_tokens`, never
   as $0. The `session` kind is one session, the one `session` names (an id a `sessions`
   row gives, with `harness` to tell two harnesses apart), by agent and model; it needs
   `session`. The `terms` kind prints every term of each cost, by `model` (the default),
   `day`, `month` or, with `session`, `agent` (`by`): each row's price groups with each
   token class's tokens, price and dollars, and its cost split by class and price tier;
-  `session` alone narrows it to one session. A keyword a kind does not read is refused
-  (`agent` by every kind here), so an unfiltered answer is never read as a filtered one.
+  `session` alone narrows it to one session. The `requests` kind is one row per request
+  of one session's agent (`session`, which it needs, and `agent`, `main` by default):
+  its tokens by class, cost and its split, its context against the model's window, its
+  turn, and the agent's compactions placed between the rows. A keyword a kind does not
+  read is refused, so an unfiltered answer is never read as a filtered one.
   The last kind, `status`, is the index itself: one row per lane with its state, files,
   excluded, held and duplicate counts, and the last pass and schema version in `total`;
   it takes only `harness`.

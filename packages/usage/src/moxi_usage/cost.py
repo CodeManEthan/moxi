@@ -235,9 +235,12 @@ def term_tokens(sums: Sums) -> tuple[tuple[str, int], ...]:
 
 
 def price(sums: Sums, facts: ModelFacts, defaults: Mapping[str, Any] | None, *,
-          size: int = 0, service_tier: str | None = None,
-          speed: str | None = None) -> Priced:
-    """Price one group's sums. See the module's text for the terms and the unknowns."""
+          size: int = 0, service_tier: str | None = None, speed: str | None = None,
+          paid: Prices | None = None) -> Priced:
+    """Price one group's sums. See the module's text for the terms and the unknowns.
+
+    `paid` is what `prices(facts, defaults, size=..., service_tier=..., speed=...)` gives
+    for these same arguments, for a caller that prices many groups and has it already."""
     rule = None
     unknown_rows = sums.unknown_any
     if sums.unknown_write and writes_as_input(defaults):
@@ -248,7 +251,8 @@ def price(sums: Sums, facts: ModelFacts, defaults: Mapping[str, Any] | None, *,
                       for field, tokens in term_tokens(sums))
         return Priced(UNKNOWN, sums.tokens, unknown_rows, None, rule,
                       why="the model table does not know the model", terms=terms)
-    paid = prices(facts, defaults, size=size, service_tier=service_tier, speed=speed)
+    if paid is None:
+        paid = prices(facts, defaults, size=size, service_tier=service_tier, speed=speed)
     found: list[tuple[str, int, Any, Any]] = []
     missing = []
     for field, tokens in term_tokens(sums):

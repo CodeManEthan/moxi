@@ -82,10 +82,48 @@ def test_a_later_step_runs_on_an_existing_store_and_bumps_index_version(conn):
     add_file(conn)
     steps = (*store.STEPS, store.Step("ALTER TABLE files ADD COLUMN extra_fact TEXT"))
     result = store.migrate(conn, steps=steps)
-    assert (result.before, result.after) == (1, 2)
-    assert store.get_meta(conn, store.META_INDEX_VERSION) == "2"
+    assert (result.before, result.after) == (store.INDEX_VERSION, store.INDEX_VERSION + 1)
+    assert store.get_meta(conn, store.META_INDEX_VERSION) == str(store.INDEX_VERSION + 1)
     assert "extra_fact" in {row[1] for row in conn.execute("PRAGMA table_info(files)")}
     assert len(store.files(conn)) == 1
+
+
+def test_version_2_keeps_every_row_and_settles_only_the_excluded_ones(tmp_path):
+    conn = store.connect(path=tmp_path / "index.db")
+    try:
+        store.migrate(conn, steps=store.STEPS[:1])
+        kept = add_file(conn, "/c/kept.jsonl", lane="codex")
+        skipped = add_file(conn, "/c/skipped.jsonl", lane="codex", excluded="imported")
+        with moxi.store.transaction(conn):
+            conn.execute("INSERT INTO requests (file_id, key, seq, sidechain, synthetic, won)"
+                         " VALUES (?, 1, 1, 0, 0, 1)", (kept,))
+        # a step that drops no row runs while an archive lane is offline
+        result = store.migrate(conn, offline=["archive:old"])
+        assert (result.before, result.after) == (1, 2) and result.dropped == ()
+        flags = {f["path"]: f["marks_read"] for f in store.files(conn)}
+        assert flags == {"/c/kept.jsonl": 0, "/c/skipped.jsonl": 1}
+        assert [tuple(r) for r in conn.execute("SELECT key, context_window FROM requests")] == [
+            (1, None)]
+        assert conn.execute("SELECT count(*) FROM marks").fetchone()[0] == 0
+        assert store.check(conn) == [] and skipped
+    finally:
+        conn.close()
+
+
+def test_a_marker_read_twice_is_stored_once_and_goes_with_its_file(conn):
+    file_id = add_file(conn)
+    first = store.MarkRow(seq=7, kind="compaction", ts=10.0, trigger=None, pre_tokens=None)
+    again = first._replace(trigger="auto", pre_tokens=150_000)
+    with moxi.store.transaction(conn):
+        store.upsert_marks(conn, file_id, [first])
+        store.upsert_marks(conn, file_id, [again])
+    assert [tuple(r) for r in conn.execute(
+        "SELECT seq, kind, ts, trigger, pre_tokens FROM marks")] == [
+        (7, "compaction", 10.0, "auto", 150_000)]
+    touched: set[int] = set()
+    with moxi.store.transaction(conn):
+        store.delete_files(conn, [file_id], touched=touched)
+    assert conn.execute("SELECT count(*) FROM marks").fetchone()[0] == 0
 
 
 def test_a_step_that_drops_rows_refuses_while_an_archive_lane_holding_rows_is_offline(conn):
@@ -95,17 +133,20 @@ def test_a_step_that_drops_rows_refuses_while_an_archive_lane_holding_rows_is_of
     with pytest.raises(store.MigrationRefused) as caught:
         store.migrate(conn, offline=["archive:old", "archive:empty"], steps=steps)
     assert caught.value.lanes == ("archive:old",) and caught.value.exit_code == 3
-    assert len(store.files(conn)) == 2 and store.get_meta(conn, "index_version") == "1"
+    assert len(store.files(conn)) == 2
+    assert store.get_meta(conn, "index_version") == str(store.INDEX_VERSION)
     # an offline lane with no rows refuses nothing
     assert store.migrate(conn, offline=["archive:empty"],
-                         steps=(*store.STEPS, store.Step("SELECT 1", drops=True))).after == 2
+                         steps=(*store.STEPS, store.Step("SELECT 1", drops=True))).after == (
+        store.INDEX_VERSION + 1)
 
 
 def test_force_runs_a_dropping_step_and_names_the_lanes_it_dropped(conn):
     add_file(conn, "/arch/a.jsonl", lane="archive:old", rank=3)
     steps = (*store.STEPS, store.Step("DELETE FROM requests; DELETE FROM files", drops=True))
     result = store.migrate(conn, offline=["archive:old"], force=True, steps=steps)
-    assert result == store.Migration(1, 2, ("archive:old",))
+    assert result == store.Migration(store.INDEX_VERSION, store.INDEX_VERSION + 1,
+                                     ("archive:old",))
     assert store.files(conn) == []
 
 
@@ -127,7 +168,7 @@ def test_meta_values_set_replace_and_remove(conn):
     store.set_meta(conn, store.META_LANES, '["claude", "codex"]')
     key = store.cursor_meta_key("opencode", "/oc/opencode.db")
     store.set_meta(conn, key, "c1")
-    assert store.all_meta(conn) == {"index_version": "1", "lanes": '["claude", "codex"]',
+    assert store.all_meta(conn) == {"index_version": str(store.INDEX_VERSION), "lanes": '["claude", "codex"]',
                                     key: "c1"}
     store.set_meta(conn, key, None)
     assert store.get_meta(conn, key, "none") == "none"
@@ -211,6 +252,9 @@ def test_a_request_becomes_a_row_with_unknown_counts_null_and_named():
     assert (got.service_tier, got.speed, got.turn_id, got.harness_cost) == ("priority", None,
                                                                            "t1", None)
     assert (got.sidechain, got.synthetic, got.response_model) == (0, 0, None)
+    assert got.context_window is None
+    reported = Request(harness="codex", request_id="r", context_window=258_400)
+    assert store.request_row(reported, lane="codex", path="/r").context_window == 258_400
 
 
 def test_an_opencode_request_is_ordered_by_its_start_in_milliseconds():

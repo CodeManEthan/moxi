@@ -407,7 +407,8 @@ def test_no_report_reads_projects(conn, monkeypatch):
     source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"))], cwd="/w/app")
     monkeypatch.delitem(sys.modules, "moxi_projects", raising=False)
     for kind, fn in reports.REPORTS.items():
-        fn(conn, table=table(), **({"session": "s1"} if kind == "session" else {}))
+        fn(conn, table=table(),
+           **({"session": "s1"} if kind in ("session", "requests") else {}))
     assert "moxi_projects" not in sys.modules
     text = open(reports.__file__, encoding="utf-8").read()
     assert "for_path" not in text.replace("calls `for_path`", "")
@@ -416,7 +417,8 @@ def test_no_report_reads_projects(conn, monkeypatch):
 
 def test_an_empty_index_gives_an_empty_report(conn):
     for kind, fn in reports.REPORTS.items():
-        report = fn(conn, table=table(), **({"session": "s1"} if kind == "session" else {}))
+        report = fn(conn, table=table(),
+                    **({"session": "s1"} if kind in ("session", "requests") else {}))
         assert report.rows == [] and report.total["requests"] == 0 and report.complete
         if kind != "status":
             assert report.total["cost"] == 0
@@ -593,7 +595,7 @@ def test_report_takes_a_session_for_the_session_kind_only(conn, passes):
     with pytest.raises(ValueError):
         api.report("session", fresh=False)
     for kind in api.KINDS:
-        if kind not in ("session", "terms"):
+        if kind not in ("session", "terms", "requests"):
             with pytest.raises(ValueError):
                 api.report(kind, session="s1", fresh=False)
             with pytest.raises(ValueError):
@@ -835,7 +837,7 @@ def test_terms_refuse_what_they_cannot_use(conn):
         reports.terms(conn, by="week", table=table())
 
 
-def test_report_takes_by_for_terms_and_agent_for_none_yet(conn, passes):
+def test_report_takes_by_for_terms_and_agent_for_requests(conn, passes):
     terms_index(conn)
     report = api.report("terms", by="day", tz="UTC", fresh=False)
     assert [r["day"] for r in report.rows] == ["2026-10-01", "2026-10-02", "2026-10-03"]
@@ -843,13 +845,16 @@ def test_report_takes_by_for_terms_and_agent_for_none_yet(conn, passes):
         "m-a", "m-b", "gpt-x", "mystery-9"}
     by_agent = api.report("terms", by="agent", session="s1", fresh=False)
     assert [r["agent"] for r in by_agent.rows] == ["main", "a"]
+    assert api.report("requests", session="s1", agent="a", fresh=False).total[
+        "requests"] == 2
     for kind in api.KINDS:
-        given = {"session": "s1"} if kind == "session" else {}
+        given = {"session": "s1"} if kind in ("session", "requests") else {}
         if kind != "terms":
             with pytest.raises(ValueError, match="takes no by"):
                 api.report(kind, by="model", fresh=False, **given)
-        with pytest.raises(ValueError, match="takes no agent"):
-            api.report(kind, agent="a", fresh=False, **given)
+        if kind != "requests":
+            with pytest.raises(ValueError, match="takes no agent; only the requests"):
+                api.report(kind, agent="a", fresh=False, **given)
     with pytest.raises(ValueError):
         api.report("terms", by="agent", fresh=False)
     with pytest.raises(ValueError):
@@ -928,9 +933,9 @@ def test_report_with_no_index_is_empty_and_says_so(monkeypatch):
         api.report("weekly", fresh=False)
 
 
-def test_report_kinds_are_the_designed_eight():
+def test_report_kinds_are_the_designed_nine():
     assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects", "session",
-                         "terms", "status")
+                         "terms", "requests", "status")
     assert tuple(reports.REPORTS) == api.KINDS
 
 
@@ -1056,3 +1061,259 @@ def test_terms_verb_passes_by_and_session(monkeypatch, capsys):
                     "project": None, "model": None, "tz": None, "fresh": True,
                     "by": "agent", "session": "s1"}
     assert "no requests in range" in capsys.readouterr().out
+
+
+# --- the requests report ------------------------------------------------------------------
+
+def line(n):
+    """Where a request or a marker sits in a file: its line."""
+    return {"at": {"line": n}}
+
+
+def compactions(conn, file_id, *found):
+    """Compaction marks of one file, each `(seq, ts, trigger, pre_tokens)`."""
+    with moxi.store.transaction(conn):
+        store.upsert_marks(conn, file_id, [store.MarkRow(seq, "compaction", ts, trigger, pre)
+                                           for seq, ts, trigger, pre in found])
+
+
+def requests_index(conn):
+    """A Claude session over two turns with a compaction between them, a fast request and
+    an unknown output count, then a subagent; and a resumed copy of it (another session)
+    that carries the first three requests and the compaction between them, then one of
+    its own."""
+    t = at("2026-10-01T12:00")
+    main = source(conn, "/p/s1.jsonl", [
+        request("r1", t, turn_id="u1", cache_read=300, **line(2)),
+        request("r2", t + 60, turn_id="u1", speed="fast", **line(3)),
+        request("r3", t + 120, turn_id="u2", output=UNKNOWN, **line(6)),
+        request("r4", t + 180, turn_id="u2", model="m-b", input=150_000, **line(7))],
+        session_id="s1", title="Main", size=900, marks_read=1)
+    compactions(conn, main, (4, t + 90, "auto", 167_412))
+    agent = source(conn, "/p/s1/subagents/agent-a.jsonl", [
+        request("a1", t + 30, model="m-b", **line(2)),
+        request("a2", t + 40, model="m-b", **line(3))],
+        session_id="s1", kind="subagent", agent_id="a", title="Helper", marks_read=1)
+    resumed = source(conn, "/p/s2.jsonl", [
+        request("r1", t, turn_id="u1", cache_read=300, **line(2)),
+        request("r2", t + 60, turn_id="u1", speed="fast", **line(3)),
+        request("r3", t + 120, turn_id="u2", output=UNKNOWN, **line(6)),
+        request("n1", t + 600, turn_id="u9", **line(9))],
+        session_id="s2", title="Resumed", size=100, marks_read=1)
+    compactions(conn, resumed, (4, t + 90, "auto", 167_412))
+    return main, agent, resumed
+
+
+def sums_of(rows):
+    names = ("fresh_input", "cache_read", "cache_write_5m", "cache_write_1h", "output")
+    return {name: sum(row[name] for row in rows) for name in names}
+
+
+def test_requests_give_one_row_per_request_in_order_priced_on_its_own(conn):
+    requests_index(conn)
+    report = reports.requests(conn, session="s1", tz="UTC", table=table())
+    assert report.kind == "requests" and report.filters == {"session": "s1",
+                                                             "agent": "main"}
+    assert [r["n"] for r in report.rows] == [1, 2, 3, 4]
+    assert [r["model"] for r in report.rows] == ["m-a", "m-a", "m-a", "m-b"]
+    assert [r["tier"] for r in report.rows] == [None, "fast", None, "above_100k"]
+    first = report.rows[0]
+    assert (first["context"], first["fresh_input"], first["cache_read"]) == (1000, 700, 300)
+    assert first["cost"] == pytest.approx((700 * 3 + 300 * 0.3 + 100 * 15) / 1e6)
+    for row in report.rows:
+        assert abs(sum(e["cost"] for e in row["split"]) - row["cost"]) < 1e-12
+        assert [e["class"] for e in row["split"]] == list(cost.PRICE_TERMS)
+    assert report.rows[2]["unknown"] == ["output"] and report.rows[0]["unknown"] == []
+    # the total equals the session report's rows for the agent
+    session = reports.session(conn, session="s1", tz="UTC", table=table())
+    main = [r for r in session.rows if r["agent"] == "main"]
+    for name in ("requests", "input", "fresh_input", "cache_read", "cache_write",
+                 "output", "unknown_rows", "unpriced_tokens"):
+        assert report.total[name] == sum(r[name] for r in main), name
+    assert report.total["cost"] == pytest.approx(sum(r["cost"] for r in main))
+    data = report.as_dict()
+    json.dumps(data)
+    assert data["rows"][2]["unknown"] == ["output"]
+
+
+def test_requests_count_turns_and_place_the_compaction_between_rows(conn):
+    requests_index(conn)
+    report = reports.requests(conn, session="s1", tz="UTC", table=table())
+    assert [(r["turn"], r["turn_start"]) for r in report.rows] == [
+        (1, False), (1, False), (2, True), (2, False)]
+    total = report.total
+    assert total["turns"] == 2 and total["marks_known"] is True
+    assert total["marks"] == [{"after": 2, "ts": at("2026-10-01T12:00") + 90,
+                               "trigger": "auto", "pre_tokens": 167_412}]
+    assert total["claimed_elsewhere"] == 0 and total["copied_marks"] == 0
+    # a compaction outside the range is left out; one with no time only in an open range
+    late = reports.requests(conn, session="s1", since="2026-10-02", tz="UTC", table=table())
+    assert late.rows == [] and late.total["marks"] == []
+
+
+def test_requests_without_turn_ids_have_null_turns(conn):
+    t = at("2026-10-01T12:00")
+    source(conn, "/oc/opencode.db", [request("o1", t, harness="opencode"),
+                                     request("o2", t + 5, harness="opencode")],
+           lane="opencode", harness="opencode", part="ses_p", session_id="ses_p", rank=2)
+    report = reports.requests(conn, session="ses_p", tz="UTC", table=table())
+    assert [(r["turn"], r["turn_start"]) for r in report.rows] == [(None, False)] * 2
+    assert report.total["turns"] is None
+    assert report.total["marks_known"] is False          # a row still to be read
+
+
+def test_a_subagents_rows_by_agent(conn):
+    requests_index(conn)
+    report = reports.requests(conn, session="s1", agent="a", tz="UTC", table=table())
+    assert [r["n"] for r in report.rows] == [1, 2] and report.filters["agent"] == "a"
+    assert {r["model"] for r in report.rows} == {"m-b"} and report.total["marks"] == []
+    assert reports.requests(conn, session="s1", agent="nobody", table=table()).rows == []
+
+
+def test_a_resumed_files_copies_count_elsewhere_and_its_copied_compaction_is_not_drawn(
+        conn):
+    requests_index(conn)
+    report = reports.requests(conn, session="s2", tz="UTC", table=table())
+    assert [r["model"] for r in report.rows] == ["m-a"] and report.total["requests"] == 1
+    assert report.total["claimed_elsewhere"] == 3
+    assert report.total["marks"] == [] and report.total["copied_marks"] == 1
+    # a compaction with a request of its own file on one side is the file's own
+    with moxi.store.transaction(conn):
+        conn.execute("DELETE FROM requests WHERE seq = 6 AND file_id = "
+                     "(SELECT id FROM files WHERE path = '/p/s2.jsonl')")
+    report = reports.requests(conn, session="s2", tz="UTC", table=table())
+    assert report.total["copied_marks"] == 0 and len(report.total["marks"]) == 1
+
+
+def test_markers_with_no_request_between_them_are_one_compaction(conn):
+    t = at("2026-10-01T12:00")
+    rollout = source(conn, "/c/r.jsonl", [
+        request("t1", t, harness="codex", model="gpt-x", **line(3)),
+        request("t2", t + 60, harness="codex", model="gpt-x", **line(8))],
+        lane="codex", harness="codex", session_id="th1", rank=1, marks_read=1)
+    # a `compacted` line, then a `context_compacted` event for the same compaction
+    compactions(conn, rollout, (5, t + 30, None, None), (6, t + 31, "auto", None))
+    report = reports.requests(conn, session="th1", tz="UTC", table=table())
+    assert report.total["marks"] == [{"after": 1, "ts": t + 30, "trigger": "auto",
+                                      "pre_tokens": None}]
+    # one with no request of its file on either side is kept
+    lone = source(conn, "/c/lone.jsonl", [], lane="codex", harness="codex",
+                  session_id="th2", rank=1, marks_read=1)
+    compactions(conn, lone, (2, None, None, None))
+    report = reports.requests(conn, session="th2", table=table())
+    assert report.total["marks"] == [{"after": 0, "ts": None, "trigger": None,
+                                      "pre_tokens": None}]
+    assert reports.requests(conn, session="th2", since="2026-10-01",
+                            table=table()).total["marks"] == []
+
+
+def test_the_window_is_the_reported_one_else_the_reports_table_by_provider(conn):
+    t = at("2026-10-01T12:00")
+    source(conn, "/c/r.jsonl", [
+        request("t1", t, harness="codex", model="m-a", context_window=258_400),
+        request("t2", t + 60, harness="codex", model="m-a"),
+        request("t3", t + 120, harness="codex", model="zz-1", provider="acme"),
+        request("t4", t + 180, harness="codex", model="mystery-9")],
+        lane="codex", harness="codex", session_id="th1", rank=1)
+    seeded = models.Table(doc({**MODELS, "acme/zz-1": {"input": 1.0, "output": 2.0,
+                                                       "window": 64_000}},
+                              defaults={"anthropic": ANTHROPIC}))
+    report = reports.requests(conn, session="th1", tz="UTC", table=seeded)
+    windows = [r["window"] for r in report.rows]
+    assert windows[:3] == [258_400, 200_000, 64_000] and windows[3] is UNKNOWN
+    # the table in effect does not know zz-1 at all: the window came from the report's own
+    assert models.context_window("zz-1") is UNKNOWN
+    data = report.as_dict()
+    assert "window" not in data["rows"][3] and "window" in data["rows"][3]["unknown"]
+    assert "cost" in data["rows"][3]["unknown"]
+
+
+def test_requests_price_a_request_its_session_group_leaves_unpriced(conn):
+    # one file of `half`: one request with tokens in the term it has no price for, and
+    # one without; the session report sums both into one group, which stays unpriced
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/s9.jsonl", [request("h1", t, model="half", cache_write=100),
+                                 request("h2", t + 60, model="half")], session_id="s9")
+    session = reports.session(conn, session="s9", tz="UTC", table=table())
+    assert one(session, agent="main")["cost"] is UNKNOWN
+    report = reports.requests(conn, session="s9", tz="UTC", table=table())
+    unpriced, priced = report.rows
+    assert unpriced["cost"] is UNKNOWN and unpriced["tier"] is None
+    assert all(e["cost"] is UNKNOWN for e in unpriced["split"])
+    assert priced["cost"] == pytest.approx((1000 * 1 + 100 * 2) / 1e6)
+    assert report.total["cost"] == pytest.approx(priced["cost"])
+    assert report.total["unpriced_tokens"] == 1100 < one(session, agent="main")[
+        "unpriced_tokens"]
+
+
+def test_requests_are_refused_without_a_session(conn, passes):
+    with pytest.raises(reports.ReportError, match="needs a session"):
+        reports.requests(conn, table=table())
+    with pytest.raises(ValueError, match="needs a session"):
+        api.report("requests", fresh=False)
+    with pytest.raises(ValueError, match="needs a session"):
+        api.report("requests", agent="a")
+    assert passes == []
+
+
+def test_requests_on_no_index_are_empty_and_say_their_marks_are_not_known(monkeypatch):
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    report = api.report("requests", session="s1", fresh=False)
+    assert report.rows == [] and report.total["marks"] == []
+    assert report.total["marks_known"] is False and "no index yet" in report.index["note"]
+
+
+def test_requests_verb_prints_a_line_per_request_and_the_compaction(conn, monkeypatch,
+                                                                    capsys):
+    requests_index(conn)
+    write_config('[[model]]\nid = "m-a"\ninput = 3.0\noutput = 15.0\nwindow = 200000\n'
+                 'cache_read = 0.3\n')
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    assert cli.main(["requests", "s1", "--no-pass", "--utc"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("agent main: 4 requests, 2 turns, 1 compaction, window ")
+    assert lines[1].split()[:6] == ["#", "time", "turn", "model", "context", "%"]
+    assert lines[2].split()[:6] == ["1", "10-01", "12:00:00", "1", "m-a", "1.0k"]
+    assert lines[4] == "       -- compaction (auto, 167,412 before) --"
+    assert lines[5].split()[0] == "3" and lines[5].endswith(" ?")
+    assert lines[7].startswith("total: 4 requests, $")
+    assert "?: a token count the harness did not report" in lines[8]
+    assert lines[-1].startswith("no pass ran first")
+    assert cli.main(["requests", "s2", "--no-pass", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["kind"] == "requests" and data["total"]["claimed_elsewhere"] == 3
+    assert len(data["rows"]) == 1, data["rows"]
+    assert data["total"]["copied_marks"] == 1, data["total"]
+    assert cli.main(["requests", "s2", "--no-pass"]) == 0
+    out = capsys.readouterr().out
+    assert "3 requests of this agent are counted under another file" in out
+    assert "1 compactions copied from another file aren't shown" in out
+
+
+def test_requests_verb_exits_1_with_no_request_and_2_on_a_bad_argument(conn, monkeypatch,
+                                                                       capsys):
+    requests_index(conn)
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    assert cli.main(["requests", "s1", "--agent", "nobody", "--no-pass"]) == 1
+    assert "no request of agent nobody of session s1" in capsys.readouterr().err
+    assert cli.main(["requests", "s1", "--since", "2027-01-01", "--no-pass"]) == 1
+    assert cli.main(["requests", "s1", "--since", "soon", "--no-pass"]) == 2
+    assert "not a date" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["requests", "--no-pass"])
+    assert caught.value.code == 2
+
+
+def test_requests_verb_passes_session_and_agent(monkeypatch, capsys):
+    seen = {}
+
+    def fake(kind, **kwargs):
+        seen.update(kwargs, kind=kind)
+        return reports._empty("requests", None, None, None, None, None, None,
+                              session=kwargs["session"], agent=kwargs["agent"])
+
+    monkeypatch.setattr(reports, "report", fake)
+    assert cli.main(["requests", "s1", "--agent", "a", "--harness", "claude"]) == 1
+    assert seen == {"kind": "requests", "since": None, "until": None, "harness": "claude",
+                    "project": None, "model": None, "tz": None, "fresh": True,
+                    "session": "s1", "agent": "a"}

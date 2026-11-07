@@ -10,6 +10,8 @@
         [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
     moxi usage terms [--by model|day|month|agent] [--session ID] [--since DATE]
         [--until DATE] [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
+    moxi usage requests SESSION [--agent ID] [--since DATE] [--until DATE] [--harness H]
+        [--project P] [--model M] [--utc] [--no-pass] [--json]
     moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
 
 `prices MODEL` prints the model's facts and where each came from, and exits 1 when the
@@ -47,6 +49,12 @@ price it paid and the dollars, adding up to the group's cost; then the total and
 split by class and price tier. `--by` groups by model (the default), day, month or, with
 `--session`, the session's agents. A group it can't price prints its tokens, the prices
 it has, and why it is unpriced.
+
+`requests SESSION` prints one line per request of the session's main agent, or with
+`--agent` one of its agents: its number, time, turn, model, context and percent of the
+window, its tokens by class and its cost, with a line where a compaction falls; first a
+header with the agent's requests, turns, compactions and window. It exits 1 when no
+request of that session and agent is in range, and 2 for an argument it can't use.
 
 `index` runs the token index's pass (`moxi_usage.index`), prints what it did in one line,
 then the index's `status` report, lane by lane (with `--json`, both). It exits 75 when
@@ -112,7 +120,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
             return _restart_point(parsed, prog)
         if parsed.verb == "marks":
             return _marks_verb(parsed)
-        if parsed.verb in REPORT_VERBS or parsed.verb == "terms":
+        if parsed.verb in REPORT_VERBS or parsed.verb in ("terms", "requests"):
             return _report(parsed, prog)
         if parsed.verb == "index":
             return _index(parsed, prog)
@@ -590,6 +598,17 @@ def _report_verbs(verbs: Any) -> None:
                             "--session")
     terms.add_argument("--session", metavar="ID", help="count one session only")
     _report_args(terms)
+    requests = verbs.add_parser(
+        "requests", help="one line per request of a session's agent, with its context "
+                         "and compactions",
+        description="Print one line per request of one session's agent from the token "
+                    "index: tokens by class, cost, context against the window, turn, and "
+                    "where a compaction falls. The index's pass runs first.")
+    requests.add_argument("session", metavar="SESSION",
+                          help="the session id (a sessions row's id)")
+    requests.add_argument("--agent", metavar="ID",
+                          help="one of the session's agents (default: main)")
+    _report_args(requests)
 
 
 def _report_args(parser: Any) -> None:
@@ -616,7 +635,11 @@ def _report(args: argparse.Namespace, prog: str) -> int:
 
     from . import reports
 
-    extra = {"by": args.by, "session": args.session} if args.verb == "terms" else {}
+    extra: dict[str, Any] = {}
+    if args.verb == "terms":
+        extra = {"by": args.by, "session": args.session}
+    elif args.verb == "requests":
+        extra = {"session": args.session, "agent": args.agent}
     try:
         found = reports.report(args.verb, since=args.since, until=args.until,
                                harness=args.harness, project=args.project,
@@ -636,8 +659,20 @@ def _report(args: argparse.Namespace, prog: str) -> int:
     elif found.kind == "terms":
         for line in terms_lines(found, args.by):
             print(line)
+    elif found.kind == "requests":
+        if found.rows:
+            for line in requests_lines(found):
+                print(line)
     else:
         _print_report(found)
+    if found.kind == "requests" and not found.rows:
+        agent = found.filters.get("agent", "main")
+        print(f"{prog} requests: no request of agent {agent} of session {args.session} "
+              "in range", file=sys.stderr)
+        note = found.index.get("note")
+        if note and not args.json:
+            print(note, file=sys.stderr)
+        return codes.ERROR
     return codes.OK
 
 
@@ -803,6 +838,88 @@ def _group_lines(group: dict[str, Any]) -> list[str]:
     else:
         lines.append(f"{'  cost':<{_COST_AT}}{_dollars(group['cost']):>10}")
     return lines
+
+
+#: `requests`'s columns after the label ones: (heading, the row's field, width).
+_REQUEST_CLASSES = (("input", "fresh_input", 9), ("cache read", "cache_read", 10),
+                    ("write 5m", "cache_write_5m", 9), ("write 1h", "cache_write_1h", 9),
+                    ("output", "output", 9))
+
+
+def requests_lines(found: Any) -> list[str]:
+    """The text of `moxi usage requests`: a header for the agent, a line per request,
+    a line where a compaction falls, then the total and the report's notes."""
+    from moxi_sessions.api import UNKNOWN
+
+    total = found.total
+    agent = found.filters.get("agent", "main")
+    windows = sorted({row["window"] for row in found.rows if row["window"] is not UNKNOWN})
+    window = ("window unknown" if not windows else f"window {windows[0]:,}"
+              if len(windows) == 1 else f"window {windows[0]:,} to {windows[-1]:,}")
+    turns = total.get("turns")
+    count = len(total["marks"])
+    lines = [f"agent {agent}: {_requests(total['requests'])}, "
+             + ("no turns" if turns is None else f"{turns} turn{'' if turns == 1 else 's'}")
+             + f", {count} compaction{'' if count == 1 else 's'}, {window}"]
+    head = [f"{'#':>5}", f"{'time':<14}", f"{'turn':>4}", f"{'model':<24}",
+            f"{'context':>9}", f"{'%':>4}"]
+    head += [f"{name:>{width}}" for name, _, width in _REQUEST_CLASSES]
+    lines.append("  ".join([*head, f"{'cost':>10}"]))
+    marks: dict[int, list] = {}
+    for mark in total["marks"]:
+        marks.setdefault(mark["after"], []).append(mark)
+    lines.extend(_compaction_line(mark) for mark in marks.get(0, []))
+    for row in found.rows:
+        context = row["context"]
+        percent = ""
+        if context is not None and row["window"] is not UNKNOWN:
+            percent = f"{100 * context / row['window']:.0f}%"
+        cells = [f"{row['n']:>5}", f"{_clock(row['ts'], found.tz):<14}",
+                 f"{'' if row['turn'] is None else row['turn']:>4}",
+                 f"{_cut(_model(row['model']), 24):<24}",
+                 f"{'?' if context is None else _tokens(context):>9}", f"{percent:>4}"]
+        cells += [f"{_tokens(row[name]):>{width}}" for _, name, width in _REQUEST_CLASSES]
+        cells.append(f"{_dollars(row['cost']):>10}"
+                     + (" ?" if row["unknown"] else "") + (" s" if row["synthetic"] else ""))
+        lines.append("  ".join(cells).rstrip())
+        lines.extend(_compaction_line(mark) for mark in marks.get(row["n"], []))
+    lines.append(f"total: {_requests(total['requests'])}, {_dollars(total['cost'])} "
+                 f"{_marks(total)}".rstrip())
+    if total.get("claimed_elsewhere"):
+        lines.append(f"{total['claimed_elsewhere']:,} requests of this agent are counted "
+                     "under another file")
+    if total.get("copied_marks"):
+        lines.append(f"{total['copied_marks']:,} compactions copied from another file "
+                     "aren't shown")
+    if not total.get("marks_known", True):
+        lines.append("compactions aren't read yet for a file of this agent; the next pass "
+                     "that can read it brings them in")
+    if turns is None:
+        lines.append("this harness wrote no turns here")
+    if any(row["synthetic"] for row in found.rows):
+        lines.append("s: a request the harness made up itself, not sent to a model")
+    if any(row["unknown"] for row in found.rows):
+        lines.append("?: a token count the harness did not report; that row's figures "
+                     "are at least what they show")
+    return lines + _footnotes(found, days=False)
+
+
+def _compaction_line(mark: dict[str, Any]) -> str:
+    said = [part for part in (
+        mark["trigger"],
+        None if mark["pre_tokens"] is None else f"{mark['pre_tokens']:,} before") if part]
+    return f"{'':>5}  -- compaction" + (f" ({', '.join(said)})" if said else "") + " --"
+
+
+def _clock(epoch: Any, tz: str) -> str:
+    """A request's time, month and day to the second, in the report's zone."""
+    import datetime as dt
+
+    if not isinstance(epoch, (int, float)):
+        return "?"
+    zone = dt.timezone.utc if tz == "UTC" else None
+    moment = dt.datetime.fromtimestamp(epoch, zone)
+    return moment.strftime("%m-%d %H:%M:%S")
 
 
 def _requests(count: int) -> str:
