@@ -161,8 +161,8 @@ GLOBAL = {
 #: `reason` says why there is no list: projects absent, busy or unreadable.
 PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS}
 #: `count` is the items not `ok` or `off`, each once however many of its harnesses
-#: aren't; `note` the line that the page's harness homes
-#: aren't the ones the user's own last run used, when they aren't.
+#: aren't; `note` the line that the page would write elsewhere than the user's last run
+#: in a terminal, or that it can't tell, when so.
 DRIFT = {"problem": _PROBLEM, "count": lb.Out("int"), "note": _MAYBE_SAYS}
 #: A page job: `state` is `running`, `done` or `interrupted`; `argv` the verb it runs;
 #: `exit`, `outcome` and `lines` as the job left them once done (`outcome` null when the

@@ -6,13 +6,13 @@ manifest or installs (`add`, `remove`, `enable`, `disable`, `global mode`, `glob
 
     python -P -m moxi_loadout.pagejob <job> <verb> [<argument>...]
 
-The runner first removes job records older than a day. Then it checks the harness homes
-(`moxi_loadout.homes`) before anything is written, and refuses (exit 3) with one line
-when they aren't the ones the user's own last run recorded, or when that run found git
-and the job's `PATH` finds none. Then it runs the verb
-through the CLI's own code path, `moxi_loadout.cli.main` with `--json`, on its main
+The runner first removes job records older than a day. Then, before anything is written,
+it asks ui's check whether the job would read and write where the user's last run in a
+terminal did (`moxi_loadout.homes`), and refuses (exit 3) with its one line when it
+wouldn't, when nothing is recorded, or when ui's check can't be loaded. Then it runs the
+verb through the CLI's own code path, `moxi_loadout.cli.main` with `--json`, on its main
 thread, so the CLI's deferred signals and lock waits hold as they do in a terminal. It
-sets loadout's marker, so the run leaves the recorded homes as they are.
+sets loadout's marker, so what the run says is worded for the browser page.
 
 A job's record is two files under `STATE/loadout/jobs/`, each field with one writer:
 
@@ -23,7 +23,7 @@ A job's record is two files under `STATE/loadout/jobs/`, each field with one wri
   logged, and the act still answers that the job started.
 - `<job>.end.json`, written by the runner in one write as its last act: `{"exit",
   "outcome", "lines"}`. `outcome` is what the verb printed with `--json`, or None when
-  it printed nothing that reads; `lines` is what was said outside it: the homes check's
+  it printed nothing that reads; `lines` is what was said outside it: the check's
   refusal, the CLI's own error lines, or an error outside the CLI, the log's setup
   included, written as exit 1.
 
@@ -38,7 +38,7 @@ shell, a kill or a restart each end a job this way; the CLI's deferred signals k
 harness files and the ledger consistent with each other.
 
 The job runs from `STATE/loadout`, with stdin closed and the page server's environment
-unchanged, so the homes check sees what the install will use. The page server sends
+unchanged, so the check sees what the install will use. The page server sends
 exact section names and absolute paths, a section named by a path as its absolute root,
 never a path relative to a directory.
 """
@@ -295,7 +295,7 @@ def prune(now: float | None = None) -> int:
 
 
 def run(job: str, argv: Sequence[str]) -> int:
-    """Run job `job`: prune, check the homes, run verb `argv` through `cli.main` with
+    """Run job `job`: prune, check its places against the terminal's, run verb `argv` through `cli.main` with
     `--json`, and write the end in one write. Returns the exit code written. An error
     anywhere before the end, the log's setup included, is written as exit 1 with its
     line."""
@@ -327,16 +327,12 @@ def _run(argv: list[str]) -> tuple[int, object, list[str]]:
 
     from moxi.exit import REFUSED, USAGE
 
-    from moxi_loadout import cli, homes, ledger
+    from moxi_loadout import cli, homes
 
     if not argv or argv[0] not in VERBS:
         return USAGE, None, [f"loadout: {' '.join(argv) or 'nothing'} is not a verb a "
                              "page job runs"]
-    try:
-        data = ledger.read()
-    except ledger.LedgerError as exc:
-        return 1, None, [f"loadout: {exc}"]
-    refused = homes.check(data)
+    refused = homes.check(argv)
     if refused is not None:
         return REFUSED, None, [f"loadout: {refused}"]
     out, err = io.StringIO(), io.StringIO()

@@ -22,8 +22,8 @@ GATED = {}
 #: CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME are the harnesses' own, read where
 #: the harness homes are found.
 INTERNAL_ENV = {
-    "MOXI_LOADOUT_CALLER": "set by loadout's own callers (the git hook's install, a page "
-                           "job), so the run leaves the recorded harness homes as they are",
+    "MOXI_LOADOUT_CALLER": "set to page-job by loadout's page jobs, so what the run says "
+                           "is worded for the browser page",
 }
 #: The machine settings: the loadout folder, whether a commit to it reinstalls it (with
 #: repo), backups kept, each harness's project folders.
