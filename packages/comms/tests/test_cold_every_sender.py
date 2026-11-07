@@ -1175,7 +1175,10 @@ def test_a_never_prompted_shim_is_delivered_and_again_after_a_restart(rig, reboo
     first = post(rig, [REVIEWER_Q], "first task")
     wait_for_queue(s, 1)
     daemon = reboot(rig)
-    wait_until(lambda: REVIEWER_Q in daemon.bindings and not s.offline)
+    # The new bind's catch-up hands `first` again; `second` is posted once it has, or it
+    # can be handed live ahead of the catch-up.
+    wait_until(lambda: REVIEWER_Q in daemon.bindings and not s.offline
+               and not s.replaying)
     second = post(rig, [REVIEWER_Q], "second")
     assert queued_ids(wait_for_queue(s, 2)) == [first.id, second.id]
 
