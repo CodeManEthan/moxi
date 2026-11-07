@@ -3165,13 +3165,20 @@ class Daemon:
     def _passing(self, b: Binding) -> bool:
         """A release point's read: it passes or it does not. The send's cold-at is never
         read here: a row already waits, and it waits for a release point that reads a
-        passing cache or reads none."""
+        passing cache or reads none. A read that does not pass is logged only when rows
+        wait for the name: with none, nothing waits on it."""
         clock = self._read(b)
         if clock.kind in cache.PASSING:
             return True
-        log.info("release for %s waits: its cache reads %s", b.qualified,
-                 self._describe(clock))
+        if self._rows_wait(b):
+            log.info("release for %s waits: its cache reads %s", b.qualified,
+                     self._describe(clock))
         return False
+
+    def _rows_wait(self, b: Binding) -> bool:
+        """Whether any row waits for `b`'s name now."""
+        with self._lock:
+            return bool(self.queue.get(b.qualified))
 
     def _behind_returned(self, binding: Binding, message_id: str) -> bool:
         """Whether a row this binding's turns left unhandled still waits below
@@ -3299,8 +3306,8 @@ class Daemon:
     def _window_read(self, w: SettleWindow) -> None:
         """One read of a settle window. A read that passes closes the window and
         releases every row then queued but the frame's `unhandled` ids. The last step's
-        read not passing closes it with one log line. Its reads log nothing else: the
-        frame's own read said why the release waited."""
+        read not passing closes it, with one log line when rows wait. Its reads log
+        nothing else: the frame's own read said why the release waited."""
         b, q = w.binding, w.binding.qualified
         with self._lock:
             bound = self.bindings.get(q) is b
@@ -3320,7 +3327,7 @@ class Daemon:
                     del self._windows[q]
         if passed:
             self._release(b, flagged=True, exclude=w.exclude)
-        elif ran_out:
+        elif ran_out and self._rows_wait(b):
             log.info("release for %s: its cache still reads %s %gs after the turn ended; "
                      "the rows wait for the next release point", q, self._describe(clock),
                      w.steps[-1])

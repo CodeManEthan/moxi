@@ -263,6 +263,141 @@ def test_a_copied_folder_carries_its_mark_and_updates_when_the_source_changes(ho
     assert [p.state for p in place.status("comms")] == ["ok"]
 
 
+# -- volatile paths -----------------------------------------------------------------------
+
+VOLATILE = ("endpoint.json", ".claude-plugin/types", "tsconfig.json")
+
+
+@pytest.fixture
+def plugin(tmp_path, skill):
+    """A folder placed as a copy at a `dest` with volatile paths, as a module's `SETUP`
+    places one; returns (source, dest, item)."""
+    src = skill("plugin")
+    (src / ".claude-plugin").mkdir()
+    (src / ".claude-plugin" / "plugin.json").write_text('{"name": "p"}\n')
+    dest = tmp_path / "data" / "turns" / "claude"
+    item = Item(src, "claude", "claude", dest=dest, volatile=VOLATILE)
+    place.apply(place.plan("turns", [item], form="copy"))
+    return src, dest, item
+
+
+def write_volatile(dest: Path) -> None:
+    (dest / "endpoint.json").write_text('{"port": 1}\n')
+    (dest / "tsconfig.json").write_text("{}\n")
+    (dest / ".claude-plugin" / "types").mkdir()
+    (dest / ".claude-plugin" / "types" / "a.d.ts").write_text("x\n")
+
+
+def test_volatile_paths_are_kept_as_slash_separated_strings(skill):
+    src = skill()
+    item = Item(src, "claude", "x", volatile=[Path("a") / "b", "c/", "endpoint.json"])
+    assert item.volatile == ("a/b", "c", "endpoint.json")
+    assert Item(src, "claude", "x", volatile="endpoint.json").volatile == ("endpoint.json",)
+    assert Item(src, "claude", "x").volatile == ()
+    with pytest.raises(TypeError, match="volatile"):
+        Item(src, "claude", "x", volatile=[3])
+
+
+@pytest.mark.parametrize("bad", ["", ".", "/abs", "../out", "a/../../b", "C:/x"])
+def test_a_volatile_path_outside_the_folder_raises(skill, bad):
+    with pytest.raises(ValueError, match="volatile"):
+        place.plan("turns", [Item(skill(), "claude", "x", volatile=[bad])])
+
+
+def test_writes_to_volatile_paths_never_read_as_a_change(plugin):
+    src, dest, item = plugin
+    mark = json.loads((dest / place.MARK).read_text())
+    assert mark["volatile"] == list(VOLATILE)
+    write_volatile(dest)
+    assert [p.state for p in place.status("turns")] == ["ok"]
+    one(place.plan("turns", [item], form="copy"), "keep")
+    place.apply(place.plan("turns", [item], form="copy"))
+    assert (dest / "endpoint.json").read_text() == '{"port": 1}\n'
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_a_read_only_source_copies_writable_and_removes(tmp_path, skill):
+    """A source in a read-only install: its owner still writes into the copy, and the
+    copy still goes at removal. The source stays as it was."""
+    src = skill("plugin")
+    (src / "sub").mkdir()
+    (src / "sub" / "f.txt").write_text("x\n")
+    paths_ = [src, *src.rglob("*")]
+    modes = {p: p.stat().st_mode for p in paths_}
+    for p in paths_:
+        p.chmod(0o555 if p.is_dir() else 0o444)
+    try:
+        dest = tmp_path / "data" / "turns" / "claude"
+        item = Item(src, "claude", "claude", dest=dest, volatile=("sub/endpoint.json",))
+        place.apply(place.plan("turns", [item], form="copy"))
+        (dest / "sub" / "endpoint.json").write_text("{}\n")
+        (dest / "sub" / "f.txt").write_text("x\n")
+        assert [p.state for p in place.status("turns")] == ["ok"]
+        assert [p.state for p in place.remove("turns", say=lambda line: None)] == ["ok"]
+        assert not dest.exists()
+        assert all(p.stat().st_mode & 0o222 == 0 for p in paths_)
+    finally:
+        for p, mode in modes.items():
+            p.chmod(mode)
+
+
+def test_a_change_outside_the_volatile_paths_still_reads_modified(plugin):
+    src, dest, item = plugin
+    write_volatile(dest)
+    (dest / ".claude-plugin" / "plugin.json").write_text("edited\n")
+    assert [p.state for p in place.status("turns")] == ["modified"]
+    assert one(place.plan("turns", [item], form="copy"), "refuse").cause == "occupant"
+
+
+def test_a_source_change_updates_the_whole_copy_volatile_paths_too(plugin):
+    src, dest, item = plugin
+    write_volatile(dest)
+    (src / "SKILL.md").write_text("# new\n")
+    assert [p.state for p in place.status("turns")] == ["stale"]
+    place.apply([one(place.plan("turns", [item], form="copy"), "update")])
+    assert (dest / "SKILL.md").read_text() == "# new\n"
+    assert not (dest / "endpoint.json").exists(), "the caller writes it again"
+    assert [p.state for p in place.status("turns")] == ["ok"]
+
+
+def test_a_volatile_path_in_the_source_is_left_out_of_its_hash_too(plugin):
+    src, dest, item = plugin
+    (src / "endpoint.json").write_text("old\n")
+    assert [p.state for p in place.status("turns")] == ["ok"]
+    one(place.plan("turns", [item], form="copy"), "keep")
+
+
+def test_other_volatile_paths_plan_an_update(plugin):
+    src, dest, item = plugin
+    other = Item(src, "claude", "claude", dest=dest, volatile=["endpoint.json"])
+    assert one(place.plan("turns", [other], form="copy"), "update").reason == \
+        "claude: volatile changed"
+    place.apply(place.plan("turns", [other], form="copy"))
+    assert json.loads((dest / place.MARK).read_text())["volatile"] == ["endpoint.json"]
+    write_volatile(dest)
+    assert [p.state for p in place.status("turns")] == ["modified"]
+
+
+def test_remove_deletes_a_copy_with_volatile_writes_and_moves_nothing_aside(plugin):
+    src, dest, item = plugin
+    write_volatile(dest)
+    said, say = lines()
+    gone = place.remove("turns", say=say)
+    assert [p.state for p in gone] == ["ok"] and said == []
+    assert not dest.exists()
+    assert not (moxi.paths.core().data_dir() / "displaced").exists()
+
+
+def test_a_copy_without_volatile_reads_any_write_as_modified(home, skill):
+    src = skill()
+    item = Item(src, "claude", "x")
+    place.apply(place.plan("comms", [item], form="copy"))
+    target = home / ".claude" / "skills" / "x"
+    assert "volatile" not in json.loads((target / place.MARK).read_text())
+    (target / "endpoint.json").write_text("{}\n")
+    assert [p.state for p in place.status("comms")] == ["modified"]
+
+
 def test_a_copied_file_is_marked_by_its_ledger_entry(home, tmp_path):
     agent = tmp_path / "reviewer.md"
     agent.write_text("v1\n")

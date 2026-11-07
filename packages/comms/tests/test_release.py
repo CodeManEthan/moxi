@@ -10,6 +10,8 @@ import ast
 import tomllib
 from pathlib import Path
 
+import pytest
+
 from moxi import names
 
 from moxi_comms import module, release
@@ -35,7 +37,6 @@ def test_every_name_is_built_from_moxi_names():
     assert release.MODULE == "comms"
     assert release.DISTRIBUTION == names.distribution("comms") == "moxi-comms"
     assert release.DISPLAY_NAME == "Moxi comms"
-    assert release.UNIT == "moxi-comms-daemon.service"
     assert release.REPO_URL == f"https://github.com/{names.OWNER}/{names.HARNESS}" == \
         "https://github.com/CodeManEthan/moxi"
 
@@ -141,3 +142,46 @@ def test_internal_env_is_the_wrapper_wiring_the_secrets_step_and_the_test_seam()
         "MOXI_COMMS_SHELL_REACH",
     }
     assert all(why.strip() for why in module.INTERNAL_ENV.values())
+
+
+# ------------------------------------------------------------------ no unit verb
+
+#: The verbs comms and cache had for writing their own units. The core writes every
+#: module's units (`moxi install`), so neither verb is named anywhere but the CHANGELOG.
+OLD_VERBS = ("comms service", "cache service")
+
+
+def old_verb_lines(package: Path) -> list[str]:
+    """Each line of `package`'s `src/`, `docs/`, `web/src/` and README that names an old
+    unit verb, as `path:line: text`. The CHANGELOG is history and is not read."""
+    files = [package / "README.md"] if (package / "README.md").is_file() else []
+    for part in ("src", "docs", "web/src"):
+        root = package / part
+        if root.is_dir():
+            files += sorted(p for p in root.rglob("*") if p.is_file())
+    found = []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if any(verb in line for verb in OLD_VERBS):
+                found.append(f"{path.relative_to(package)}:{number}: {line.strip()}")
+    return found
+
+
+def test_no_surface_names_a_unit_verb():
+    assert old_verb_lines(REPO) == []
+
+
+def test_the_cli_offers_no_service_verb(capsys):
+    from moxi_comms import cli
+
+    sub = [a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.dest
+           == "verb"][0]
+    assert "service" not in sub.choices
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["service", "install"])
+    assert stopped.value.code == 2
+    assert "invalid choice: 'service'" in capsys.readouterr().err

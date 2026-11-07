@@ -423,21 +423,25 @@ def ready_sources(frames) -> list:
 class _ReadySession(FakeSession):
     """A session whose first load had already raised its ready when the watch
     subscribed, as turns' `wait_ready` hands one over: the watch never gives that
-    ready."""
+    ready. `source` is that ready's: `startup` for a thread with no turn yet."""
+
+    def __init__(self, *args, source="resume", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.first_source = source
 
     def facts(self):
         from fake_turns import Facts, Ready
 
         with self._lock:
             return Facts(self.session_id, self._turn_number, self.open_turn is not None,
-                         ready=Ready("resume", self.session_id, 1.0))
+                         ready=Ready(self.first_source, self.session_id, 1.0))
 
 
 def test_a_register_told_to_resume_reports_the_thread_as_resumed(rig, launch):
     adapter = launch(start=False, resume=OLD)
     report = adapter.session_report(register=True)
     assert (report["session_id"], report["new_session"]) == (OLD, False)
-    assert report["turned"] is True, "a resumed thread had turns before this launch"
+    assert "turned" not in report, "a resumed thread may have had no turn yet"
     fresh = launch(start=False, name="other").session_report(register=True)
     assert fresh["new_session"] is True and "session_id" not in fresh
 
@@ -510,6 +514,76 @@ def test_a_resume_ready_after_a_subscription_that_saw_the_first_is_reported(
     later load's, and is reported."""
     adapter = launch(resume=OLD, session=_ReadySession(OLD))
     assert wait_until(lambda: ready_sources(frames) == ["resume"])
+    adapter.fake.ready("resume")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "resume"])
+
+
+def test_a_first_load_startup_ready_is_dropped_and_a_later_resume_reported(
+        rig, launch, frames, monkeypatch):
+    """A thread resumed before its first turn: turns' ready for the first load is
+    `startup`. It is that load's ready, dropped as its `resume` would be, so the next
+    load's `resume` (a reconnect's) is reported."""
+    owed_changes = []
+    session = FakeSession(OLD)
+    adapter = launch(start=False, resume=OLD, session=session)
+    real = adapter.owed_session_changed
+    monkeypatch.setattr(adapter, "owed_session_changed",
+                        lambda source, sid: owed_changes.append((source, sid))
+                        or real(source, sid))
+    adapter.start()
+    assert wait_until(lambda: ready_sources(frames) == ["resume"])
+    session.ready("startup")                     # turns' ready for the first load
+    assert wait_until(lambda: not adapter._first_resume_unseen)
+    # A later reload before any turn: still no turn, nothing to report.
+    session.ready("startup")
+    # A turn runs, then a reconnect's load.
+    session.start_turn()
+    session.end_turn("answer")
+    session.ready("resume")
+    assert wait_until(lambda: ready_sources(frames) == ["resume", "resume"])
+    assert owed_changes == [("resume", OLD), ("resume", OLD)]
+
+
+def test_a_resumed_thread_with_no_turn_reads_unturned_until_its_first_turn_ends(
+        rig, launch, frames):
+    """turns' `startup` ready for the first load says the resumed thread has had no
+    turn: `turned` stays false, so the cache can read the thread as fresh, until the
+    launch's first turn ends."""
+    session = FakeSession(OLD)
+    adapter = launch(start=False, resume=OLD, session=session)
+    adapter.start()
+    assert wait_until(lambda: ready_sources(frames) == ["resume"])
+    session.ready("startup")
+    assert wait_until(lambda: adapter._own_turned is False)
+    assert adapter.session_report(register=False)["turned"] is False
+    assert rig.daemon.bindings[IDENTITY].turned is False
+    session.start_turn()
+    session.end_turn("answer")
+    assert wait_until(lambda: adapter.session_report(register=False)["turned"])
+    assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned is True)
+
+
+def test_a_resumed_thread_with_turns_reads_turned_from_its_first_ready(rig, launch):
+    session = FakeSession(OLD)
+    adapter = launch(start=False, resume=OLD, session=session)
+    adapter.start()
+    assert "turned" not in adapter.session_report(register=False)
+    assert rig.daemon.bindings[IDENTITY].turned is False
+    session.ready("resume")
+    assert wait_until(lambda: adapter.session_report(register=False).get("turned"))
+    assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned is True)
+
+
+@pytest.mark.parametrize("source, turned", [("startup", False), ("resume", True)])
+def test_a_first_ready_raised_before_the_subscription_says_turned(rig, launch, frames,
+                                                                 source, turned):
+    """The first load's ready came before the watch: the subscription's facts carry it,
+    and say whether the thread has had a turn."""
+    adapter = launch(resume=OLD, session=_ReadySession(OLD, source=source))
+    assert wait_until(lambda: ready_sources(frames) == ["resume"])
+    assert adapter.session_report(register=False)["turned"] is turned
+    assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned is turned)
+    assert adapter._first_resume_unseen is False
     adapter.fake.ready("resume")
     assert wait_until(lambda: ready_sources(frames) == ["resume", "resume"])
 

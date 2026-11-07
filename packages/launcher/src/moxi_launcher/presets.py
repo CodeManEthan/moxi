@@ -1101,6 +1101,31 @@ def comms_codex_resume() -> bool:
     return api is not None and bool(getattr(api, "CODEX_RESUME", False))
 
 
+def comms_bind_wait(api: object | None) -> float | None:
+    """How long, in seconds, comms' wrappers wait for their adapter to bind the name:
+    `BIND_WAIT` in comms' API, the longest of their waits. None with no comms, or from a
+    comms older than that name, whose wrappers all wait less than the launcher's own
+    default bind wait."""
+    value = getattr(api, "BIND_WAIT", None) if api is not None else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return float(value)
+
+
+def comms_ends_on_bind_timeout(api: object | None) -> frozenset[str]:
+    """The harnesses whose comms wrapper ends the launch (exit 75) when its bind isn't
+    answered in its wait, and so never starts the harness without the name:
+    `ENDS_ON_BIND_TIMEOUT` in comms' API. Empty with no comms, and from a comms older than
+    that name, whose wrappers all start the harness anyway after their wait."""
+    value = getattr(api, "ENDS_ON_BIND_TIMEOUT", None) if api is not None else None
+    if value is None or isinstance(value, str):
+        return frozenset()
+    try:
+        return frozenset(str(name) for name in value)
+    except TypeError:
+        return frozenset()
+
+
 def codex_host() -> str | None:
     """turns' Codex host, when it can start here, else None: its script is installed in
     this environment, and turns says the host can start (`codex_host_available()`, true
@@ -1218,7 +1243,8 @@ __all__ = [
     "Agent", "BadPreset", "CODEX_START_CEILING", "COMMS_INTERFACE", "ERROR", "KINDS",
     "LEFT_OUT", "Layered", "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets",
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
-    "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_codex",
-    "comms_codex_resume", "harness_of", "layered", "mode_of", "path", "project_agents",
-    "projects_api", "read", "resolve", "roles", "schema",
+    "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
+    "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "harness_of",
+    "layered", "mode_of", "path", "project_agents", "projects_api", "read", "resolve",
+    "roles", "schema",
 ]

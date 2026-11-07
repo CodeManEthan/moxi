@@ -368,3 +368,45 @@ def test_a_send_read_cold_before_the_pass_and_queued_after_it_is_not_left_behind
     assert wait_until(lambda: peer.handed() == [mid], timeout=3.0)
     assert wait_until(lambda: mid not in queued(rig.daemon, REVIEWER_Q))
     assert peer.payloads()[0].get("held") is None, "the second read went live"
+
+
+# ------------------------------------------------------------------ a one-request turn from cold
+
+def test_mail_queued_cold_goes_out_when_the_warming_turns_line_lands_after_its_end(
+        rig, peers, caplog):
+    """A session's last request is 1h16m old, so a send to it is queued cold. The
+    session then runs a turn of one request, whose end reaches the daemon 66 ms before
+    the transcript holds the request. The frame's own read is cold; the window's next
+    read finds the request and hands the row, with no closing line."""
+    peer = peers()
+    sid = rig.daemon.bindings[REVIEWER_Q].session_id
+    path = write_transcript(sid, 76 * 60)
+    mid = post(rig, [REVIEWER_Q], "while you were away")
+    row_for(rig, REVIEWER_Q, mid)
+    assert peer.handed() == []
+    with caplog.at_level(logging.INFO, logger="comms.daemon"):
+        peer.turn()
+        assert peer.held() == [], "the transcript did not hold the turn yet"
+        time.sleep(0.066)
+        with path.open("a") as f:
+            f.write(json.dumps(assistant_line(0)) + "\n")
+        assert wait_until(lambda: peer.held() == [mid], timeout=2.0)
+    assert still_lines(caplog) == []
+
+
+def test_a_cold_turn_end_with_nothing_queued_reads_but_logs_nothing(
+        rig, seam, peers, caplog, monkeypatch):
+    """No row waits for the name. The frame and its window still read (a send can queue
+    a row inside the window), but no line says a release waits, since nothing does."""
+    monkeypatch.setattr(daemon_mod, "RELEASE_SETTLE_STEPS", SHORT_STEPS, raising=False)
+    seam.table[REVIEWER_Q] = cache.COLD
+    peer = peers()
+    seam.calls.clear()
+    with caplog.at_level(logging.INFO, logger="comms.daemon"):
+        peer.turn()
+        assert wait_until(lambda: seam.reads(REVIEWER_Q) == 1 + len(SHORT_STEPS),
+                          timeout=2.0)
+        time.sleep(0.1)
+    assert [r.getMessage() for r in caplog.records
+            if r.getMessage().startswith(f"release for {REVIEWER_Q}")] == []
+    assert peer.handed() == []

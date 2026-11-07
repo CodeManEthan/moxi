@@ -17,7 +17,7 @@ from moxi_turns import opencode
 from moxi_turns.client import TurnsError
 from moxi_turns.results import (Agent, Ended, Failed, Lost, Ran, Refused, Started,
                                 TurnEnded)
-from conftest import bare, opener
+from conftest import bare, end_endpoint, opener
 
 
 def until(pred, timeout=5.0):
@@ -117,7 +117,7 @@ def host(turns_env, tmp_path):
 
     yield make
     for h in made:
-        h.endpoint.stop("the test ended")
+        end_endpoint(h.endpoint)
 
 
 # -- options: laid on unread, a key turns owns refused -------------------------------------
@@ -833,3 +833,39 @@ def test_with_no_after_tool_row_a_finished_part_asks_nothing(host, monkeypatch):
     world.fake.tool_part(h.session_id, "call_1", "oc_echo", "completed")
     time.sleep(0.3)
     assert asked == []
+
+
+# -- the tests' own isolation ----------------------------------------------------------------
+
+def test_no_installed_modules_listener_runs_in_a_test():
+    # An endpoint a test builds without a registry reads the listener group; the
+    # workspace installs modules whose listeners keep stores, so the group reads empty.
+    from moxi_turns import listeners
+
+    assert listeners.load().listeners == ()
+
+
+def test_a_host_that_ended_on_its_own_is_done_with_its_listeners_when_cleaned_up(
+        host, monkeypatch):
+    # The endpoint ends on the host's own thread when the server forgets its session; the
+    # test's cleanup must not return while that thread is still telling `gone`.
+    import listener_targets
+    from moxi_turns import listeners
+
+    class Row:
+        name = "usage"
+
+        def load(self):
+            import types
+            return types.SimpleNamespace(LISTENERS=[("gone", "listener_targets:gone_late")])
+
+    registry = listeners.load([Row()], order=(), limit=0)
+    monkeypatch.setattr(listeners, "load", lambda *a, **kw: registry)
+    listener_targets.CALLS.clear()
+    s, h, world = host()
+    with world.fake.lock:
+        world.fake.sessions.clear()
+    world.fake.close_streams()
+    assert until(lambda: h.endpoint.is_gone)
+    end_endpoint(h.endpoint)
+    assert ("gone_late", h.session_id) in listener_targets.CALLS

@@ -56,7 +56,7 @@ uv run python scripts/codex-smoke.py --dry-run
 ## The name
 
 comms is a module of Moxi. The harness and the owner are spelled by the core
-(`moxi.names`); `moxi_comms.release` builds the distribution, the unit and the repository
+(`moxi.names`); `moxi_comms.release` builds the distribution and the repository
 from them and the module's name, and `tests/test_release.py` holds `pyproject.toml` to
 them. The import package is `moxi_comms`, the commands run as `moxi comms <verb>`, and
 the internal entry points are `moxi-comms-<part>`.

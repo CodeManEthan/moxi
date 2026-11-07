@@ -19,10 +19,12 @@ What turns itself adds, per harness:
 
 - Claude: `--plugin-dir` for the runner and for the gate, and `MOXI_TURNS_ENDPOINT`, the
   absolute endpoint command the runner spawns, so a launch loads both plugins and gets
-  an endpoint with no user-scope install. The command is the one turns' config and this
-  Python environment give, read from this process's own environment as turns' setup
-  reads it, not from `env`. A launch writes nothing into turns' package: launches in
-  parallel share no write, and a read-only install launches.
+  an endpoint with no user-scope install. The folders are the copy turns' setup placed
+  in its data dir when that copy is current and this version of turns placed it, else
+  the package's own. The command is the one turns' config and this Python environment
+  give, read from this process's own environment as turns' setup reads it, not from
+  `env`. A launch writes nothing: launches in parallel share no write, and a read-only
+  install with no setup run launches.
 - every harness: `MOXI_TURNS_COMMANDS`, the session commands the launch grants, when
   `commands` is not empty. With a `session_id` it is bound to that id,
   `<session id>:<commands>`, and an endpoint honours it only while its session's id is

@@ -97,7 +97,7 @@ export class CachePage extends LitElement {
       case "error":
         return html`<p class="problem">cache's page server hit an error: ${detail}</p>`;
       case "empty":
-        return html`<p class="dim">No live Claude Code session has a cache record. The watcher writes one for each: <code>moxi cache watch</code>, or <code>moxi cache service install</code>.</p>`;
+        return html`<p class="dim">No live Claude Code session has a cache record. The watcher writes one for each: <code>moxi cache watch</code>, or <code>moxi install cache</code>.</p>`;
       default:
         return stopped ? html`<p class="warn">The cache watcher has stopped, so these readings may be old.</p>` : nothing;
     }

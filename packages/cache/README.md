@@ -20,8 +20,9 @@ while the recipient's cache is cold), and it adds these commands:
 - `moxi cache segment SESSION [--color|--json]` prints a Claude Code session's status
   line segment from the watcher's record, such as `cache:12m3s`, and nothing when there
   is no record.
-- `moxi cache watch` runs the watcher in the foreground. `moxi cache service
-  install|remove|status` runs it as a systemd user service instead.
+- `moxi cache watch` runs the watcher in the foreground. `moxi install cache` writes it
+  as a unit of your system's supervisor (a systemd user unit on Linux) and starts it;
+  `moxi cache doctor` shows the unit and its state.
 - `moxi cache timers [--json]` lists the timer's subscriptions, the refused ones and why,
   and when each subscription next asks about each live session.
 - `moxi cache doctor` checks the config, the lifetime table, the drift record and the
@@ -58,7 +59,7 @@ the other modules.
 
 `moxi`, Moxi's core, and `moxi-sessions`. cache has no optional extras. The watcher lists
 live sessions with Claude Code's `claude agents --json`, so it needs `claude` on PATH or
-at `~/.local/bin/claude`, and `moxi cache service` needs a systemd user manager.
+at `~/.local/bin/claude`, and the watcher's unit needs a systemd user manager.
 
 ## License
 

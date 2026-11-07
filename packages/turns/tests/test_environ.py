@@ -11,6 +11,7 @@ import sys
 import pytest
 
 from claude_runner import FakeRunner, pipe_pair
+from conftest import end_endpoint
 from moxi import ipc
 from moxi_turns import opencode, protocol
 from moxi_turns.claude_endpoint import ClaudeHarness
@@ -55,7 +56,7 @@ def hosts(launch_env, tmp_path):
     runner.wait_first()
     runner.session("s-claude")
     ep.open()
-    stops.append(lambda: (ep.stop("the test ended"), w.close()))
+    stops.append(lambda: (end_endpoint(ep), w.close()))
     sessions = {"claude": Session(ep.address, ep.session(), directory=ep.dir)}
 
     # Codex: the host is the launch's own process.
@@ -70,7 +71,7 @@ def hosts(launch_env, tmp_path):
                          client_factory=clients, app_server_factory=FakeAppServer)
     cep = Endpoint(codex, env=codex.env).open()
     codex.start()
-    stops.append(lambda: cep.stop("the test ended"))
+    stops.append(lambda: end_endpoint(cep))
     sessions["codex"] = Session(cep.address, cep.session(), directory=cep.dir)
 
     # OpenCode: the same, on a fake server.
@@ -79,7 +80,7 @@ def hosts(launch_env, tmp_path):
                                   server_factory=world.factory,
                                   backoff_factory=lambda: itertools.repeat(0.05))
     sessions["opencode"] = opencode._run(oc)
-    stops.append(lambda: oc.endpoint.stop("the test ended"))
+    stops.append(lambda: end_endpoint(oc.endpoint))
 
     yield sessions
     for s in sessions.values():
@@ -138,7 +139,7 @@ def test_a_launch_env_given_to_a_host_is_what_it_answers(launch_env, tmp_path):
             "MOXI_T_ENV_ONE": "given", "OPENCODE_SERVER_PASSWORD": None}
     finally:
         s.close()
-        oc.endpoint.stop("the test ended")
+        end_endpoint(oc.endpoint)
 
 
 def test_a_session_without_the_capability_gets_the_capability_error(make_endpoint):

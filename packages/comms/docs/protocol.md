@@ -325,8 +325,9 @@ already handed, oldest first, with `held: true` on the payload:
 | `bind` | yes | rows of unflagged messages if it passes; flagged rows wait |
 | a live message to the name, an `activity` | - | nothing |
 
-A turn end is a release point that stays open for a short window, not an instant. The
-harness can write the turn's own record after the turn's end reaches the daemon (Claude
+A turn end is a release point that stays open for a short window, not an instant. So
+held mail goes out at the end of the recipient's next turn, including the turn that
+warmed a cold cache. The harness can write the turn's own record after the turn's end reaches the daemon (Claude
 Code drains its transcript writes on a 100 ms timer), so the read at the frame can judge
 the cache as it was before the turn, and the turn that warmed a cold cache would not
 count. When a `turn_ended`'s read does not pass, whatever the queue holds, the daemon
@@ -337,7 +338,10 @@ rows of the digests that report named unhandled, which wait for the next release
 A newer `turn_ended` of the binding, or the binding's end, closes the window early; a `ready`, `look` or
 bind takes its own single read and leaves it open. A window whose last read still
 does not pass logs one line naming the binding, the read and the window's length, and
-the rows wait for the next release point. Only cache's read of the harness's record says
+the rows wait for the next release point. That line, and the line a release point's
+read that does not pass logs, are written only when rows wait for the name; a turn end
+with an empty queue still reads and opens its window, for a send that queues inside it,
+but logs nothing. Only cache's read of the harness's record says
 a cache is warm: a turn end alone never releases. A window lives in the daemon's memory,
 so a restart loses it; a `[held]` row then waits for the next turn end, and nothing goes
 out cold.
@@ -418,7 +422,9 @@ its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `con
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the
-daemon (`moxi comms service restart`) when it is the older, or relaunch the session or
+daemon (`moxi services restart comms/daemon` when services is installed, else the
+supervisor's own restart of the daemon's unit, `systemctl --user restart` on systemd) when
+it is the older, or relaunch the session or
 update the install when the program is. Nothing of comms 0.2's wire is served: a first
 line that isn't JSON-RPC 2.0 gets the JSON-RPC error and the connection closes.
 
@@ -530,6 +536,10 @@ its own thread or session, as a Claude launch does: neither adapter reads its re
 every launch's `bind` reports `new_session: true` and its `turned` is false until its own
 first turn ends; a `bind` later in the same launch reports the held id with
 `new_session: false`, and no reconnect or restart inside the launch makes it fresh again.
+A Codex launch told to resume a thread reports that id from its first `bind`, with
+`new_session: false`, and leaves `turned` out until the host's ready for the first load
+says whether the thread has had a turn: a thread can be resumed before its first turn,
+and then reads as one with no turn until a turn of this launch ends.
 The OpenCode adapter adds `agent_model`, `{"agent": <name>, "model": "<provider>/<model>"
 or null}`, the default agent it named from `opencode debug config` and that agent's model,
 or `null` when it could not name one (which withdraws an earlier report). A `ready` with

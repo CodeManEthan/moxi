@@ -11,6 +11,8 @@ dependencies = ["moxi>=0.1,<0.2"]
 # The browser UI shell: with it, repo's git hooks page shows there. Loopback, which repo's
 # page server runs on, comes with it.
 ui = ["moxi-ui>=0.1,<0.2"]
+# Project keys: with projects, a key works where a command takes a path.
+projects = ["moxi-projects>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

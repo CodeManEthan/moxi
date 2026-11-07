@@ -42,7 +42,6 @@ Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
 uv tool install moxi
 moxi install comms
 moxi comms doctor
-moxi comms service install
 ```
 
 `uv tool install moxi` puts the `moxi` command on PATH, and `moxi install comms` adds comms
@@ -67,11 +66,12 @@ command if you want one.
 - `moxi comms doctor` prints what this machine resolved: where files live, the config
   file, the backend (`local`) and where that choice came from, the provisioned
   identities, and whether the daemon answers. It writes nothing.
-- `moxi comms service install` writes a systemd user unit,
-  `~/.config/systemd/user/moxi-comms-daemon.service`, and starts it. On its first
-  start the daemon provisions itself: the operator identity. Nothing else
-  needs setting up. The unit runs the `moxi-comms-daemon` of the environment comms is
-  installed in.
+- `moxi install comms` also writes the daemon as a unit of your system's supervisor (a
+  systemd user unit on Linux) and starts it. On its first start the daemon provisions
+  itself: the operator identity. Nothing else needs setting up. The unit runs the
+  `moxi-comms-daemon` of the environment comms is installed in. Stop and start it with
+  `moxi services` (when services is installed) or `systemctl --user`, and check it with
+  `moxi comms doctor`.
 
 The daemon also runs fine in the foreground, which is the simplest way to watch it.
 `moxi install comms` puts it in the `moxi` tool's environment, whose scripts uv doesn't put
@@ -84,16 +84,16 @@ on PATH, so run it by its path there:
 On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
 PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
 
-`moxi comms service install` prints the same path as the unit's `ExecStart=`, and
-`moxi modules --json` names the environment as `prefix`.
+The unit's `ExecStart=` names the same path, and `moxi modules --json` names the
+environment as `prefix`.
 
 The user service stops when you log out. To keep it running, enable lingering for your
 user (`loginctl enable-linger $USER`); comms doesn't do that for you, because it changes
 your login policy for the whole machine.
 
-To remove it: `moxi comms service uninstall`, then take comms out of the `moxi` tool
-(`uv tool install moxi` again, with a `--with` for each module you keep). Your messages
-stay under `~/.local/state/moxi/` and `~/.local/share/moxi/` until you delete them.
+To remove it: `moxi uninstall comms`, which stops and removes the daemon's unit and takes
+comms out of the `moxi` tool. Your messages stay under `~/.local/state/moxi/` and
+`~/.local/share/moxi/` until you delete them.
 
 ## Quick start with Claude Code
 
@@ -142,7 +142,7 @@ meets.
 |---|---|
 | Local backend (SQLite record), daemon, `moxi comms` CLI | supported |
 | Claude Code sessions through `moxi comms claude` | supported, through Moxi turns: the session must load turns' Claude plugin; until its adapter finds the session's turns endpoint, mail to it waits and a send says `waiting` |
-| Systemd user service (`moxi comms service`) | supported |
+| The daemon as a systemd user unit, written by `moxi install comms` | supported |
 | Held mail, catch-up on start, delivery at turn boundaries | supported |
 | Attribution and the binding history | supported |
 | Reply enforcement for the operator's and directors' messages | supported |
@@ -164,7 +164,6 @@ meets.
 | `moxi comms whois <name>` | the card an identity wrote about itself |
 | `moxi comms explain <name> [id]` | why a message did or didn't land |
 | `moxi comms doctor` | what this machine resolved, and whether the daemon answers |
-| `moxi comms service install\|uninstall\|status` | the daemon as a user service |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
 | `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
@@ -279,9 +278,10 @@ How messages are routed, delivered and attributed is in
 
 - **A session got nothing.** `moxi comms explain <name>` says whether the name is bound, what
   was delivered, and whether the turn that read it completed.
-- **`moxi comms doctor` says the daemon isn't answering.** `moxi comms service status`, then
-  `journalctl --user -u moxi-comms-daemon`. Or run the daemon in a terminal:
-  `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
+- **`moxi comms doctor` says the daemon isn't answering.** `moxi doctor` shows its unit's
+  state and, when it failed, the line that reads its log. Restart it with `moxi services
+  restart comms/daemon`, or with the supervisor (`systemctl --user restart` on its unit).
+  Or run the daemon in a terminal: `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
   credentials the store expects; see [docs/security.md](docs/security.md).
 
