@@ -217,7 +217,8 @@ def test_an_answered_turn_settles_the_digest_handled_and_moves_the_cursor(
         "the digest's id is its ref"
     ep.end_turn("answer")
     assert wait_until(lambda: a.boundary is None and not a.shim.awaiting_ids)
-    assert wait_until(lambda: any(mid[0] in f.get("handled_ids", ())
+    # The frame is recorded as it goes out; the daemon has acked once it answers.
+    assert wait_until(lambda: any(mid[0] in f.get("handled_ids", ()) and "answer" in f
                                   for f in frame_kinds(frames, "turn")))
     assert cursor_of(REVIEWER) == mid[0]
 
@@ -232,7 +233,7 @@ def test_a_turn_that_did_not_answer_settles_the_digest_unhandled(
     assert wait_until(lambda: len(ep.texts) == 1)
     (mid,) = awaiting(a)
     ep.end_turn(outcome)
-    assert wait_until(lambda: any(mid in f.get("unhandled_ids", ())
+    assert wait_until(lambda: any(mid in f.get("unhandled_ids", ()) and "answer" in f
                                   for f in frame_kinds(frames, "turn")))
     assert cursor_of(REVIEWER) is None, "the cursor does not pass an unhandled digest"
     assert a.session is not None, "the endpoint is kept"
