@@ -11,6 +11,9 @@ dependencies = ["moxi>=0.1,<0.2"]
 # The browser UI shell: with it, projects' page shows there. Loopback, which projects'
 # page server runs on, comes with it.
 ui = ["moxi-ui>=0.1,<0.2"]
+# notes' inbox: with it, `moxi projects promote` makes one of notes' inbox one-offs a
+# project.
+notes = ["moxi-notes>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

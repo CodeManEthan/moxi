@@ -963,8 +963,14 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cache = [
+    { name = "moxi-cache" },
+]
 comms = [
     { name = "moxi-comms" },
+]
+notes = [
+    { name = "moxi-notes" },
 ]
 projects = [
     { name = "moxi-projects" },
@@ -978,6 +984,9 @@ turns = [
 ui = [
     { name = "moxi-ui" },
 ]
+usage = [
+    { name = "moxi-usage" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -990,13 +999,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
+    { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
+    { name = "moxi-usage", marker = "extra == 'usage'", editable = "packages/usage" },
 ]
-provides-extras = ["turns", "comms", "projects", "slots", "ui"]
+provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1130,6 +1142,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+notes = [
+    { name = "moxi-notes" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1145,9 +1160,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["ui"]
+provides-extras = ["ui", "notes"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1166,6 +1182,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1181,9 +1200,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
-provides-extras = ["ui"]
+provides-extras = ["ui", "projects"]
 
 [package.metadata.requires-dev]
 dev = [

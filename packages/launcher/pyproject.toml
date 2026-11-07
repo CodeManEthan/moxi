@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 # The launcher requires the core only. Every other module it works with (turns, comms,
-# slots, projects, notes, usage, loadout, ui) is an optional link it reaches through
+# slots, projects, notes, cache, usage, ui) is an optional link it reaches through
 # moxi.modules.load where a feature needs it, and never imports.
 dependencies = ["moxi>=0.1,<0.2"]
 
@@ -15,7 +15,7 @@ dependencies = ["moxi>=0.1,<0.2"]
 # The first turn, readiness, Codex ids, and the start listeners.
 turns = ["moxi-turns>=0.2,<0.3"]
 # Identities, scopes, directors, the with: posture and the console name.
-comms = ["moxi-comms>=0.2,<0.3"]
+comms = ["moxi-comms>=0.3,<0.4"]
 # Project keys for a launch's place, a directory's key on its row, and a project's agents.
 projects = ["moxi-projects>=0.1,<0.2"]
 # The tmux slot target, and the startup screens answered there.
@@ -23,6 +23,12 @@ slots = ["moxi-slots>=0.1,<0.2"]
 # The browser UI shell: with it, the launcher's page shows there. Loopback, which the
 # launcher's page server runs on, comes with it.
 ui = ["moxi-ui>=0.1,<0.2"]
+# notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.
+notes = ["moxi-notes>=0.1,<0.2"]
+# cache's timer, for keep-warm and recycle on expiry.
+cache = ["moxi-cache>=0.1,<0.2"]
+# usage's context warning: the warn_at, limit_at and recycle_at_limit rows.
+usage = ["moxi-usage>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

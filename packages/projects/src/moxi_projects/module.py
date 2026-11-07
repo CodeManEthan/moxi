@@ -13,6 +13,9 @@ SUMMARY = "Moxi's list of named places: projects, their roots, kinds and agents.
 OPTIONAL = {
     "ui": "The projects page in the browser UI shell: the list, add (with create), edit, "
           "the agents and remove.",
+    "notes": "Promote: `moxi projects promote` makes one of notes' inbox one-offs a "
+             "project, moving its folder to the project's notes folder. Without it "
+             "promote is refused.",
 }
 GATED = {}
 INTERNAL_ENV = {}

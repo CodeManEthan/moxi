@@ -1092,3 +1092,107 @@ def test_moxi_dev_has_no_write_site_list(tmp_path):
     r.src("__init__.py")
     r.src("new.py", "from pathlib import Path\ndef render(p):\n    Path(p).write_text('x')\n")
     assert r.findings("8") == []
+
+
+# --- check 9 ---------------------------------------------------------------------------------
+
+@pytest.fixture
+def linked(repo):
+    """alpha requires the core and beta; beta requires gamma, and delta is its extra."""
+    beta = Repo(repo.root.parent / "beta", "beta")
+    beta.write("pyproject.toml", pyproject(
+        "moxi-beta", deps=("moxi>=0.1", "moxi-gamma>=0.1"),
+        extras={"delta": ["moxi-delta>=0.1"]}))
+    return repo
+
+
+def test_a_literal_link_to_an_undeclared_module_names_the_call_and_the_extra(linked):
+    linked.src("links.py", """\
+        from moxi import modules
+
+        def notes():
+            return modules.load("notes", interface=1)
+        """)
+    found = linked.findings("9")
+    assert len(found) == 1
+    assert found[0].startswith("src/moxi_alpha/links.py:4: modules.load('notes')")
+    assert "add the extra 'notes' installing moxi-notes" in found[0]
+
+
+def test_a_module_level_constant_is_read(linked):
+    linked.src("links.py", """\
+        from moxi import modules
+
+        MODULE = "notes"
+
+        def here():
+            return modules.available(MODULE)
+        """)
+    assert [f.split(": ")[0] for f in linked.findings("9")] == ["src/moxi_alpha/links.py:6"]
+
+
+def test_every_import_alias_is_read(linked):
+    linked.src("links.py", """\
+        import moxi
+        import moxi.modules
+        import moxi.modules as mm
+        from moxi import modules as mods
+        from moxi.modules import available as here, load
+
+        def every():
+            moxi.modules.load("notes")
+            mm.available("notes")
+            mods.load("notes")
+            here("notes")
+            load("notes")
+        """)
+    found = linked.findings("9")
+    assert [f.split(": ")[0] for f in found] == [f"src/moxi_alpha/links.py:{n}"
+                                                for n in range(8, 13)]
+
+
+def test_its_own_the_core_a_required_and_an_extra_s_module_pass(linked):
+    linked.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
+                                             extras={"epsilon": ["moxi-epsilon>=0.1"]}))
+    linked.src("module.py", announcement(OPTIONAL="{'epsilon': 'Epsilon.'}"))
+    linked.src("links.py", """\
+        from moxi import modules
+
+        def every():
+            return [modules.load(name) for name in ("alpha", "moxi", "beta", "epsilon")]
+
+        modules.load("alpha"), modules.load("moxi"), modules.load("beta")
+        modules.available("epsilon")
+        """)
+    assert linked.findings("9") == []
+
+
+def test_a_module_an_extra_s_module_requires_passes_one_hop_only(linked):
+    # beta comes only with an extra, and requires gamma: gamma needs nothing more. delta
+    # is behind beta's own extra, and notes is no link of beta's at all.
+    linked.write("pyproject.toml", pyproject(deps=("moxi>=0.1",),
+                                             extras={"beta": ["moxi-beta>=0.1"]}))
+    linked.src("module.py", announcement(OPTIONAL="{'beta': 'Beta.'}"))
+    linked.src("core.py", "")
+    linked.src("links.py", """\
+        from moxi import modules
+
+        modules.load("gamma")
+        modules.load("delta")
+        modules.load("notes")
+        """)
+    calls = [f.split(": ", 1)[1].split(" ")[0] for f in linked.findings("9")]
+    assert calls == ["modules.load('delta')", "modules.load('notes')"]
+
+
+def test_a_module_named_at_run_time_or_in_tests_is_not_read(linked):
+    linked.src("links.py", """\
+        from moxi import modules
+
+        def each(name):
+            for other in ("notes", "cache"):
+                modules.load(other)
+            return modules.available(name)
+        """)
+    linked.write("tests/test_links.py", 'from moxi import modules\nmodules.load("notes")\n')
+    assert linked.findings("9") == []
