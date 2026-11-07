@@ -50,7 +50,9 @@ def test_claude_with_no_settings_file_is_thirty_days(home):
     item = by_harness()["claude"]
     assert item.file == str(home / ".claude" / "settings.json")
     assert item.key == "cleanupPeriodDays" and item.value is None and not item.warn
-    assert "is not set" in item.lines[0] and "30 days" in item.lines[0]
+    assert item.lines[0] == (f"Claude Code: {item.file} doesn't exist, so cleanupPeriodDays "
+                             "is not set: 30 days. Claude Code deletes transcripts older "
+                             "than that.")
     assert "raise cleanupPeriodDays" in item.lines[1]
 
 

@@ -130,9 +130,10 @@ def _claude(environ: Mapping[str, str]) -> Retention:
             raise_it), f"Claude Code: {file} {reason}")
     value = data.get(CLAUDE_KEY) if isinstance(data, dict) else None
     if value is None:
-        where = "is not set" if data is not None else "is not set: there is no such file"
+        unset = (f"{CLAUDE_KEY} is not set in {file}" if data is not None else
+                 f"{file} doesn't exist, so {CLAUDE_KEY} is not set")
         return Retention(CLAUDE, file, CLAUDE_KEY, None, None, False, (
-            f"Claude Code: {CLAUDE_KEY} {where} in {file}: {CLAUDE_DEFAULT_DAYS} days. "
+            f"Claude Code: {unset}: {CLAUDE_DEFAULT_DAYS} days. "
             f"Claude Code deletes transcripts older than that.", raise_it),
             f"Claude Code: {CLAUDE_KEY} not set, {CLAUDE_DEFAULT_DAYS} days")
     if isinstance(value, bool) or not isinstance(value, int):
