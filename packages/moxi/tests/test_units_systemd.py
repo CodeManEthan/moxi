@@ -20,11 +20,12 @@ from moxi import units
 from moxi.units import _backend, _systemd
 from moxi.units._backend import (
     Backend, ReadError, RenderError, Schedule, Socket, Spec, UnitRef)
-from moxi.units._fake import FakeSupervisor
 from moxi.units._fence import Fence
 from moxi.units._systemd import SystemdBackend, quote
 from moxi.units._types import Wrapped
 from moxi_dev.testing import console_script
+
+from fake_backend import FakeSupervisor
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
 pytestmark = pytest.mark.usefixtures("default_home")

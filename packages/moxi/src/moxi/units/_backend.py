@@ -3,8 +3,9 @@
 `backend()` names the supervisor from the platform and the file system alone, with no
 supervisor call. `implementation()` gives the object that speaks to it: a `Backend`.
 Three are written for real systems (`moxi.units._systemd`, `_launchd`, `_schtasks`, each
-defining `BACKEND`), and `moxi.units._fake` is one for tests. A test installs its own with
-`use(backend)`.
+defining `BACKEND`), and `backend()` names only those three. A test installs its own with
+`use(backend)`: the core's tests keep a fake one in their own folder, which is not part
+of the installed package.
 
 The protocol
 ------------

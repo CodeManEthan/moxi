@@ -21,12 +21,13 @@ from moxi import proc, units
 from moxi.doctor import _run
 from moxi.units import _backend, _home
 from moxi.units._backend import Schedule, Spec
-from moxi.units._fake import FakeBackend, FakeSupervisor
 from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
 from moxi.units._schtasks import SchtasksBackend
 from moxi.units._systemd import SystemdBackend, dropin_name, environment_line
 from moxi_dev.testing import console_script, need_symlinks
+
+from fake_backend import FakeBackend, FakeSupervisor
 
 #: Every test starts in the default home; one that wants a tagged home sets `MOXI_HOME`.
 pytestmark = pytest.mark.usefixtures("default_home")
