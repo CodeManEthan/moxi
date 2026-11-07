@@ -50,7 +50,10 @@ the lines it adds or summarises (`isMeta`, `isCompactSummary`); Codex writes whi
 of content a user message holds; OpenCode marks a text part it added `synthetic`. Where
 no such field is written, a short fixed list of wrappers the harness puts around text it
 composed (Claude Code's `<local-command-stdout>`, an older Codex rollout's
-`<environment_context>`) marks the message true. A message's text never makes it false.
+`<environment_context>`) marks the message true. Three more cases read as true because the
+harness wrote the message itself: a Claude Code assistant message whose model is
+`<synthetic>`, a Codex `developer` or `system` message, and an OpenCode `summary`
+message. A message's text never makes it false.
 So a prompt sent through Claude Code's SDK, a command line typed at the prompt, and most
 user messages in Codex and OpenCode read as unknown: the harness does not say who wrote
 them.
