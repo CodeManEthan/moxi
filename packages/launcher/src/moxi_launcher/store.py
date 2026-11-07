@@ -63,6 +63,8 @@ CAP = 64 * 1024
 HARNESSES = ("claude", "codex")
 TARGETS = ("terminal", "headless", "slot")
 PRESET_KINDS = ("seat", "project")
+#: A launch's kind, as `LaunchRow.kind` decides it: the first that holds, in this order.
+KINDS = ("scratch", "seat", "project", "one-off")
 #: The event a claim that moved to a new endpoint records.
 RECLAIMED = "reclaimed"
 #: The event a launch made from the page records, under its request id, when it is refused
@@ -365,6 +367,21 @@ class LaunchRow:
     @property
     def env(self) -> dict[str, str]:
         return json.loads(self.env_json)
+
+    @property
+    def kind(self) -> str:
+        """The launch's kind, the first of `KINDS` that holds: `scratch` when it works in
+        a scratch folder, whatever its preset; `seat` for a seat preset; `project` when it
+        names a project, by a project preset or a project key; else `one-off`. Scratch
+        comes first so that a seat launched in a scratch folder, as a test tool does, reads
+        as scratch."""
+        if self.values.get("scratch"):
+            return "scratch"
+        if self.preset_kind == "seat":
+            return "seat"
+        if self.preset_kind == "project" or self.project_key:
+            return "project"
+        return "one-off"
 
     @property
     def base_env(self) -> dict[str, str | None] | None:
@@ -847,6 +864,38 @@ def resolve(conn: sqlite3.Connection, session_id: str) -> LaunchRow | None:
                           "ORDER BY seen_at DESC, rowid DESC LIMIT 1", found).fetchone()
     cursor = conn.execute(f"{_SELECT} WHERE request_id = ?", found)
     return _row(cursor, cursor.fetchone(), newest_session_id=newest[0])
+
+
+def kinds(session_ids: Iterable[str], *, timeout: float = 1.0,
+          env: Mapping[str, str] | None = None) -> dict[str, str | None]:
+    """Each session id's launch kind (`LaunchRow.kind`) by the launch `resolve` finds for
+    it, or None when no launch holds the id.
+
+    No launch holds the id of a session the launcher didn't start: one started by hand or
+    by a script, and one started from inside a launched session, whose ids never join
+    (only the endpoint that claimed a launch records its ids). A Codex launch is held by
+    its id only once that id was learned, so a Codex launch without turns, or in `exec`
+    mode, answers None. With no launch log every id answers None.
+
+    Opens the launch log for this call alone and writes nothing to it, except to bring
+    an older schema up to date. Raises `Busy` when the log is held past `timeout`
+    seconds, `moxi.store.StoreTooNew` when a newer launcher wrote it, and any other error
+    as it comes: the caller asks again later.
+    """
+    ids = list(dict.fromkeys(session_ids))
+    if not ids or not path(env).exists():
+        return dict.fromkeys(ids)
+    try:
+        conn = connect(env=env, create=False, timeout=timeout)
+        try:
+            return {sid: None if (row := resolve(conn, sid)) is None else row.kind
+                    for sid in ids}
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as error:
+        if _busy(error):
+            raise Busy(f"the launch log is busy: {error}") from error
+        raise
 
 
 def seen_at(conn: sqlite3.Connection, request_id: str, session_id: str) -> str | None:
@@ -1662,7 +1711,8 @@ def table_lines(name: str, *, limit: int | None = None, before: str | datetime |
 
 
 __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
-           "HOWS", "JOB_GONE", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PRUNE_LIMIT", "RECLAIMED",
+           "HOWS", "JOB_GONE", "KINDS", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PRUNE_LIMIT",
+           "RECLAIMED",
            "RUN_COLUMNS",
            "RUN_FIELDS", "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES",
            "STATES", "STEPS", "TABLES", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow",
@@ -1671,7 +1721,8 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTE
            "advance_run", "chain",
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
            "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
-           "holds_log", "insert_run", "learn_session", "log", "log_lines", "made_by", "new_run_id",
+           "holds_log", "insert_run", "kinds", "learn_session", "log", "log_lines", "made_by",
+           "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
            "pend_compact", "pending_compact", "picked", "prune", "release_hold", "resolve",
            "running", "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts",
