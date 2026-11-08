@@ -1,8 +1,8 @@
 # The same check a contributor runs before asking for a merge: `moxi-dev check`.
 # Linux runs on every push to any branch; Windows and macOS run on pushes to main,
-# after the merge, and gate nothing while the packages are Linux-only. secrets
-# supports Windows, so its tests also run on Windows, on the same terms: on pushes
-# to main, gating nothing, with only secrets and what it needs installed.
+# after the merge, and gate nothing while the packages are Linux-only. secrets' tests
+# also run in a Windows job of their own, on the same terms: on pushes to main, gating
+# nothing, with only secrets and what it needs installed and line-ending conversion on.
 # The web job runs on all three systems on every push: the web pages' built files must be
 # what the pinned Node toolchain makes from their sources, byte for byte.
 # The browser jobs run the browser tests: every page package's in Chromium and Firefox on
