@@ -22,7 +22,7 @@ The walk (`moxi.terminal._walk`):
 - `marked(env=None)` is a copy of an environment carrying the start mark, `MARK`
   (`MOXI_STARTED_BY`), for a program that builds a child's environment from scratch.
 
-The front door's record step (`step()`, run by the `moxi` console script before it
+The `moxi` command's record step (`step()`, run by the `moxi` console script before it
 dispatches) leaves its `Outcome` in `last`: None when no step ran in this process.
 
 `RECORD_COMMAND` (`moxi modules`) is the command a line names to make a record, and
@@ -30,7 +30,7 @@ dispatches) leaves its `Outcome` in `last`: None when no step ran in this proces
 record row names them, and so does the check a page makes before it writes, which is ui's
 (`moxi_ui.api`).
 
-The walk's names and the two commands are imported when first used, so the front door's
+The walk's names and the two commands are imported when first used, so the `moxi` command's
 step, which walks only when a write is pending, doesn't pay for them on an unchanged
 environment.
 """
@@ -43,7 +43,7 @@ from ._record import (FAILED, FORMAT, FOUND, NO_KEYBOARD, NO_PLACE, SAME, UNDECI
                       WRITTEN, NewerFormat, NoRecord, Outcome, Read, Record, Unreadable,
                       anchor_set, in_set, keyboard, of, read, row, step, version, write)
 
-#: The `Outcome` of this process's front-door record step; None when none ran.
+#: The `Outcome` of this process's record step (the `moxi` command's); None when none ran.
 last: Outcome | None = None
 
 _WALK = ("walk", "Evidence", "Undecided", "Found", "Run")

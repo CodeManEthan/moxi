@@ -12,17 +12,27 @@ module is off and quiet.
 
 ## Modules
 
-| module | what it does | requires | optional |
-|---|---|---|---|
-| `moxi` | The core: names, paths, one config file per module, module discovery, and the `moxi` command | nothing (standard library only) | |
-| sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | |
-| turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host |
-| cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | |
-| comms | Messages between agent sessions on one machine, delivered into the recipient's session at the end of its current turn | `moxi`, turns | `cache`: hold a send while the recipient's cache is cold; `codex`: Codex sessions |
+This package is the core: names, paths, one config file per module, module discovery,
+and the `moxi` command. Every other module is its own package, installed with
+`moxi install <module>`. The repository's README lists every package with its PyPI name
+and what it does:
+[github.com/CodeManEthan/moxi](https://github.com/CodeManEthan/moxi#packages).
+`moxi modules --available` prints the same list of modules from the command line.
 
 Every module's code is a folder under `packages/` in one repository,
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), and its issues go to that
 repository's tracker: [CodeManEthan/moxi/issues](https://github.com/CodeManEthan/moxi/issues).
+
+## What it needs
+
+- Linux. The core also has macOS and Windows code (launchd and Task Scheduler for
+  daemons, the Windows folders and consoles), and the repository's CI runs its tests on
+  both, but those runs gate nothing and nobody runs Moxi there yet: treat macOS and
+  Windows as untested.
+- Python 3.12 or later, and [uv](https://docs.astral.sh/uv/), which `moxi install` uses
+  to add modules.
+- One third-party package, psutil. The core also carries copies of two released
+  libraries, tomlkit 0.15.2 and packaging 26.3, so it doesn't depend on them.
 
 ## The `moxi` command
 
@@ -35,23 +45,59 @@ commands:
   `connection` for the first connection to its socket, or `null` when the setting that
   chooses can't be read. It is what systemd and launchd do; on Windows every daemon starts
   at each logon. Python code gets the same value from `moxi.units.starts(found)`.
+  `moxi modules --available` lists the first-party modules, installed or not, and
+  `--refresh` first fetches the newest list from the repository: the one command that
+  uses the network.
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
   `--without`, `--all` and `--none` answer ahead.
+- `moxi uninstall <module>` runs the module's teardown, then removes its daemons and
+  timers, its skills and its package. Its config file is kept, and so are its stores
+  unless `--purge` is given (`--yes` answers its questions).
 - `moxi shortcut <module>` puts a bare `<module>` command on PATH. It is off by default
   and refused when the name is already taken; `--remove` takes it off.
 - `moxi config <module>` shows a module's settings and its config file; `moxi config set
   <module> <key> <value>` changes one, keeping the file's comments, and `moxi config unset`
   removes one. `moxi config moxi` is the core's own.
+- `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
+  config and runtime directories, its config file and each store it declares.
+- `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and
+  stores, and exits 1 when a row fails. `--json` prints the rows as JSON, and `--costs`
+  also measures each module's daemons.
+- `moxi help [<command>|<module>]` prints the command list, or one command's or module's
+  help.
+- `moxi version` prints the versions of `moxi` and the modules it sees.
+
+## What it does outside its own folders
+
+The core keeps its own files in the usual places for this system (`moxi paths moxi`
+names them). Beyond those, `moxi install <module>` may write in three places on your
+behalf, and `moxi uninstall` removes what it wrote:
+
+- Skills and agent files a module ships, placed where each agent reads them: Claude Code's
+  `~/.claude/skills` and `~/.claude/agents` (under `$CLAUDE_CONFIG_DIR` when that is
+  set), and Codex's `~/.agents/skills` and `~/.codex/agents` (under `$CODEX_HOME` when
+  set). `moxi install` asks before it places a module's skills; `--skills` and
+  `--no-skills` answer ahead. They are links to the installed package on Linux and macOS
+  and copies on Windows (the core setting `skills.form`), and the core settings
+  `skills.harnesses` and `harnesses` choose the agents and folders.
+- A module's daemons and timers, written as systemd user units in
+  `~/.config/systemd/user` (launchd agents on macOS, Task Scheduler tasks on Windows).
+  Each file is marked as Moxi's, and a file Moxi didn't write is never touched unless
+  `--replace` moves it aside.
+- Whatever the module's own setup does, which its README describes.
+
+A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.
 
 ## Install
 
-Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
-
 ```sh
 uv tool install moxi
-moxi install comms
+moxi install <module>
 ```
+
+`moxi install comms`, for example, installs comms with turns, which it requires, runs
+their setup, and asks about comms' optional extras.
 
 Only the core provides the `moxi` command. `moxi install <module>` adds the module to the
 `moxi` tool's environment and runs its setup. A module installed on its own, such as
@@ -67,31 +113,6 @@ tool's environment, so run one by its path there, for example comms' daemon:
 
 On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
 PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
-
-### Before the modules are on PyPI
-
-Install the core from git, then give `moxi install` one `--from` for each Moxi
-distribution the module needs that the environment lacks, in dependency order: `moxi`,
-`moxi-sessions`, `moxi-turns`, `moxi-cache`, `moxi-comms`. One left out is looked for on
-PyPI and the install fails. For comms:
-
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install comms --none \
-  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
-  --from 'moxi-comms @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/comms'
-```
-
-comms with its `cache` extra needs cache and sessions too:
-
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install comms --with cache \
-  --from 'moxi-sessions @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/sessions' \
-  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
-  --from 'moxi-cache @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/cache' \
-  --from 'moxi-comms @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/comms'
-```
 
 ## Troubleshooting
 
@@ -119,4 +140,4 @@ shortcut file, or reinstall.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/moxi/LICENSE).

@@ -1,7 +1,7 @@
 """The core's record of the terminal's environment: the set it holds, its file, its reader
 and the keyboard test.
 
-The front door's record step is tested in test_terminal_step.py.
+The `moxi` command's record step is tested in test_terminal_step.py.
 """
 
 from __future__ import annotations

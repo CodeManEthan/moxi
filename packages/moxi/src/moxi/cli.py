@@ -137,7 +137,7 @@ def _tell_strays(argv: list[str]) -> None:
 
 
 def _record_terminal(argv: list[str]) -> None:
-    """The front door's record step: the core's record of the terminal's environment,
+    """The `moxi` command's record step: the core's record of the terminal's environment,
     written when the environment changed, a keyboard is on the input, and nothing Moxi or
     an agent started is above this run (`moxi.terminal.step`). The words the stray check
     skips skip it too, so the gate (`moxi run`) never records.

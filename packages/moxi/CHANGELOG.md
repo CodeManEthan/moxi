@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 (2026-11-08)
+
+- The catalogue lists all sixteen first-party modules, so `moxi install <module>` and
+  `moxi modules --available` know each by name. Its version is 2.
+- The README says what the core needs (psutil, and its own copies of tomlkit and
+  packaging), that macOS and Windows are untested, every command `moxi help` lists, and
+  where `moxi install` writes outside Moxi's own folders: skills and agent files for
+  Claude Code and Codex, and a module's daemons and timers. It points to the
+  repository's list of packages instead of keeping its own, and installs from PyPI.
+
 ## 0.1.6 (2026-11-07)
 
 - Unit names carry the home. With `MOXI_HOME` set, units are named
@@ -51,8 +61,59 @@
 
 ## 0.1.4 (2026-11-07)
 
-- New `moxi.terminal`: the front door records the terminal's environment and its launch
+- New `moxi.terminal`: the `moxi` command records the terminal's environment and its launch
   chain, and the doctor reports that record in its terminal row. The check that compares
   a page's environment with the record lives in ui.
 - The Windows folders come from the shell through ctypes; the core no longer needs
   platformdirs.
+
+## 0.1.3 (2026-11-04)
+
+Not published; summarised from the repository's history.
+
+- `files.append_record` takes `refuse`, a set of field names a record may not hold at
+  any depth, and `collapse`, which writes the first rows of a busy class and counts the
+  rest, so a log facing unauthenticated callers stays bounded without losing a row
+  silently. Both are off by default.
+
+## 0.1.2 (2026-11-03)
+
+Not published; summarised from the repository's history. Moxi's packages moved into one
+repository, `CodeManEthan/moxi`, and the core grew the foundation the modules share.
+
+- Python 3.12 or later.
+- Only the core provides the `moxi` command; a module installed on its own brings none.
+- New commands: `moxi uninstall` (with `--purge`), `moxi paths`, `moxi doctor`,
+  `moxi help`, `moxi version`, `moxi modules --available [--refresh]`, and `moxi config
+  set` and `unset`.
+- The catalogue of first-party modules: `moxi install` refuses a name it doesn't list
+  unless given `--third-party` or `--from`.
+- The announcement, a module's one declaration of itself, read in schemas 1 and 2.
+  Among what it may declare: daemons and timers, which the core writes as systemd user
+  units, launchd agents or Task Scheduler tasks; socket daemons, started at login or at
+  the first connection (schema 2 lets that follow a bool setting); skills and agent
+  files, which the core places for Claude Code and Codex; and doctor checks.
+- New modules for module code: `moxi.files` (atomic writes, locks, records, with
+  `append_record` able to write durably and without a size cap), `moxi.proc`,
+  `moxi.aio`, `moxi.ipc` (a newline JSON-RPC wire over Unix sockets), `moxi.units`,
+  `moxi.place`, `moxi.doctor` and `moxi.log`.
+- `MOXI_HOME` puts every module's files under one directory.
+- The config reader keeps comments when it writes, through a vendored copy of tomlkit.
+- The module contract check moved to the contributor tools, `moxi-dev`; `moxi check` is
+  gone.
+
+## 0.1.1 (2026-10-22)
+
+- Comments and docstrings state each rule in plain words.
+- The source distribution lists the paths it includes instead of the ones it leaves out.
+
+## 0.1.0 (2026-10-21)
+
+The first public release.
+
+- The `moxi` command: `moxi modules`, `moxi install <module>` with its optional extras,
+  `moxi shortcut <module>`, `moxi config <module>` and `moxi check`, which checks a
+  module repository against the module contract.
+- Names, paths, one config file per module, and module discovery through the
+  `moxi.modules` entry point.
+- Python 3.11 or later.

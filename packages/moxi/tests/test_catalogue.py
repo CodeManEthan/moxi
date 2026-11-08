@@ -27,10 +27,12 @@ def text(version=2, extra=""):
 
 # -- the shipped copy ----------------------------------------------------------------
 
-def test_the_shipped_catalogue_lists_the_four_ported_modules():
+def test_the_shipped_catalogue_lists_every_first_party_module():
     shipped = catalogue.shipped()
-    assert shipped.version == 1 and shipped.source == "shipped"
-    assert shipped.names() == ["cache", "comms", "sessions", "turns"]
+    assert shipped.version == 2 and shipped.source == "shipped"
+    assert shipped.names() == ["cache", "comms", "connector", "launcher", "loadout", "notes",
+                               "projects", "repo", "secrets", "services", "sessions",
+                               "slots", "tunnel", "turns", "ui", "usage"]
     for entry in shipped.entries:
         assert entry.distribution == f"moxi-{entry.name}"
         assert entry.summary and "\n" not in entry.summary
@@ -88,7 +90,7 @@ def test_readers_take_the_higher_version(tmp_path):
     path = catalogue.cached_path(env)
     assert path == tmp_path / "cache" / "moxi" / "catalogue.toml"
     path.parent.mkdir(parents=True)
-    path.write_text(text(version=1))
+    path.write_text(text(version=catalogue.shipped().version))
     assert catalogue.load(env).source == "shipped"  # a tie keeps the shipped copy
     path.write_text(text(version=5))
     assert catalogue.load(env).names() == ["comms"]
@@ -102,20 +104,21 @@ def test_refresh_keeps_a_newer_copy(tmp_path):
 
     def fetch(url):
         asked.append(url)
-        return text(version=3).encode()
+        return text(version=9).encode()
 
     kept, said = catalogue.refresh(env, fetch=fetch)
     assert asked == [catalogue.URL]
-    assert kept.version == 3 and kept.names() == ["comms"]
-    assert said.startswith("catalogue version 3 kept in ")
-    assert catalogue.cached_path(env).read_text() == text(version=3)
-    assert catalogue.load(env).version == 3
+    assert kept.version == 9 and kept.names() == ["comms"]
+    assert said.startswith("catalogue version 9 kept in ")
+    assert catalogue.cached_path(env).read_text() == text(version=9)
+    assert catalogue.load(env).version == 9
 
 
 def test_refresh_leaves_the_shipped_copy_when_the_published_one_is_not_newer(tmp_path):
     env = {"MOXI_HOME": str(tmp_path)}
-    kept, said = catalogue.refresh(env, fetch=lambda url: text(version=1).encode())
-    assert kept.source == "shipped" and "the shipped one (version 1) stays" in said
+    have = catalogue.shipped().version
+    kept, said = catalogue.refresh(env, fetch=lambda url: text(version=have).encode())
+    assert kept.source == "shipped" and f"the shipped one (version {have}) stays" in said
     assert not catalogue.cached_path(env).exists()
 
 
@@ -191,7 +194,7 @@ def test_available_as_json(site, capsys):
     site.module("comms")
     assert cli.main(["modules", "--available", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert data["version"] == 1 and data["source"] == "shipped"
+    assert data["version"] == 2 and data["source"] == "shipped"
     rows = {row["name"]: row for row in data["modules"]}
     assert rows["comms"]["state"] == "present" and rows["comms"]["version"] == "0.1.0"
     assert rows["turns"] == {"name": "turns", "distribution": "moxi-turns",
