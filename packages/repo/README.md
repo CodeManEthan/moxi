@@ -460,27 +460,24 @@ command to copy and run in a terminal.
 
 ## Install
 
-Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/). On macOS
-use the Xcode command line tools' git or Homebrew's; on Windows, Git for Windows. Pushing
-needs a remote you can already push to without a prompt.
+Linux, Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/).
+Pushing needs a remote you can already push to without a prompt.
+
+repo also has macOS and Windows code. On macOS it takes the Xcode command line tools' git
+or Homebrew's; on Windows, Git for Windows. The repository's CI runs repo's tests on both
+without gating, but nobody runs repo there yet, and the Windows path, where git runs the
+hook entries and shims through Git for Windows, has never been run on a real machine:
+treat macOS and Windows as untested.
 
 ```sh
 uv tool install moxi
 moxi install repo
 ```
 
-Before the modules are on PyPI, install the core from git and give `moxi install` a git
-source for repo:
-
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install repo \
-  --from 'moxi-repo @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/repo'
-```
-
-The front door's README, at
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds repo beside it and runs repo's setup. The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
-the other modules.
+lists the other modules.
 
 ## Dependencies
 
@@ -490,4 +487,4 @@ The `ui` extra (`moxi-ui`, the browser UI shell) adds the git hooks page; see
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/repo/LICENSE).

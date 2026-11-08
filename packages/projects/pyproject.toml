@@ -2,9 +2,21 @@
 name = "moxi-projects"
 version = "0.1.3"
 description = "Moxi's list of named places: projects, their roots, kinds and agents."
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["projects", "agents", "claude-code", "codex"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
 dependencies = ["moxi>=0.1.6,<0.2"]
 
 [project.optional-dependencies]
