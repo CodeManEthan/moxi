@@ -222,17 +222,11 @@ moxi install secrets
 ```
 
 `moxi install secrets` offers the `re2` extra where a google-re2 wheel fits, and the
-`personal-data` extra everywhere. Before the modules are on PyPI, install the core from
-git and give `moxi install` the module's git source:
+`personal-data` extra everywhere.
 
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install secrets --from 'moxi-secrets @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/secrets'
-```
-
-The front door's README, at
-[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
-the other modules.
+The first line installs `moxi`, the core, whose README covers the `moxi` command. The
+repository, [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), lists the other
+modules.
 
 ## Dependencies
 
@@ -243,5 +237,5 @@ the other modules.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The vendored gitleaks rules are gitleaks' own, under its MIT
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/secrets/LICENSE). The vendored gitleaks rules are gitleaks' own, under its MIT
 licence in `src/moxi_secrets/rules/upstream/LICENSE`.
