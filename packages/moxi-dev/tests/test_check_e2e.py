@@ -39,7 +39,7 @@ def package(root: Path, name: str, deps: str) -> None:
     (path / "tests").mkdir(parents=True)
     release_files(path)
     (path / "pyproject.toml").write_text(
-        f'[project]\nname = "{name}"\nversion = "0.1.0"\nrequires-python = ">=3.12"\n'
+        f'[project]\nname = "{name}"\nversion = "0.1.0"\n'
         f"{METADATA}dependencies = {deps}\n[dependency-groups]\ndev = {TOOLS}\n"
         '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n')
     (path / "tests" / "test_it.py").write_text(UNDER_WORKERS)

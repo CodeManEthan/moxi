@@ -19,8 +19,9 @@ The first public release.
 - moxi-dev needs moxi 0.1.6 or later, and its dependency now says so.
 - `moxi-dev check` runs a release step over every package: the catalogue lists exactly
   the module packages, every requirement between packages admits the other's version,
-  and each package has `readme`, classifiers, `[project.urls]`, a CHANGELOG whose first
-  entry is its version and a README with no relative link. moxi-dev now depends on
-  `packaging`, which reads the requirements.
+  and each package has `readme`, a licence, `requires-python`, keywords, classifiers,
+  `[project.urls]`, a CHANGELOG whose first entry is its version and which its sdist
+  includes, and a README with no relative link. moxi-dev now depends on `packaging`,
+  which reads the requirements.
 - `moxi-dev new` writes `readme`, keywords, Linux-only classifiers and a `CHANGELOG.md`,
   so a new package passes the release step once the catalogue lists it.

@@ -59,10 +59,11 @@ publishing needs on every package, whatever the change touched:
   entry point, each under its distribution name;
 - every requirement one package places on another, in its dependencies or any extra,
   admits the other's version as it stands in the tree;
-- each package declares `readme`, `classifiers` and `[project.urls]`, has a
-  `CHANGELOG.md` whose first version heading is its version, and its README links to
-  nothing by a relative path (PyPI shows the README, where such a link leads nowhere;
-  a link to a heading of the same page is fine).
+- each package declares `readme`, `license`, `requires-python`, `keywords`,
+  `classifiers` and `[project.urls]`, has a `CHANGELOG.md` whose first version heading
+  is its version and which its source distribution's `only-include`, when it sets one,
+  lists, and its README links to nothing by a relative path (PyPI shows the README,
+  where such a link leads nowhere; a link to a heading of the same page is fine).
 
 Each problem's line names the package, the field and the fix. After `moxi-dev new`,
 the catalogue line is the one thing left to add by hand.

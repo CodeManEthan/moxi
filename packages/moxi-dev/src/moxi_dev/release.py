@@ -11,11 +11,12 @@ It reads the root `pyproject.toml`'s workspace members and each member's own
 2. Every requirement a member places on another member, in `dependencies` or in any
    extra, admits that member's `version`, so the packages as they stand in the tree can
    be installed together.
-3. Each member declares `readme`, `classifiers` and `[project.urls]`; has a
-   `CHANGELOG.md` whose first version heading is its `version`; and its README links to
-   nothing by a relative path, `](LICENSE)` included. PyPI shows the README as the
-   project's page, where a relative link leads nowhere. A link to a heading of the same
-   page (`#...`) is let through.
+3. Each member declares `readme`, `license`, `requires-python`, `keywords`,
+   `classifiers` and `[project.urls]`; has a `CHANGELOG.md` whose first version heading
+   is its `version`, and which its sdist's `only-include`, when it sets one, names; and
+   its README links to nothing by a relative path, `](LICENSE)` included. PyPI shows
+   the README as the project's page, where a relative link leads nowhere. A link to a
+   heading of the same page (`#...`) is let through.
 
 Each problem names the member, the field and the fix. `scan` returns them all.
 """
@@ -58,6 +59,7 @@ class _Member:
     project: dict             # its [project] table, or {} when it has none
     dist: str | None          # its project name, canonical
     version: Version | None
+    sdist_only: object        # its sdist's `only-include`, or None when it sets none
 
 
 def scan(root: Path) -> list[Problem]:
@@ -92,6 +94,8 @@ def _read_member(root: Path, name: str, problems: list[Problem]) -> _Member | No
         return None
     project = data.get("project")
     project = project if isinstance(project, dict) else {}
+    sdist = _table(data, "tool", "hatch", "build", "targets", "sdist")
+    sdist_only = sdist.get("only-include")
     dist = project.get("name")
     if not isinstance(dist, str):
         problems.append(Problem(name, "project.name", "missing",
@@ -109,7 +113,17 @@ def _read_member(root: Path, name: str, problems: list[Problem]) -> _Member | No
             problems.append(Problem(name, "project.version", f"{raw!r} is not a version",
                                     "write a version such as 0.1.0"))
     return _Member(name, path, project,
-                   canonicalize_name(dist) if isinstance(dist, str) else None, version)
+                   canonicalize_name(dist) if isinstance(dist, str) else None, version,
+                   sdist_only)
+
+
+def _table(data: dict, *keys: str) -> dict:
+    """The table at `keys` in `data`, or {} when any step of the way isn't one."""
+    for key in keys:
+        data = data.get(key)
+        if not isinstance(data, dict):
+            return {}
+    return data
 
 
 # --- 1. the catalogue ---------------------------------------------------------------------
@@ -280,8 +294,13 @@ def _absolute(member: _Member, target: str) -> str:
     return f"{repository.rstrip('/')}/blob/main/{path}"
 
 
+#: The site of the sdist's file list in a member's pyproject.toml.
+SDIST_ONLY = "tool.hatch.build.targets.sdist.only-include"
+
+
 def metadata_problems(member: _Member) -> list[Problem]:
-    """The member's readme, classifiers, URLs, CHANGELOG and README links."""
+    """The member's readme, licence, Python floor, keywords, classifiers, URLs,
+    CHANGELOG and README links."""
     project, name = member.project, member.name
     problems = []
     readme = project.get("readme")
@@ -289,6 +308,18 @@ def metadata_problems(member: _Member) -> list[Problem]:
         problems.append(Problem(name, "project.readme", "missing",
                                 'add readme = "README.md", which PyPI shows as the '
                                 "project's page"))
+    if not project.get("license"):
+        problems.append(Problem(name, "project.license", "missing",
+                                'add license = "MIT", the licence every package here '
+                                "carries"))
+    if not project.get("requires-python"):
+        problems.append(Problem(name, "project.requires-python", "missing",
+                                'add requires-python = ">=3.12", the oldest Python CI '
+                                "runs"))
+    if not project.get("keywords"):
+        problems.append(Problem(name, "project.keywords", "missing",
+                                "add keywords: the words someone would search PyPI for "
+                                "to find the package"))
     if not project.get("classifiers"):
         problems.append(Problem(name, "project.classifiers", "missing",
                                 "add the base set the core declares (Development Status, "
@@ -298,6 +329,7 @@ def metadata_problems(member: _Member) -> list[Problem]:
         problems.append(Problem(name, "project.urls", "missing",
                                 "add [project.urls] with Homepage, Repository and Issues"))
     problems += _changelog(member)
+    problems += _sdist_changelog(member)
     readme_file = readme if isinstance(readme, str) else (
         readme.get("file") if isinstance(readme, dict) else None)
     if isinstance(readme_file, str):
@@ -314,6 +346,19 @@ def metadata_problems(member: _Member) -> list[Problem]:
                     f"links to {target} by a relative path, which leads nowhere on PyPI",
                     f"link to {_absolute(member, target)} instead"))
     return problems
+
+
+def _sdist_changelog(member: _Member) -> list[Problem]:
+    """An sdist that lists its paths must list the CHANGELOG, or it ships without one."""
+    listed = member.sdist_only
+    if not isinstance(listed, list):
+        return []
+    paths = {item.strip().lstrip("/").removeprefix("./")
+             for item in listed if isinstance(item, str)}
+    if CHANGELOG in paths:
+        return []
+    return [Problem(member.name, SDIST_ONLY, f"leaves out {CHANGELOG}",
+                    f"add {CHANGELOG}, so the source distribution carries it")]
 
 
 def _changelog(member: _Member) -> list[Problem]:

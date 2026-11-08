@@ -11,6 +11,9 @@ from moxi_dev import release
 
 #: The [project] keys the release step asks of every member, for tests that build one.
 METADATA = ('readme = "README.md"\n'
+            'license = "MIT"\n'
+            'requires-python = ">=3.12"\n'
+            'keywords = ["moxi"]\n'
             'classifiers = ["Programming Language :: Python :: 3"]\n'
             'urls = { Repository = "https://github.com/example/moxi" }\n')
 
@@ -177,11 +180,31 @@ def test_a_missing_version_fails_and_its_requirements_are_not_judged(ws):
      "project.classifiers: missing; add the base set"),
     ('urls = { Repository = "https://github.com/example/moxi" }\n',
      "project.urls: missing; add [project.urls] with Homepage, Repository and Issues"),
-], ids=["readme", "classifiers", "urls"])
+    ('license = "MIT"\n', 'project.license: missing; add license = "MIT"'),
+    ('requires-python = ">=3.12"\n',
+     'project.requires-python: missing; add requires-python = ">=3.12"'),
+    ('keywords = ["moxi"]\n', "project.keywords: missing; add keywords"),
+], ids=["readme", "classifiers", "urls", "license", "requires-python", "keywords"])
 def test_a_missing_field_fails(ws, key, says):
     edit(ws / "packages/alpha/pyproject.toml", key, "")
     [said] = problems(ws)
     assert said.startswith(f"packages/alpha: {says}")
+
+
+def test_an_sdist_listing_its_changelog_passes(ws):
+    with (ws / "packages/alpha/pyproject.toml").open("a") as fh:
+        fh.write('\n[tool.hatch.build.targets.sdist]\n'
+                 'only-include = ["CHANGELOG.md", "README.md", "src/x"]\n')
+    assert problems(ws) == []
+
+
+def test_an_sdist_leaving_out_its_changelog_fails(ws):
+    with (ws / "packages/alpha/pyproject.toml").open("a") as fh:
+        fh.write('\n[tool.hatch.build.targets.sdist]\n'
+                 'only-include = ["README.md", "src/x"]\n')
+    assert problems(ws) == [
+        "packages/alpha: tool.hatch.build.targets.sdist.only-include: leaves out "
+        "CHANGELOG.md; add CHANGELOG.md, so the source distribution carries it"]
 
 
 def test_a_missing_changelog_fails(ws):
