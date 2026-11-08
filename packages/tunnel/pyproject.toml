@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 # The core with the daemon switch and the uninstall listeners tunnel relies on.
-dependencies = ["moxi>=0.1.1,<0.2"]
+dependencies = ["moxi>=0.1.6,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

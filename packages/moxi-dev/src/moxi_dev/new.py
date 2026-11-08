@@ -44,7 +44,7 @@ from moxi import names
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SUFFIX = ".tmpl"
-DEFAULT_CORE_RANGE = ">=0.1,<0.2"
+DEFAULT_CORE_RANGE = ">=0.1.6,<0.2"
 PACKAGES = "packages"
 
 

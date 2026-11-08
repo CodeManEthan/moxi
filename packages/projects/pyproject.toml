@@ -5,7 +5,7 @@ description = "Moxi's list of named places: projects, their roots, kinds and age
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1.4,<0.2"]
+dependencies = ["moxi>=0.1.6,<0.2"]
 
 [project.optional-dependencies]
 # The browser UI shell: with it, projects' page shows there.
