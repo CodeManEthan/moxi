@@ -1,5 +1,5 @@
 """The transcript-read guard: sessions' guard for turns, its judge per tool and harness,
-the `moxi sessions` and `moxi memory` escape, its switch and install question, and the
+the `moxi sessions` escape and its setting, its switch and install question, and the
 doctor's `guard` row. Calls are turns' own `ToolCall`; turns' guard loader reads the
 installed entry points."""
 
@@ -186,12 +186,32 @@ def test_the_refusal_names_the_path_its_root_and_the_reader(home):
 
 # --- the escape -------------------------------------------------------------------------
 
-def test_moxi_sessions_and_moxi_memory_pass_whatever_paths_they_name(home):
+def test_moxi_sessions_passes_whatever_paths_it_names(home):
     t = transcript(home)
-    for command in (f"moxi sessions find {t}", f"moxi memory add --from {t}",
+    for command in (f"moxi sessions find {t}",
                     f"MOXI_HOME=/x moxi sessions read {SESSION} --root {t}",
                     f"{readguard.own_moxi()} sessions read {SESSION} {t}"):
         assert not refused("Bash", {"command": command}, home), command
+
+
+def test_the_escapes_are_sessions_alone_by_default(home, own_config):
+    assert readguard.escapes() == readguard.ESCAPES == frozenset({"sessions"})
+    assert refused("Bash", {"command": f"moxi notes add --from {transcript(home)}"}, home)
+
+
+def test_a_verb_added_to_the_escapes_setting_passes(home, own_config):
+    t = transcript(home)
+    write_config(own_config,
+                 '[guard]\ntranscript_read_escapes = ["sessions", "notes"]\n')
+    assert readguard.escapes() == frozenset({"sessions", "notes"})
+    assert not refused("Bash", {"command": f"moxi notes add --from {t}"}, home)
+    assert not refused("Bash", {"command": f"moxi sessions find {t}"}, home)
+    assert refused("Bash", {"command": f"moxi usage {t}"}, home)
+
+
+def test_the_escapes_setting_can_take_sessions_off(home, own_config):
+    write_config(own_config, "[guard]\ntranscript_read_escapes = []\n")
+    assert refused("Bash", {"command": f"moxi sessions find {transcript(home)}"}, home)
 
 
 def test_the_command_after_the_escape_is_judged_on_its_own(home):

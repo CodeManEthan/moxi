@@ -24,3 +24,10 @@ type = "bool"
 default = false
 doc = "Run the transcript-read guard, which turns enforces: an agent's Read, Grep or Glob of a path under a harness's transcript root, or a shell command naming one, is refused and pointed to moxi sessions read. Naming sessions.transcript-read on turns' guards.on runs it too."
 read = "use"
+
+[guard.transcript_read_escapes]
+type = "list"
+items = "str"
+default = ["sessions"]
+doc = "The verbs of this environment's moxi whose commands the transcript-read guard lets name a transcript path (moxi sessions by default); add a module's verb when that module reads transcripts for its agents."
+read = "use"

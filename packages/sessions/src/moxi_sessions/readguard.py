@@ -19,10 +19,11 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
 The roots are each harness's `source.root()`: the configured root when a config key names
 one, and the harness's own rule over the launch's environment.
 
-**The escape.** A simple command that runs this environment's own `moxi sessions` or
-`moxi memory` (as `moxi`, or by the absolute path of this environment's `moxi`) passes
-whatever paths its words name. The command after it on the same line is judged on its own,
-so `moxi sessions root; cat <transcript>` is refused. sessions' own reads happen in its own
+**The escape.** A simple command that runs one of this environment's own `moxi` verbs
+named on `guard.transcript_read_escapes` (`moxi sessions` by default; as `moxi`, or by the
+absolute path of this environment's `moxi`) passes whatever paths its words name. The
+command after it on the same line is judged on its own, so `moxi sessions root; cat
+<transcript>` is refused. sessions' own reads happen in its own
 process, which is no tool call, so the guard never sees them.
 
 **A nudge, not a boundary.** A relative path after `cd`, a variable, a path built at run
@@ -52,8 +53,10 @@ SWITCH = "guard.transcript_read"
 CALLS = {"claude": ("Read", "Grep", "Glob", "Bash"), "codex": ("Bash",)}
 #: The logger a problem goes to.
 LOGGER = "moxi.sessions"
-#: The verbs of this environment's `moxi` that pass whatever paths they name.
-ESCAPES = frozenset({"sessions", "memory"})
+#: The key naming the verbs of this environment's `moxi` that pass whatever paths they
+#: name, and its shipped default (settings.toml holds the same list).
+ESCAPES_KEY = "guard.transcript_read_escapes"
+ESCAPES = frozenset({"sessions"})
 #: Shell names whose `-c` script is read as commands of its own.
 SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash"})
 #: How deep a `-c` script inside a `-c` script is read.
@@ -71,14 +74,14 @@ _GLOB = "*?["
 _HOME_PREFIXES = ("${HOME}", "$HOME", "~")
 _said: set[str] = set()
 _lock = _thread.allocate_lock()
-_roots_cache: list = [None, None]
+_config_cache: list = [None, None]
 
 
 def reset() -> None:
-    """Forget the logged kinds and the cached roots (tests)."""
+    """Forget the logged kinds and the cached config (tests)."""
     with _lock:
         _said.clear()
-        _roots_cache[:] = [None, None]
+        _config_cache[:] = [None, None]
 
 
 # --- the judge --------------------------------------------------------------------------
@@ -180,6 +183,18 @@ def transcript_roots(env: Mapping[str, str] | None = None) -> tuple[tuple[str, s
 
 def _configured_roots() -> tuple[tuple[str, str], ...]:
     """The roots sessions' config names, read again only when its file changes."""
+    return _configured()[0]
+
+
+def escapes() -> frozenset[str]:
+    """The verbs on `guard.transcript_read_escapes`, read again only when sessions' config
+    file changes. Raises `moxi.config.ConfigError` when the file cannot be read."""
+    return _configured()[1]
+
+
+def _configured() -> tuple[tuple[tuple[str, str], ...], frozenset[str]]:
+    """The roots sessions' config names and its escape verbs, read again only when its
+    file changes."""
     from moxi.paths import Layout
 
     from .settings import MODULE, current
@@ -188,13 +203,14 @@ def _configured_roots() -> tuple[tuple[str, str], ...]:
     path = Layout(MODULE).config_file()
     key = (str(path), _stat(path))
     with _lock:
-        if _roots_cache[0] == key:
-            return _roots_cache[1]
+        if _config_cache[0] == key:
+            return _config_cache[1]
     settings = current()
-    found = tuple((harness, str(settings[k])) for harness, k in ROOT_KEYS.items()
+    roots = tuple((harness, str(settings[k])) for harness, k in ROOT_KEYS.items()
                   if settings[k] is not None)
+    found = (roots, frozenset(settings[ESCAPES_KEY]))
     with _lock:
-        _roots_cache[:] = [key, found]
+        _config_cache[:] = [key, found]
     return found
 
 
@@ -409,12 +425,15 @@ def _past_assignments(words: list[str]) -> list[str]:
     return words[i:]
 
 
-def escaped(words: list[str], home: str | None = None) -> bool:
-    """Whether the simple command runs this environment's own `moxi sessions` or `moxi
-    memory`: `moxi`, or the absolute path (or `~/` path, with `home`) of this
-    environment's `moxi`, then one of those verbs."""
+def escaped(words: list[str], home: str | None = None,
+            verbs: Iterable[str] | None = None) -> bool:
+    """Whether the simple command runs one of this environment's own `moxi` verbs named in
+    `verbs` (`escapes()` when None): `moxi`, or the absolute path (or `~/` path, with
+    `home`) of this environment's `moxi`, then one of those verbs."""
     words = _past_assignments(words)
-    if len(words) < 2 or words[1] not in ESCAPES:
+    if len(words) < 2:
+        return False
+    if words[1] not in (escapes() if verbs is None else frozenset(verbs)):
         return False
     first = words[0]
     if first == "moxi":
@@ -467,5 +486,6 @@ def _fail(kind: str, message: str) -> None:
         log.warning(message, exc_info=True)
 
 
-__all__ = ["NAME", "GUARD_ID", "SWITCH", "CALLS", "ESCAPES", "DENY", "judge", "decide",
-           "transcript_roots", "commands", "split", "escaped", "own_moxi", "reset"]
+__all__ = ["NAME", "GUARD_ID", "SWITCH", "CALLS", "ESCAPES_KEY", "ESCAPES", "DENY", "judge",
+           "decide", "transcript_roots", "escapes", "commands", "split", "escaped",
+           "own_moxi", "reset"]

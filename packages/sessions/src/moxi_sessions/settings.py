@@ -4,7 +4,9 @@ Three keys name a root read when the caller hands none in: `claude.projects` (Cl
 Code's projects root), `codex.sessions` (Codex's sessions root) and `opencode.database`
 (OpenCode's database). Unset, each is the harness's own default in the reading process's
 environment. A fourth, `guard.transcript_read`, is the transcript-read guard's switch
-(`moxi_sessions.readguard`), off by default.
+(`moxi_sessions.readguard`), off by default, and a fifth,
+`guard.transcript_read_escapes`, names the `moxi` verbs that guard lets through
+(`["sessions"]` by default).
 """
 
 from __future__ import annotations
