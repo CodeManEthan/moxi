@@ -7,13 +7,13 @@ import { HOME, KEY_STORAGE } from "./passkey.ts";
 
 /** The theme values these pages use, as `light-dark()` pairs from tokens.json. */
 export const COLOURS = {
-  bg: ["#ffffff", "#14171c"],
-  "bg-raised": ["#ffffff", "#1a1e25"],
-  border: ["#d9dde3", "#2b313b"],
-  text: ["#14181f", "#e6e9ee"],
-  "text-dim": ["#5b6472", "#a0a9b6"],
-  accent: ["#2f6fd0", "#6ea8ff"],
-  error: ["#c0392b", "#ff8a7a"],
+  bg: ["#f6f4f1", "#0a0918"],
+  "bg-raised": ["#fffefd", "#141228"],
+  border: ["#e4dfd7", "#2a2650"],
+  text: ["#1e1a22", "#eeeaf8"],
+  "text-dim": ["#4f4856", "#aca5cb"],
+  accent: ["#5a3ccf", "#a78bfa"],
+  error: ["#a63a26", "#ff7461"],
 } as const;
 
 function colour(name: keyof typeof COLOURS): string {

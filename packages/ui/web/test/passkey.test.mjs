@@ -96,8 +96,8 @@ test("a fresh n is 16 hex digits", () => {
 test("the pages' colours are the theme's tokens", () => {
   const tokens = JSON.parse(readFileSync(new URL("../tokens.json", import.meta.url), "utf8"));
   for (const [name, [light, dark]] of Object.entries(COLOURS)) {
-    assert.equal(tokens[name].$value, light, name);
-    assert.equal(tokens[name].$extensions.moxi.dark, dark, name);
+    assert.equal(tokens[name].$extensions.moxi.sets["calm-workbench"], light, name);
+    assert.equal(tokens[name].$extensions.moxi.sets["midnight-neon"], dark, name);
   }
 });
 
