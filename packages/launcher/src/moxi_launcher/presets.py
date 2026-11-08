@@ -78,8 +78,6 @@ CODEX_HOST = "moxi-turns-codex-host"
 #: The comms interface whose names the launcher calls: `identity_state`, and the Codex
 #: wrapper `moxi comms codex` that ships with it. An older comms offers neither.
 COMMS_INTERFACE = 2
-#: What to install for that comms.
-COMMS_NEEDED = "moxi-comms 0.2"
 #: The start postures every install takes; `with:<identity>` needs comms.
 POSTURES = ("operator", "go")
 WITH = "with:"
@@ -249,6 +247,36 @@ def schema() -> Schema:
     if _schema is None:
         _schema = Schema.parse(_SCHEMA_TEXT, source=f"{__package__} presets schema")
     return _schema
+
+
+#: One requirement line of a distribution's metadata: the name, its version bounds (bare
+#: or in parentheses), and the marker after `;`.
+_REQUIREMENT = re.compile(r"\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*"
+                          r"\(?(?P<specs>[^;()]*)\)?\s*(;(?P<marker>.*))?$")
+
+
+def needed(extra: str) -> str:
+    """What to install for one of the launcher's extras, as a line names it: the
+    distribution with the version bounds the launcher's own requirement for that extra
+    gives, lower bound first (`moxi-comms>=0.3,<0.4` for `comms`). Read from the installed
+    metadata, so no second copy of the version can fall behind; `moxi-<extra>` alone when
+    the metadata can't be read."""
+    from importlib import metadata
+
+    fallback = f"moxi-{extra}"
+    try:
+        lines = metadata.requires("moxi-launcher") or []
+    except metadata.PackageNotFoundError:
+        return fallback
+    wanted = re.compile(r"""\bextra\s*==\s*["']""" + re.escape(extra) + r"""["']""")
+    for line in lines:
+        found = _REQUIREMENT.match(line)
+        if found is None or not wanted.search(found["marker"] or ""):
+            continue
+        specs = [s.strip() for s in found["specs"].split(",") if s.strip()]
+        specs.sort(key=lambda s: not s.startswith(">"))
+        return found["name"] + ",".join(specs)
+    return fallback
 
 
 def path(env: Mapping[str, str] | None = None) -> Path:
@@ -1058,7 +1086,7 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
         if not comms_codex():
             raise NotYet("identity", "a Codex launch with an identity needs comms' Codex "
                          "wrapper (moxi comms codex), which this comms does not offer",
-                         f"install {COMMS_NEEDED}, or launch without an identity")
+                         f"install {needed('comms')}, or launch without an identity")
         if not turns or not _host_installed():
             raise NotYet("identity", "a Codex launch with an identity runs under turns' "
                          f"Codex host ({CODEX_HOST}), which can't start here",
@@ -1245,6 +1273,6 @@ __all__ = [
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "harness_of",
-    "layered", "mode_of", "path", "project_agents", "projects_api", "read", "resolve",
-    "roles", "schema",
+    "layered", "mode_of", "needed", "path", "project_agents", "projects_api", "read",
+    "resolve", "roles", "schema",
 ]

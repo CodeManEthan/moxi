@@ -6,12 +6,13 @@ each harness's flags, composes the command, writes a row to the launch log, and 
 session in this terminal, headless, or (with slots) in a tmux slot. The CLI calls the same
 library a script can import, in its own process; there is no service and no socket.
 
-    pip install moxi-launcher
+    uv tool install moxi
     moxi install launcher
 
-The launcher needs only `moxi`. Everything else is an optional link (see below). You
-need Claude Code or Codex installed and signed in, with their own accounts; the launcher
-has no account and no cloud service of its own.
+The launcher needs only `moxi`, Moxi's core, which the first line installs with the
+`moxi` command. Everything else is an optional link (see below). You need Claude Code or
+Codex installed and signed in, with their own accounts; the launcher has no account and
+no cloud service of its own. Install has the details.
 
 ## A launch
 
@@ -67,6 +68,26 @@ target that names one is refused, exit 2.
 With turns, a launch in this terminal or in a slot waits until the session is ready and
 sends the brief as its first turn, once. If turns cannot say whether it went in, the
 launch log says the brief is unconfirmed; it is never sent twice.
+
+**The start posture.** The `posture` row tells the agent how its session begins. The
+launcher writes it as one line, `start posture: <value>`, in the identity block the
+session starts with (the few lines naming its session id, directory, project and comms
+name, which Claude Code gets with its system prompt), or, where a session gets no
+identity block (a Codex launch without turns, or a headless one), as the second line of
+its opening prompt. The launcher does nothing else with it: the word is for the agent,
+and your own instructions can say more about each. Unset, the default, there is no line.
+
+- `operator`: the operator, the person running Moxi, is at this session and directs it.
+  The agent takes its work from that person as it comes.
+- `go`: nobody is waiting at this session to direct it. The agent starts on its brief at
+  once and carries it through.
+- `with:<identity>` (needs comms): the session works for a director, the comms identity
+  named. A director is a session that hands this one its work and hears back through
+  comms; a launch lists its directors with `--director`. A director's relaunch starts the
+  new session with this posture.
+- `relaunched (handoff: <file>)`: the launcher's own, never set by a preset. A session
+  that relaunched itself with a handoff starts with it, and reads that file before
+  anything else; the `moxi-handoff` skill the launcher ships says so.
 
 `moxi launcher preview` takes the same words as `run` and prints the command and the
 environment variables the launch would set, starting nothing.
@@ -256,7 +277,7 @@ and nothing has gone well since; a session merely waiting is never red.
 
 ## The page
 
-With the UI shell installed (`pip install "moxi-launcher[ui]"`), the launcher has a page
+With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
 in the shell, and two small views other pages can show: a launched session's state, red
 when it needs a look, and a block on the shell's home listing each running launched
 session with its state.
@@ -408,3 +429,27 @@ Set with `moxi config set launcher <key> <value>`:
   words.
 - `records.keep_days` (90): how long ended runs, their events, exits and released holds
   are kept.
+
+## Install
+
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/), with Claude Code or
+Codex. Launching in this terminal and headless needs nothing more. A slot launch needs
+the slots module and tmux (Linux, macOS and WSL2), and keep-warm and recycle on expiry
+need cache, which reads a session's environment on Linux, macOS and WSL2. The launcher
+also has macOS and Windows code for the rest, which the repository's CI tests without
+gating and nobody runs yet: treat both as untested.
+
+```sh
+uv tool install moxi
+moxi install launcher
+```
+
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds the launcher beside it, runs its setup and offers each module under
+Optional links as an extra (`--with turns,comms`, say, answers ahead). The repository's
+README, at [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi`
+command and lists the other modules.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/launcher/LICENSE).
