@@ -409,8 +409,8 @@ def test_no_type_name_is_spelled_in_the_package():
 
     names = {row["name"] for row in tomllib.loads(TYPES)["type"]}
     names |= {"brief", "journal", "minutes", "ledger", "agent-file", "design", "handoff",
-              "charter", "round-note", "build-report", "design-records", "evidence-note",
-              "archive", "state", "memo", "spec"}
+              "proposal", "meeting-note", "status-report", "decision-record",
+              "research-note", "archive", "state", "memo", "spec"}
     found = []
     for path in SRC.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

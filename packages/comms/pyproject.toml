@@ -2,6 +2,7 @@
 name = "moxi-comms"
 version = "0.3.0"
 description = "Messages between coding-agent sessions, delivered into their turns."
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
@@ -15,7 +16,6 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Topic :: Communications",
-    "Topic :: Software Development",
 ]
 # turns is required: it is the one way into a harness session (a Claude session's
 # delivery, its Stop hold and its context all go through it).

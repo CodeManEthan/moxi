@@ -296,8 +296,9 @@ a failure for an act that never ran. Neither leaks data or runs code as you.
 
 ## Platforms
 
-Linux, macOS and Windows, with Python 3.12 or later. Linux and macOS serve on a Unix
-socket; Windows serves on loopback TCP.
+Linux, with Python 3.12 or later. The server also has macOS and Windows code, which
+nobody runs yet: treat both as untested. Linux and macOS serve on a Unix socket; Windows
+serves on loopback TCP.
 
 ## Install
 

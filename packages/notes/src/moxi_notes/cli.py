@@ -157,12 +157,26 @@ def _override() -> str | None:
     return os.environ.get(OVERRIDE) or None
 
 
+#: Why a folder has no notes directory, by the resolver rule that said so.
+NO_DIR = {
+    "excluded": "no notes directory: this folder is inside one of the folders the "
+                "exclude setting names",
+    "reserved": "no notes directory: the folder notes would compute for it falls inside "
+                "the topics or inbox folder",
+    "none": "no notes directory: notes computes one only for a folder below your home "
+            "folder and outside the notes root and the excluded folders (a project or a "
+            "git work tree counts from its top)",
+}
+
+
 def _dir(args, out) -> int:
     found = api.notes_dir(_path(args.path), override=_override())
     if args.json:
         print(json.dumps(found.as_dict()), file=out)
     elif found.dir is not None:
         print(found.dir, file=out)
+    else:
+        print(NO_DIR.get(found.rule, "no notes directory for this folder"), file=sys.stderr)
     if found.warning:
         print(f"warning: {found.warning}", file=sys.stderr)
     return codes.OK if found.dir is not None else codes.ERROR

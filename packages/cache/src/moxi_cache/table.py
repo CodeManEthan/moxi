@@ -9,10 +9,10 @@ Claude reads do not use the table.
 Three kinds of row:
 
 * a documented row: `seconds` from the provider's documentation (`source`), with
-  `evidence` or a `ruling` where the source does not name the route in use;
-* a measured row: `seconds` from a ruled measurement, `floor` the provider's documented
-  minimum, `measured = true`. A learning drift store may lower it when a read sees a
-  cache go cold sooner (`codex`, the drift scan), never below `floor`;
+  `evidence` or a `basis` where the source does not name the route in use;
+* a measured row: `seconds` from a measurement its `basis` says to count, `floor` the
+  provider's documented minimum, `measured = true`. A learning drift store may lower it
+  when a read sees a cache go cold sooner (`codex`, the drift scan), never below `floor`;
 * a free row: `charge = "free"` and no `seconds`. A read whose next request runs on one
   of its models is `no-cache`, since a cold landing there costs nothing.
 
@@ -25,6 +25,9 @@ checked as shipped rows are. A user row adds a model and never overrides one: a 
 that overlaps a shipped row or another user row is refused, and so is any row the loader
 cannot vouch for. A refused user row refuses the table, as a refused shipped row does, so
 a typo never silently changes who can be reached; `moxi cache doctor` names it.
+
+`basis` was named `ruling` before cache 0.1.4. A row that still says `ruling` is read as
+if it said `basis`; a row that says both is refused.
 """
 
 from __future__ import annotations
@@ -49,7 +52,9 @@ SHIPPED, USER = "shipped", "user"
 #: The keys a row may carry. Anything else is refused: a key the loader does not read
 #: could be a qualification the row's author meant to be honoured.
 ROW_KEYS = {"harness", "provider", "models", "seconds", "anchor", "source", "checked",
-            "evidence", "ruling", "note", "floor", "measured", "charge"}
+            "evidence", "basis", "note", "floor", "measured", "charge", "ruling"}
+#: `basis`'s old name, still read so rows written before the rename keep loading.
+OLD_BASIS = "ruling"
 
 #: Why every Codex and OpenCode read is `unknown` when the table does not load.
 NOT_LOADED = "the cache lifetime table could not be read"
@@ -69,7 +74,7 @@ class Row:
     source: str
     checked: str
     evidence: str
-    ruling: str
+    basis: str
     note: str
     floor: int | None = None
     measured: bool = False
@@ -146,11 +151,14 @@ def parse_row(raw, n: int, *, origin: str = SHIPPED) -> Row:
     if len(set(models)) != len(models):
         raise TableError(f"{where}: a model id is listed twice")
     source = _text(where, raw, "source")
-    ruling = _text(where, raw, "ruling")
+    if OLD_BASIS in raw and "basis" in raw:
+        raise TableError(f"{where}: both `basis` and `{OLD_BASIS}`, its old name; keep "
+                         f"`basis`")
+    basis = _text(where, raw, OLD_BASIS if OLD_BASIS in raw else "basis")
     evidence = _text(where, raw, "evidence")
     note = _text(where, raw, "note")
-    if not source.strip() and not ruling.strip():
-        raise TableError(f"{where}: no `source` and no `ruling`")
+    if not source.strip() and not basis.strip():
+        raise TableError(f"{where}: no `source` and no `basis`")
     checked = raw.get("checked")
     if not isinstance(checked, datetime.date) or isinstance(checked, datetime.datetime):
         raise TableError(f"{where}: `checked` is not a date")
@@ -169,8 +177,8 @@ def parse_row(raw, n: int, *, origin: str = SHIPPED) -> Row:
             raise TableError(f"{where}: a free row has no `anchor`, `floor` or `measured`")
         if models == [WILDCARD]:
             raise TableError(f"{where}: a free row lists exact model ids, never \"*\"")
-        if not ruling.strip():
-            raise TableError(f"{where}: a free row needs the `ruling` that made it free")
+        if not basis.strip():
+            raise TableError(f"{where}: a free row needs the `basis` that made it free")
         seconds = None
     else:
         seconds = raw.get("seconds")
@@ -179,8 +187,8 @@ def parse_row(raw, n: int, *, origin: str = SHIPPED) -> Row:
         if anchor not in ANCHORS:
             raise TableError(f"{where}: unknown anchor {anchor!r}")
         if measured:
-            if not ruling.strip():
-                raise TableError(f"{where}: a measured row needs a `ruling`")
+            if not basis.strip():
+                raise TableError(f"{where}: a measured row needs a `basis`")
             if not evidence.strip():
                 raise TableError(f"{where}: a measured row needs its `evidence`")
             if not _positive_int(floor) or floor > seconds:
@@ -190,7 +198,7 @@ def parse_row(raw, n: int, *, origin: str = SHIPPED) -> Row:
             raise TableError(f"{where}: `floor` only on a measured row")
     return Row(harness=harness, provider=provider, models=tuple(models), seconds=seconds,
                anchor=anchor, source=source, checked=checked.isoformat(),
-               evidence=evidence, ruling=ruling, note=note,
+               evidence=evidence, basis=basis, note=note,
                floor=floor if measured else None, measured=measured,
                charge=raw.get("charge"), origin=origin)
 

@@ -4,13 +4,13 @@ The contributor tools for the Moxi repository. It is a development package: the
 repository's `uv sync` installs it, and no Moxi module depends on it at run time.
 
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
-  tag check, the contract's import rules (import-linter and deptry) and the tests of the
-  packages the change reaches. A test in the `slow`, `browser` or `build` tier runs
+  tag check, the release step (see below), the contract's import rules (import-linter
+  and deptry) and the tests of the packages the change reaches. A test in the `slow`, `browser` or `build` tier runs
   when a path its `touches` mark names changed; `--full` runs every package and every
-  tier but `live`; `--finding L<n>` runs only the tests marked with that finding. Its
-  last line gives the tests' seconds, the slowest 5 %'s share of them and the change
-  against the newest record on `main` (one record per commit, kept under git's own
-  directory).
+  tier but `live`; `--finding L<n>` runs only the tests marked with that finding (see
+  "The tag check" below). Its last line gives the tests' seconds, the slowest 5 %'s
+  share of them and the change against the newest record on `main` (one record per
+  commit, kept under git's own directory).
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
   the fence around each test, the tier markers, the durations each run writes and the
   helpers tests share (`Seam` for a seam with two implementations among them).
@@ -27,6 +27,46 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 uv sync
 uv run moxi-dev check
 ```
+
+## The tag check
+
+Code, tests and docs in this repository give their reasons in plain words. The tag
+check, which `moxi-dev check` runs over every text file git doesn't ignore, refuses short
+reference ids that point into notes a reader of the repository can't see: a capital
+letter and a number in square brackets, a section sign with a number, a severity word
+with a number, and a few more shapes listed in `moxi_dev/tags.py`. Its line names the
+file, the line and the text it refused. Write the reason the id stood for instead.
+
+Some text has to look like an id because it is data, such as the input a test feeds the
+pattern that refuses it. `.residue-allow` at the repository's root lets such text stand
+in one file. Each line is `<path> TAB <exact text> TAB <why>`, the why saying what data
+the text is. A line lets that exact text through in that one file and nowhere else.
+
+A finding is one reported issue: a bug, say, given a name of the form `L<n>`, an L and a
+number. A test that covers it carries the mark `@pytest.mark.finding("L<n>")` with that
+name, and `moxi-dev check --finding L<n>` runs only the tests carrying it in the
+packages the check picks (every package with `--full`), so a fix can be checked against
+just the tests written for it. A finding's name is let through inside the mark's
+arguments and refused everywhere else, like any other id.
+
+## The release step
+
+Every package here is published to PyPI from this tree, so `moxi-dev check` checks what
+publishing needs on every package, whatever the change touched:
+
+- the core's catalogue (`packages/moxi/src/moxi/catalogue.toml`, the modules
+  `moxi install` knows by name) lists exactly the packages that declare a `moxi.modules`
+  entry point, each under its distribution name;
+- every requirement one package places on another, in its dependencies or any extra,
+  admits the other's version as it stands in the tree;
+- each package declares `readme`, `license`, `requires-python`, `keywords`,
+  `classifiers` and `[project.urls]`, has a `CHANGELOG.md` whose first version heading
+  is its version and which its source distribution's `only-include`, when it sets one,
+  lists, and its README links to nothing by a relative path (PyPI shows the README,
+  where such a link leads nowhere; a link to a heading of the same page is fine).
+
+Each problem's line names the package, the field and the fix. After `moxi-dev new`,
+the catalogue line is the one thing left to add by hand.
 
 ## The web build's stamp
 

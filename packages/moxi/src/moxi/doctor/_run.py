@@ -1306,8 +1306,8 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     holds this run's environment), or the first thing that stops it, each with its step.
 
     It reads only: it places the record, compares it with what this run would record, and
-    runs the front door's keyboard test (`keyboard`, for a test) and the walk (`view` and
-    `run`, as `moxi.terminal.walk` takes them). A write the front door's record step
+    runs the `moxi` command's keyboard test (`keyboard`, for a test) and the walk (`view` and
+    `run`, as `moxi.terminal.walk` takes them). A write the `moxi` command's record step
     tried and failed in this run (`moxi.terminal.last`) is named with its error; with no
     step in this run, a record that differs is checked for whether it could be written.
     A walk that finds Moxi or an agent, or can't decide, is a `warn`; a record that can't

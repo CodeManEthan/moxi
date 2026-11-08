@@ -584,7 +584,7 @@ def test_the_session_query_and_the_roster_carry_the_endpoint_state(rig):
 
 def test_the_doctor_names_a_bound_session_with_no_endpoint_and_leaves_turns_rows(rig):
     """comms' doctor keeps its own row for a bound session with no endpoint; turns'
-    rows are turns' declared checks, which the front door's doctor runs."""
+    rows are turns' declared checks, which `moxi doctor` runs."""
     from moxi_comms.adapters.claude_adapter import ClaudeAdapter
     shim = rig.shim(name="reviewer", scope="proj-a", start=False)
     a = ClaudeAdapter(shim, 1, look_interval=60).start(tolerate_offline=False)

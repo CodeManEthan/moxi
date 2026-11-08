@@ -1,12 +1,23 @@
 [project]
 name = "moxi-sessions"
-version = "0.2.5"
+version = "0.2.6"
 description = "Read each harness's own session records in one shape: find a session and its subagents, list a root's sources, read records forward or back."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1,<0.2"]
+keywords = ["agents", "claude-code", "codex", "opencode", "transcripts", "sessions"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+dependencies = ["moxi>=0.1.6,<0.2"]
 
 [project.optional-dependencies]
 # The browser UI shell: with it, the sessions page and its window block show there.

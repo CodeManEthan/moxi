@@ -2,6 +2,14 @@
 
 ## 0.2.3 (2026-11-08)
 
+The first public release.
+
+- The README gains a section for using the shell: install, the verbs, how the shell
+  runs, its port and settings, and which modules show pages. Its gateway section says
+  the gateway's port can be taken while Moxi isn't running, that macOS and Windows have
+  no provider check, and what to do on a machine others log in to. The README's links
+  work on PyPI.
+- The package metadata gains keywords and classifiers.
 - The theme is two named colour sets: calm-workbench, a warm paper grey, in light mode
   and midnight-neon, a near-black violet, in dark mode. `theme.mode` switches between
   them as before, and its default, `system`, follows the browser. The old blue-grey
@@ -45,6 +53,8 @@
 - The page-server base moves into ui as `moxi_ui.loopback`, reached through ui's API
   module. ui no longer needs moxi-loopback; it requires starlette, uvicorn and h11
   itself.
+- ui offers interface 3: interface 2 plus `api.loopback`, the page-server base, which
+  every page module now loads with `moxi.modules.load("ui", interface=3)`.
 
 ## 0.1.1 (2026-11-07)
 

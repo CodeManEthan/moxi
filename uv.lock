@@ -749,7 +749,7 @@ wheels = [
 
 [[package]]
 name = "moxi"
-version = "0.1.6"
+version = "0.1.7"
 source = { editable = "packages/moxi" }
 dependencies = [
     { name = "psutil" },
@@ -772,7 +772,7 @@ dev = [
 
 [[package]]
 name = "moxi-cache"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "packages/cache" }
 dependencies = [
     { name = "moxi" },
@@ -930,6 +930,7 @@ dependencies = [
     { name = "deptry" },
     { name = "import-linter" },
     { name = "moxi" },
+    { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
@@ -945,6 +946,7 @@ requires-dist = [
     { name = "deptry" },
     { name = "import-linter" },
     { name = "moxi", editable = "packages/moxi" },
+    { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
@@ -1267,7 +1269,7 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.5"
+version = "0.2.6"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
@@ -1357,7 +1359,7 @@ dev = [
 
 [[package]]
 name = "moxi-turns"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "packages/turns" }
 dependencies = [
     { name = "moxi" },

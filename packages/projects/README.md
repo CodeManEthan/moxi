@@ -2,6 +2,81 @@
 
 Moxi's list of named places: projects, their roots, kinds and agents.
 
+A project is a key, such as `alpha`, standing for a directory, its root. Other Moxi
+modules take the key wherever they take a path, and file what they keep under it: repo's
+git hooks, services' rows, notes' folders, the launcher's launches. Each project has a
+kind, may name a lead agent and any number of associated agents, and, with the notes
+module, may keep its notes in a folder of its own.
+
+```sh
+moxi projects add alpha --root ~/code/alpha
+moxi projects list
+moxi projects find ~/code/alpha/src     # alpha
+```
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `moxi projects add KEY [--root DIR] [--create] [--kind KIND] [--lead NAME] [--notes-root DIR]` | add a project; `--create` makes the root first (for most kinds a directory and `git init`) |
+| `moxi projects set KEY [--root DIR] [--kind KIND] [--lead NAME \| --no-lead] [--notes-root DIR \| --no-notes-root]` | change a project's fields |
+| `moxi projects remove KEY` | remove a project; its files stay |
+| `moxi projects list [--kind KIND]` | every project, by key |
+| `moxi projects show KEY` | one project with its lead and associated agents |
+| `moxi projects find [PATH]` | the key of the project PATH (default: here) is in, or nothing |
+| `moxi projects kinds` | the kinds, built in and contributed, and any contribution that won't load |
+| `moxi projects agents add KEY NAME`, `agents remove KEY NAME` | add or remove an associated agent |
+| `moxi projects promote SLUG KEY [...]` | make one of notes' inbox one-offs a project (below) |
+
+Every verb takes `--json`. A write prints the project as it now stands, and `remove`
+prints it as it was. Paths are made absolute: `~` expanded, a relative one against the
+working directory. `--notes-root` needs the notes module installed.
+
+Exit codes: 0 done; 1 an error, such as a store that can't be read or a module's part of
+projects that won't load; 2 asked wrongly; 3 refused, such as a taken key or no such
+project; 75 the store stayed locked, try again. A refusal prints its reason and the
+command that fixes it.
+
+## Keys, roots and agents
+
+A key holds only letters, digits, `.`, `_` and `-`, starts with a letter or a digit and
+doesn't end with `.`. Keys are unique ignoring case and looked up ignoring case, and no
+key is a Windows device name (`con`, `nul`, `com1`), since other modules use a key as a
+folder name. A root is an absolute directory, unique among projects, and may not exist
+yet: a project can be added before it is cloned. `find` matches the deepest root a path
+is under, and a linked git worktree counts as its main work tree.
+
+An agent name is any word without spaces. The lead is never also an associated agent.
+Whether a name is a live agent anywhere is not projects' question.
+
+## Kinds
+
+A kind says what a project is. projects has two built in, `project` (a code project: a
+directory, usually a git repository; the default) and `agent` (an agent's home
+directory), and other modules add their own: notes adds `topic`, a subject with no code
+(see Promote). A module that adds a kind may give its defaults, such as a root, check a
+row of its kind before it is written, and refuse a remove while it still holds the
+project: services while a service names it, notes while removing it would move where the
+project's sessions find notes that are already there.
+
+A module whose part of projects won't load blocks only what it bears on: a remove, since
+it can't say whether it holds the project, and an add or set of a kind no loaded module
+declares. Any other add goes ahead with a warning naming it. `moxi projects kinds` and
+`moxi doctor projects` name it with the fix: repair it, or `moxi uninstall` it.
+
+## The store
+
+The list is one SQLite file, `projects.db`, in projects' data directory (`moxi paths
+projects` names it), readable by you alone. The first write makes it; a read never
+writes. Other modules read it in process through projects' API, interface 1
+(`list_projects`, `get`, `for_path`, `kinds`), reached with
+`moxi.modules.load("projects", interface=1)`. `moxi install projects` again is the
+upgrade, and moves an older store to the current schema.
+
+`moxi doctor projects` checks the store, each root (a missing one is a warning), two
+roots naming one directory, rows whose kind no installed module declares, and each
+module's part of projects.
+
 ## Promote
 
 With the notes module installed, `moxi projects promote SLUG KEY` turns an inbox one-off
@@ -110,3 +185,24 @@ attribute once, when it is placed; place a new one for another kind or key. Afte
 change that was made, or may have been, the add form and the page send
 `moxi-projects-changed` on the document, and every placed picker and card reads its
 route again.
+
+## Install
+
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/); `git` for
+`add --create`. projects also has macOS and Windows code, which the repository's CI tests
+without gating and nobody runs yet: treat both as untested.
+
+```sh
+uv tool install moxi
+moxi install projects
+```
+
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds projects beside it and offers its optional extras: `notes` (`moxi projects
+promote`) and `ui` (the page). The repository's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
+lists the other modules.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/projects/LICENSE).

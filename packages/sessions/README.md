@@ -167,9 +167,13 @@ Codex. A shell command is split into simple commands, each judged on its own, an
 refused when one of its words is such a path. The refusal points the agent to `moxi
 sessions read <session>`. The roots are each harness's root, the configured one included.
 
-A simple command that runs this environment's own `moxi sessions` or `moxi memory` passes
-whatever paths it names. The command after it on the same line is judged on its own, so
-`moxi sessions root; cat <transcript>` is refused.
+A simple command that runs this environment's own `moxi sessions` passes whatever paths it
+names. The command after it on the same line is judged on its own, so `moxi sessions root;
+cat <transcript>` is refused. The verbs that pass are the list
+`guard.transcript_read_escapes`, `["sessions"]` by default. A module of your own that
+reads transcripts for its agents can be let through by adding its verb:
+
+    moxi config set sessions guard.transcript_read_escapes '["sessions", "<verb>"]'
 
 A call it can't judge runs, so one fault never refuses every read; `moxi doctor sessions`
 shows the fault in its `guard` row. That row is `off` when the guard is off, `ok` when it
@@ -232,17 +236,10 @@ uv tool install moxi
 moxi install sessions
 ```
 
-Before the modules are on PyPI, install the core from git and give `moxi install` the
-module's git source:
-
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install sessions --from 'moxi-sessions @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/sessions'
-```
-
-The front door's README, at
-[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
-the other modules.
+The core's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi/tree/main/packages/moxi), covers
+the `moxi` command and how `moxi install` works; the repository's README lists the other
+modules.
 
 ## Dependencies
 
@@ -259,4 +256,4 @@ extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/sessions/LICENSE).

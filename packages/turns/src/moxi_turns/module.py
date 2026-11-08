@@ -2,7 +2,7 @@
 
 turns is a library with no user command: other modules call `moxi_turns`, and the
 internal entry points the harness adapters add are spawned, never typed. Its checks run
-in the front door's doctor (`DOCTOR`); it has no daemon, so no `HEALTH`. With the `ui`
+in `moxi doctor` (`DOCTOR`); it has no daemon, so no `HEALTH`. With the `ui`
 extra it has a page in the browser UI shell: the live list of the sessions it can reach,
 read-only.
 """

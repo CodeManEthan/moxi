@@ -96,9 +96,11 @@ def mode(values: Mapping[str, object], ctx: Context) -> tuple[str, tuple[str, ..
         return "exec", ()
     if identity:
         if not ctx.comms_codex:
+            from ..presets import needed
+
             raise NotYet("identity", "a Codex launch with an identity needs comms' Codex "
                          "wrapper (moxi comms codex), which this comms does not offer",
-                         "install moxi-comms 0.2, or leave the identity out")
+                         f"install {needed('comms')}, or leave the identity out")
         if "turns" not in ctx.modules or not ctx.host:
             raise NotYet("identity", "a Codex launch with an identity runs under turns' "
                          "Codex host, which can't start here",

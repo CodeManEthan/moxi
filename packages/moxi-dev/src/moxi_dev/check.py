@@ -7,8 +7,13 @@ worker count or base stops it there, before any step runs. Then, in order:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
    stale lock stops the check here.
-2. The tag check over the repository's files (`moxi_dev.tags`): no ruling, design,
-   review or build tags in code, tests or docs.
+2. The tag check over the repository's files (`moxi_dev.tags`): no short reference ids,
+   pointing into notes a reader of the repository can't see, in code, tests or docs.
+   Then the release step over every workspace member, whatever the change picks
+   (`moxi_dev.release`): the core's catalogue lists exactly the module packages, every
+   requirement one member places on another admits that member's version, and each
+   member has the metadata, the CHANGELOG entry and the README links PyPI needs. Each
+   problem's line names the member, the field and the fix.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
    tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
@@ -43,7 +48,8 @@ worker count or base stops it there, before any step runs. Then, in order:
    `build` and `live` tiers), and besides it, through the test kit's variables
    (`moxi_dev.testing`): a tier test marked `touches` whose glob matches a changed path;
    with `--full`, every tier but `live`; with `--finding L<n>`, only the tests marked
-   with that finding, whatever their tier but `live`. Under `--finding` a package where
+   with that finding (one reported issue, named by an L and a number, which
+   `@pytest.mark.finding` gives the tests that cover it), whatever their tier but `live`. Under `--finding` a package where
    no test carries it counts as `none`, not as a failure, but a check where no package
    has one fails. A `live` test never runs here.
 
@@ -70,13 +76,13 @@ worker count or base stops it there, before any step runs. Then, in order:
    package), keep the commit's record and find the newest record on `main` to compare
    with (`moxi_dev.durations`).
 10. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, stamp, web, sync and lint results, each package's tests and seconds (and
+   lock, tag, release, stamp, web, sync and lint results, each package's tests and seconds (and
    `without its browser tests` where Chromium couldn't start), the serial pass's
    packages with their results and seconds (`timed none` when no package held a timed
    test, `timed not run` when the suites never ran), the tests' own seconds with the
    slowest 5 %'s share of them and the delta against main, the total and the exit code.
 
-The tags, each package's lint and each package's tests (both passes) all run even when
+The tags, the release step, each package's lint and each package's tests (both passes) all run even when
 one before them failed, so one run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
@@ -99,7 +105,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import durations, lint, stamp, tags
+from . import durations, lint, release, stamp, tags
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -362,6 +368,7 @@ class Result:
     packages: list[str] | None = None
     lock: str = "not run"
     tags: str = "not run"
+    release: str = "not run"
     stamps: str = "not run"
     web: str = "not run"
     sync: str = "not run"
@@ -411,7 +418,8 @@ class Result:
             failed = [name for name, ok in self.lint if not ok]
             linted = f"fail ({', '.join(failed)})" if failed else "pass"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
-                f"lock {self.lock} | tags {self.tags} | stamps {self.stamps} | "
+                f"lock {self.lock} | tags {self.tags} | release {self.release} | "
+                f"stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
                 f"total {self.seconds:.1f}s | exit {self.code}")
@@ -486,6 +494,7 @@ class _Steps:
         if not ok:
             return False
         ok = self.tags()
+        ok = self.release() and ok
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
             return ok
@@ -645,6 +654,13 @@ class _Steps:
         self.result.tags = "fail" if hits else "pass"
         return not hits
 
+    def release(self) -> bool:
+        problems = release.scan(self.root)
+        for problem in problems:
+            print(f"moxi-dev check: {problem}", flush=True)
+        self.result.release = "fail" if problems else "pass"
+        return not problems
+
     def lint(self, package: Package, venv: Path, suite_env: Mapping[str, str]) -> bool:
         """The package's lint commands, run in the check's environment; True when each
         passed. A package with none is left out of the result."""
@@ -704,10 +720,11 @@ def _web(root: Path, env: Mapping[str, str], run: Run, result: Result) -> bool:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
-        description="Run the checks a change must pass before it merges: the lock and "
-                    "the tag check, then the import rules and the tests of every package "
-                    "the change touches and of every package that depends on one, in an "
-                    "environment of the check's own. Run it from the repository's root.")
+        description="Run the checks a change must pass before it merges: the lock, the "
+                    "tag check and the release step, then the import rules and the tests "
+                    "of every package the change touches and of every package that "
+                    "depends on one, in an environment of the check's own. Run it from "
+                    "the repository's root.")
     parser.add_argument("--full", action="store_true",
                         help="check every package, whatever changed, and run every "
                              "test tier but live")

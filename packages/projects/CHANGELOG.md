@@ -2,9 +2,15 @@
 
 ## 0.1.4 (2026-11-08)
 
+The first public release.
+
+- projects needs moxi 0.1.6 or later.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has the selected colour.
 - The chosen project in the picker and the open project are edged with the theme's
   selected colour.
-- The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
+- The package metadata gains the README as its long description, keywords and
+  classifiers.
+- The README covers the commands, keys, kinds, the store and install.
 
 ## 0.1.3 (2026-11-07)
 

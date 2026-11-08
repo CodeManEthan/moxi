@@ -10,7 +10,7 @@ read = "use"
 [lifetime]
 type = "list"
 default = []
-doc = "Your own [[lifetime]] rows, in the shipped table's schema: each adds a Codex or OpenCode model the shipped table has no row for, with a source or a ruling; a row that overlaps another is refused."
+doc = "Your own [[lifetime]] rows, in the shipped table's schema: each adds a Codex or OpenCode model the shipped table has no row for, with a source or a basis; a row that overlaps another is refused."
 read = "use"
 
 [watch.tick]

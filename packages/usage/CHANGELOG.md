@@ -1,7 +1,16 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-08)
 
+The first public release.
+
+- usage needs moxi 0.1.6 or later.
+- LiteLLM's license notice ships with the model table derived from its price file, as
+  `data/LICENSE-litellm`, in the wheel and the source distribution, and the README's
+  License section names it.
+- The README says how to install usage, what it needs, and where its files live. The
+  source distribution includes this changelog. The package declares keywords and
+  classifiers.
 - `moxi usage terms` and the `terms` report print every term of a cost: each price
   group's tokens, price and dollars for input, cache read, the two cache writes and
   output, adding up to the cost. Grouped by model it is a reconciliation table; by day,

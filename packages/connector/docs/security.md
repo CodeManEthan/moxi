@@ -32,8 +32,10 @@ not a gate, since a process can call the socket directly.
 comms provides the one gate today. Its socket check walks the calling process's ancestry
 against every live comms session, the walk comms makes before a send under a reserved
 name. A process inside a session is refused, and so is one the walk can't place. Its
-shell check refuses a shell inside a session, or one with no operator stamp
-(`MOXI_COMMS_OPERATOR`).
+shell check refuses a shell inside a session, or one with no operator stamp. In comms the
+operator is the human running the system, as opposed to the agents, and the operator stamp
+is the `MOXI_COMMS_OPERATOR` variable you set in your own terminal to send messages as
+yourself ([comms' configuration](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/configuration.md)).
 
 What this stops, and what it doesn't, plainly. It refuses every process the session walk
 places inside a live comms session, so an agent that runs `moxi connector code` or calls
@@ -41,7 +43,8 @@ the socket from its own process tree can't mint a code. An agent that deliberate
 a process outside its tree (with `setsid` or `systemd-run --user`, say) and calls the
 socket from there can mint one, and so can any other process of your user outside every
 session's tree: a harness comms doesn't know, a timer. This is the boundary comms already
-keeps for the operator's lane and for reserved names. It is accepted as designed, and no
+keeps for the operator's lane (sending as the operator, which comms refuses inside an
+agent's session) and for reserved names. It is accepted as designed, and no
 per-code approval on another device is built. The other way in is a person: someone who
 talks you into reading a code out. Use a code only for a sign-in you started yourself.
 
@@ -153,6 +156,11 @@ The connector listens on loopback only. While its switch is on, a socket unit ho
 port, so no other local user can bind it while the process restarts and collect tokens.
 Its control socket is mode 0600 in a 0700 directory and drops a peer of another user before
 reading it.
+
+That holds while you are logged in. A Tailscale forward outlives your login: tailscaled
+keeps forwarding to 8452 after you log out, while your user units, the socket unit among
+them, stop with your last logout. On a machine other people log in to, turn on lingering
+for your user (`loginctl enable-linger`), or remove the tunnel entry before you log out.
 
 ## Reporting a vulnerability
 

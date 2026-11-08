@@ -272,7 +272,7 @@ def write(env: Mapping[str, str] | None = None, *, path: str | os.PathLike | Non
     newer format included. Returns the path.
 
     Raises `paths.NoAnchor` when the account's folder can't be placed, and `OSError`
-    when the file can't be written. Only the front door's record step writes the real
+    when the file can't be written. Only the `moxi` command's record step writes the real
     account's record; this is also the test kits' writer, under a test's anchor.
     """
     path = paths.terminal_record() if path is None else Path(path)
@@ -384,7 +384,7 @@ def is_pty_pipe(name: str) -> bool:
     return _PTY_PIPE.fullmatch(name) is not None
 
 
-# -- the front door's step -----------------------------------------------------------------
+# -- the moxi command's step ---------------------------------------------------------------
 
 #: What a record step did (`Outcome.kind`).
 SAME = "same"                # the file already held this environment: nothing walked

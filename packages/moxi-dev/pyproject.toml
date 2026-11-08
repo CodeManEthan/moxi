@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["moxi", "testing", "pytest", "contributor-tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -18,8 +19,10 @@ classifiers = [
 ]
 # The test runner, its plugins and the two tools that check the contract's import rules
 # (import-linter and deptry) are moxi-dev's own dependencies, so the root's dev group,
-# which names moxi-dev alone, brings them into a contributor's environment.
-dependencies = ["moxi>=0.1.6,<0.2", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry"]
+# which names moxi-dev alone, brings them into a contributor's environment. packaging
+# reads the requirements and versions the release step compares.
+dependencies = ["moxi>=0.1.6,<0.2", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry",
+                "packaging"]
 
 [project.scripts]
 moxi-dev = "moxi_dev.cli:main"

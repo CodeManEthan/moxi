@@ -2,9 +2,20 @@
 
 ## 0.1.3 (2026-11-08)
 
+The first public release.
+
+- The launcher needs moxi 0.1.6 or later.
+- The `usage` extra needs moxi-usage 0.2, the version in this release; with 0.1
+  `moxi-launcher[usage]` could not be installed.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has the colours below.
 - A live session that's fine shows in the theme's live colour, and the launch form's
   "Starting…" line in its launching colour.
-- The `ui` extra needs moxi-ui 0.2.3 or later, which has those colours.
+- A Codex launch with an identity whose comms lacks the Codex wrapper names the comms
+  the `comms` extra asks for, read from the launcher's own requirement (it named
+  moxi-comms 0.2). New `presets.needed(extra)`.
+- The README documents the start postures (`operator`, `go`, `with:<identity>` and a
+  self relaunch's `relaunched`) and installs from PyPI with `moxi install`.
+- The package metadata gains keywords and classifiers.
 
 ## 0.1.2 (2026-11-07)
 

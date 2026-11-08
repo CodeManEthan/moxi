@@ -56,8 +56,8 @@ measured = true
 anchor = "last-use"
 source = "https://example.invalid/docs"
 checked = 2026-10-06
-evidence = "a probe"
-ruling = "a ruling"
+evidence = "a measurement"
+basis = "a basis"
 """
 
 FREE_ROW = """[[lifetime]]
@@ -67,11 +67,11 @@ models = ["big-pickle"]
 charge = "free"
 source = "https://example.invalid/zen"
 checked = 2026-10-05
-ruling = "a ruling"
+basis = "a basis"
 """
 
 MALFORMED = [
-    row_with(source='""'),                                       # no source, no ruling
+    row_with(source='""'),                                       # no source, no basis
     row_with(harness='"claude"'),
     row_with(anchor='"whenever"'),
     row_with(models='["*", "claude-x"]'),
@@ -89,9 +89,10 @@ MALFORMED = [
     FREE_ROW + "floor = 10\n",
     FREE_ROW + "measured = true\n",
     FREE_ROW.replace('["big-pickle"]', '["*"]'),
-    FREE_ROW.replace('ruling = "a ruling"\n', ""),
-    MEASURED_ROW.replace('ruling = "a ruling"\n', ""),
-    MEASURED_ROW.replace('evidence = "a probe"\n', ""),
+    FREE_ROW.replace('basis = "a basis"\n', ""),
+    MEASURED_ROW.replace('basis = "a basis"\n', ""),
+    MEASURED_ROW.replace('evidence = "a measurement"\n', ""),
+    MEASURED_ROW + 'ruling = "the old name beside the new"\n',  # basis and ruling
     MEASURED_ROW.replace("floor = 1800", "floor = 9000"),
     MEASURED_ROW.replace("floor = 1800", 'floor = "1800"'),
     MEASURED_ROW.replace("floor = 1800\n", ""),
@@ -107,13 +108,13 @@ MALFORMED = [
 def test_the_shipped_table_loads_and_meets_every_rule():
     loaded = table.parse_table(shipped_text())
     for row in loaded.rows:
-        assert row.source.startswith("https://") or row.ruling, row
+        assert row.source.startswith("https://") or row.basis, row
         assert row.checked
         assert (row.seconds or 0) > 0 or row.free
         if row.provider == "openai":
-            assert row.evidence or row.ruling, row
+            assert row.evidence or row.basis, row
         if row.measured or row.free:
-            assert row.ruling, row
+            assert row.basis, row
         assert row.origin == table.SHIPPED
 
 
@@ -200,7 +201,7 @@ provider = "openai"
 models = ["gpt-5.5"]
 seconds = 600
 anchor = "last-use"
-ruling = "my own reading of my route"
+basis = "my own reading of my route"
 checked = 2026-10-10
 """
 
@@ -224,7 +225,7 @@ def test_a_user_row_adds_a_model(tmp_path, own_roots):
     (USER_ROW.replace('provider = "openai"\nmodels = ["gpt-5.5"]',
                       'provider = "openai"\nmodels = ["*"]'), "overlaps a shipped row"),
     (USER_ROW + USER_ROW, "your config's rows overlap"),
-    (USER_ROW.replace('ruling = "my own reading of my route"\n', ""), "no `source`"),
+    (USER_ROW.replace('basis = "my own reading of my route"\n', ""), "no `source`"),
     (USER_ROW.replace('harness = "codex"', 'harness = "claude"'), "unknown harness"),
     ("lifetime = 3\n", "is an int, not a list"),
 ], ids=["shipped-model", "shipped-wildcard", "two-user-rows", "no-source", "harness",
@@ -244,6 +245,17 @@ def test_a_user_row_that_cannot_be_vouched_for_refuses_the_table(tmp_path, own_r
     assert words in clock.reason
 
 
+def test_a_row_that_says_ruling_is_read_as_basis(own_roots):
+    """`ruling` is `basis`'s old name: a row written before the rename still loads."""
+    old = USER_ROW.replace("basis = ", "ruling = ")
+    assert "ruling = " in old and "basis = " not in old
+    write_cache_config(own_roots, old)
+    (row,) = table.load_table().of(table.USER)
+    assert row.basis == "my own reading of my route"
+    loaded = table.parse_table(MEASURED_ROW.replace("basis = ", "ruling = "))
+    assert loaded.rows[0].basis == "a basis"
+
+
 def test_a_user_row_is_read_from_the_config_at_each_use(tmp_path, own_roots):
     path = write_cache_config(own_roots, USER_ROW)
     assert len(table.load_table().of(table.USER)) == 1
@@ -251,11 +263,11 @@ def test_a_user_row_is_read_from_the_config_at_each_use(tmp_path, own_roots):
     assert table.load_table().of(table.USER) == ()
 
 
-def test_a_user_free_row_needs_its_ruling(own_roots):
+def test_a_user_free_row_needs_its_basis(own_roots):
     free = FREE_ROW.replace('["big-pickle"]', '["my-free-model"]')
     write_cache_config(own_roots, free)
     assert table.load_table().is_free("opencode", "opencode", "my-free-model")
-    write_cache_config(own_roots, free.replace('ruling = "a ruling"\n', ""))
+    write_cache_config(own_roots, free.replace('basis = "a basis"\n', ""))
     with pytest.raises(table.TableError):
         table.load_table()
 

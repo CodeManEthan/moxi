@@ -3,6 +3,10 @@
 Moxi's services: one list of every daemon and timer on the machine, with start, stop,
 enable, disable, add, remove and watch.
 
+[Moxi](https://github.com/CodeManEthan/moxi) is a harness for running many AI
+coding-agent sessions as one system, built as modules that plug together; services is the
+module that shows and runs the daemons and timers they, and you, keep on the machine.
+
 ```
 moxi install services
 ```
@@ -128,3 +132,31 @@ run in a terminal, and refuses where that command refuses.
 `moxi uninstall services` refuses while a command you added still has its unit, naming
 the `moxi services remove` for each, and gives every adopted Linux timer back as it was.
 Other adopted units are left untouched.
+
+## Install
+
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). services drives the
+systemd user manager (`systemctl --user`); adopting a systemd timer needs systemd 243 or
+later. It also has code for launchd on macOS and the Task Scheduler on Windows, which the
+repository's CI tests without gating and nobody runs yet: treat both as untested.
+
+```sh
+uv tool install moxi
+moxi install services
+```
+
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds services beside it and offers its optional extras: `projects` (project keys
+on rows) and `ui` (the page). The repository's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
+lists the other modules.
+
+## Dependencies
+
+`moxi`, Moxi's core, and `psutil`, which reads a running daemon's uptime, memory and
+CPU time, and when the machine booted. The `projects` extra (`moxi-projects`) files rows
+under projects, and the `ui` extra (`moxi-ui`, the browser UI shell) adds the page.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/services/LICENSE).

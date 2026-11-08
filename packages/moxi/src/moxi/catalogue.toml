@@ -1,7 +1,7 @@
 # Moxi's catalogue: the first-party modules `moxi install` installs by name.
 # `moxi modules --available` lists it; `moxi modules --available --refresh` fetches a newer
 # copy from the repository. Raise `version` whenever a line changes.
-version = 1
+version = 2
 
 [[module]]
 name = "cache"
@@ -14,11 +14,71 @@ distribution = "moxi-comms"
 summary = "Messages between coding-agent sessions, delivered into their turns"
 
 [[module]]
+name = "connector"
+distribution = "moxi-connector"
+summary = "An MCP server for the Claude apps: its sign-in, its address, and the tools other modules provide"
+
+[[module]]
+name = "launcher"
+distribution = "moxi-launcher"
+summary = "Launch Claude Code and Codex sessions from presets: in this terminal, headless or in a tmux slot"
+
+[[module]]
+name = "loadout"
+distribution = "moxi-loadout"
+summary = "Your own skills, agents and settings, placed for Claude Code, Codex and OpenCode"
+
+[[module]]
+name = "notes"
+distribution = "moxi-notes"
+summary = "Where each session keeps its notes, snapshots of the notes repository, and the secret checks that guard it"
+
+[[module]]
+name = "projects"
+distribution = "moxi-projects"
+summary = "A list of named places: projects, their roots, kinds and agents"
+
+[[module]]
+name = "repo"
+distribution = "moxi-repo"
+summary = "Git hooks run as declared pieces, and one shared committer"
+
+[[module]]
+name = "secrets"
+distribution = "moxi-secrets"
+summary = "Named pattern sets for credentials and personal data, and one way to scan text for them"
+
+[[module]]
+name = "services"
+distribution = "moxi-services"
+summary = "One list of every daemon and timer on the machine, to start, stop, enable, disable and watch"
+
+[[module]]
 name = "sessions"
 distribution = "moxi-sessions"
 summary = "Read a harness's own session records: find a session, read its transcript back"
 
 [[module]]
+name = "slots"
+distribution = "moxi-slots"
+summary = "Numbered tmux sessions to launch into, on one supervised tmux server"
+
+[[module]]
+name = "tunnel"
+distribution = "moxi-tunnel"
+summary = "An address off the machine for a loopback service, through Tailscale or a Cloudflare tunnel"
+
+[[module]]
 name = "turns"
 distribution = "moxi-turns"
 summary = "Drive a coding-agent session's turns: start, hold, steer and read a turn on any harness"
+
+[[module]]
+name = "ui"
+distribution = "moxi-ui"
+summary = "The browser shell: one local web address for every module's page"
+
+[[module]]
+name = "usage"
+distribution = "moxi-usage"
+summary = "How much of each plan window is used, how full a session's context is, and what the tokens cost"

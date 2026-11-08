@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from moxi_dev import check
+from test_release import METADATA, release_files
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
 
@@ -36,9 +37,10 @@ def git(root: Path, *args: str) -> None:
 def package(root: Path, name: str, deps: str) -> None:
     path = root / "packages" / name
     (path / "tests").mkdir(parents=True)
+    release_files(path)
     (path / "pyproject.toml").write_text(
-        f'[project]\nname = "{name}"\nversion = "0.1.0"\nrequires-python = ">=3.12"\n'
-        f"dependencies = {deps}\n[dependency-groups]\ndev = {TOOLS}\n"
+        f'[project]\nname = "{name}"\nversion = "0.1.0"\n'
+        f"{METADATA}dependencies = {deps}\n[dependency-groups]\ndev = {TOOLS}\n"
         '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n')
     (path / "tests" / "test_it.py").write_text(UNDER_WORKERS)
 
@@ -84,8 +86,8 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     (workspace / "packages/low/tests/test_more.py").write_text(UNDER_WORKERS)
     assert check.main([]) == 0
     line = last_line(capsys)
-    assert ("packages: low, high | lock pass | tags pass | stamps none | web none | "
-            "sync pass | lint none | low pass") in line, line
+    assert ("packages: low, high | lock pass | tags pass | release pass | stamps none | "
+            "web none | sync pass | lint none | low pass") in line, line
     assert ", high pass " in line and line.endswith("exit 0")
     assert check.venv_program(workspace / ".moxi-dev/env-3.12", "python").exists()
     assert not (workspace / ".venv").exists()
@@ -99,8 +101,8 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     git(workspace, "commit", "-q", "-m", "break high")
     assert check.main(["--base", "mark"]) == 1
     line = last_line(capsys)
-    assert ("packages: high | lock pass | tags pass | stamps none | web none | sync pass | "
-            "lint none | high fail ") in line, line
+    assert ("packages: high | lock pass | tags pass | release pass | stamps none | "
+            "web none | sync pass | lint none | high fail ") in line, line
     assert line.endswith("exit 1")
 
 
@@ -109,5 +111,6 @@ def test_a_stale_lock_fails_the_check(workspace, capsys):
         (workspace / "packages/low/pyproject.toml").read_text()
         .replace("dependencies = []", 'dependencies = ["iniconfig"]'))
     assert check.main(["--full"]) == 1
-    assert "lock fail | tags not run | stamps not run | web not run | sync not run" in (
+    assert ("lock fail | tags not run | release not run | stamps not run | web not run | "
+            "sync not run") in (
         last_line(capsys))

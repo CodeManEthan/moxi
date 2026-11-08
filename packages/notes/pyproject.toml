@@ -2,9 +2,21 @@
 name = "moxi-notes"
 version = "0.1.1"
 description = "Where each session keeps its notes, snapshots of the notes repo, and the secret gates that guard it."
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["notes", "git", "snapshots", "secrets", "agents", "claude-code"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+]
 # turns calls the start line and the snapshot trigger; repo's committer takes the
 # snapshots, reached only through moxi_repo.api; secrets' sets judge what they commit.
 dependencies = ["moxi>=0.1.6,<0.2", "moxi-repo>=0.1,<0.2", "moxi-secrets>=0.1,<0.2",

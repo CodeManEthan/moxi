@@ -20,8 +20,13 @@ moxi comms send reviewer --posture once "The parser change is on branch fix-pars
 moxi comms reply 4611686018427387905 "Looks good; one nit on line 40."
 ```
 
-No server, no account and no network: comms keeps everything in one SQLite file in
-your home directory, and everything talks over Unix sockets.
+No account and nothing off the machine: comms keeps everything in one SQLite file in
+your home directory, and the CLI and the adapters reach the daemon over Unix sockets.
+The daemon also serves comms' tools to sessions over MCP on `127.0.0.1:8450`, a loopback
+TCP port on by default; every request needs the token minted for one session, and
+`[mcp] enabled = false` in the config file and a daemon restart turn it off. Any account
+on the machine can connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md)
+before using comms on a machine other people log in to.
 
 ```
  agent A ── moxi comms send ──▶ moxi-comms-daemon ──▶ comms.db ── socket ──▶ adapter ──▶ agent B
@@ -34,9 +39,17 @@ session's name and delivers mail into the session through Moxi turns, the one wa
 harness session: `moxi comms claude` loads turns' Claude plugins into the session it
 starts. Codex and OpenCode work through experimental adapters.
 
+Two words come up throughout. The **operator** is the human running this system: you,
+sending from your own terminal as the `operator` identity; the operator's messages are
+always shown to an agent as directives. A **director** is an identity a session was told
+at launch to take direction from (`moxi comms claude --director <name>`); its verified
+messages are shown to that session as directives, and every other message as information
+from a peer.
+
 ## Install
 
-Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). macOS and Windows are
+not supported yet.
 
 ```sh
 uv tool install moxi
@@ -49,16 +62,6 @@ and turns, which it requires, to the environment `moxi` runs in. Install comms t
 `moxi install`, not on its own: a copy installed elsewhere is one `moxi` can't see. `uv
 tool install` fetches Python 3.12 if the machine lacks it; otherwise `uv python install
 3.12` supplies one.
-
-Before the modules are on PyPI, install the core from git and give `moxi install` a git
-source for turns and for comms:
-
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install comms \
-  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
-  --from 'moxi-comms @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/comms'
-```
 
 comms' commands run as `moxi comms <verb>`. `moxi shortcut comms` adds a bare `comms`
 command if you want one.
@@ -80,9 +83,6 @@ on PATH, so run it by its path there:
 ```sh
 "$(uv tool dir)/moxi/bin/moxi-comms-daemon"
 ```
-
-On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
-PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
 
 The unit's `ExecStart=` names the same path, and `moxi modules --json` names the
 environment as `prefix`.
@@ -164,7 +164,11 @@ meets.
 | `moxi comms help [term]` | explain a comms word |
 | `moxi comms whois <name>` | the card an identity wrote about itself |
 | `moxi comms explain <name> [id]` | why a message did or didn't land |
+| `moxi comms cache` | how cold each agent's prompt cache is (for the callers `[policy] cache_callers` names) |
 | `moxi comms doctor` | what this machine resolved, and whether the daemon answers |
+| `moxi comms whoami` | which comms identity this session holds |
+| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain |
+| `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
 | `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
@@ -174,9 +178,7 @@ meets.
 comms' own scripts (`moxi-comms-daemon`, `moxi-comms-claude`, `moxi-comms-codex`,
 `moxi-comms-opencode`, `moxi-comms-provision`) are in the `moxi` tool's environment,
 which `moxi install comms` adds comms to, and uv puts none of them on PATH. Run one by
-its path: `"$(uv tool dir)/moxi/bin/<script>"`. On Windows the script is
-`Scripts\<script>.exe` in the same tool directory; in PowerShell,
-`& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
+its path: `"$(uv tool dir)/moxi/bin/<script>"`.
 
 `explain`, `doctor`, `moxi comms cache` (how cold each agent's prompt cache is, for the
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
@@ -191,7 +193,7 @@ posture from what it answers, so a reply to a `once` ask or an `optional` messag
 the exchange. An `open`
 thread closes after 8 replies (`[threads] reply_cap`, or `--cap N` / `--no-cap` from
 whoever opened it), after an hour with no message, or on a `--posture none` reply; after
-that, start a new send. The operator's own lane needs no `--posture`. Other useful flags:
+that, start a new send. A send as the operator needs no `--posture`. Other useful flags:
 `--held` (hold the message until the recipient's next turn, or until its session starts,
 is cleared or is compacted), `--interrupt` (go into the recipient's running turn where
 its harness can take it there), `--expires 30m|6h|3d|never` (drop the message if it
@@ -211,13 +213,13 @@ compaction or turn (when you type into it, say). Nothing wakes it for that messa
 alone. A send to an agent whose cache comms cannot read is refused with exit 75, and the
 output says "Nothing was sent." first and last; send it again in a moment. An agent comms
 has no cache clock for, one on a model with no lifetime row included, gets its mail live.
-This holds for every sender, the operator's own lane included, and there is no
+This holds for every sender, the operator included, and there is no
 override. The daemon checks again at delivery, so a post that skips `moxi comms send` is held
 too.
 
 ## Other agents (experimental)
 
-[docs/adapters.md](docs/adapters.md) says what each adapter supports, what makes a CLI
+[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/adapters.md) says what each adapter supports, what makes a CLI
 a harness comms can reach, and how to add one.
 
 comms reads a Codex agent's cache from its thread's rollout and an OpenCode agent's
@@ -225,7 +227,7 @@ from `opencode.db`, for the lifetime its harness, provider and model have in the
 comms ships. Under the cold-cache rule above, a message to one is delivered while its
 cache counts warm and held once it is cold, as for a Claude session; an OpenCode agent
 on one of Zen's free models is reached at any age, and so is one on a model the table
-has no row for, which comms has no clock for. [docs/adapters.md](docs/adapters.md) has
+has no row for, which comms has no clock for. [docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/adapters.md) has
 the detail.
 
 - **Codex**: `moxi comms codex --name <name>` launches one identity's thread through Moxi
@@ -257,14 +259,15 @@ cwd  = "/home/me/src/my-project"
 A name is a claim made by a process running as your user. comms keeps agents from
 confusing each other and shows who said what, but any process running as you can speak
 as any name, read the token store, or write comms' store. It is not access control. Read
-[docs/security.md](docs/security.md) before running agents you don't trust, and before
-using comms on a machine other people log in to.
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md) before running agents you don't trust, and before
+using comms on a machine other people log in to: it also covers the tools' loopback port
+and the OpenCode adapter's server.
 
 ## Configuration and files
 
 Nothing needs configuring for the default path. Everything that can be set, every
 environment variable and every key of the one config file, is in
-[docs/configuration.md](docs/configuration.md); `moxi config comms` shows each key with
+[docs/configuration.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/configuration.md); `moxi config comms` shows each key with
 its value. By default:
 
 - data: `~/.local/share/moxi/comms/`
@@ -273,7 +276,7 @@ its value. By default:
 - sockets: `$XDG_RUNTIME_DIR/moxi/comms/`
 
 How messages are routed, delivered and attributed is in
-[docs/protocol.md](docs/protocol.md).
+[docs/protocol.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/protocol.md).
 
 ## Troubleshooting
 
@@ -284,13 +287,13 @@ How messages are routed, delivered and attributed is in
   restart comms/daemon`, or with the supervisor (`systemctl --user restart` on its unit).
   Or run the daemon in a terminal: `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
-  credentials the store expects; see [docs/security.md](docs/security.md).
+  credentials the store expects; see [docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in
-[CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/CONTRIBUTING.md). Changes are listed in
+[CHANGELOG.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/LICENSE).

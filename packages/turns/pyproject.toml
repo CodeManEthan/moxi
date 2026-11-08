@@ -1,11 +1,21 @@
 [project]
 name = "moxi-turns"
-version = "0.2.3"
+version = "0.2.4"
 description = "Drive a coding-agent session's turns: start, hold, steer and read a turn on any harness."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["agents", "claude-code", "codex", "opencode", "hooks", "harness"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
 dependencies = ["moxi>=0.1.6,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]

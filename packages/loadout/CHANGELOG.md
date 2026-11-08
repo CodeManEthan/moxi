@@ -2,8 +2,16 @@
 
 ## 0.1.4 (2026-11-08)
 
+The first public release.
+
+- loadout needs moxi 0.1.6 or later.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has the selected colour.
 - A switch that's on is filled with the theme's selected colour.
-- The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
+- Experimental: Codex's `hooks.json` and rules file, and everything loadout writes for
+  OpenCode. No real run has confirmed them yet.
+- The package metadata gains the README as its long description, keywords and
+  classifiers.
+- The README gains an install section and points to the example manifest.
 
 ## 0.1.3 (2026-11-07)
 

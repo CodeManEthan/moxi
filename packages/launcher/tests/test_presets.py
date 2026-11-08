@@ -592,9 +592,24 @@ def test_a_codex_launch_with_an_identity_needs_the_host(monkeypatch):
 def test_a_codex_launch_with_an_identity_needs_comms_codex_wrapper(monkeypatch):
     monkeypatch.setattr(presets, "_host_installed", lambda: True)
     monkeypatch.setattr(presets, "comms_codex", lambda: False)
-    with pytest.raises(presets.NotYet, match="moxi comms codex"):
+    with pytest.raises(presets.NotYet, match="moxi comms codex") as caught:
         resolve(typed={"harness": "codex", "identity": "x"},
                 available=only("comms", "turns"))
+    assert f"install {presets.needed('comms')}," in caught.value.hint
+
+
+def test_needed_reads_the_extra_from_the_launchers_own_requirement():
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"]
+    for extra in ("comms", "usage", "turns"):
+        (declared,) = extras[extra]
+        name, _, specs = declared.partition(">")
+        assert presets.needed(extra) == f"{name}>{specs}"
+    assert presets.needed("comms").startswith("moxi-comms>=0.3,")
+    assert presets.needed("no-such-extra") == "moxi-no-such-extra"
 
 
 def test_a_codex_launch_with_an_identity_and_extra_flags_is_refused(monkeypatch):

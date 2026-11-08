@@ -19,10 +19,8 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
 
 `moxi install comms` puts the wrappers in the `moxi` tool's environment, and uv puts none
-of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. On
-Windows the script is `Scripts\moxi-comms-codex.exe` in the same tool directory; in PowerShell,
-`& "$(uv tool dir)\moxi\Scripts\moxi-comms-codex.exe" <identity>`. The
-Claude wrapper also runs as `moxi comms claude`.
+of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`.
+The Claude wrapper also runs as `moxi comms claude`.
 
 A kind decides two things. One is the **wire**: how the adapter talks to its CLI, and so
 how mail gets into a turn and how the adapter learns the turn ended. The other is the
