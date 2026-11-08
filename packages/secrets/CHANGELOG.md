@@ -14,6 +14,6 @@ The first public release.
   that runs the same rules and reports text it can't finish as unscanned.
 - `moxi doctor secrets` rows for the rules, the engine, the private names, where they
   live, and the personal-data extra.
-- Linux, macOS and Windows.
+- Linux; macOS and Windows are untested.
 - Requires moxi 0.1.6 or later.
 - The README installs from PyPI, and its links work on PyPI.

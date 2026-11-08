@@ -9,9 +9,11 @@ sessions as one system.
 
 ## What it needs
 
-- Linux, macOS, or WSL2 (which is Linux). On native Windows the package installs, but
-  every command says where slots runs and exits 3, no daemon is installed, and a launcher
-  treats slots as absent.
+- Linux, or WSL2 (which is Linux). slots also has macOS code (launchd supervises the
+  server there), which the repository's CI tests without gating and nobody runs yet:
+  treat macOS as untested. On native Windows the package installs, but every command
+  says where slots runs and exits 3, no daemon is installed, and a launcher treats slots
+  as absent.
 - Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
 - tmux 3.2 or later. `moxi install slots` looks `tmux` up on your PATH and records its
   absolute path, which every slots process then uses.

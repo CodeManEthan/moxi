@@ -16,7 +16,9 @@ Tunnel authenticates nothing. The module behind the address checks every call it
 
 ## Install
 
-Linux, macOS or Windows, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). tunnel also has
+macOS and Windows code (see Platforms below), which the repository's CI tests without
+gating and nobody runs yet: treat macOS and Windows as untested.
 
 ```sh
 uv tool install moxi
@@ -256,6 +258,9 @@ your tailnet (on mobile data):
    it.
 
 ## Platforms
+
+Linux is the platform tunnel supports. The macOS and Windows columns describe code that
+nobody runs yet: treat them as untested.
 
 | | Linux | macOS | Windows |
 |---|---|---|---|

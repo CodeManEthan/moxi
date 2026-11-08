@@ -16,6 +16,7 @@ The first public release.
 - `moxi doctor tunnel` rows for the record, the declarations, Tailscale, Cloudflare and
   each target.
 - `moxi tunnel --help` names Cloudflare beside Tailscale.
+- Linux; macOS and Windows are untested.
 - Requires moxi 0.1.6 or later.
 - The README installs from PyPI, and its links work on PyPI.
 

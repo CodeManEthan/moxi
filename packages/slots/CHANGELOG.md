@@ -16,6 +16,7 @@ The first public release.
 - `moxi doctor slots` rows for the system, tmux, the server mode, linger, the server's
   options, the socket, launch files, the trampoline, saved mismatches, the registry and
   holds.
-- Linux, macOS and WSL2; refused on native Windows. Needs tmux 3.2 or later.
+- Linux and WSL2; macOS is untested; refused on native Windows. Needs tmux 3.2 or
+  later.
 - Requires moxi 0.1.6 or later.
 - A README for someone new to Moxi.

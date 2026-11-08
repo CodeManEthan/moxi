@@ -214,7 +214,9 @@ pinned.
 
 ## Install
 
-Linux, macOS or Windows, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). The repository's CI
+also runs secrets' tests on macOS and Windows, without gating, but nobody runs secrets
+there yet: treat macOS and Windows as untested.
 
 ```sh
 uv tool install moxi
