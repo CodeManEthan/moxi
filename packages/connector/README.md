@@ -34,7 +34,8 @@ Its settings are `enabled`, `port` (the loopback port, 8452 by default), `public
 1. `moxi connector on`.
 2. Give it a public address. With the tunnel module, `moxi tunnel add connector/mcp`;
    without it, set `public_url` to an HTTPS address you forward to the loopback port
-   yourself. Claude's connector service has been seen reaching only port 443.
+   yourself. Use port 443: Claude's connector service has so far been seen reaching only
+   that port. That is an observation, not a documented guarantee.
 3. `moxi connector check`.
 4. `moxi connector status` prints the URL. In Claude, open Settings, Connectors, Add
    custom connector, and paste it.
@@ -55,7 +56,7 @@ sign-in again from Claude. Use a code only for a sign-in you started yourself.
 A code is minted only when an installed module can tell an agent session's processes from
 your terminal and says yes. comms provides that check: a shell or process inside a live
 comms session is refused. Without such a module, `moxi connector code` refuses and says
-so. `docs/security.md` says what the check stops and what it doesn't.
+so. [`docs/security.md`](https://github.com/CodeManEthan/moxi/blob/main/packages/connector/docs/security.md) says what the check stops and what it doesn't.
 
 A sign-in lasts `refresh_days` (30) after Claude last refreshed it. Claude refreshes on
 its own; when a grant expires or is revoked, Claude asks you to sign in again, with a new
@@ -70,6 +71,40 @@ the old address, so pressing Connect again isn't enough: in Claude, remove the c
 and add it again with the new URL. The same advice holds after `moxi connector revoke
 --all`, and whenever the sign-in page says it doesn't know the client.
 
+## Writing a provider
+
+A module gives the connector tools through an entry in the group
+`moxi.connector.providers`, named after the module and pointing at a `Provider`:
+
+```toml
+[project.entry-points."moxi.connector.providers"]
+mymodule = "moxi_mymodule.connector:PROVIDER"
+```
+
+The connector refuses an entry whose name is not the declaring distribution's module. A
+provider imports nothing of the connector but `moxi_connector.provider`, its interface 1,
+which is standard library only. A module that has the connector only through an extra
+reaches it with `moxi.modules.load("connector", interface=1).api`, never at its own
+import time.
+
+A `Provider` holds:
+
+- `tools`: each a `Tool` with a name, a description, an input schema, an optional output
+  schema and MCP annotations, and `call(args, ctx)`, an async function that returns a
+  `Result`. A refusal is `Result.refused(code, text)`, never an exception. A tool that
+  raises answers "The tool failed" and the exception stays in the connector's log.
+- `start(env)` and `stop()`, async, run once each in the connector's process. A provider
+  whose `start` raises serves no tools and shows a `fail` row.
+- `status()`: rows of `(name, level, text)`, the level `ok`, `warn` or `fail`, shown by
+  `moxi connector status` and the doctor.
+- `gate`, optional: a `Gate` for the sign-in code (see "Signing in").
+
+Each call gets a `Ctx`: the grant's id and label, the request id, `log(**fields)` to add
+fields to the call's log row (names that could carry a secret or a message body are
+refused), and `after_answer(fn)`, which runs `fn(written)` once it is known whether the
+answer reached the caller. No code, token or grant ever reaches a provider. Two providers
+that declare one tool name both lose it.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
@@ -79,4 +114,19 @@ uv tool install moxi
 moxi install connector
 ```
 
-Read `docs/security.md` before you turn it on.
+The connector serves no tools on its own. To have comms' four, install comms with its
+`connector` extra, which brings the connector too:
+
+```sh
+moxi install comms --with connector
+```
+
+The first line installs `moxi`, the core, whose README covers the `moxi` command. The
+repository, [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), lists the other
+modules.
+
+Read [`docs/security.md`](https://github.com/CodeManEthan/moxi/blob/main/packages/connector/docs/security.md) before you turn it on.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/connector/LICENSE).

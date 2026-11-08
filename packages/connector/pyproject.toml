@@ -9,6 +9,7 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 keywords = ["mcp", "claude", "connector", "agents", "oauth"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
@@ -18,8 +19,8 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
 ]
 # The core gives the daemon behind its switch, the settings, the doctor, the control
-# socket and the call log's writer (0.1.3 is the first whose append_record refuses field
-# names and collapses busy classes). mcp is the SDK the door serves MCP with, and uvicorn the HTTP server it runs on:
+# socket and the call log's writer (an append_record that refuses field names and
+# collapses busy classes, since 0.1.3; 0.1.6 is the oldest core run against from wheels). mcp is the SDK the door serves MCP with, and uvicorn the HTTP server it runs on:
 # both required, since the door is the module's whole purpose. Their ranges are the ones
 # comms pins for its own tools, so one environment holds one of each. jsonschema, which
 # mcp brings anyway, checks a tool call's arguments against the provider's schema before
@@ -67,7 +68,7 @@ packages = ["src/moxi_connector"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "docs", "src/moxi_connector", "tests"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "docs", "src/moxi_connector", "tests"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
