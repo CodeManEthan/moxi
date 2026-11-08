@@ -1,7 +1,16 @@
 # Changelog
 
-## 0.3.0 (2026-11-07)
+## 0.3.0 (2026-11-08)
 
+The first public release on PyPI.
+
+- The README is the package's PyPI page, and its links work from there. It says that the
+  daemon serves comms' tools on `127.0.0.1:8450` by default and how to turn that off,
+  defines "operator" and "director", lists `cache`, `whoami`, `reserved renew` and
+  `migrate`, and says macOS and Windows are not supported yet.
+- `docs/security.md` names the tools' loopback port and the OpenCode adapter's loopback
+  server, says what another account on the machine can and can't do with each, and no
+  longer says comms opens no network connection.
 - `moxi comms service install|uninstall|status` is removed, and so is
   `moxi_comms.release.UNIT`. `moxi install comms` writes and starts the daemon's unit
   through the core; stop and start it with `moxi services` or the supervisor.

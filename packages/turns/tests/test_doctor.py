@@ -1,4 +1,4 @@
-"""turns' checks for the front door's doctor, and the hook times behind its rows."""
+"""turns' checks for `moxi doctor`, and the hook times behind its rows."""
 
 from __future__ import annotations
 

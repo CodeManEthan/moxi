@@ -95,15 +95,18 @@ def test_interface_2_finds_and_lists():
     assert list(inspect.signature(api.subagents).parameters) == ["source"]
 
 
-def test_the_schema_holds_the_three_roots_and_the_guards_switch():
+def test_the_schema_holds_the_three_roots_and_the_guards_switch_and_escapes():
     schema = Schema.from_resource("moxi_sessions", "settings.toml")
     assert list(schema.keys) == ["claude.projects", "codex.sessions", "opencode.database",
-                                 "guard.transcript_read"]
+                                 "guard.transcript_read", "guard.transcript_read_escapes"]
     for name in ("claude.projects", "codex.sessions", "opencode.database"):
         key = schema.keys[name]
         assert (key.type, key.default, key.read, key.env) == ("path", "", "use", None)
     key = schema.keys["guard.transcript_read"]
     assert (key.type, key.default, key.read, key.env) == ("bool", False, "use", None)
+    key = schema.keys["guard.transcript_read_escapes"]
+    assert (key.type, key.items, key.read, key.env) == ("list", "str", "use", None)
+    assert list(key.default) == ["sessions"]
 
 
 READ_NAMES = {"records", "records_back", "last_request", "records_since", "window", "Read",

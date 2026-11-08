@@ -33,6 +33,22 @@ keep an honest agent on its own lane and make a forged claim take deliberate wor
   store directory with any group or other permission bit set.
 - `comms.db`, which holds message bodies, is created 0600, and so are its WAL and
   shared-memory files.
+- comms' tools listen on TCP `127.0.0.1:8450` (`[mcp] port`) by default (see Network).
+  A TCP port has no file mode, so any account on the machine can connect to it. It can't
+  use the tools without a session's token: each request is answered 401 unless it
+  carries one, the token lives only in that session's environment, which another
+  account can't read, and the daemon keeps only its SHA-256 hash. The endpoint doesn't
+  check which account a client runs as, so a token that did reach another account would
+  work from there. One way it could: another account listens on the port while comms
+  isn't holding it (with systemd, comms' socket unit holds it from your login to your
+  last logout, unless lingering is on; a daemon you run by hand holds it only while it
+  runs), and a session sends its token there. A daemon that starts and finds another
+  account's listener on its port revokes every token. On a machine other people log in
+  to, enable lingering (`loginctl enable-linger $USER`) so the port stays held, or turn
+  the tools off.
+- The OpenCode adapter's server (experimental) listens on a loopback port of its own
+  while an OpenCode identity runs. Another account can connect to it, but every request
+  needs that launch's password.
 
 ## Credentials
 
@@ -119,8 +135,28 @@ The connector's own `docs/security.md` covers its sign-in, its tokens and its ca
 
 ## Network
 
-Without the connector, the supported path opens no network connection. The daemon, the CLI and the adapters
-talk over Unix sockets and local files. There is no telemetry.
+Without the connector, comms opens no connection off the machine and listens on no
+address but loopback. There is no telemetry. The daemon, the CLI and the Claude Code and
+Codex adapters talk over Unix sockets and local files. Two things listen on loopback TCP:
+
+- **comms' tools.** The daemon serves comms' MCP tools over HTTP on `127.0.0.1:8450`
+  (`[mcp] port`), on by default (`[mcp] enabled = true`), so a session's model can send
+  and read mail without a shell. With systemd, comms' socket unit holds the port from
+  login, whether or not a session runs. Every request needs the bearer token the wrapper
+  minted for one session, or it is answered 401 before any tool runs. The MCP SDK's
+  DNS-rebinding check answers a request with a foreign `Host` 421 and one with a foreign
+  `Origin` 403, so a web page can't drive the tools. To turn them off, run `moxi config
+  set comms mcp.enabled false` and restart the daemon (`moxi services restart
+  comms/daemon`, or `systemctl --user restart` on its unit). The socket unit still holds
+  the port, so nothing else can take it, but nothing answers there, and sessions send
+  with `moxi comms` commands instead. What another account on the machine can do with
+  the port is under "What other users on the machine can see".
+- **The OpenCode adapter's server (experimental).** The OpenCode adapter runs one
+  `opencode serve` per identity on `127.0.0.1`, on a port the server picks, for as long
+  as that identity's launch runs. Each launch starts it with a fresh password (HTTP basic
+  auth), held in the wrapper's memory and in the server's environment. The password
+  keeps out other accounts and web pages. Any process of your own user can read the
+  server's environment, and with it the password, and post prompts into that session.
 
 ## Reporting a vulnerability
 

@@ -78,6 +78,41 @@ def test_pyproject_spells_it_the_same():
         f"{release.REPO_URL}/issues"
 
 
+def test_the_readme_is_the_long_description():
+    """PyPI shows README.md as the project's page."""
+    assert PYPROJECT["project"]["readme"] == "README.md"
+    assert (REPO / "README.md").is_file()
+
+
+def test_the_readme_and_the_security_doc_name_the_tools_port():
+    """comms' tools listen on a loopback TCP port by default. The README and the security
+    model say so, with the port the shipped schema gives, and how to turn it off."""
+    schema = tomllib.loads((SOURCE / module.SETTINGS).read_text())
+    port, enabled = schema["mcp"]["port"]["default"], schema["mcp"]["enabled"]["default"]
+    assert enabled is True
+    readme = (REPO / "README.md").read_text()
+    security = (REPO / "docs" / "security.md").read_text()
+    other_users = security[security.index("## What other users on the machine can see"):]
+    other_users = other_users[:other_users.index("\n## ", 1)]
+    network = security[security.index("## Network"):]
+    for text in (readme, other_users, network):
+        assert f"127.0.0.1:{port}" in text
+    for text in (readme, network):
+        assert "enabled = false" in text or "mcp.enabled false" in text
+    assert "no network connection" not in security
+    assert "opencode serve" in network
+
+
+def test_the_readme_links_work_from_pypi():
+    """A relative link on PyPI's page points nowhere, so every link is absolute."""
+    import re
+
+    readme = (REPO / "README.md").read_text()
+    targets = re.findall(r"\]\(([^)]+)\)", readme)
+    assert targets
+    assert [t for t in targets if not t.startswith("https://")] == []
+
+
 def test_the_public_identity_is_one_everywhere():
     """MIT, CodeManEthan and codemanethan@gmail.com."""
     project = PYPROJECT["project"]

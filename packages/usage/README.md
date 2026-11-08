@@ -10,6 +10,40 @@ Moxi's usage module answers four questions about the coding-agent sessions on a 
 It decodes no harness file of its own: every record it reads comes through Moxi's sessions
 module, in sessions' one shape.
 
+## Install
+
+```sh
+uv tool install moxi
+moxi install usage
+```
+
+`moxi install usage` brings sessions with it and asks about usage's optional extras:
+`turns` (Claude limits, Codex limits pulled from its app-server, the warn-at mark and the
+worker ceiling), `projects` (a session's project in the reports) and `ui` (the page). Add
+one later with `moxi install usage --with <extra>`. The core's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi/tree/main/packages/moxi), covers
+the `moxi` command.
+
+## Requirements
+
+- Linux and Python 3.12 or later, with [uv](https://docs.astral.sh/uv/) to install.
+- `moxi`, Moxi's core, 0.1.6 or later, and `moxi-sessions` 0.2.
+- The live parts need turns and the harness it reaches: Claude limits, the warn-at mark
+  and the worker ceiling need Claude Code (or Codex) sessions running under turns, and a
+  pulled Codex limits reading needs `codex` on PATH. The token index, the reports, the
+  prices and the stored limits need no harness running.
+- `moxi usage prices update` fetches LiteLLM's price file from GitHub; nothing else in
+  usage fetches from the web unless turns pulls a Codex reading (see Commands).
+
+## Where its files live
+
+usage writes under Moxi's per-module directories, named here by their root: `CONFIG/` is
+`~/.config/moxi/`, `DATA/` is `~/.local/share/moxi/` and `STATE/` is
+`~/.local/state/moxi/` on Linux (each follows `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
+`XDG_STATE_HOME`), or `$MOXI_HOME/config/`, `$MOXI_HOME/data/` and `$MOXI_HOME/state/`
+with `MOXI_HOME` set. So `STATE/usage/index.db` is `~/.local/state/moxi/usage/index.db` by
+default. `moxi paths usage` prints the real paths.
+
 ## Model facts
 
 Price, cache prices and context window come from one table, which other modules read
@@ -338,8 +372,8 @@ no setting and runs no command but the pass.
 
 ## Stores and the doctor
 
-usage keeps its files in Moxi's roots, each made by its first write and readable only by
-you: the token index `STATE/usage/index.db` and the lock a pass holds on it,
+usage keeps its files in Moxi's roots (see "Where its files live"), each made by its first
+write and readable only by you: the token index `STATE/usage/index.db` and the lock a pass holds on it,
 `STATE/usage/index.lock`, the limits readings `STATE/usage/readings.db`
 (kept 8 days), the restart-point measure `STATE/usage/restart-point.json` and the model
 snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
@@ -398,3 +432,13 @@ status = api.report("status", fresh=False)    # the index itself, one row per la
 
 Every result has `as_dict()` for JSON: an unknown fact is left out and named in the
 object's `"unknown"` list.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/usage/LICENSE).
+
+The shipped model table, `data/models.json`, is derived from LiteLLM's
+`model_prices_and_context_window.json` (MIT, Copyright (c) 2023 Berri AI). LiteLLM's
+license notice ships beside it as
+[`data/LICENSE-litellm`](https://github.com/CodeManEthan/moxi/blob/main/packages/usage/src/moxi_usage/data/LICENSE-litellm),
+in the wheel and the source distribution.

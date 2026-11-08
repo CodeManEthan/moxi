@@ -235,3 +235,20 @@ def test_api_imports_nothing_heavy():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          check=True)
     assert out.stdout.strip() == "[]"
+
+
+def test_the_shipped_table_carries_litellms_license_notice():
+    """The table is derived from LiteLLM's price file, so LiteLLM's MIT notice ships
+    beside it in the package, and the README's License section names it."""
+    from importlib import resources
+    from pathlib import Path
+
+    notice = resources.files("moxi_usage").joinpath("data", "LICENSE-litellm").read_text()
+    assert "MIT License" in notice and "Copyright (c) 2023 Berri AI" in notice
+    assert "The above copyright notice and this permission notice" in notice
+    shipped = json.loads(resources.files("moxi_usage").joinpath("data", "models.json")
+                         .read_text())
+    assert shipped["snapshot"]["source"] == "litellm"
+    readme = (Path(__file__).parents[1] / "README.md").read_text()
+    license_section = readme[readme.index("## License"):]
+    assert "data/LICENSE-litellm" in license_section

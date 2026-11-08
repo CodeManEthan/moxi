@@ -32,6 +32,15 @@ Its settings are `claude.ttl_seconds`, `lifetime` (your own lifetime table rows)
 `watch.tick`, `segment.warn_before` and `timer.subscriber`; `moxi config cache` shows
 them.
 
+A lifetime row, shipped or your own, names a harness (`codex` or `opencode`), a provider,
+its models, and either `seconds` with an `anchor` or `charge = "free"`. It also needs a
+`source` (the provider's documentation that promises the number) or a `basis` (why the
+number is counted where no source promises it), and a `checked` date. `evidence` and
+`note` are optional. Your row adds a model the shipped table has no row for and never
+overrides one. While any row is one the loader can't vouch for, every Codex and OpenCode
+read is `unknown`, and `moxi cache doctor` names the row. A row written before cache 0.1.4 may
+say `ruling` for `basis`; it is read the same.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
@@ -41,19 +50,10 @@ uv tool install moxi
 moxi install cache
 ```
 
-Before the modules are on PyPI, install the core from git and give `moxi install` a git
-source for sessions and for cache, in that order:
-
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install cache \
-  --from 'moxi-sessions @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/sessions' \
-  --from 'moxi-cache @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/cache'
-```
-
-The front door's README, at
-[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
-the other modules.
+`moxi install cache` brings sessions with it. The core's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi/tree/main/packages/moxi), covers
+the `moxi` command and how `moxi install` works; the repository's README lists the other
+modules.
 
 ## Dependencies
 
@@ -65,4 +65,4 @@ core writes units for: a systemd user manager, launchd or Task Scheduler.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/cache/LICENSE).
