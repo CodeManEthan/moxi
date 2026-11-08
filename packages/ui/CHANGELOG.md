@@ -2,6 +2,14 @@
 
 ## 0.2.2 (2026-11-08)
 
+The first public release.
+
+- The README gains a section for using the shell: install, the verbs, how the shell
+  runs, its port and settings, and which modules show pages. Its gateway section says
+  the gateway's port can be taken while Moxi isn't running, that macOS and Windows have
+  no provider check, and what to do on a machine others log in to. The README's links
+  work on PyPI.
+- The package metadata gains keywords and classifiers.
 - The width check no longer counts an element held by a scroll container (`overflow-x` of
   `auto` or `scroll`) that itself ends inside the viewport, as its docstring always said:
   a table that scrolls sideways in its own wrapper passes. An element cut off by
@@ -24,6 +32,8 @@
 - The page-server base moves into ui as `moxi_ui.loopback`, reached through ui's API
   module. ui no longer needs moxi-loopback; it requires starlette, uvicorn and h11
   itself.
+- ui offers interface 3: interface 2 plus `api.loopback`, the page-server base, which
+  every page module now loads with `moxi.modules.load("ui", interface=3)`.
 
 ## 0.1.1 (2026-11-07)
 

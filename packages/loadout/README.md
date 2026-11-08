@@ -26,10 +26,11 @@ and `moxi loadout status` says what has drifted.
    extends by plugins), and MCP servers through the `claude` and `codex` CLIs. Each file
    is read once and written once per run, backed up first. It removes only what it added:
    an entry you had first stays yours, and one you edited is left and reported until
-   `--replace` takes it. No run has confirmed yet that Codex reads `hooks.json` and the
-   rules file as loadout writes them, or how Codex asks you to trust a new hook; the
-   OpenCode shapes follow its published schema, also unconfirmed by a run. `status`
-   notes both.
+   `--replace` takes it. **Experimental:** Codex's `hooks.json` and rules file, and
+   everything loadout writes for OpenCode. No run has confirmed yet that Codex reads
+   `hooks.json` and the rules file as loadout writes them, or how Codex asks you to trust
+   a new hook; the OpenCode shapes follow its published schema, also unconfirmed by a
+   run. `status` notes both.
 5. The global instruction file, `global.md` in your folder, reaches every session in one
    of three modes: `off` (the default), `managed` (a line or a marked block added to your
    own file, which `moxi loadout global off` takes out exactly) or `if-absent` (placed
@@ -67,6 +68,34 @@ and `moxi loadout status` says what has drifted.
     each with `--json`, and `moxi doctor` shows loadout's rows: the manifest, entries
     not ok, the global file, hook programs, the projects link, the git hook pieces and
     Codex's switches.
+
+## Install
+
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/), with the harnesses you
+place for: Claude Code, Codex or OpenCode, each signed in with its own account. MCP
+servers are added through the `claude` and `codex` commands, so those need to be on
+`PATH`, and `git` lets loadout check that nothing it places would be committed. loadout
+also has macOS and Windows code, which the repository's CI tests without gating and
+nobody runs yet: treat both as untested.
+
+```sh
+uv tool install moxi
+moxi install loadout
+```
+
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds loadout beside it, runs its setup and offers its optional extras: `projects`
+(project sections by key), `repo` (reinstall on commit) and `ui` (the page). The
+repository's README, at [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers
+the `moxi` command and lists the other modules.
+
+The loadout folder is the `source` setting (`moxi config set loadout source DIR`); empty,
+it is a folder in loadout's data directory (`moxi paths loadout`). Setup writes an example
+manifest into an empty folder, every item commented out; the same file is
+[`example/loadout.toml`](https://github.com/CodeManEthan/moxi/blob/main/packages/loadout/src/moxi_loadout/example/loadout.toml)
+in the package. Take the `#` off an item, put the item's files in the folder
+(`skills/<name>/SKILL.md`, `agents/<name>.md`, `global.md`), then run
+`moxi loadout install`.
 
 ## The page
 
@@ -122,3 +151,7 @@ MCP servers are added through the `claude` and `codex` CLIs, so the page needs t
 the shell's `PATH`. Without one, a change from the page does what the terminal does
 without it: the servers that need it stand, each with a note naming the fix, and the
 rest is written.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/loadout/LICENSE).

@@ -1,7 +1,15 @@
 # Changelog
 
-## 0.1.3 (2026-11-07)
+## 0.1.3 (2026-11-08)
 
+The first public release.
+
+- loadout needs moxi 0.1.6 or later.
+- Experimental: Codex's `hooks.json` and rules file, and everything loadout writes for
+  OpenCode. No real run has confirmed them yet.
+- The package metadata gains the README as its long description, keywords and
+  classifiers.
+- The README gains an install section and points to the example manifest.
 - A folder a module's own setup places at a path of its choosing (turns' Claude Code
   plugins) is left to that module: loadout's install listener, install and setup no
   longer take it over. New `moxi_loadout.adoption.at_its_folder`.

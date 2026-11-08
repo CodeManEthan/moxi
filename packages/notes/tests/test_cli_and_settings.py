@@ -34,10 +34,19 @@ def test_dir_prints_the_folder(monkeypatch):
 
 
 def test_dir_exits_1_with_no_folder_and_prints_json():
-    code, out, _ = moxi_cmd("notes", "dir", str(home()))
+    code, out, err = moxi_cmd("notes", "dir", str(home()))
     assert (code, out) == (1, "")
+    assert err.strip().startswith("no notes directory: notes computes one only for a folder "
+                                  "below your home folder")
     code, out, _ = moxi_cmd("notes", "dir", str(home()), "--json")
     assert code == 1 and json.loads(out) == {"dir": None, "rule": "none", "warning": None}
+
+
+def test_dir_says_why_an_excluded_folder_has_none():
+    configure(exclude=[str(home() / "private")])
+    code, out, err = moxi_cmd("notes", "dir", str(home() / "private" / "x"))
+    assert (code, out) == (1, "")
+    assert "exclude setting" in err
 
 
 def test_dir_takes_the_override_from_its_own_environment(monkeypatch):

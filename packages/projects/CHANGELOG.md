@@ -1,7 +1,13 @@
 # Changelog
 
-## 0.1.3 (2026-11-07)
+## 0.1.3 (2026-11-08)
 
+The first public release.
+
+- projects needs moxi 0.1.6 or later.
+- The package metadata gains the README as its long description, keywords and
+  classifiers.
+- The README covers the commands, keys, kinds, the store and install.
 - New extra `notes`, for `moxi projects promote`.
 
 ## 0.1.2 (2026-11-07)

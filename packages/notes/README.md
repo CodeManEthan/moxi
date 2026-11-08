@@ -32,7 +32,7 @@ moxi doctor notes
 
 | Command | Does |
 |---|---|
-| `moxi notes dir [PATH] [--json]` | print the notes directory for PATH (default: here); exit 1 when it has none |
+| `moxi notes dir [PATH] [--json]` | print the notes directory for PATH (default: here); when it has none, say why and exit 1 |
 | `moxi notes handoffs dir [PATH]` | print that notes directory's `handoffs/` folder |
 | `moxi notes snapshot` | run one snapshot pass now and print repo's line |
 | `moxi notes scan [--json]` | what a snapshot would leave out now, with rules and lines; changes nothing; exit 1 when any file would be left out |
@@ -306,36 +306,26 @@ touched.
 
 ## Install
 
-Python 3.12 or later and git 2.39 or later, on Linux, macOS or Windows (Git for Windows),
-and [uv](https://docs.astral.sh/uv/). Each snapshot is one short background process at most
-once a minute, plus at most one sleeping process per notes root waiting to commit an ended
-session's last edits, and, while the remote fails, one sleeping push retry per recent
-commit.
+Linux, Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/).
+Each snapshot is one short background process at most once a minute, plus at most one
+sleeping process per notes root waiting to commit an ended session's last edits, and,
+while the remote fails, one sleeping push retry per recent commit.
 
 ```sh
 uv tool install moxi
 moxi install notes
 ```
 
-Before the modules are on PyPI, install the core from git and give `moxi install` a git
-source for each module notes needs:
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds notes with turns, repo and secrets, which it requires, and runs its setup.
+The repository's README, at [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi),
+covers the `moxi` command and lists the other modules.
 
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install notes \
-  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
-  --from 'moxi-repo @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/repo' \
-  --from 'moxi-secrets @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/secrets' \
-  --from 'moxi-notes @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/notes'
-```
-
-On Windows the clean filter runs through Git for Windows' `sh`, and paths compare without
-case. On macOS a path spelled in another case than your home gets no computed folder, and
-Apple's git 2.39 runs the gates through repo's shim mode.
-
-The front door's README, at
-[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
-the other modules.
+notes also has macOS and Windows code, which the repository's CI tests without gating and
+nobody runs yet, so treat both as untested. On Windows (Git for Windows) the clean filter
+runs through Git for Windows' `sh`, and paths compare without case. On macOS a path
+spelled in another case than your home gets no computed folder, and Apple's git 2.39 runs
+the gates through repo's shim mode.
 
 ## Dependencies
 
@@ -347,4 +337,4 @@ parses no module's printed output.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/notes/LICENSE).
