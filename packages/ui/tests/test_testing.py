@@ -238,6 +238,94 @@ def test_the_width_check_names_what_reaches_past_the_edge(ui_page, ui_width_chec
         ui_width_check(ui_page)
 
 
+#: Builders the width cases below put together in the shell's panel: a 900 px table, a div
+#: with a style, and a host whose open shadow root holds what it is given.
+WIDTH_KIT = """
+const panel = document.getElementById("moxi-panel");
+const table = () => {
+  const made = document.createElement("table");
+  made.id = "wide-table";
+  made.style.width = "900px";
+  const row = made.insertRow();
+  row.insertCell().textContent = "a";
+  row.insertCell().textContent = "b";
+  return made;
+};
+const box = (id, style, ...children) => {
+  const made = document.createElement("div");
+  made.id = id;
+  made.style.cssText = style;
+  made.append(...children);
+  return made;
+};
+const shadow = (...children) => {
+  const host = document.createElement("div");
+  host.attachShadow({mode: "open"}).append(...children);
+  return host;
+};
+"""
+
+#: Wide content a scroll container that ends inside the edge holds, so scrolling it
+#: reaches the rest: the width check passes.
+HELD = {
+    "wrapper": 'panel.append(box("wrapper", "overflow-x: auto", table()));',
+    "across-a-shadow-root": 'panel.append(box("wrapper", "overflow-x: auto", shadow(table())));',
+    "slotted": """
+      const host = shadow(box("wrapper", "overflow-x: auto", document.createElement("slot")));
+      host.append(table());
+      panel.append(host);""",
+    "absolute-in-a-positioned-wrapper": """
+      panel.append(box("wrapper", "overflow-x: auto; position: relative",
+                       box("abs", "position: absolute; left: 0; width: 900px; height: 1px")));""",
+    "hidden-box-it-fits-in": """
+      panel.append(box("wrapper", "overflow-x: auto",
+                       box("fits", "overflow: hidden; width: 900px", table())));""",
+}
+
+#: Wide content nothing scrolling holds, and what the check names for it.
+NOT_HELD = {
+    "hidden": ('panel.append(box("wrapper", "overflow: hidden", table()));',
+               "table#wide-table"),
+    "clip": ('panel.append(box("wrapper", "overflow-x: clip", table()));', "table#wide-table"),
+    "hidden-inside-a-wrapper": (
+        'panel.append(box("wrapper", "overflow-x: auto", box("cut", "overflow: hidden", table())));',
+        "table#wide-table"),
+    "wrapper-past-the-edge": (
+        'panel.append(box("wrapper", "overflow-x: auto; width: 500px", table()));',
+        "div#wrapper"),
+    "absolute-past-its-wrapper": (
+        """panel.append(box("wrapper", "overflow-x: auto",
+                            box("abs", "position: absolute; left: 0; width: 900px; height: 1px")));""",
+        "div#abs"),
+    "fixed": (
+        """panel.append(box("wrapper", "overflow-x: auto; position: relative",
+                            box("fixed", "position: fixed; left: 0; width: 900px; height: 1px")));""",
+        "div#fixed"),
+}
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("case", list(HELD))
+def test_the_width_check_passes_what_a_scroll_container_inside_the_edge_holds(
+        ui_page, ui_width_check, case):
+    ui_page.set_viewport_size({"width": 360, "height": 800})
+    ui_page.evaluate(f"() => {{ {WIDTH_KIT} {HELD[case]} }}")
+    wrapper = ui_page.locator("#wrapper")
+    # The wrapper does scroll: the table is wider than it.
+    assert wrapper.evaluate("(node) => node.scrollWidth > node.clientWidth")
+    ui_width_check(ui_page)
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("case", list(NOT_HELD))
+def test_the_width_check_names_what_no_scroll_container_inside_the_edge_holds(
+        ui_page, ui_width_check, case):
+    script, named = NOT_HELD[case]
+    ui_page.evaluate(f"() => {{ {WIDTH_KIT} {script} }}")
+    with pytest.raises(AssertionError, match=named):
+        ui_width_check(ui_page)
+
+
 @pytest.mark.browser
 def test_each_context_is_fresh_from_one_stored_sign_in_and_a_refused_one_signs_in_again(
         ui_shells, fixture_site, ui_contexts):
