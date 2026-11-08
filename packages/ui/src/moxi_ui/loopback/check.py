@@ -60,7 +60,7 @@ __all__ = [
     "upstream",
 ]
 
-#: The Host names the shell's listener may admit without a further ruling.
+#: The Host names the shell's listener may admit without a further check.
 BASE_NAMES = frozenset({"127.0.0.1", "localhost"})
 
 #: The one token shape, `secrets.token_urlsafe(32)`, and the nonce's too.

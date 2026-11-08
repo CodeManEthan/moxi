@@ -9,7 +9,6 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 keywords = ["agents", "claude-code", "codex", "opencode", "hooks", "harness"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Environment :: Console",
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",

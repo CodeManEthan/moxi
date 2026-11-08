@@ -16,7 +16,6 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Topic :: Communications",
-    "Topic :: Software Development",
 ]
 # turns is required: it is the one way into a harness session (a Claude session's
 # delivery, its Stop hold and its context all go through it).
