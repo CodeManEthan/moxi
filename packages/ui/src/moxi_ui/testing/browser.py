@@ -117,11 +117,36 @@ const name = (node) => {
   const root = node.getRootNode();
   return root instanceof ShadowRoot ? `${name(root.host)} > ${text}` : text;
 };
+// The box a node lays out in: its slot when it is slotted, else its parent, else, at the
+// top of a shadow tree, the tree's host.
+const up = (node) => {
+  if (node.assignedSlot) return node.assignedSlot;
+  if (node.parentElement) return node.parentElement;
+  const root = node.getRootNode();
+  return root instanceof ShadowRoot ? root.host : null;
+};
+// Whether a scroll container that ends inside the edge holds `node`, so scrolling it
+// reaches the part past the edge. A box placed `absolute` is clipped only from its
+// containing block up (taken as its nearest positioned ancestor); one placed `fixed` by
+// none of them.
+const held = (node, width) => {
+  let position = getComputedStyle(node).position;
+  for (let box = up(node); box; box = up(box)) {
+    const style = getComputedStyle(box);
+    const clips = position === "fixed" ? false
+      : position === "absolute" ? style.position !== "static" : true;
+    if (!clips) continue;
+    if ((style.overflowX === "auto" || style.overflowX === "scroll")
+        && box.getBoundingClientRect().right <= width + 0.5) return true;
+    position = style.position;
+  }
+  return false;
+};
 return async () => {
   await frames();
   const width = window.innerWidth;
   const wide = [...walk(document.documentElement)]
-    .filter((node) => node.getBoundingClientRect().right > width + 0.5)
+    .filter((node) => node.getBoundingClientRect().right > width + 0.5 && !held(node, width))
     .slice(0, 8).map((node) => `${name(node)} (right edge ${Math.round(node.getBoundingClientRect().right)})`);
   return {width, scroll: document.documentElement.scrollWidth, body: document.body.scrollWidth, wide};
 };
@@ -301,6 +326,13 @@ def check_width(page: Any, *, module: str | None = None, name: str = "page",
     """The width check: at a viewport `width` CSS px wide (360 by default) the document
     has no horizontal scroll, and no element reaches past its right edge (where a parent
     that doesn't scroll would cut it off).
+
+    An element inside a scroll container (`overflow-x` of `auto` or `scroll`) that itself
+    ends inside the edge is not counted: scrolling that container reaches it. The walk up
+    to the container crosses shadow roots. An element cut off by `overflow: hidden` or
+    `clip`, or held only by a container that passes the edge itself, is counted. So is one
+    placed `fixed`, or `absolute` against a containing block outside the container, since
+    the container doesn't clip it.
 
     With no `module` it checks the page as it is. With `module` and `name` `page` it
     first opens that module's panel at `route` through `navigate()`; with another `name`
