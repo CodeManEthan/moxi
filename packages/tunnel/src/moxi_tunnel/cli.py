@@ -54,7 +54,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog, description="Give a module's loopback service an address something off "
                                "the box can reach: Tailscale Serve for your own devices, "
-                               "Tailscale Funnel for public callers.")
+                               "Tailscale Funnel for public callers, or a Cloudflare "
+                               "named tunnel for either.")
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 

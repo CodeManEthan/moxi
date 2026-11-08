@@ -16,9 +16,16 @@ Tunnel authenticates nothing. The module behind the address checks every call it
 
 ## Install
 
+Linux, macOS or Windows, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
+
 ```sh
+uv tool install moxi
 moxi install tunnel
 ```
+
+The first line installs `moxi`, the core, whose README covers the `moxi` command. The
+repository, [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), lists the other
+modules.
 
 Tunnel needs only the core. For Tailscale it needs the `tailscale` CLI, the machine logged
 in, MagicDNS and HTTPS certificates on for the tailnet, and for a public target the
@@ -134,10 +141,9 @@ GATEWAY = {"reach": "own-devices", "port_setting": "gateway.port",
 - `retired()` gives origins the module keeps a copy of; tunnel adds them to its own list
   before it places the target, which refills the list after a `--purge`.
 
-These keys are refused in `moxi.tunnel`, and so is a target declared in both groups, since
-moxi-tunnel 0.1 reads only `moxi.tunnel` and would apply such a target as a plain loopback
-port. A caller that relies on them loads tunnel with interface 2. `lifetime` is refused in
-either group by this version.
+These keys are refused in `moxi.tunnel`, and so is a target declared in both groups. A
+caller that relies on them loads tunnel with interface 2. `lifetime` is refused in either
+group.
 
 **Retired origins.** An origin is `https://<host>:<port>`. Tunnel's record keeps a list,
 which only grows, of every origin at which a persistent loopback mapping has been live:
@@ -151,9 +157,7 @@ an entry onto a socket picks a new port when the one it would keep is retired. A
 `--port` or a Cloudflare hostname you name is taken as given, with one line saying so.
 
 Each Cloudflare rule carries `originRequest: httpHostHeader: <hostname>`, so the target
-sees its own hostname as the Host. After upgrading from moxi-tunnel 0.1, the doctor's
-`cloudflare in step` row fails, `cloudflared.yml` being behind the record, until you run
-`moxi tunnel repair`.
+sees its own hostname as the Host.
 
 A module may also declare `on_change(target, old, new)` in the group
 `moxi.tunnel.changes`, named by the module. Tunnel calls it in the process that made the
@@ -161,7 +165,7 @@ change, after the change, once per changed address.
 
 ## Settings
 
-`moxi config tunnel` shows them; the file is `CONFIG/tunnel/config.toml`.
+`moxi config tunnel` shows them, and `moxi config tunnel path` prints the file's path.
 
 | key | default | what |
 |---|---|---|
@@ -260,3 +264,7 @@ your tailnet (on mobile data):
 | `cloudflared` daemon | a systemd user unit | a LaunchAgent | a Task Scheduler task |
 
 The `tailscale.binary` setting overrides the search.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/tunnel/LICENSE).

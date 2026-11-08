@@ -6,6 +6,19 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["tunnel", "tailscale", "funnel", "cloudflare", "loopback"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking",
+]
 # The core with the daemon switch and the uninstall listeners tunnel relies on.
 dependencies = ["moxi>=0.1.6,<0.2"]
 
@@ -40,7 +53,7 @@ packages = ["src/moxi_tunnel"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_tunnel", "tests"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi_tunnel", "tests"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
