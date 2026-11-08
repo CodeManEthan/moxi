@@ -220,7 +220,8 @@ function readConfig(root, name) {
   return { entries, copy, generate: config.generate };
 }
 
-// The colour check. A page draws its colours from the theme's tokens (var(--moxi-*)), so
+// The colour check. The rule: a page's web sources carry no colour literal in any place a
+// colour can be written; every colour comes from the theme's tokens (var(--moxi-*)), so
 // every page follows the light and dark sets with no code of its own. A colour written
 // into a page's source would not, so the build refuses one in a module's web/src/**/*.ts
 // and in the .css and .html files it copies, unless its line says why it is fixed in a
@@ -231,16 +232,29 @@ function readConfig(root, name) {
 //   so a private name (`this.#feed`, `#feed: Feed`, `#feed = null`, `#add()`) passes;
 // - a colour function: rgb(), rgba(), hsl(), hsla(), hwb(), lab(), lch(), oklab(),
 //   oklch(), color(), color-mix();
-// - a named colour or a system colour as a whole word in the value of a colour property
-//   (`color`, `background`, `border*`, `outline*`, `fill`, `stroke`, `box-shadow`,
-//   `accent-color`, `caret-color`, `text-decoration*`). `transparent`, `currentColor`
-//   and `inherit` pass.
+// - a named colour or a system colour as a whole word in the value of a CSS colour
+//   property (`color`, `background*`, `border*`, `outline*`, `fill`, `stroke`,
+//   `box-shadow`, `accent-color`, `caret-color`, `text-decoration*`, `stop-color`,
+//   `flood-color`, `lighting-color`, `column-rule*`, `scrollbar-color`);
+// - the same words in a quoted value given with `=`: an HTML or SVG attribute
+//   (`fill="red"`, `stroke='black'`, `stop-color="white"`, in a Lit html or svg template
+//   too) or a script's style assignment (`el.style.color = "red"`,
+//   `el.style.backgroundColor = "white"`); or given with `:` to a camelCase style key
+//   (`{ borderColor: "red" }`); and an unquoted attribute value (`fill=red`).
+//
+// `transparent`, `currentColor` and `inherit` pass, and so does `none`. A colour set
+// through a variable, setProperty() or a quoted key ("color": "red") is not found.
 
 const HEX_COLOUR = /(?<![\w$.&])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})(?![\w$:(?.]|\s*=)/gi;
 const COLOUR_FUNCTION = /(?<![\w$.-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\(/gi;
 const COLOUR_PROPERTY = new RegExp("(?<![\\w$-])(?:color|background(?:-color)?|border(?:-[a-z-]+)?"
   + "|outline(?:-[a-z-]+)?|fill|stroke|box-shadow|accent-color|caret-color"
-  + "|text-decoration(?:-[a-z-]+)?)\\s*:([^;{}]*)", "gi");
+  + "|text-decoration(?:-[a-z-]+)?|stop-color|flood-color|lighting-color"
+  + "|column-rule(?:-color)?|scrollbar-color)\\s*:([^;{}]*)", "gi");
+const COLOUR_ATTRIBUTE = new RegExp("(?<![\\w$-])(?:fill|stroke|color|background|border|outline"
+  + "|stop-color|flood-color|lighting-color|boxShadow|[a-z][a-zA-Z]*Color"
+  + "|(?:border|outline|columnRule|textDecoration)[A-Z][a-zA-Z]*)"
+  + "(?:\\s*[=:]\\s*(?:\"([^\"]*)\"|'([^']*)'|`([^`]*)`)|=([A-Za-z]+)(?![\\w$.(-]))", "g");
 const VALUE_WORD = /(?<![\w$.-])[a-z]+(?![\w$.(-])/gi;
 const COLOUR_FIXED = /(?:\/\/|\/\*|<!--).*colour-fixed/;
 const COLOUR_NAMES = new Set(`
@@ -275,14 +289,20 @@ export function colourLiterals(text) {
     const literals = [];
     for (const match of line.matchAll(HEX_COLOUR)) literals.push([match.index, match[0]]);
     for (const match of line.matchAll(COLOUR_FUNCTION)) literals.push([match.index, match[0]]);
-    for (const match of line.matchAll(COLOUR_PROPERTY)) {
-      const start = match.index + match[0].length - match[1].length;
-      for (const word of match[1].matchAll(VALUE_WORD)) {
+    const named = (match) => {
+      const value = match.slice(1).find((group) => group !== undefined);
+      const start = match.index + match[0].lastIndexOf(value);
+      for (const word of value.matchAll(VALUE_WORD)) {
         if (COLOUR_NAMES.has(word[0].toLowerCase())) literals.push([start + word.index, word[0]]);
       }
+    };
+    for (const match of line.matchAll(COLOUR_PROPERTY)) named(match);
+    for (const match of line.matchAll(COLOUR_ATTRIBUTE)) named(match);
+    // A word both forms find (`{ color: "red" }`) is one literal.
+    const unique = new Map(literals);
+    for (const [, literal] of [...unique].sort((a, b) => a[0] - b[0])) {
+      found.push({ line: index + 1, literal });
     }
-    literals.sort((a, b) => a[0] - b[0]);
-    for (const [, literal] of literals) found.push({ line: index + 1, literal });
   });
   return found;
 }

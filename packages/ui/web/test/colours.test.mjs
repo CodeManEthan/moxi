@@ -86,6 +86,62 @@ test("a named or system colour in a colour property's value is found", () => {
   }
 });
 
+test("the colour properties a hyphen once hid are read too", () => {
+  for (const [line, literals] of [
+    ["stop-color: white;", ["white"]],
+    ["flood-color: black", ["black"]],
+    ["lighting-color: red;", ["red"]],
+    ["column-rule-color: gray", ["gray"]],
+    ["column-rule: 1px solid silver;", ["silver"]],
+    ["scrollbar-color: navy Canvas;", ["navy", "Canvas"]],
+  ]) {
+    assert.deepEqual(found(line), literals, line);
+  }
+  for (const line of [
+    "stop-color: var(--moxi-accent);",
+    "flood-color: currentColor; lighting-color: transparent;",
+    "scrollbar-color: var(--moxi-border) transparent;",
+  ]) {
+    assert.deepEqual(found(line), [], line);
+  }
+});
+
+test("a named colour in an attribute, a style assignment or a style key is found", () => {
+  for (const [line, literals] of [
+    ["<rect fill=\"red\"></rect>", ["red"]],
+    ["<path stroke='black'/>", ["black"]],
+    ["<rect fill=red>", ["red"]],
+    ["svg`<line x1=${a} stroke=\"white\" stroke-width=\"2\">`", ["white"]],
+    ["html`<font color=\"Teal\">x</font>`", ["Teal"]],
+    ["<stop offset=\"0\" stop-color=\"gold\"/>", ["gold"]],
+    ["<feFlood flood-color='black'/>", ["black"]],
+    ["<feDiffuseLighting lighting-color=white>", ["white"]],
+    ["this.style.color = \"red\";", ["red"]],
+    ["el.style.backgroundColor = 'white';", ["white"]],
+    ["el.style.border = \"1px solid black\";", ["black"]],
+    ["styleMap({ borderColor: \"red\", outlineColor: \"Highlight\" })", ["red", "Highlight"]],
+    ["styleMap({ color: \"red\" })", ["red"]],
+  ]) {
+    assert.deepEqual(found(line), literals, line);
+  }
+  for (const line of [
+    "<path d=${d} fill=\"none\" stroke=\"currentColor\"></path>",
+    "<rect fill=\"var(--moxi-accent)\" stroke=\"transparent\"></rect>",
+    "<rect fill=none stroke=currentColor>",
+    "svg`<line stroke=${colour(key)} stroke-width=\"1\">`",
+    "<circle fill=\"${this.tone}\"/>",
+    "el.style.color = \"var(--moxi-text)\";",
+    "el.style.backgroundColor = tone;",
+    "const fill = highlight;",
+    "if (row.color === \"red\") return;",
+    "const seriesColor = colours[i];",
+    "<div data-color=\"red\" class=\"white\"></div>",
+    "{ borderRadius: \"4px\", textColor: \"inherit\" }",
+  ]) {
+    assert.deepEqual(found(line), [], line);
+  }
+});
+
 test("a line passes only when a comment on it holds colour-fixed", () => {
   assert.deepEqual(found("p { background: rgb(0 0 0 / 0.4); } /* colour-fixed: the scrim */"), []);
   assert.deepEqual(found("<rect fill=\"#ffffff\"></rect><!-- colour-fixed: for scanners -->"), []);
