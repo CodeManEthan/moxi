@@ -11,6 +11,8 @@
 
 ## 0.2.5 (2026-11-07)
 
+Not published.
+
 - New guard for turns, `sessions.transcript-read`: once it is on, an agent's Read, Grep or
   Glob of a path under a transcript root, or a shell command naming one, is refused and
   pointed to `moxi sessions read <session>`. A simple command that runs `moxi sessions`

@@ -8,13 +8,18 @@
   refuses, every setting, the Claude Code version the plugins were run against, the Codex
   version it needs, and that it needs moxi 0.1.6 or later. It installs from PyPI and its
   links work from PyPI. The package declares keywords and classifiers.
+- The OpenCode host is experimental: no real run has confirmed it.
 
 ## 0.2.3 (2026-11-08)
+
+Not published.
 
 - The open turn is shaded with the theme's selected colour.
 - The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
 
 ## 0.2.2 (2026-11-07)
+
+Not published.
 
 - Setup places a copy of the Claude marketplace in turns' data dir, writes
   `endpoint.json` there, and installs the plugins from it. It never writes into the
@@ -38,6 +43,8 @@
 - turns needs moxi 0.1.6 or later.
 
 ## 0.2.1 (2026-11-07)
+
+Not published.
 
 - The `ui` extra needs moxi-ui 0.2, where the page-server base now lives as
   `moxi_ui.loopback`.

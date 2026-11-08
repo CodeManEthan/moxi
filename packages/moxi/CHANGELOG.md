@@ -12,6 +12,8 @@
 
 ## 0.1.6 (2026-11-07)
 
+Not published.
+
 - Unit names carry the home. With `MOXI_HOME` set, units are named
   `moxi-<tag>-<module>-<name>` (systemd), `moxi.<tag>.<module>.<name>` (launchd) and
   `\Moxi\<tag>\<module>-<name>` (Task Scheduler), and run with that `MOXI_HOME`. The
@@ -52,6 +54,8 @@
 
 ## 0.1.5 (2026-11-07)
 
+Not published.
+
 - `units.status` and the five acts take `kinds`, a mapping of a foreign unit to
   `"daemon"` or `"timer"`. Only Task Scheduler reads it: a foreign task read as a
   daemon is active only while it runs, failed when its last result is outside Task
@@ -60,6 +64,8 @@
 - New `units.TASK_STATUS_CODES`, Task Scheduler's success band (0x41300-0x413FF).
 
 ## 0.1.4 (2026-11-07)
+
+Not published.
 
 - New `moxi.terminal`: the `moxi` command records the terminal's environment and its launch
   chain, and the doctor reports that record in its terminal row. The check that compares
