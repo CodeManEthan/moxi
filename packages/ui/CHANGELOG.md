@@ -5,8 +5,9 @@
 - The width check no longer counts an element held by a scroll container (`overflow-x` of
   `auto` or `scroll`) that itself ends inside the viewport, as its docstring always said:
   a table that scrolls sideways in its own wrapper passes. An element cut off by
-  `overflow: hidden` or `clip`, held only by a container that passes the edge itself, or
-  placed `fixed` or `absolute` outside the container's reach is still named. Every module
+  `overflow: hidden` or `clip` (inside such a container too), held only by a container
+  that passes the edge itself, or placed `fixed` or `absolute` outside the container's
+  reach is still named. Every module
   that runs the check gets the looser rule.
 
 ## 0.2.1 (2026-11-07)

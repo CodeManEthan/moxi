@@ -277,6 +277,9 @@ HELD = {
     "absolute-in-a-positioned-wrapper": """
       panel.append(box("wrapper", "overflow-x: auto; position: relative",
                        box("abs", "position: absolute; left: 0; width: 900px; height: 1px")));""",
+    "hidden-box-it-fits-in": """
+      panel.append(box("wrapper", "overflow-x: auto",
+                       box("fits", "overflow: hidden; width: 900px", table())));""",
 }
 
 #: Wide content nothing scrolling holds, and what the check names for it.
@@ -284,6 +287,9 @@ NOT_HELD = {
     "hidden": ('panel.append(box("wrapper", "overflow: hidden", table()));',
                "table#wide-table"),
     "clip": ('panel.append(box("wrapper", "overflow-x: clip", table()));', "table#wide-table"),
+    "hidden-inside-a-wrapper": (
+        'panel.append(box("wrapper", "overflow-x: auto", box("cut", "overflow: hidden", table())));',
+        "table#wide-table"),
     "wrapper-past-the-edge": (
         'panel.append(box("wrapper", "overflow-x: auto; width: 500px", table()));',
         "div#wrapper"),

@@ -128,7 +128,8 @@ const up = (node) => {
 // Whether a scroll container that ends inside the edge holds `node`, so scrolling it
 // reaches the part past the edge. A box placed `absolute` is clipped only from its
 // containing block up (taken as its nearest positioned ancestor); one placed `fixed` by
-// none of them.
+// none of them. A box on the way with `overflow` hidden or clip that `node` passes cuts it
+// off, and no scrolling above reaches the cut part.
 const held = (node, width) => {
   let position = getComputedStyle(node).position;
   for (let box = up(node); box; box = up(box)) {
@@ -136,6 +137,8 @@ const held = (node, width) => {
     const clips = position === "fixed" ? false
       : position === "absolute" ? style.position !== "static" : true;
     if (!clips) continue;
+    if ((style.overflowX === "hidden" || style.overflowX === "clip")
+        && node.getBoundingClientRect().right > box.getBoundingClientRect().right + 0.5) return false;
     if ((style.overflowX === "auto" || style.overflowX === "scroll")
         && box.getBoundingClientRect().right <= width + 0.5) return true;
     position = style.position;
@@ -330,9 +333,9 @@ def check_width(page: Any, *, module: str | None = None, name: str = "page",
     An element inside a scroll container (`overflow-x` of `auto` or `scroll`) that itself
     ends inside the edge is not counted: scrolling that container reaches it. The walk up
     to the container crosses shadow roots. An element cut off by `overflow: hidden` or
-    `clip`, or held only by a container that passes the edge itself, is counted. So is one
-    placed `fixed`, or `absolute` against a containing block outside the container, since
-    the container doesn't clip it.
+    `clip` (inside such a container too), or held only by a container that passes the edge
+    itself, is counted. So is one placed `fixed`, or `absolute` against a containing block
+    outside the container, since the container doesn't clip it.
 
     With no `module` it checks the page as it is. With `module` and `name` `page` it
     first opens that module's panel at `route` through `navigate()`; with another `name`
