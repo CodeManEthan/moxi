@@ -5,7 +5,8 @@ token class, a session opened under its row's harness, the strip with no index, 
 new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
 the session view's request and context charts and their readout, a subagent's charts, the
 cost terms view's Total against its group lines and the models view, the daily cost by class
-naming each tier, and the Rates section and its search.
+naming each tier, the Rates section and its search, and Reconcile and Rates keeping every
+column on a phone, scrolling in their wrappers with the Model column in view.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
 the shell's own environment, so they sit under the shell's home where its page servers
@@ -411,6 +412,69 @@ def test_the_rates_section_fits_a_phone_when_open(charted, charted_page, ui_widt
     rates = panel_of(charted_page).locator("section[data-part=view] details[data-part=rates]")
     rates.locator("summary").click()
     expect(rates.locator("tr[data-rate]")).to_have_count(2)
+    ui_width_check(charted_page)
+
+
+#: Over a table in its scrolling wrapper: the headers it doesn't draw, whether the wrapper
+#: scrolls, and, scrolled to its right end, the rows whose first cell has left the wrapper
+#: and the colours behind each first cell.
+SCROLLED = """(table) => {
+  const wrapper = table.parentElement;
+  const hidden = [...table.tHead.rows[0].cells]
+    .filter((cell) => getComputedStyle(cell).display === "none" || cell.getBoundingClientRect().width === 0)
+    .map((cell) => cell.textContent.trim());
+  const scrolls = wrapper.scrollWidth > wrapper.clientWidth;
+  wrapper.scrollLeft = wrapper.scrollWidth;
+  const edge = wrapper.getBoundingClientRect().left;
+  const firsts = [...table.rows].map((row) => row.cells[0]);
+  return {
+    headers: [...table.tHead.rows[0].cells].map((cell) => cell.textContent.trim()),
+    hidden, scrolls, scrolled: wrapper.scrollLeft,
+    page: document.documentElement.scrollWidth - window.innerWidth,
+    out: firsts.filter((cell) => cell.getBoundingClientRect().left < edge - 0.5)
+      .map((cell) => cell.textContent.trim()),
+    backgrounds: [...new Set(firsts.map((cell) => getComputedStyle(cell).backgroundColor))],
+  };
+}"""
+
+RECONCILE_HEADERS = ["Model", "Priced by", "fresh input", "cache read", "cache write 5m",
+                     "cache write 1h", "output", "Cost"]
+RATE_HEADERS = ["Model", "Input", "Output", "Cache read", "Write 5m", "Write 1h", "Window",
+                "Tiers", "Period", "Where from"]
+
+
+def scrolled_on_a_phone(table, headers: list[str]) -> None:
+    """At phone width `table` draws every header in `headers`, scrolls inside its wrapper
+    while the page doesn't, and keeps its Model column in view, on an opaque background,
+    when scrolled to its right end."""
+    seen = table.evaluate(SCROLLED)
+    assert seen["headers"] == headers, seen
+    assert seen["hidden"] == [], seen
+    assert seen["scrolls"] and seen["scrolled"] > 0, seen
+    assert seen["page"] <= 0, seen
+    assert seen["out"] == [], seen
+    assert seen["backgrounds"], seen
+    for colour in seen["backgrounds"]:
+        # rgb() is opaque; rgba() and color() carry an alpha, which must be 1.
+        alpha = re.fullmatch(r"rgb\(\d+, \d+, \d+\)|rgba\(.*, (?P<a>[\d.]+)\)", colour)
+        assert alpha and float(alpha.group("a") or 1) == 1, seen
+
+
+def test_reconcile_and_rates_keep_every_column_on_a_phone_and_scroll_with_model_in_view(
+        charted, charted_page, ui_width_check):
+    ui_width_check(charted_page, module="usage", route="terms")
+    panel = panel_of(charted_page)
+    view = panel.locator("section[data-part=view]")
+    table = reconcile(panel)
+    expect(table.locator("tr[data-line=total]")).to_be_visible()
+    for header in RECONCILE_HEADERS:
+        expect(table.locator("thead th", has_text=header).first).to_be_visible()
+    scrolled_on_a_phone(table, RECONCILE_HEADERS)
+
+    rates = view.locator("details[data-part=rates]")
+    rates.locator("summary").click()
+    expect(rates.locator("tr[data-rate]")).to_have_count(2)
+    scrolled_on_a_phone(rates.locator("table[data-part=rate-lines]"), RATE_HEADERS)
     ui_width_check(charted_page)
 
 

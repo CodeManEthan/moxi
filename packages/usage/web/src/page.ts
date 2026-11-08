@@ -65,8 +65,6 @@ const REQUESTS_HEIGHT = 200;
 const SPLIT_HEIGHT = 16;
 const TREEMAP_HEIGHT = 300;
 const SEARCH_MS = 200;
-/** The rate columns a phone keeps; the rest of the Rates table shows from 640 px up. */
-const PHONE_RATES: ReadonlySet<string> = new Set(["input", "output"]);
 
 // The filters and the daily view's choices outlive one placement: the shell places a new
 // page for each route, and the user's filters carry over.
@@ -108,6 +106,10 @@ const STYLES = [BASE, SERIES, css`
   th { color: var(--moxi-text-dim); font-weight: normal; white-space: nowrap; }
   td.wrap { overflow-wrap: anywhere; min-width: 8em; }
   @media (max-width: 640px) { .wide { display: none; } }
+  /* Reconcile and Rates keep every column on a phone and scroll inside their wrapper; the
+     Model column stays in view, opaque over the cells that scroll under it. */
+  table:is([data-part="reconcile"], [data-part="rate-lines"]) :is(th, td):first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--moxi-bg); }
   a.link { color: var(--moxi-accent); }
   svg { display: block; width: 100%; height: auto; margin-bottom: var(--moxi-gap); }
   svg text { fill: var(--moxi-text-dim); font-size: 11px; font-family: var(--moxi-font-sans); }
@@ -601,12 +603,12 @@ export class UsagePage extends LitElement {
   #reconcile(report: Report<TermsRow, TermsTotal>) {
     const lines = reconcileLines(report);
     return html`<div class="scroll"><table data-part="reconcile">
-      <thead><tr><th>Model</th><th class="wide">Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="num wide">${label}</th>`)}<th class="num">Cost</th></tr></thead>
+      <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="num">${label}</th>`)}<th class="num">Cost</th></tr></thead>
       <tbody>${lines.map((line) => html`
         <tr data-line=${line.kind} data-model=${line.model}>
           <td class="wrap"><code>${line.model}</code></td>
-          <td class="wrap small wide">${line.pricedBy}</td>
-          ${line.cells.map((cell) => html`<td class="num wide" data-class=${cell.cls} title=${cell.title}>${cell.text}</td>`)}
+          <td class="wrap small">${line.pricedBy}</td>
+          ${line.cells.map((cell) => html`<td class="num" data-class=${cell.cls} title=${cell.title}>${cell.text}</td>`)}
           <td class="num" data-cost=${line.cost === null ? "" : String(line.cost)}>${fmtCost(line.cost)}${flag(line.flags)}</td>
         </tr>`)}</tbody>
     </table></div>
@@ -674,17 +676,17 @@ export class UsagePage extends LitElement {
     const lines = prices.models.map(rateLine);
     if (!lines.length) return html`<p class="dim small">No model matches.</p>`;
     return html`<div class="scroll"><table data-part="rate-lines">
-      <thead><tr><th>Model</th>${RATE_FIELDS.map(([field, label]) => html`<th class=${PHONE_RATES.has(field) ? "num" : "num wide"}>${label}</th>`)}
-        <th class="num wide">Window</th><th class="wide">Tiers</th><th class="wide">Period</th><th class="wide">Where from</th></tr></thead>
+      <thead><tr><th>Model</th>${RATE_FIELDS.map(([, label]) => html`<th class="num">${label}</th>`)}
+        <th class="num">Window</th><th>Tiers</th><th>Period</th><th>Where from</th></tr></thead>
       <tbody>${lines.map((line) => html`
         <tr data-rate=${line.model} data-provider=${line.provider ?? ""}>
           <td class="wrap"><code>${line.model}</code>${line.provider ? html`<div class="dim small">${line.provider}</div>` : nothing}
             ${line.known ? nothing : html`<div class="dim small">not in the model table</div>`}</td>
-          ${line.cells.map((cell, i) => html`<td class=${PHONE_RATES.has(RATE_FIELDS[i][0]) ? "num" : "num wide"}>${cell.text}${cell.mark ? html`<div class="dim small">${cell.mark}</div>` : nothing}</td>`)}
-          <td class="num wide">${line.window}</td>
-          <td class="wrap small wide">${line.tiers.map((tier) => html`<div>${tier}</div>`)}</td>
-          <td class="small wide">${line.period}</td>
-          <td class="wrap small wide">${line.from}</td>
+          ${line.cells.map((cell) => html`<td class="num">${cell.text}${cell.mark ? html`<div class="dim small">${cell.mark}</div>` : nothing}</td>`)}
+          <td class="num">${line.window}</td>
+          <td class="wrap small">${line.tiers.map((tier) => html`<div>${tier}</div>`)}</td>
+          <td class="small">${line.period}</td>
+          <td class="wrap small">${line.from}</td>
         </tr>`)}</tbody>
     </table></div>`;
   }
