@@ -1,10 +1,23 @@
 [project]
 name = "moxi-$module"
-version = "0.1.0"
+version = "$version"
 description = $summary_toml
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["moxi", "$module"]
+# Add "Environment :: Console" once the module has a command, and an Operating System
+# classifier only for a system its README claims and CI runs.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
 dependencies = ["moxi$core_range"]
 
 [project.urls]
@@ -28,7 +41,8 @@ packages = ["src/moxi_$module"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_$module", "tests"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi_$module",
+                "tests"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

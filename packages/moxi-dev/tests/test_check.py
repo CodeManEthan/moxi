@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from moxi_dev import check, testing
+from test_release import METADATA, release_files
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -57,13 +58,20 @@ def toml_list(items) -> str:
 
 
 def write_workspace(root: Path, layout: dict) -> None:
+    """The layout's packages, each ready for the release step; the core's catalogue lists
+    no module, as no package here declares one."""
     members = toml_list(f"packages/{d}" for d in layout)
     (root / "pyproject.toml").write_text(f"[tool.uv.workspace]\nmembers = {members}\n")
     (root / "README.md").write_text("root\n")
     for directory, (dist, deps, extras, groups) in layout.items():
         package = root / "packages" / directory
         (package / "tests").mkdir(parents=True)
-        text = f'[project]\nname = "{dist}"\nversion = "0.1.0"\ndependencies = {toml_list(deps)}\n'
+        release_files(package)
+        if dist == "moxi":
+            (package / "src" / "moxi").mkdir(parents=True)
+            (package / "src" / "moxi" / "catalogue.toml").write_text("version = 1\n")
+        text = (f'[project]\nname = "{dist}"\nversion = "0.1.0"\n{METADATA}'
+                f"dependencies = {toml_list(deps)}\n")
         if extras:
             text += "[project.optional-dependencies]\n"
             text += "".join(f"{k} = {toml_list(v)}\n" for k, v in extras.items())
@@ -367,8 +375,8 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert ("lock fail | tags not run | stamps not run | web not run | sync not run | "
-            "lint not run") in result.line()
+    assert ("lock fail | tags not run | release not run | stamps not run | web not run | "
+            "sync not run | lint not run") in result.line()
 
 
 def test_a_failed_sync_runs_no_suite(repo):
@@ -382,8 +390,8 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert ("packages: none | lock pass | tags pass | stamps skipped | web skipped | "
-            "sync skipped | lint not run | no suites run") in result.line()
+    assert ("packages: none | lock pass | tags pass | release pass | stamps skipped | "
+            "web skipped | sync skipped | lint not run | no suites run") in result.line()
 
 
 # --- the tag check and the lint -------------------------------------------------------
@@ -397,6 +405,26 @@ def test_a_tag_fails_the_check_and_the_rest_still_run(repo, capsys):
     assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
     assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in capsys.readouterr().out
 
+
+
+def test_the_release_step_runs_whatever_the_change_picks(repo, capsys):
+    # A CHANGELOG behind its version, committed: no change since `--base HEAD` picks turns.
+    commit_file(repo, "packages/turns/CHANGELOG.md", "# Changelog\n\n## 0.0.9\n")
+    runs = Runs()
+    result = run_check(repo, runs, base="HEAD")
+    assert result.code == 1 and result.release == "fail"
+    assert "| packages: none | lock pass | tags pass | release fail |" in result.line()
+    assert ("moxi-dev check: packages/turns: CHANGELOG.md: its first version heading is "
+            "0.0.9, but project.version is 0.1.0;") in capsys.readouterr().out
+
+
+def test_a_release_problem_fails_the_check_and_the_rest_still_run(repo, capsys):
+    commit_file(repo, "packages/sessions/README.md", "See [the guide](docs/guide.md).\n")
+    runs = Runs()
+    result = run_check(repo, runs)
+    assert result.code == 1 and result.release == "fail" and result.tags == "pass"
+    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+    assert "packages/sessions: README.md:1: links to docs/guide.md" in capsys.readouterr().out
 
 def test_each_lint_command_runs_in_the_check_s_environment(repo):
     commit_file(repo, "packages/sessions/x.py")
@@ -689,6 +717,7 @@ LINE = re.compile(
     r"moxi-dev check: commit (?P<commit>[0-9a-f]{12}(\+dirty)?) \| "
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
     r"tags (pass|fail|not run) \| "
+    r"release (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| "

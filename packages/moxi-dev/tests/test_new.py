@@ -15,8 +15,9 @@ from pathlib import Path
 import pytest
 
 import moxi.modules as modules
-from moxi_dev import new
+from moxi_dev import new, release
 from moxi_dev.contract import check
+from test_release import METADATA, release_files
 
 ROOT_PYPROJECT = """\
 # The workspace root: a comment that must survive.
@@ -35,8 +36,8 @@ moxi-other = { workspace = true }
 dev = ["moxi-dev"]
 """
 
-FILES = [".gitignore", "LICENSE", "README.md", "conftest.py", "pyproject.toml",
-         "src/moxi_sample/__init__.py", "src/moxi_sample/module.py",
+FILES = [".gitignore", "CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
+         "pyproject.toml", "src/moxi_sample/__init__.py", "src/moxi_sample/module.py",
          "tests/test_contract.py"]
 
 #: The repository's own LICENSE, which every package carries byte for byte.
@@ -94,9 +95,12 @@ def test_it_writes_the_package_and_nothing_else(workspace, capsys):
     assert (package / "README.md").read_text().startswith("# moxi-sample\n")
     out = capsys.readouterr().out.splitlines()
     # Each file is named as this system writes a path.
-    assert sorted(out[:-1]) == sorted(str(Path("packages/sample", f)) for f in FILES)
-    assert out[-1] == ("pyproject.toml: packages/sample added to the workspace members "
+    assert sorted(out[:-2]) == sorted(str(Path("packages/sample", f)) for f in FILES)
+    assert out[-2] == ("pyproject.toml: packages/sample added to the workspace members "
                        "and sources")
+    assert out[-1] == ("next: add a [[module]] line for sample to "
+                       "packages/moxi/src/moxi/catalogue.toml and raise its version; until "
+                       "then `moxi-dev check` fails its release step")
 
 
 def test_the_pyproject_declares_the_module(workspace):
@@ -106,6 +110,12 @@ def test_the_pyproject_declares_the_module(workspace):
     assert project["name"] == "moxi-sample"
     assert project["description"] == "Moxi's sample: a test."
     assert project["requires-python"] == ">=3.12"
+    assert project["version"] == new.VERSION
+    assert project["readme"] == "README.md"
+    assert project["keywords"] == ["moxi", "sample"]
+    assert [c for c in project["classifiers"] if c.startswith("Operating System")] == [
+        "Operating System :: POSIX :: Linux"]
+    assert "Topic :: Software Development" in project["classifiers"]
     assert project["dependencies"] == ["moxi>=0.1.6,<0.2"]
     assert "scripts" not in project  # only the core declares the moxi script
     assert project["entry-points"] == {"moxi.modules": {"sample": "moxi_sample.module"}}
@@ -114,10 +124,40 @@ def test_the_pyproject_declares_the_module(workspace):
                                "Issues": "https://github.com/CodeManEthan/moxi/issues"}
     assert data["dependency-groups"] == {"dev": ["pytest", "moxi-dev"]}
     assert "tool" not in data or "uv" not in data["tool"]       # the root resolves
+    assert "CHANGELOG.md" in data["tool"]["hatch"]["build"]["targets"]["sdist"]["only-include"]
     options = data["tool"]["pytest"]["ini_options"]
     assert options["testpaths"] == ["tests"]
     assert options["addopts"] == "-m 'not browser and not slow and not build and not live'"
 
+
+
+def test_the_changelog_opens_with_the_package_s_version(workspace):
+    run("sample", "--summary", "Moxi's sample: a test.")
+    text = (workspace / "packages/sample/CHANGELOG.md").read_text()
+    assert text == ("# Changelog\n\n## 0.1.0 (unreleased)\n\n"
+                    "- Moxi's sample: a test.\n")
+
+
+def test_a_new_package_passes_the_release_step_once_the_catalogue_lists_it(workspace):
+    core = workspace / "packages" / "moxi"
+    release_files(core, "0.1.7")
+    (core / "pyproject.toml").write_text(
+        f'[project]\nname = "moxi"\nversion = "0.1.7"\n{METADATA}')
+    listing = core / "src" / "moxi" / "catalogue.toml"
+    listing.parent.mkdir(parents=True)
+    listing.write_text("version = 1\n")
+    release_files(workspace / "packages" / "other")
+    (workspace / "packages/other/pyproject.toml").write_text(
+        f'[project]\nname = "moxi-other"\nversion = "0.1.0"\n{METADATA}')
+    assert release.scan(workspace) == []
+    assert run("sample") == 0
+    # The catalogue is the one thing left, and its line says how to add it.
+    [problem] = release.scan(workspace)
+    assert (problem.member, problem.field) == (
+        "packages/sample", 'project.entry-points."moxi.modules"')
+    listing.write_text('version = 2\n\n[[module]]\nname = "sample"\n'
+                       'distribution = "moxi-sample"\nsummary = "s"\n')
+    assert release.scan(workspace) == []
 
 def test_the_package_loads_the_kit_and_imports_only_names_that_stay(workspace):
     run("sample")

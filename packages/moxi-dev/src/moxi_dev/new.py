@@ -13,7 +13,8 @@ declares `[tool.uv.workspace]`). It writes `packages/<module>/`:
   inside its fence;
 - `src/moxi_<module>/` with an announcement that offers nothing yet;
 - `tests/test_contract.py`, the contract check over the package;
-- `LICENSE` (the repository's MIT text), a one-line `README.md` and `.gitignore`.
+- `LICENSE` (the repository's MIT text), a one-line `README.md`, a `CHANGELOG.md` whose
+  first entry is the package's first version, and `.gitignore`.
 
 Then it adds `packages/<module>` to the root's workspace `members` and `moxi-<module>`
 to its `[tool.uv.sources]` (editing the text, so comments stay) and runs `uv lock` at
@@ -21,10 +22,17 @@ the root. It refuses a name that is not a module name or is one of the core's ve
 module the workspace already has, and any file that already exists: it overwrites
 nothing.
 
+The pyproject declares what the release step of `moxi-dev check` asks of every package:
+`readme`, keywords, classifiers (Linux only, until the module runs elsewhere) and
+`[project.urls]`. The one thing left to the author is the catalogue: a module package
+passes the release step once the core's `catalogue.toml` lists it, which `new` prints as
+its last line rather than editing the core.
+
 The templates are `templates/**.tmpl` beside this file: `$module`, `$summary`,
-`$summary_py`, `$summary_toml` and `$core_range` are substituted in their text, and the directory
-`__import__` becomes the module's import package `moxi_<module>`. A rendered package
-imports only names that keep their place: `moxi_dev.contract` and `moxi_dev.testing`.
+`$summary_py`, `$summary_toml`, `$core_range` and `$version` are substituted in their
+text, and the directory `__import__` becomes the module's import package
+`moxi_<module>`. A rendered package imports only names that keep their place:
+`moxi_dev.contract` and `moxi_dev.testing`.
 """
 
 from __future__ import annotations
@@ -45,6 +53,10 @@ from moxi import names
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SUFFIX = ".tmpl"
 DEFAULT_CORE_RANGE = ">=0.1.6,<0.2"
+#: A new package's first version, in its pyproject and its CHANGELOG's first entry.
+VERSION = "0.1.0"
+#: Where the core keeps the catalogue, from the repository's root.
+CATALOGUE = "packages/moxi/src/moxi/catalogue.toml"
 PACKAGES = "packages"
 
 
@@ -60,6 +72,7 @@ def plan(module: str, summary: str, core_range: str) -> dict[Path, str]:
         "summary_py": repr(summary),
         "summary_toml": json.dumps(summary),
         "core_range": core_range,
+        "version": VERSION,
     }
     out = {}
     for template in sorted(TEMPLATES.rglob(f"*{SUFFIX}")):
@@ -286,4 +299,6 @@ def main(argv: list[str]) -> int:
               "named in pyproject.toml, so fix the cause and run `uv lock` again",
               file=sys.stderr)
         return 1
+    print(f"next: add a [[module]] line for {args.module} to {CATALOGUE} and raise its "
+          "version; until then `moxi-dev check` fails its release step")
     return 0

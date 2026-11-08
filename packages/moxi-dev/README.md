@@ -4,8 +4,8 @@ The contributor tools for the Moxi repository. It is a development package: the
 repository's `uv sync` installs it, and no Moxi module depends on it at run time.
 
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
-  tag check, the contract's import rules (import-linter and deptry) and the tests of the
-  packages the change reaches. A test in the `slow`, `browser` or `build` tier runs
+  tag check, the release step (see below), the contract's import rules (import-linter
+  and deptry) and the tests of the packages the change reaches. A test in the `slow`, `browser` or `build` tier runs
   when a path its `touches` mark names changed; `--full` runs every package and every
   tier but `live`; `--finding L<n>` runs only the tests marked with that finding (see
   "The tag check" below). Its last line gives the tests' seconds, the slowest 5 %'s
@@ -48,6 +48,24 @@ name, and `moxi-dev check --finding L<n>` runs only the tests carrying it in the
 packages the check picks (every package with `--full`), so a fix can be checked against
 just the tests written for it. A finding's name is let through inside the mark's
 arguments and refused everywhere else, like any other id.
+
+## The release step
+
+Every package here is published to PyPI from this tree, so `moxi-dev check` checks what
+publishing needs on every package, whatever the change touched:
+
+- the core's catalogue (`packages/moxi/src/moxi/catalogue.toml`, the modules
+  `moxi install` knows by name) lists exactly the packages that declare a `moxi.modules`
+  entry point, each under its distribution name;
+- every requirement one package places on another, in its dependencies or any extra,
+  admits the other's version as it stands in the tree;
+- each package declares `readme`, `classifiers` and `[project.urls]`, has a
+  `CHANGELOG.md` whose first version heading is its version, and its README links to
+  nothing by a relative path (PyPI shows the README, where such a link leads nowhere;
+  a link to a heading of the same page is fine).
+
+Each problem's line names the package, the field and the fix. After `moxi-dev new`,
+the catalogue line is the one thing left to add by hand.
 
 ## The web build's stamp
 

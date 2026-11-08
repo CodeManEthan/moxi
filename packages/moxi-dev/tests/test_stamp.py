@@ -17,6 +17,7 @@ import pytest
 
 from moxi_dev import check, stamp
 from test_contract_rules import symlink
+from test_release import METADATA, release_files
 
 REPO = Path(__file__).resolve().parents[3]
 VERSION = "0.28.2"
@@ -278,8 +279,9 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
     (repo / "pyproject.toml").write_text(
         '[tool.uv.workspace]\nmembers = ["packages/alpha", "packages/beta"]\n')
     for name in ("alpha", "beta"):
+        release_files(repo / f"packages/{name}")
         (repo / f"packages/{name}/pyproject.toml").write_text(
-            f'[project]\nname = "moxi-{name}"\nversion = "0.1.0"\n')
+            f'[project]\nname = "moxi-{name}"\nversion = "0.1.0"\n{METADATA}')
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "packages")
     git(repo, "switch", "-q", "-c", "work")
@@ -289,8 +291,8 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
                          run=lambda cmd, cwd, env: calls.append(cmd) or 0)
     assert result.code == 1
     assert calls == [["uv", "lock", "--check"]]
-    assert ("| packages: alpha | lock pass | tags pass | stamps fail | web not run | "
-            "sync not run |") in result.line()
+    assert ("| packages: alpha | lock pass | tags pass | release pass | stamps fail | "
+            "web not run | sync not run |") in result.line()
     assert "npm run build" in capsys.readouterr().err
     rebuild(repo)
     result = check.check(repo, environ={"PATH": "/usr/bin"}, run=lambda cmd, cwd, env: 0)
