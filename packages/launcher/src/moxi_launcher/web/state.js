@@ -13,7 +13,7 @@ var O=globalThis,M=O.ShadowRoot&&(O.ShadyCSS===void 0||O.ShadyCSS.nativeShadow)&
   }
   .state:focus-visible { outline-style: solid; outline-width: 2px; outline-offset: 1px; }
   .loading { color: transparent; }
-  .ok { color: var(--moxi-accent); }
+  .ok { color: var(--moxi-live); }
   .red { color: var(--moxi-error); background: var(--moxi-error-soft); font-weight: 600; }
   .muted { color: var(--moxi-text-dim); }
 `,st=class extends ${static{this.styles=Zt}#e=new T("");#t=null;#s=null;#n=()=>{document.visibilityState==="visible"&&this.#t?.refresh()};connectedCallback(){super.connectedCallback();let t=new T(this.getAttribute("session")??"");this.#e=t;let e=`api/state?session=${encodeURIComponent(t.session)}`,s=new V(()=>Jt("launcher",e),t.route,()=>this.requestUpdate(),{topic:t.topic});this.#t=s,s.refresh().then(()=>{this.#t===s&&(this.#s=Gt("launcher","sessions",i=>s.topic(i)))}),document.addEventListener("visibilitychange",this.#n)}disconnectedCallback(){super.disconnectedCallback(),this.#t?.close(),this.#t=null,this.#s?.(),this.#s=null,document.removeEventListener("visibilitychange",this.#n)}render(){let t=this.#t;if(t===null)return u;let e=xt(t,this.#e.session,this.#e.request);return e.state==="gone"?u:wt`<span class="state ${e.tone}" tabindex="0" title=${e.title??u}

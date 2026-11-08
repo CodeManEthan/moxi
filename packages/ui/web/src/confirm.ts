@@ -28,7 +28,7 @@ dialog {
   border-radius: var(--moxi-radius); background: var(--moxi-bg-raised); color: var(--moxi-text);
   font-family: var(--moxi-font-sans);
 }
-dialog::backdrop { background: rgb(0 0 0 / 0.4); }
+dialog::backdrop { background: rgb(0 0 0 / 0.4); } /* colour-fixed: it darkens whatever lies beneath */
 h2 { margin: 0 0 var(--moxi-gap); font-size: 1.1rem; color: var(--moxi-accent); overflow-wrap: anywhere; }
 p { margin: 0 0 var(--moxi-gap); overflow-wrap: anywhere; }
 code { font-family: var(--moxi-font-mono); font-size: var(--moxi-font-size-sm); }

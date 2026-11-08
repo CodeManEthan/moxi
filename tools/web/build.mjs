@@ -18,6 +18,9 @@
 // (see `stamp`). The repository's Python pre-commit check recomputes that hash without
 // Node and refuses a commit whose sources changed without a rebuild.
 //
+// Before it bundles anything, the build refuses a colour written into a page's source
+// rather than drawn from the theme's tokens (see `checkColours`).
+//
 // `node tools/web/build.mjs --out DIR` writes the same files under DIR instead, at their
 // repository-relative paths; tools/web/check.mjs uses it to compare a fresh build with
 // the committed files. `--root DIR` builds another checkout with this toolchain.
@@ -217,6 +220,104 @@ function readConfig(root, name) {
   return { entries, copy, generate: config.generate };
 }
 
+// The colour check. A page draws its colours from the theme's tokens (var(--moxi-*)), so
+// every page follows the light and dark sets with no code of its own. A colour written
+// into a page's source would not, so the build refuses one in a module's web/src/**/*.ts
+// and in the .css and .html files it copies, unless its line says why it is fixed in a
+// comment holding `colour-fixed`. It finds:
+//
+// - a hex colour: `#` and 3, 4, 6 or 8 hex digits, not after `.`, `&` or an identifier
+//   character, and not followed by an identifier character, `:`, `(`, `?`, `.` or `=`;
+//   so a private name (`this.#feed`, `#feed: Feed`, `#feed = null`, `#add()`) passes;
+// - a colour function: rgb(), rgba(), hsl(), hsla(), hwb(), lab(), lch(), oklab(),
+//   oklch(), color(), color-mix();
+// - a named colour or a system colour as a whole word in the value of a colour property
+//   (`color`, `background`, `border*`, `outline*`, `fill`, `stroke`, `box-shadow`,
+//   `accent-color`, `caret-color`, `text-decoration*`). `transparent`, `currentColor`
+//   and `inherit` pass.
+
+const HEX_COLOUR = /(?<![\w$.&])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})(?![\w$:(?.]|\s*=)/gi;
+const COLOUR_FUNCTION = /(?<![\w$.-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\(/gi;
+const COLOUR_PROPERTY = new RegExp("(?<![\\w$-])(?:color|background(?:-color)?|border(?:-[a-z-]+)?"
+  + "|outline(?:-[a-z-]+)?|fill|stroke|box-shadow|accent-color|caret-color"
+  + "|text-decoration(?:-[a-z-]+)?)\\s*:([^;{}]*)", "gi");
+const VALUE_WORD = /(?<![\w$.-])[a-z]+(?![\w$.(-])/gi;
+const COLOUR_FIXED = /(?:\/\/|\/\*|<!--).*colour-fixed/;
+const COLOUR_NAMES = new Set(`
+  aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue
+  blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk
+  crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki
+  darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen
+  darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue
+  dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro
+  ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo
+  ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan
+  lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen
+  lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen
+  linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple
+  mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred
+  midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab
+  orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip
+  peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue
+  saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue
+  slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet
+  wheat white whitesmoke yellow yellowgreen
+  accentcolor accentcolortext activetext buttonborder buttonface buttontext canvas
+  canvastext field fieldtext graytext highlight highlighttext linktext mark marktext
+  selecteditem selecteditemtext visitedtext
+`.trim().split(/\s+/));
+
+/** The colour literals in a source's text, each with its 1-based line. */
+export function colourLiterals(text) {
+  const found = [];
+  text.split("\n").forEach((line, index) => {
+    if (COLOUR_FIXED.test(line)) return;
+    const literals = [];
+    for (const match of line.matchAll(HEX_COLOUR)) literals.push([match.index, match[0]]);
+    for (const match of line.matchAll(COLOUR_FUNCTION)) literals.push([match.index, match[0]]);
+    for (const match of line.matchAll(COLOUR_PROPERTY)) {
+      const start = match.index + match[0].length - match[1].length;
+      for (const word of match[1].matchAll(VALUE_WORD)) {
+        if (COLOUR_NAMES.has(word[0].toLowerCase())) literals.push([start + word.index, word[0]]);
+      }
+    }
+    literals.sort((a, b) => a[0] - b[0]);
+    for (const [, literal] of literals) found.push({ line: index + 1, literal });
+  });
+  return found;
+}
+
+/** The sources the colour check reads: each package's .ts files under web/src/, and the
+ * .css and .html files it copies. */
+export function colourSources(inputs, configs) {
+  const sources = [];
+  for (const [name, config] of configs) {
+    const web = `packages/${name}/web/`;
+    sources.push(...inputs.filter((rel) => rel.startsWith(`${web}src/`) && rel.endsWith(".ts")));
+    for (const item of config.copy) {
+      const rel = path.posix.normalize(web + item);
+      if (/\.(css|html)$/.test(rel)) sources.push(rel);
+    }
+  }
+  return sources.sort(byPath);
+}
+
+/** Refuses the build when a page source holds a colour literal, naming each. */
+export function checkColours(root, inputs, configs) {
+  const problems = [];
+  for (const rel of colourSources(inputs, configs)) {
+    const text = fs.readFileSync(path.join(root, ...rel.split("/")), "utf8");
+    for (const { line, literal } of colourLiterals(text)) {
+      problems.push(`${rel}:${line}: ${literal}`);
+    }
+  }
+  if (problems.length) {
+    throw new BuildError("a page draws its colours from the theme's tokens (var(--moxi-*)); "
+      + "these sources hold a colour of their own. Use a token, or say why the colour is "
+      + "fixed in a comment holding colour-fixed on its line:\n  " + problems.join("\n  "));
+  }
+}
+
 function within(base, rel, what) {
   const full = path.resolve(base, rel);
   if (!full.startsWith(base + path.sep)) throw new BuildError(`${what} ${rel} is outside ${base}`);
@@ -267,6 +368,7 @@ export async function build({ root = repoRoot(), outRoot = root } = {}) {
 
   const inputs = listInputs(root);
   checkAttributes(root, inputs);
+  checkColours(root, inputs, configs);
   for (const [name, config] of configs) {
     const out = outdir(name);
     const web = `packages/${name}/web`;

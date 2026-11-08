@@ -37,7 +37,7 @@ const STYLES = css`
   .harness { font-weight: 600; }
   .badge { padding: 0 6px; border-radius: var(--moxi-radius); font-size: var(--moxi-font-size-sm);
            background: var(--moxi-bg-sunken); color: var(--moxi-text-dim); white-space: nowrap; }
-  .turn[data-open="true"] { background: var(--moxi-accent-soft); color: var(--moxi-text); }
+  .turn[data-open="true"] { background: var(--moxi-selected-soft); color: var(--moxi-text); }
   .stale { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
   .cwd { color: var(--moxi-text-dim); }
   .facts { font-size: var(--moxi-font-size-sm); color: var(--moxi-text-dim); }

@@ -54,7 +54,7 @@ code { font-family: var(--moxi-font-mono); }
 }
 
 .moxi-menu a:hover { background: var(--moxi-bg-hover); color: var(--moxi-text); }
-.moxi-menu a[aria-current="page"] { background: var(--moxi-accent-soft); color: var(--moxi-text); }
+.moxi-menu a[aria-current="page"] { background: var(--moxi-selected-soft); color: var(--moxi-text); }
 
 .moxi-menu-button {
   display: none;
