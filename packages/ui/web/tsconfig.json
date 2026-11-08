@@ -1,7 +1,9 @@
 {
   "extends": "../../../tools/web/tsconfig.base.json",
   "compilerOptions": {
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "module": "esnext",
+    "resolveJsonModule": true
   },
   "include": ["src"]
 }

@@ -92,10 +92,10 @@ const STYLES = [BASE, SERIES, css`
   button:hover:not(:disabled) { background: var(--moxi-bg-hover); }
   button:disabled { color: var(--moxi-text-faint); cursor: default; }
   button.primary { border-color: var(--moxi-accent); color: var(--moxi-accent); }
-  button[aria-pressed="true"] { background: var(--moxi-accent-soft); border-color: var(--moxi-accent); }
+  button[aria-pressed="true"] { background: var(--moxi-selected-soft); border-color: var(--moxi-selected); }
   nav, .filters, .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: var(--moxi-gap); }
   nav a { padding: 4px 10px; border-radius: var(--moxi-radius); color: var(--moxi-text); text-decoration: none; }
-  nav a[aria-current="page"] { background: var(--moxi-accent-soft); color: var(--moxi-accent); font-weight: 600; }
+  nav a[aria-current="page"] { background: var(--moxi-selected-soft); color: var(--moxi-selected); font-weight: 600; }
   .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; }
   select { font: inherit; max-width: 100%; padding: 3px 6px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
            background: var(--moxi-bg); color: var(--moxi-text); }

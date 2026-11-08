@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 (2026-11-08)
+
+- The chosen project in the picker and the open project are edged with the theme's
+  selected colour.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
+
 ## 0.1.3 (2026-11-07)
 
 - New extra `notes`, for `moxi projects promote`.

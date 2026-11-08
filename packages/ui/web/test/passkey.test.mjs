@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { COLOURS } from "../src/gateway-page.ts";
+import { CSS } from "../src/gateway-page.ts";
 import {
   creationOptions, credentialJson, defaultName, freshN, fromB64url, pairRefusal, passkeyFailure, requestOptions,
   signinRefusal, toB64url,
@@ -93,12 +93,17 @@ test("a fresh n is 16 hex digits", () => {
   assert.equal(freshN((b) => b.fill(0xab)), "ab".repeat(8));
 });
 
-test("the pages' colours are the theme's tokens", () => {
+test("the pages' colours are tokens.json's, the light set's and the dark set's", () => {
   const tokens = JSON.parse(readFileSync(new URL("../tokens.json", import.meta.url), "utf8"));
-  for (const [name, [light, dark]] of Object.entries(COLOURS)) {
-    assert.equal(tokens[name].$value, light, name);
-    assert.equal(tokens[name].$extensions.moxi.dark, dark, name);
+  const pairs = [...CSS.matchAll(/light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\)/g)];
+  assert.ok(pairs.length >= 7);
+  // Every colour in the sheet is a pair; none is written another way.
+  assert.equal(CSS.match(/#[0-9a-f]{3,8}\b/g).length, pairs.length * 2);
+  for (const name of ["bg", "bg-raised", "border", "text", "text-dim", "accent", "error"]) {
+    const values = tokens[name].$extensions.moxi.sets;
+    assert.ok(CSS.includes(`light-dark(${values["calm-workbench"]}, ${values["midnight-neon"]})`), name);
   }
+  assert.match(CSS, /:root \{ color-scheme: light dark; \}/);
 });
 
 test("the pages load their scripts from their own paths and hold no inline script or style", () => {

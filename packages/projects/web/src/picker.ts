@@ -24,7 +24,7 @@ const STYLES = [BASE, css`
   li { min-width: 0; }
   .choice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); width: 100%;
             min-width: 0; padding: 4px 10px; text-align: left; border-color: var(--moxi-border); }
-  .choice[aria-pressed="true"] { border-color: var(--moxi-accent); box-shadow: inset 3px 0 0 var(--moxi-accent); }
+  .choice[aria-pressed="true"] { border-color: var(--moxi-selected); box-shadow: inset 3px 0 0 var(--moxi-selected); }
   .key { font-weight: 600; overflow-wrap: anywhere; }
   .choice code { flex: 1 1 12em; min-width: 0; color: var(--moxi-text-dim); }
 `];

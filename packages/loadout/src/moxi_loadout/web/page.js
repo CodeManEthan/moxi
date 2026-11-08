@@ -36,7 +36,7 @@ var J=globalThis,W=J.ShadowRoot&&(J.ShadyCSS===void 0||J.ShadyCSS.nativeShadow)&
   .switch { min-width: 6em; text-align: left; }
   .switch::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 6px;
                     border: 1px solid var(--moxi-border-strong); border-radius: 50%; vertical-align: -0.05em; }
-  .switch.on::before { background: var(--moxi-accent); border-color: var(--moxi-accent); }
+  .switch.on::before { background: var(--moxi-selected); border-color: var(--moxi-selected); }
   .cell .why { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; font-size: var(--moxi-font-size-sm); }
   button, select, input { font: inherit; color: var(--moxi-text); max-width: 100%; }
   button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);

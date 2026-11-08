@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 SCRIPT = r'''
-import json, sys, time
+import json, os, sys, time
 from pathlib import Path
 
 STATE = Path(__file__).with_name("tailscale-state.json")
@@ -29,7 +29,9 @@ args = sys.argv[1:]
 state["calls"].append(args)
 
 def save():
-    STATE.write_text(json.dumps(state, indent=1))
+    tmp = STATE.with_name(f"{STATE.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(state, indent=1))
+    os.replace(tmp, STATE)
 
 def kind():
     if args[:2] == ["status", "--json"]:

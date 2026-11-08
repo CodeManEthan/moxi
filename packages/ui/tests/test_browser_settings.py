@@ -1,12 +1,14 @@
 """The settings view and `<moxi-ui-form>` in a browser: every type, the save path through
 `moxi config` (a saved int, a switch-table entry, a refused value, a typing slip, a
-reset), a file that won't parse, the theme toggle, and the form in submit mode with
-catalog rows."""
+reset), a file that won't parse, the theme mode picking a colour set, and the form in
+submit mode with catalog rows."""
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -16,6 +18,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
 # The settings view reads and writes through `moxi config` in a child process.
 SETTINGS_MS = 15_000
 WRITES = re.compile(r"/m/ui/api/settings/(set|unset)$")
+TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 
 
 def _settings(page, module="fixture"):
@@ -192,27 +195,55 @@ def test_the_core_has_its_own_section(ui_page):
         expect(ui_page.locator(f"moxi-ui-page section.card[data-module={module}]")).to_be_attached()
 
 
-def test_the_theme_toggle_sets_data_theme_and_the_background_follows(ui_shell, ui_contexts):
+def _set_background(mode: str) -> str:
+    """The `bg` token of the colour set `mode` shows, as the browser computes it."""
+    tokens = json.loads(TOKENS.read_text())
+    name = next(name for name, entry in tokens["$sets"].items() if entry["mode"] == mode)
+    value = tokens["bg"]["$extensions"]["moxi"]["sets"][name]
+    return "rgb({}, {}, {})".format(*(int(value[i:i + 2], 16) for i in (1, 3, 5)))
+
+
+def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
+    light, dark = _set_background("light"), _set_background("dark")
+    assert (light, dark) == ("rgb(246, 244, 241)", "rgb(10, 9, 24)")
     page = ui_contexts(color_scheme="light").pages[0]
     html = page.locator("html")
-    expect(html).to_have_attribute("data-theme", "system")
-    background = "() => getComputedStyle(document.body).backgroundColor"
-    light = page.evaluate(background)
     form = _settings(page, "ui")
+    # The select sits in <moxi-ui-form>'s shadow root, on --moxi-bg.
+    select = form.locator("select[data-control='theme.mode']")
+
+    def shows(colour: str) -> None:
+        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        expect(select).to_have_css("background-color", colour)
+
     try:
-        form.locator("select[data-control='theme.mode']").select_option("dark")
+        # system follows the browser's scheme, both ways.
+        expect(html).to_have_attribute("data-theme", "system")
+        shows(light)
+        page.emulate_media(color_scheme="dark")
+        shows(dark)
+        page.emulate_media(color_scheme="light")
+        shows(light)
+        # dark fixes the dark set on a light browser, at once and after a reload.
+        select.select_option("dark")
         expect(html).to_have_attribute("data-theme", "dark", timeout=SETTINGS_MS)
-        page.wait_for_function(f"(light) => ({background})() !== light", arg=light)
-        dark = page.evaluate(background)
+        shows(dark)
         assert _file(ui_shell, "ui")["theme"] == {"mode": "dark"}
-        # The document takes the mode from the setting at its next load.
         page.reload()
         expect(html).to_have_attribute("data-theme", "dark")
-        assert page.evaluate(background) == dark
         form = _settings(page, "ui")
-        form.locator("select[data-control='theme.mode']").select_option("light")
+        select = form.locator("select[data-control='theme.mode']")
+        shows(dark)
+        # light fixes the light set on a dark browser, at once and after a reload.
+        page.emulate_media(color_scheme="dark")
+        select.select_option("light")
         expect(html).to_have_attribute("data-theme", "light", timeout=SETTINGS_MS)
-        page.wait_for_function(f"(light) => ({background})() === light", arg=light)
+        shows(light)
+        page.reload()
+        expect(html).to_have_attribute("data-theme", "light")
+        form = _settings(page, "ui")
+        select = form.locator("select[data-control='theme.mode']")
+        shows(light)
     finally:
         status, _ = ui_shell.session().post("/m/ui/api/settings/unset",
                                             {"module": "ui", "key": "theme.mode"})

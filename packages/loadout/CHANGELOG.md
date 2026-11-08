@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 (2026-11-08)
+
+- A switch that's on is filled with the theme's selected colour.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
+
 ## 0.1.3 (2026-11-07)
 
 - A folder a module's own setup places at a path of its choosing (turns' Claude Code

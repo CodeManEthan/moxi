@@ -36,7 +36,7 @@ var z=globalThis,q=z.ShadowRoot&&(z.ShadyCSS===void 0||z.ShadyCSS.nativeShadow)&
   .broken { padding-left: 8px; border-left: 3px solid var(--moxi-error); font-size: var(--moxi-font-size-sm); }
   ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
   .project { display: grid; gap: 6px; min-width: 0; padding: 4px 0 4px 8px; border-left: 3px solid var(--moxi-border); }
-  .project[data-open="true"] { border-left-color: var(--moxi-accent); }
+  .project[data-open="true"] { border-left-color: var(--moxi-selected); }
   .first { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
   .first .key { font-weight: 600; overflow-wrap: anywhere; text-align: left; }
   .first code { flex: 1 1 12em; min-width: 0; color: var(--moxi-text-dim); }

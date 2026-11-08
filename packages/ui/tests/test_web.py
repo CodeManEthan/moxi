@@ -34,17 +34,19 @@ def _built(name: str) -> str:
 # --- the theme --------------------------------------------------------------------------
 
 
-def test_tokens_become_theme_css_26_tokens_each_colour_a_light_dark_pair():
+def test_tokens_become_theme_css_39_tokens_each_colour_the_light_and_dark_sets_pair():
     names = [name for name in TOKENS if not name.startswith("$")]
-    assert len(names) == 26
+    assert len(names) == 39
+    mode = {TOKENS["$sets"][name]["mode"]: name for name in TOKENS["$sets"]}
+    assert mode == {"light": "calm-workbench", "dark": "midnight-neon"}
     css = _built("theme.css")
     props = dict(re.findall(r"^  --moxi-([a-z0-9-]+): (.*);$", css, re.M))
     assert sorted(props) == sorted(names)
     colours = [name for name in names if TOKENS[name]["$type"] == "color"]
-    assert len(colours) == 19
+    assert len(colours) == 32
     for name in colours:
-        token = TOKENS[name]
-        assert props[name] == f"light-dark({token['$value']}, {token['$extensions']['moxi']['dark']})"
+        values = TOKENS[name]["$extensions"]["moxi"]["sets"]
+        assert props[name] == f"light-dark({values[mode['light']]}, {values[mode['dark']]})"
     for name in set(names) - set(colours):
         assert "light-dark" not in props[name]
     assert ":root {\n  color-scheme: light dark;" in css

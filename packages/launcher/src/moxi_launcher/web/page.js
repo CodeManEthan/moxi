@@ -14,6 +14,7 @@ var z=globalThis,W=z.ShadowRoot&&(z.ShadyCSS===void 0||z.ShadyCSS.nativeShadow)&
   .block { display: block; padding: 6px 8px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
            white-space: pre-wrap; word-break: break-all; }
   .help, .dim { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
+  p.dim[data-follow="waiting"] { color: var(--moxi-launching); }
   .lede { padding-left: 8px; border-left: 3px solid var(--moxi-accent); }
   .warn { color: var(--moxi-warn); }
   .problem { color: var(--moxi-error); }

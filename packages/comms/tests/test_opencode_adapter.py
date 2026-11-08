@@ -701,7 +701,7 @@ def test_a_digests_turn_is_handled_and_the_daemons_ack_moves_the_cursor(
     the daemon's answer carries the cursor the ack moved."""
     adapter = wrapper()
     send(rig, "handle me")
-    assert wait_until(lambda: turn_frames(frames) and cursor_of(IDENTITY), 5.0)
+    assert wait_until(lambda: (t := turn_frames(frames)) and "answer" in t[-1], 5.0)
     high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     turn = turn_frames(frames)[-1]
     assert turn["handled_ids"] == [str(high)] and turn["unhandled_ids"] == []

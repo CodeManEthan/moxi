@@ -665,9 +665,10 @@ def test_the_components_reach_data_only_through_their_routes_and_topics():
     assert '"launcher","launches"' in panel and '"launcher","sessions"' in panel
     assert "moxi-ui-form" in panel and 'mode="submit"' in panel
     assert '"launcher","state"' in panel
-    # Red is drawn with the theme's error colour; the rest with its accent.
+    # Red is drawn with the theme's error colour; a live session that's fine with its live
+    # colour.
     for text in (sessions, state):
-        assert "var(--moxi-error)" in text and "var(--moxi-accent)" in text
+        assert "var(--moxi-error)" in text and "var(--moxi-live)" in text
 
 
 WITHOUT_UI = textwrap.dedent("""\

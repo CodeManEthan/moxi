@@ -25,7 +25,7 @@ var H=globalThis,V=H.ShadowRoot&&(H.ShadyCSS===void 0||H.ShadyCSS.nativeShadow)&
   li { min-width: 0; }
   .choice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); width: 100%;
             min-width: 0; padding: 4px 10px; text-align: left; border-color: var(--moxi-border); }
-  .choice[aria-pressed="true"] { border-color: var(--moxi-accent); box-shadow: inset 3px 0 0 var(--moxi-accent); }
+  .choice[aria-pressed="true"] { border-color: var(--moxi-selected); box-shadow: inset 3px 0 0 var(--moxi-selected); }
   .key { font-weight: 600; overflow-wrap: anywhere; }
   .choice code { flex: 1 1 12em; min-width: 0; color: var(--moxi-text-dim); }
 `],ce=class extends v{constructor(){super(...arguments);this.chosen=null;this.#t=null;this.#e=null;this.#i=()=>{this.#e?.refresh()};this.#s=()=>{document.visibilityState==="visible"&&this.#i()}}static{this.styles=gt}static{this.properties={chosen:{state:!0}}}#t;#e;#i;#s;connectedCallback(){super.connectedCallback(),this.#t=this.getAttribute("kind")||null;let t=We(this.#t);this.#e=new G(()=>ft("projects",t),Be,()=>this.requestUpdate()),this.#e.refresh(),document.addEventListener("visibilitychange",this.#s),document.addEventListener(le,this.#i)}disconnectedCallback(){super.disconnectedCallback(),this.#e?.close(),this.#e=null,document.removeEventListener("visibilitychange",this.#s),document.removeEventListener(le,this.#i)}render(){let t=this.#e;if(t===null)return d;let i=Fe(t,this.#t);return i.state==="gone"?d:S`<div class="picker" data-state=${i.state} data-kind=${this.#t??d}>

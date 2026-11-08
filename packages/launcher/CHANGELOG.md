@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (2026-11-08)
+
+- A live session that's fine shows in the theme's live colour, and the launch form's
+  "Starting…" line in its launching colour.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has those colours.
+
 ## 0.1.2 (2026-11-07)
 
 - The bind wait for a launch under comms' wrapper is comms' own `BIND_WAIT` plus 5 s

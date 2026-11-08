@@ -22,7 +22,7 @@ var V=globalThis,D=V.ShadowRoot&&(V.ShadyCSS===void 0||V.ShadyCSS.nativeShadow)&
   .word { display: inline-block; max-width: 100%; padding: 0 6px; overflow: hidden; text-overflow: ellipsis;
           white-space: nowrap; border-radius: var(--moxi-radius); font-size: var(--moxi-font-size-sm);
           line-height: 1.6; background: var(--moxi-bg-sunken); }
-  .word.ok { color: var(--moxi-accent); }
+  .word.ok { color: var(--moxi-live); }
   .word.red { color: var(--moxi-error); background: var(--moxi-error-soft); font-weight: 600; }
   .word.muted { color: var(--moxi-text-dim); }
   .head { color: var(--moxi-error); font-size: var(--moxi-font-size-sm); }
