@@ -1,6 +1,6 @@
 [project]
 name = "moxi-ui"
-version = "0.2.2"
+version = "0.2.3"
 description = "The browser shell: one origin for every module's page"
 readme = "README.md"
 requires-python = ">=3.12"

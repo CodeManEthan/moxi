@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3 (2026-11-08)
+
+- The open turn is shaded with the theme's selected colour.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
+
 ## 0.2.2 (2026-11-07)
 
 - Setup places a copy of the Claude marketplace in turns' data dir, writes
