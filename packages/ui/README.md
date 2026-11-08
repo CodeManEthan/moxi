@@ -5,12 +5,53 @@ which listens on `127.0.0.1` and `[::1]` on one port (8460 by default), signs th
 in with a one-use ticket from `moxi ui open`, and serves each module's page under
 `/m/<module>/`.
 
+## Using the shell
+
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/), with a browser on the
+same machine (or one that reaches it through an SSH forward). ui also has macOS and
+Windows code, and the repository's CI runs its browser tests there without gating, but
+nobody runs ui there yet: treat both as untested.
+
+```sh
+uv tool install moxi
+moxi install ui
+moxi ui open
+```
+
+The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
+second adds the shell beside it. A module shows a page only when it has one: the modules
+with a `ui` extra, such as services, projects, loadout and the launcher. Install the shell
+with one of them, `moxi install services --with ui`, or answer yes when `moxi install`
+offers the extra. The repository's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), lists the modules.
+
+| `moxi ui` | what it does |
+|---|---|
+| `open [--print] [--no-browser]` | makes sure a shell of yours holds the port, then opens the browser on a one-use sign-in link, good for 30 seconds; `--print` prints the link instead, for an SSH forward or a browser elsewhere |
+| `serve` | runs the shell in the foreground until stopped |
+| `status [--json]` | whether the shell runs, its listener, and each page server's state |
+| `stop` | stops the shell; under its socket unit the next connection starts it again |
+| `signout` | ends every browser session the shell holds |
+| `gateway ...` | the UI on your phone (below) |
+
+**How the shell runs.** `moxi install ui` gives the shell to your system's supervisor. On
+Linux a systemd user socket unit holds port 8460 on `127.0.0.1` and `[::1]`, so the shell
+starts on the first browser connection, and stops again after 15 minutes with nothing
+open (`idle_s`, 900 seconds); the socket keeps the port meanwhile, so no other program can
+take it. launchd does the same on macOS, and on Windows a logon task starts the shell at
+every logon. While the gateway is on, the shell also starts at login. The shell starts
+each module's page server on the first request for its page.
+
+**Settings** (`moxi config ui`): `port` (8460), `idle_s` (900), `theme.mode` (`system`,
+`light` or `dark`), and the gateway's `gateway.enabled` (off) and `gateway.port` (8461).
+A change to `port` takes effect once `moxi install ui` rewrites the unit.
+
 ## Confirmed acts in a page
 
 An act the user should confirm a second time, such as stopping a service or removing a
 project, is a confirmed act: it runs at most once, and only after the user says yes on a
 sheet the shell draws. The page declares it in its route table with `confirmed=True` and
-the status route it reports on; [docs/loopback.md](docs/loopback.md), "Confirmed acts",
+the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md), "Confirmed acts",
 has the route's whole shape. For example:
 
 ```python
@@ -94,6 +135,19 @@ and launchd (on macOS from the next login) and is restarted after a crash; on Wi
 shell's logon task starts it at every logon either way. Changing it never restarts a running
 shell. `gateway.port` (8461) is the loopback port the tunnel forwards to.
 
+Unlike 8460, the gateway's port is held by the shell itself, not by a socket unit, so it
+listens on a port another program could take while Moxi isn't running. The tunnel entry
+still forwards to it then, so a program that took the port could answer the phone at the
+gateway's address. The phone's acts are never mounted on this port: from the phone you
+can only read, redacted. `moxi doctor ui` says the same on its `gateway` row. On macOS and
+Windows the gateway also has no provider check, so any local program can reach its open
+routes; those still need a pairing code or a passkey.
+
+On a machine other people log in to, a Tailscale forward outlives your login: tailscaled
+keeps forwarding after you log out, while your user units, which hold Moxi's ports, stop
+with your last logout. Turn on lingering for your user (`loginctl enable-linger`), or
+remove the tunnel entry before you log out.
+
 The gateway needs moxi-tunnel 0.2 or later. `moxi install ui --with tunnel` counts the extra
 installed once any tunnel is, so it leaves an older tunnel as it is; `moxi ui gateway on` and
 `moxi doctor ui` name the command that raises it.
@@ -126,7 +180,7 @@ too, and names the step: install or update moxi-ui.
 The shell starts each module's page server on the first request for its page, as
 `python -P -m moxi_ui.loopback.serve <module>`, and reads every module's route table with
 `python -P -m moxi_ui.loopback.export <module>...`. Both run on loopback, ui's
-page-server base: [docs/loopback.md](docs/loopback.md) has the request check, how a page
+page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md) has the request check, how a page
 is declared, and the runner's rules.
 
 ## Testing a module's pages
@@ -154,3 +208,7 @@ A page module whose UI is optional:
 `moxi`, Moxi's core; `starlette` and `uvicorn`, which serve every page server's requests;
 `h11`, which uvicorn parses HTTP with, at 0.16 or later for its request-smuggling fix;
 and `psutil`, which the shell uses to watch its page servers.
+
+## License
+
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/LICENSE).
