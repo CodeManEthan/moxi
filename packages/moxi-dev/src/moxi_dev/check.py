@@ -7,8 +7,8 @@ worker count or base stops it there, before any step runs. Then, in order:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
    stale lock stops the check here.
-2. The tag check over the repository's files (`moxi_dev.tags`): no ruling, design,
-   review or build tags in code, tests or docs.
+2. The tag check over the repository's files (`moxi_dev.tags`): no short reference ids,
+   pointing into notes a reader of the repository can't see, in code, tests or docs.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
    tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
@@ -43,7 +43,8 @@ worker count or base stops it there, before any step runs. Then, in order:
    `build` and `live` tiers), and besides it, through the test kit's variables
    (`moxi_dev.testing`): a tier test marked `touches` whose glob matches a changed path;
    with `--full`, every tier but `live`; with `--finding L<n>`, only the tests marked
-   with that finding, whatever their tier but `live`. Under `--finding` a package where
+   with that finding (one reported issue, named by an L and a number, which
+   `@pytest.mark.finding` gives the tests that cover it), whatever their tier but `live`. Under `--finding` a package where
    no test carries it counts as `none`, not as a failure, but a check where no package
    has one fails. A `live` test never runs here.
 

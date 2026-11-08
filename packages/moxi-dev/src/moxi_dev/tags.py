@@ -1,22 +1,23 @@
-"""The tag check: no ruling, design, review or build tags in the repository's files.
+"""The tag check: no short reference ids in the repository's files.
 
-Code, tests and docs say a reason in plain words. A tag is the shorthand of the notes a
-change was planned in, which a reader of the repository cannot follow: a short capital id
-with a number in square brackets, one of a few capital letters with a number in
-parentheses, a decision id (a D and two digits, perhaps a letter after), a section sign
-with a number, a design version, a severity with a number, a round named by its home
-and slug, one of the two hyphenated (two plain words with a slash between, after
-"round", are as likely prose), or a finding id, an L and a number, bare or bracketed.
-No example of one is written here, so this file passes its own check.
+Code, tests and docs say a reason in plain words. A reference id is shorthand that points
+into notes a reader of the repository can't see, such as the notes a change was planned
+or reviewed in, so the reader can't follow it. The check refuses these shapes: a short
+capital id with a number in square brackets; one of a few capital letters with a number
+in parentheses; a D and two digits, perhaps with a letter after; a section sign with a
+number; "design v" and a number; a severity word in capitals with a number; the word
+"round" followed by two names joined by a slash, one of them hyphenated (two plain words
+with a slash between are as likely prose); and a finding id, an L and a number, bare or
+bracketed. No example of one is written here, so this file passes its own check.
 
-Two kinds of text are let through. A finding mark's arguments,
-`@pytest.mark.finding("L50")`, are data a tool reads, and a finding id is let through
-there and nowhere else: in a comment, a docstring or a string it is a tag like the rest,
-so a label of that shape (a numbered rule, say) is written another way. And a line of
-the root's
-`.residue-allow`, `<path> TAB <exact text> TAB <why>`, lets that text stand in that file,
-for a tag that is itself data (a pattern's test input, say); the repository's commit scan
-reads the same file.
+Two kinds of text are let through. A finding is one reported issue, and
+`@pytest.mark.finding("L50")` marks the tests that cover it, so `moxi-dev check
+--finding L<n>` can run just those. The mark's arguments are data a tool reads, and a
+finding id is let through there and nowhere else: in a comment, a docstring or a string
+it is refused like the rest, so a label of that shape (a numbered rule, say) is written
+another way. And a line of `.residue-allow` at the repository's root, `<path> TAB <exact
+text> TAB <why>`, lets that text stand in that one file, for an id that is itself data
+(the input a pattern's test feeds it, say).
 
 `scan(root)` reads every tracked and untracked-but-not-ignored file that is UTF-8 text,
 and returns what it found. A file under the core's `packages/moxi/src/moxi/_vendor/` is a

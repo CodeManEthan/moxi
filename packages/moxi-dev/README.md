@@ -7,10 +7,10 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   tag check, the contract's import rules (import-linter and deptry) and the tests of the
   packages the change reaches. A test in the `slow`, `browser` or `build` tier runs
   when a path its `touches` mark names changed; `--full` runs every package and every
-  tier but `live`; `--finding L<n>` runs only the tests marked with that finding. Its
-  last line gives the tests' seconds, the slowest 5 %'s share of them and the change
-  against the newest record on `main` (one record per commit, kept under git's own
-  directory).
+  tier but `live`; `--finding L<n>` runs only the tests marked with that finding (see
+  "The tag check" below). Its last line gives the tests' seconds, the slowest 5 %'s
+  share of them and the change against the newest record on `main` (one record per
+  commit, kept under git's own directory).
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
   the fence around each test, the tier markers, the durations each run writes and the
   helpers tests share (`Seam` for a seam with two implementations among them).
@@ -27,6 +27,27 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 uv sync
 uv run moxi-dev check
 ```
+
+## The tag check
+
+Code, tests and docs in this repository give their reasons in plain words. The tag
+check, which `moxi-dev check` runs over every text file git doesn't ignore, refuses short
+reference ids that point into notes a reader of the repository can't see: a capital
+letter and a number in square brackets, a section sign with a number, a severity word
+with a number, and a few more shapes listed in `moxi_dev/tags.py`. Its line names the
+file, the line and the text it refused. Write the reason the id stood for instead.
+
+Some text has to look like an id because it is data, such as the input a test feeds the
+pattern that refuses it. `.residue-allow` at the repository's root lets such text stand
+in one file. Each line is `<path> TAB <exact text> TAB <why>`, the why saying what data
+the text is. A line lets that exact text through in that one file and nowhere else.
+
+A finding is one reported issue: a bug, say, given a name of the form `L<n>`, an L and a
+number. A test that covers it carries the mark `@pytest.mark.finding("L<n>")` with that
+name, and `moxi-dev check --finding L<n>` runs only the tests carrying it in the
+packages the check picks (every package with `--full`), so a fix can be checked against
+just the tests written for it. A finding's name is let through inside the mark's
+arguments and refused everywhere else, like any other id.
 
 ## The web build's stamp
 

@@ -1,5 +1,10 @@
 # Which tracked paths are public. Each line is `public <path>` or `private <path>`, and
 # every tracked path falls under exactly one line. A new top-level path needs a line.
+# This repository is published whole, so `private` doesn't mean unpublished: a push sends
+# every tracked file, the two marked `private` below included. Here it means published
+# but not read by the residue scan, the check run before a push that looks for private
+# names and reference ids in published files. `.residue-allow` lists text that scan and
+# the tag check let stand as data, so it would trip the scan by design.
 public .gitattributes
 public .github
 public .gitignore
