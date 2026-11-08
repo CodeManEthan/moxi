@@ -1,24 +1,31 @@
 // What the gateway's pairing and sign-in pages share: their look, a few DOM helpers, and
 // the sign-in's last step. Those pages load before the phone holds a session, so they can
 // read no asset that needs one, theme.css included, and the policy allows no inline style:
-// each page adopts this stylesheet from its script. Its colours are tokens.json's.
+// each page adopts this stylesheet from its script. Its colours are read from tokens.json
+// when the page is built, and follow the browser's scheme: the light set on a light
+// system, the dark set on a dark one.
 
+import tokens from "../tokens.json" with { type: "json" };
 import { HOME, KEY_STORAGE } from "./passkey.ts";
 
-/** The theme values these pages use, as `light-dark()` pairs from tokens.json. */
-export const COLOURS = {
-  bg: ["#f6f4f1", "#0a0918"],
-  "bg-raised": ["#fffefd", "#141228"],
-  border: ["#e4dfd7", "#2a2650"],
-  text: ["#1e1a22", "#eeeaf8"],
-  "text-dim": ["#4f4856", "#aca5cb"],
-  accent: ["#5a3ccf", "#a78bfa"],
-  error: ["#a63a26", "#ff7461"],
-} as const;
+type Colour = "bg" | "bg-raised" | "border" | "text" | "text-dim" | "accent" | "error";
 
-function colour(name: keyof typeof COLOURS): string {
-  const [light, dark] = COLOURS[name];
-  return `light-dark(${light}, ${dark})`;
+const SETS: Record<string, { mode: string }> = tokens.$sets;
+
+/** The name of tokens.json's set shown in `mode`. */
+function set(mode: "light" | "dark"): string {
+  const name = Object.keys(SETS).find((key) => SETS[key].mode === mode);
+  if (name === undefined) throw new Error(`tokens.json has no ${mode} set`);
+  return name;
+}
+
+const LIGHT = set("light");
+const DARK = set("dark");
+
+/** A theme colour as `light-dark()` of its light set's and dark set's values. */
+function colour(name: Colour): string {
+  const values: Record<string, string> = tokens[name].$extensions.moxi.sets;
+  return `light-dark(${values[LIGHT]}, ${values[DARK]})`;
 }
 
 export const CSS = `
