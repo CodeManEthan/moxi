@@ -162,8 +162,8 @@ export class UiGateway extends LitElement {
     return html`<div class="qr">
       ${code.size ? html`<svg viewBox="-4 -4 ${side} ${side}" role="img" aria-label="QR code of the pairing link"
           shape-rendering="crispEdges">
-        <rect x="-4" y="-4" width=${side} height=${side} fill="#ffffff"></rect>
-        <path d=${code.path} fill="#000000"></path></svg>` : nothing}
+        <rect x="-4" y="-4" width=${side} height=${side} fill="#ffffff"></rect><!-- colour-fixed: scanners need dark on light -->
+        <path d=${code.path} fill="#000000"></path><!-- colour-fixed: scanners need dark on light --></svg>` : nothing}
       <p class="small"><code>${code.url}</code></p>
       <p class="dim small">It works once, for two minutes.</p>
     </div>`;

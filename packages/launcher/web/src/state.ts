@@ -31,7 +31,7 @@ const STYLES = css`
   }
   .state:focus-visible { outline-style: solid; outline-width: 2px; outline-offset: 1px; }
   .loading { color: transparent; }
-  .ok { color: var(--moxi-accent); }
+  .ok { color: var(--moxi-live); }
   .red { color: var(--moxi-error); background: var(--moxi-error-soft); font-weight: 600; }
   .muted { color: var(--moxi-text-dim); }
 `;

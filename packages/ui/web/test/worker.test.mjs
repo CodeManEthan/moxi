@@ -94,20 +94,23 @@ test("the offline page says the case the worker saw and when the gateway last an
   assert.equal(RETRY_MS, 30_000);
 });
 
-test("the manifest starts the shell, standalone, in the theme's colour, with both icons", () => {
+test("the manifest starts the shell, standalone, in the light set's background, with both icons", () => {
   const value = JSON.parse(manifest(tokens));
+  const light = Object.keys(tokens.$sets).find((name) => tokens.$sets[name].mode === "light");
   assert.equal(value.name, "Moxi");
   assert.equal(value.start_url, "/m/ui/");
   assert.equal(value.scope, "/");
   assert.equal(value.display, "standalone");
-  assert.equal(value.background_color, tokens.bg.$value);
-  assert.equal(value.theme_color, tokens.bg.$value);
+  assert.equal(value.background_color, tokens.bg.$extensions.moxi.sets[light]);
+  assert.equal(value.background_color, "#f6f4f1");
+  assert.equal(value.theme_color, value.background_color);
   assert.deepEqual(value.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
   for (const icon of value.icons) {
     assert.equal(icon.type, "image/png");
     assert.ok(icon.purpose.split(" ").includes("maskable"));
   }
-  assert.throws(() => manifest({ ...tokens, bg: { $value: "white" } }), /bg/);
+  assert.throws(() => manifest({ ...tokens, bg: { $type: "color", $extensions: { moxi: { sets: { [light]: "white" } } } } }),
+                /bg/);
 });
 
 test("the built worker is a classic script, as a worker registered without a type must be", () => {

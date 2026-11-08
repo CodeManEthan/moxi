@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.3 (2026-11-08)
+## 0.2.4 (2026-11-08)
 
 - `start.order`'s default is `["launcher", "comms", "notes"]`, the start-context modules
   in this repository. A config that sets the key keeps its own list.
@@ -8,6 +8,11 @@
   refuses, every setting, the Claude Code version the plugins were run against, the Codex
   version it needs, and that it needs moxi 0.1.6 or later. It installs from PyPI and its
   links work from PyPI. The package declares keywords and classifiers.
+
+## 0.2.3 (2026-11-08)
+
+- The open turn is shaded with the theme's selected colour.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has that colour.
 
 ## 0.2.2 (2026-11-07)
 

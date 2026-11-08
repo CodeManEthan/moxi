@@ -27,3 +27,6 @@ The first public release.
   rebuild and takes about as long as `--rebuild`. The page asks you to run
   `moxi usage index` until one has run. usage 0.1.0 can't open a version 2 index; to go
   back, remove the index and let 0.1.0 build its own.
+- Pressed buttons and the current view use the theme's selected colours, and chart
+  series take its six series colours.
+- The `ui` extra needs moxi-ui 0.2.3 or later, which has those colours.

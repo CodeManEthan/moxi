@@ -1,9 +1,9 @@
 // The UI module's own build steps, run by tools/web/build.mjs before anything is bundled:
 //
 // - theme.css, from tokens.json: every token as `--moxi-<name>` on `:root`, each colour
-//   written once as `light-dark(<light>, <dark>)`;
+//   written once as `light-dark(<the light set's value>, <the dark set's value>)`;
 // - manifest.json, the gateway's web app manifest, which it serves at
-//   /manifest.webmanifest, its colours tokens.json's;
+//   /manifest.webmanifest, its colours the light set's background;
 // - tools/web/client.d.ts, the types of /m/ui/client.js, from src/client.ts by tsc's
 //   declaration output. Every page's tsc resolves the client's URL to that file;
 // - offline.js, the offline page's script, and sw.js, the gateway's worker, with the
@@ -33,22 +33,69 @@ function family(names, where) {
   }).join(", ");
 }
 
-/** The CSS value of one token, checked against its type. */
-function value(name, token) {
+/**
+ * The colour sets tokens.json names in `$sets`, as `{light, dark}`: each set's name. There
+ * are exactly two, one shown in light mode and one in dark; theme.css writes each colour as
+ * a `light-dark()` pair of the two.
+ */
+export function sets(tokens) {
+  const table = tokens.$sets;
+  if (table === null || typeof table !== "object" || Array.isArray(table)) {
+    throw new Error("tokens.json: $sets names the colour sets");
+  }
+  const names = Object.keys(table);
+  const byMode = {};
+  for (const name of names) {
+    if (!NAME.test(name)) throw new Error(`tokens.json: $sets: ${name} is not a set name`);
+    const mode = table[name]?.mode;
+    if (mode !== "light" && mode !== "dark") throw new Error(`tokens.json: $sets: ${name}'s mode is light or dark`);
+    if (byMode[mode] !== undefined) throw new Error(`tokens.json: $sets: ${byMode[mode]} and ${name} are both ${mode}`);
+    byMode[mode] = name;
+  }
+  if (names.length !== 2 || !byMode.light || !byMode.dark) {
+    throw new Error("tokens.json: $sets holds exactly two sets, one light and one dark");
+  }
+  return { light: byMode.light, dark: byMode.dark };
+}
+
+/** A colour token's value in each set, checked: every set named, each #rrggbb, no other. */
+function colours(name, token, names) {
   const where = `tokens.json: ${name}`;
-  const dark = token.$extensions?.moxi?.dark;
+  const moxi = token.$extensions?.moxi ?? {};
+  if (token.$value !== undefined || moxi.dark !== undefined) {
+    throw new Error(`${where}: a colour has its values in $extensions.moxi.sets, not $value or dark`);
+  }
+  const values = moxi.sets;
+  if (values === null || typeof values !== "object" || Array.isArray(values)) {
+    throw new Error(`${where}: a colour has a value for each set in $extensions.moxi.sets`);
+  }
+  for (const set of Object.keys(values)) {
+    if (!names.includes(set)) throw new Error(`${where}: ${set} is not a set in $sets`);
+  }
+  for (const set of names) {
+    if (!COLOR.test(values[set] ?? "")) throw new Error(`${where}: ${set}'s value is #rrggbb`);
+  }
+  return values;
+}
+
+/** The CSS value of one token, checked against its type. */
+function value(name, token, pair) {
+  const where = `tokens.json: ${name}`;
   switch (token.$type) {
-    case "color":
-      if (!COLOR.test(token.$value) || !COLOR.test(dark ?? "")) {
-        throw new Error(`${where}: a colour has a #rrggbb $value and $extensions.moxi.dark`);
-      }
-      return `light-dark(${token.$value}, ${dark})`;
+    case "color": {
+      const values = colours(name, token, [pair.light, pair.dark]);
+      return `light-dark(${values[pair.light]}, ${values[pair.dark]})`;
+    }
     case "dimension":
-    case "fontFamily":
-      if (dark !== undefined) throw new Error(`${where}: only a colour has a dark value`);
+    case "fontFamily": {
+      const moxi = token.$extensions?.moxi ?? {};
+      if (moxi.sets !== undefined || moxi.dark !== undefined) {
+        throw new Error(`${where}: only a colour has a value per set`);
+      }
       if (token.$type === "fontFamily") return family(token.$value, where);
       if (!DIMENSION.test(token.$value)) throw new Error(`${where}: a dimension is a number and px, rem or em`);
       return token.$value;
+    }
     default:
       throw new Error(`${where}: $type is color, dimension or fontFamily`);
   }
@@ -56,15 +103,17 @@ function value(name, token) {
 
 /** theme.css's text from the parsed tokens.json. */
 export function themeCss(tokens) {
+  const pair = sets(tokens);
   const lines = [
-    "/* The shared theme, written by `npm run build` from packages/ui/web/tokens.json. */",
+    "/* The shared theme, written by `npm run build` from packages/ui/web/tokens.json.",
+    `   Light: ${pair.light}. Dark: ${pair.dark}. */`,
     ":root {",
     "  color-scheme: light dark;",
   ];
   for (const [name, token] of Object.entries(tokens)) {
     if (name.startsWith("$")) continue;
     if (!NAME.test(name)) throw new Error(`tokens.json: ${name} is not a token name`);
-    lines.push(`  --moxi-${name}: ${value(name, token)};`);
+    lines.push(`  --moxi-${name}: ${value(name, token, pair)};`);
   }
   lines.push("}", ':root[data-theme="light"] { color-scheme: light; }',
              ':root[data-theme="dark"] { color-scheme: dark; }', "");
@@ -75,10 +124,10 @@ export function themeCss(tokens) {
 export const ICON_SIZES = [192, 512];
 
 /** manifest.json's text: the installed app's name, where it starts, its colours (the
- * light theme's background) and its icons. Each icon fills its square and keeps its mark
- * in the middle, so the phone may crop it to any shape. */
+ * light set's background: a manifest holds one colour) and its icons. Each icon fills its
+ * square and keeps its mark in the middle, so the phone may crop it to any shape. */
 export function manifest(tokens) {
-  const background = tokens.bg?.$value;
+  const background = tokens.bg?.$extensions?.moxi?.sets?.[sets(tokens).light];
   if (!COLOR.test(background ?? "")) throw new Error("tokens.json: bg is the manifest's colour and must be #rrggbb");
   const value = {
     name: "Moxi",

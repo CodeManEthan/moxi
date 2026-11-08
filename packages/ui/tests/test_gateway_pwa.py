@@ -39,9 +39,12 @@ def test_every_pwa_file_ships_in_the_ui_web_files_and_is_open() -> None:
         assert path in OPEN_PATHS | ICONS, path
 
 
-def test_the_manifest_starts_the_shell_with_the_themes_colour_and_two_maskable_icons() -> None:
+def test_the_manifest_starts_the_shell_in_the_light_sets_colour_and_two_maskable_icons() -> None:
     manifest = json.loads(web_file("manifest.json"))
-    background = json.loads(_TOKENS.read_text())["bg"]["$value"]
+    tokens = json.loads(_TOKENS.read_text())
+    light = next(name for name, entry in tokens["$sets"].items() if entry["mode"] == "light")
+    background = tokens["bg"]["$extensions"]["moxi"]["sets"][light]
+    assert background == "#f6f4f1"
     assert manifest["name"] == "Moxi"
     assert (manifest["start_url"], manifest["scope"], manifest["display"]) == (
         "/m/ui/", "/", "standalone")

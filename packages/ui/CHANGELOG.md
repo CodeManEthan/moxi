@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.2 (2026-11-08)
+## 0.2.3 (2026-11-08)
 
 The first public release.
 
@@ -10,6 +10,27 @@ The first public release.
   no provider check, and what to do on a machine others log in to. The README's links
   work on PyPI.
 - The package metadata gains keywords and classifiers.
+- The theme is two named colour sets: calm-workbench, a warm paper grey, in light mode
+  and midnight-neon, a near-black violet, in dark mode. `theme.mode` switches between
+  them as before, and its default, `system`, follows the browser. The old blue-grey
+  colours are gone.
+- New colour tokens: `live-soft`, `launching`, `launching-soft`, `selected`,
+  `selected-soft`, `attention`, `attention-soft` and `series-1` to `series-6`.
+- `tokens.json` names its sets in `$sets`, and each colour token holds one value per
+  set; the build refuses a file that doesn't, and set values on any token but a colour.
+  A test holds each set to contrast floors (4.5:1 for text, 3:1 for control edges and
+  chart series).
+- The pair, sign-in and offline pages take their colours from `tokens.json` when built,
+  and follow the browser's light or dark scheme.
+- The installed app's colour is calm-workbench's background.
+- The shell menu marks the current page with the selected colours.
+- A page's sources hold no colour of their own: the web build refuses a hex colour, a
+  colour function or a named colour in a module's page sources, unless a comment on its
+  line holding `colour-fixed` says why. The QR code and the confirm dialog's scrim keep
+  theirs.
+
+## 0.2.2 (2026-11-08)
+
 - The width check no longer counts an element held by a scroll container (`overflow-x` of
   `auto` or `scroll`) that itself ends inside the viewport, as its docstring always said:
   a table that scrolls sideways in its own wrapper passes. An element cut off by
