@@ -24,8 +24,8 @@ No account and nothing off the machine: comms keeps everything in one SQLite fil
 your home directory, and the CLI and the adapters reach the daemon over Unix sockets.
 The daemon also serves comms' tools to sessions over MCP on `127.0.0.1:8450`, a loopback
 TCP port on by default; every request needs the token minted for one session, and
-`[mcp] enabled = false` in the config file turns it off. Any account on the machine can
-connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md)
+`[mcp] enabled = false` in the config file and a daemon restart turn it off. Any account
+on the machine can connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md)
 before using comms on a machine other people log in to.
 
 ```
@@ -193,7 +193,7 @@ posture from what it answers, so a reply to a `once` ask or an `optional` messag
 the exchange. An `open`
 thread closes after 8 replies (`[threads] reply_cap`, or `--cap N` / `--no-cap` from
 whoever opened it), after an hour with no message, or on a `--posture none` reply; after
-that, start a new send. The operator's own lane needs no `--posture`. Other useful flags:
+that, start a new send. A send as the operator needs no `--posture`. Other useful flags:
 `--held` (hold the message until the recipient's next turn, or until its session starts,
 is cleared or is compacted), `--interrupt` (go into the recipient's running turn where
 its harness can take it there), `--expires 30m|6h|3d|never` (drop the message if it
@@ -213,7 +213,7 @@ compaction or turn (when you type into it, say). Nothing wakes it for that messa
 alone. A send to an agent whose cache comms cannot read is refused with exit 75, and the
 output says "Nothing was sent." first and last; send it again in a moment. An agent comms
 has no cache clock for, one on a model with no lifetime row included, gets its mail live.
-This holds for every sender, the operator's own lane included, and there is no
+This holds for every sender, the operator included, and there is no
 override. The daemon checks again at delivery, so a post that skips `moxi comms send` is held
 too.
 

@@ -23,8 +23,8 @@ no cloud service of its own. Install has the details.
 
 Each value of a launch comes from, each later one winning: the catalog's shipped default;
 your `[defaults]`; the one preset you name; the flags you type. A launch names at most one
-preset, a seat (`--seat NAME`) or a project preset (`--project-preset NAME`), and never
-draws values from a second.
+preset, a seat (`--seat NAME`: a saved setup for a standing agent) or a project preset
+(`--project-preset NAME`: where to work), and never draws values from a second.
 
 `--leave-out ROW`, given once per row, leaves a catalog row out of this launch whatever
 your `[defaults]` or the preset sets: the row launches at its shipped default, as if no
@@ -61,8 +61,8 @@ on Linux and macOS the launcher execs it, on Windows it starts the harness and w
 `--target headless` starts the harness's non-interactive mode (`claude -p`, `codex exec`)
 detached, with the brief as its prompt, its output going to the launch's run log; a
 headless launch needs a brief. `--target slot` starts the session in a tmux slot, and needs
-the slots module (Linux, macOS and WSL2). `--slot` names the slot; a launch with any other
-target that names one is refused, exit 2.
+the slots module (Linux and WSL2; macOS untested). `--slot` names the slot; a launch with
+any other target that names one is refused, exit 2.
 
 **The brief.** Without turns, the brief (or the handoff) is the harness's opening prompt.
 With turns, a launch in this terminal or in a slot waits until the session is ready and
@@ -268,7 +268,7 @@ with a hold, from its own tool shell:
 
 A hold stays open until it is released, across a relaunch or a resume of the session.
 Keep-warm and recycle on expiry are offered where cache can read a session's
-environment: Linux, macOS and WSL2, for Claude Code sessions.
+environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
 **State.** `moxi launcher state [SESSION_ID]` shows a launched session's relaunch,
 recycle and keep-warm state (this session's when none is named). It reads red, with
@@ -434,8 +434,9 @@ Set with `moxi config set launcher <key> <value>`:
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/), with Claude Code or
 Codex. Launching in this terminal and headless needs nothing more. A slot launch needs
-the slots module and tmux (Linux, macOS and WSL2), and keep-warm and recycle on expiry
-need cache, which reads a session's environment on Linux, macOS and WSL2. The launcher
+the slots module and tmux (Linux and WSL2; macOS untested), and keep-warm and recycle on
+expiry need cache, which reads a session's environment on Linux and WSL2 (macOS
+untested). The launcher
 also has macOS and Windows code for the rest, which the repository's CI tests without
 gating and nobody runs yet: treat both as untested.
 

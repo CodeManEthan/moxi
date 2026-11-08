@@ -46,8 +46,9 @@ commands:
   chooses can't be read. It is what systemd and launchd do; on Windows every daemon starts
   at each logon. Python code gets the same value from `moxi.units.starts(found)`.
   `moxi modules --available` lists the first-party modules, installed or not, and
-  `--refresh` first fetches the newest list from the repository: the one command that
-  uses the network.
+  `--refresh` first fetches the newest list from the repository: the one listing
+  command that uses the network (`moxi install` and `moxi uninstall` run uv, which does
+  too).
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
   `--without`, `--all` and `--none` answer ahead.
@@ -58,12 +59,15 @@ commands:
   and refused when the name is already taken; `--remove` takes it off.
 - `moxi config <module>` shows a module's settings and its config file; `moxi config set
   <module> <key> <value>` changes one, keeping the file's comments, and `moxi config unset`
-  removes one. `moxi config moxi` is the core's own.
+  removes one. `moxi config <module> path` prints the file's path, `check` exits non-zero
+  when the file can't be read or the module refuses it, and `init` writes the file with
+  every key commented out at its default. `moxi config moxi` is the core's own.
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and
   stores, and exits 1 when a row fails. `--json` prints the rows as JSON, and `--costs`
-  also measures each module's daemons.
+  also measures each module's daemons. `moxi doctor --clear <module> <key>` removes a
+  record a program left for the doctor.
 - `moxi help [<command>|<module>]` prints the command list, or one command's or module's
   help.
 - `moxi version` prints the versions of `moxi` and the modules it sees.
@@ -76,8 +80,8 @@ behalf, and `moxi uninstall` removes what it wrote:
 
 - Skills and agent files a module ships, placed where each agent reads them: Claude Code's
   `~/.claude/skills` and `~/.claude/agents` (under `$CLAUDE_CONFIG_DIR` when that is
-  set), and Codex's `~/.agents/skills` and `~/.codex/agents` (under `$CODEX_HOME` when
-  set). `moxi install` asks before it places a module's skills; `--skills` and
+  set), and Codex's `~/.agents/skills`, and `~/.codex/agents` (`$CODEX_HOME/agents` when
+  that is set). `moxi install` asks before it places a module's skills; `--skills` and
   `--no-skills` answer ahead. They are links to the installed package on Linux and macOS
   and copies on Windows (the core setting `skills.form`), and the core settings
   `skills.harnesses` and `harnesses` choose the agents and folders.
@@ -111,8 +115,8 @@ tool's environment, so run one by its path there, for example comms' daemon:
 "$(uv tool dir)/moxi/bin/moxi-comms-daemon"
 ```
 
-On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
-PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
+On Windows a module's script is `Scripts\<script>.exe` in the same tool directory; in
+PowerShell, `& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
 
 ## Troubleshooting
 

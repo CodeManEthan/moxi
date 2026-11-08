@@ -157,6 +157,11 @@ port, so no other local user can bind it while the process restarts and collect 
 Its control socket is mode 0600 in a 0700 directory and drops a peer of another user before
 reading it.
 
+That holds while you are logged in. A Tailscale forward outlives your login: tailscaled
+keeps forwarding to 8452 after you log out, while your user units, the socket unit among
+them, stop with your last logout. On a machine other people log in to, turn on lingering
+for your user (`loginctl enable-linger`), or remove the tunnel entry before you log out.
+
 ## Reporting a vulnerability
 
 Email codemanethan@gmail.com with the details. Please don't open a public issue for a
