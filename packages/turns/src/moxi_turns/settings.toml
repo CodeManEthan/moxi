@@ -33,7 +33,7 @@ read = "start"
 [start.order]
 type = "list"
 items = "str"
-default = ["launcher", "comms", "notes", "memory"]
+default = ["launcher", "comms", "notes"]
 doc = "What adds start context, in order: module names and file paths; setting it replaces the whole list."
 read = "start"
 

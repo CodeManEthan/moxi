@@ -1,4 +1,4 @@
-"""turns' checks for the front door's doctor: the announcement's `DOCTOR`.
+"""turns' checks for `moxi doctor`: the announcement's `DOCTOR`.
 
 `check()` yields `moxi.doctor.Row`s of module `turns`: its config, the start list, the
 registered listeners (an after-tool row's floor that does not import fails its module's

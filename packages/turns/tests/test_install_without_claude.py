@@ -181,7 +181,7 @@ class Box:
                               stdin=subprocess.DEVNULL, check=False)
 
     def install(self, module: str) -> subprocess.CompletedProcess:
-        """The front door, with a `--from` for each Moxi distribution the module needs."""
+        """`moxi install`, with a `--from` for each Moxi distribution the module needs."""
         froms = []
         for name in _required(MEMBERS, f"moxi-{module}"):
             if name != "moxi":

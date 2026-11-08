@@ -134,13 +134,12 @@ def _module(name, rows):
 
 
 def test_the_default_order_is_the_schemas_and_an_uninstalled_module_is_skipped():
-    assert listeners.default_order() == ("launcher", "comms", "notes", "memory")
+    assert listeners.default_order() == ("launcher", "comms", "notes")
     reg = listeners.load([Entry("comms", [("start", "listener_targets:comms")])], order=None,
                          limit=0)
     plan = listeners.plan(reg, present=lambda name: name == "comms")
     assert [e.entry for e in plan.entries] == ["comms"]
-    assert dict(plan.skipped) == {"launcher": "not installed", "notes": "not installed",
-                                  "memory": "not installed"}
+    assert dict(plan.skipped) == {"launcher": "not installed", "notes": "not installed"}
     assert listeners.ask(reg, event("ready", source="startup"), 2.0) == "comms at start"
 
 

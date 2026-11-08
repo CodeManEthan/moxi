@@ -1,25 +1,33 @@
-# turns
+# moxi-turns
 
-turns is the Moxi module that drives a coding agent's session. Other modules call it to
-put input into a session (a new turn, a delivery held until the running turn ends, a
-steer into the running turn, `/clear`, `/compact` and `/exit`, optionally stopping the
-session's background shells) and to take session events out: the session ready, a turn
-started, steered or ended, naming each delivery it took by the caller's `ref`, and the
-session gone. A caller can also read the session's subagents, teammates and Codex
-background terminals; the list says `complete` false when turns could not read it whole. A holder can be asked at each
-Stop before the turn ends, and a registered module can add context at a session's start
-or at a prompt. Each session turns can reach has an endpoint with a Unix socket and a
-ledger of the session's turns (a small process of its own for a Claude Code session, and
-part of the host turns runs for a Codex or OpenCode session), so whether a session is idle
-and whether a delivered turn ran are read from the harness's own turn events. When a
-socket's path under the runtime directory is too long for a Unix socket (a long
-`MOXI_HOME`, say), turns listens at a short hashed path instead. Claude Code sessions are
-reached through two Claude Code plugins that ship inside the package; Codex sessions run
-under a host turns launches, in its caller or as a process of its own (the internal entry
-`moxi-turns-codex-host`, installed with the `codex` extra); OpenCode sessions run under an
-experimental host. turns is
-a library with no command of its own. Its API is the `moxi_turns` package, and the wire
-under it is described in [contracts/socket-protocol.md](contracts/socket-protocol.md).
+turns lets other Moxi modules drive a coding agent's session in Claude Code, Codex or
+OpenCode: put a new turn, a steer or a session command into it, and hear back when the
+session is ready, when a turn starts and ends, and when the session is gone. It also runs
+guards, checks that refuse an agent's tool call before it runs.
+
+Other modules call it to put input into a session (a new turn, a delivery held until the
+running turn ends, a steer into the running turn, `/clear`, `/compact` and `/exit`,
+optionally stopping the session's background shells) and to take session events out: the
+session ready, a turn started, steered or ended, naming each delivery it took by the
+caller's `ref`, and the session gone. A caller can also read the session's subagents,
+teammates and Codex background terminals; the list says `complete` false when turns could
+not read it whole. A holder can be asked at each Stop before the turn ends, and a
+registered module can add context at a session's start or at a prompt.
+
+Each session turns can reach has an endpoint with a Unix socket and a ledger of the
+session's turns (a small process of its own for a Claude Code session, and part of the
+host turns runs for a Codex or OpenCode session), so whether a session is idle and whether
+a delivered turn ran are read from the harness's own turn events. When a socket's path
+under the runtime directory is too long for a Unix socket (a long `MOXI_HOME`, say), turns
+listens at a short hashed path instead. Claude Code sessions are reached through two
+Claude Code plugins that ship inside the package; Codex sessions run under a host turns
+launches, in its caller or as a process of its own (the internal entry
+`moxi-turns-codex-host`, installed with the `codex` extra); OpenCode sessions run under a
+host that is experimental: no real run has confirmed it yet.
+
+turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
+the `moxi_turns` package, and the wire under it is described in
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/main/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -44,14 +52,62 @@ returns carries both, and its environment names the endpoint command in
 package's own otherwise. Such a launch writes nothing, so it works from a read-only
 install with no setup run, and many can start at once.
 
-### Before turns is on PyPI
+## The guards
 
-Install the core from git, then name turns' repo with `--from`:
+A guard refuses an agent's tool call before it runs, and the agent reads why. turns ships
+three, each off until you turn it on. `moxi install turns` asks about each; afterwards set
+its switch, for example `moxi config set turns guards.removal true`:
 
-```sh
-uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
-moxi install turns --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns'
-```
+- **The removal guard** (`turns.removal`, switch `guards.removal`): refuses a Claude Code
+  shell command that Claude Code's own dangerous-removal check would stop for your
+  approval even in bypass mode, where an unattended agent would sit blocked. Its rules
+  are coarse text rules: an `rm` or `rmdir` beside a `cd` and a `*`, beside a word that is
+  not a plain path, beside more than 64 substitutions, or inside a shell's `-c` script.
+- **The no-nested-agents guard** (`turns.no-nested-agents`, switch
+  `guards.no_nested_agents`): refuses a subagent's call to start a subagent of its own
+  (Claude Code's `Agent` and `Task`, Codex's `spawn_agent`), and tells it to report to
+  its parent instead.
+- **Question mode** (`turns.question-mode`, switch `guards.question_mode`): lets Claude
+  Code's `AskUserQuestion` run only in a turn where you typed something that mentions a
+  question, and never from a subagent. A prompt that asks to go through open questions
+  gets a one-line reminder of this.
+
+Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
+`usage.ceiling`), and a guard can also be a file of your own. `guards.on` lists the
+guards that run beyond the switches: guard ids or paths to guard files.
+
+## Settings
+
+`moxi config turns` shows every key and its value; `moxi config set turns <key> <value>`
+sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
+(`$MOXI_HOME/config/turns/config.toml` with `MOXI_HOME` set).
+
+- `commands.allow`: the session commands (`clear`, `exit`, `compact`) every session may be
+  asked to run; a launch may add more for itself. Default none.
+- `claude.endpoint`: the endpoint command the Claude plugin spawns. Empty means this
+  environment's `moxi-turns-endpoint`.
+- `stop_handler.wait_ms`: how long a Stop waits for the session's stop handler, in
+  milliseconds. Default 2000.
+- `listen.wait_ms`: how long an event waits for the registered listeners, in
+  milliseconds. Default 2000.
+- `start.order`: what adds context when a session starts, resumes, is cleared or is
+  compacted, in order: module names and file paths. A module not installed is skipped.
+  Default `["launcher", "comms", "notes"]`; setting it replaces the whole list.
+- `start.limit`: the most start context a session gets, in characters; 0 means the
+  harness's own ceiling. Default 0.
+- `guards.on`: the guards that run besides those switched on: guard ids and paths to
+  guard files. Default none.
+- `guards.removal`, `guards.no_nested_agents`, `guards.question_mode`: the switches of
+  turns' three guards. Default off.
+- `guards.max_wait_ms`: the most any guard may take on one tool call, in milliseconds.
+  Default 3000.
+- `after_tool.wait_ms`: how long the after-tool listeners may take on one tool call,
+  together, in milliseconds. Default 300.
+- `question_mode.origins`: the prompt origins question mode counts as yours. Default
+  `["composer"]`, a prompt typed at this terminal.
+
+`hold.wait_ms` is retired: a file that still sets it is told to set
+`stop_handler.wait_ms` instead.
 
 ## The panel
 
@@ -71,14 +127,19 @@ per session; turns adds no daemon for it.
 ## Requirements
 
 - Linux and Python 3.12 or later.
-- `moxi` (0.1).
+- `moxi`, Moxi's core, 0.1.6 or later.
 - The `ui` extra adds `moxi-ui`, the browser UI shell, for the panel.
 - The `codex` extra adds `websockets`, which the Codex host needs; it also needs `codex`
   on PATH. The host's entry is installed either way; `turns.codex_host_available()` says
   whether the extra is there.
-- Claude Code sessions need Claude Code with the two plugins loaded; OpenCode sessions
-  need `opencode` on PATH or in `~/.opencode/bin`.
+- Claude Code sessions need Claude Code with the two plugins loaded. The plugins are
+  TypeScript hook modules (`hooks/register.ts`) that Claude Code loads itself. They have
+  been run against Claude Code 2.1.296; `moxi doctor turns` says `ok` for that version
+  and warns on any other.
+- Codex sessions need Codex 0.153.0 or later, the first with `thread/inject_items`; an
+  older Codex is refused with one line naming that version.
+- OpenCode sessions (experimental) need `opencode` on PATH or in `~/.opencode/bin`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/turns/LICENSE).
