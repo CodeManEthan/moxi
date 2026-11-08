@@ -17,7 +17,7 @@ read = "start"
 type = "enum"
 values = ["system", "light", "dark"]
 default = "system"
-doc = "The pages' colours: system follows the browser's light or dark scheme; light and dark fix one. Each page the shell opens reads it."
+doc = "The pages' colours: system follows the browser's light or dark scheme; light fixes the calm-workbench colours and dark the midnight-neon ones. Each page the shell opens reads it."
 read = "use"
 
 [gateway.enabled]
