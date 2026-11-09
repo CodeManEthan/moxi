@@ -14,6 +14,7 @@ import shlex
 import sys
 import tempfile
 import textwrap
+import types
 
 import pytest
 from statusline_kit import config_file
@@ -211,6 +212,20 @@ def test_the_pieces_verb_prints_measured_times(capsys):
     assert found and found[0].lstrip().startswith("cache timer:")
     assert MEASURED.match(out[len(found) + 1]), out
     assert out[-1] == pieces.NEEDS
+
+
+def test_a_cost_is_the_median_of_five_timed_runs_after_one_to_warm_up(tmp_path,
+                                                                       monkeypatch):
+    log = tmp_path / "runs"
+    piece = pieces.Piece("cache", "cache timer", f"echo run >> {shlex.quote(str(log))}")
+    # Each run reads the clock at its start and its end. The warm-up takes 5 s; the five
+    # timed runs take 10, 80, 20, 40 and 30 ms.
+    took = [5.0, 0.010, 0.080, 0.020, 0.040, 0.030]
+    reads = iter([t for run in took for t in (100.0, 100.0 + run)])
+    clock = types.SimpleNamespace(perf_counter=lambda: next(reads))
+    monkeypatch.setattr(pieces, "time", clock)
+    assert pieces.measure(piece) == pytest.approx(30.0)
+    assert log.read_text() == "run\n" * 6
 
 
 def test_a_piece_command_runs_as_printed(tmp_path):
