@@ -387,8 +387,14 @@ def _folder(name: str, kind: str, value: str, environ=None) -> Path | None:
     if value:
         return Path(_expanduser(value, environ))
     if name == "claude":
-        base = environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
-        return Path(_expanduser(base, environ)) / kind
+        from .paths import claude_home
+
+        try:
+            return claude_home(environ) / kind
+        except LookupError:
+            # Nothing places the home: the `~` stays as written, as it always has here.
+            base = environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
+            return Path(_expanduser(base, environ)) / kind
     if name == "codex":
         if kind == "skills":
             base = os.path.join("~", ".agents")

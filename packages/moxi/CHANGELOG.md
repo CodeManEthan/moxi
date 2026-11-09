@@ -19,6 +19,17 @@
   would write, byte for byte, and the stamp of the file it was built over, with no lock
   and no write. Given that stamp as `base`, either refuses with the new `ConfigChanged`
   (exit code 75) once the file has changed.
+- New `moxi.paths.claude_home(env=None)`: Claude Code's folder, `$CLAUDE_CONFIG_DIR`
+  else `~/.claude`, read from the given environment alone. A leading `~` in the variable
+  is that environment's home folder.
+- The skill placer finds Claude's built-in skills and agents folders through
+  `claude_home`. What it places doesn't change.
+- New `moxi.harnessfile`, the writer for a harness's own files (Claude Code's
+  `settings.json` and the like), moved here from moxi-loadout so every module that writes
+  one shares one rule: `Doc` reads a file once, keeping a JSON file's key order and
+  indent; `write(doc, backups, keep)` drops the write when the file changed since it was
+  read, keeps the old bytes under `backups`, writes atomically in the file's own mode and
+  through a link, and leaves no lock file. Its refusal lines name no module.
 
 ## 0.1.7 (2026-11-08)
 

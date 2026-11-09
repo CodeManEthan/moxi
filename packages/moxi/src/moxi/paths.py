@@ -29,6 +29,10 @@ and macOS, else the user database's entry for this account; on Windows `USERPROF
 `HOMEDRIVE` and `HOMEPATH`, else the shell's profile folder. An empty variable reads as
 unset here too.
 
+`claude_home(env)` is Claude Code's own folder, `$CLAUDE_CONFIG_DIR` else `~/.claude`,
+with a leading `~` in the variable read as that same home folder. Every module that
+reads or writes Claude's files finds the folder there.
+
 The anchor (`anchor_dir()`) is the one directory no variable a user sets moves: the core's
 data directory as the account itself places it, `~/.local/share/moxi/moxi` under the
 account's home in the user database on Linux and macOS (not `HOME`), and
@@ -422,11 +426,16 @@ def _expanduser(path: str, environ: Mapping[str, str]) -> str:
     and no user-database entry), `path` is left as it is, as `os.path.expanduser` leaves
     it.
     """
-    seps = ("/", "\\") if _WINDOWS else ("/",)
-    if path == "~" or path.startswith(tuple("~" + sep for sep in seps)):
+    if _home_relative(path):
         found = _home(environ)
         return path if found is None else found + path[1:]
     return os.path.expanduser(path)
+
+
+def _home_relative(path: str) -> bool:
+    """Whether `path` is a bare `~` or starts `~/` (also `~\\` on Windows)."""
+    seps = ("/", "\\") if _WINDOWS else ("/",)
+    return path == "~" or path.startswith(tuple("~" + sep for sep in seps))
 
 
 def home(env: Mapping[str, str] | None = None) -> Path:
@@ -442,6 +451,27 @@ def home(env: Mapping[str, str] | None = None) -> Path:
         raise LookupError("nothing places the home folder: no HOME is set and this "
                           "account has no home of its own")
     return Path(found)
+
+
+def claude_home(env: Mapping[str, str] | None = None) -> Path:
+    """Claude Code's folder, `$CLAUDE_CONFIG_DIR`, else `~/.claude`, placed by `env`
+    (`os.environ` without one) alone.
+
+    An empty `CLAUDE_CONFIG_DIR` reads as unset. A value that is `~` or starts `~/` is
+    under the home folder `env` places (`home(env)`), never this process's own; `~user`
+    is that user's home, found as `os.path.expanduser` finds it; any other value is taken
+    as given, a relative one too. A leading `~` is never read as a folder named `~` under
+    this process's working directory: that folder is never the one the user meant, and
+    the expanded one is what a shell gives for an unquoted `CLAUDE_CONFIG_DIR=~/x`.
+    Raises `LookupError`, as `home` does, when the home is needed and nothing places one.
+    """
+    environ = _environ(env)
+    given = environ.get("CLAUDE_CONFIG_DIR")
+    if not given:
+        return home(environ) / ".claude"
+    if _home_relative(given):
+        return Path(str(home(environ)) + given[1:])
+    return Path(os.path.expanduser(given))
 
 
 def _home(environ: Mapping[str, str]) -> str | None:
@@ -618,5 +648,5 @@ def terminal_record(env: Mapping[str, str] | None = None) -> Path:
 
 __all__ = ["CONFIG_FILE", "LOCATORS", "HOME", "DEVICE", "DEVICE_ID", "SOCKET_MAX",
            "ANCHOR_HOME", "TERMINAL_RECORD", "Layout", "NoAnchor", "core", "core_lock",
-           "device_id", "device_label", "socket_path", "script", "python", "home", "which",
-           "anchor_dir", "terminal_record"]
+           "device_id", "device_label", "socket_path", "script", "python", "home",
+           "claude_home", "which", "anchor_dir", "terminal_record"]
