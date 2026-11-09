@@ -52,22 +52,17 @@ from moxi_sessions.api import UNKNOWN
 
 from . import readings as store
 from .readings import CLAUDE, CODEX, FIVE_HOUR, SEVEN_DAY, Reading
+# The row states, labels and main limits live in `windows`, which the status line segment
+# loads alone; they are imported back here so callers find them where they always have.
+from .windows import (FRESH, LABELS, MAIN_LIMIT, NO_PERCENT, RESET, ROW_STATES,
+                      UNAVAILABLE, label, row_state)
 
 if TYPE_CHECKING:
     import sqlite3
 
 log = logging.getLogger("moxi.usage")
 
-FRESH = "fresh"
-RESET = "reset"
-UNAVAILABLE = "unavailable"
-ROW_STATES = (FRESH, RESET, UNAVAILABLE)
-
 HARNESSES = (CLAUDE, CODEX)
-#: Each harness's main limit, whose 5h and 7d rows are always shown.
-MAIN_LIMIT = {CLAUDE: store.PLAN_LIMIT, CODEX: store.CODEX_LIMIT}
-#: Labels by duration; any other duration is labelled by its minutes.
-LABELS = {FIVE_HOUR: "5h", SEVEN_DAY: "7d"}
 
 #: Seconds turns' Codex pull may take.
 PULL_TIMEOUT = 3.0
@@ -82,7 +77,6 @@ _WORDS = re.compile(r"[_-]|(?<=[a-z])(?=[A-Z])")
 _MTIME_SLACK = 60.0
 
 NO_TURNS = "turns is not installed"
-NO_PERCENT = "the reading has no percent for this window"
 
 
 # --- results --------------------------------------------------------------------------
@@ -300,25 +294,6 @@ def pick(harness: str, found: list[Reading], now: float) -> Reading:
                                      else r.used_percent))
 
 
-def row_state(used_percent: float | None, resets_at: float | None,
-              now: float) -> tuple[str, str | None]:
-    """A window's state and its reason.
-
-    No `resets_at` is `reset`: a harness reports none for a while after a five-hour
-    reset. `now` at or past `resets_at` is `reset`. No percent is `unavailable`, and so
-    is a reading with neither, such as a spend limit that reports only dollars.
-    """
-    if resets_at is None and used_percent is None:
-        return UNAVAILABLE, NO_PERCENT
-    if resets_at is None:
-        return RESET, "the reading has no reset time"
-    if now >= resets_at:
-        return RESET, "the window has reset since the reading"
-    if used_percent is None:
-        return UNAVAILABLE, NO_PERCENT
-    return FRESH, None
-
-
 def project(found: list[Reading], winner: Reading, *, now: float,
             minutes: float) -> tuple[float | None, str | None, int]:
     """`(full_at, why_none, readings_fitted)` for one window's winning reading.
@@ -358,17 +333,6 @@ def project(found: list[Reading], winner: Reading, *, now: float,
     if full_at >= winner.resets_at:
         return None, "resets first", count
     return full_at, None, count
-
-
-def label(minutes: int | None, limit_id: str, slot: str | None = None) -> str:
-    """A row's label: `5h`, `7d` or `<n>m` from its duration, with the limit beside it
-    when it is not a main one; the kind when the duration is unknown."""
-    if minutes is None:
-        return slot or limit_id
-    text = LABELS.get(minutes, f"{minutes}m")
-    if limit_id not in MAIN_LIMIT.values():
-        text = f"{text} {limit_id}"
-    return text
 
 
 # --- bringing Codex up to date --------------------------------------------------------

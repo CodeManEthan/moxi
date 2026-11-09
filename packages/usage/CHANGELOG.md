@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 (2026-11-08)
+
+- usage announces a status line segment, `moxi_usage.segment`. Its `from_input` reads
+  the `rate_limits` Claude Code hands its status line command and shows each window as
+  `5h:42% 7d:61%`, `5h:reset` once a window has reset, with a window that has no percent
+  left out; green under 50%, yellow from 50%, red from 80%. It reads no file and records
+  nothing, and shows nothing when the input has no `rate_limits`.
+- The window rules (each Claude kind's window, a row's label and its state) move into
+  `moxi_usage.windows`, which imports only `math`, so the segment loads without the
+  readings store. `readings` and `limits` import them back, so every name is where it
+  was and nothing behaves differently.
+
 ## 0.2.0 (2026-11-08)
 
 The first public release.

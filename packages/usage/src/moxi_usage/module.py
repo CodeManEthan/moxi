@@ -34,7 +34,8 @@ QUESTIONS = {
                   "ceiling.hard_tokens)",
 }
 SETUP = None
-SEGMENT = None
+#: The status line segment: Claude's plan limits from the status line's own input.
+SEGMENT = "moxi_usage.segment"
 #: usage's page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_usage.page:PAGE"
 #: What usage offers the browser UI shell: its panel, and two blocks for the home view.

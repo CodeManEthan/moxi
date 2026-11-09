@@ -134,6 +134,14 @@ line through them says when it reaches 100%, given only when that comes after no
 before the reset. Of what else a reading says, the line prints only a spend limit's
 dollars; `--json` keeps all of it.
 
+usage also offers a Claude status line segment, `moxi_usage.segment`. It reads the
+`rate_limits` that Claude Code hands its status line command and shows each window by the
+same rules, such as `5h:42% 7d:61%`: green under 50%, yellow from 50%, red from 80%,
+`5h:reset` once a window has reset, and a window with no percent left out. A spend
+limit shows as `spend_limit:<percent>`, which can pass 100%. It reads no file and records
+nothing, so with no `rate_limits` (an API key, or before Claude's first reply) it shows
+nothing.
+
 ## The token index
 
 Every request every harness wrote is kept in one SQLite file, `STATE/usage/index.db`, so a
