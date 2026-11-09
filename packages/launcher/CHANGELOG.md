@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `moxi launcher handoffs --key KEY` reads KEY's own handoff folder, the one of KEY's
+  newest launch, so it finds the handoffs of a seat that works in another project. A key
+  with no launch is read in the folder of the caller's directory, as before. It says on
+  stderr which folder it read, and its `--json` names that launch as `launch`. Without
+  `--key` nothing changes. New `handoffs.folder_of_key` and `handoffs.newest_launch`.
+
 ## 0.1.3 (2026-11-08)
 
 The first public release.

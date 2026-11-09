@@ -760,6 +760,80 @@ def test_handoffs_with_a_key_that_cant_name_a_file_exits_2(capsys):
     assert run(["handoffs", "--key", "../up"], capsys)[0] == codes.USAGE
 
 
+@pytest.fixture
+def project_notes(monkeypatch, tmp_path):
+    """notes faked with one handoff folder per project directory, named by its last
+    part, so a key's folder depends on where it works."""
+    def handoffs_dir(path, *, create=False, override=None):
+        found = tmp_path / "notes" / Path(override or path).name / "handoffs"
+        if create:
+            found.mkdir(parents=True, exist_ok=True)
+        return found
+
+    real = modules.available
+    loaded = SimpleNamespace(state=modules.PRESENT, reason="",
+                             api=SimpleNamespace(handoffs_dir=handoffs_dir))
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None: loaded)
+    return lambda name: handoffs_dir(name, create=True)
+
+
+def launched(rid: str, cwd: str, *, at: str, **fields) -> None:
+    conn = store.connect()
+    try:
+        store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
+                     cwd=cwd, values={}, argv=["codex"], env={common.REQUEST: rid},
+                     posture="", at=at, **fields)
+    finally:
+        conn.close()
+
+
+def test_handoffs_of_a_key_read_the_folder_of_its_newest_launch(work, project_notes,
+                                                               capsys):
+    there = project_notes("moxi")
+    (there / "2026-11-08-planner.md").write_text("done; next\n")
+    (project_notes("work") / "2026-11-09-planner.md").write_text("stale\n")
+    launched("r-old", str(work), at="2026-11-01T00:00:00Z", identity="planner@home")
+    launched("r-new", "/src/moxi", at="2026-11-05T00:00:00Z", identity="planner@moxi")
+    launched("r-other", str(work), at="2026-11-07T00:00:00Z", identity="coder",
+             project_key="planner")
+    code, out, err = run(["handoffs", "--key", "planner"], capsys)
+    assert code == codes.OK
+    assert out.split() == ["2026-11-08", "waiting", str(there / "2026-11-08-planner.md")]
+    assert err == (f"reading {there}, the handoff folder of planner's newest launch "
+                   "(/src/moxi)\n")
+    shown = json.loads(run(["handoffs", "--key", "planner", "--json"], capsys)[1])
+    assert (shown["folder"], shown["launch"]) == (str(there), "r-new")
+    assert [h["path"] for h in shown["handoffs"]] == [str(there / "2026-11-08-planner.md")]
+
+
+def test_handoffs_of_a_key_with_no_launch_read_this_directorys_folder(work, project_notes,
+                                                                     capsys):
+    here = project_notes("work")
+    (here / "2026-11-09-planner.md").write_text("done; next\n")
+    assert not store.path().exists()
+    code, out, err = run(["handoffs", "--key", "planner"], capsys)
+    assert code == codes.OK and out.split()[2] == str(here / "2026-11-09-planner.md")
+    assert err == f"reading {here}: planner has no launch, so this directory's folder\n"
+    launched("r-1", "/src/moxi", at="2026-11-05T00:00:00Z", identity="planner-2@moxi",
+             preset_kind="seat", preset_name="planners")
+    shown = json.loads(run(["handoffs", "--key", "planner", "--json"], capsys)[1])
+    assert (shown["folder"], shown["launch"]) == (str(here), None)
+
+
+def test_handoffs_of_this_session_are_unchanged_by_launches_elsewhere(work, project_notes,
+                                                                      monkeypatch, capsys):
+    here = project_notes("work")
+    (here / "2026-11-09-planner.md").write_text("done; next\n")
+    launched("r-1", "/src/moxi", at="2026-11-05T00:00:00Z", identity="planner@moxi")
+    monkeypatch.setenv("MOXI_COMMS_NAME", "planner@home")
+    code, out, err = run(["handoffs"], capsys)
+    assert (code, err) == (codes.OK, "")
+    assert out.split() == ["2026-11-09", "waiting", str(here / "2026-11-09-planner.md")]
+    shown = json.loads(run(["handoffs", "--json"], capsys)[1])
+    assert set(shown) == {"key", "folder", "handoffs"} and shown["folder"] == str(here)
+
+
 # -- deliver --------------------------------------------------------------------------------
 
 
