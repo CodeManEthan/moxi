@@ -43,6 +43,15 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 memory = "moxi_memory.module"
 
+# The start line, the start lists, the reminder and the ingest trigger: turns reads this
+# stdlib-only module when a session's endpoint starts.
+[project.entry-points."moxi.turns.listeners"]
+memory = "moxi_memory.listeners"
+
+# The two commands the start line names run without an approval prompt in a launch.
+[project.entry-points."moxi.turns.additions"]
+memory = "moxi_memory.additions:additions"
+
 # The ingest child, which every trigger starts detached (`moxi_memory.start`).
 [project.scripts]
 moxi-memory-ingest = "moxi_memory.ingest:main"

@@ -2,8 +2,8 @@
 
 ## 0.2.4 (2026-11-08)
 
-- `start.order`'s default is `["launcher", "comms", "notes"]`, the start-context modules
-  in this repository. A config that sets the key keeps its own list.
+- `start.order`'s default is `["launcher", "comms", "notes", "memory"]`, the
+  start-context modules in this repository. A config that sets the key keeps its own list.
 - The README is written for a newcomer: what turns is, its three guards and what each
   refuses, every setting, the Claude Code version the plugins were run against, the Codex
   version it needs, and that it needs moxi 0.1.6 or later. It installs from PyPI and its
