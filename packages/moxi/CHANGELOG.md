@@ -12,6 +12,8 @@
 - New `moxi.render`, the render audit hook, moved here from moxi-cache unchanged:
   `install()`, `installed()`, `Refused` and `load_segment(name)`. A process that renders a
   status line segment installs it first, and can then read and do nothing else.
+  Importing it loads no `urllib.parse`; only the check of a `sqlite3.connect`
+  URI does.
 - The catalogue lists statusline, the Claude Code status line. Its version is 3.
 - New `moxi.config.set_many(module, changes, by=, base=)`: several keys set in one write,
   checked once as a whole, so keys bound to each other move together; any refusal writes

@@ -27,6 +27,10 @@ sys.stderr.write("MODULES " + repr(sorted(sys.modules)) + "\\n")
 """
 
 FORBIDDEN = ("subprocess", "socket", "logging", "datetime", "moxi_sessions")
+#: Modules a default render doesn't use, which a module on its path once loaded at import:
+#: each costs several milliseconds on every render. The render loads none of them, and
+#: the TOML reader loads none by itself.
+NEVER = ("urllib.parse", "dataclasses")
 
 
 def probe(payload, argv: str = "[]") -> tuple[list[str], list[str]]:
@@ -56,6 +60,8 @@ def test_the_default_line_loads_no_api_and_nothing_a_segment_may_not():
     # The TOML reader's own imports are the config read's price; the render adds none.
     assert {n for n in toml if n.split(".")[0] in FORBIDDEN} <= {"datetime"}
     assert [n for n in names if n.split(".")[0] in FORBIDDEN and n not in toml] == []
+    assert [n for n in NEVER if n in toml] == []
+    assert [n for n in NEVER if n in names] == []
     ours = [n for n in names if n.split(".")[0] in ("moxi", "moxi_statusline")]
     assert sorted(set(ours) - set(RENDER_IMPORTS)) == []
     # The default line's segments, where their modules are installed here.

@@ -5,6 +5,10 @@
 - The render audit hook moved to the core as `moxi.render`; `moxi_cache.render` is
   gone. `moxi cache segment` installs the core's hook, which refuses the same things.
 - cache needs moxi 0.1.8 or later, for that hook.
+- `Segment` is a plain class, not a dataclass, so loading the segment module no longer
+  loads `dataclasses`. It keeps its fields, equality, hash, `coloured()` and `as_dict()`,
+  and still refuses assignment, now with a plain `AttributeError` (`dataclasses`'
+  `FrozenInstanceError` was one).
 
 ## 0.1.4 (2026-11-08)
 

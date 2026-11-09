@@ -182,6 +182,34 @@ def test_as_dict():
                                              "age_s": 60.0, "ttl_s": 3600.0, "dim": False}
 
 
+
+def test_a_segment_is_a_value_that_cant_change():
+    a = segment.Segment("cache:1m0s", "warm", 60.0, 3600.0)
+    b = segment.Segment("cache:1m0s", "warm", 60.0, 3600.0, False)
+    assert a == b and hash(a) == hash(b) and len({a, b}) == 1
+    assert a != segment.Segment("cache:1m0s", "warm", 60.0, 3600.0, True)
+    assert a != ("cache:1m0s", "warm", 60.0, 3600.0, False)
+    assert repr(a) == ("Segment(text='cache:1m0s', band='warm', age_s=60.0, ttl_s=3600.0, "
+                       "dim=False)")
+    with pytest.raises(AttributeError):
+        a.band = "cold"
+    with pytest.raises(AttributeError):
+        del a.text
+    with pytest.raises(AttributeError):
+        a.other = 1
+    assert a.band == "warm"
+
+
+def test_the_segment_module_loads_no_dataclasses():
+    import subprocess
+    import sys
+
+    probe = ("import sys, moxi_cache.segment; "
+             "print([n for n in ('dataclasses', 'inspect') if n in sys.modules])")
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                          timeout=60, check=True)
+    assert done.stdout.strip() == "[]"
+
 # --- segment(): one record, read from disk ------------------------------------------------
 
 def test_segment_reads_the_sessions_record():

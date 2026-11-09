@@ -39,7 +39,6 @@ from __future__ import annotations
 import importlib
 import os
 import sys
-from urllib.parse import parse_qs, urlsplit
 
 #: Open flags that write.
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
@@ -72,6 +71,10 @@ _installed = False
 def _read_only_sqlite(database) -> bool:
     if not isinstance(database, str) or not database.startswith("file:"):
         return False
+    # Imported here, not at the top: only a sqlite3 connect needs it, and every render
+    # imports this module.
+    from urllib.parse import parse_qs, urlsplit
+
     modes = parse_qs(urlsplit(database).query).get("mode", [])
     return modes == ["ro"]
 
