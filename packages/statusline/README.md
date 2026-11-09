@@ -38,7 +38,7 @@ After the install, statusline looks at the `statusLine` setting in Claude Code's
 - Moxi's line already: it points the setting at this environment's render, and asks
   nothing.
 - No status line: it asks "Use Moxi's status line in Claude Code? [Y/n]". Yes sets Moxi's
-  line with the default items.
+  line, with the items you saved, or the default items when you saved none.
 - Your own line: it offers to run that line once with test input, to see what it shows
   (your script may store what it is given, so it asks first). Then it says what it
   found and offers two things:
@@ -123,9 +123,9 @@ Every key is read at each render; `moxi config statusline` shows them.
 
 - `moxi statusline use` sets Claude Code's status line to Moxi's, keeping the line it
   replaces. Over Moxi's line it points it at this environment's render. With no line it
-  asks first; with nobody at the keyboard the command is the yes. Over your own line it
-  makes the two offers above, whatever was answered before; with nobody at the keyboard
-  it prints both and changes nothing.
+  asks first, and the switch keeps the items you saved; with nobody at the keyboard the
+  command is the yes. Over your own line it makes the two offers above, whatever was
+  answered before; with nobody at the keyboard it prints both and changes nothing.
 - `moxi statusline restore [--force]` puts back the line `use` replaced, or removes the
   setting when there was none. When Claude Code's line is no longer Moxi's (you set
   another since), it refuses with one line; `--force` puts the saved line back over it.

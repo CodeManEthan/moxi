@@ -12,11 +12,10 @@ import stat
 import sys
 
 import pytest
-from statusline_kit import config_file
 
+from moxi import config, paths
 from moxi import exit as codes
-from moxi import paths
-from moxi_statusline import setup, switch
+from moxi_statusline import settings, setup, switch
 
 OWN = {"type": "command", "command": "/home/u/.claude/line.sh"}
 OLD_RENDER = "/old/env/bin/moxi-statusline-render"
@@ -76,8 +75,7 @@ def test_no_line_answered_yes_switches_with_the_default_items_and_records_it():
     assert term.said == [switch.SWITCHED]
     assert switch.is_moxis(line())
     assert setup.recorded()["answer"] == "switch"
-    assert 'show = ["dir", "branch", "model", "effort", "context", "usage", "cache"]' \
-        in config_file().read_text()
+    assert settings.load()["show"] == setup.default_show()
 
 
 def test_no_line_answered_no_then_a_second_install_asks_nothing():
@@ -215,6 +213,24 @@ def test_use_with_nobody_at_the_keyboard_switches(nobody):
     assert setup.use(say=said.append) == 0
     assert said == [switch.SWITCHED]
     assert switch.is_moxis(line())
+
+
+SAVED = ["model", "row", "session"]
+
+
+@pytest.mark.parametrize("who", ["use at the keyboard", "use with nobody", "setup"])
+def test_a_switch_over_no_line_keeps_the_saved_items(who, monkeypatch):
+    # Items saved the way the page saves them, then the line put back to none.
+    write_settings({})
+    config.set_many("statusline", [("show", SAVED)], by="ui")
+    if who == "use with nobody":
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        assert setup.use(say=print) == 0
+    else:
+        run = setup.use if who.startswith("use") else setup.setup
+        assert run(ask=Terminal("y").ask, say=print) == 0
+    assert switch.is_moxis(line())
+    assert settings.load()["show"] == SAVED
 
 
 def test_use_over_moxis_line_points_it_here():

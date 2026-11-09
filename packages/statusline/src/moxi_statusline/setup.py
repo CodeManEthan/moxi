@@ -8,8 +8,9 @@
    the path to this one's. Done either way.
 3. An answer is recorded in `asked.json`: say that the line is left as it is and that
    `moxi statusline use` switches. Done. Setup asks once; after that only `use` asks.
-4. No `statusLine`: ask "Use Moxi's status line in Claude Code? [Y/n]". Yes switches,
-   with the default items; no says how to switch later.
+4. No `statusLine`: ask "Use Moxi's status line in Claude Code? [Y/n]". Yes switches
+   and leaves the config's `show` as it is (the default items when none is saved); no
+   says how to switch later.
 5. Another command: `offer(settings, current)`. It asks to run that line once with test
    input to see what it shows (`moxi_statusline.detect`), says what it found, and offers
    the switch, set up to show the same, or the keep, with the commands that add Moxi's
@@ -154,10 +155,11 @@ def _switch(show, *, by: str, say: Say, env) -> int:
 
 
 def _no_line(*, ask: Ask | None, say: Say, by: str, env, verb: bool) -> int:
-    """Step 4, for setup (`verb` false) and for `use`."""
+    """Step 4, for setup (`verb` false) and for `use`. The switch keeps a saved `show`,
+    such as a layout made on the page; with none saved the default items show."""
     if not keyboard(ask):
         if verb:
-            return _switch(default_show(), by=by, say=say, env=env)
+            return _switch(None, by=by, say=say, env=env)
         say(NOT_NOW)
         return codes.OK
     answer = yes_no(QUESTION, ask, say)
@@ -168,7 +170,7 @@ def _no_line(*, ask: Ask | None, say: Say, by: str, env, verb: bool) -> int:
         record("no", env)
         say(f"{switch.LEFT}." if verb else NOT_NOW)
         return codes.OK
-    return _switch(default_show(), by=by, say=say, env=env)
+    return _switch(None, by=by, say=say, env=env)
 
 
 def choose(ask: Ask | None = None, say: Say = print) -> str | None:
