@@ -180,7 +180,7 @@ def test_the_current_folder_of_a_launched_seat():
     conn = store.connect()
     try:
         store.insert(conn, request_id="r1", actor="a", harness="claude", target="slot",
-                     cwd="/work", values={}, argv=["codex"], env={}, posture="go",
+                     cwd="/work", values={}, argv=["claude"], env={}, posture="go",
                      session_id=CLAUDE_ID, preset_kind="seat", preset_name="lead")
     finally:
         conn.close()
