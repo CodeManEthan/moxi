@@ -1110,9 +1110,11 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
          posture requirement, `--new` with `--reply-to`, `--cap` with `--no-cap`, the
          `--cap` shape, `--interrupt` with `--held`, the `--expires` shape, the config
          file's `block`;
-      2. the daemon block: resolution (with the send-only refusal, the `--standing`
-         declaration and, on a `moxi comms send`, the never-bound check), the `session`
-         query for each bound recipient, and the claim's token;
+      2. the daemon block: the connection (refused when the daemon's wire version
+         doesn't match or the daemon is offline), resolution (with the send-only
+         refusal, the `--standing` declaration and, on a `moxi comms send`, the
+         never-bound check), the `session` query for each bound recipient, and the
+         claim's token;
       3. the single-reply refusal;
       4. the reply checks: read the referent, then a reply to `[no reply]`, `--posture
          open` on a reply to a once ask, the open-thread

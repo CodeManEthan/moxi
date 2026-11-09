@@ -429,7 +429,7 @@ Newline-delimited JSON-RPC 2.0 at `RUNTIME/comms/daemon.sock` (0600, in a 0700
 directory; Moxi's short socket path for it when that one is too long). Each adapter's
 claim socket speaks the same wire. Every connection opens with `rpc.hello`: the client
 offers a range of comms wire versions, and the daemon answers the highest common one and
-its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`), or refuses with
+its capabilities (`remove`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`), or refuses with
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the

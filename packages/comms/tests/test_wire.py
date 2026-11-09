@@ -190,7 +190,7 @@ def test_the_hello_agrees_the_version_and_answers_the_daemons_own_capabilities(r
     line = lines(hello=False)
     answer = result(line.hello(capabilities={"x-not-comms"}))
     assert answer["version"] == wire.VERSIONS[1]
-    assert set(answer["capabilities"]) == {"delete", "expiry", "interrupt", "reserved-names",
+    assert set(answer["capabilities"]) == {"remove", "expiry", "interrupt", "reserved-names",
                                            "mcp", "connector"}
     # Each side holds the other's set: the daemon's connection holds what the client
     # offered, not an intersection.
