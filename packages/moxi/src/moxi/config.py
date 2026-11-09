@@ -92,6 +92,15 @@ checks over the file as it is. Every change appends one line, `{module, key, op,
 at}`, to the core's settings history (`history()` reads it); the line never holds a
 value. Each refusal raises `ConfigError` with the problem and its fix.
 
+`set_many(module, changes, by=, base=)` sets several keys in one write: each change is
+coerced and checked as `set` checks it, all are applied in order, and the checks run once
+over the whole result, so keys that must change together (a pair with a bound between
+them) change together or not at all. `draft_text(module, changes, base=)` is the same step
+with no lock and no write: it returns the text `set_many` would write and the stamp of the
+file it was built over, so a preview shows what a save would write, byte for byte. Given
+that stamp back as `base`, either one refuses with `ConfigChanged` when the file has
+changed since.
+
 This module imports only what is already loaded when Python starts; everything else it
 needs is imported inside the function that needs it, so a hook may read config through it.
 """
@@ -134,7 +143,7 @@ class ConfigError(Exception):
 
     `exit_code` is what a command that stops on it exits with: 2 (a bad key or value)
     unless the refusal says otherwise, 3 for a module that is absent, broken or has no
-    settings, 75 when the file stays locked.
+    settings, 75 when the file stays locked or has changed since it was read (try again).
     """
 
     exit_code = 2
@@ -152,6 +161,14 @@ class ConfigError(Exception):
 
 class SchemaError(ConfigError):
     """A module's schema that does not hold to the format. The module's own bug."""
+
+
+class ConfigChanged(ConfigError):
+    """A config file whose bytes are no longer those a draft was built over: someone
+    changed it since it was read. Nothing was written; read it again and redo the change.
+    Its `exit_code` is 75, as a held lock's is, and only this refusal is of this type."""
+
+    exit_code = 75
 
 
 class _Frozen:
@@ -832,6 +849,73 @@ def remove_item(module: str, key: str, item, *, by: str) -> None:
     _change(module, key, "remove", item, by=by)
 
 
+def set_many(module: str, changes, *, by: str, base: str | None = None) -> list:
+    """Set several keys of module `module`'s config file in one write.
+
+    `changes` is a sequence of `(key, value)` pairs, each taken as `set` takes it and
+    applied in order (a later change of a key wins). The checks `set` runs over the new
+    text run once, over the text with every change made, so two keys bound to each other
+    can be moved together where either alone would be refused. Under the file's lock,
+    when `base` is given and the file's stamp (see `draft_text`) is no longer `base`, it
+    raises `ConfigChanged`. Any refusal writes nothing; otherwise the text is written
+    once, and one history line is added per key changed, each naming `by`. Returns the
+    units applied for each key, one list, as `set` returns them. No changes write nothing
+    and make no file, though the file is still read and checked as `draft_text` does.
+    Raises `ConfigError`; a refusal of the whole text, not of one value, names no key
+    unless the module's check names one.
+    """
+    _need_by(by, None)
+    changes = _pairs(changes)
+    if not changes:
+        draft_text(module, changes, base=base)
+        return []
+    from . import files
+
+    path = _config_file(module)
+    schema, check, steps = _resolved(module, changes, path)
+    named = _named(changes)
+    try:
+        with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
+            # The lock is held, so the bytes read here are the bytes `doc` was parsed from.
+            if base is not None and _stamp_of(_raw(path)) != base:
+                raise _changed(path)
+            _drafted(module, schema, check, steps, doc, path, named)
+    except (files.LockTimeout, ValueError) as exc:
+        raise _edit_refused(exc, path, named) from None
+    keys = list(dict.fromkeys(key for key, _ in changes))
+    _record_changes(module, keys, "set", by)
+    return [applied for key in keys for applied in apply_units(module, key)]
+
+
+def draft_text(module: str, changes, *, base: str | None = None) -> tuple:
+    """The text `set_many(module, changes, base=base)` would write now, and the stamp of
+    the file it was built over: `(text, stamp)`.
+
+    The file is read as `set_many` reads it (a missing file is the empty text), the same
+    changes are made and the same checks run, so for the same file the text is what
+    `set_many` writes, byte for byte, and a draft it refuses is one `set_many` refuses.
+    Nothing is written, no lock is taken and no file or folder is made. The stamp is the
+    SHA-256 hex digest of the file's bytes (of no bytes for a missing file); with `base`
+    given and the stamp now different, it raises `ConfigChanged`. Raises `ConfigError`.
+    """
+    from ._vendor import tomlkit
+
+    changes = _pairs(changes)
+    path = _config_file(module)
+    schema, check, steps = _resolved(module, changes, path)
+    named = _named(changes)
+    raw = _raw(path)
+    try:
+        doc = tomlkit.document() if raw is None else tomlkit.parse(_decoded(raw))
+        stamp = _stamp_of(raw)
+        if base is not None and stamp != base:
+            raise _changed(path)
+        text = _drafted(module, schema, check, steps, doc, path, named)
+    except ValueError as exc:
+        raise _edit_refused(exc, path, named) from None
+    return text, stamp
+
+
 def history(module: str, key: str | None = None, *, tail: int | None = 200) -> list:
     """The last `tail` changes of module `module`'s settings (of `key` alone, when given),
     oldest first: `{module, key, op, by, at}` each. `tail=None` gives them all."""
@@ -1021,21 +1105,134 @@ class _Unchanged(Exception):
     """Raised inside `edit_toml`'s block when a change would change nothing."""
 
 
-def _change(module, key, op, value, *, by, text=False) -> bool:
-    """Make one change; returns False when there was nothing to change."""
+def _need_by(by, key) -> None:
+    """Refuse a change that names no one as making it."""
     if not isinstance(by, str) or not by.strip():
         raise ConfigError(None, key, "has no one named as making the change",
                           "pass by=, who makes it (cli, ui, moxi install)")
+
+
+def _prepared(schema, module, key, value, path, text) -> tuple:
+    """Steps 2 and 3 of a set: the key `key` names, and `value` coerced and checked as its
+    type. Returns `(target, entry, new)`; `entry` is the switch entry `key` names, or
+    None."""
+    target, entry = _resolve(schema, module, key, path)
+    new = _coerce(target, entry, key, value, path, text)
+    if entry is None:
+        _check_value(target, new, path, os.environ)
+    return target, entry, new
+
+
+def _put(doc, target, entry, new, path) -> None:
+    """Write the value `new` of `target` (or of its switch `entry`) into `doc`."""
+    parts = target.name.split(".")
+    if entry is not None:
+        parts.append(entry)
+    node = _container(doc, parts[:-1], path, create=True)
+    node[parts[-1]] = _item(new)
+
+
+def _pairs(changes) -> list:
+    """`changes` as a list of `(key, value)` pairs."""
+    return [(key, value) for key, value in changes]
+
+
+def _named(changes) -> str | None:
+    """The key a refusal of the whole text names: the one key changed, else none."""
+    return changes[0][0] if len(changes) == 1 else None
+
+
+def _resolved(module, changes, path) -> tuple:
+    """The first half of the step `set_many` and `draft_text` share: the module's schema
+    and `CONFIG_CHECK`, and each change prepared as `set` prepares it."""
+    schema, check = _schema_of(module)
+    steps = [_prepared(schema, module, key, value, path, False) for key, value in changes]
+    return schema, check, steps
+
+
+def _drafted(module, schema, check, steps, doc, path, key) -> str:
+    """The second half: every prepared change put into `doc` in order, then the new text
+    checked once, whole, as a change's text is. Returns the text."""
+    from ._vendor import tomlkit
+
+    for target, entry, new in steps:
+        _put(doc, target, entry, new, path)
+    text = tomlkit.dumps(doc)
+    _check_file(module, schema, check, text, path, key)
+    return text
+
+
+def _raw(path) -> bytes | None:
+    """The bytes of the file `path` points to, or None when there is none."""
+    try:
+        with open(os.path.realpath(path), "rb") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+
+
+def _decoded(raw: bytes) -> str:
+    """`raw` as text, read as `moxi.files.edit_toml` reads a file: UTF-8, with each line
+    ending made a newline."""
+    import io
+
+    return io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8").read()
+
+
+def _stamp_of(raw: bytes | None) -> str:
+    """The stamp of a file's bytes `raw`: their SHA-256 hex digest (of no bytes for
+    None)."""
+    import hashlib
+
+    return hashlib.sha256(raw or b"").hexdigest()
+
+
+def _changed(path) -> ConfigChanged:
+    return ConfigChanged(path, None, "has changed since it was read",
+                         "read it again and make the change over what it holds now")
+
+
+def _edit_refused(exc, path, key) -> ConfigError:
+    """The refusal for an edit of `path` that failed with `exc`: a lock held past the
+    wait, a file that is not valid TOML, or a value TOML cannot hold."""
+    from . import files
+
+    if isinstance(exc, files.LockTimeout):
+        who = f"pid {exc.holder}" if exc.holder else "another process"
+        return _refused(path, f"is locked by {who}", "try again once it is free", 75, key)
+    from ._vendor.tomlkit.exceptions import ParseError
+
+    if isinstance(exc, ParseError):
+        return ConfigError(path, None, f"is not valid TOML ({exc})",
+                           "correct the file's TOML syntax")
+    return ConfigError(path, key, f"cannot be written as TOML ({exc})",
+                       "give a value TOML can hold")
+
+
+def _record_changes(module, keys, op, by) -> None:
+    """One history line per key in `keys`."""
+    import time
+
+    from . import files
+
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for key in keys:
+        files.append_record(_history_file(), {
+            "module": module, "key": key, "op": op, "by": by, "at": at})
+
+
+def _change(module, key, op, value, *, by, text=False) -> bool:
+    """Make one change; returns False when there was nothing to change."""
+    _need_by(by, key)
     from . import files
 
     schema, check = _schema_of(module)
     path = _config_file(module)
-    target, entry = _resolve(schema, module, key, path)
     if op == "set":
-        new = _coerce(target, entry, key, value, path, text)
-        if entry is None:
-            _check_value(target, new, path, os.environ)
-    elif op in ("add", "remove"):
+        target, entry, new = _prepared(schema, module, key, value, path, text)
+    else:
+        target, entry = _resolve(schema, module, key, path)
+    if op in ("add", "remove"):
         if entry is not None:
             raise ConfigError(path, key, "is a switch, not a list",
                               "set it to true or false")
@@ -1047,40 +1244,26 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
         return False
     try:
         with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
-            parts = target.name.split(".")
-            if entry is not None:
-                parts.append(entry)
             if op == "set":
-                node = _container(doc, parts[:-1], path, create=True)
-                node[parts[-1]] = _item(new)
-            elif op == "unset":
-                dropped = _drop(doc, parts)
+                _drafted(module, schema, check, [(target, entry, new)], doc, path, key)
             else:
-                _edit_list(doc, parts, target, op, item, path, module, key)
-            from ._vendor import tomlkit
+                parts = target.name.split(".")
+                if entry is not None:
+                    parts.append(entry)
+                if op == "unset":
+                    dropped = _drop(doc, parts)
+                else:
+                    _edit_list(doc, parts, target, op, item, path, module, key)
+                from ._vendor import tomlkit
 
-            _check_file(module, schema, check, tomlkit.dumps(doc), path, key)
-            if op == "unset" and not dropped:
-                raise _Unchanged
+                _check_file(module, schema, check, tomlkit.dumps(doc), path, key)
+                if op == "unset" and not dropped:
+                    raise _Unchanged
     except _Unchanged:
         return False
-    except files.LockTimeout as exc:
-        who = f"pid {exc.holder}" if exc.holder else "another process"
-        raise _refused(path, f"is locked by {who}", "try again once it is free", 75,
-                       key) from None
-    except ValueError as exc:
-        from ._vendor.tomlkit.exceptions import ParseError
-
-        if isinstance(exc, ParseError):
-            raise ConfigError(path, None, f"is not valid TOML ({exc})",
-                              "correct the file's TOML syntax") from None
-        raise ConfigError(path, key, f"cannot be written as TOML ({exc})",
-                          "give a value TOML can hold") from None
-    import time
-
-    files.append_record(_history_file(), {
-        "module": module, "key": key, "op": op, "by": by,
-        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    except (files.LockTimeout, ValueError) as exc:
+        raise _edit_refused(exc, path, key) from None
+    _record_changes(module, [key], op, by)
     return True
 
 
@@ -1238,4 +1421,5 @@ def _check_config(module: str, schema: Schema, check) -> None:
 __all__ = ["TYPES", "READS", "FIELDS", "ITEMS", "DEFAULT", "FILE", "ENV", "HISTORY",
            "ConfigError", "SchemaError", "Key", "Schema", "Settings", "is_switch_table",
            "is_entry_name", "schema_for", "check_text", "load", "Config", "set", "unset",
-           "add_item", "remove_item", "history"]
+           "add_item", "remove_item", "history", "set_many", "draft_text",
+           "ConfigChanged"]

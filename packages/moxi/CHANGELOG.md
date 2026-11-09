@@ -13,6 +13,12 @@
   `install()`, `installed()`, `Refused` and `load_segment(name)`. A process that renders a
   status line segment installs it first, and can then read and do nothing else.
 - The catalogue lists statusline, the Claude Code status line. Its version is 3.
+- New `moxi.config.set_many(module, changes, by=, base=)`: several keys set in one write,
+  checked once as a whole, so keys bound to each other move together; any refusal writes
+  nothing. New `moxi.config.draft_text(module, changes, base=)`: the text `set_many`
+  would write, byte for byte, and the stamp of the file it was built over, with no lock
+  and no write. Given that stamp as `base`, either refuses with the new `ConfigChanged`
+  (exit code 75) once the file has changed.
 
 ## 0.1.7 (2026-11-08)
 
