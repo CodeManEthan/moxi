@@ -251,6 +251,17 @@ def test_status_shows_every_field(capsys):
         assert any(line.startswith(start_) for line in out.splitlines()), start_
 
 
+def test_status_counts_a_harness_with_no_root_as_nothing_behind(capsys):
+    t = claude()
+    t.user("q")
+    t.write()
+    run()                              # the Codex and OpenCode roots are not there
+    code, out, _ = memory(capsys, "status", "--json")
+    assert json.loads(out)["backlog"] == {"claude": 0, "codex": 0, "opencode": 0}
+    code, out, _ = memory(capsys, "status")
+    assert "root not listable" not in out
+
+
 def test_status_with_no_index_exits_1_and_says_what_to_run(capsys):
     code, out, _ = memory(capsys, "status")
     assert code == 1 and out.startswith("index: none")

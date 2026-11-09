@@ -42,9 +42,9 @@ from .settings import HARNESSES
 
 #: The command to watch an ingest or a rebuild by.
 WATCH = "moxi memory status"
-#: The command that reads a session; sessions' own, which takes Claude Code by default.
+#: The command that reads a session: sessions' own.
 READ = "moxi sessions read"
-#: The harness `moxi sessions read` reads when it is given none.
+#: The harness whose hits get a read line with no `--harness`.
 READ_DEFAULT_HARNESS = "claude"
 
 _RELATIVE = re.compile(r"(\d+(?:\.\d+)?)\s*([smhdw])")
@@ -69,8 +69,9 @@ def parse_since(text: str, *, now: float | None = None) -> float:
 
 
 def read_line(hit) -> str:
-    """The command that opens `hit`'s session around its time. It names the harness
-    whenever the hit isn't Claude Code's, which `moxi sessions read` reads by default."""
+    """The command that opens `hit`'s session around its time. For a hit that isn't
+    Claude Code's it names `--harness`, so the read needn't look the session up in
+    every harness."""
     parts = [READ, hit.session_id]
     if hit.harness != READ_DEFAULT_HARNESS:
         parts += ["--harness", hit.harness]

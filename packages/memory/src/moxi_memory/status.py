@@ -14,6 +14,7 @@ thread) may be counted until that walk has run.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -41,8 +42,9 @@ class Status:
       rollouts whose thread has no rows, which sessions can't read.
     - `last_ingest`: the time a source was last read; `last_walk`: each harness's last
       catch-up walk.
-    - `backlog`: sources changed since the last walk, by harness (None for a harness
-      whose root couldn't be listed, or when no config could be read).
+    - `backlog`: sources changed since the last walk, by harness (0 for a harness with
+      no root on this machine, None for one whose root couldn't be listed; None as a
+      whole when no config could be read).
     - `first_read`: whether the first full read has finished; `filling`: how far it is
       while it hasn't.
     - `rebuilding`: the start time of a running rebuild (0.0 before it wrote its time),
@@ -138,8 +140,9 @@ def _sessions_of(conn, schema: str) -> dict[str, object]:
 def backlog(conn, env: Mapping[str, str] | None = None) -> dict[str, int | None] | None:
     """Sources changed since the last walk, per harness in config `harnesses`: listed
     through sessions with `modified_since` the last walk, less those whose reuse keys
-    the index already holds. None for a harness whose root couldn't be listed; None as a
-    whole when memory's config can't be read."""
+    the index already holds. 0 for a harness with no root on this machine; None for one
+    whose root is there but couldn't be listed; None as a whole when memory's config
+    can't be read."""
     from moxi.config import ConfigError
 
     from . import ingest, settings
@@ -158,7 +161,9 @@ def backlog(conn, env: Mapping[str, str] | None = None) -> dict[str, int | None]
         except Exception:  # noqa: BLE001 - a root that can't be listed is counted unknown
             listing = None
         if listing is None or not listing.ok:
-            out[harness] = None
+            # no root at all: nothing to read, as a walk counts it; else not known
+            absent = listing is not None and not os.path.lexists(listing.root)
+            out[harness] = 0 if absent else None
             continue
         stored = dict(conn.execute("SELECT source, reuse FROM sources WHERE harness = ?",
                                    (harness,)))

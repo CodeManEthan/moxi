@@ -87,6 +87,33 @@ def test_after_an_ingest_the_index_and_ingest_rows_say_what_is_there():
     assert sessions.detail.startswith("1 session, 0 with an identity, 1 settled")
 
 
+def test_the_ingest_row_counts_what_status_counts_as_backlog():
+    write_config("memory", 'harnesses = ["claude"]\n')
+    t = T.ClaudeTranscript(api.root("claude"), session_id="0190b000-0000-7000-8000-00000000c1a0")
+    t.user("how do the widgets render")
+    t.write()
+    ingest.run("walk", None, None, launcher=links.Link(links.NONE), then=lambda: None)
+    sub = t.subagent("a0190b0000000001")        # subagents are off: no backlog
+    sub.user("subagent work item")
+    sub.write()
+    from moxi_memory import status
+
+    assert status.status().backlog == {"claude": 0}
+    assert "claude: last walk " in by_name()["ingest"].detail
+    assert "0 sources changed since" in by_name()["ingest"].detail
+
+
+def test_a_harness_with_no_root_is_not_a_walk_missing():
+    ingest_one()                      # the Codex and OpenCode roots are not there
+    row = by_name()["ingest"]
+    assert row.state == "ok", row.detail
+    assert "codex: nothing to read, no root at " in row.detail
+    assert "opencode: nothing to read, no root at " in row.detail
+    os.makedirs(api.root("codex"), exist_ok=True)
+    row = by_name()["ingest"]
+    assert row.state == "warn" and "codex: no walk yet" in row.detail
+
+
 def test_the_sessions_row_counts_identities_and_kinds():
     conn = state.connect()
     table.write_start(conn, "claude", "a", "shop")

@@ -3,8 +3,9 @@
 - index: the current generation, its schema and tokenizer, rows per tier, whether the
   first full read is still filling it, a rebuild running, older generations left to
   remove and the sessions the last rebuild dropped. `warn` with no index yet.
-- ingest: each harness's last catch-up walk, the sources changed since it (behind), and
-  the compressed Codex rollouts memory can't read. A failed child's message is the
+- ingest: each harness's last catch-up walk, the sources changed since it (behind, the
+  same count as `moxi memory status`'s backlog), and the compressed Codex rollouts
+  memory can't read. A failed child's message is the
   core's record row `record ingest`, not this one.
 - sets: memory's redaction sets load in secrets. `fail` when one can't run: every child
   stops on it.
@@ -104,9 +105,11 @@ def _index() -> Row:
 # -- ingest -----------------------------------------------------------------------------
 
 def _ingest(harnesses) -> Row:
+    import os
+
     from moxi_sessions import api
 
-    from . import index, ingest
+    from . import index, ingest, status
     from .clock import show
 
     try:
@@ -117,20 +120,24 @@ def _ingest(harnesses) -> Row:
     with reader as r:
         walks = {h: index.meta_get(r.conn, f"last_walk.{h}") for h in harnesses}
         compressed = ingest.not_read(r.conn)
+        # the count `moxi memory status` shows as its backlog
+        backlog = status.backlog(r.conn) or {}
     parts = []
     state = "ok"
     for harness, last in walks.items():
         if last is None:
+            root = api.root(harness)
+            if not os.path.lexists(root):
+                # a walk counts such a harness as read: it has nothing to read
+                parts.append(f"{harness}: nothing to read, no root at {root}")
+                continue
             parts.append(f"{harness}: no walk yet")
             state = "warn"
             continue
-        try:
-            listing = api.sources(harness, modified_since=float(last), heads=False)
-            behind = (f"{_plural(len(listing), 'source')} changed since"
-                      if listing.ok else f"root not listed ({listing.reason})")
-        except Exception as exc:  # noqa: BLE001 - a root that can't be listed is said
-            behind = f"root not listed ({exc})"
-        parts.append(f"{harness}: last walk {show(float(last))}, {behind}")
+        behind = backlog.get(harness)
+        said = (f"{_plural(behind, 'source')} changed since" if behind is not None
+                else "its root can't be listed")
+        parts.append(f"{harness}: last walk {show(float(last))}, {said}")
     if compressed:
         parts.append(f"{_plural(compressed, 'Codex session')} not read: Codex compressed "
                      "the rollout, which sessions can't read")
