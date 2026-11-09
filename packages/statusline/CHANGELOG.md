@@ -20,7 +20,13 @@ The first release.
 - Setup keeps Moxi's line on this environment's render, and with no line asks once
   whether to use it, recording the answer. Uninstall puts the old line back, or removes
   Moxi's.
+- Over a status line of your own, setup and `moxi statusline use` offer to run it once
+  with marked test input, in a throwaway folder and home, to see which pieces it shows;
+  then offer to switch to Moxi's line set up to show the same, or to keep yours and print
+  the commands that add Moxi's pieces to it, each with its measured cost.
 - `moxi statusline status [--json]`.
+- `moxi statusline pieces` prints those commands, cache's timer first, with each one's
+  measured time.
 - `moxi statusline preview` renders a sample input and prints the line and its time.
 - An install listener compiles the bytecode a render loads at every module's install.
 - Doctor rows: the command Claude Code's setting names resolves, bytecode for what a

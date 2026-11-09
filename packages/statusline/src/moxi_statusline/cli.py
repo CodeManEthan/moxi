@@ -3,17 +3,25 @@
     moxi statusline use
     moxi statusline restore [--force]
     moxi statusline status [--json]
+    moxi statusline pieces
     moxi statusline preview [--show a,b,c] [--no-color]
 
 `use` sets Claude Code's status line to Moxi's. Over Moxi's line it points it at this
 environment's render; with no line it asks first, and with nobody at the keyboard the
-command is the yes. The line it replaces is kept for `restore`.
+command is the yes. Over a line of your own it asks to run that line once with test input,
+says what it shows, and offers to switch to Moxi's line set up to show the same, or to
+keep yours and print the commands for Moxi's pieces; with nobody at the keyboard it prints
+both and changes nothing. The line it replaces is kept for `restore`.
 
 `restore` puts back the line `use` replaced, only while Claude Code's line is still
 Moxi's: a line set since is the user's, and `--force` is the one way over it.
 
 `status` says whether Claude Code's line is Moxi's, its command, the line kept to put
 back, the items shown and which show nothing, and a project's own line in this folder.
+
+`pieces` prints the commands that add Moxi's pieces to a status line of your own, one per
+installed module with a segment, cache's timer first, and what each took, measured just
+now as Claude Code would run it.
 
 `preview` renders the sample input with the real command, as Claude would run it, and
 prints the line and the time the render took. `--show` renders these items in place of
@@ -106,6 +114,21 @@ def _status(args: argparse.Namespace) -> int:
     return 0
 
 
+# -- pieces ----------------------------------------------------------------------------
+
+def _pieces(args: argparse.Namespace) -> int:
+    from . import pieces
+
+    try:
+        found = pieces.pieces()
+    except FileNotFoundError as exc:
+        print(f"moxi statusline: {exc}", file=sys.stderr)
+        return 1
+    for line in pieces.lines(found, pieces.measured(found) if found else None):
+        print(line)
+    return 0
+
+
 # -- preview ---------------------------------------------------------------------------
 
 def _preview_arguments(parser: argparse.ArgumentParser) -> None:
@@ -151,6 +174,11 @@ VERBS: list[Verb] = [
          "back, the items shown and which show nothing, modules named like a base field, "
          "and a project's own status line in this folder. Writes nothing.",
          _status_arguments, _status),
+    Verb("pieces", "print the commands that add Moxi's pieces to your own status line",
+         "Print one command per installed module with a segment, cache's timer first, to "
+         "call from your own status line script, and what each took, measured just now "
+         "through sh -c with the sample input. Writes nothing.",
+         _no_arguments, _pieces),
     Verb("preview", "render the sample input and print the line and its time",
          "Render the sample input with the real command, as Claude runs it, and print "
          "the line and how long the render took. Writes nothing.",

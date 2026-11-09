@@ -120,7 +120,7 @@ def test_keep_recorded_then_a_second_install_neither_asks_nor_offers(monkeypatch
     assert settings_file().read_bytes() == raw
 
 
-def test_another_command_goes_to_the_offer_which_keeps_it_for_now(monkeypatch):
+def test_another_command_goes_to_the_offer(monkeypatch):
     raw = write_settings({"statusLine": OWN})
     calls = []
     real = setup.offer
@@ -133,8 +133,9 @@ def test_another_command_goes_to_the_offer_which_keeps_it_for_now(monkeypatch):
     term = Terminal()
     assert setup.setup(ask=term.ask, say=term.say) == 0
     assert calls == [(settings_file(), OWN)]
-    assert term.said == ["Claude Code's status line is your own (/home/u/.claude/line.sh); "
-                         "it is left as it is. moxi statusline use switches to Moxi's."]
+    assert term.asked == [setup.DETECT_QUESTION]
+    assert term.said == ["Claude Code's status line is your own (/home/u/.claude/line.sh).",
+                         "", f"{switch.LEFT}."]
     assert settings_file().read_bytes() == raw
     assert setup.recorded() is None
 
@@ -149,7 +150,7 @@ def test_nobody_at_the_keyboard_records_nothing_and_says_how(nobody):
     write_settings({"statusLine": OWN})
     said.clear()
     assert setup.setup(say=said.append) == 0
-    assert "moxi statusline use switches" in said[0]
+    assert "is left as it is" in said[0] and "moxi statusline use" in said[1]
     assert setup.recorded() is None
 
 
@@ -226,7 +227,8 @@ def test_use_over_moxis_line_points_it_here():
 def test_use_over_another_command_calls_the_offer():
     raw = write_settings({"statusLine": OWN})
     term = Terminal()
-    assert setup.use(ask=never, say=term.say) == 0
+    assert setup.use(ask=term.ask, say=term.say) == 0
+    assert term.asked == [setup.DETECT_QUESTION]
     assert "is your own" in term.said[0]
     assert settings_file().read_bytes() == raw
 

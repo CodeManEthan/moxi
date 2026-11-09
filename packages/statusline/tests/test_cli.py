@@ -35,7 +35,7 @@ def test_preview_refuses_a_show_the_config_would_refuse(show, capsys):
 
 
 def test_each_verb_has_a_parser_and_a_runner():
-    assert [v.name for v in VERBS] == ["use", "restore", "status", "preview"]
+    assert [v.name for v in VERBS] == ["use", "restore", "status", "pieces", "preview"]
     with pytest.raises(SystemExit) as caught:
         main([])
     assert caught.value.code == 2

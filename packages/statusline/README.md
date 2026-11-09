@@ -39,12 +39,33 @@ After the install, statusline looks at the `statusLine` setting in Claude Code's
   nothing.
 - No status line: it asks "Use Moxi's status line in Claude Code? [Y/n]". Yes sets Moxi's
   line with the default items.
-- Your own line: it is left as it is; `moxi statusline use` switches.
+- Your own line: it offers to run that line once with test input, to see what it shows
+  (your script may store what it is given, so it asks first). Then it says what it
+  found and offers two things:
+  1. Switch to Moxi's line, set up to show the same pieces in the same order and rows,
+     plus the installed modules' segments yours lacked at the end of the first row.
+     Pieces Moxi has that yours didn't show stay off. When your line shows Claude's 5h
+     and 7d limits and usage isn't installed, it says `moxi install usage`. Your line is
+     kept for `restore`.
+  2. Keep your line. Nothing is written; it prints one command per piece of Moxi's line
+     (cache's timer first) to call from your script, with what each costs, measured just
+     then. `moxi statusline pieces` prints the same list later.
 
 It asks once and records the answer, so a later install asks nothing; `moxi statusline
-use` asks again. With nobody at the keyboard it asks nothing, records nothing and says
-how to switch. An install never edits your own command: it replaces the setting whole or
-leaves it alone.
+use` asks again. With nobody at the keyboard it asks nothing, runs nothing and records
+nothing: with no line it says how to switch, and over your own line it prints both
+offers' commands. An install never edits your own command: it replaces the setting whole
+or leaves it alone.
+
+The test run is your command as Claude Code runs it, `sh -c`, with made-up input on
+stdin: each piece of it (the folder, branch, model, effort, context, limits, session,
+transcript, lines, cost) carries a marker no other piece or the clock can print, so the
+output shows which pieces your line prints, and where. It runs in a fresh folder under the
+system temp folder, with that folder's empty `home` as `HOME` and no `XDG_*_HOME`,
+`MOXI_*` or `CLAUDE_CONFIG_DIR` set, so what the script writes under its home lands there
+and is removed after; a `~` or `$HOME` in the command itself is still your own home. It
+gets 5 seconds, then it and every process it started in its group are killed. Writes to
+absolute paths, and processes that leave the group, are not caught.
 
 Moxi's line is a `statusLine` whose command is the absolute path of a
 `moxi-statusline-render`. A script of your own that calls it stays yours.
@@ -102,13 +123,26 @@ Every key is read at each render; `moxi config statusline` shows them.
 
 - `moxi statusline use` sets Claude Code's status line to Moxi's, keeping the line it
   replaces. Over Moxi's line it points it at this environment's render. With no line it
-  asks first; with nobody at the keyboard the command is the yes.
+  asks first; with nobody at the keyboard the command is the yes. Over your own line it
+  makes the two offers above, whatever was answered before; with nobody at the keyboard
+  it prints both and changes nothing.
 - `moxi statusline restore [--force]` puts back the line `use` replaced, or removes the
   setting when there was none. When Claude Code's line is no longer Moxi's (you set
   another since), it refuses with one line; `--force` puts the saved line back over it.
 - `moxi statusline status [--json]` says whether Claude Code's line is Moxi's, its
   command, the line kept to put back, the items shown and which show nothing, modules
   named like a base field, and a project's own status line in the current folder.
+- `moxi statusline pieces` prints the commands that add Moxi's pieces to a status line
+  of your own, one per installed module with a segment, cache's timer first:
+
+  ```sh
+  printf '%s' "$input" | /path/to/bin/moxi-statusline-render --only cache
+  ```
+
+  where `$input` holds the JSON Claude Code gave your script on stdin. Each piece starts
+  Python once per render of your line; the verb runs each command through `sh -c` with
+  a sample input, once to warm up and 5 times more, and prints each median. cache's
+  figure is for a session with no clock record.
 - `moxi statusline preview [--show a,b,c] [--no-color]` renders a sample input with the
   real command and prints the line and how long the render took. `--show` renders these
   items in place of `show`.
