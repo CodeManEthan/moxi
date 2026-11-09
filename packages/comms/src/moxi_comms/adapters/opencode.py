@@ -1575,7 +1575,7 @@ def build_parser():
     import argparse
 
     ap = argparse.ArgumentParser(
-        prog="moxi-comms-opencode",
+        prog="moxi-comms-opencode", allow_abbrev=False,
         description="an OpenCode session with comms mail, in this terminal: one wrapper "
                     "per identity; closing the window takes the identity offline")
     ap.add_argument("identity", help="qualified roster identity, e.g. coder@proj-a")

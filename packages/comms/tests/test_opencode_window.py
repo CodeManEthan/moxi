@@ -206,3 +206,11 @@ def test_dry_run_prints_the_plan_and_spawns_nothing(oc_rig):
     assert "attach <url> -s <session>" in out
     assert w.events() == []
     assert json.dumps(out)
+
+
+@pytest.mark.parametrize("old", ["--ready-wait", "--notice-hold"])
+def test_the_launch_refuses_the_old_wait_flags(old, capsys):
+    with pytest.raises(SystemExit) as exc:
+        oc.build_parser().parse_args(["coder@proj-a", old, "3"])
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {old}" in capsys.readouterr().err

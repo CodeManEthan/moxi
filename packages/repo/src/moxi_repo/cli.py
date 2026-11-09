@@ -101,7 +101,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     rf.add_argument("path", nargs="?", metavar="PATH")
 
     cm = verbs.add_parser(
-        "commit", help="run a repo's saved committer specs",
+        "commit", allow_abbrev=False, help="run a repo's saved committer specs",
         description="Run one pass of the spec saved as NAME in the repo at PATH, or of every "
                     "spec saved there, and print each pass's line.", epilog=note)
     cm.add_argument("path", metavar="PATH")

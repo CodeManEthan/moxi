@@ -170,7 +170,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs.required = True
 
     def verb(name: str, help: str, *, reads: bool = False) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")
+        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".",
+                             allow_abbrev=False)
         if reads:
             p.add_argument("--json", action="store_true", help="print JSON")
         return p

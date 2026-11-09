@@ -8,6 +8,8 @@ import shlex
 import sys
 import time
 
+import pytest
+
 from fake_harness import FakeHarness
 from moxi_turns import codex_hooks, listeners
 from moxi_turns.client import Session
@@ -164,6 +166,14 @@ def test_hook_commands_carry_the_endpoints_event_budget():
         ["ping"], "/run/hooks.sock", codex_hooks.EVENTS[0], 5,
     )) == ["ping", "--socket", "/run/hooks.sock", "--wait-s", "5",
            "SessionStart"]
+
+
+def test_the_ping_refuses_the_old_wait_flags(capsys):
+    for old in ("--wait-seconds", "--wait"):
+        with pytest.raises(SystemExit) as exc:
+            codex_hooks.main(["--socket", "/run/hooks.sock", "Stop", old, "5"])
+        assert exc.value.code == 2
+        assert f"unrecognized arguments: {old}" in capsys.readouterr().err
 
 
 def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_env):

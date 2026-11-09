@@ -655,6 +655,13 @@ def test_a_saved_spec_with_a_renamed_key_is_refused_naming_the_new_one(demo, old
     assert committer.saved_spec(repo, "demo/snap") == spec(repo)
 
 
+def test_moxi_repo_commit_refuses_the_old_wait_flag(tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["commit", str(tmp_path), "--wait", "0.1"])
+    assert exc.value.code == 2
+    assert "unrecognized arguments: --wait" in capsys.readouterr().err
+
+
 def test_moxi_repo_commit_runs_saved_specs_and_gives_exit_codes(demo, capsys):
     repo = demo.repo()
     moxi_repo.save_spec(spec(repo))

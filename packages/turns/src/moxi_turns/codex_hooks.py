@@ -617,7 +617,7 @@ def _deny(event: str, reason: str) -> str:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="moxi-turns-ping")
+    parser = argparse.ArgumentParser(prog="moxi-turns-ping", allow_abbrev=False)
     parser.add_argument("event", choices=PING_EVENTS)
     parser.add_argument("--socket", required=True)
     parser.add_argument("--source")

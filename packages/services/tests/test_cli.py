@@ -375,6 +375,11 @@ def test_watch_prints_a_line_when_a_verdict_changes(fake, no_modules, capsys, mo
     assert lines[1].endswith("(fix: moxi services start web)")
 
 
+def test_watch_refuses_the_old_every_flag(capsys):
+    code, _, err = run(capsys, "watch", "--every", "1", "web")
+    assert code == 2 and "unrecognized arguments: --every" in err
+
+
 def test_watch_json_and_a_row_that_goes(fake, no_modules, capsys, monkeypatch):
     add(**written("web"))
     fake.written["web"] = Unit("daemon", False)
