@@ -164,6 +164,12 @@ when the launcher gave it to a launch of its seat or showed it to one, so a sess
 by hand never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
 `moxi install launcher` offers to place for Claude Code and Codex.
 
+`moxi launcher handoffs` lists this session's handoffs, in its own folder. With `--key KEY`
+it lists KEY's handoffs in the folder of KEY's newest launch (that launch's directory and
+`notes_dir`), so a seat that works in another project is read where it files; a key with
+no launch is read in this directory's folder. It says on stderr which folder it read, and
+`--json` gives the launch it took the folder from as `launch` (null when none).
+
 ## Acting on launched sessions
 
 The launcher can act on a session it launched: relaunch it, exit it, resume it, recycle it
@@ -331,7 +337,7 @@ starts when the page is first opened and stops once nothing has used it for a wh
 | `moxi launcher presets --project KEY [--json]` | a project's agents, each beside the seat whose identity is its name (needs projects) |
 | `moxi launcher catalog [HARNESS] [--json]` | the flag rows this install offers |
 | `moxi launcher handoff dir [--json]` | this session's handoff folder |
-| `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait |
+| `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait; a `--key` in the folder of its newest launch |
 | `moxi launcher deliver REQUEST_ID --pid PID` | internal: the detached process that sends a launch's first turn |
 | `moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]` | arm a relaunch of this session, with its handoff |
 | `moxi launcher relaunch SESSION_ID \| IDENTITY [--dry-run] [--json]` | relaunch a session you direct |

@@ -27,8 +27,9 @@ nothing. `log` lists launches, newest first, or with `--table` the runs, the exi
 holds. `presets` lists, shows or checks the seats and project presets, and with `--project
 KEY` lists a project's agents beside the seat of each. `catalog` lists the flag rows this
 install offers. `handoff dir` prints the handoff folder for this session; `handoffs` lists
-a key's handoffs and which still wait for their seat. `deliver` is internal: the detached
-process that sends a terminal launch's first turn.
+a key's handoffs and which still wait for their seat, a `--key` in the folder of that key's
+newest launch. `deliver` is internal: the detached process that sends a terminal launch's
+first turn.
 
 The acts on a launched session: `relaunch` arms a relaunch of this session (`--self`), or
 relaunches another as one of its directors, shows a run (`--status`), or launches again
@@ -475,17 +476,28 @@ def _handoffs(args: argparse.Namespace, prog: str) -> int:
             print(f"{prog} handoffs: {args.key!r} can't be a handoff key; a key is "
                   "letters, digits, '.', '_' and '-'", file=sys.stderr)
             return codes.USAGE
-        folder = handoffs.folder(Path.cwd(), create=False)
+        read = handoffs.folder_of_key(key)
+        folder, launch = read.folder, read.launch
     else:
         here = handoffs.current(create=False)
-        key, folder = here.key, here.folder
+        key, folder, launch = here.key, here.folder, None
     found = handoffs.handoffs(folder, key)
     waiting = {h.path for h in handoffs.unpicked(folder, key, _picked(key))}
     if args.json:
-        print(_dump({"key": key, "folder": str(folder),
-                     "handoffs": [{"path": str(h.path), "date": h.date,
-                                   "waiting": h.path in waiting} for h in found]}))
+        shown = {"key": key, "folder": str(folder)}
+        if args.key is not None:
+            shown["launch"] = launch.request_id if launch is not None else None
+        shown["handoffs"] = [{"path": str(h.path), "date": h.date,
+                              "waiting": h.path in waiting} for h in found]
+        print(_dump(shown))
         return codes.OK
+    if args.key is not None:
+        if launch is not None:
+            print(f"reading {folder}, the handoff folder of {key}'s newest launch "
+                  f"({launch.cwd})", file=sys.stderr)
+        else:
+            print(f"reading {folder}: {key} has no launch, so this directory's folder",
+                  file=sys.stderr)
     if not found:
         print(f"no handoffs of {key} in {folder}", file=sys.stderr)
         return codes.OK
@@ -713,7 +725,8 @@ def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
                                 description="List a key's handoffs, newest first, and "
                                             "which still wait for their seat. The key is "
                                             "this session's unless --key names one.")
-    handoffs.add_argument("--key", metavar="KEY", help="list this key's handoffs")
+    handoffs.add_argument("--key", metavar="KEY",
+                          help="list this key's handoffs, in the folder of its newest launch")
     handoffs.add_argument("--json", action="store_true", help="print JSON")
 
     deliver = verbs.add_parser("deliver", help="internal: send a launch's first turn",
