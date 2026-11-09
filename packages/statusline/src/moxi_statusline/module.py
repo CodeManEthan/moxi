@@ -20,6 +20,13 @@ TEARDOWN = "moxi_statusline.setup:teardown"
 SEGMENT = None
 #: Its doctor rows: what `moxi doctor` adds for statusline.
 DOCTOR = "moxi_statusline.doctor:rows"
+#: statusline's page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_statusline.page:PAGE"
+#: What statusline offers the browser UI shell: its page.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Status line", "contract": 1, "place": "page",
+             "doc": "Pick, order and preview Claude Code's status line"},
+}
 #: The old `statusLine` value kept at a switch, the answer setup records, and the old bytes
 #: of Claude's `settings.json` before each write. None of them can be rebuilt.
 STORES = {

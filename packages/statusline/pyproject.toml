@@ -41,7 +41,9 @@ statusline = "moxi_statusline.module"
 statusline = "moxi_statusline.compile"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs the page in a real shell; its testing extra brings the
+# browser. The browser test imports Playwright itself, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -54,7 +56,7 @@ packages = ["src/moxi_statusline"]
 # A source distribution built from any branch holds these public paths, and the
 # pyproject.toml and .gitignore hatchling adds itself.
 only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi_statusline",
-                "tests"]
+                "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 [tool.pytest.ini_options]
