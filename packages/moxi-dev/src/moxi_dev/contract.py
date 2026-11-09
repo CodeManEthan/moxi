@@ -33,7 +33,8 @@ finding names them:
 7. The names: the `moxi.modules` entry point, the distribution and import names (no
    module may take a core verb or a name the core keeps for itself), the console
    scripts (a module never declares `moxi`, which the core alone declares; its others
-   are named `moxi-<name>-<part>`), the announcement, the `CLI` target's `argv` and
+   are named `moxi-<name>-<part>`, and each daemon or timer uses
+   `moxi-<name>-<announcement-key>`), the announcement, the `CLI` target's `argv` and
    `prog` parameters, the `SETTINGS` schema and the skills in the `SKILLS` folder. Each
    name of `moxi.modules.KNOWN` the announcement defines is read as a literal and held to
    the checks `moxi.modules.load` runs; a name it leaves out passes, as it takes its
@@ -1161,6 +1162,24 @@ class _Repo:
         source = self.announcement_source
         if source is None:
             return
+        if name:
+            for table in ("DAEMONS", "TIMERS"):
+                value = self.ann(table, {})
+                if not isinstance(value, Mapping):
+                    continue
+                for key, item in value.items():
+                    if not isinstance(key, str) or not isinstance(item, Mapping):
+                        continue
+                    command = item.get("command")
+                    if not isinstance(command, str):
+                        continue
+                    script = command.split()[0]
+                    expected = f"moxi-{name}-{key}"
+                    if script != expected or expected not in self.scripts:
+                        self.add(source.path, 0, "7",
+                                 f"the {table[:-1].lower()} {key!r} uses console script "
+                                 f"{script!r}; its script is {expected!r}, from the "
+                                 "announcement key")
         for problem in self.announcement_problems:
             self.add(source.path, 0, "7", f"the announcement {problem}")
         self._check_announcement_values(source)

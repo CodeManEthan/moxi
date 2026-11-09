@@ -42,6 +42,8 @@ moxi install comms
 
 ## Working on Moxi
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the comment and naming rules.
+
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). From a clone:
 
 ```sh

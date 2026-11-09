@@ -460,6 +460,27 @@ def test_console_scripts_are_named_moxi_module_part(repo):
     assert len(repo.findings("7")) == 3
 
 
+def test_daemon_and_timer_scripts_are_named_from_their_keys(repo):
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-serve": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
+    repo.src("module.py", announcement(
+        DAEMONS="{'shell': {'command': 'moxi-alpha-serve'}}",
+        TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m', "
+               "'switch': 'sweep.enabled'}}"))
+    found = repo.findings("7")
+    assert len(found) == 1
+    assert "daemon 'shell' uses console script 'moxi-alpha-serve'" in found[0]
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-shell": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
+    repo.src("module.py", announcement(
+        DAEMONS="{'shell': {'command': 'moxi-alpha-shell'}}",
+        TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m', "
+               "'switch': 'sweep.enabled'}}"))
+    assert repo.findings("7") == []
+
+
 @pytest.mark.parametrize("target", ["moxi.cli:main", "moxi_alpha.module:main"])
 def test_a_module_never_declares_the_moxi_script(repo, target):
     """Only the core declares moxi, whatever a module's line points at."""
@@ -497,6 +518,9 @@ def test_an_announcement_may_leave_any_name_out(repo):
 
 
 def test_every_new_name_present_is_held_to_load_s_checks(repo):
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-relay": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
     repo.src("module.py", announcement(
         DAEMONS="{'relay': {'command': 'moxi-alpha-relay', 'restart': 'always'}}",
         TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m'}}",
@@ -514,6 +538,9 @@ def test_every_new_name_present_is_held_to_load_s_checks(repo):
 
 
 def test_every_new_name_that_keeps_the_contract_passes(repo):
+    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
+        "moxi-alpha-relay": "moxi_alpha.d:main",
+        "moxi-alpha-sweep": "moxi_alpha.t:main"}))
     repo.src("module.py", announcement(
         ANNOUNCES="1",
         DAEMONS="{'relay': {'command': 'moxi-alpha-relay', 'stop': 'process', "

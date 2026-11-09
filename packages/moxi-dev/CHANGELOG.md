@@ -4,6 +4,11 @@
 
 The first public release.
 
+- `moxi-dev check` now runs whole-tree comment-reference and public-name steps, reports
+  `refs` and `names` in its summary, and can run either step alone with `--only`.
+- Contract check 7 holds daemon and timer console scripts to their announcement keys.
+- `moxi-dev rename` applies the tab-separated identifier rename table, preserves
+  resolved imports and calls, and reports unresolved or moved old uses.
 - The README explains the tag check in plain words: what it refuses, what
   `.residue-allow` is, and what a finding, its `finding` mark and `--finding` are.
 - `moxi-dev new` writes a core requirement of `moxi>=0.1.6,<0.2`, the oldest core a
