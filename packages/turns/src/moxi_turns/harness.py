@@ -178,7 +178,7 @@ class Live:
         count = agents.busy()
         if count is None:
             return cls(None, draft)
-        return cls(count, draft, count - (agents.busy(shells=False) or 0))
+        return cls(count, draft, count - (agents.busy(include_shells=False) or 0))
 
     def busy(self, *, shells: bool = True) -> bool:
         """Whether a live subagent keeps the session busy; an unreadable list does. With

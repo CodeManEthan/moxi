@@ -54,7 +54,7 @@ def golden_v1(tmp_path_factory) -> tuple[Path, str]:
     where = tmp_path_factory.mktemp("golden-v1")
     base = os.path.join(str(where), "roots")
     db = where / "projects.db"
-    conn = moxi.store.connect(str(db), timeout=store.TIMEOUT)
+    conn = moxi.store.connect(str(db), timeout_s=store.TIMEOUT)
     try:
         moxi.store.migrate(conn, store.STEPS[:1])
         with moxi.store.transaction(conn):

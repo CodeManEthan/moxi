@@ -137,7 +137,7 @@ class DaemonClient:
         """Connect and agree a wire version. Raises `DaemonOffline` when nothing
         answers, and `VersionMismatch` when the daemon refuses this comms' version."""
         try:
-            client = ipc.connect(self.socket_path, timeout=self.timeout)
+            client = ipc.connect(self.socket_path, timeout_s=self.timeout)
         except (ipc.IpcError, OSError) as e:
             raise DaemonOffline(f"comms offline: {self.socket_path}: {e}") from e
         try:
@@ -200,7 +200,7 @@ class DaemonClient:
         first, self._asked = not self._asked, True
         try:
             result = self._client.call(method, dict(params or {}),
-                                       timeout=self.timeout if timeout is None else timeout)
+                                       timeout_s=self.timeout if timeout is None else timeout)
         except ipc.RpcError as e:
             if e.code == wire.BUSY and first and self._may_retry():
                 # The daemon had no room for this connection and closed it, having done

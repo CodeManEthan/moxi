@@ -363,12 +363,12 @@ def call(path, method: str, timeout: float = 15.0) -> dict:
     adapter there doesn't speak this comms' wire (a comms 0.2 adapter, or another wire
     version)."""
     try:
-        client = ipc.connect(str(path), timeout=timeout)
+        client = ipc.connect(str(path), timeout_s=timeout)
     except (ipc.IpcError, OSError) as e:
         raise ClaimUnreachable(f"no claim socket answers at {path}: {e}") from None
     try:
         client.hello(wire.VERSIONS)
-        answer = client.call(method, {}, timeout=timeout)
+        answer = client.call(method, {}, timeout_s=timeout)
     except ipc.NotRpc:
         raise AdapterMismatch(OLD_ADAPTER) from None
     except ipc.RpcError as e:

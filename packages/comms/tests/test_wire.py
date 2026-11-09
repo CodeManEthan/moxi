@@ -199,7 +199,7 @@ def test_the_hello_agrees_the_version_and_answers_the_daemons_own_capabilities(r
 
 
 def test_the_ipc_client_holds_the_daemons_capabilities(rig):
-    with ipc.connect(str(daemon_socket()), timeout=5.0) as client:
+    with ipc.connect(str(daemon_socket()), timeout_s=5.0) as client:
         agreed = client.hello(wire.VERSIONS, ["x-not-comms"])
     assert agreed.version == 1 and set(agreed.capabilities) == set(wire.CAPABILITIES)
 

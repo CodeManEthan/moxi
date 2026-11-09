@@ -396,7 +396,7 @@ def test_a_replayed_terminal_launch_carries_the_start_mark(work, harness, no_exe
                                                            monkeypatch):
     from moxi import terminal
 
-    mark = terminal.MARK
+    mark = terminal.STARTED_BY_ENV
     api.launch(request(work))
     assert mark not in row("r1").base_env
     # The replaying shell's own mark is not carried over; the target adds its own.

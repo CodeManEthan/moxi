@@ -1784,8 +1784,8 @@ class Daemon:
         # The daemon's own read of the bound session's cache, by the function the gate
         # delivers by: the verb's hold and `moxi comms cache` read these.
         clock = self._read(b)
-        answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,
-                      cache_reason=clock.reason, cache_ttl=clock.ttl_seconds,
+        answer.update(cache_kind=clock.kind, age_seconds=clock.age_s,
+                      cache_reason=clock.reason, cache_ttl=clock.ttl_s,
                       cache_key=clock.key, cache_code=clock.code)
         return answer
 
@@ -3046,7 +3046,7 @@ class Daemon:
         lifetime, `cold (<reason>; last request 3m ago)` for one without a lifetime, and
         `unreadable (<reason>)`."""
         if clock is not None and clock.kind == cache.COLD:
-            age, ttl = clock.age_seconds, getattr(clock, "ttl_seconds", None)
+            age, ttl = clock.age_s, getattr(clock, "ttl_seconds", None)
             if age is not None and ttl is not None:
                 return f"cold for {cache.span(age - ttl)} (last request {cache.span(age)} ago)"
             reason = clock.reason or "no cache lifetime to count it by"

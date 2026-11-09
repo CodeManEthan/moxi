@@ -99,4 +99,4 @@ def test_the_skill_name_cap_is_64_characters():
                                            (".x", False), (".git", False),
                                            ("__pycache__", False), ("_private", True)])
 def test_a_skill_folder_is_any_but_dot_named_and_pycache(name, counted):
-    assert names.is_skill_folder(name) is counted
+    assert names.is_skill_dir(name) is counted

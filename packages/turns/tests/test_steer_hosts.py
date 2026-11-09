@@ -51,7 +51,7 @@ def connect():
     clients = []
 
     def make(ep):
-        client = ipc.connect(ep.address, timeout=5)
+        client = ipc.connect(ep.address, timeout_s=5)
         clients.append(client)
         client.hello((2, 2))
         return client
@@ -128,11 +128,11 @@ def test_a_stuck_submit_line_never_wedges_the_expiry_sweep(claude):
 def test_append_done_starts_the_steer_and_its_turn_names_it(claude, connect):
     ep, runner, harness = claude()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     runner.turn_start("T1")                          # the person's turn
     client = connect(ep)
     answer, took = timed(lambda: client.call("steer", {"text": "also", "ref": "s1"},
-                                             timeout=5))
+                                             timeout_s=5))
     assert took < 0.5 and "result" not in answer
     steer = answer["delivery"]
     assert runner.next_line() == {"op": leg.LINE_APPEND, "delivery": steer,
@@ -296,15 +296,15 @@ def codex(turns_env):
 def test_a_late_turn_steer_answers_at_once_and_starts_at_codexs_word(codex, connect):
     ep, harness, app = codex()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     app.steer_delay = 1.0
     client = connect(ep)
     answer, took = timed(lambda: client.call("steer", {"text": "also", "ref": "s1"},
-                                             timeout=5))
+                                             timeout_s=5))
     assert took < 0.5 and "result" not in answer
     steer = answer["delivery"]
     assert until(lambda: app.steer_log)              # turn/steer is out
-    facts, took = timed(lambda: R.from_wire(client.call("facts", {}, timeout=5)))
+    facts, took = timed(lambda: R.from_wire(client.call("facts", {}, timeout_s=5)))
     assert took < 0.5 and facts.turn_open
     assert ep.wait(steer, "started", 0) is None
     assert ep.wait(steer, "started", 5) == R.Started("turn-1", steer, "s1")
@@ -321,10 +321,10 @@ def test_no_active_turn_answered_late_reads_idle_through_wait(codex, connect):
     ep, harness, app = codex()
     app.steer_delay, app.steer_no_turn = 1.0, True
     client = connect(ep)
-    answer, took = timed(lambda: client.call("steer", {"text": "too late"}, timeout=5))
+    answer, took = timed(lambda: client.call("steer", {"text": "too late"}, timeout_s=5))
     assert took < 0.5 and "result" not in answer
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
+                               "timeout_ms": 5000}, timeout_s=10)
     assert R.from_wire(got["result"]) == R.Refused("idle", answer["delivery"])
     assert until(lambda: not ep.reading().turn_open)  # the held end goes out after
     assert app.texts("turn/start") == ["first"]      # never a turn of its own
@@ -342,7 +342,7 @@ def test_two_steers_reach_turn_steer_in_order_one_at_a_time(codex):
 def test_a_turn_completed_after_the_record_is_held_for_the_steer(codex, connect):
     ep, harness, app = codex()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     reached, go = threading.Event(), threading.Event()
     append = harness.append
 

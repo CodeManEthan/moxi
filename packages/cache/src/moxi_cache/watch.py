@@ -197,7 +197,7 @@ def make_record(session: str, seen: Seen, now: float, *, warn_before: float,
     clock = seen.clock
     return {"v": records.VERSION, "session": session, "harness": "claude", "pid": seen.pid,
             "kind": clock.kind, "last_request": seen.last_request,
-            "ttl": clock.ttl_seconds, "read_at": seen.read_at, "seen_at": now,
+            "ttl": clock.ttl_s, "read_at": seen.read_at, "seen_at": now,
             "code": clock.code, "warn_before": warn_before, "stale_after": stale_after}
 
 
@@ -368,8 +368,8 @@ class Watcher:
         if seen.clock is None or stat != seen.stat or seen.clock.kind == UNKNOWN:
             clock = self.read("claude", live.session, now=now)
             seen.clock, seen.stat, seen.read_at = clock, stat, now
-            seen.last_request = (now - clock.age_seconds
-                                 if clock.age_seconds is not None else None)
+            seen.last_request = (now - clock.age_s
+                                 if clock.age_s is not None else None)
         return seen
 
 

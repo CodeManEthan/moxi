@@ -535,7 +535,7 @@ def _clock(record: Mapping) -> tuple[float, float] | None:
 class Timer:
     """The timer's state and its tick. The outside effects can be replaced for tests:
     `config_entries` (the user's tables now), `modules` (the modules' checked
-    subscriptions now: a callable, run at each tick, or a fixed list), `process_env` (a
+    subscriptions now: a callable, run at each tick, or a fixed list), `environ` (a
     process's environment), `spawn` and `log_file`. `spawn` is called with the argv alone,
     and on Windows with the ask's output file as `output=` too."""
 

@@ -335,7 +335,7 @@ def test_a_launch_without_turns_has_the_brief_as_its_opening_prompt(
     else:
         typed["scratch"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=extra, cwd=str(work)),
-                        environ=live_env)
+                        env=live_env)
     assert result.state == "started", result.line
     assert first.on_argv(result.argv) and any(brief in word for word in result.argv)
     wait_for(lambda: run_log_holds(result.request_id, answer), timeout=ANSWER_S,
@@ -366,7 +366,7 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
     if harness == "codex":
         typed["trust_cwd"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=extra, cwd=str(work)),
-                        environ=live_env)
+                        env=live_env)
     row = launch_row(result.request_id)
     try:
         assert result.state == "started", result.line
@@ -392,7 +392,7 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
         # names it is refused as taken, naming this one.
         [taken] = api.check(api.LaunchRequest(
             typed={**flags(harness), "target": "slot", "slot": str(row.slot),
-                   "cwd": str(work)}, cwd=str(work)), environ=live_env)
+                   "cwd": str(work)}, cwd=str(work)), env=live_env)
         assert type(taken) is targets.SlotTaken, taken
         assert result.request_id in taken.problem
     finally:
@@ -410,13 +410,13 @@ def test_a_named_slot_with_no_registry_row_is_refused_as_missing(live_env, work,
                    env=live_env, capture_output=True, timeout=10, check=True)
     request = api.LaunchRequest(typed={"harness": "claude", "target": "slot",
                                        "slot": "7", "cwd": str(work)}, cwd=str(work))
-    [refused] = api.check(request, environ=live_env)
+    [refused] = api.check(request, env=live_env)
     assert type(refused) is targets.SlotMissing, refused
     assert "there is no slot 7 (a session of that name runs with no registry row)" in (
         refused.problem)
     assert "moxi slots create 7" in refused.hint
     with pytest.raises(targets.SlotMissing):
-        api.launch(request, environ=live_env)
+        api.launch(request, env=live_env)
     assert launch_row() is None
 
 
@@ -464,7 +464,7 @@ def test_a_headless_launch_with_turns_runs_its_brief(harness, live_env, work):
     typed = {**flags(harness), "target": "headless", "brief": brief}
     typed.update({"cwd": str(work)} if harness == "claude" else {"scratch": True})
     result = api.launch(api.LaunchRequest(typed=typed, extra=kept_out(harness),
-                                          cwd=str(work)), environ=live_env)
+                                          cwd=str(work)), env=live_env)
     assert result.state == "started", result.line
     # Headless, the brief is the harness's prompt even with turns: nothing is delivered.
     assert any(brief in word for word in result.argv)
@@ -489,7 +489,7 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
     if harness == "codex":
         typed["trust_cwd"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=kept_out(harness, host=True),
-                                          cwd=str(work)), environ=live_env)
+                                          cwd=str(work)), env=live_env)
     row = launch_row(result.request_id)
     try:
         assert result.outcome is not None and result.outcome.outcome == "sent", result.line
@@ -551,7 +551,7 @@ def test_claude_print_with_turns_records_its_id_and_shows_no_pointer(live_env, w
     result = api.launch(api.LaunchRequest(
         seat="liveprint", typed={"target": "headless", "brief": brief,
                                  "model": CLAUDE_MODEL}, extra=CLAUDE_OWN, cwd=str(work)),
-        environ=live_env)
+        env=live_env)
     assert result.state == "started", result.line
     wait_for(lambda: run_log_holds(result.request_id, answer), timeout=ANSWER_S,
              what=lambda: f"{answer} in {targets.run_log(result.request_id)}")
@@ -646,13 +646,13 @@ def test_a_slot_launch_whose_comms_daemon_is_down_fails_comms_offline(live_env, 
                                        "identity": "probe", "scope": "launcherlive",
                                        "cwd": str(work)},
                                 extra=CLAUDE_OWN, cwd=str(work))
-    [refused] = api.check(request, environ=live_env)
+    [refused] = api.check(request, env=live_env)
     assert type(refused) is api.CommsOffline and refused.exit_code == 75, refused
     with pytest.raises(api.CommsOffline):
-        api.launch(request, environ=live_env)
+        api.launch(request, env=live_env)
     assert launch_row() is None
     monkeypatch.setattr(api, "_identity_taken", lambda name, scope: None)
-    result = api.launch(request, environ=live_env)
+    result = api.launch(request, env=live_env)
     row = launch_row(result.request_id)
     try:
         assert (result.state, result.reason) == ("failed", targets.COMMS_OFFLINE), \

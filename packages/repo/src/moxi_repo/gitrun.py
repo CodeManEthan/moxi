@@ -237,8 +237,8 @@ def head_commit(root: str | os.PathLike, *, timeout: float = DEFAULT_TIMEOUT) ->
     return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
 
 
-def changes(root: str | os.PathLike, *, staged: bool = True, rev_range: tuple[str, str] | None = None,
-            paths=(), renames: bool = True,
+def changes(root: str | os.PathLike, *, staged: bool = True,
+            rev_range: tuple[str, str] | None = None, paths=(), renames: bool = True,
             timeout_s: float = DEFAULT_TIMEOUT) -> list[Change]:
     """What changed under `paths` (every path when none): what is staged against `HEAD`
     (the empty tree on an unborn branch), or with `range=(a, b)` between two commits.

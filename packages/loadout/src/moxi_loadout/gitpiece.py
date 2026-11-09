@@ -85,7 +85,7 @@ def run(ctx):
     # Windows, and git's pathspec matches case exactly even where the file system doesn't.
     rel = os.path.relpath(os.path.realpath(folder), os.path.realpath(ctx.root))
     paths = () if rel == os.curdir else (rel,)
-    if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):
+    if not link.changes(ctx.root, rev_range=span, paths=paths, timeout_s=GIT_SECONDS):
         return link.Outcome.ok()
     failure = _install()
     if failure is None:
@@ -116,7 +116,7 @@ def _holds(link, root: str, folder) -> bool:
         return False
     if not os.path.isdir(folder):
         return False
-    done = link.git(folder, "rev-parse", "--show-toplevel", timeout=GIT_SECONDS)
+    done = link.git(folder, "rev-parse", "--show-toplevel", timeout_s=GIT_SECONDS)
     top = done.stdout.strip()
     return done.returncode == 0 and bool(top) and _real(top) == real_root
 
@@ -132,8 +132,8 @@ def _span(link, root: str, event: str) -> tuple[str, str] | None:
     parent = _verify(link, root, "HEAD^")
     if parent is not None:
         return (parent, "HEAD")
-    done = link.git(root, "hash-object", "-t", "tree", "--stdin", input=b"",
-                    timeout=GIT_SECONDS)
+    done = link.git(root, "hash-object", "-t", "tree", "--stdin", stdin_data=b"",
+                    timeout_s=GIT_SECONDS)
     tree = done.stdout.strip()
     if done.returncode != 0 or not tree:
         raise RuntimeError(f"git can't give the empty tree: {done.stderr.strip()}")
@@ -142,7 +142,7 @@ def _span(link, root: str, event: str) -> tuple[str, str] | None:
 
 def _verify(link, root: str, rev: str) -> str | None:
     done = link.git(root, "rev-parse", "-q", "--verify", f"{rev}^{{commit}}",
-                    timeout=GIT_SECONDS)
+                    timeout_s=GIT_SECONDS)
     found = done.stdout.strip()
     return found if done.returncode == 0 and found else None
 
@@ -151,7 +151,7 @@ def _head(link, root: str) -> str | None:
     import subprocess
 
     try:
-        done = link.git(root, "rev-parse", "--short", "HEAD", timeout=GIT_SECONDS)
+        done = link.git(root, "rev-parse", "--short", "HEAD", timeout_s=GIT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if done.returncode != 0:

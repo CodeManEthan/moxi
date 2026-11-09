@@ -371,7 +371,7 @@ def _host(turns_env, app):
 def test_the_host_settles_at_its_load_and_offers_mcp_reload(turns_env):
     app = App(comms="connected")
     endpoint, harness, records, thread_ids = _host(turns_env, app)
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     try:
         assert {"mcp-token", "usage"} <= session.capabilities
         _wait_for(lambda: harness.mcp.settles == 1 and harness.mcp._running is None)

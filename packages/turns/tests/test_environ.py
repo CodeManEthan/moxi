@@ -57,7 +57,7 @@ def hosts(launch_env, tmp_path):
     runner.session("s-claude")
     ep.open()
     stops.append(lambda: (end_endpoint(ep), w.close()))
-    sessions = {"claude": Session(ep.address, ep.session(), directory=ep.dir)}
+    sessions = {"claude": Session(ep.address, ep.session(), endpoint_dir=ep.dir)}
 
     # Codex: the host is the launch's own process.
     made = []
@@ -72,7 +72,7 @@ def hosts(launch_env, tmp_path):
     cep = Endpoint(codex, env=codex.env).open()
     codex.start()
     stops.append(lambda: end_endpoint(cep))
-    sessions["codex"] = Session(cep.address, cep.session(), directory=cep.dir)
+    sessions["codex"] = Session(cep.address, cep.session(), endpoint_dir=cep.dir)
 
     # OpenCode: the same, on a fake server.
     world = World(tmp_path)
@@ -146,7 +146,7 @@ def test_a_session_without_the_capability_gets_the_capability_error(make_endpoin
     from fake_harness import FakeHarness
 
     ep, _ = make_endpoint(FakeHarness(can=("deliver",)))
-    s = Session(ep.address, ep.session(), directory=ep.dir)
+    s = Session(ep.address, ep.session(), endpoint_dir=ep.dir)
     try:
         assert "environ" not in s.capabilities
         with pytest.raises(TurnsError) as caught:
@@ -155,11 +155,11 @@ def test_a_session_without_the_capability_gets_the_capability_error(make_endpoin
         assert caught.value.data == {"capability": "environ"}
     finally:
         s.close()
-    client = ipc.connect(ipc.address("turns", ep.dir.name), timeout=5)
+    client = ipc.connect(ipc.address("turns", ep.dir.name), timeout_s=5)
     try:
         client.hello((2, 2))
         with pytest.raises(ipc.RpcError) as caught:
-            client.call("environ", {"names": ["HOME"]}, timeout=5)
+            client.call("environ", {"names": ["HOME"]}, timeout_s=5)
         assert caught.value.code == ERROR_CAPABILITY
     finally:
         client.close()

@@ -204,13 +204,13 @@ def _connect(address: str) -> tuple[ipc.Client, ipc.Agreed, dict[str, Any]]:
     """A new connection to `address`, past its `rpc.hello` and `session`: the client, what
     the hello agreed and the session answer. Raises `_NotWritten`."""
     try:
-        client = ipc.connect(address, timeout=CONNECT_S)
+        client = ipc.connect(address, timeout_s=CONNECT_S)
     except (ipc.IpcError, OSError) as exc:
         raise _NotWritten(TurnsError(f"the endpoint at {address} cannot be reached: "
                                      f"{exc}"), exc, True) from None
     try:
         agreed = client.hello(protocol.VERSIONS)
-        info = client.call("session", timeout=READ_S)
+        info = client.call("session", timeout_s=READ_S)
     except ipc.RpcError as exc:
         client.close()
         raise _NotWritten(_rpc_error(exc, address, "the hello"), exc, False) from None
@@ -275,7 +275,7 @@ def _call(client: ipc.Client, method: str, params: Any, timeout: float | None) -
     """`client.call`, with a failure after the request was handed to the connection
     raised as `_Unanswered`. An error the endpoint answered is raised as given."""
     try:
-        return client.call(method, params, timeout=timeout)
+        return client.call(method, params, timeout_s=timeout)
     except ipc.RpcError:
         raise
     except (ipc.IpcError, OSError) as exc:
@@ -874,7 +874,7 @@ class StopHandler:
             reason = None
         try:
             answer = self._client.call("stops.answer", {"ask": ask, "reason": reason},
-                                       timeout=READ_S)
+                                       timeout_s=READ_S)
         except ipc.RpcError as exc:
             log.warning("the endpoint refused the answer to Stop %s: %s", ask, exc)
             return

@@ -120,6 +120,17 @@ def _module(path: str) -> str | None:
     return ".".join(dotted) if dotted and all(p.isidentifier() for p in dotted) else None
 
 
+def _outside_module(path: str) -> str | None:
+    """A name for a file outside a package's `src` (its tests, conftest and scripts),
+    which no import reaches: the script reads its uses but none of its definitions is a
+    row's."""
+    parts = PurePosixPath(path).parts
+    if len(parts) < 3 or parts[0] != "packages" or not path.endswith(".py"):
+        return None
+    dotted = [re.sub(r"\W", "_", part) for part in (*parts[1:-1], parts[-1][:-3])]
+    return ".".join(["~outside", *dotted])
+
+
 def _scope_map(tree: ast.Module) -> tuple[dict[str, ast.AST], dict[int, ast.AST],
                                           dict[int, str]]:
     scopes: dict[str, ast.AST] = {"-": tree}
@@ -149,6 +160,11 @@ def _offsets(text: str) -> list[int]:
     if not out or text.endswith(("\n", "\r")):
         out.append(total)
     return out
+
+
+def _strings(node: ast.Tuple | ast.List) -> list[str]:
+    return [one.value for one in node.elts
+            if isinstance(one, ast.Constant) and isinstance(one.value, str)]
 
 
 def _relative(module: str, level: int, named: str | None, package: bool = False) -> str:
@@ -183,7 +199,7 @@ class Project:
                     except (OSError, UnicodeDecodeError):
                         pass
         for path, text in texts.items():
-            module = _module(path)
+            module = _module(path) or _outside_module(path)
             if module is None:
                 continue
             try:
@@ -198,6 +214,8 @@ class Project:
         self.modules = {source.module: source for source in self.sources.values()}
         for source in self.sources.values():
             self._index(source)
+        for source in self.sources.values():
+            self._lazy(source)
         self._settle_aliases()
         for source in self.sources.values():
             self._instances(source)
@@ -238,6 +256,77 @@ class Project:
                     else:
                         prefix = "sym:" if module in self.modules else "ext:"
                         bind(local, f"{prefix}{module}:{alias.name}")
+
+    def _tables(self, source: Source) -> dict[str, ast.expr]:
+        return {target.id: node.value for node in source.tree.body
+                if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+                for target in (node.targets if isinstance(node, ast.Assign)
+                               else [node.target]) if isinstance(target, ast.Name)}
+
+    def _table(self, source: Source, node: ast.expr, depth: int = 0) -> dict[str, str]:
+        """The string-to-string mapping a module-level expression spells: a dict literal,
+        `dict.fromkeys(names, value)`, a comprehension giving each name one value, and
+        `**` of another such table in this module or one it imports."""
+        out: dict[str, str] = {}
+        if depth > 5:
+            return out
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if key is None:
+                    out.update(self._table(source, value, depth + 1))
+                elif (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                      and isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                    out[key.value] = value.value
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and isinstance(node.func.value, ast.Name) and node.func.value.id == "dict"
+              and node.func.attr == "fromkeys" and len(node.args) == 2
+              and isinstance(node.args[0], (ast.Tuple, ast.List))
+              and isinstance(node.args[1], ast.Constant)
+              and isinstance(node.args[1].value, str)):
+            out.update(dict.fromkeys(_strings(node.args[0]), node.args[1].value))
+        elif (isinstance(node, ast.DictComp) and len(node.generators) == 1
+              and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+              and isinstance(node.key, ast.Name)
+              and isinstance(node.generators[0].target, ast.Name)
+              and node.generators[0].target.id == node.key.id
+              and isinstance(node.generators[0].iter, (ast.Tuple, ast.List))):
+            out.update(dict.fromkeys(_strings(node.generators[0].iter), node.value.value))
+        elif isinstance(node, ast.Name):
+            tables = self._tables(source)
+            if node.id in tables:
+                return self._table(source, tables[node.id], depth + 1)
+            bound = source.aliases.get(node.id, "")
+            if bound.startswith("sym:"):
+                _, module, qual = bound.split(":", 2)
+                other = self.modules.get(module)
+                if other is not None and qual in self._tables(other):
+                    return self._table(other, self._tables(other)[qual], depth + 1)
+        return out
+
+    def _lazy(self, source: Source) -> None:
+        """Bind the names a module's `__getattr__` hands out from a table of where each
+        lives (`{"connect": "_client"}`, `{"git": "moxi_repo.gitrun"}`), so a re-export
+        that loads on first touch resolves as an import would."""
+        if not any(isinstance(node, ast.FunctionDef) and node.name == "__getattr__"
+                   for node in source.tree.body):
+            return
+        package = (source.module if source.path.endswith("/__init__.py")
+                   else source.module.rpartition(".")[0])
+        for value in self._tables(source).values():
+            for name, home in self._table(source, value).items():
+                if not name.isidentifier():
+                    continue
+                if home == "":
+                    candidates = [f"{package}.{name}"]
+                else:
+                    candidates = [home, f"{source.module}.{home}", f"{package}.{home}"]
+                module = next((one for one in candidates if one in self.modules), None)
+                if module is None:
+                    continue
+                if module.rpartition(".")[2] == name:
+                    source.aliases.setdefault(name, f"mod:{module}")
+                else:
+                    source.aliases.setdefault(name, f"sym:{module}:{name}")
 
     def _settle_aliases(self) -> None:
         for _ in range(len(self.modules) + 2):
@@ -344,21 +433,8 @@ def _field(source: Source, scope: str, name: str) -> bool:
 
 def state(project: Project, row: Row) -> str:
     if row.kind in ("use", "keep"):
-        if row.scope.startswith("removed:"):
-            return "applied"
         source = project.sources.get(row.path)
-        if source is None:
-            return "not here"
-        lines = [line.strip() for line in source.text.splitlines()]
-        if row.kind == "keep" and row.scope in lines:
-            return "applied"
-        if row.kind == "use":
-            if row.scope in lines:
-                return "to apply"
-            changed = re.sub(rf"\b{re.escape(row.old)}\b", row.new, row.scope, count=1)
-            if changed in lines:
-                return "applied"
-        return "not here"
+        return line_state({row.path: source.text} if source else {}, row)
     source = project.sources.get(row.path)
     if source is None:
         return "not here"
@@ -638,7 +714,9 @@ def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[s
 
     # A backticked cite of the old name is renamed where it means this definition: a
     # parameter's in its function, a field's in its class, any other name's in the files
-    # the row edited. Every other cite is a leftover.
+    # the row edited. Every other cite is a leftover; a cite on a line a `keep` row names
+    # is another thing's and stays.
+    kept = {(row.path, row.scope) for row in rows if row.kind == "keep"}
     for row, target in active:
         if row.kind != "name":
             continue
@@ -653,21 +731,67 @@ def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[s
         pattern = re.compile(rf"`{re.escape(row.old)}(?:\(\))?`")
         for other, start, end in regions:
             for match in pattern.finditer(other.text, start, end):
+                line = other.text.count("\n", 0, match.start()) + 1
+                if (other.path, other.line_text(line).strip()) in kept:
+                    continue
                 _add(edits, other.path,
                      Edit(match.start() + 1, match.start() + 1 + len(row.old), row.new))
 
-    for row, status in zip(rows, states):
-        if row.kind != "use" or status != "to apply":
-            continue
-        source = project.sources[row.path]
-        for number, line in enumerate(source.text.splitlines(), 1):
-            if line.strip() != row.scope:
-                continue
-            base = source.position(number, 0)
-            for match in re.finditer(rf"\b{re.escape(row.old)}\b", line):
-                _add(edits, row.path, Edit(base + match.start(), base + match.end(), row.new))
-                break
     return edits
+
+
+def _used(scope: str, rows: Sequence[Row]) -> str:
+    for row in rows:
+        scope = _use_pattern(row.old).sub(row.new, scope)
+    return scope
+
+
+def line_state(texts: dict[str, str], row: Row, rows: Sequence[Row] = ()) -> str:
+    """A `use` or `keep` row's state, read from the text after the `name` and `kwonly`
+    rows' edits: its line is the line as those leave it, so a line that also holds a
+    resolved use of another row is named once, the same on every tree."""
+    if row.scope.startswith("removed:"):
+        return "applied"
+    text = texts.get(row.path)
+    if text is None:
+        return "not here"
+    lines = {line.strip() for line in text.splitlines()}
+    if row.kind == "keep":
+        return "applied" if row.scope in lines else "not here"
+    if row.scope in lines:
+        return "to apply"
+    # Every `use` row naming this line changes it at once.
+    siblings = [one for one in rows if one.kind == "use" and one.path == row.path
+                and one.scope == row.scope] or [row]
+    return "applied" if _used(row.scope, siblings) in lines else "not here"
+
+
+def _use_pattern(old: str) -> re.Pattern[str]:
+    """A `use` row's old text, matched whole: an end that is a word character must not
+    run on into another (`timeout` is not `timeout_s`); old text longer than one name,
+    such as `clock.age_seconds` or `timeout=`, picks the token where a line holds the
+    name twice with two meanings."""
+    start = r"\b" if re.match(r"\w", old) else ""
+    end = r"\b" if re.search(r"\w$", old) else ""
+    return re.compile(start + re.escape(old) + end)
+
+
+def apply_uses(texts: dict[str, str], rows: Sequence[Row], states: Sequence[str]) -> set[str]:
+    """Rename every match of a `use` row's old text on each line it names; the paths
+    changed."""
+    changed: set[str] = set()
+    named: dict[tuple[str, str], list[Row]] = {}
+    for row, status in zip(rows, states):
+        if row.kind == "use" and status == "to apply":
+            named.setdefault((row.path, row.scope), []).append(row)
+    for (path, scope), group in named.items():
+        lines = texts[path].splitlines(keepends=True)
+        for number, line in enumerate(lines):
+            if line.strip() == scope:
+                lines[number] = _used(line, group)
+        texts[path] = "".join(lines)
+        changed.add(path)
+    return changed
 
 
 def _apply(text: str, edits: Iterable[Edit]) -> str:
@@ -692,6 +816,13 @@ def transformed(project: Project, edits: dict[str, list[Edit]], rows: Sequence[R
 def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
     found: set[Leftover] = set()
     covered = {(row.path, row.scope) for row in rows if row.kind in ("use", "keep")}
+    # A `use` row covers its line as it leaves it too, so a run after it lists what the
+    # run before it did.
+    uses: dict[tuple[str, str], list[Row]] = {}
+    for row in rows:
+        if row.kind == "use":
+            uses.setdefault((row.path, row.scope), []).append(row)
+    covered |= {(path, _used(scope, group)) for (path, scope), group in uses.items()}
     targets = [(row, _target(project, row)) for row in rows if row.kind in ("name", "kwonly")]
     by_old: dict[str, list[tuple[Row, Target]]] = {}
     for row, target in targets:
@@ -724,6 +855,9 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                 positional = [(row, function_name) for row, target, function_name in kwonly
                               if name == function_name and target.position is not None
                               and len(node.args) > target.position]
+                # A row covers a keyword on its own line or on the call's first line.
+                passed = [keyword for keyword in passed if not is_covered(node.lineno)
+                          and not is_covered(keyword.value.lineno)]
                 if not (passed or named or positional) or is_covered(node.lineno):
                     continue
                 canonical = _canonical(project, project.resolve(source, node.func,
@@ -840,7 +974,10 @@ def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None 
     states = [state(project, row) for row in rows]
     edits = plan(project, rows, states)
     texts = transformed(project, edits, rows)
-    for path in sorted(edits):
+    states = [line_state(texts, row, rows) if row.kind in ("use", "keep") else status
+              for row, status in zip(rows, states)]
+    written = set(edits) | apply_uses(texts, rows, states)
+    for path in sorted(written):
         try:
             ast.parse(texts[path], filename=path)
         except SyntaxError as exc:
@@ -857,7 +994,7 @@ def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None 
         print(f"moxi-dev rename: leftover: {leftover}")
     print(f"moxi-dev rename: {len(remaining)} leftovers")
     if not dry_run:
-        for path in sorted(edits):
+        for path in sorted(written):
             (root / path).write_text(texts[path], encoding="utf-8")
     return 1 if remaining else 0
 

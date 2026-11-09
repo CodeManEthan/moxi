@@ -347,7 +347,7 @@ def test_compact_posts_summarize_with_the_last_replys_model_and_settles_at_ready
     d = s.deliver("hello", only_if_idle=True)
     d.wait_ended(5)
     events = watching(s)
-    assert s.command("compact", timeout=10) == Ran(None)
+    assert s.command("compact", timeout_s=10) == Ran(None)
     assert summaries(world) == [{"providerID": fake_opencode.PROVIDER,
                                  "modelID": fake_opencode.MODEL}]
     seen = []
@@ -370,22 +370,22 @@ def _drain(q):
 
 def test_compact_with_no_reply_yet_uses_the_launchs_model_option(host):
     s, h, world = _compacting(host, options={"model": "prov/some-model"})
-    assert s.command("compact", timeout=10) == Ran(None)
+    assert s.command("compact", timeout_s=10) == Ran(None)
     assert summaries(world) == [{"providerID": "prov", "modelID": "some-model"}]
 
 
 def test_compact_with_no_model_known_fails_and_posts_nothing(host):
     s, h, world = _compacting(host)
-    assert s.command("compact", timeout=10) == Failed("no model known yet")
+    assert s.command("compact", timeout_s=10) == Failed("no model known yet")
     assert summaries(world) == []
 
 
 def test_compact_on_a_server_without_the_route_refuses_unsupported(host):
     s, h, world = _compacting(host, options={"model": "prov/m"})
     world.fake.summarize_route = False         # its answer: the web page, a 200
-    assert s.command("compact", timeout=10) == Refused("unsupported")
+    assert s.command("compact", timeout_s=10) == Refused("unsupported")
     # The slot is free again; the rate still counts the accepted command.
-    assert s.command("compact", timeout=10) == Refused("rate")
+    assert s.command("compact", timeout_s=10) == Refused("rate")
     assert not h.endpoint.is_gone
 
 
@@ -395,7 +395,7 @@ def test_compact_on_an_older_server_without_the_route_refuses_unsupported(host):
     s, h, world = _compacting(host, options={"model": "prov/m"})
     world.fake.summarize_route = False
     world.fake.missing_route_answer = PLAIN_404
-    assert s.command("compact", timeout=10) == Refused("unsupported")
+    assert s.command("compact", timeout_s=10) == Refused("unsupported")
     assert not h.endpoint.is_gone
 
 
@@ -404,7 +404,7 @@ def test_compact_on_a_session_gone_from_the_server_fails_and_ends_the_endpoint(h
     # The session went between the checks and the post (OpenCode's own answer for it).
     world.fake.summarize_answers.append((404, {"name": "NotFoundError", "data": {
         "message": f"Session not found: {h.session_id}"}}))
-    result = s.command("compact", timeout=10)
+    result = s.command("compact", timeout_s=10)
     assert isinstance(result, Failed)
     assert "404" in result.reason and "session is gone" in result.reason
     assert "NotFoundError" in result.reason
@@ -414,7 +414,7 @@ def test_compact_on_a_session_gone_from_the_server_fails_and_ends_the_endpoint(h
 def test_compact_the_server_turns_down_fails_with_its_answer(host):
     s, h, world = _compacting(host, options={"model": "prov/m"})
     world.fake.summarize_answers.append((400, {"name": "BadRequest"}))
-    result = s.command("compact", timeout=10)
+    result = s.command("compact", timeout_s=10)
     assert isinstance(result, Failed) and "400" in result.reason
     assert "BadRequest" in result.reason
 
@@ -425,7 +425,7 @@ def test_compact_meets_a_busy_status_at_the_post_and_refuses(host):
     s, h, world = _compacting(host, options={"model": "prov/m"})
     h.live = lambda: Live(0, False)      # so the one status answer meets the re-check
     world.fake.status_answers.append((200, json.dumps({h.session_id: {"type": "busy"}})))
-    assert s.command("compact", timeout=10) == Refused("busy-turn")
+    assert s.command("compact", timeout_s=10) == Refused("busy-turn")
     assert summaries(world) == []
 
 

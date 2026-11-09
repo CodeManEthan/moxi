@@ -369,7 +369,7 @@ def test_a_codex_resume_with_a_comms_name_continues_its_thread(conn, monkeypatch
     composed = []
 
     def launch(request, *, environ=None, warn=None):
-        composed.append(api.preview(request, environ=environ))
+        composed.append(api.preview(request, env=environ))
         return Launch()(request, environ=environ, warn=warn)
 
     result = resume.resume(THREAD, conn=conn, turns=None, slots_api=None, launch=launch,

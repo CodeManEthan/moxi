@@ -49,7 +49,7 @@ def build(places=None):
     places = places or _settings.read()
     s = places.settings
     return Spec(name=NAME, root=places.root, paths=PATHS, author=author(s),
-                min_interval=s["snapshot.interval"] * MINUTE, message=None,
+                min_interval_s=s["snapshot.interval"] * MINUTE, message=None,
                 prepare=PREPARE, push=s["snapshot.push"] or None,
                 max_bytes=s["max_mb"] * MIB)
 
@@ -78,7 +78,7 @@ def ensure_saved(spec) -> bool:
         saved = None
     if same(saved, spec):
         return False
-    save_spec(spec, wait=0)
+    save_spec(spec, wait_s=0)
     return True
 
 

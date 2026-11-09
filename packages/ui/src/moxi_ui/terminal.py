@@ -26,7 +26,7 @@ place under both. Otherwise it returns the one line to refuse with:
 
 The line's fix names every variable that `places` read under either mapping whose value
 differs between them, with the terminal's value, so setting all of them in one step makes
-the next check pass. `page` words the line for the browser page (the default) or for a
+the next check pass. `for_page` words the line for the browser page (the default) or for a
 terminal. With no record, a record that can't be read, one in a newer format, or an
 account whose folder can't be placed, the line says so and names the step that makes a
 record. On Windows names compare without case, as Windows compares them.

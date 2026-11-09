@@ -19,7 +19,7 @@ around `/run` and `/end`.
 The stop record. `stop(module, names, record=[])` first reads, in one supervisor call,
 which of the units are running, and stops only those; before it asks the supervisor to
 stop each one it appends a `Stopped` entry (the backend's exact id, a daemon's `.socket`
-before its service) to `record`. `resume(record)` starts exactly those entries again, in
+before its service) to `stopped`. `resume(record)` starts exactly those entries again, in
 the order recorded, with the backend's start verb alone (never an enable verb, so a unit
 the user disabled stays disabled), and only entries a `stop` of this process issued and
 no `resume` has taken yet. A start the supervisor refuses is an `Acted` with `ok=False`

@@ -9,10 +9,10 @@ Down toward the option on a screen that allows them, then Enter on the option. T
 no other way to send a key or text into a pane: a session is typed into only through
 its own channel.
 
-1. With `wait=0` it reads once. With `wait` above 0 it reads every 250 ms until the pane
+1. With `wait_s=0` it reads once. With `wait_s` above 0 it reads every 250 ms until the pane
    is dead (`ended-without-screen`), the screen has fully matched on two reads at least
    0.5 s apart with the marker on the same row (the trust warning drops keys while it
-   opens), or `wait` runs out (`mismatch`). A caller passing `wait=0` has seen the
+   opens), or `wait_s` runs out (`mismatch`). A caller passing `wait_s=0` has seen the
    screen with `read_screen` at least 0.5 s before.
 2. The rule for keys: every key is decided on a settled read, and a read is settled only
    once the previous key has visibly taken effect. The first read is settled by step 1.
@@ -21,7 +21,7 @@ its own channel.
    that read decides the next key. A read that does not fully match, inside that window,
    is a frame being drawn: the reads go on. Each key's settle bound is 2 s; a spent one
    ends the call `mismatch` with `why` starting `not-settled`, and so does a key there
-   is too little of `wait` left to settle. Enter goes only on a settled read with the
+   is too little of `wait_s` left to settle. Enter goes only on a settled read with the
    marker on the option. On a screen that allows moving, one Up or Down toward the
    option is sent per settled read, at most one per row between the first marked row
    and the option; a marker that moves away from the option ends the call `mismatch`.
@@ -32,7 +32,7 @@ its own channel.
    (`ended`, else `not-ended`); one whose `then` is `gone` needs the screen to leave
    within 5 s with the pane still live (`gone`, else `mismatch`).
 
-`wait` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has
+`wait_s` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has
 its own bound. One call presses Enter at most once, and every key follows a read taken
 after the screen appeared. With `wait=0` on a screen that takes Enter alone (the exit
 dialog), the call is one read and at most Enter, back to back.

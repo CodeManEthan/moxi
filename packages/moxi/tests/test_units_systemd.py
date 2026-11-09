@@ -761,7 +761,7 @@ def test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can(w, 
     w.module(DAEMONS=shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
     record: list = []
-    stopped = units.stop("demo", ["relay"], record=record, runner=w.sup)
+    stopped = units.stop("demo", ["relay"], stopped=record, runner=w.sup)
     assert stopped[0].ok and [e.unit for e in record] == [SOCK, SOCK_1, SERVICE]
     assert not any(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
     service = w.root / SERVICE
@@ -786,7 +786,7 @@ NO_BUS = "Failed to connect to bus: No such file or directory"
 def _moved(w):
     """The home move's stop of the relay: every socket unit, then the service."""
     record: list = []
-    assert all(a.ok for a in units.stop("demo", ["relay"], record=record, runner=w.sup))
+    assert all(a.ok for a in units.stop("demo", ["relay"], stopped=record, runner=w.sup))
     assert record[-1].unit == SERVICE and all(e.unit.endswith(".socket")
                                               for e in record[:-1])
     assert not any(w.sup.units[e.unit]["active"] for e in record)
@@ -1464,7 +1464,7 @@ def test_the_stop_record_lists_every_socket_unit_first_in_unit_order(w, v6):
     w.apply(units.plan("demo"))
     record: list = []
     w.sup.calls.clear()
-    [acted] = units.stop("demo", ["relay"], record=record, runner=w.sup)
+    [acted] = units.stop("demo", ["relay"], stopped=record, runner=w.sup)
     assert acted.ok and [(e.unit, e.marked) for e in record] == [
         (SOCK, True), (SOCK_1, True), (SOCK_2, True), (SERVICE, True)]
     assert w.sup.calls == [("show", "--property=Id,ActiveState", SOCK, SOCK_1, SOCK_2, SERVICE),

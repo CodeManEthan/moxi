@@ -5,8 +5,8 @@ The bound. When a session's `gone` event fires, every edit it made before the ev
 pass can commit is committed within `snapshot.interval` plus 6 minutes. The push of that
 commit is attempted by the pass that made it, or, while the committer's backoff from an
 earlier failed push holds it, by the first pass after that backoff if a pass comes; when
-the committing pass's own attempt fails, a pass tries once more `push_backoff` later. Each
-attempt these steps make starts within `push_backoff` plus 6 minutes of the commit. This
+the committing pass's own attempt fails, a pass tries once more `push_backoff_s` later. Each
+attempt these steps make starts within `push_backoff_s` plus 6 minutes of the commit. This
 holds with `snapshot.auto` on, the timer off, and a pass's commit part ending within a
 minute.
 
@@ -62,7 +62,7 @@ then reads the counter after that request. Five `busy` or `index-busy` passes in
 the first pass included, end the duty with the `settle` record; then too it releases, reads
 again, and starts a new streak when a request came after its last read.
 
-The push duty. One due time, `push_backoff` after the pass ended, per commit this
+The push duty. One due time, `push_backoff_s` after the pass ended, per commit this
 process's passes left unpushed, a holder's included. A pass of this process that took the
 committer's lock and ended at or after a due time clears it: that pass ran the push part.
 A holder waits for due times inside its wait; after the commit duty the process sleeps to

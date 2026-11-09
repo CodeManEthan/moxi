@@ -36,7 +36,7 @@ from moxi.units._backend import (
     ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, listen_address,
     socket_name, socket_place, socket_state)
 from moxi.units._fence import Fence, Ran
-from moxi.units._home import environment, home_tag
+from moxi.units._home import unit_env, home_tag
 from moxi.units._systemd import SocketStarts, dropin_name
 from moxi.units._types import Acted, UnitChange, UnitState, Wrapped
 
@@ -587,7 +587,7 @@ class FakeBackend:
 
     def dropin_text(self, ref: str, *, module: str, key: str, name: str) -> str:
         record = f"{module}/{name}"
-        home = environment(module).get("MOXI_HOME")
+        home = unit_env(module).get("MOXI_HOME")
         run = f"{self.gate} run" + (f" --home {home}" if home else "")
         return _text([f"{WRAP_MARK}{record}",
                       f"# moxi: timer = {ref}, if = {module}.{key}",

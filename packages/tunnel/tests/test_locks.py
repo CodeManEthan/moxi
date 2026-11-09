@@ -47,7 +47,7 @@ def test_held_takes_the_core_lock_before_tunnel_lock():
     with locks.held(core=True, timeout=1):
         assert locks.holds_core() and locks.holds_tunnel()
         # The core's own nested take yields to this hold, as config.set's does.
-        with files.lock(paths.core_lock(), nested=True, timeout=0):
+        with files.lock(paths.core_lock(), nested=True, timeout_s=0):
             pass
     with locks.held(timeout=1):
         assert locks.holds_tunnel() and not locks.holds_core()

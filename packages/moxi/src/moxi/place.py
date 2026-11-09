@@ -5,7 +5,7 @@ manager placing a project's own skills, say). The caller names what it wants pla
 `Item`s, and the placer plans, applies, reads back and removes those placements, keeping
 a ledger of what each owner placed.
 
-    plan(owner, items, form=None, git_seconds=None)
+    plan(owner, items, form=None, git_s=None)
                                          what placing `items` would do (`Step` per item)
     apply(steps, replace=False)          carry a plan out (`Placed` per placement left)
     status(owner)                        each placement of `owner` read against the disk
@@ -101,7 +101,7 @@ the way is in git without reading the reason; its reason reads as an occupant's,
 ", and git tracks it" added. Whatever reads cause `occupant` reads `tracked` alike.
 
 The tracked check asks git once per folder that holds an occupant. Each git call gets 10
-seconds, or, with `plan`'s `git_seconds=`, the plan's git calls get that many seconds in
+seconds, or, with `plan`'s `git_s=`, the plan's git calls get that many seconds in
 all. When git doesn't answer in time, the occupant stays cause `occupant`, never
 `tracked`, and its reason says git did not answer: a slow git can only leave `tracked`
 out, never put it in. A marked folder this ledger lacks is then read as git not tracking
@@ -419,9 +419,9 @@ def plan(owner: str, items: list[Item], *, form: str | None = None,
     if form is not None and form not in SETTINGS:
         raise ValueError(f"form must be one of {', '.join(SETTINGS)}, not {form!r}")
     if git_s is not None and (isinstance(git_s, bool)
-                                    or not isinstance(git_s, (int, float))
-                                    or not git_s >= 0):
-        raise ValueError(f"git_seconds must be a number of seconds, not {git_s!r}")
+                              or not isinstance(git_s, (int, float))
+                              or not git_s >= 0):
+        raise ValueError(f"git_s must be a number of seconds, not {git_s!r}")
     settings = _core_settings()
     setting = form if form is not None else settings["skills.form"]
     rows, skipped = harnesses(settings)

@@ -332,7 +332,7 @@ class Host:
                 server = await ipc.serve(
                     self.address, self._handle,
                     hello=ipc.Hello(VERSIONS, self.capabilities),
-                    write_deadline=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
+                    write_timeout_s=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
                     on_close=self._on_close)
             except BaseException as exc:
                 ready.set_exception(exc)

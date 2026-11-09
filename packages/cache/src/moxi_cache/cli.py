@@ -143,19 +143,19 @@ def _duration(seconds: float) -> str:
 
 def line(session: str, clock: Clock) -> str:
     """One session's read, in words."""
-    if clock.kind in (WARM, COLD) and clock.age_seconds is not None \
-            and clock.ttl_seconds is not None:
+    if clock.kind in (WARM, COLD) and clock.age_s is not None \
+            and clock.ttl_s is not None:
         source = f", from the {clock.ttl_source}" if clock.ttl_source else ""
         key = f", {clock.key}" if clock.key else ""
-        return (f"{session}: {clock.kind}, last request {_duration(clock.age_seconds)} ago, "
-                f"lifetime {_duration(clock.ttl_seconds)}{source}{key}")
+        return (f"{session}: {clock.kind}, last request {_duration(clock.age_s)} ago, "
+                f"lifetime {_duration(clock.ttl_s)}{source}{key}")
     words = f"{session}: {clock.kind}"
     if clock.code:
         words += f" [{clock.code}]"
     if clock.reason:
         words += f": {clock.reason}"
-    if clock.age_seconds is not None:
-        words += f" (last request {_duration(clock.age_seconds)} ago)"
+    if clock.age_s is not None:
+        words += f" (last request {_duration(clock.age_s)} ago)"
     return words
 
 

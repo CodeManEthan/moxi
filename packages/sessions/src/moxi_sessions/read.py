@@ -190,11 +190,11 @@ class Back:
     (from its newest line, with that line's values).
 
     * `ended`: how the read ended, as `read_back` says it: `start` once every line back to
-      line 1 (line 2 with `head`) was read, `limit` when the byte limit stopped it with
+      line 1 (line 2 with `read_head`) was read, `limit` when the byte limit stopped it with
       lines left, None until the records run out or when the caller stops first. An
       OpenCode read always reaches the session's first record, so it is `start`.
-    * `first`: with `head`, line 1's records (an OpenCode session's first message's), not
-      also among the records iterated; None without `head`, or when line 1 does not end
+    * `first`: with `read_head`, line 1's records (an OpenCode session's first message's), not
+      also among the records iterated; None without `read_head`, or when line 1 does not end
       within the limit.
     * `header`: the session's header, read when first asked for.
     """

@@ -169,7 +169,7 @@ def test_close_removes_the_socket_before_it_lets_the_lock_go(serving):
     srv.call(srv.server.close)
     assert seen == [False]
     assert not os.path.lexists(address)
-    with files.lock(f"{address}.lock", timeout=0):
+    with files.lock(f"{address}.lock", timeout_s=0):
         pass
     assert ipc.sweep(address) == "absent"
 
@@ -229,7 +229,7 @@ def test_a_file_that_is_not_a_socket_is_left_alone(sock_dir):
     with pytest.raises(FileExistsError):
         ServerThread(address, echo)
     assert address.read_text() == "mine"
-    with files.lock(f"{address}.lock", timeout=0):
+    with files.lock(f"{address}.lock", timeout_s=0):
         pass
 
 
@@ -625,7 +625,7 @@ def test_a_stuck_peer_is_dropped_at_the_write_deadline_and_others_go_on(serving,
     def on_close(conn):
         closed[conn.peer.pid] = time.monotonic()
 
-    srv = serving(handler, write_deadline=deadline, queue=1000, on_close=on_close)
+    srv = serving(handler, write_timeout_s=deadline, queue=1000, on_close=on_close)
     stuck = Raw(srv.address)
     stuck.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
     stuck.send(req(1, "flood"))

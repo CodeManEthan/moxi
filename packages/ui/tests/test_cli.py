@@ -329,7 +329,7 @@ def test_a_tagged_home_opens_through_its_own_socket(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     for spelling in (str(home), str(tmp_path / "link"), "h"):
         environ = {**_plain(), "MOXI_HOME": spelling}
-        assert units.environment("ui", environ) == {"MOXI_HOME": os.path.realpath(home)}
+        assert units.unit_env("ui", environ) == {"MOXI_HOME": os.path.realpath(home)}
         world = World(monkeypatch, [socket_unit("active")], probes=("down",))
         assert world.ensure(environ) is None and world.spawned == []
 
@@ -449,7 +449,7 @@ def test_signout_with_no_shell_clears_the_store_holding_page_lock(monkeypatch, c
     assert cli.main(["signout"]) == 0
     assert seen == [True] and "signed out" in capsys.readouterr().out
     # A shell starting holds the lock: nothing is cleared, and the exit is 75.
-    with files.lock(Layout("ui").runtime_dir(create=True) / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir(create=True) / "page.lock", timeout_s=0):
         assert cli.main(["signout"]) == 75
     assert seen == [True] and "starting or stopping" in capsys.readouterr().err
 

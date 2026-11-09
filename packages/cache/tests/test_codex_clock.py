@@ -188,7 +188,7 @@ def test_the_30_minute_rows(tmp_path, model):
     root = sessions_root(tmp_path)
     one_turn(1799, model).write(root)
     clock = codex_read(root)
-    assert (clock.kind, clock.ttl_seconds, clock.key) == ("warm", 1800,
+    assert (clock.kind, clock.ttl_s, clock.key) == ("warm", 1800,
                                                           f"codex openai/{model}")
     one_turn(1800, model).write(root)
     assert codex_read(root).kind == "cold"
@@ -200,7 +200,7 @@ def test_each_model_on_the_measured_row(tmp_path):
         root = sessions_root(tmp_path / model)
         one_turn(seconds - 1, model).write(root)
         clock = codex_read(root)
-        assert (clock.kind, clock.ttl_seconds) == ("warm", seconds)
+        assert (clock.kind, clock.ttl_s) == ("warm", seconds)
         assert clock.key == f"codex openai/{model} (measured on this box)"
         one_turn(seconds, model).write(root)
         assert codex_read(root).kind == "cold"
@@ -214,9 +214,9 @@ def test_no_row_reads_no_cache_with_the_reason(tmp_path, model, provider):
     root = sessions_root(tmp_path)
     one_turn(10, model, model_provider=provider).write(root)
     clock = codex_read(root)
-    assert clock.kind == "no-cache" and clock.ttl_seconds is None
+    assert clock.kind == "no-cache" and clock.ttl_s is None
     assert clock.reason == _clock.no_row(provider, model)
-    assert clock.age_seconds == pytest.approx(10, abs=0.1)
+    assert clock.age_s == pytest.approx(10, abs=0.1)
 
 
 def test_a_turn_context_naming_another_model_after_the_record_is_cold(tmp_path):
@@ -318,7 +318,7 @@ def test_a_record_of_another_session_does_not_move_the_clock(tmp_path):
     r.record("t1", NOW - 10, session=f"guardian:{TID}")
     r.write(root)
     clock = codex_read(root)
-    assert clock.age_seconds == pytest.approx(600, abs=0.1)
+    assert clock.age_s == pytest.approx(600, abs=0.1)
 
 
 def test_a_compactions_record_moves_the_clock(tmp_path):
@@ -328,7 +328,7 @@ def test_a_compactions_record_moves_the_clock(tmp_path):
     r.add("compacted", NOW - 98, {"message": "summary"})
     r.record("t2", NOW - 50, inp=13_000, cached=12_000)
     r.write(root)
-    assert codex_read(root).age_seconds == pytest.approx(50, abs=0.1)
+    assert codex_read(root).age_s == pytest.approx(50, abs=0.1)
 
 
 def test_an_older_codex_with_token_count_and_no_record_is_unknown(tmp_path):
@@ -432,8 +432,8 @@ def test_a_message_between_threads_does_not_move_the_clock(tmp_path, turned):
         clocks.append(codex_read(root, turned=turned))
     without, with_line = clocks
     assert with_line.code != "unrecognised"
-    assert (with_line.kind, with_line.code, with_line.age_seconds) == (
-        without.kind, without.code, without.age_seconds)
+    assert (with_line.kind, with_line.code, with_line.age_s) == (
+        without.kind, without.code, without.age_s)
 
 
 def test_a_token_usage_record_with_no_usage_is_unrecognised(tmp_path):
@@ -556,7 +556,7 @@ def test_a_lone_zst_is_cold_with_no_age(tmp_path):
     root = sessions_root(tmp_path)
     one_turn(60).write(root, zst=True)
     clock = codex_read(root)
-    assert (clock.kind, clock.age_seconds, clock.ttl_seconds) == ("cold", None, None)
+    assert (clock.kind, clock.age_s, clock.ttl_s) == ("cold", None, None)
     assert clock.reason == codex.COMPRESSED
 
 
@@ -589,7 +589,7 @@ def test_a_stamp_in_the_future_is_unknown(tmp_path):
     assert clock.kind == "unknown" and "stamped in the future" in clock.reason
     Rollout().turn("t1", NOW - 1, length=5).write(root)        # ends 4 s ahead
     clock = codex_read(root)
-    assert (clock.kind, clock.age_seconds) == ("warm", 0.0)
+    assert (clock.kind, clock.age_s) == ("warm", 0.0)
 
 
 
@@ -680,7 +680,7 @@ def test_a_cold_landing_lowers_and_the_same_read_uses_it(tmp_path):
     clock = drift_read(tmp_path, drifting(gap))
     lowered = codex.lower_to(gap, 1800)
     assert lowered == max(1800, int(gap * 0.8) // 60 * 60)
-    assert clock.lowering["lifetime"] == lowered and clock.ttl_seconds == lowered
+    assert clock.lowering["lifetime"] == lowered and clock.ttl_s == lowered
     assert clock.lowering["gap"] == pytest.approx(gap)
     assert clock.lowering["cached"] == 7_424 and clock.lowering["input"] == 48_210
     assert clock.key.startswith(f"codex openai/gpt-5.6-sol (measured on this box, lowered "
@@ -716,7 +716,7 @@ def test_each_of_these_lowers_nothing(tmp_path, case):
         read_kw["bound_at"] = None
     clock = drift_read(tmp_path, drifting(gap, **kw), **read_kw)
     assert clock.lowering is None, case
-    assert clock.ttl_seconds == seconds
+    assert clock.ttl_s == seconds
 
 
 @pytest.mark.parametrize("breaker", sorted(BREAKERS))
@@ -730,12 +730,12 @@ def test_a_turn_that_is_not_a_normal_continuation_lowers_nothing(tmp_path, break
 
 def test_a_row_not_marked_measured_is_never_lowered(tmp_path):
     clock = drift_read(tmp_path, drifting(1700, model="gpt-5.6-terra"))
-    assert clock.lowering is None and clock.ttl_seconds == 1800 and clock.kind == "warm"
+    assert clock.lowering is None and clock.ttl_s == 1800 and clock.kind == "warm"
 
 
 def test_a_cold_landing_under_the_floor_is_a_journal_line_only(tmp_path):
     clock = drift_read(tmp_path, drifting(1500))
-    assert clock.lowering is None and clock.ttl_seconds == measured_seconds()
+    assert clock.lowering is None and clock.ttl_s == measured_seconds()
     assert len(clock.notes) == 1 and "under the documented 30m" in clock.notes[0]
 
 
@@ -757,9 +757,9 @@ def test_a_longer_miss_never_raises_and_a_shorter_one_lowers_to_the_floor(tmp_pa
     in_force = codex.lower_to(seconds - 1200, 1800)
     view = view_of(entry(in_force))
     clock = drift_read(tmp_path / "a", drifting(in_force + 300), drift=view)
-    assert clock.lowering is None and clock.ttl_seconds == in_force
+    assert clock.lowering is None and clock.ttl_s == in_force
     clock = drift_read(tmp_path / "b", drifting(3000), drift=view)
-    assert clock.lowering["lifetime"] == 2400 and clock.ttl_seconds == 2400
+    assert clock.lowering["lifetime"] == 2400 and clock.ttl_s == 2400
     clock = drift_read(tmp_path / "c", drifting(2000), drift=view)
     assert clock.lowering["lifetime"] == 1800, "never below the floor"
 
@@ -796,7 +796,7 @@ def test_a_stale_entry_is_ignored(tmp_path):
         view, kept, rejected = drift.judge(drift.Record(entries=[stale]),
                                                  table.load_table())
         assert kept == [] and rejected == []
-        assert codex_read(root, drift=view).ttl_seconds == measured_seconds()
+        assert codex_read(root, drift=view).ttl_s == measured_seconds()
 
 
 @pytest.mark.parametrize("bad", ["unrecognised", "above", "below", "not-int", "bool"])

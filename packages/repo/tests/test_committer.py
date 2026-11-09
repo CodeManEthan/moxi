@@ -170,7 +170,7 @@ def test_a_held_lock_is_busy_and_wait_takes_it_once_freed(demo):
         result = moxi_repo.commit(spec(repo))
     assert result.status == "busy" and result.exit_code == 0
     assert staged(repo) == [] and "notes/a.md" not in in_head(repo)
-    assert moxi_repo.commit(spec(repo), wait=5).status == "committed"
+    assert moxi_repo.commit(spec(repo), wait_s=5).status == "committed"
 
 
 # -- what a pass takes ---------------------------------------------------------------------------
@@ -504,10 +504,10 @@ def test_changes_reads_staged_and_ranged_changes(demo):
     git(repo, "commit", "-q", "-m", "two")
     git(repo, "mv", "notes/b.md", "notes/c.md")
     git(repo, "commit", "-q", "-m", "moved")
-    ranged = moxi_repo.changes(repo, range=(first, "HEAD"))
+    ranged = moxi_repo.changes(repo, rev_range=(first, "HEAD"))
     assert {(c.status, c.path, c.old_path) for c in ranged} == {
         ("A", "notes/a[1].md", None), ("A", "notes/c.md", None)}
-    moved = moxi_repo.changes(repo, range=("HEAD~1", "HEAD"))
+    moved = moxi_repo.changes(repo, rev_range=("HEAD~1", "HEAD"))
     assert [(c.status, c.path, c.old_path) for c in moved] == [
         ("R", "notes/c.md", "notes/b.md")]
     raw = moxi_repo.git(repo, "cat-file", "blob", moved[0].blob, binary=True)
@@ -853,7 +853,7 @@ def test_wait_queues_behind_another_thread_of_this_process(demo):
         assert taken.wait(10)
         assert moxi_repo.commit(spec(repo)).status == "busy"
         threading.Timer(0.3, release.set).start()
-        assert moxi_repo.commit(spec(repo), wait=10).status == "committed"
+        assert moxi_repo.commit(spec(repo), wait_s=10).status == "committed"
     finally:
         release.set()
         thread.join(10)
@@ -864,9 +864,9 @@ def test_wait_queues_behind_another_thread_of_this_process(demo):
     try:
         assert taken.wait(10)
         with pytest.raises(files.LockTimeout):
-            moxi_repo.save_spec(spec(repo), wait=0.2)
+            moxi_repo.save_spec(spec(repo), wait_s=0.2)
         threading.Timer(0.3, release.set).start()
-        moxi_repo.save_spec(spec(repo), wait=10)
+        moxi_repo.save_spec(spec(repo), wait_s=10)
     finally:
         release.set()
         thread.join(10)

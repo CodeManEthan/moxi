@@ -96,7 +96,7 @@ def test_anthropic_counts_5_minutes(tmp_path):
     s = oc_db(tmp_path, request(NOW - 299, "anthropic", "claude-sonnet-4"),
               model=("anthropic", "claude-sonnet-4"))
     clock = oc_read(s)
-    assert (clock.kind, clock.ttl_seconds, clock.key) == (
+    assert (clock.kind, clock.ttl_s, clock.key) == (
         "warm", 300, "opencode anthropic/claude-sonnet-4")
     s2 = oc_db(tmp_path / "b", request(NOW - 300, "anthropic", "claude-sonnet-4"),
                model=("anthropic", "claude-sonnet-4"))
@@ -110,7 +110,7 @@ def test_openai_counts_30_minutes_and_no_drift_lowers_it(tmp_path, model):
         s = oc_db(tmp_path / str(age), request(NOW - age, "openai", model),
                   model=("openai", model))
         clock = oc_read(s)
-        assert (clock.kind, clock.ttl_seconds) == (kind, 1800)
+        assert (clock.kind, clock.ttl_s) == (kind, 1800)
 
 
 @pytest.mark.parametrize("model", ["big-pickle", "space-bunny-free"])
@@ -118,7 +118,7 @@ def test_openai_counts_30_minutes_and_no_drift_lowers_it(tmp_path, model):
 def test_a_free_next_pair_is_no_cache_at_any_age(tmp_path, model, age):
     s = oc_db(tmp_path, request(NOW - age, "opencode", model), model=("opencode", model))
     clock = oc_read(s)
-    assert clock.kind == "no-cache" and clock.ttl_seconds is None
+    assert clock.kind == "no-cache" and clock.ttl_s is None
     assert clock.reason == (f"opencode/{model} is a free model, so a cold cache costs "
                             "nothing and is not counted")
     assert clock.key == f"opencode opencode/{model} (free)"
@@ -144,7 +144,7 @@ def test_the_stamp_errs_old(tmp_path):
                                       steps=((0, 10), (700, 710))),   # starts at NOW-300
               model=claude_x)
     clock = oc_read(s)
-    assert clock.age_seconds == pytest.approx(990, abs=0.01)
+    assert clock.age_s == pytest.approx(990, abs=0.01)
     # A step that started 6 minutes ago and finished 2 minutes ago is cold on 300 s.
     s = oc_db(tmp_path / "c", request(NOW - 360, *claude_x, steps=((0, 240),)),
               model=claude_x)
@@ -153,7 +153,7 @@ def test_the_stamp_errs_old(tmp_path):
     s = oc_db(tmp_path / "d", request(NOW - 100, *claude_x, steps=((0, None),)),
               model=claude_x)
     clock = oc_read(s)
-    assert clock.kind == "warm" and clock.age_seconds == pytest.approx(100, abs=0.01)
+    assert clock.kind == "warm" and clock.age_s == pytest.approx(100, abs=0.01)
 
 
 def test_a_compaction_and_a_child_session_do_not_move_the_clock(tmp_path):
@@ -163,7 +163,7 @@ def test_a_compaction_and_a_child_session_do_not_move_the_clock(tmp_path):
               request(NOW - 9, *claude_x, summary=True, user=False), model=claude_x)
     add(s.child(model=claude_x), request(NOW - 5, *claude_x))
     clock = oc_read(s)
-    assert clock.kind == "cold" and clock.age_seconds == pytest.approx(400, abs=0.01)
+    assert clock.kind == "cold" and clock.age_s == pytest.approx(400, abs=0.01)
 
 
 def fresh_session(tmp_path, **kw):

@@ -488,8 +488,8 @@ def kind_of(t: Target) -> CacheState:
         state.code = t.code
         return state
     clock = clock_state(t.adapter or "claude-shim", t.session_id)
-    state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_seconds
-    state.ttl_seconds, state.key, state.code = clock.ttl_seconds, clock.key, clock.code
+    state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_s
+    state.ttl_seconds, state.key, state.code = clock.ttl_s, clock.key, clock.code
     return state
 
 

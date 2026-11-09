@@ -1243,7 +1243,7 @@ def test_a_failed_domain_read_stops_nothing_and_records_nothing(mac):
     mac.ctl.calls.clear()
     mac.ctl.fail[("print", None)] = (1, "Operation not permitted")
     record: list = []
-    [done] = units.stop("demo", record=record)
+    [done] = units.stop("demo", stopped=record)
     assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
     assert "Operation not permitted" in done.lines[0]
     assert record == [] and RELAY in mac.ctl.loaded and mac.ctl.verbs() == []
@@ -1256,7 +1256,7 @@ def test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_
         {"Label": RELAY, "ProgramArguments": ["/bin/true"], "RunAtLoad": True}))
     mac.ctl.loaded[RELAY] = [99, None]
     record: list = []
-    [done] = units.stop("demo", replace=True, record=record)
+    [done] = units.stop("demo", replace=True, stopped=record)
     assert done.ok and done.lines == (f"{RELAY} stopped",)
     assert [(e.unit, e.marked, e.backend) for e in record] == [(RELAY, False, "launchd")]
     assert RELAY not in mac.ctl.loaded

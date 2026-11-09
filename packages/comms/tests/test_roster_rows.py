@@ -111,7 +111,7 @@ def test_one_row_per_address_live_first_then_by_name(monkeypatch):
 
 def test_the_deadline_reaches_every_call(monkeypatch):
     daemon = two_live().install(monkeypatch)
-    api.roster_rows(deadline=2)
+    api.roster_rows(timeout_s=2)
     assert len(daemon.calls) == 5 and {d for _, d in daemon.calls} == {2}
     daemon.calls.clear()
     api.roster_rows()

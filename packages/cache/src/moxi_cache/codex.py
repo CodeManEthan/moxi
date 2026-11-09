@@ -204,7 +204,7 @@ def read(thread_id, *, cache_source, turned, new_session, now, drift=MISSING,
         return Clock(COLD, reason=COMPRESSED, code=_clock.COMPRESSED)
     limit = _clock.CLOCK_SCAN_LIMIT if limit is None else limit
     try:
-        with records_back(hits[0].source, head=True, block=_clock.CLOCK_BLOCK,
+        with records_back(hits[0].source, read_head=True, block=_clock.CLOCK_BLOCK,
                           limit=limit) as back:
             return _read_open(back, thread_id, table=table, turned=turned, now=now,
                               drift=drift, bound_at=bound_at, judged=judged)

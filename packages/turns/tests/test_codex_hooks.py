@@ -88,7 +88,7 @@ def test_stop_blocks_only_after_the_ping_prints_the_reason(monkeypatch, turns_en
     harness = HookHarness()
     endpoint = Endpoint(harness, session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     hold = session.handle_stops(lambda facts: "reply before stopping")
     harness.start_turn()
     try:
@@ -180,7 +180,7 @@ def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_e
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     hold = session.handle_stops(lambda facts: (time.sleep(3.05), "hold in budget")[1])
     harness.start_turn()
     try:
@@ -212,7 +212,7 @@ def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     hold = session.handle_stops(lambda facts: (time.sleep(0.2), "too late")[1])
     harness.start_turn()
     try:
@@ -238,7 +238,7 @@ def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
     events = []
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     watcher = threading.Thread(target=lambda: events.extend(session.watch()), daemon=True)
     watcher.start()
     time.sleep(0.2)

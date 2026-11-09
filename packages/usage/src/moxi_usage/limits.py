@@ -445,7 +445,7 @@ def _pull(conn: sqlite3.Connection, *, now: float, days: float) -> Pull:
     if fn is None:
         return Pull(tried=False, ok=False, reason=why)
     try:
-        got = fn(timeout=PULL_TIMEOUT)
+        got = fn(timeout_s=PULL_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - a failed pull leaves the stored readings
         return Pull(tried=True, ok=False, reason=f"the pull failed: {_describe(exc)}")
     if got is None:

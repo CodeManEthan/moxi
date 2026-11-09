@@ -290,7 +290,7 @@ def test_a_backward_codex_read_maps_each_turn_from_its_own_start(codex_root):
         agree_but_provider(got, forward)
         assert [r.request_id for r in requests(got)] == \
             [r.request_id for r in reversed(requests(forward))]
-        with_head = records_back(src, head=True)
+        with_head = records_back(src, read_head=True)
         rest = list(with_head)
         assert [m.marker for m in with_head.first] == ["session_meta"]
         assert len(rest) == len(got) - 1
@@ -357,7 +357,7 @@ def test_opencode_records_back_is_the_exact_reverse_with_line_one_as_first(db):
     forward = plains(records(src))
     back = records_back(src)
     assert plains(back) == list(reversed(forward)) and back.ended == "start"
-    headed = records_back(src, head=True)
+    headed = records_back(src, read_head=True)
     assert [r.kind for r in headed.first] == ["message"]
     assert plains(headed) == list(reversed(forward))[:-1]
 

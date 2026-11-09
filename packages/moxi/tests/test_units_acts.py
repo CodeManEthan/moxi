@@ -264,7 +264,7 @@ def test_stop_records_only_what_runs_socket_first_and_resume_starts_exactly_that
                         "'moxi-demo-relay'}}")
     w.sup.units["moxi-demo-idle.service"]["active"] = False
     record: list = []
-    acted = units.stop("demo", record=record)
+    acted = units.stop("demo", stopped=record)
     assert [(a.name, a.ok) for a in acted] == [("relay", True), ("idle", True)]
     assert acted[1].lines == ("demo/idle is not running",)
     assert [(s.module, s.name, s.unit, s.backend, s.marked) for s in record] == [
@@ -286,7 +286,7 @@ def test_stop_records_only_what_runs_socket_first_and_resume_starts_exactly_that
 def test_resume_never_starts_an_entry_twice_or_one_built_by_hand(w):
     w.installed(DAEMONS=DAEMON)
     record: list = []
-    units.stop("demo", ["relay"], record=record)
+    units.stop("demo", ["relay"], stopped=record)
     assert all(a.ok for a in units.resume(record))
     w.sup.calls.clear()
     again = units.resume(record)
@@ -317,7 +317,7 @@ def test_stop_names_none_takes_the_declared_and_rejected_daemons(w, tmp_path):
     w.sup.state("moxi-demo-late.service")["active"] = True
     w.sup.calls.clear()
     record: list = []
-    acted = units.stop("demo", record=record)
+    acted = units.stop("demo", stopped=record)
     assert [a.name for a in acted] == ["relay", "late"]
     assert [s.unit for s in record] == ["moxi-demo-relay.service", "moxi-demo-late.service"]
     assert ("stop", "moxi-demo-snapshot.service") not in w.sup.calls
@@ -326,7 +326,7 @@ def test_stop_names_none_takes_the_declared_and_rejected_daemons(w, tmp_path):
 def test_stop_names_none_raises_when_units_from_fails(w):
     w.installed(DAEMONS=DAEMON, units_from="def units():\n    raise OSError('gone')\n")
     with pytest.raises(units.DeclarationError):
-        units.stop("demo", record=[])
+        units.stop("demo", stopped=[])
     assert w.sup.calls == []
 
 
@@ -346,7 +346,7 @@ def test_replace_stops_and_records_the_unmarked_unit_of_a_declared_daemon(w):
     record: list = []
     [plain] = units.stop("demo", ["relay"])
     assert not plain.ok and w.sup.units["moxi-demo-relay.service"]["active"]
-    [acted] = units.stop("demo", ["relay"], replace=True, record=record)
+    [acted] = units.stop("demo", ["relay"], replace=True, stopped=record)
     assert acted.ok
     assert [(s.unit, s.marked) for s in record] == [("moxi-demo-relay.service", False)]
     assert not w.sup.units["moxi-demo-relay.service"]["active"]
@@ -358,7 +358,7 @@ def test_a_failed_running_read_stops_and_records_nothing(w):
     w.installed(DAEMONS=DAEMON)
     w.sup.fail[("show", None)] = "Failed to connect to bus"
     record: list = []
-    [acted] = units.stop("demo", ["relay"], record=record)
+    [acted] = units.stop("demo", ["relay"], stopped=record)
     assert not acted.ok and "nothing was stopped" in acted.lines[0]
     assert "Failed to connect to bus" in acted.lines[0]
     assert record == [] and w.calls("stop") == []
@@ -369,7 +369,7 @@ def test_a_stop_that_fails_is_recorded_first_and_resumed(w):
                         "'other': {'command': 'moxi-demo-relay'}}")
     w.sup.fail[("stop", "moxi-demo-other.service")] = "Job timed out."
     record: list = []
-    acted = units.stop("demo", record=record)
+    acted = units.stop("demo", stopped=record)
     assert [(a.name, a.ok) for a in acted] == [("relay", True), ("other", False)]
     assert "Job timed out." in acted[1].lines[0]
     assert [s.unit for s in record] == ["moxi-demo-relay.service",
@@ -391,7 +391,7 @@ def test_a_stop_that_raises_leaves_its_entry_recorded_for_resume(w, monkeypatch)
     monkeypatch.setattr(w.backend, "runner", runner)
     record: list = []
     with pytest.raises(RuntimeError, match="the runner broke"):
-        units.stop("demo", record=record)
+        units.stop("demo", stopped=record)
     assert [s.unit for s in record] == ["moxi-demo-relay.service"]
     monkeypatch.setattr(w.backend, "runner", w.sup)
     [started] = units.resume(record)
@@ -402,7 +402,7 @@ def test_a_refused_start_is_reported_never_retried_and_the_next_is_started(w):
     w.installed(DAEMONS="{'relay': {'command': 'moxi-demo-relay'}, "
                         "'other': {'command': 'moxi-demo-relay'}}")
     record: list = []
-    units.stop("demo", record=record)
+    units.stop("demo", stopped=record)
     w.sup.fail[("start", "moxi-demo-relay.service")] = "Unit is masked."
     w.sup.calls.clear()
     first, second = units.resume(record)
@@ -419,7 +419,7 @@ def test_a_start_that_raises_is_caught_into_its_entry(w, monkeypatch):
     w.installed(DAEMONS="{'relay': {'command': 'moxi-demo-relay'}, "
                         "'other': {'command': 'moxi-demo-relay'}}")
     record: list = []
-    units.stop("demo", record=record)
+    units.stop("demo", stopped=record)
 
     def runner(cmd, **kw):
         if cmd[2:] == ["start", "--", "moxi-demo-relay.service"]:
@@ -437,7 +437,7 @@ def test_a_start_that_raises_is_caught_into_its_entry(w, monkeypatch):
 def test_a_start_that_raises_before_naming_its_command_has_no_by_hand_line(w, monkeypatch):
     w.installed(DAEMONS=DAEMON)
     record: list = []
-    units.stop("demo", record=record)
+    units.stop("demo", stopped=record)
 
     def start_id(unit, fence):
         raise RuntimeError("the backend broke")
@@ -452,7 +452,7 @@ def test_resume_starts_a_unit_the_user_disabled_and_leaves_it_disabled(w):
     w.installed(DAEMONS=DAEMON)
     w.sup.units["moxi-demo-relay.service"]["enabled"] = False
     record: list = []
-    units.stop("demo", record=record)
+    units.stop("demo", stopped=record)
     units.resume(record)
     assert w.sup.units["moxi-demo-relay.service"] == {"active": True, "enabled": False}
     assert w.calls("enable") == []
@@ -466,7 +466,7 @@ def test_resume_clears_the_record_of_a_unit_it_started_and_keeps_the_others(w):
                       fix=f"systemctl --user start -- {unit}")
     doctor.record("demo", "unrelated", key="other")
     record: list = []
-    units.stop("demo", record=record)
+    units.stop("demo", stopped=record)
     w.sup.fail[("start", "moxi-demo-other.service")] = "Unit is masked."
     units.resume(record)
     path = moxi.paths._layout("demo").state_dir() / "doctor.json"
@@ -498,7 +498,7 @@ def test_every_act_takes_the_core_lock_nested(w, monkeypatch):
     monkeypatch.setattr(files, "lock", lock)
     record: list = []
     units.start("demo", ["relay"])
-    units.stop("demo", ["relay"], record=record)
+    units.stop("demo", ["relay"], stopped=record)
     units.resume(record)
     units.wrap("backup.timer", module="demo", key="rows.backup", name="backup")
     units.unwrap("backup.timer", module="demo")
@@ -533,13 +533,13 @@ def test_acts_resume_and_wraps_yield_where_this_process_holds_the_lock(w):
 
     def calls():
         record: list = []
-        results.append(units.stop("demo", ["relay"], record=record)[0].ok)
+        results.append(units.stop("demo", ["relay"], stopped=record)[0].ok)
         results.append(units.resume(record)[0].ok)
         results.append(units.wrap("backup.timer", module="demo", key="rows.backup",
                                   name="backup").ok)
         results.append(units.unwrap("backup.timer", module="demo").ok)
 
-    with files.lock(moxi.paths.core_lock(), timeout=0):
+    with files.lock(moxi.paths.core_lock(), timeout_s=0):
         calls()
         thread = threading.Thread(target=calls)
         thread.start()

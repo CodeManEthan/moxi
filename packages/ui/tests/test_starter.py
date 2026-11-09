@@ -542,7 +542,7 @@ class Squatter:
 
     def _run(self):
         try:
-            with files.lock(self._lock, timeout=1):
+            with files.lock(self._lock, timeout_s=1):
                 self._held.set()
                 conn, _ = self.sock.accept()
                 conn.settimeout(5)

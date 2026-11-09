@@ -704,7 +704,7 @@ def raw_connection(path=None):
     from moxi import ipc
 
     from moxi_comms import wire
-    client = ipc.connect(str(path or daemon_socket()), timeout=5.0)
+    client = ipc.connect(str(path or daemon_socket()), timeout_s=5.0)
     try:
         client.hello(wire.VERSIONS)
         yield client
@@ -715,7 +715,7 @@ def raw_connection(path=None):
 def settle(client) -> None:
     """A round trip on `client`: the daemon handles one connection's messages in order,
     so its answer says every message sent before it has been handled."""
-    client.call("max_id", {}, timeout=5.0)
+    client.call("max_id", {}, timeout_s=5.0)
 
 
 def cursor_of(qualified: str):

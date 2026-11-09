@@ -418,9 +418,9 @@ def test_proc_environ_reads_a_process_and_none_for_a_gone_one():
 def test_proc_environ_is_moxi_procs_reader(monkeypatch):
     from moxi import proc
 
-    monkeypatch.setattr(proc, "environ", lambda pid: {"PID": str(pid)})
+    monkeypatch.setattr(proc, "process_env", lambda pid: {"PID": str(pid)})
     assert timer.proc_environ(7) == {"PID": "7"}
-    monkeypatch.setattr(proc, "environ", lambda pid: None)
+    monkeypatch.setattr(proc, "process_env", lambda pid: None)
     assert timer.proc_environ(7) is None
 
 
@@ -433,7 +433,7 @@ def test_env_checkable_asks_the_platform_and_reads_no_process(monkeypatch, platf
     def refuse(*_):
         raise AssertionError("env_checkable read a process")
 
-    monkeypatch.setattr(proc, "environ", refuse)
+    monkeypatch.setattr(proc, "process_env", refuse)
     monkeypatch.setattr(timer, "proc_environ", refuse)
     monkeypatch.setattr(sys, "platform", platform)
     assert timer.env_checkable() is expected

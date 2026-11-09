@@ -218,7 +218,7 @@ def _from_hosts(deadline: float) -> CodexLimits | None:
             if remaining <= 0:
                 return None
             try:
-                answer = session.codex_limits(timeout=remaining)
+                answer = session.codex_limits(timeout_s=remaining)
             except Exception as exc:  # noqa: BLE001 - the next way is tried
                 log.info("the Codex host pid %s did not read the rate limits: %s",
                          session.pid, exc)

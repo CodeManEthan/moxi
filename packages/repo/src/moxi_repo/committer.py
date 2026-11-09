@@ -7,7 +7,7 @@ every committer on that repo:
 
 - the commit part: cadence, what changed, what to leave out, stage, prepare, commit;
 - the push part, which runs on every pass that holds the lock, whatever the commit part
-  returned, so a failed push is retried by the first pass after `push_backoff`;
+  returned, so a failed push is retried by the first pass after `push_backoff_s`;
 - the record part: the repo's state file, then the doctor records, then the sweep.
 
 Only a `busy` pass, which never took the lock, skips the push and record parts. A failure
@@ -235,8 +235,8 @@ def spec_problem(spec: Spec) -> str | None:
             or not all(isinstance(x, str) and x.strip() for x in spec.author)
             or any(c in "".join(spec.author) for c in "<>\n\0")):
         return "author is (name, email), each non-empty, with no '<', '>' or newline"
-    for label, value in (("min_interval", spec.min_interval),
-                         ("push_backoff", spec.push_backoff)):
+    for label, value in (("min_interval", spec.min_interval_s),
+                         ("push_backoff", spec.push_backoff_s)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             return f"{label} is a number of seconds, 0 or more"
     if spec.max_bytes is not None and (isinstance(spec.max_bytes, bool)
@@ -488,12 +488,12 @@ def _plain(x: float) -> str:
 def _fields(spec: Spec) -> list[tuple[str, str]]:
     out = [("paths", p) for p in spec.paths]
     out.append(("author", f"{spec.author[0]} <{spec.author[1]}>"))
-    out.append(("min-interval", _plain(spec.min_interval)))
+    out.append(("min-interval", _plain(spec.min_interval_s)))
     for var, value in (("message", spec.message), ("trailers", spec.trailers),
                        ("prepare", spec.prepare), ("push", spec.push)):
         if value is not None:
             out.append((var, value))
-    out.append(("push-backoff", _plain(spec.push_backoff)))
+    out.append(("push-backoff", _plain(spec.push_backoff_s)))
     out.append(("max-bytes", "none" if spec.max_bytes is None else str(spec.max_bytes)))
     return out
 
@@ -779,9 +779,9 @@ def _unstage(p: _Pass, spec: Spec, paths: list[str], judged: dict) -> bool:
 def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
     now = _now()
     since = _last_commit(p, spec.author)
-    if spec.min_interval and since is not None and now - since < spec.min_interval:
+    if spec.min_interval_s and since is not None and now - since < spec.min_interval_s:
         p.end("throttled", f"the last commit by {spec.author[0]} was {int(now - since)} s "
-                           f"ago; the interval is {_plain(spec.min_interval)} s")
+                           f"ago; the interval is {_plain(spec.min_interval_s)} s")
         return
     stranded = state.get("stranded") or {}
     for attempt in (1, 2):
@@ -1122,7 +1122,7 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
             _push_clear(p, b, state)
             continue
         failed_at = ((state.get("push") or {}).get(b) or {}).get("failed_at")
-        if failed_at is not None and _now() - failed_at < spec.push_backoff:
+        if failed_at is not None and _now() - failed_at < spec.push_backoff_s:
             continue
         _push_one(spec, p, r, b, tip_sha)
 
@@ -1130,7 +1130,7 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
 def _pushable(spec: Spec) -> bool:
     """Whether the spec's push fields can be read, so the push part can run even when
     another field is wrong."""
-    backoff = spec.push_backoff
+    backoff = spec.push_backoff_s
     return ((spec.push is None or (isinstance(spec.push, str)
                                    and bool(_REMOTE.fullmatch(spec.push))))
             and isinstance(backoff, (int, float)) and not isinstance(backoff, bool))
@@ -1168,7 +1168,7 @@ def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
         f"repo: {spec.name} push of {branch} to {remote} failed: {error}"
         + "".join(f"\n  {x}" for x in lines[-20:]),
         f"fix the remote or what refused the push; the first pass after "
-        f"{_plain(spec.push_backoff)} s tries again (moxi repo commit {quote_arg(p.where.top)})")
+        f"{_plain(spec.push_backoff_s)} s tries again (moxi repo commit {quote_arg(p.where.top)})")
 
 
 def _push_reason(lines: list[str], code: int) -> str:
@@ -1376,9 +1376,9 @@ def listing(root) -> list[dict]:
             try:
                 spec = _from_section(where.top, name, saved[name])
                 item["spec"] = {"paths": list(spec.paths), "author": list(spec.author),
-                                "min_interval": spec.min_interval, "message": spec.message,
+                                "min_interval": spec.min_interval_s, "message": spec.message,
                                 "trailers": spec.trailers, "prepare": spec.prepare,
-                                "push": spec.push, "push_backoff": spec.push_backoff,
+                                "push": spec.push, "push_backoff": spec.push_backoff_s,
                                 "max_bytes": spec.max_bytes}
             except SpecError as exc:
                 item["problem"] = str(exc)

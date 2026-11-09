@@ -105,7 +105,7 @@ def resolve(env) -> dict[str, object]:
     except LookupError as exc:
         found["home"] = repr(exc)
     found["expanduser"] = paths._expanduser("~/x", os.environ if env is None else env)
-    found["folders"] = place.folders(env)
+    found["folders"] = place.harness_dirs(env)
     found["which"] = paths.which("tool", env)
     return found
 

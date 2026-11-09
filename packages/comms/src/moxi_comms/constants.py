@@ -56,7 +56,7 @@ IDLE_POLL = 0.1        # seconds between idle checks
 IDLE_SETTLE = 0.3      # queue must be unchanged this long before an idle flush
 
 # --- cold sends ----------------------------------------------------------------------
-# A cache's lifetime is cache's to say (its read gives `ttl_seconds`); comms keeps none.
+# A cache's lifetime is cache's to say (its read gives `ttl_s`); comms keeps none.
 # A binding younger than this with no session id reported yet has simply not had its
 # first look or turn event. The `--next-turn` NOTE reads one older than this, still with
 # no id, as a session launched before comms carried session ids.

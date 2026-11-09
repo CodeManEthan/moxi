@@ -382,7 +382,7 @@ def test_a_command_runs_only_from_an_idle_snapshot(make_endpoint):
     fake.draft = False
     fake.auto_commands = False
     results = []
-    t = threading.Thread(target=lambda: results.append(s.command("clear", timeout=3)))
+    t = threading.Thread(target=lambda: results.append(s.command("clear", timeout_s=3)))
     t.start()
     time.sleep(0.2)
     assert s.command("clear") == turns.Refused("in-flight")
@@ -437,10 +437,10 @@ def test_a_command_the_harness_never_settles_expires_and_frees_the_slot(
     fake.auto_commands = False
     ep, fake = make_endpoint(fake, env=env)
     s = turns.find(session_id="s-1")
-    first = s.command("clear", timeout=0.1)          # the caller stops waiting
+    first = s.command("clear", timeout_s=0.1)          # the caller stops waiting
     assert isinstance(first, turns.Failed)
     assert not first.reason.startswith("expired")
-    assert s.command("exit", timeout=0.1) == turns.Refused("in-flight")
+    assert s.command("exit", timeout_s=0.1) == turns.Refused("in-flight")
     pending = ep._commands[fake.commands[0].id]
     deadline = time.monotonic() + 3
     while pending.result is None and time.monotonic() < deadline:
@@ -450,7 +450,7 @@ def test_a_command_the_harness_never_settles_expires_and_frees_the_slot(
     fake.run_command(fake.commands[0])
     assert ep.ledger.session_id == "s-1"
     fake.auto_commands = True
-    assert s.command("clear", timeout=1) == turns.Ran("s-2")
+    assert s.command("clear", timeout_s=1) == turns.Ran("s-2")
     # A caller who waits without a bound gets the expiry, not a hang.
     fake.auto_commands = False
     t0 = time.monotonic()

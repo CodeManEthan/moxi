@@ -61,11 +61,11 @@ class Reader:
     any other, whether or not it parses. Blank lines are skipped and no other line is.
 
     `first` is line 1's bytes without its newline when `head=True` (`b""` for an empty
-    file), and None without `head` or when line 1 does not end within the head's limit;
+    file), and None without `read_head` or when line 1 does not end within the head's limit;
     the read then ends `limit` with no line yielded.
 
     `ended` is None until the read is over: `start` once the line the read stops at (line
-    1, or line 2 with `head`) has been yielded or there was none to yield, `limit` once the
+    1, or line 2 with `read_head`) has been yielded or there was none to yield, `limit` once the
     limit stopped it with lines left. It is set as soon as the reader knows, which can be
     while the caller holds the last line it will get. A caller that stops iterating before
     then sees None.

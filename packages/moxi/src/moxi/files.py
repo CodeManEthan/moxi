@@ -607,8 +607,9 @@ class Collapse:
     `clock` gives the time in seconds since the epoch.
     """
 
-    def __init__(self, after: int = 10, hourly_past: int | None = None, *,
-                 clock: Callable[[], float] = time.time) -> None:
+    def __init__(  # noqa: MX1 -- after is a count of rows, not a duration
+            self, after: int = 10, hourly_past: int | None = None, *,
+            clock: Callable[[], float] = time.time) -> None:
         if after < 0:
             raise ValueError("after must be zero or more")
         if hourly_past is not None and hourly_past < 0:

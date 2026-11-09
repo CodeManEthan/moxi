@@ -233,7 +233,7 @@ def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_rout
         assert {row["module"] for row in data["servers"]} >= {"snone", "sntwo"}
         assert data["shell"]["budget"] == {"rss": "80M", "fds": 64}
         assert _get(port, "/m/ui/api/servers", browser)[0] == 403
-        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
             found = health.probe(wait=2)
         assert found.state == "running" and health.shell_row(found).state in ("ok", "warn")
         status, _ = call(info, "POST", "/m/ui/api/stop", {})
@@ -286,7 +286,7 @@ def test_a_held_lock_with_no_file_is_starting_never_another_program(site, monkey
     seen = _no_connect(monkeypatch)
     _units(monkeypatch, [SimpleNamespace(module="ui", name="shell", kind="socket",
                                          state="active", detail="", backend="systemd")])
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         found = health.probe(wait=0.3)
     assert found.state == "starting" and health.shell_row(found).state == "warn" and seen == []
 
@@ -326,7 +326,7 @@ def test_a_held_lock_reads_a_runtime_file_whose_start_is_off_the_pids_and_compar
     called = []
     monkeypatch.setattr(health, "_servers", lambda found, timeout: called.append(found) or {
         "shell": {"pid": os.getpid(), "port": 8460}, "servers": []})
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         found = health.probe(wait=0.3)
     assert found.state == "running" and [c.server_id for c in called] == [info.server_id]
 
@@ -344,7 +344,7 @@ def test_the_lock_is_tried_before_the_runtime_file_is_read(site, monkeypatch, he
     _units(monkeypatch, [])
     _no_connect(monkeypatch)
     if held:
-        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
             health.probe(wait=0.1)
     else:
         health.probe(wait=0.1)

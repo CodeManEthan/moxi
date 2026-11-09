@@ -468,7 +468,7 @@ def test_a_host_spawned_with_a_lifeline_is_found_by_pid_and_ends_with_the_pipe(r
     host = rig.spawn("--no-window", "--sandbox", "workspace-write",
                      *_roster_flags([str(rig.work)]), "--model", "gpt-sample",
                      "--instructions-file", str(instructions), lifeline="fd", env=env)
-    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=host.pid, timeout_s=WAIT)
     try:
         assert session.pid == session.endpoint_pid == host.pid
         assert session.harness == "codex" and session.session_id
@@ -495,7 +495,7 @@ def test_a_host_spawned_with_a_lifeline_is_found_by_pid_and_ends_with_the_pipe(r
 @LINUX
 def test_a_host_spawned_with_a_stdin_lifeline_ends_when_its_stdin_closes(rig):
     host = rig.spawn("--no-window", lifeline="stdin")
-    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=host.pid, timeout_s=WAIT)
     server = rig.app_server()
     session.close()
     time.sleep(0.5)
@@ -509,7 +509,7 @@ def test_a_host_spawned_with_a_stdin_lifeline_ends_when_its_stdin_closes(rig):
 @LINUX
 def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig):
     host = rig.spawn("--no-window", stdin=subprocess.PIPE)
-    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=host.pid, timeout_s=WAIT)
     thread = session.session_id
     assert session.facts().ready.source == "startup"
     # A turn runs (the stub ends it), so the later load is a resume, not a start.
@@ -523,7 +523,7 @@ def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig)
     assert "the Codex host was stopped (SIGTERM)" in host.out.read_text()
 
     again = rig.spawn("--no-window", "--resume", thread, stdin=subprocess.DEVNULL)
-    session = turns_client.wait_ready(pid=again.pid, timeout=WAIT)
+    session = turns_client.wait_ready(pid=again.pid, timeout_s=WAIT)
     try:
         assert session.session_id == thread
         assert session.facts().ready.source == "resume"
@@ -541,7 +541,7 @@ def test_a_host_without_a_lifeline_ignores_its_stdin_and_resumes_its_thread(rig)
 @LINUX
 def test_the_app_server_ends_when_its_host_is_killed(rig):
     host = rig.spawn("--no-window")
-    turns_client.wait_ready(pid=host.pid, timeout=WAIT).close()
+    turns_client.wait_ready(pid=host.pid, timeout_s=WAIT).close()
     server = rig.app_server()
     host.kill()
     host.wait()

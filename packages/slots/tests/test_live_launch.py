@@ -271,22 +271,22 @@ def test_wait_ended_wakes_when_the_pane_dies(server, base, tmp_path, monkeypatch
     monkeypatch.setattr(tmux, "attempt", counted)
     placed = go(1, "sh", "-c", "sleep 0.5; exit 4", env=base, cwd=tmp_path)
     started = time.monotonic()
-    got = launch.wait_ended(1, pane_id=placed.pane_id, timeout=10)
+    got = launch.wait_ended(1, pane_id=placed.pane_id, timeout_s=10)
     assert (got.ended, got.dead_status, got.gone) == (True, 4, False)
     assert waits == ["signalled"]
     assert time.monotonic() - started < 0.95
     monkeypatch.setattr(tmux, "attempt", real)
-    again_ = launch.wait_ended(1, pane_id=placed.pane_id, timeout=0)
+    again_ = launch.wait_ended(1, pane_id=placed.pane_id, timeout_s=0)
     assert again_.ended and again_.dead_status == 4
     long = go(2, "sleep", "60", env=base, cwd=tmp_path)
     started = time.monotonic()
-    got = launch.wait_ended(2, pane_id=long.pane_id, timeout=0.3)
+    got = launch.wait_ended(2, pane_id=long.pane_id, timeout_s=0.3)
     assert not got.ended
     assert time.monotonic() - started < 2
     with pytest.raises(UsageError):
-        launch.wait_ended(1, pane_id=long.pane_id, timeout=0)
+        launch.wait_ended(1, pane_id=long.pane_id, timeout_s=0)
     tmux.call("kill-window", "-t", long.window_id)
-    assert launch.wait_ended(2, pane_id=long.pane_id, timeout=1).gone
+    assert launch.wait_ended(2, pane_id=long.pane_id, timeout_s=1).gone
 
 
 def test_a_label_is_shown_as_written(server, base, tmp_path):

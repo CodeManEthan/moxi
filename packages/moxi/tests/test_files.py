@@ -144,7 +144,7 @@ def test_timeout_zero_raises_at_once_naming_the_holder(tmp_path, holder):
     proc = holder(path)
     started = time.monotonic()
     with pytest.raises(files.LockTimeout) as caught:
-        with files.lock(path, timeout=0):
+        with files.lock(path, timeout_s=0):
             pass
     assert time.monotonic() - started < 0.5
     assert caught.value.holder == proc.pid
@@ -158,7 +158,7 @@ def test_a_float_timeout_waits_that_long(tmp_path, holder):
     holder(path)
     started = time.monotonic()
     with pytest.raises(files.LockTimeout):
-        with files.lock(path, timeout=0.3):
+        with files.lock(path, timeout_s=0.3):
             pass
     assert 0.3 <= time.monotonic() - started < 2.0
 
@@ -177,7 +177,7 @@ def test_a_killed_holder_frees_the_lock_at_once(tmp_path, holder):
     proc = holder(path)
     proc.kill()
     proc.wait()
-    with files.lock(path, timeout=0):
+    with files.lock(path, timeout_s=0):
         pass
 
 
@@ -188,9 +188,9 @@ def test_the_lock_is_not_reentrant(tmp_path):
             with files.lock(path):
                 pass
         with pytest.raises(RuntimeError):
-            with files.lock(tmp_path / "." / "x.lock", timeout=0):
+            with files.lock(tmp_path / "." / "x.lock", timeout_s=0):
                 pass
-    with files.lock(path, timeout=0):
+    with files.lock(path, timeout_s=0):
         pass
 
 
@@ -202,7 +202,7 @@ def test_another_thread_of_this_process_is_refused(tmp_path):
 
     def other():
         try:
-            with files.lock(path, timeout=5):
+            with files.lock(path, timeout_s=5):
                 seen.append("took it")
         except RuntimeError as exc:
             seen.append(str(exc))
@@ -215,7 +215,7 @@ def test_another_thread_of_this_process_is_refused(tmp_path):
         waited = time.monotonic() - started
     assert len(seen) == 1 and "another thread of this process" in seen[0]
     assert waited < 2
-    with files.lock(path, timeout=0):
+    with files.lock(path, timeout_s=0):
         pass
 
 
@@ -268,7 +268,7 @@ def test_an_error_in_the_block_releases_the_lock(tmp_path):
     with pytest.raises(KeyError):
         with files.lock(path):
             raise KeyError("x")
-    with files.lock(path, timeout=0):
+    with files.lock(path, timeout_s=0):
         pass
 
 
@@ -290,7 +290,7 @@ def core(tmp_path, monkeypatch):
     from moxi import paths
 
     monkeypatch.setenv("MOXI_HOME", str(tmp_path / "moxi"))
-    monkeypatch.delenv(files.CLAIM_VARIABLE, raising=False)
+    monkeypatch.delenv(files.LOCK_FD_ENV, raising=False)
     monkeypatch.setattr(files, "_claim", None)
     monkeypatch.setattr(files, "_adopted", False)
     return paths.core_lock()
@@ -327,12 +327,12 @@ def test_nested_compares_the_path_made_absolute(core, monkeypatch):
     core.parent.mkdir(parents=True)
     monkeypatch.chdir(core.parent.parent)
     with files.lock(Path(core.parent.name) / ".." / core.parent.name / core.name,
-                    nested=True, timeout=0):
+                    nested=True, timeout_s=0):
         assert core.read_text().strip() == str(os.getpid())
 
 
 def test_a_standalone_nested_call_takes_the_lock(core):
-    with files.lock(core, nested=True, timeout=0):
+    with files.lock(core, nested=True, timeout_s=0):
         assert core.read_text().strip() == str(os.getpid())
         assert taken_elsewhere(core)
     assert not taken_elsewhere(core)
@@ -342,7 +342,7 @@ def test_a_standalone_nested_call_waits_for_an_install(core, holder):
     proc = holder(core)
     started = time.monotonic()
     with pytest.raises(files.LockTimeout) as caught:
-        with files.lock(core, nested=True, timeout=0.3):
+        with files.lock(core, nested=True, timeout_s=0.3):
             pass
     assert time.monotonic() - started >= 0.3
     assert caught.value.holder == proc.pid
@@ -359,14 +359,14 @@ def test_under_the_installs_own_hold_nested_yields_on_every_thread(core):
 
     def other():
         try:
-            with files.lock(core, nested=True, timeout=0):
+            with files.lock(core, nested=True, timeout_s=0):
                 seen.append("yielded")
         except Exception as exc:  # noqa: BLE001 - collected for the assertion
             seen.append(repr(exc))
 
     with files.lock(core):
-        with files.lock(core, nested=True, timeout=0):
-            with files.lock(core, nested=True, timeout=0):
+        with files.lock(core, nested=True, timeout_s=0):
+            with files.lock(core, nested=True, timeout_s=0):
                 pass
         thread = threading.Thread(target=other)
         thread.start()
@@ -378,8 +378,8 @@ def test_under_the_installs_own_hold_nested_yields_on_every_thread(core):
 
 def test_a_nested_call_inside_a_standalone_nested_hold_yields_on_its_thread(core):
     """A standalone caller holds the lock around several core calls that take it too."""
-    with files.lock(core, nested=True, timeout=0):
-        with files.lock(core, nested=True, timeout=0):
+    with files.lock(core, nested=True, timeout_s=0):
+        with files.lock(core, nested=True, timeout_s=0):
             pass
         assert taken_elsewhere(core)
     assert not taken_elsewhere(core)
@@ -401,7 +401,7 @@ def test_another_thread_of_a_standalone_caller_waits_its_turn(core):
 
     def second(timeout):
         try:
-            with files.lock(core, nested=True, timeout=timeout):
+            with files.lock(core, nested=True, timeout_s=timeout):
                 events.append("second in")
         except files.LockTimeout:
             events.append("second timed out")
@@ -436,7 +436,7 @@ def test_a_thread_still_waiting_to_take_the_lock_covers_no_other(core, holder):
     one.start()
     time.sleep(0.2)
     with pytest.raises(files.LockTimeout):
-        with files.lock(core, nested=True, timeout=0.2):
+        with files.lock(core, nested=True, timeout_s=0.2):
             events.append("second in")
     one.join(10)
     proc.wait()
@@ -458,7 +458,7 @@ def test_a_plain_take_still_waiting_covers_no_nested_call(core, holder):
     one.start()
     time.sleep(0.2)
     with pytest.raises(RuntimeError, match="another thread of this process"):
-        with files.lock(core, nested=True, timeout=0.2):
+        with files.lock(core, nested=True, timeout_s=0.2):
             events.append("second in")
     one.join(10)
     proc.wait()
@@ -533,7 +533,7 @@ def start_child(core, script, value):
     """A child of this process, started as the install starts its settle child: the
     lock's descriptor passed to it alone and named in its environment alone."""
     fd = files._descriptor(core)
-    env = {**os.environ, files.CLAIM_VARIABLE: value(fd)}
+    env = {**os.environ, files.LOCK_FD_ENV: value(fd)}
     return subprocess.run([sys.executable, "-c", script], env=env, pass_fds=(fd,),
                           capture_output=True, text=True, timeout=60)
 
@@ -544,7 +544,7 @@ def test_a_child_that_adopts_the_claim_works_under_its_parents_lock(core):
         child = start_child(core, CHILD, str)
         assert child.returncode == 0, child.stderr
         out = json.loads(child.stdout)
-        assert files.CLAIM_VARIABLE not in os.environ
+        assert files.LOCK_FD_ENV not in os.environ
         assert taken_elsewhere(core)
     assert out["adopted"] is True and out["again"] is True
     assert out["variable"] is None
@@ -594,7 +594,7 @@ def test_a_forged_claim_is_never_honoured(core, value):
 
 def test_a_child_with_no_claim_variable_holds_no_claim(core):
     assert files.adopt_core_claim(core) is False
-    with files.lock(core, nested=True, timeout=0):
+    with files.lock(core, nested=True, timeout_s=0):
         assert core.read_text().strip() == str(os.getpid())
 
 
@@ -604,12 +604,12 @@ def test_lock_never_reads_the_variable(core, holder, monkeypatch):
     proc = holder(core)
     fd = os.open(core, os.O_RDONLY)
     try:
-        monkeypatch.setenv(files.CLAIM_VARIABLE, str(fd))
+        monkeypatch.setenv(files.LOCK_FD_ENV, str(fd))
         with pytest.raises(files.LockTimeout) as caught:
-            with files.lock(core, nested=True, timeout=0.2):
+            with files.lock(core, nested=True, timeout_s=0.2):
                 pass
         assert caught.value.holder == proc.pid
-        assert os.environ[files.CLAIM_VARIABLE] == str(fd)
+        assert os.environ[files.LOCK_FD_ENV] == str(fd)
     finally:
         os.close(fd)
 
@@ -621,22 +621,22 @@ def test_adoption_deletes_the_variable_and_a_second_call_reads_nothing(core, tmp
     fd = os.open(core, os.O_RDONLY)
     try:
         os.set_inheritable(fd, True)
-        monkeypatch.setenv(files.CLAIM_VARIABLE, named(fd))
+        monkeypatch.setenv(files.LOCK_FD_ENV, named(fd))
         assert files.adopt_core_claim(core) is True
-        assert files.CLAIM_VARIABLE not in os.environ
+        assert files.LOCK_FD_ENV not in os.environ
         if sys.platform != "win32":
             assert os.get_inheritable(fd) is False
-        monkeypatch.setenv(files.CLAIM_VARIABLE, "999")
+        monkeypatch.setenv(files.LOCK_FD_ENV, "999")
         assert files.adopt_core_claim(core) is True
-        assert os.environ[files.CLAIM_VARIABLE] == "999"
+        assert os.environ[files.LOCK_FD_ENV] == "999"
     finally:
         os.close(fd)
 
 
 def test_a_failed_adoption_stays_failed(core, monkeypatch):
-    monkeypatch.setenv(files.CLAIM_VARIABLE, "999")
+    monkeypatch.setenv(files.LOCK_FD_ENV, "999")
     assert files.adopt_core_claim(core) is False
-    assert files.CLAIM_VARIABLE not in os.environ
+    assert files.LOCK_FD_ENV not in os.environ
     assert files.adopt_core_claim(core) is False
 
 
@@ -645,9 +645,9 @@ def test_an_adopted_claim_lets_nested_calls_yield(core, holder):
     proc = holder(core)
     fd = os.open(core, os.O_RDONLY)
     try:
-        os.environ[files.CLAIM_VARIABLE] = named(fd)
+        os.environ[files.LOCK_FD_ENV] = named(fd)
         assert files.adopt_core_claim(core) is True
-        with files.lock(core, nested=True, timeout=0):
+        with files.lock(core, nested=True, timeout_s=0):
             pass
         assert core.read_text().strip() == str(proc.pid)
     finally:
@@ -661,19 +661,19 @@ def test_a_claim_that_no_longer_checks_is_dropped_with_a_warning(core, tmp_path,
     core.parent.mkdir(parents=True)
     core.touch()
     fd = os.open(core, os.O_RDONLY)
-    os.environ[files.CLAIM_VARIABLE] = str(fd)
+    os.environ[files.LOCK_FD_ENV] = str(fd)
     assert files.adopt_core_claim(core) is True
     other = os.open(tmp_path / "elsewhere", os.O_RDWR | os.O_CREAT, 0o600)
     os.dup2(other, fd, inheritable=False)
     os.close(other)
     try:
-        with files.lock(core, nested=True, timeout=0):
+        with files.lock(core, nested=True, timeout_s=0):
             assert core.read_text().strip() == str(os.getpid())
             assert taken_elsewhere(core)
         err = capfd.readouterr().err
         assert err.count("\n") == 1 and "lock claim" in err
         assert files.adopt_core_claim(core) is False
-        with files.lock(core, nested=True, timeout=0):
+        with files.lock(core, nested=True, timeout_s=0):
             pass
         assert capfd.readouterr().err == ""
     finally:
@@ -808,7 +808,7 @@ def test_edit_toml_holds_the_files_lock(tmp_path, holder):
     target = tmp_path / "config.toml"
     holder(tmp_path / "config.toml.lock")
     with pytest.raises(files.LockTimeout):
-        with files.edit_toml(target, timeout=0.1):
+        with files.edit_toml(target, timeout_s=0.1):
             pytest.fail("the block ran")
     assert not target.exists()
 
@@ -824,12 +824,12 @@ def test_edit_toml_takes_the_lock_it_is_given_and_none_beside_the_file(tmp_path,
     assert target.read_text() == "a = 2\n" and given.exists()
     assert [p.name for p in folder.iterdir()] == ["loadout.toml"]
     holder(folder / "loadout.toml.lock")          # the default lock is not waited on
-    with files.edit_toml(target, timeout=0.1, lock=given) as doc:
+    with files.edit_toml(target, timeout_s=0.1, lock=given) as doc:
         doc["a"] = 3
     assert target.read_text() == "a = 3\n"
     holder(str(given))
     with pytest.raises(files.LockTimeout):
-        with files.edit_toml(target, timeout=0.1, lock=str(given)):
+        with files.edit_toml(target, timeout_s=0.1, lock=str(given)):
             pytest.fail("the block ran")
     assert target.read_text() == "a = 3\n"
 

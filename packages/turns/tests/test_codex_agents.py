@@ -36,7 +36,7 @@ def item(app, event, payload, thread="thread-1"):
 
 
 def session(endpoint):
-    return Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    return Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
 
 
 def wait_for(pred, timeout=3.0):
@@ -372,7 +372,7 @@ def test_a_failed_terminal_list_refuses_a_plain_compact_but_not_one_that_stops_t
     assert s.command("compact") == Refused("busy-agents")
     # With stop_shells the terminals leave the check, so the known subagents decide it.
     app.list_errors = [error] * 3
-    result = s.command("compact", stop_shells=True, timeout=15)
+    result = s.command("compact", stop_shells=True, timeout_s=15)
     assert result.shells is not None and result.shells.complete is False
 
 

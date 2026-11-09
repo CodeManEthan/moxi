@@ -397,11 +397,11 @@ def test_facts_and_agents_ride_their_own_connection(make_endpoint):
 def test_wait_ready_returns_once_the_ready_is_raised(make_endpoint):
     ep, fake = make_endpoint()
     with pytest.raises(TimeoutError):
-        turns.wait_ready(session_id="s-1", timeout=0.3)
+        turns.wait_ready(session_id="s-1", timeout_s=0.3)
     threading.Timer(0.2, ep.ready, ("startup", "s-1")).start()
-    s = turns.wait_ready(session_id="s-1", timeout=3)
+    s = turns.wait_ready(session_id="s-1", timeout_s=3)
     assert s.facts().ready.source == "startup"
-    assert turns.wait_ready(pid=os.getpid(), timeout=1).session_id == "s-1"
+    assert turns.wait_ready(pid=os.getpid(), timeout_s=1).session_id == "s-1"
 
 
 # -- versions ---------------------------------------------------------------------------

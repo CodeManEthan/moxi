@@ -273,7 +273,7 @@ def resume(session_id: str, *, slot: int | str | None = None,
         if launch is None:
             result = api.launch(request, env=environ, warn=warn)
         else:
-            result = launch(request, environ=environ, warn=warn)
+            result = launch(request, env=environ, warn=warn)
     except store.SessionLive as met:
         raise met_refusal(met) from None
     lines = (result.line,)

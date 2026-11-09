@@ -216,3 +216,163 @@ def test_removed_scope_keep_form_is_already_applied(tmp_path):
                     row("-", "removed:p.x:gone", "keep", "old", "new"))
     project = rename.Project(root)
     assert rename.state(project, rename.read_table(renames)[0]) == "applied"
+
+
+def test_a_field_row_renames_constructor_keywords_and_self_reads(tmp_path):
+    root = repo(tmp_path, {
+        "packages/p/src/p/model.py": '''
+from dataclasses import dataclass
+@dataclass
+class Clock:
+    age_seconds: float = 0.0
+    def older(self):
+        return self.age_seconds + 1
+''',
+        "packages/p/src/p/use.py": "from p.model import Clock\nmade = Clock(age_seconds=3)\n",
+    })
+    renames = table(tmp_path,
+                    row("packages/p/src/p/model.py", "Clock", "name", "age_seconds", "age_s"))
+    assert rename.run(root, renames) == 0
+    model = (root / "packages/p/src/p/model.py").read_text()
+    assert "    age_s: float" in model and "self.age_s + 1" in model
+    assert "Clock(age_s=3)" in (root / "packages/p/src/p/use.py").read_text()
+
+
+def test_kwonly_names_every_later_positional_argument_and_drops_the_old_star(tmp_path):
+    root = repo(tmp_path, {
+        "packages/p/src/p/git.py": '''
+def changes(root, staged=True, rng=None, *, paths=()):
+    return root
+''',
+        "packages/p/src/p/use.py": "from p.git import changes\nchanges('.', False, 'a..b')\n",
+    })
+    renames = table(tmp_path,
+                    row("packages/p/src/p/git.py", "changes", "kwonly", "staged", "staged"))
+    assert rename.run(root, renames) == 0
+    text = (root / "packages/p/src/p/git.py").read_text()
+    assert "def changes(root, *, staged=True, rng=None, paths=()):" in text
+    assert "changes('.', staged=False, rng='a..b')" in (
+        root / "packages/p/src/p/use.py").read_text()
+
+
+def test_all_strings_change_only_inside_all(tmp_path):
+    root = repo(tmp_path, {"packages/p/src/p/paths.py": '''
+HOME = "P_HOME"
+LOCATORS = ("HOME", "DATA_HOME")
+__all__ = ["HOME", "LOCATORS"]
+'''})
+    renames = table(tmp_path, row("packages/p/src/p/paths.py", "-", "name", "HOME", "HOME_ENV"),
+                    row("packages/p/src/p/paths.py", 'LOCATORS = ("HOME", "DATA_HOME")',
+                        "keep", "HOME", "HOME"))
+    assert rename.run(root, renames) == 0
+    text = (root / "packages/p/src/p/paths.py").read_text()
+    assert 'LOCATORS = ("HOME", "DATA_HOME")' in text and '__all__ = ["HOME_ENV",' in text
+
+
+def test_a_parameter_cite_changes_only_inside_its_function(tmp_path, capsys):
+    root = repo(tmp_path, {"packages/p/src/p/x.py": '''
+"""`run` waits `timeout` seconds."""
+def run(timeout=1):
+    """Give up after `timeout` seconds."""
+def other(timeout=2):
+    """Its own `timeout`."""
+'''})
+    renames = table(tmp_path, row("packages/p/src/p/x.py", "run", "name", "timeout", "timeout_s"))
+    assert rename.run(root, renames) == 1
+    text = (root / "packages/p/src/p/x.py").read_text()
+    assert "after `timeout_s` seconds" in text and "Its own `timeout`" in text
+    assert "waits `timeout` seconds" in text
+    assert "x.py:2: comment still cites 'timeout'" in capsys.readouterr().out
+
+
+def test_a_keep_row_stops_a_cite_rewrite_on_its_line(tmp_path):
+    root = repo(tmp_path, {"packages/p/src/p/paths.py": '''
+"""The home is `HOME`, or `HOME`'s value."""
+HOME = "P_HOME"
+x = HOME
+'''})
+    renames = table(tmp_path, row("packages/p/src/p/paths.py", "-", "name", "HOME", "HOME_ENV"),
+                    row("packages/p/src/p/paths.py", '"""The home is `HOME`, or `HOME`\'s value."""',
+                        "keep", "HOME", "HOME"))
+    assert rename.run(root, renames) == 0
+    text = (root / "packages/p/src/p/paths.py").read_text()
+    assert "The home is `HOME`" in text and "x = HOME_ENV" in text
+
+
+def test_an_instance_attribute_chain_is_unresolved_and_a_parameter_is_never_one(tmp_path,
+                                                                                capsys):
+    root = repo(tmp_path, {"packages/p/src/p/x.py": '''
+class Holder:
+    def __init__(self):
+        self.inner = object()
+    def read(self):
+        return self.inner.marker
+marker = 1
+def fn(wait=1):
+    return wait
+thing.wait
+thing.wait()
+'''})
+    renames = table(tmp_path, row("packages/p/src/p/x.py", "-", "name", "marker", "mark"),
+                    row("packages/p/src/p/x.py", "fn", "name", "wait", "wait_s"))
+    assert rename.run(root, renames, dry_run=True) == 1
+    out = capsys.readouterr().out
+    assert "x.py:6: unresolved attribute still uses 'marker'" in out
+    assert "'wait'" not in out
+
+
+def test_a_run_that_would_not_parse_writes_nothing(tmp_path):
+    source = "def fn(wait=1):\n    return wait\n"
+    root = repo(tmp_path, {"packages/p/src/p/x.py": source})
+    renames = table(tmp_path, row("packages/p/src/p/x.py", "fn", "name", "wait", "class"))
+    try:
+        rename.run(root, renames)
+    except rename.RenameError as exc:
+        assert "would not parse" in str(exc)
+    else:
+        raise AssertionError("the run did not refuse")
+    assert (root / "packages/p/src/p/x.py").read_text() == source
+
+
+def test_a_lazy_reexport_table_resolves_and_tests_are_read(tmp_path):
+    root = repo(tmp_path, {
+        "packages/p/src/p/__init__.py": '''
+_LAZY = {"connect": "_client", **dict.fromkeys(("Client",), "_client")}
+def __getattr__(name):
+    import importlib
+    return getattr(importlib.import_module(f"{__name__}.{_LAZY[name]}"), name)
+''',
+        "packages/p/src/p/_client.py": "def connect(address, timeout=1):\n    return address\n",
+        "packages/q/src/q/use.py": "import p\np.connect('a', timeout=2)\n",
+        "packages/q/tests/test_use.py": "from p import connect\nconnect('b', timeout=3)\n",
+    })
+    renames = table(tmp_path, row("packages/p/src/p/_client.py", "connect", "name", "timeout",
+                                  "timeout_s"))
+    assert rename.run(root, renames) == 0
+    assert "p.connect('a', timeout_s=2)" in (root / "packages/q/src/q/use.py").read_text()
+    assert "connect('b', timeout_s=3)" in (root / "packages/q/tests/test_use.py").read_text()
+
+
+def test_use_rows_on_one_line_apply_together_and_keep_covers_a_later_keyword_line(tmp_path,
+                                                                                  capsys):
+    root = repo(tmp_path, {
+        "packages/p/src/p/x.py": "def fn(wait=1, timeout=1):\n    return wait\n",
+        "packages/q/src/q/use.py": '''
+fn = load()
+fn(wait=1, timeout=2) or other.wait
+proc.join(1,
+          timeout=3)
+''',
+    })
+    line = "fn(wait=1, timeout=2) or other.wait"
+    renames = table(tmp_path,
+                    row("packages/p/src/p/x.py", "fn", "name", "wait", "wait_s"),
+                    row("packages/p/src/p/x.py", "fn", "name", "timeout", "timeout_s"),
+                    row("packages/q/src/q/use.py", line, "use", "wait=", "wait_s="),
+                    row("packages/q/src/q/use.py", line, "use", "timeout=", "timeout_s="),
+                    row("packages/q/src/q/use.py", "timeout=3)", "keep", "timeout", "timeout"))
+    assert rename.run(root, renames) == 0
+    text = (root / "packages/q/src/q/use.py").read_text()
+    assert "fn(wait_s=1, timeout_s=2) or other.wait" in text and "timeout=3)" in text
+    assert rename.run(root, renames, dry_run=True) == 0
+    assert "0 to apply, 5 applied, 0 not here" in capsys.readouterr().out

@@ -199,7 +199,7 @@ def check(argv: Sequence[str] = ()) -> str | None:
     api, why = ui()
     if api is None:
         return unloadable(why)
-    return api.check(places(reads=reads(argv)), programs=PROGRAMS, page=True)
+    return api.check(places(reads=reads(argv)), programs=PROGRAMS, for_page=True)
 
 
 def note() -> str | None:
@@ -211,7 +211,7 @@ def note() -> str | None:
     if api is None:
         return unloadable(why) if page else None
     try:
-        return api.check(places(reads=reads()), programs=PROGRAMS, page=page)
+        return api.check(places(reads=reads()), programs=PROGRAMS, for_page=page)
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return f"loadout couldn't compare its folders with your terminal's: {exc}"
 

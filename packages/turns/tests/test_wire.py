@@ -40,7 +40,7 @@ def connect():
     clients = []
 
     def make(ep, *, hello=True):
-        client = ipc.connect(ep.address, timeout=5)
+        client = ipc.connect(ep.address, timeout_s=5)
         clients.append(client)
         if hello:
             client.hello((2, 2))
@@ -72,7 +72,7 @@ def started(client, answer: dict) -> R.Started:
     """Wait until the delivery `answer` names has started: the answer comes before the
     worker hands the delivery to the harness."""
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
-                               "timeout_ms": 5000}, timeout=10)
+                               "timeout_ms": 5000}, timeout_s=10)
     return R.from_wire(got["result"])
 
 
@@ -99,7 +99,7 @@ def test_hello_json_follows_the_session_id(make_endpoint):
 
 def test_the_session_answer_names_the_harness_and_the_endpoint(make_endpoint, connect):
     ep, _ = make_endpoint(FakeHarness(pid=4242))
-    session = connect(ep).call("session", {}, timeout=5)
+    session = connect(ep).call("session", {}, timeout_s=5)
     assert (session["pid"], session["endpoint_pid"]) == (4242, os.getpid())
     assert session["harness"] == "fake" and session["nonce"] == ep.nonce
     assert session["session_id"] == "s-1" and "trouble" not in session
@@ -121,7 +121,7 @@ def test_stop_takes_the_directory_the_socket_and_its_lock(make_endpoint):
     assert not os.path.lexists(ep.address)
     assert not os.path.lexists(ep.address + ".lock")
     with pytest.raises(ipc.NotServing):
-        ipc.connect(ep.address, timeout=1)
+        ipc.connect(ep.address, timeout_s=1)
 
 
 def test_framing_is_moxi_ipcs(make_endpoint, connect):
@@ -136,11 +136,11 @@ def test_framing_is_moxi_ipcs(make_endpoint, connect):
     assert "v" not in answer
     client = connect(ep, hello=False)
     with pytest.raises(ipc.RpcError) as caught:
-        client.call("facts", {}, timeout=5)
+        client.call("facts", {}, timeout_s=5)
     assert caught.value.code == -32002
     client = connect(ep)
     with pytest.raises(ipc.RpcError) as caught:
-        client.call("deliver", ["x"], timeout=5)
+        client.call("deliver", ["x"], timeout_s=5)
     assert caught.value.code == -32602
 
 
@@ -207,7 +207,7 @@ def test_version_1s_scan_finds_and_removes_nothing_of_version_2(make_endpoint):
 def test_a_dead_directory_goes_on_sweeps_word(turns_env):
     dead, address = _dead_v2()
     with pytest.raises(ipc.NotServing):
-        ipc.connect(address, timeout=1)
+        ipc.connect(address, timeout_s=1)
     assert protocol.sweep(dead, address) == "removed"
     assert not dead.exists() and not os.path.lexists(address)
     assert not os.path.lexists(address + ".lock")
@@ -239,7 +239,7 @@ def test_a_refused_connect_with_the_lock_held_removes_nothing(turns_env):
     try:
         assert holder.stdout.readline().strip() == "held"
         with pytest.raises(ipc.NotServing):
-            ipc.connect(address, timeout=1)
+            ipc.connect(address, timeout_s=1)
         assert protocol.sweep(dead, address) == "live"
         assert (dead / "hello.json").exists() and os.path.lexists(address)
     finally:
@@ -381,13 +381,13 @@ def test_a_dead_version_1_directory_reads_as_no_answer_and_stays(turns_env):
 def test_a_watch_gets_its_facts_then_every_notification_in_order(make_endpoint, connect):
     ep, fake = make_endpoint()
     watch = connect(ep)
-    first = R.from_wire(watch.call("watch", {}, timeout=5)["facts"])
+    first = R.from_wire(watch.call("watch", {}, timeout_s=5)["facts"])
     assert (first.turn_number, first.turn_open, first.turn) == (0, False, None)
     client = connect(ep)
     ep.ready("startup", "s-1")
-    opened = client.call("deliver", {"text": "one", "ref": "r1"}, timeout=5)
+    opened = client.call("deliver", {"text": "one", "ref": "r1"}, timeout_s=5)
     started(client, opened)
-    steered = client.call("steer", {"text": "two", "ref": "r2"}, timeout=5)
+    steered = client.call("steer", {"text": "two", "ref": "r2"}, timeout_s=5)
     started(client, steered)
     fake.end_turn("answer")
     fake.start_turn()                             # the person's own turn
@@ -408,7 +408,7 @@ def test_a_watch_gets_its_facts_then_every_notification_in_order(make_endpoint, 
 def test_a_watch_ends_with_session_gone(make_endpoint, connect):
     ep, _ = make_endpoint()
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     threading.Timer(0.1, ep.stop, args=("the session ended",)).start()
     assert list(watch.notifications()) == [("session.gone", {"reason": "the session ended"})]
 
@@ -416,13 +416,13 @@ def test_a_watch_ends_with_session_gone(make_endpoint, connect):
 def test_facts_name_the_open_turn_and_the_last_ready(make_endpoint, connect):
     ep, fake = make_endpoint()
     client = connect(ep)
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = R.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.ready is None and facts.turn is None
     ep.ready("resume", "s-1")
     before = time.time()
-    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
+    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout_s=5)
     started(client, d)
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = R.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn_open and facts.turn_number == 1
     assert facts.turn.opening == R.DeliveryRef(d["delivery"], "r1")
     assert facts.turn.turn_id == "t1" and facts.turn.command is None
@@ -430,35 +430,35 @@ def test_facts_name_the_open_turn_and_the_last_ready(make_endpoint, connect):
     assert (facts.ready.source, facts.ready.session_id) == ("resume", "s-1")
     assert facts.ready.at is not None
     fake.end_turn()
-    assert R.from_wire(client.call("facts", {}, timeout=5)).turn is None
+    assert R.from_wire(client.call("facts", {}, timeout_s=5)).turn is None
 
 
 def test_a_held_turn_reads_no_turn_until_its_tie(make_endpoint, connect):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     client = connect(ep)
-    d = client.call("deliver", {"text": "x", "ref": "r9"}, timeout=5)
+    d = client.call("deliver", {"text": "x", "ref": "r9"}, timeout_s=5)
     ep.turn_started("t1", held=True)
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = R.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn_open and facts.turn is None
     ep.turn_tied("t1", d["delivery"])
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = R.from_wire(client.call("facts", {}, timeout_s=5))
     assert facts.turn.opening == R.DeliveryRef(d["delivery"], "r9")
 
 
 def test_every_delivery_value_names_its_delivery_and_its_ref(make_endpoint, connect):
     ep, fake = make_endpoint()
     client = connect(ep)
-    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
+    d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout_s=5)
     assert started(client, d) == R.Started("t1", d["delivery"], "r1")
     by_ref = client.call("wait", {"ref": "r1", "until": "ended", "timeout_ms": 0},
-                         timeout=5)
+                         timeout_s=5)
     assert by_ref == {"delivery": d["delivery"], "pending": True}
     fake.end_turn()
     ended = client.call("wait", {"ref": "r1", "until": "ended", "timeout_ms": 1000},
-                        timeout=5)
+                        timeout_s=5)
     assert ended["delivery"] == d["delivery"]
     assert R.from_wire(ended["result"]) == R.Ended("t1", "answer", d["delivery"], "r1")
-    idle = client.call("steer", {"text": "y", "ref": "r2"}, timeout=5)
+    idle = client.call("steer", {"text": "y", "ref": "r2"}, timeout_s=5)
     assert R.from_wire(idle["result"]) == R.Refused("idle", idle["delivery"], "r2")
 
 
@@ -467,7 +467,7 @@ def test_every_delivery_value_names_its_delivery_and_its_ref(make_endpoint, conn
 def test_the_stop_handler_answers_each_stop_on_its_connection(make_endpoint, connect):
     ep, _ = make_endpoint()
     handler = connect(ep)
-    assert handler.call("stops.handle", {}, timeout=5) == {}
+    assert handler.call("stops.handle", {}, timeout_s=5) == {}
     answers: list = []
     asked = threading.Thread(target=lambda: answers.append(
         ep.on_stop(StopFacts("t1", "s-1", False, ("shell",), 0))))
@@ -476,13 +476,13 @@ def test_the_stop_handler_answers_each_stop_on_its_connection(make_endpoint, con
     assert method == "stop.asked"
     assert R.from_wire(params["facts"]) == StopFacts("t1", "s-1", False, ("shell",), 0)
     assert handler.call("stops.answer", {"ask": params["ask"], "reason": "keep going"},
-                        timeout=5) == {"taken": True}
+                        timeout_s=5) == {"taken": True}
     asked.join(5)
     assert answers == ["keep going"]
     assert handler.call("stops.answer", {"ask": params["ask"], "reason": None},
-                        timeout=5) == {"taken": False}
+                        timeout_s=5) == {"taken": False}
     assert handler.call("stops.answer", {"ask": 999, "reason": None},
-                        timeout=5) == {"taken": False}
+                        timeout_s=5) == {"taken": False}
 
 
 def test_a_late_answer_is_not_taken_and_a_closed_handler_frees_the_slot(
@@ -490,20 +490,20 @@ def test_a_late_answer_is_not_taken_and_a_closed_handler_frees_the_slot(
     ep, _ = make_endpoint()
     ep.stop_wait_s = 0.2
     handler = connect(ep)
-    handler.call("stops.handle", {}, timeout=5)
+    handler.call("stops.handle", {}, timeout_s=5)
     assert ep.on_stop(StopFacts()) is None               # nobody answered in time
     [(_, params)] = notes(handler, 1)
     assert handler.call("stops.answer", {"ask": params["ask"], "reason": "late"},
-                        timeout=5) == {"taken": False}
+                        timeout_s=5) == {"taken": False}
     other = connect(ep)
     with pytest.raises(ipc.RpcError) as caught:
-        other.call("stops.handle", {}, timeout=5)
+        other.call("stops.handle", {}, timeout_s=5)
     assert caught.value.code == R.ERROR_STOP_HANDLER_TAKEN
     handler.close()
     deadline = time.monotonic() + 5
     while True:
         try:
-            assert other.call("stops.handle", {}, timeout=5) == {}
+            assert other.call("stops.handle", {}, timeout_s=5) == {}
             break
         except ipc.RpcError:
             assert time.monotonic() < deadline
@@ -537,15 +537,15 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
     ep, _ = make_endpoint(ExitPasses(), registry=registry, env=env)
     ep.listen_wait_s = 10
     watch = connect(ep)
-    watch.call("watch", {}, timeout=5)
+    watch.call("watch", {}, timeout_s=5)
     client = connect(ep)
-    result = client.call("command", {"name": "exit"}, timeout=5)
+    result = client.call("command", {"name": "exit"}, timeout_s=5)
     assert R.from_wire(result["result"]) == Passed()
     # The harness is still up: every method answers.
-    assert R.from_wire(client.call("facts", {}, timeout=5)).session_id == "s-1"
-    assert R.from_wire(client.call("agents", {}, timeout=5)).complete is True
-    assert "facts" in connect(ep).call("watch", {}, timeout=5)
-    assert client.call("session", {}, timeout=5)["nonce"] == ep.nonce
+    assert R.from_wire(client.call("facts", {}, timeout_s=5)).session_id == "s-1"
+    assert R.from_wire(client.call("agents", {}, timeout_s=5)).complete is True
+    assert "facts" in connect(ep).call("watch", {}, timeout_s=5)
+    assert client.call("session", {}, timeout_s=5)["nonce"] == ep.nonce
     # The endpoint's own end: from then on each method answers `gone`.
     stopping = threading.Thread(target=ep.stop, args=("the harness process exited",))
     stopping.start()
@@ -553,7 +553,7 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
         assert gone_called.wait(5)
         for method in ("session", "facts", "agents", "watch"):
             with pytest.raises(ipc.RpcError) as caught:
-                client.call(method, {}, timeout=5)
+                client.call(method, {}, timeout_s=5)
             assert caught.value.code == R.ERROR_GONE
     finally:
         released.set()

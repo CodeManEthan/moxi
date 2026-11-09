@@ -865,7 +865,7 @@ def _ready(turns: Any, launch: Launch, row: store.LaunchRow | None,
         if row is None or not row.session_id:
             return None
         where = {"session_id": row.session_id}
-    return lambda timeout: turns.wait_ready(**where, timeout=timeout)
+    return lambda timeout: turns.wait_ready(**where, timeout_s=timeout)
 
 
 def _start_deliverer(launch: Launch, pid: int) -> Started | None:

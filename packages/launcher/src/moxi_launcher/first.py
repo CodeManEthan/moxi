@@ -340,7 +340,7 @@ def _wait_ready(turns: Any, row: store.LaunchRow, pid: int | None,
             return "no session id to find the session by"
         where = {"session_id": row.session_id}
     try:
-        return turns.wait_ready(**where, timeout=timeout)
+        return turns.wait_ready(**where, timeout_s=timeout)
     except TimeoutError:
         return f"not ready within {timeout:g} s"
     except Exception as error:  # noqa: BLE001  (turns could not find the session)

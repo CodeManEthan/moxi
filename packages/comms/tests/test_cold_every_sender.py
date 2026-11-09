@@ -309,7 +309,7 @@ def test_a_warm_and_a_cold_clock_through_the_seam(tmp_path):
     root = str(projects_root())
     assert cache.clock_state("claude-shim", SESS_A, projects_root=root).kind == "warm"
     cold = cache.clock_state("claude-shim", SESS_B, projects_root=root)
-    assert (cold.kind, cold.ttl_seconds) == ("cold", HOUR)
+    assert (cold.kind, cold.ttl_s) == ("cold", HOUR)
     fresh = cache.clock_state("claude-shim", SESS_C, projects_root=root, turned=False)
     assert fresh.kind == "fresh", "no transcript, on the session's own word"
 

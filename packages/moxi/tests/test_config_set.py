@@ -464,7 +464,7 @@ def test_a_schema_declaring_a_key_under_a_switch_table_is_refused():
 def test_what_makes_a_switch_table(change, switch):
     spec = {"type": "table", "items": "bool", "default": {}, "doc": "d", "read": "use",
             **change}
-    key = config.Key(name="rows", type=spec["type"], default=spec["default"], doc="d",
+    key = config.Key(name="rows", value_type=spec["type"], default=spec["default"], doc="d",
                      read=spec["read"], items=spec["items"])
     assert config.is_switch_table(key) is switch
 
@@ -491,7 +491,7 @@ def test_bad_items_or_needs_are_refused(extra, words):
 
 
 def test_a_key_is_a_plain_read_only_record():
-    key = config.Key(name="a", type="int", default=1, doc="d", read="use")
+    key = config.Key(name="a", value_type="int", default=1, doc="d", read="use")
     assert key == config.Key("a", "int", 1, "d", "use")
     assert hash(key) == hash(config.Key("a", "int", 1, "d", "use"))
     assert (key.values, key.env, key.retired, key.needs, key.items) == (None,) * 5

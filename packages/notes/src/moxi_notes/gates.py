@@ -127,7 +127,7 @@ def _base(ctx) -> str:
     """`HEAD`'s commit, or the empty tree on an unborn branch."""
     from . import blobs
 
-    done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=blobs.TIMEOUT)
+    done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout_s=blobs.TIMEOUT)
     head = done.stdout.strip() if done.returncode == 0 else ""
     if head:
         return head
@@ -263,7 +263,7 @@ def _leave_out(ctx, base, entries, found, problem):
 def _known(ctx, oid: str) -> bool:
     from . import blobs
 
-    done = ctx.git("cat-file", "-e", f"{oid}^{{commit}}", timeout=blobs.TIMEOUT)
+    done = ctx.git("cat-file", "-e", f"{oid}^{{commit}}", timeout_s=blobs.TIMEOUT)
     return done.returncode == 0
 
 

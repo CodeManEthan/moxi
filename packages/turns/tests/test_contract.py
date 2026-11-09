@@ -354,7 +354,7 @@ def test_the_busy_count_reads_the_agents_list():
                        R.Agent("e", "shell", "running", False),
                        R.Agent("f", "teammate", "pending", False)), True, 1.0)
     assert agents.busy() == 4
-    assert agents.busy(shells=False) == 3
+    assert agents.busy(include_shells=False) == 3
     assert R.Agents(agents.entries, False, 1.0).busy() is None
     assert R.Agents((), True, 1.0).busy() == 0
 
@@ -379,7 +379,7 @@ def connect(make_endpoint):
     def make(can=R.CAPABILITIES, *, hello=True, ep=None):
         if ep is None:
             ep, _ = make_endpoint(FakeHarness(can=can))
-        client = ipc.connect(ipc.address("turns", ep.dir.name), timeout=5)
+        client = ipc.connect(ipc.address("turns", ep.dir.name), timeout_s=5)
         clients.append(client)
         if hello:
             client.hello((2, 2))
@@ -392,7 +392,7 @@ def connect(make_endpoint):
 
 def _code(client, method, params=None) -> ipc.RpcError:
     with pytest.raises(ipc.RpcError) as caught:
-        client.call(method, params, timeout=5)
+        client.call(method, params, timeout_s=5)
     return caught.value
 
 
@@ -504,15 +504,15 @@ def test_a_capability_the_session_lacks(connect, method, params, capability):
 @_POSIX
 def test_the_result_shapes_of_the_reads(connect):
     client, ep = connect()
-    session = client.call("session", {}, timeout=5)
+    session = client.call("session", {}, timeout_s=5)
     want = METHODS["session"][1]
     assert want <= set(session) <= want | SESSION_OPTIONAL
     assert session["harness"] == ep.harness.name and session["nonce"] == ep.nonce
-    facts = R.from_wire(client.call("facts", {}, timeout=5))
+    facts = R.from_wire(client.call("facts", {}, timeout_s=5))
     assert isinstance(facts, R.Facts) and facts.turn_number == 0 and facts.turn is None
-    assert set(client.call("facts", {}, timeout=5)) == {"kind", *VALUES["facts"]}
+    assert set(client.call("facts", {}, timeout_s=5)) == {"kind", *VALUES["facts"]}
     watch, _ = connect(ep=ep)
-    first = watch.call("watch", {}, timeout=5)
+    first = watch.call("watch", {}, timeout_s=5)
     assert set(first) == METHODS["watch"][1]
     assert isinstance(R.from_wire(first["facts"]), R.Facts)
 
@@ -526,12 +526,12 @@ def test_environ_answers_the_names_asked_from_the_endpoints_environment(
                                "PATH": "/bin"})
     client, _ = connect(ep=ep)
     answer = client.call("environ", {"names": ["MOXI_T_SET", "MOXI_T_EMPTY", "MOXI_T_NO"]},
-                         timeout=5)
+                         timeout_s=5)
     assert set(answer) == METHODS["environ"][1]
     assert answer["values"] == {"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "MOXI_T_NO": None}
-    assert client.call("environ", {"names": []}, timeout=5) == {"values": {}}
+    assert client.call("environ", {"names": []}, timeout_s=5) == {"values": {}}
     names = [f"MOXI_T_{n}" for n in range(R.ENVIRON_MAX_NAMES)]
-    assert client.call("environ", {"names": names}, timeout=5)["values"] == \
+    assert client.call("environ", {"names": names}, timeout_s=5)["values"] == \
         dict.fromkeys(names)
     assert R.ENVIRON_MAX_NAMES == 64
 
@@ -539,10 +539,10 @@ def test_environ_answers_the_names_asked_from_the_endpoints_environment(
 @_POSIX
 def test_a_deliver_answers_its_id_and_echoes_its_ref(connect):
     client, _ = connect()
-    answer = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
+    answer = client.call("deliver", {"text": "x", "ref": "r1"}, timeout_s=5)
     assert {"delivery", "ref"} <= set(answer) <= {"delivery", "ref", "result"}
     assert answer["ref"] == "r1" and isinstance(answer["delivery"], str)
-    plain = client.call("deliver", {"text": "y"}, timeout=5)
+    plain = client.call("deliver", {"text": "y"}, timeout_s=5)
     assert plain["ref"] is None
 
 
@@ -550,11 +550,11 @@ def test_a_deliver_answers_its_id_and_echoes_its_ref(connect):
 def test_a_wait_for_an_unknown_delivery(connect):
     client, _ = connect()
     by_id = client.call("wait", {"delivery": "nonesuch", "until": "started",
-                                 "timeout_ms": 0}, timeout=5)
+                                 "timeout_ms": 0}, timeout_s=5)
     lost = R.from_wire(by_id["result"])
     assert isinstance(lost, R.Lost) and lost.reason.startswith(R.LOST_UNKNOWN)
     by_ref = client.call("wait", {"ref": "nonesuch", "until": "started", "timeout_ms": 0},
-                         timeout=5)
+                         timeout_s=5)
     assert by_ref["delivery"] is None
     lost = R.from_wire(by_ref["result"])
     assert isinstance(lost, R.Lost) and lost.reason.startswith(R.LOST_UNKNOWN)
@@ -563,6 +563,6 @@ def test_a_wait_for_an_unknown_delivery(connect):
 @_POSIX
 def test_one_stop_handler_at_a_time(connect):
     first, ep = connect()
-    assert first.call("stops.handle", {}, timeout=5) == {}
+    assert first.call("stops.handle", {}, timeout_s=5) == {}
     second, _ = connect(ep=ep)
     assert _code(second, "stops.handle", {}).code == R.ERROR_STOP_HANDLER_TAKEN

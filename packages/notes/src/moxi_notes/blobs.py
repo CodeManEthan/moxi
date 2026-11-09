@@ -79,7 +79,7 @@ def run(git, *args: str, input: bytes | None = None) -> bytes:
     """`git <args>`'s stdout; `GitError` when it fails, runs past `TIMEOUT` or can't
     start."""
     try:
-        done = git(*args, input=input, timeout=TIMEOUT, binary=True)
+        done = git(*args, stdin_data=input, timeout_s=TIMEOUT, binary=True)
     except subprocess.TimeoutExpired:
         raise GitError(f"git {args[0]} ran past {int(TIMEOUT)} s") from None
     except OSError as exc:
