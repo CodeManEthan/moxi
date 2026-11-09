@@ -15,17 +15,20 @@ module only decides which of them count and what text each row holds.
 tail.
 
 **Redaction, then the cut.** Every text is redacted with `moxi_secrets.redact` and the
-configured sets before it is cut to its size, so a cut never leaves part of a secret
-whose shape no longer matches. A text secrets reports it could not scan is stored as its
-placeholder alone. A message keeps its first `MESSAGE_CHARS` characters and a tool call
-its first `TOOL_CHARS`; a tail keeps its last `tail_chars`. Each cut text says how many
-characters went.
+configured sets before it is cut to its size, so a cut doesn't leave part of a secret
+whose shape no longer matches. A long text is redacted a window at a time, and the window
+grows until its redacted form runs at least `MARGIN` characters past the cut, so only a
+secret longer than `MARGIN` that straddles the window's edge could leave a part in what is
+kept. A text secrets reports it could not scan is stored as its placeholder alone. A
+message keeps its first `MESSAGE_CHARS` characters and a tool call its first `TOOL_CHARS`;
+a tail keeps its last `tail_chars`. Each cut text says how many characters went.
 
-**The secret-path rule.** A tool call is a secret-path call when any string in its input,
-or any whitespace-separated word of one, is a path `moxi_secrets.is_secret_path` names;
-strings inside lists and nested objects count, and so does a string that holds a JSON
-object or list. Such a call keeps one line, the tool's name and the path, and loses its
-input; its result gives no tail.
+**The secret-path rule.** A tool call is a secret-path call when any whitespace-separated
+word of any string in its input is a path `moxi_secrets.is_secret_path` names; strings
+inside lists and nested objects count, and so does a string that holds a JSON object or
+list. Such a call keeps one line, the tool's name and the path, and loses its input; its
+result gives no tail. The path shown is the matched word alone, never a run of text with
+whitespace in it, so a heredoc or a patch into a secret file doesn't reach the index.
 
 **The key.** A row's key names one record: the harness, then the line's own id where the
 harness writes one (Claude Code's `uuid`, OpenCode's row id) or else the source and the
@@ -53,9 +56,10 @@ KINDS = ("message", "tool_call", "tool_result")
 MESSAGE_CHARS = 16384
 #: How many characters of a tool call (its summary line and input) tier 1 keeps.
 TOOL_CHARS = 2048
-#: How far past the part it keeps a text is redacted. A secret longer than this that
-#: straddles the edge of the redacted part could reach the kept part only if it were
-#: longer than the margin itself.
+#: How far past the part it keeps a text is redacted, counted in the redacted text: the
+#: window redacted grows until its redacted form is this much longer than the part kept,
+#: or holds the whole text. Only a secret longer than this that straddles the window's
+#: edge could leave a part of itself in the kept part.
 MARGIN = 65536
 
 #: A row's kind for a tool call; a message's row takes its role.
@@ -65,8 +69,9 @@ UNSCANNED = "[REDACTED:unscanned]"
 
 #: The characters stripped from each end of a word before it is tested as a path.
 _PUNCTUATION = "\"'`()[]{}<>,;:|&"
-#: A string at most this long is tested whole as well as word by word.
-_WHOLE_PATH_CHARS = 4096
+#: The characters a word is split at, so that a path joined to an assignment or a shell
+#: redirection (`--env-file=.env`, `cat<.env`, `x>/a/.env`) is tested, and shown, alone.
+_JOINS = re.compile(r"[=<>|;&]+")
 
 
 @dataclass(frozen=True)
@@ -132,12 +137,32 @@ def redact(text: str, sets: Iterable[str]) -> str:
     return done
 
 
+def _redact_window(text: str, limit: int, sets: tuple[str, ...],
+                   *, tail: bool) -> tuple[str, int]:
+    """The redacted window of `text` that a cut to `limit` characters takes from, and how
+    many characters of `text` lie outside it.
+
+    The window starts `MARGIN` characters past `limit` and doubles while its redacted
+    form is shorter than `limit + MARGIN` and text remains, so the cut edge stays at
+    least `MARGIN` redacted characters inside the window's edge however much redaction
+    shrank the window."""
+    want = limit + MARGIN
+    size = want
+    while True:
+        if size >= len(text):
+            return redact(text, sets), 0
+        part = text[-size:] if tail else text[:size]
+        clean = redact(part, sets)
+        if clean == UNSCANNED or len(clean) >= want:
+            return clean, len(text) - size
+        size *= 2
+
+
 def keep_head(text: str, limit: int, sets: Iterable[str]) -> str:
     """`text` redacted, then cut to its first `limit` characters with a marker that says
-    how many went."""
-    part = text[:limit + MARGIN]
-    beyond = len(text) - len(part)
-    clean = redact(part, sets)
+    how many went: the redacted characters past the cut, and the characters past the
+    redacted window."""
+    clean, beyond = _redact_window(text, limit, tuple(sets), tail=False)
     if clean == UNSCANNED:
         return clean
     gone = len(clean) + beyond - limit
@@ -148,10 +173,8 @@ def keep_head(text: str, limit: int, sets: Iterable[str]) -> str:
 
 def keep_tail(text: str, limit: int, sets: Iterable[str]) -> str:
     """`text` redacted, then cut to its last `limit` characters with a marker before
-    them that says how many went."""
-    part = text[-(limit + MARGIN):] if len(text) > limit + MARGIN else text
-    before = len(text) - len(part)
-    clean = redact(part, sets)
+    them that says how many went, counted as `keep_head` counts them."""
+    clean, before = _redact_window(text, limit, tuple(sets), tail=True)
     if clean == UNSCANNED:
         return clean
     gone = len(clean) + before - limit
@@ -170,26 +193,26 @@ def _is_secret(word: str) -> bool:
 
 
 def _candidates(text: str) -> Iterable[str]:
-    """The words of `text` to test as paths: the whole string when short, each
-    whitespace-separated word, each word with quotes and brackets taken off its ends,
-    and what follows a word's last `=`."""
-    if len(text) <= _WHOLE_PATH_CHARS:
-        yield text.strip()
+    """The words of `text` to test as paths, narrowest first: for each
+    whitespace-separated word, the pieces between `=`, `<`, `>`, `|`, `;` and `&`, then
+    the word with quotes and brackets taken off its ends, then the word itself. None of
+    them holds whitespace, so the path a call is shown with is never more than one word."""
     for word in text.split():
-        yield word
         bare = word.strip(_PUNCTUATION)
+        pieces = [p.strip(_PUNCTUATION) for p in _JOINS.split(bare)]
+        if len(pieces) > 1:
+            yield from (p for p in pieces if p)
         if bare != word:
             yield bare
-        if "=" in bare:
-            yield bare.rsplit("=", 1)[1].strip(_PUNCTUATION)
+        yield word
 
 
 def secret_path(value: Any, _depth: int = 0) -> str | None:
     """The first path in a tool's input that secrets says must not be read, or None.
 
-    Every string counts, inside lists and nested objects too, as does each of its
-    whitespace-separated words; a string that holds a JSON object or list is read into
-    and searched the same way."""
+    Each whitespace-separated word of every string counts, inside lists and nested
+    objects too; a string that holds a JSON object or list is read into and searched the
+    same way. What comes back is one word, never a string with whitespace in it."""
     if _depth > 32:
         return None
     if isinstance(value, str):
