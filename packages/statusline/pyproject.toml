@@ -1,0 +1,62 @@
+[project]
+name = "moxi-statusline"
+version = "0.1.0"
+description = "A Claude Code status line: your directory, branch, model and context, with the figures installed modules add."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["agents", "claude-code", "status-line"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+dependencies = ["moxi>=0.1.8,<0.2"]
+
+[project.optional-dependencies]
+# The browser UI shell: with it, the status line page shows there.
+ui = ["moxi-ui>=0.2,<0.3"]
+
+[project.urls]
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
+
+# The command Claude Code runs for each render of its status line.
+[project.scripts]
+moxi-statusline-render = "moxi_statusline.render:main"
+
+# The module's one announcement, read by moxi.modules.
+[project.entry-points."moxi.modules"]
+statusline = "moxi_statusline.module"
+
+# At every module's install, compile the bytecode a render loads.
+[project.entry-points."moxi.installs"]
+statusline = "moxi_statusline.compile"
+
+[dependency-groups]
+dev = ["pytest", "moxi-dev"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_statusline"]
+
+[tool.hatch.build.targets.sdist]
+# A source distribution built from any branch holds these public paths, and the
+# pyproject.toml and .gitignore hatchling adds itself.
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi_statusline",
+                "tests"]
+
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"
