@@ -1460,8 +1460,9 @@ class Daemon:
         """(hwm, error): the record's high id for a register's catch-up boundary.
 
         One read per register, concurrent with every other register's: no register
-        waits out another's round trip. A failed read fails the register `transient`, and
-        the shim's backoff retries it a moment later. See `_register`.
+        waits out another's round trip. A failed read fails the register with
+        `wire.FAILED`, an error in the try-again range, and the shim's backoff retries it
+        a moment later. See `_register`.
         """
         try:
             return self.record.max_message_id(self._names_channel()) or "0", None
@@ -1852,8 +1853,8 @@ class Daemon:
         id that is not a message id is refused as a bad param.
 
         A READ. It changes no hold, pend, delivery, cursor or ask state. Who may ask:
-        any process that can open this socket, as for `record_message`, `session` and
-        `owner`. It answers nothing those reads, `moxi comms history` and `moxi comms reply` do
+        any process that can open this socket, as for the `message`, `session` and
+        `owner` reads. It answers nothing those reads, `moxi comms history` and `moxi comms reply` do
         not already show any process of this user (the body, its author with tier and
         verified or unverified, its recipients), so no caller learns more through it.
         """

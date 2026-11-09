@@ -14,7 +14,7 @@ read is decided by the send's `[cold-at:…]` on line zero: `-` or a time still 
 delivers, a time reached or no token at all makes a row. A row goes out only at a
 release point: a `turn` carrying `handled` on a passing read, a `ready` with a source, a
 register (unflagged rows) on a passing read. Never with another message: no piggyback.
-There is no gate file, no `cold_refusals` and no `never_held`.
+There is no gate file and no `never_held`.
 
 Sections: (a) `clock_state`, (b) the verb with no exemption, (c) `--cold`, (d) the
 daemon's gate, past the verb, (e) the race, (f) a turn's read and a session id two

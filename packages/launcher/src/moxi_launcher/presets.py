@@ -1046,9 +1046,9 @@ def resolve(request, *, presets: Presets | None = None,
 
 def _one_spelling(layers, rows, values: dict, sources: dict) -> None:
     """Each text given inline or from a file (`TWO_SPELLINGS`) is taken from the latest
-    layer that gives it either way, so a typed `--instructions` replaces a seat's
-    `instructions_file`; the other spelling goes back to its default. One layer giving
-    both is refused, since one of them would go unread."""
+    layer that gives it either way, so `instructions` typed on the command line
+    replaces a seat's `instructions_file`; the other spelling goes back to its default.
+    One layer giving both is refused, since one of them would go unread."""
     for inline, from_file in TWO_SPELLINGS:
         for source, layer in reversed(layers):
             given = [k for k in (inline, from_file) if catalog.is_set(layer.get(k))]
@@ -1071,8 +1071,8 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
     launch with turns but without turns' host installed runs as one without turns, with
     a warning. A Codex launch with an identity runs comms' Codex wrapper, which execs
     turns' host, so it is `host` and refused where the host can't start or comms has no
-    such wrapper. Refused for now: a headless launch with an identity (comms' headless
-    wrapper flags)."""
+    such wrapper. A headless launch with an identity is refused (`NotYet`): comms has no
+    headless wrapper to run it."""
     avail = _avail(available)
     turns = avail("turns")
     headless = target == "headless"

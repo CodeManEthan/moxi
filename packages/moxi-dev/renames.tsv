@@ -345,6 +345,7 @@ loadout	packages/loadout/tests/test_page.py	return real(*a, git=git, git_seconds
 loadout	packages/loadout/tests/test_pagejob.py	holder.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_pagejob.py	child.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_repo_piece.py	assert env["SAMPLE_KEPT"] == "yes" and env["HOME"] == os.environ["HOME"]	keep	HOME	HOME
+loadout	packages/loadout/tests/test_repo_piece.py	assert call["timeout"] == gitpiece.INSTALL_SECONDS == 180	use	["timeout"]	["timeout_s"]
 moxi	packages/moxi/src/moxi/_settle.py	handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.CLAIM_VARIABLE	use	CLAIM_VARIABLE	LOCK_FD_ENV
 moxi	packages/moxi/src/moxi/_settle.py	is_skill_folder` counts, sorted) and the folder, read through	use	is_skill_folder`	is_skill_dir`
 moxi	packages/moxi/src/moxi/cli.py	shortcut_text	name	windows	is_windows

@@ -496,8 +496,8 @@ class Detached:
 
     def poll(self) -> int | None:
         """None while the process runs, else its exit status. Raises `LookupError` when
-        `moxi.proc` no longer holds it (its code was dropped past `moxi.proc`'s bound,
-        which a reap at every tick never reaches)."""
+        `moxi.proc` holds no code for it: `status` already returned it, or the code was
+        dropped past `moxi.proc`'s bound, which a reap at every tick never reaches."""
         return _proc.status(self.pid)
 
 

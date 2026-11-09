@@ -57,9 +57,9 @@ IDLE_SETTLE = 0.3      # queue must be unchanged this long before an idle flush
 
 # --- cold sends ----------------------------------------------------------------------
 # A cache's lifetime is cache's to say (its read gives `ttl_s`); comms keeps none.
-# A binding younger than this with no session id reported yet has simply not had its
-# first look or turn event. The `--next-turn` NOTE reads one older than this, still with
-# no id, as a session launched before comms carried session ids.
+# The age past which a binding with no session id reported is no longer new. No send
+# reads it: a binding with no session id reads unknown, young or old, and the tests age
+# one past this to show that.
 SESSION_ID_GRACE = 60.0
 
 # --- reply posture -------------------------------------------------------------------

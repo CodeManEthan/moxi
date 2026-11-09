@@ -246,8 +246,8 @@ def launch(request, *, env: Mapping[str, str] | None = None,
     composition = compose.build(ids, resolved, environ=env, child_environ=child,
                                 create=True)
     target = targets.get(composition.target)
-    env = common.environment(child, composition, moxi_modules.session_env())
-    command = target.prepare(composition, env)
+    launch_env = common.environment(child, composition, moxi_modules.session_env())
+    command = target.prepare(composition, launch_env)
     values = composition.values
     resume = bool(getattr(request, "resume_of", None))
     session_id = ids.session_id if composition.harness == "claude" or resume else None
@@ -267,7 +267,7 @@ def launch(request, *, env: Mapping[str, str] | None = None,
             project_key=resolved.project_key,
             identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
             handoff_path=str(values.get("handoff") or "") or None,
-            handoff_key=handoff_key, base_env=common.base_env(env),
+            handoff_key=handoff_key, base_env=common.base_env(launch_env),
             relaunch_of=getattr(request, "relaunch_of", None),
             resume_of=getattr(request, "resume_of", None))
         if not inserted.new:
@@ -291,7 +291,7 @@ def launch(request, *, env: Mapping[str, str] | None = None,
             warn(line)
         started = target.start(targets.Launch(
             conn=conn, request_id=rid, composition=composition, argv=composition.argv,
-            command=command, env=env, cwd=str(values["cwd"]), deliverer_env=caller,
+            command=command, env=launch_env, cwd=str(values["cwd"]), deliverer_env=caller,
             hold=getattr(request, "hold", None),
             respawn=bool(getattr(request, "respawn", False)),
             chain=_chain(conn, request, rid)))

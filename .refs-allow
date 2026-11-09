@@ -1,0 +1,54 @@
+packages/cache/tests/test_codex_clock.py	revert_thread.rs	a source file of Codex, the program whose rollout files the test reads
+packages/comms/src/moxi_comms/adapters/codex_roster.py	network.unix_sockets	a key of Codex's sandbox config
+packages/comms/src/moxi_comms/adapters/opencode.py	agent/agent.ts	the OpenCode source file that defines its built-in agents
+packages/comms/src/moxi_comms/mcp/listen.py	SD_LISTEN_FDS_START	systemd's constant for the first descriptor it passes a socket-activated service
+packages/comms/src/moxi_comms/mcp/server.py	TokenVerifier	the MCP Python SDK's bearer token verifier interface
+packages/comms/tests/test_guards.py	sun_path	the path field of the system's Unix socket address struct
+packages/comms/tests/test_local_default.py	sun_path	the path field of the system's Unix socket address struct
+packages/comms/tests/test_roster_snapshot.py	probeB	a session name passed to Claude Code's -n flag in a measured command line
+packages/connector/src/moxi_connector/listen.py	SD_LISTEN_FDS_START	systemd's constant for the first descriptor it passes a socket-activated service
+packages/connector/src/moxi_connector/oauth.py	AuthorizationHandler	the MCP Python SDK's authorize endpoint handler
+packages/connector/src/moxi_connector/oauth.py	OAuthAuthorizationServerProvider	the MCP Python SDK's OAuth provider interface
+packages/connector/src/moxi_connector/oauth.py	TokenVerifier	the MCP Python SDK's bearer token verifier interface
+packages/connector/src/moxi_connector/oauth.py	create_auth_routes	the MCP Python SDK's function that builds its OAuth routes
+packages/moxi-dev/src/moxi_dev/testing.py	--markers	pytest's flag that lists the registered markers
+packages/moxi/src/moxi/_settle.py	nohup	the POSIX command that starts a program with hang-ups ignored
+packages/moxi/src/moxi/ipc/_pipe.py	INFINITE	the Windows API's constant for a wait with no timeout
+packages/moxi/src/moxi/modules.py	EntryPoint.load	the method of importlib.metadata's EntryPoint class that imports the entry point
+packages/moxi/src/moxi/proc.py	KERN_PROC_PID	the macOS sysctl name for one process's kinfo_proc
+packages/moxi/src/moxi/proc.py	kp_eproc.e_ppid	the parent pid field of macOS's struct kinfo_proc
+packages/moxi/src/moxi/proc.py	kp_proc.p_pid	the pid field of macOS's struct kinfo_proc
+packages/moxi/src/moxi/proc.py	kthreadd	Linux's kernel thread daemon, pid 2
+packages/moxi/src/moxi/proc.py	p_pid	the pid field of macOS's struct kinfo_proc
+packages/moxi/src/moxi/terminal/_walk.py	hidepid	the Linux /proc mount option that hides other users' processes
+packages/moxi/tests/test_run.py	CommandLineToArgvW	the Windows API function whose rules split a command line
+packages/moxi/tests/test_settle_procs.py	nohup	the POSIX command that starts a program with hang-ups ignored
+packages/repo/src/moxi_repo/commit_rules.py	core.commentString	a git config key, the comment prefix of commit messages
+packages/repo/src/moxi_repo/commit_rules.py	find_separator	the function in git's trailer code that finds a trailer's separator
+packages/secrets/src/moxi_secrets/_generate.py	unicode.SimpleFold	the Go standard library function for Unicode simple case folding
+packages/services/src/moxi_services/cli.py	CommandLineToArgvW	the Windows API function whose rules split a command line
+packages/sessions/src/moxi_sessions/codex.py	interacted	a kind of Codex's SubAgentActivity item
+packages/sessions/src/moxi_sessions/codex.py	security_risk_score	an event_msg payload type Codex can write to a rollout
+packages/sessions/src/moxi_sessions/codex.py	should_persist_event_msg	the function in Codex's rollout policy that picks the event_msg types it persists
+packages/sessions/src/moxi_sessions/codex.py	should_persist_response_item	the function in Codex's rollout policy that picks the response_item types it persists
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.conversation.id	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.provider.name	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.request.model	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.response.id	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.response.model	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.tool.call.id	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	gen_ai.tool.name	an attribute name of the OpenTelemetry GenAI conventions
+packages/sessions/src/moxi_sessions/shape.py	isApiErrorMessage	a boolean Claude Code writes on a transcript line
+packages/turns/src/moxi_turns/additions.py	mcp__name__tool	the shape of an MCP tool rule in Claude Code's permission syntax
+packages/turns/src/moxi_turns/claude_endpoint.py	AgentStatus	Claude Code's type for an agent's status
+packages/turns/src/moxi_turns/codex.py	multi_agent_v2	the name of a Codex feature that spawns subagents
+packages/turns/src/moxi_turns/codex_protocol.py	CollabAgentStatus	Codex's app-server type for a collab agent's status
+packages/turns/src/moxi_turns/codex_protocol.py	multi_agent_v2	the name of a Codex feature that spawns subagents
+packages/turns/tests/test_codex_tool_hooks.py	matches_matcher	the Codex function that reads a hook's tool matcher
+packages/ui/src/moxi_ui/gateway/endpoint.py	sun_path	the path field of the system's Unix socket address struct
+packages/ui/src/moxi_ui/listen.py	SD_LISTEN_FDS_START	systemd's constant for the first descriptor it passes a socket-activated service
+packages/ui/src/moxi_ui/loopback/serve.py	cr_uid	the uid field of macOS's struct xucred
+packages/ui/src/moxi_ui/loopback/serve.py	cr_version	the version field of macOS's struct xucred
+packages/ui/src/moxi_ui/testing/phone.py	SSLSocket.shutdown	the shutdown method of the ssl module's SSLSocket class
+packages/ui/tests/squatter.py	Server.close_clients	the asyncio Server method added in Python 3.13
+packages/ui/web/src/passkey.ts	toJSON	the WebAuthn method that gives a credential as JSON

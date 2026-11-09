@@ -457,7 +457,7 @@ class HarnessAdapter:
 
         Any exception the daemon arm below does not name, and anything the port's turn
         raises, is logged with its traceback, said once per exception type, and the loop
-        carries on at its next backoff, where a fixed tuple used to end the thread."""
+        carries on at its next backoff: no exception ends the thread."""
         delays = self._backoff or backoff_delays()
         while not self._stop.is_set():
             try:

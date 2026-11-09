@@ -123,8 +123,8 @@ class Message:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Message":
-        # tolerate a record dict from an older store: `reply_to` used to ride the
-        # transport, and now lives in the machine line only.
+        # Keys a Message has no field for are dropped: a record dict from an older
+        # store carries `reply_to`, which the machine line holds instead.
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 

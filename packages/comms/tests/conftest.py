@@ -218,7 +218,7 @@ BOTH_BACKENDS = (
     "test_directory_provision.py",  # provision against the seam
     "test_local_record.py",        # its rig tests state the no-op half on the mock too
     "test_audience.py",             # the audience mark, verb to frame
-    "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --next-turn
+    "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --held
     "test_cold_every_sender.py",    # THE RULE: the clock, the hold, the daemon's gate
     "test_cold_hold.py",            # a cold claude-shim recipient is posted and held
     "test_cache_clock.py",          # the codex and opencode clocks, drift, the free rows
@@ -256,10 +256,9 @@ def backend(request):
 def build_record(backend: str, clock):
     """One record, chosen by name. The record and the daemon always share one clock.
 
-    The local one takes no `secret_reader`: provision is the writer of every minted
+    The local one is given no tokens: provision is the writer of every minted
     token, so the rig lays the files down the way `moxi-comms-provision` does and the record
-    reads them back through its own resolver chain. The stand-in that used to serve them
-    out of memory is gone with it.
+    reads them back through its own resolver chain.
     """
     if backend == "local":
         return LocalRecord(clock=clock, poll_interval=0.02)

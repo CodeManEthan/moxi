@@ -44,7 +44,8 @@ def ask(rig, audience=None, text="question?"):
 
 @pytest.fixture
 def reboot():
-    """Restart the rig's daemon and own the new one (the `test_custody` pattern)."""
+    """Restart the rig's daemon and own the new one: each daemon it starts is stopped
+    when the test ends."""
     started = []
 
     def _reboot(rig):

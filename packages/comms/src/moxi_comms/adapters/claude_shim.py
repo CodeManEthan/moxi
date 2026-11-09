@@ -740,9 +740,9 @@ class ClaudeShim:
         created was released again before this shim ever went online -- because `stop()`
         arrived while the round trip was in flight, or because the connection died under
         it. Both leave `offline` True with nothing bound, and both are things the caller
-        must be able to tell apart from success. `_supervise` is why: a bare `return`
-        here used to be indistinguishable from a bind, so the supervisor said "comms
-        online: reconnected" over a shim that was shutting down bound to nothing.
+        must be able to tell apart from success. `_supervise` is why: it says "comms
+        online: reconnected" only on True, so a shim that is shutting down bound to
+        nothing is never reported as reconnected.
         """
         def register(client):
             with self._lock:
