@@ -92,7 +92,7 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   milliseconds. Default 2000.
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
   compacted, in order: module names and file paths. A module not installed is skipped.
-  Default `["launcher", "comms", "notes"]`; setting it replaces the whole list.
+  Default `["launcher", "comms", "notes", "memory"]`; setting it replaces the whole list.
 - `start.limit`: the most start context a session gets, in characters; 0 means the
   harness's own ceiling. Default 0.
 - `guards.on`: the guards that run besides those switched on: guard ids and paths to
