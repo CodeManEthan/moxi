@@ -451,3 +451,99 @@ def launch(req, environ=None):
     assert "def launch(req, env=None):" in text and "launch_env = build(req)" in text
     assert "send(launch_env, env)" in text and "`launch_env`" in text
     assert rename.run(root, renames, dry_run=True) == 0
+
+
+def test_submodule_in_function_and_package_relative_imports_resolve(tmp_path):
+    root = repo(tmp_path, {
+        "packages/p/src/p/__init__.py": "from .impl import old\n",
+        "packages/p/src/p/impl.py": "def old(value):\n    return value\n",
+        "packages/q/src/q/use.py": '''
+from p import impl
+a = impl.old(1)
+def late():
+    from p.impl import old
+    return old(2)
+''',
+    })
+    renames = table(tmp_path, row("packages/p/src/p/impl.py", "-", "name", "old", "fresh"))
+    assert rename.run(root, renames) == 0
+    assert (root / "packages/p/src/p/__init__.py").read_text() == "from .impl import fresh\n"
+    use = (root / "packages/q/src/q/use.py").read_text()
+    assert "a = impl.fresh(1)" in use
+    assert "from p.impl import fresh\n    return fresh(2)" in use
+
+
+def test_a_parameter_row_leaves_self_attributes_and_reads_its_state_from_the_signature(
+        tmp_path, capsys):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: '''
+class Waiter:
+    def __init__(self, timeout):
+        self.timeout = timeout
+    def left(self):
+        return self.timeout
+'''})
+    renames = table(tmp_path, row(path, "Waiter.__init__", "name", "timeout", "timeout_s"))
+    assert rename.run(root, renames) == 0
+    text = (root / path).read_text()
+    assert "def __init__(self, timeout_s):" in text
+    assert "self.timeout = timeout_s" in text and "return self.timeout\n" in text
+    capsys.readouterr()
+    # The attribute still stores the old name; the row is applied all the same.
+    assert rename.run(root, renames, dry_run=True) == 0
+    assert "0 to apply, 1 applied, 0 not here" in capsys.readouterr().out
+
+
+def test_a_parameter_cite_is_listed_only_in_its_own_file(tmp_path, capsys):
+    root = repo(tmp_path, {
+        "packages/p/src/p/x.py": '''
+"""`run` waits `timeout` seconds."""
+def run(timeout=1):
+    """Give up after `timeout` seconds."""
+''',
+        "packages/q/src/q/y.py": '''
+# `timeout` here is wait's own.
+def wait(timeout=2):
+    return timeout
+''',
+    })
+    renames = table(tmp_path, row("packages/p/src/p/x.py", "run", "name", "timeout", "timeout_s"))
+    assert rename.run(root, renames) == 1
+    out = capsys.readouterr().out
+    assert "x.py:2: comment still cites 'timeout'" in out
+    assert "y.py" not in out and "1 leftovers" in out
+    assert "`timeout` here is wait's own" in (root / "packages/q/src/q/y.py").read_text()
+
+
+def test_a_use_row_changes_every_match_on_its_line_and_stops_at_a_word_end(tmp_path,
+                                                                            capsys):
+    path = "packages/q/src/q/use.py"
+    line = "both = clock.wait + clock.wait * clock.wait_more + wait"
+    root = repo(tmp_path, {path: f"{line}\n"})
+    renames = table(tmp_path, row(path, line, "use", "clock.wait", "clock.wait_s"))
+    assert rename.run(root, renames) == 0
+    assert (root / path).read_text() == \
+        "both = clock.wait_s + clock.wait_s * clock.wait_more + wait\n"
+    capsys.readouterr()
+    assert rename.run(root, renames, dry_run=True) == 0
+    assert "0 to apply, 1 applied, 0 not here" in capsys.readouterr().out
+
+
+def test_a_kwonly_call_with_a_star_at_its_position_is_a_leftover(tmp_path, capsys):
+    root = repo(tmp_path, {
+        "packages/p/src/p/git.py": "def changes(root, staged=True, rng=None):\n    return root\n",
+        "packages/p/src/p/use.py": '''
+from p.git import changes
+rest = [False]
+changes('.', *rest)
+changes('.', False)
+''',
+    })
+    renames = table(tmp_path,
+                    row("packages/p/src/p/git.py", "changes", "kwonly", "staged", "staged"))
+    assert rename.run(root, renames) == 1
+    out = capsys.readouterr().out
+    assert ("use.py:4: changes call passes a starred argument that may reach keyword-only "
+            "'staged'") in out and "1 leftovers" in out
+    use = (root / "packages/p/src/p/use.py").read_text()
+    assert "changes('.', *rest)" in use and "changes('.', staged=False)" in use
