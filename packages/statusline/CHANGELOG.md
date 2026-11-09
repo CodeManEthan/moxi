@@ -28,6 +28,11 @@ The first release.
 - `moxi statusline pieces` prints those commands, cache's timer first, with each one's
   measured time.
 - `moxi statusline preview` renders a sample input and prints the line and its time.
+- With the `ui` extra, a page in the browser UI shell: the line's items in Row 1, Row 2
+  and Off lists, each with a switch and up and down buttons; the line's options; a
+  preview rendered by the real command over a sample input, with its time; Save and
+  Discard, so the config is written only on Save; and "Use Moxi's line" and "Put my old
+  line back", disabled while changes are unsaved.
 - An install listener compiles the bytecode a render loads at every module's install.
 - Doctor rows: the command Claude Code's setting names resolves, bytecode for what a
   render loads, one sample render against the budget, `show` items with nothing behind

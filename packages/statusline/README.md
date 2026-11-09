@@ -156,6 +156,44 @@ executable, that what a render loads is compiled, times one sample render
 against the module's budget (three times the start of `python -I -c pass`), and names
 `show` items with nothing behind them and installed modules named like a base field.
 
+## The page
+
+With the `ui` extra (`moxi-ui`, the browser UI shell), statusline has a page in the shell
+where you pick the line's items, put them in order and see the line before Claude Code
+does: `moxi install statusline --with ui`.
+
+- **The line.** Three lists: Row 1, Row 2 and Off. Each item on the line has a switch
+  that turns it off and up and down buttons that move it one place. Moving the last item
+  of row 1 down puts it at the start of row 2, starting row 2 when there is none, and
+  moving the first item of row 2 up puts it at the end of row 1. An item switched on
+  from Off goes at the end of row 1. Off lists the base fields and the installed
+  modules with a segment that `show` leaves out. A base field is named in plain words
+  (Folder, Git branch, Context used) with its `show` name beside it; a module's item
+  shows its name and summary.
+- **Options.** The text between items, colours on or off, how many folder parts are
+  kept, and the percents where the context turns yellow and red. Each key's name sits
+  beside its label (`separator`, `dir.parts`, ...); click it to copy it.
+- **Preview.** The line your changes give, rendered by the real
+  `moxi-statusline-render` over a sample input in a made-up folder, with how long the
+  render took. An item that shows nothing for the sample gets a note under it: `branch`
+  shows inside a git repository, and a module's segment shows in a live session. When
+  the render fails or runs past 2 seconds, the preview says why.
+- **Save and Discard.** Every change goes into a draft, and the preview shows it at
+  once. Claude Code's line changes only when you press Save, which writes the draft to
+  the config in one checked write; Discard drops it. Both show, with the count of
+  unsaved changes, while the draft differs from the saved config. A draft the config's
+  check refuses shows why in place of the preview, and Save stays off until you fix it.
+  When the config file changed since the page read it, the page reads the new file,
+  keeps your changes over it and says so. A config that can't be read shows why, with
+  the defaults, and the page saves nothing over it.
+- **Claude Code's status line.** Whether Claude Code shows no line, this line, Moxi's
+  line from another install or your own, with its command. "Use Moxi's line" sets it to
+  Moxi's line with the saved `show`, keeping the line it replaces, as `moxi statusline
+  use` does but with no question and no offers. "Put my old line back" shows while
+  Moxi's line is set and an old one is kept, and does what `moxi statusline restore`
+  does. Both buttons are disabled while the draft has unsaved changes: save or discard
+  first.
+
 ## Dependencies
 
 `moxi`, Moxi's core. Segments come from whichever modules are installed; statusline
