@@ -11,7 +11,7 @@
     moxi services remove ID
     moxi services start|stop|restart ID...
     moxi services enable|disable ID...
-    moxi services watch [ID...] [--every SECONDS] [--json]
+    moxi services watch [ID...] [--every-s SECONDS] [--json]
 
 `ID` is `<module>/<name>` for a module's daemon or timer, and `services/<name>` or a
 bare `<name>` for one the user added or adopted. The read verbs (`list`, `show`,
@@ -223,7 +223,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = verb("watch", "print a line whenever a row's verdict changes, until interrupted",
              reads=True)
     p.add_argument("ids", nargs="*", metavar="ID")
-    p.add_argument("--every", type=float, default=WATCH_EVERY, metavar="SECONDS",
+    p.add_argument("--every-s", type=float, default=WATCH_EVERY, metavar="SECONDS",
                    help=f"seconds between reads (default {WATCH_EVERY:g})")
 
     _PARSERS[prog] = parser
@@ -468,8 +468,8 @@ def _process(pid: int | None) -> dict | None:
             started = proc.create_time()
             rss = proc.memory_info().rss
             cpu = proc.cpu_times()
-        return {"pid": pid, "uptime_seconds": round(max(0.0, time.time() - started), 1),
-                "rss_bytes": int(rss), "cpu_seconds": round(cpu.user + cpu.system, 2)}
+        return {"pid": pid, "uptime_s": round(max(0.0, time.time() - started), 1),
+                "rss_bytes": int(rss), "cpu_s": round(cpu.user + cpu.system, 2)}
     except Exception:  # noqa: BLE001 - a process gone or unreadable shows nothing
         return None
 
@@ -545,7 +545,7 @@ def _show(args, out) -> int:
     if view.health is not None:
         put("checked", f"{view.health[0]}: {view.health[1]}")
     if process is not None:
-        put("process", f"pid {process['pid']}, up {_duration(process['uptime_seconds'])}, "
+        put("process", f"pid {process['pid']}, up {_duration(process['uptime_s'])}, "
                        f"{process['rss_bytes'] / 1048576:.1f} MiB resident, "
                        f"{process['cpu_seconds']:g} s of CPU")
     elif st is not None and st.pid:
@@ -594,8 +594,8 @@ def _watch_rows(idents: Sequence[str], noted: dict[str, str]) -> tuple[list, lis
 
 
 def _watch(args, out) -> int:
-    if args.every <= 0:
-        raise Usage("--every takes a number of seconds above 0", None)
+    if args.every_s <= 0:
+        raise Usage("--every-s takes a number of seconds above 0", None)
     for ident in args.ids:
         acts.resolve(ident)  # an unknown id is refused before the first read
     seen: dict[str, tuple[str, str]] = {}
@@ -626,7 +626,7 @@ def _watch(args, out) -> int:
             except ServicesError as exc:
                 print(f"{time.strftime('%H:%M:%S')} {exc.reason}", file=sys.stderr)
             out.flush()
-            _sleep(args.every)
+            _sleep(args.every_s)
     except KeyboardInterrupt:
         return codes.OK
 

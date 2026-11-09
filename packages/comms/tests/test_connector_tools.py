@@ -423,7 +423,7 @@ def test_send_and_wait_gets_a_reply_during_the_wait(rig, tools):
         assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))
         post(rig, [ME], "yes", reply_to=mid)
 
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5},
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 5},
                     reply)
     assert got.structured["outcome"] == "replied", got.text
     assert got.structured["reply"]["text"] == "yes"
@@ -442,14 +442,14 @@ def test_send_and_wait_finds_a_reply_that_came_before_the_wait(rig, tools, link)
         return result
 
     tools._send = send_then_reply
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 1})
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 1})
     assert got.structured["outcome"] == "replied"
     assert got.structured["reply"]["text"] == "early"
 
 
 def test_send_and_wait_times_out(rig, tools):
     planner(rig)
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 1})
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 1})
     assert got.structured["outcome"] == "no-reply"
     assert got.text.startswith("No reply within 1 second. The message was sent, msg ")
     assert tools.waiting == 0
@@ -470,7 +470,7 @@ def test_send_and_wait_finds_the_reply_in_the_record_past_a_full_window(rig, too
         to_operator.append(post(rig, ["operator"], "for the human", reply_to=mid))
         post(rig, [ME], "found", reply_to=mid)
 
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5},
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 5},
                     reply)
     assert got.structured["outcome"] == "replied" and got.structured["reply"]["text"] == "found"
     assert got.structured["other_new"] == 64
@@ -511,7 +511,7 @@ def test_send_and_wait_never_shows_a_reply_withdrawn_before_the_open(rig, tools,
         post(rig, [ME], "kept", reply_to=mid)
 
     try:
-        got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5},
+        got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 5},
                         replies)
     finally:
         link.open_digest = real
@@ -521,7 +521,7 @@ def test_send_and_wait_never_shows_a_reply_withdrawn_before_the_open(rig, tools,
 
 
 def test_send_and_wait_to_a_recipient_that_cant_read_now_answers_at_once(rig, tools):
-    got = wait_call(tools, {"to": "main@proj-b", "text": "ok?", "wait_seconds": 5})
+    got = wait_call(tools, {"to": "main@proj-b", "text": "ok?", "wait_s": 5})
     assert got.structured["outcome"] == "not-delivered"
     assert got.text.endswith(tools_mod.LATER)
 
@@ -530,7 +530,7 @@ def test_send_and_wait_to_a_held_recipient_answers_at_once(rig, tools):
     sid = "cold-session"
     write_transcript(sid, age=7200)
     rig.shim(name="lead", scope="proj-a", project="proj-a", session_id=sid)
-    got = wait_call(tools, {"to": "lead@proj-a", "text": "ok?", "wait_seconds": 5})
+    got = wait_call(tools, {"to": "lead@proj-a", "text": "ok?", "wait_s": 5})
     assert got.structured["outcome"] == "not-delivered"
     assert "lead@proj-a: held for its next turn" in got.text
     assert got.text.endswith(tools_mod.LATER)
@@ -547,7 +547,7 @@ def test_other_new_messages_never_count_the_reply_found_in_the_pushes(rig, tools
         assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))
         post(rig, [ME], "yes", reply_to=mid)
 
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5},
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 5},
                     reply)
     assert got.structured["outcome"] == "replied", got.text
     assert got.structured["other_new"] == 2
@@ -562,7 +562,7 @@ def test_a_dropped_caller_ends_the_wait_and_the_late_reply_stays_unread(rig, too
 
     async def go():
         task = asyncio.ensure_future(tools.send_and_wait(
-            {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 5}, Ctx()))
+            {"to": "planner@proj-a", "text": "ok?", "wait_s": 5}, Ctx()))
         mid = await asyncio.to_thread(sent_id, rig)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -587,16 +587,16 @@ def test_a_fifth_wait_is_refused(rig, tools):
 def test_a_wait_over_wait_max_waits_wait_max_and_the_schema_says_so(rig, tools):
     planner(rig)
     tools.wait_max = 1
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_seconds": 6})
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_s": 6})
     assert got.structured["outcome"] == "no-reply"
     assert got.text.startswith("No reply within 1 second.")
-    schema = tools_mod.inputs()["send_and_wait"]["properties"]["wait_seconds"]
+    schema = tools_mod.inputs()["send_and_wait"]["properties"]["wait_s"]
     assert schema["maximum"] == CONNECTOR_WAIT_CEILING
     assert f"longest wait is {ConnectorConfig.wait_max} seconds" in schema["description"]
 
 
 def test_a_wait_under_one_second_is_refused(rig, tools):
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_seconds": 0})
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "x", "wait_s": 0})
     assert got.is_error and got.refusal == "wait-shape"
     assert not [m for m in rig.record.history(rig.names_channel) if m.author_id == ME]
 
@@ -613,7 +613,7 @@ def test_mail_to_the_operator_alone_is_never_returned(rig, tools, link, monkeypa
         assert wait_until(lambda: any(p["message_id"] == mid for p in shim.queue))
         post(rig, ["operator"], "not yours", reply_to=mid)
 
-    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_seconds": 2},
+    got = wait_call(tools, {"to": "planner@proj-a", "text": "ok?", "wait_s": 2},
                     reply_to_operator)
     assert got.structured["outcome"] == "no-reply"
     assert answers and all(a["messages"] == [] for a in answers)

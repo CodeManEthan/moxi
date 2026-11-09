@@ -11,10 +11,10 @@ key, which a command doesn't hold.
 - `devices` lists the device file; `revoke <id>` deletes one, and the running shell ends
   its sessions at its next tick.
 - `log` prints the audit log's rows.
-- `on` checks what the gateway needs, sets `gateway.enabled`, starts the shell, waits for it
+- `enable` checks what the gateway needs, sets `gateway.enabled`, starts the shell, waits for it
   to hold a TCP endpoint, and adds the tunnel entry when there is none, by running `moxi
   tunnel add ui/gateway` in this terminal so tunnel's own warnings and question show.
-- `off` clears `gateway.enabled`, which ends every phone session within 2 s, and asks
+- `disable` clears `gateway.enabled`, which ends every phone session within 2 s, and asks
   whether to remove the tunnel entry too.
 """
 
@@ -37,7 +37,7 @@ __all__ = ["HOLD_WAIT", "cmd_devices", "cmd_log", "cmd_off", "cmd_on",
            "cmd_pair", "cmd_revoke", "dispatch"]
 
 MODULE = "ui"
-#: Seconds `on` waits for the shell to hold the TCP endpoint.
+#: Seconds `enable` waits for the shell to hold the TCP endpoint.
 HOLD_WAIT = 5.0
 POLL = 0.1
 OFF_QUESTION = "Remove the tunnel entry too? The phone can't use the gateway while it is off."
@@ -279,7 +279,7 @@ def cmd_off(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 
 
 HANDLERS = {"pair": cmd_pair, "devices": cmd_devices, "revoke": cmd_revoke, "log": cmd_log,
-            "on": cmd_on, "off": cmd_off}
+            "enable": cmd_on, "disable": cmd_off}
 
 
 def dispatch(args: argparse.Namespace, say: Callable[[str], Any]) -> int:

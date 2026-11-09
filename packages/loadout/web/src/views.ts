@@ -208,11 +208,11 @@ export function replaceAct(row: Row): Act & { sheet: string[] } {
   return { path: "api/replace", body: { replace: [value], ...scope }, sheet };
 }
 
-/** The lines the sheet shows before `global off`: what comes out of each global file. */
+/** The lines the sheet shows before `global remove`: what comes out of each global file. */
 export function globalOffSheet(global: Global | null): string[] {
-  const lines = ["Runs moxi loadout global off: the global mode becomes off, and loadout takes "
-                 + "its own part out of each global file, leaving your text. An edited copy "
-                 + "loadout placed moves to Moxi's displaced folder."];
+  const lines = ["Runs moxi loadout global remove: the global mode becomes off, and loadout "
+                 + "takes its own part out of each global file, leaving your text. An edited "
+                 + "copy loadout placed moves to Moxi's displaced folder."];
   for (const file of global?.files ?? []) {
     lines.push(file.placed ? `${file.file}: the copy loadout placed is removed.`
       : `${file.file}: loadout's part comes out.`);
@@ -493,7 +493,7 @@ export interface GlobalView {
   line: string;
   /** The modes a button sets: the ones not in force. */
   modes: Array<{ mode: "managed" | "if-absent"; label: string; act: Act }>;
-  /** Whether `global off` is offered: always but when the manifest chose `off`. */
+  /** Whether `global remove` is offered: always but when the manifest chose `off`. */
   canTurnOff: boolean;
   files: GlobalFile[];
 }

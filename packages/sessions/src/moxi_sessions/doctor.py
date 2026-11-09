@@ -15,7 +15,7 @@ switch is on, or a setting holds a value that isn't one. It never changes a sett
 
 The `guard` row is the transcript-read guard's (`moxi_sessions.readguard`):
 
-* `off`: neither `guard.transcript_read` nor turns' `guards.on` turns it on.
+* `off`: neither `guard.transcript_read` nor turns' `guards.run` turns it on.
 * `ok`: it is on and turns is installed to enforce it; the detail names what turned it on
   and the roots it keeps agents out of.
 * `warn`: it is on and turns is absent, so nothing enforces it; or turns' guard loader
@@ -158,7 +158,7 @@ def guard_row(env=None) -> Row:
     found, problem = _in_turns(GUARD_ID, env) if turns else (None, None)
     by = [f"sessions' {SWITCH}"] if switched else []
     if found is not None and "list" in found.by:
-        by.append("turns' guards.on")
+        by.append("turns' guards.run")
     if not by:
         return Row(MODULE, "guard", "off",
                    "the transcript-read guard is off; turn it on with: moxi config set "

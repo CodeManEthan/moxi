@@ -28,7 +28,7 @@ default = "leave-out"
 doc = "What a commit does with a file that holds a secret: leave the file out, or commit a redacted copy."
 read = "use"
 
-[max_mb]
+[max_mib]
 type = "int"
 default = 10
 doc = "Largest file, in MiB, a snapshot takes and a git hook gate reads."
@@ -40,13 +40,13 @@ default = "doc-types.toml"
 doc = "The document types file, relative to the root."
 read = "use"
 
-[snapshot.auto]
+[snapshot.session_end]
 type = "bool"
 default = true
 doc = "Snapshot when an agent session's turn ends or the session ends."
 read = "use"
 
-[snapshot.interval]
+[snapshot.interval_minutes]
 type = "int"
 default = 15
 doc = "At most one snapshot commit per this many minutes."
@@ -75,3 +75,15 @@ type = "bool"
 default = false
 doc = "Commit a snapshot on a timer, outside agent sessions, as well."
 read = "use"
+
+# Keys an earlier notes read, kept declared so a file that still sets one is told what to
+# do rather than refused as unknown.
+
+[max_mb]
+retired = "renamed: set max_mib instead"
+
+[snapshot.auto]
+retired = "renamed: set snapshot.session_end instead"
+
+[snapshot.interval]
+retired = "renamed: set snapshot.interval_minutes instead"

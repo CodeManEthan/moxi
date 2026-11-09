@@ -2,12 +2,12 @@
 and their commit pushed, within a stated time, while the machine stays up.
 
 The bound. When a session's `gone` event fires, every edit it made before the event that a
-pass can commit is committed within `snapshot.interval` plus 6 minutes. The push of that
+pass can commit is committed within `snapshot.interval_minutes` plus 6 minutes. The push of that
 commit is attempted by the pass that made it, or, while the committer's backoff from an
 earlier failed push holds it, by the first pass after that backoff if a pass comes; when
 the committing pass's own attempt fails, a pass tries once more `push_backoff_s` later. Each
 attempt these steps make starts within `push_backoff_s` plus 6 minutes of the commit. This
-holds with `snapshot.auto` on, the timer off, and a pass's commit part ending within a
+holds with `snapshot.session_end` on, the timer off, and a pass's commit part ending within a
 minute.
 
 Left outside the bound, each on purpose:

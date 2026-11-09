@@ -67,7 +67,7 @@ def test_the_spec_is_built_from_config(notes):
     assert (built.min_interval_s, built.message, built.prepare, built.push) == \
         (15 * 60, None, "moxi_notes.prepare:prepare", None)
     assert (built.push_backoff_s, built.max_bytes, built.trailers) == (300, 10 * 2**20, None)
-    configure(snapshot__interval=5, snapshot__push="origin", max_mb=2,
+    configure(snapshot__interval_minutes=5, snapshot__push="origin", max_mib=2,
               snapshot__author_name="sample-bot", snapshot__author_email="bot@example.invalid")
     built = spec.build()
     assert built.author == ("sample-bot", "bot@example.invalid")
@@ -77,7 +77,7 @@ def test_the_spec_is_built_from_config(notes):
 def test_the_spec_is_saved_only_when_it_differs(notes):
     assert spec.ensure_saved(spec.build()) is True
     assert spec.ensure_saved(spec.build()) is False
-    configure(snapshot__interval=5)
+    configure(snapshot__interval_minutes=5)
     assert spec.ensure_saved(spec.build()) is True
     assert saved_spec(notes, "notes/snapshot").min_interval_s == 300
 
@@ -91,7 +91,7 @@ def test_a_root_spelled_through_a_link_is_the_same_spec(notes):
 
 
 def test_repo_commit_runs_the_spec_as_last_saved(notes):
-    configure(snapshot__interval=0)
+    configure(snapshot__interval_minutes=0)
     (notes / "a.md").write_text("alpha\n", encoding="utf-8")
     result, _, _ = snapshot.one_pass()
     assert result.status == "committed"
@@ -156,7 +156,7 @@ def test_the_snapshot_verb_runs_one_pass_and_prints_repos_line(notes):
 
 def test_an_ended_sessions_edit_is_committed_when_the_interval_ends(notes, monkeypatch):
     monkeypatch.setattr(spec, "MINUTE", 1)  # the interval in seconds
-    configure(snapshot__interval=2)
+    configure(snapshot__interval_minutes=2)
     (notes / "a.md").write_text("alpha\n", encoding="utf-8")
     assert snapshot.one_pass()[0].status == "committed"
     (notes / "b.md").write_text("beta\n", encoding="utf-8")
@@ -172,7 +172,7 @@ def test_an_ended_sessions_edit_is_committed_when_the_interval_ends(notes, monke
 
 def test_a_second_settler_exits_while_one_holds_the_lock(notes, monkeypatch):
     monkeypatch.setattr(spec, "MINUTE", 1)
-    configure(snapshot__interval=60)
+    configure(snapshot__interval_minutes=60)
     (notes / "a.md").write_text("alpha\n", encoding="utf-8")
     snapshot.one_pass()
     holder = snapshot.Real()

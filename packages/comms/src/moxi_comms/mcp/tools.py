@@ -1,5 +1,5 @@
 """comms' six tools, as a session's model calls them over MCP: `send`, `reply`, `agents`,
-`whoami`, `history` and `delete`.
+`whoami`, `history` and `remove`.
 
 Each tool is the `moxi comms` verb of the same name, run inside the daemon:
 
@@ -45,7 +45,7 @@ from . import inprocess
 log = logging.getLogger("comms.mcp.tools")
 
 #: The six tools, in the order `tools/list` gives them.
-NAMES_OF_TOOLS = ("send", "reply", "agents", "whoami", "history", "delete")
+NAMES_OF_TOOLS = ("send", "reply", "agents", "whoami", "history", "remove")
 
 #: Seconds every daemon call and record read of one tool call may take.
 DEADLINE = 30.0
@@ -101,7 +101,7 @@ def descriptions(expiry: str = "24h") -> dict[str, str]:
         "history": (
             "Read recent messages to and from an identity, newest last, with who really "
             "sent each. A message that expired or was withdrawn is shown as such."),
-        "delete": (
+        "remove": (
             "Withdraw a message you sent from every recipient who hasn't had it yet. One "
             "already delivered can't be withdrawn; the result says who had it."),
     }
@@ -159,7 +159,7 @@ INPUTS: dict[str, dict] = {
         "limit": {"type": "integer", "minimum": HISTORY_LIMIT[0],
                   "maximum": HISTORY_LIMIT[1], "default": HISTORY_DEFAULT},
     }},
-    "delete": {"type": "object", "properties": {"message_id": _ID},
+    "remove": {"type": "object", "properties": {"message_id": _ID},
                "required": ["message_id"]},
 }
 
@@ -192,7 +192,7 @@ OUTPUTS: dict[str, dict] = {
         "attribution": _STR,
         "state": {"type": "string",
                   "enum": ["delivered", "waiting", "expired", "withdrawn"]}})}}),
-    "delete": _object({"message_id": _STR, "withdrawn": _STRS, "delivered": _STRS,
+    "remove": _object({"message_id": _STR, "withdrawn": _STRS, "delivered": _STRS,
                        "expired": _STRS}),
 }
 
@@ -415,7 +415,7 @@ class Tools:
             return await call(self.delete, {"message_id": message_id})
 
         return {"send": send, "reply": reply, "agents": agents, "whoami": whoami,
-                "history": history, "delete": delete}
+                "history": history, "remove": delete}
 
 
 def adder(daemon):

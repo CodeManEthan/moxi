@@ -89,7 +89,9 @@ comms	packages/comms/src/moxi_comms/adapters/opencode.py	env.get("HOME") or os.p
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	_out, err = proc.communicate(timeout=MODELS_REFRESH_TIMEOUT)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	last=last, wait=self.retry_delay()))	keep	wait	wait
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--ready-wait", type=float, default=READY_WAIT, metavar="SECONDS",	keep	type	type
+comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--ready-wait", type=float, default=READY_WAIT, metavar="SECONDS",	use	"--ready-wait"	"--ready-wait-s"
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--notice-hold", type=float, default=NOTICE_HOLD, metavar="SECONDS",	keep	type	type
+comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--notice-hold", type=float, default=NOTICE_HOLD, metavar="SECONDS",	use	"--notice-hold"	"--notice-hold-s"
 comms	packages/comms/src/moxi_comms/adapters/opencode_server.py	proc.wait(timeout=grace)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/api/__init__.py	attributed	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	check	name	deadline	timeout_s
@@ -675,6 +677,7 @@ projects	packages/projects/tests/test_cli.py	monkeypatch.setenv("HOME", str(tmp_
 projects	packages/projects/tests/test_page.py	given = {"HOME": str(tmp_path / "h"), "USERPROFILE": str(tmp_path / "h"),	keep	HOME	HOME
 projects	packages/projects/tests/test_page.py	for name in ("HOME", "MOXI_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME",	keep	HOME	HOME
 repo	packages/repo/src/moxi_repo/cli.py	cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",	keep	type	type
+repo	packages/repo/src/moxi_repo/cli.py	cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",	use	"--wait"	"--wait-s"
 repo	packages/repo/src/moxi_repo/committer.py	PrepareContext.git	name	input	stdin_data
 repo	packages/repo/src/moxi_repo/committer.py	PrepareContext.git	name	timeout	timeout_s
 repo	packages/repo/src/moxi_repo/committer.py	Spec	name	min_interval	min_interval_s
@@ -690,7 +693,9 @@ repo	packages/repo/src/moxi_repo/committer.py	"""Hold the committer's lock for t
 repo	packages/repo/src/moxi_repo/committer.py	got = gate.acquire(timeout=wait)	keep	timeout	timeout
 repo	packages/repo/src/moxi_repo/committer.py	pass holds it past `wait`."""	keep	wait	wait
 repo	packages/repo/src/moxi_repo/committer.py	out.append(("min-interval", _plain(spec.min_interval)))	use	.min_interval	.min_interval_s
+repo	packages/repo/src/moxi_repo/committer.py	out.append(("min-interval", _plain(spec.min_interval)))	use	"min-interval"	"min-interval-s"
 repo	packages/repo/src/moxi_repo/committer.py	out.append(("push-backoff", _plain(spec.push_backoff)))	use	.push_backoff	.push_backoff_s
+repo	packages/repo/src/moxi_repo/committer.py	out.append(("push-backoff", _plain(spec.push_backoff)))	use	"push-backoff"	"push-backoff-s"
 repo	packages/repo/src/moxi_repo/committer.py	if spec.min_interval and since is not None and now - since < spec.min_interval:	use	.min_interval	.min_interval_s
 repo	packages/repo/src/moxi_repo/committer.py	f"ago; the interval is {_plain(spec.min_interval)} s")	use	.min_interval	.min_interval_s
 repo	packages/repo/src/moxi_repo/committer.py	if failed_at is not None and _now() - failed_at < spec.push_backoff:	use	.push_backoff	.push_backoff_s
@@ -749,6 +754,7 @@ secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--seed", ty
 secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--cost-mb", type=float, default=1.0,	keep	type	type
 secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--cost-factor", type=float, default=1.0,	keep	type	type
 services	packages/services/src/moxi_services/cli.py	p.add_argument("--every", type=float, default=WATCH_EVERY, metavar="SECONDS",	keep	type	type
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--every", type=float, default=WATCH_EVERY, metavar="SECONDS",	use	"--every"	"--every-s"
 services	packages/services/tests/browser_kit.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
 services	packages/services/tests/test_live.py	base = _REAL.get("XDG_CONFIG_HOME") or os.path.join(_REAL["HOME"], ".config")	keep	HOME	HOME
@@ -914,6 +920,7 @@ turns	packages/turns/src/moxi_turns/codex_appserver.py	proc.wait(timeout=grace +
 turns	packages/turns/src/moxi_turns/codex_appserver.py	answer = session.codex_limits(timeout=remaining)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self._thread.join(timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,	keep	type	type
+turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,	use	"--wait-seconds"	"--wait-s"
 turns	packages/turns/src/moxi_turns/codex_window.py	self._thread.join(timeout=TERM_GRACE * 2)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex_window.py	self.say(WAITING.format(wait=self.ready_wait))	keep	wait	wait
 turns	packages/turns/src/moxi_turns/endpoint.py	return self.future().result(timeout=max(0.0, timeout))	keep	timeout	timeout

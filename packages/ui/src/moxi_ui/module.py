@@ -30,7 +30,7 @@ SEGMENT = None
 #: since a phone may call at any time; turning it on or off restarts nothing. On Windows a
 #: logon task starts it at every logon either way, and it holds the port from logon to
 #: logout.
-DAEMONS = {"shell": {"command": "moxi-ui-serve", "doc": "the UI shell",
+DAEMONS = {"shell": {"command": "moxi-ui-shell", "doc": "the UI shell",
                      "platforms": ["linux", "darwin", "win32"],
                      "socket": {"setting": "port", "addresses": ["127.0.0.1", "::1"],
                                 "start": {"login": "gateway.enabled"}}}}

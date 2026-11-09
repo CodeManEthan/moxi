@@ -24,7 +24,7 @@ def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
 def test_the_retired_keys_are_declared():
     retired = {k.name for k in config.schema().keys.values() if k.retired}
     assert retired == {"claude.channel", "policy.never_held", "policy.next_turn_refused",
-                       "provision.slots"}
+                       "provision.slots", "connector.wait_default", "connector.wait_max"}
     assert not retired & {k.name for k in config.schema().live()}
 
 
@@ -188,6 +188,18 @@ def test_a_retired_key_says_what_to_do():
     write_config(None, '[claude]\nchannel = "plugin"\n')
     with pytest.raises(config.ConfigError, match="turns' plugin delivers"):
         config.load()
+
+
+@pytest.mark.parametrize("text, old, new", [
+    ("[connector]\nwait_default = 20\n", "connector.wait_default", "connector.wait_default_s"),
+    ("[connector]\nwait_max = 60\n", "connector.wait_max", "connector.wait_max_s"),
+])
+def test_a_renamed_key_is_refused_naming_the_new_one(text, old, new):
+    write_config(None, text)
+    with pytest.raises(config.ConfigError) as caught:
+        config.load()
+    assert caught.value.key == old
+    assert caught.value.fix == f"renamed: set {new} instead"
 
 
 def test_the_retired_provision_slots_key_says_to_remove_it():

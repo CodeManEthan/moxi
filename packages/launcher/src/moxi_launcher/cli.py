@@ -20,7 +20,7 @@ launched.
     moxi launcher sessions [--limit N] [--before TIME] [--json]
     moxi launcher resume SESSION_ID [--slot N]
     moxi launcher keep-warm hold NAME | release NAME | holds [--json]
-    moxi launcher state [SESSION_ID] [--json]
+    moxi launcher show [SESSION_ID] [--json]
 
 `run` launches; `preview` prints the argv and environment a launch would use and starts
 nothing. `log` lists launches, newest first, or with `--table` the runs, the exits or the
@@ -36,7 +36,7 @@ relaunches another as one of its directors, shows a run (`--status`), or launche
 the session of a run that exited it and did not bring it back (`--from-record`).
 `exit-session` exits a launched session, and `exits` lists every exit tried. `sessions`
 lists past launches and whether each can be resumed; `resume` launches one again,
-resumed. `keep-warm` opens, releases and lists this session's named holds. `state` shows
+resumed. `keep-warm` opens, releases and lists this session's named holds. `show` shows
 a launched session's relaunch, recycle and keep-warm state, and whether it needs a look.
 
 `run` and `preview` keep what this parser does not know as `rest`, and read it again
@@ -637,7 +637,7 @@ VERBS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "sessions": _sessions,
     "resume": _resume,
     "keep-warm": _keep_warm,
-    "state": _state,
+    "show": _state,
 }
 
 
@@ -805,7 +805,7 @@ def _act_parsers(verbs) -> None:
     listed.add_argument("--json", action="store_true", help="print one JSON object")
 
     state = verbs.add_parser(
-        "state", help="show a launched session's state", allow_abbrev=False,
+        "show", help="show a launched session's state", allow_abbrev=False,
         description="Show a launched session's relaunch, recycle and keep-warm state, and "
                     "whether it needs a look. With no SESSION_ID, this session's.")
     state.add_argument("session_id", nargs="?", metavar="SESSION_ID",

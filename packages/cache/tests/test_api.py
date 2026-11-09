@@ -104,17 +104,17 @@ def test_a_clock_is_json(tmp_path):
 
 def test_the_schema_holds_the_first_releases_keys():
     schema = Schema.from_resource("moxi_cache", "settings.toml")
-    assert list(schema.keys) == ["claude.ttl_seconds", "lifetime", "watch.tick",
-                                 "segment.warn_before", "timer.subscriber"]
+    assert [key.name for key in schema.live()] == ["claude.ttl_s", "lifetime", "watch.tick_s",
+                                                   "segment.warn_before_s", "timer.subscriber"]
     subscribers = schema.keys["timer.subscriber"]
     assert (subscribers.type, subscribers.default, subscribers.read) == ("list", [], "use")
-    ttl = schema.keys["claude.ttl_seconds"]
+    ttl = schema.keys["claude.ttl_s"]
     assert (ttl.type, ttl.default, ttl.read) == ("int", 3600, "use")
     rows = schema.keys["lifetime"]
     assert (rows.type, rows.default, rows.read) == ("list", [], "use")
-    tick = schema.keys["watch.tick"]
+    tick = schema.keys["watch.tick_s"]
     assert (tick.type, tick.default, tick.read) == ("int", 10, "use")
-    warn = schema.keys["segment.warn_before"]
+    warn = schema.keys["segment.warn_before_s"]
     assert (warn.type, warn.default, warn.read) == ("int", 900, "use")
 
 

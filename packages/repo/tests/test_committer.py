@@ -637,9 +637,22 @@ def test_a_saved_spec_round_trips_through_git_config(demo):
     moxi_repo.save_spec(s)
     back = committer.saved_spec(repo, "demo/snap")
     assert back == s
-    assert git(repo, "config", "moxi-repo.spec.demo/snap.min-interval").stdout == "90.5\n"
+    assert git(repo, "config", "moxi-repo.spec.demo/snap.min-interval-s").stdout == "90.5\n"
     with pytest.raises(committer.SpecError):
         moxi_repo.save_spec(spec(repo, prepare=lambda ctx: None))
+
+
+@pytest.mark.parametrize("old, new", [("min-interval", "min-interval-s"),
+                                      ("push-backoff", "push-backoff-s")])
+def test_a_saved_spec_with_a_renamed_key_is_refused_naming_the_new_one(demo, old, new):
+    repo = demo.repo()
+    moxi_repo.save_spec(spec(repo))
+    git(repo, "config", f"moxi-repo.spec.demo/snap.{old}", "60")
+    with pytest.raises(committer.SpecError, match=f"saved {old} is renamed: set {new} "
+                                                  "instead"):
+        committer.saved_spec(repo, "demo/snap")
+    moxi_repo.save_spec(spec(repo))
+    assert committer.saved_spec(repo, "demo/snap") == spec(repo)
 
 
 def test_moxi_repo_commit_runs_saved_specs_and_gives_exit_codes(demo, capsys):
@@ -658,7 +671,7 @@ def test_moxi_repo_commit_runs_saved_specs_and_gives_exit_codes(demo, capsys):
     with files.lock(repo / ".git" / "moxi-repo" / "lock"):
         assert cli.main(["commit", str(repo), "--spec", "demo/snap"]) == 0
         assert "busy" in capsys.readouterr().out
-        assert cli.main(["commit", str(repo), "--spec", "demo/snap", "--wait", "0.2"]) == 75
+        assert cli.main(["commit", str(repo), "--spec", "demo/snap", "--wait-s", "0.2"]) == 75
     (repo / ".git" / "index.lock").write_text("", encoding="utf-8")
     write(repo, "notes/c.md")
     try:

@@ -186,9 +186,9 @@ def test_refusals_are_the_same_errors_from_the_same_codes(rig, planner, console)
         ("send", {"as": PLANNER, "token": OWN,
                   "content": f"::to {CONSOLE} [no reply]\nreport"}, wire.NOT_MAILABLE),
         ("send", {"token": OWN, "content": "x"}, wire.INVALID_PARAMS),
-        ("delete", {"as": PLANNER, "token": OWN, "message_id": "99999"},
+        ("remove", {"as": PLANNER, "token": OWN, "message_id": "99999"},
          wire.UNKNOWN_MESSAGE),
-        ("delete", {"as": PLANNER, "token": "nope", "message_id": "1"}, wire.CREDENTIAL),
+        ("remove", {"as": PLANNER, "token": "nope", "message_id": "1"}, wire.CREDENTIAL),
     ]
     for method, params, code in cases:
         socket_answer, in_process_answer = both(rig.daemon, method, params, planner)

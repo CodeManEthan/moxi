@@ -3,8 +3,8 @@
 turns reads `GUARDS` from the `moxi.turns.guards` entry `usage`, so the guard's id is
 `usage.ceiling`. It covers every tool call of a subagent on Claude and Codex (OpenCode
 has no point before a tool call that turns can reach), and runs only when turned on: by
-usage's switch `ceiling.on`, which the install asks about, or by naming `usage.ceiling`
-on turns' `guards.on`. A break lets the call run, as the judge itself does on any error.
+usage's switch `ceiling.enabled`, which the install asks about, or by naming `usage.ceiling`
+on turns' `guards.run`. A break lets the call run, as the judge itself does on any error.
 
 turns is reached through `moxi.modules.load`, since usage installs it only as an extra;
 turns' loader is the only importer of this module, so turns is there when it runs.

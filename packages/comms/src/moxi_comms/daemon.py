@@ -585,7 +585,7 @@ class Daemon:
             "bind": self._bind,
             # The reads take no connection.
             **{name: _read(self, f"_{name}_query") for name in READS},
-            "delete": self._delete,
+            "remove": self._delete,
             "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
             "injected": self._injected,
@@ -1337,7 +1337,7 @@ class Daemon:
                           code=wire.NAME_RESERVED, name=name)
 
     def _delete(self, conn, params: dict) -> dict:
-        """`delete`: the author withdraws `message_id` from every recipient that hasn't
+        """`remove`: the author withdraws `message_id` from every recipient that hasn't
         had it in a digest. Refused `not-sender` for anyone but its author,
         `already-delivered` when every recipient has had it, `unknown-message` for an
         id the record doesn't hold. A message withdrawn again answers as the first time

@@ -735,10 +735,10 @@ def _gateway_parser(verbs: Any) -> None:
     log.add_argument("--days", type=int, default=1, metavar="N",
                      help="today and the N-1 days before (default 1)")
     log.add_argument("--json", action="store_true", help="one JSON object per row")
-    inner.add_parser("on", help="turn the gateway on",
+    inner.add_parser("enable", help="turn the gateway on",
                      description="Check what the gateway needs, turn it on, start the shell "
                                  "and add the tunnel entry when there is none.")
-    inner.add_parser("off", help="turn the gateway off",
+    inner.add_parser("disable", help="turn the gateway off",
                      description="Turn the gateway off, ending every phone session, and "
                                  "offer to remove the tunnel entry.")
 

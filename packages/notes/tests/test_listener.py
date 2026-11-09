@@ -192,7 +192,7 @@ def test_nothing_fires_with_auto_off_or_without_a_git_repo(spawned):
     listener.fire(gone())
     assert spawned == []
     repo(root)
-    configure(snapshot__auto=False)
+    configure(snapshot__session_end=False)
     listener.fire(gone())
     listener.fire(turn())
     assert spawned == []

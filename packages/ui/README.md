@@ -114,7 +114,7 @@ Cloudflare is the other provider. Then:
 
 ```sh
 moxi install ui --with gateway,tunnel
-moxi ui gateway on
+moxi ui gateway enable
 ```
 
 and scan the QR code in the desktop's Gateway section. No domain, no key to type.
@@ -149,7 +149,7 @@ with your last logout. Turn on lingering for your user (`loginctl enable-linger`
 remove the tunnel entry before you log out.
 
 The gateway needs moxi-tunnel 0.2 or later. `moxi install ui --with tunnel` counts the extra
-installed once any tunnel is, so it leaves an older tunnel as it is; `moxi ui gateway on` and
+installed once any tunnel is, so it leaves an older tunnel as it is; `moxi ui gateway enable` and
 `moxi doctor ui` name the command that raises it.
 
 `moxi doctor ui` shows three gateway rows: `gateway` (its address, endpoint, devices and

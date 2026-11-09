@@ -1,4 +1,4 @@
-"""`moxi ui serve`, also `python -P -m moxi_ui.serve` and `moxi-ui-serve`: the shell.
+"""`moxi ui serve`, also `python -P -m moxi_ui.serve` and `moxi-ui-shell`: the shell.
 
 It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 
@@ -549,7 +549,7 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="moxi-ui-serve", description="Run Moxi's browser shell in the foreground.")
+        prog="moxi-ui-shell", description="Run Moxi's browser shell in the foreground.")
     parser.parse_args(argv)
     from moxi import log
 

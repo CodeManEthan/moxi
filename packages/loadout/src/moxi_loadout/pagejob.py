@@ -1,7 +1,7 @@
 """Page jobs: an act from the browser page, run as the same verb in the user's terminal.
 
 The page server never runs an install on its own threads. Each act that writes the
-manifest or installs (`add`, `remove`, `enable`, `disable`, `global mode`, `global off`,
+manifest or installs (`add`, `remove`, `enable`, `disable`, `global mode`, `global remove`,
 `install`) starts a process of its own, the runner:
 
     python -P -m moxi_loadout.pagejob <job> <verb> [<argument>...]

@@ -70,7 +70,7 @@ def test_upstream_on_tcp_waits_for_a_hold_that_names_a_running_shell(env):
     runtime = Layout("ui").runtime_dir(env, create=True)
     with pytest.raises(_not_ready()) as err:
         decl.upstream(environ=env, kind="tcp")
-    assert "moxi ui gateway on" in str(err.value)
+    assert "moxi ui gateway enable" in str(err.value)
     endpoint.write_hold(runtime, 8471, pid=os.getpid())
     assert decl.upstream(environ=env, kind="tcp") == "http://127.0.0.1:8471"
     with pytest.raises(_not_ready()):
@@ -181,7 +181,7 @@ def test_pair_refuses_with_the_locator_text_and_without_an_address(env, tmp_path
     with pytest.raises(cli.Refused, match="MOXI_UI_HOME"):
         verbs.cmd_pair(_ns(), print, environ=moved)
     monkeypatch.setattr(verbs, "_address", lambda: None)
-    with pytest.raises(cli.Refused, match="moxi ui gateway on"):
+    with pytest.raises(cli.Refused, match="moxi ui gateway enable"):
         verbs.cmd_pair(_ns(), print, environ=env)
 
 
@@ -375,11 +375,11 @@ def test_the_gateway_row_is_off_then_ok_with_what_it_serves(tmp_path):
     ({"kind": "unix", "path_problem": "the gateway's socket can't live under /x"}, "/x", None),
     ({"held": {"reason": "taken"}, "hold": None},
      "port 8461 was held by another program; the tunnel entry was removed",
-     "free the port and run `moxi ui gateway on`"),
+     "free the port and run `moxi ui gateway enable`"),
     ({"held": {"reason": "taken", "removed": None}, "hold": None},
      "port 8461 was held by another program; there was no tunnel entry to remove",
-     "free the port and run `moxi ui gateway on`"),
-    ({"address": None}, "no ui/gateway tunnel entry", "moxi ui gateway on"),
+     "free the port and run `moxi ui gateway enable`"),
+    ({"address": None}, "no ui/gateway tunnel entry", "moxi ui gateway enable"),
     ({"address": None, "retired_problem": "/s/retired.json can't be read (not a list)"},
      "retired origins, /s/retired.json can't be read (not a list), so tunnel refuses",
      "the copy refills from tunnel's record, unless tunnel was purged"),
@@ -404,7 +404,7 @@ def test_each_failure_is_named_with_its_fix(tmp_path, change, detail, fix):
     ({"switch": False}, "gateway.enabled is off while", "moxi tunnel remove ui/gateway"),
     ({"address": Address(exposure="internet")}, "from the internet", None),
     ({"kind": "unix", "acts": {"acts": False, "reason": "origin"}}, "outlived Moxi",
-     "moxi tunnel remove ui/gateway, then moxi ui gateway on"),
+     "moxi tunnel remove ui/gateway, then moxi ui gateway enable"),
     ({"kind": "unix", "acts": {"acts": False, "reason": "origin"},
       "address": Address(provider="cloudflare", port=443, exposure="own-devices")},
      "outlived Moxi", "--hostname <new>"),

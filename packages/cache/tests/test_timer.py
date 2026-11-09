@@ -962,7 +962,7 @@ def test_a_failing_timer_tick_is_logged_and_the_watcher_goes_on(tmp_path):
         def close(self):
             T.closed = True
 
-    write_cache_config(Path(os.environ["MOXI_CACHE_HOME"]), "[watch]\ntick = 0\n")
+    write_cache_config(Path(os.environ["MOXI_CACHE_HOME"]), "[watch]\ntick_s = 0\n")
     assert watch.run(watcher=W(), timer=T(), stop=stop) == 0
     assert ("timer-error", "the timer's tick failed (ValueError: boom)") in said
     assert T.closed

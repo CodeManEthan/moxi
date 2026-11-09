@@ -346,7 +346,7 @@ def test_a_fresh_codex_reading_is_not_pulled(turns):
     put(codex(5.0, 300, NOW + HOUR, NOW - 5 * MIN))
     result = limits.limits(harness="codex", now=NOW)
     assert turns.calls == [] and result.pull is None
-    write_config("[limits]\ncodex_pull_after = 120\n")
+    write_config("[limits]\ncodex_pull_after_s = 120\n")
     turns.answer = pulled()
     limits.limits(harness="codex", now=NOW)
     assert turns.calls == [3.0]

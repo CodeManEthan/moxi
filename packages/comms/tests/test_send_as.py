@@ -127,6 +127,6 @@ def test_a_later_holder_of_a_freed_name_cant_delete_the_modules_post(console):
     reserved.reconcile(declared={}, chain=secrets.from_config(), clock=console.clock)
     console.shim(name="console")
     assert wait_until(lambda: "console" in console.daemon.bindings)
-    code, out = console.cli(["delete", sent.message_id], name="console")
+    code, out = console.cli(["remove", sent.message_id], name="console")
     assert code == moxi_exit.REFUSED and "not yours" in out, out
     assert console.record.get_message(sent.message_id).withdrawn_at is None

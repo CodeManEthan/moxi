@@ -31,13 +31,13 @@ default = 0
 doc = "Processes a full rebuild of the token index reads sources with; 0 picks one per core."
 read = "use"
 
-[index.wait_seconds]
-type = "float"
-default = 30.0
-doc = "How long a pass waits for another pass to finish before it exits 75."
+[index.wait_s]
+type = "int"
+default = 30
+doc = "Seconds a pass waits for another pass to finish before it exits 75."
 read = "use"
 
-[limits.codex_pull_after]
+[limits.codex_pull_after_s]
 type = "int"
 default = 600
 doc = "Seconds after which the newest Codex limits reading counts as stale, so limits asks the Codex app-server for a new one (needs turns); 0 or more."
@@ -99,10 +99,10 @@ default = false
 doc = "Measure the restart point once a week on a timer."
 read = "use"
 
-[ceiling.on]
+[ceiling.enabled]
 type = "bool"
 default = false
-doc = "Run the worker ceiling, the guard that warns a subagent and then refuses its tools once its context has grown past warn_tokens and hard_tokens; naming usage.ceiling on turns' guards.on runs it too."
+doc = "Run the worker ceiling, the guard that warns a subagent and then refuses its tools once its context has grown past warn_tokens and hard_tokens; naming usage.ceiling on turns' guards.run runs it too."
 read = "use"
 
 [ceiling.warn_tokens]
@@ -161,3 +161,15 @@ type = "int"
 default = 7
 doc = "Days a subagent's ceiling markers are kept; 1 or more."
 read = "use"
+
+# Keys an earlier usage read, kept declared so a file that still sets one is told what to
+# do rather than refused as unknown.
+
+[index.wait_seconds]
+retired = "renamed: set index.wait_s instead"
+
+[limits.codex_pull_after]
+retired = "renamed: set limits.codex_pull_after_s instead"
+
+[ceiling.on]
+retired = "renamed: set ceiling.enabled instead"

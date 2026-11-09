@@ -276,7 +276,7 @@ A hold stays open until it is released, across a relaunch or a resume of the ses
 Keep-warm and recycle on expiry are offered where cache can read a session's
 environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
-**State.** `moxi launcher state [SESSION_ID]` shows a launched session's relaunch,
+**State.** `moxi launcher show [SESSION_ID]` shows a launched session's relaunch,
 recycle and keep-warm state (this session's when none is named). It reads red, with
 `failed` or `blocked` and why, when the latest run on the launch failed or was blocked
 and nothing has gone well since; a session merely waiting is never red.
@@ -348,7 +348,7 @@ starts when the page is first opened and stops once nothing has used it for a wh
 | `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
 | `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
 | `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
-| `moxi launcher state [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
+| `moxi launcher show [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
 
 `--dry-run` takes an act's checks and writes nothing. `--json` prints the verb's data, its
 outcome word among it.

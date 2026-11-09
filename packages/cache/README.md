@@ -28,8 +28,8 @@ while the recipient's cache is cold), and it adds these commands:
 - `moxi cache doctor` checks the config, the lifetime table, the drift record and the
   watcher, and exits 1 when something there stops reads.
 
-Its settings are `claude.ttl_seconds`, `lifetime` (your own lifetime table rows),
-`watch.tick`, `segment.warn_before` and `timer.subscriber`; `moxi config cache` shows
+Its settings are `claude.ttl_s`, `lifetime` (your own lifetime table rows),
+`watch.tick_s`, `segment.warn_before_s` and `timer.subscriber`; `moxi config cache` shows
 them.
 
 A lifetime row, shipped or your own, names a harness (`codex` or `opencode`), a provider,

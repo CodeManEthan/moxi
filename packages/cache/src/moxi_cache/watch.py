@@ -4,7 +4,7 @@
 verdict is made from its records; a caller that decides about a cache calls `api.read`.**
 A record can lag the transcript by a tick, so it is not evidence.
 
-At each tick (`watch.tick`, 10 s by default):
+At each tick (`watch.tick_s`, 10 s by default):
 
 1. Every third tick, and whenever a file in Claude Code's sessions folder
    (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions`) is added, removed or rewritten, it runs
@@ -18,7 +18,7 @@ At each tick (`watch.tick`, 10 s by default):
 3. It writes `RUNTIME/cache/clock/<session>.json` by atomic replace (`records`), with
    `seen_at` at this tick whether it read or not, and removes the record of a session that
    left the live list. Every record it writes carries `warn_before` (the effective
-   `segment.warn_before`) and `stale_after` (three times the effective tick), both in
+   `segment.warn_before_s`) and `stale_after` (three times the effective tick), both in
    seconds, from the config as read at this tick, so a config change reaches every record
    within one tick (`records`). The tick that sets `stale_after` is the one the watcher
    then waits, so a fresh record never shows dim.
@@ -236,8 +236,8 @@ class Watcher:
         self.projects_root = projects_root or (lambda: api.projects_root(None))
         self.directory = records.record_dir() if directory is None else Path(directory)
         self.sessions = sessions_dir() if sessions is None else Path(sessions)
-        self.warn_before = default("segment.warn_before")
-        self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick"))
+        self.warn_before = default("segment.warn_before_s")
+        self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick_s"))
         self.ticks = 0
         #: The records this tick wrote, by session id, for the timer; None when the tick
         #: wrote nothing because the live list could not be read or has a shape it does
@@ -376,10 +376,10 @@ class Watcher:
 # --- running it ---------------------------------------------------------------------------
 
 def _interval(config: Config, watcher: Watcher) -> int:
-    """The effective tick: `watch.tick`, at least `MIN_TICK`."""
-    tick = config.use("watch.tick")
+    """The effective tick: `watch.tick_s`, at least `MIN_TICK`."""
+    tick = config.use("watch.tick_s")
     if tick < MIN_TICK:
-        watcher.say("tick", f"watch.tick is {tick}; the watcher ticks every {MIN_TICK}s")
+        watcher.say("tick", f"watch.tick_s is {tick}; the watcher ticks every {MIN_TICK}s")
         return MIN_TICK
     watcher.say("tick", None)
     return tick
@@ -389,7 +389,7 @@ def _thresholds(config: Config, watcher: Watcher) -> int:
     """Read the config once for this tick: set what the tick writes into every record
     and return the tick it then waits, the same read that set `stale_after`."""
     interval = _interval(config, watcher)
-    watcher.warn_before = config.use("segment.warn_before")
+    watcher.warn_before = config.use("segment.warn_before_s")
     watcher.stale_after = records.STALE_TICKS * interval
     return interval
 

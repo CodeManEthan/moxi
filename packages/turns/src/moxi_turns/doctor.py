@@ -88,7 +88,7 @@ def _config():
     detail = (f"{settings.file}: {config.STOP_WAIT} {settings[config.STOP_WAIT]}, "
               f"listen.wait_ms {settings['listen.wait_ms']}, "
               f"commands.allow {', '.join(allow) or 'none'}, "
-              f"start.limit {settings['start.limit'] or 'the ceiling'}")
+              f"start.limit_chars {settings['start.limit_chars'] or 'the ceiling'}")
     unknown = config.unknown_commands(allow)
     if unknown:
         return settings, moxi_doctor.Row(
@@ -239,14 +239,14 @@ def _off_fix(on) -> str | None:
     """The command that turns guard `on` off: off the list, else its switch off."""
     found = on.found
     if "list" in on.by:
-        return f"moxi config set turns guards.on --remove {found.path or found.id}"
+        return f"moxi config set turns guards.run --remove {found.path or found.id}"
     if found.module and found.guard.switch:
         return f"moxi config set {found.module} {found.guard.switch} false"
     return None
 
 
 #: How the `guards` row says what turned a guard on.
-_BY = {"list": "guards.on", "switch": "its switch"}
+_BY = {"list": "guards.run", "switch": "its switch"}
 
 
 def _tool_points() -> dict[str, dict[str, bool]]:

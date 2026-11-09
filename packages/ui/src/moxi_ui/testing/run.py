@@ -1,11 +1,11 @@
 """A test shell's process: `python -P -m moxi_ui.testing.run '<options as JSON>'`.
 
-`TestShell` starts it; nothing else should. It runs the shell as `moxi-ui-serve` does,
+`TestShell` starts it; nothing else should. It runs the shell as `moxi-ui-shell` does,
 with three differences a test needs: it binds the port its options name, or one the
 system picks, it takes the test-only options (`child_args` for every page server it
 starts, `leave_out` for the modules its snapshot leaves out, `failed_for` for the seconds
 a failed start answers with its failure, `gateway` to run the shell's gateway as
-`moxi-ui-serve` does) from its one argument, never from a setting or a variable, and it
+`moxi-ui-shell` does) from its one argument, never from a setting or a variable, and it
 stops when its lifeline closes (`moxi.proc.spawn(..., lifeline="fd")`).
 
 Once it serves, it prints one line, `ready <JSON>`, holding its runtime file's fields

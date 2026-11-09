@@ -81,14 +81,14 @@ def test_on_in_gateway_mode_passes_and_writes_no_unit(tmp_path_factory, fixture_
             pytest.skip(f"the core finds {found} under the kit's environment, so `on`'s "
                         "`moxi config set` would apply the shell's unit there; the kit "
                         "refuses that call, so `on` isn't run on this system")
-        done = shell.moxi("ui", "gateway", "on")
+        done = shell.moxi("ui", "gateway", "enable")
         assert done.returncode == 0, done.stdout + done.stderr
         assert f"the gateway is on at https://{HOST}" in done.stdout
         assert "no supervisor on this system" in done.stdout
         units = [path for path in shell.home.rglob("*")
                  if path.suffix in (".service", ".socket", ".plist")]
         assert units == []
-        done = shell.moxi("ui", "gateway", "off")
+        done = shell.moxi("ui", "gateway", "disable")
         assert done.returncode == 0, done.stdout + done.stderr
         assert "moxi tunnel remove ui/gateway" in done.stdout
     finally:

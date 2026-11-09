@@ -451,17 +451,26 @@ def _number(section, var: str, default, kind=float):
         raise SpecError(f"saved {var} = {value!r} is not a number") from None
 
 
+#: Spec keys an earlier repo saved, by the key that replaced each. A saved spec that still
+#: has one is refused, naming the new key: `save_spec` writes the new keys.
+RENAMED_SPEC_KEYS = {"min-interval": "min-interval-s", "push-backoff": "push-backoff-s"}
+
+
 def _from_section(top: Path, name: str, section: dict[str, list[str]]) -> Spec:
+    for old, new in RENAMED_SPEC_KEYS.items():
+        if old in section:
+            raise SpecError(f"saved {old} is renamed: set {new} instead (save the spec "
+                            "again)")
     author = _one(section, "author") or ""
     found = re.fullmatch(r"(.+?) <([^<>]+)>", author)
     if not found:
         raise SpecError(f"saved author = {author!r} is not 'name <email>'")
     spec = Spec(name=name, root=top, paths=tuple(section.get("paths", ())),
                 author=(found.group(1), found.group(2)),
-                min_interval_s=_number(section, "min-interval", 0),
+                min_interval_s=_number(section, "min-interval-s", 0),
                 message=_one(section, "message"), trailers=_one(section, "trailers"),
                 prepare=_one(section, "prepare"), push=_one(section, "push") or None,
-                push_backoff_s=_number(section, "push-backoff", 300),
+                push_backoff_s=_number(section, "push-backoff-s", 300),
                 max_bytes=_number(section, "max-bytes", 10 * 1024 * 1024, int))
     problem = spec_problem(spec)
     if problem:
@@ -488,12 +497,12 @@ def _plain(x: float) -> str:
 def _fields(spec: Spec) -> list[tuple[str, str]]:
     out = [("paths", p) for p in spec.paths]
     out.append(("author", f"{spec.author[0]} <{spec.author[1]}>"))
-    out.append(("min-interval", _plain(spec.min_interval_s)))
+    out.append(("min-interval-s", _plain(spec.min_interval_s)))
     for var, value in (("message", spec.message), ("trailers", spec.trailers),
                        ("prepare", spec.prepare), ("push", spec.push)):
         if value is not None:
             out.append((var, value))
-    out.append(("push-backoff", _plain(spec.push_backoff_s)))
+    out.append(("push-backoff-s", _plain(spec.push_backoff_s)))
     out.append(("max-bytes", "none" if spec.max_bytes is None else str(spec.max_bytes)))
     return out
 

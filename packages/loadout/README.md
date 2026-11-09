@@ -33,7 +33,7 @@ and `moxi loadout status` says what has drifted.
    run. `status` notes both.
 5. The global instruction file, `global.md` in your folder, reaches every session in one
    of three modes: `off` (the default), `managed` (a line or a marked block added to your
-   own file, which `moxi loadout global off` takes out exactly) or `if-absent` (placed
+   own file, which `moxi loadout global remove` takes out exactly) or `if-absent` (placed
    only where a harness has none). `global show --diff` previews the next install.
 6. No placement lands where git would commit it. In a project tree it writes a
    `.gitignore` of its own, which ignores itself, before it places anything there; where
@@ -119,7 +119,7 @@ and links to the page. An item counts once, however many of its harnesses aren't
   `would-commit` until you commit that.
 - **The global instruction file.** The mode, and what the next install does to each
   global file, with its diff. Managed and Only where absent run `moxi loadout global
-  mode`. Turn off runs `moxi loadout global off` once you confirm on the sheet.
+  mode`. Turn off runs `moxi loadout global remove` once you confirm on the sheet.
 
 Each change runs the same `moxi loadout` command you would run in a terminal, in a
 process of its own, and the page shows the command and how it ended under "Last change".

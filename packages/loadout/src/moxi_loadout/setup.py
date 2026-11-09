@@ -50,7 +50,7 @@ loadout: the global instruction file, global.md in your loadout folder, can reac
 session of every harness. Choose how:
   off        loadout touches no global file (the default)
   managed    your own CLAUDE.md and AGENTS.md stay; loadout adds a line or a block that
-             brings global.md in, and global off takes exactly that out
+             brings global.md in, and global remove takes exactly that out
   if-absent  global.md is placed where a harness has no global file; an existing one
              is left alone
 Global mode [off]: """

@@ -147,9 +147,9 @@ def nudges(text: object) -> bool:
 
 
 def is_on(settings) -> bool:
-    """Question mode is on: its id is on `guards.on`, or its switch reads true.
+    """Question mode is on: its id is on `guards.run`, or its switch reads true.
     `settings` is turns' settings, read by key."""
-    listed = settings["guards.on"] or ()
+    listed = settings["guards.run"] or ()
     return GUARD_ID in listed or settings[SWITCH] is True
 
 

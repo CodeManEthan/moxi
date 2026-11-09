@@ -89,14 +89,14 @@ def test_the_verbs_that_act_stay_four():
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "whoami",
-                                "claude", "codex", "migrate", "delete", "reserved"}
+                                "claude", "codex", "migrate", "remove", "reserved"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     claim = {"whoami"}
     wrapper = {"claude", "codex"}
     store_verb = {"migrate", "reserved"}
-    # `delete` acts only on the sender's own message, taking back what it sent.
-    withdraw = {"delete"}
+    # `remove` acts only on the sender's own message, taking back what it sent.
+    withdraw = {"remove"}
     assert (acting | reading | claim | wrapper | store_verb | withdraw
             == set(sub.choices)) \
         and len(acting) == 4

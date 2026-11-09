@@ -350,7 +350,7 @@ def test_watch_prints_a_line_when_a_verdict_changes(fake, no_modules, capsys, mo
             fake.written["web"].active = False
 
     rounds(monkeypatch, 4, between)
-    code, out, _ = run(capsys, "watch", "web", "--every", "1")
+    code, out, _ = run(capsys, "watch", "web", "--every-s", "1")
     lines = out.splitlines()
     assert code == 0 and len(lines) == 2
     assert lines[0].split("  ")[1:4] == ["services/web", "ok", "running"]

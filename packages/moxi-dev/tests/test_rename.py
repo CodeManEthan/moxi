@@ -376,3 +376,22 @@ proc.join(1,
     assert "fn(wait_s=1, timeout_s=2) or other.wait" in text and "timeout=3)" in text
     assert rename.run(root, renames, dry_run=True) == 0
     assert "0 to apply, 5 applied, 0 not here" in capsys.readouterr().out
+
+
+def test_a_keep_row_on_a_line_a_use_row_changes_stays_applied(tmp_path, capsys):
+    root = repo(tmp_path, {
+        "packages/p/src/p/x.py": "def fn(type=1):\n    return type\n",
+        "packages/q/src/q/use.py": 'parse.add("--wait", type=float)\n',
+    })
+    line = 'parse.add("--wait", type=float)'
+    renames = table(tmp_path,
+                    row("packages/p/src/p/x.py", "fn", "name", "type", "kind"),
+                    row("packages/q/src/q/use.py", line, "keep", "type", "type"),
+                    row("packages/q/src/q/use.py", line, "use", '"--wait"', '"--wait-s"'))
+    assert rename.run(root, renames) == 0
+    assert (root / "packages/q/src/q/use.py").read_text() == \
+        'parse.add("--wait-s", type=float)\n'
+    capsys.readouterr()
+    assert rename.run(root, renames, dry_run=True) == 0
+    assert "0 to apply, 3 applied, 0 not here" in capsys.readouterr().out
+

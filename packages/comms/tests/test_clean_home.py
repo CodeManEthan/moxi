@@ -433,7 +433,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         #    start provisioned, read from the directory.
         def launch(name):
             records = home / "opencode-records" / name
-            proc = OnPty([str(venv / "bin" / "moxi-comms-opencode"), name, "--notice-hold", "0"],
+            proc = OnPty([str(venv / "bin" / "moxi-comms-opencode"), name, "--notice-hold-s", "0"],
                          {**env, "FAKE_OPENCODE_DIR": str(records),
                           "FAKE_OPENCODE_AUTO": "0", "FAKE_OPENCODE_WINDOW": "",
                           "FAKE_OPENCODE_CONFIG": DEBUG_CONFIG}, home)

@@ -95,7 +95,7 @@ def test_the_real_loader_finds_them_off_and_the_switch_or_list_turns_each_on(tur
     assert {f.id for f in loaded.off} >= {"turns.removal", "turns.no-nested-agents",
                                           "turns.question-mode"}
     assert not loaded.on and not [p for p in loaded.problems if p.id.startswith("turns")]
-    write_config(turns_env, '[guards]\non = ["turns.no-nested-agents"]\nremoval = true\n')
+    write_config(turns_env, '[guards]\nrun = ["turns.no-nested-agents"]\nremoval = true\n')
     loaded = guards.load(env=env)
     assert {(o.id, o.by) for o in loaded.on} == {("turns.removal", ("switch",)),
                                                  ("turns.no-nested-agents", ("list",))}
@@ -385,9 +385,9 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
     assert qm.on_prompt(prompt_event(text, None)) is None
     assert qm.on_prompt(prompt_event("go through the open questions in prose",
                                      "composer")) is None
-    write_config(turns_env, '[guards]\non = ["turns.question-mode"]\n')
+    write_config(turns_env, '[guards]\nrun = ["turns.question-mode"]\n')
     assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
-    write_config(turns_env, '[guards]\non = ["turns.question-mode"]\n'
+    write_config(turns_env, '[guards]\nrun = ["turns.question-mode"]\n'
                             '[question_mode]\norigins = ["plugin"]\n')
     assert qm.on_prompt(prompt_event(text, "plugin")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "composer")) is None
@@ -487,7 +487,7 @@ def test_end_to_end_a_relative_removal_is_judged_against_the_asks_cwd(endpoint, 
 
 
 def test_end_to_end_a_subagents_agent_call_is_refused_without_a_trip(endpoint):
-    fake = endpoint('[guards]\non = ["turns.no-nested-agents"]\n')
+    fake = endpoint('[guards]\nrun = ["turns.no-nested-agents"]\n')
     (entry,) = fake.first["guards"]
     assert entry["id"] == "turns.no-nested-agents" and entry["judge"] is False
     assert entry["deny"] == guards.NO_NESTED_AGENTS_DENY and entry["who"] == "agents"

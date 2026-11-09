@@ -386,7 +386,7 @@ class CodexHarness(Harness):
         self.hook_server = codex_hooks.HookServer(self, hook_socket)
 
     def _guard_settings(self) -> tuple[list[str], int]:
-        """`guards.on` and `guards.max_wait_ms` now, the wait held to the launch's value,
+        """`guards.run` and `guards.max_wait_ms` now, the wait held to the launch's value,
         since the ping's wait is fixed for the launch. Raises `ConfigError`."""
         from . import config as turns_config
 

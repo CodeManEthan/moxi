@@ -310,10 +310,10 @@ def test_the_doctor_row_is_ok_when_on_and_turns_enforces_it(home, own_config):
 
 
 def test_the_doctor_row_is_ok_when_turns_list_alone_turns_it_on(home, own_config):
-    write_turns_config('[guards]\non = ["sessions.transcript-read"]\n')
+    write_turns_config('[guards]\nrun = ["sessions.transcript-read"]\n')
     row = doctor.guard_row()
     assert row.state == "ok", row.detail
-    assert "turns' guards.on" in row.detail
+    assert "turns' guards.run" in row.detail
 
 
 def test_the_doctor_row_warns_when_on_and_turns_is_absent(home, own_config, monkeypatch):

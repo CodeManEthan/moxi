@@ -9,7 +9,7 @@ that names an existing folder by an absolute path, else `PWD` from the session's
 environment under the same test, else this process's working directory. The override is
 `MOXI_NOTES_DIR` from the session's environment, never this process's own.
 
-`fire(event)` runs at every `turn` and `gone`. It does nothing while `snapshot.auto` is
+`fire(event)` runs at every `turn` and `gone`. It does nothing while `snapshot.session_end` is
 off or the notes root holds no `.git`. A `turn` is skipped when another `turn` started a
 pass less than a minute ago (the runtime file `fired` keeps the time); a `gone` is never
 skipped, since it is the last chance to see the session's edits. Then it starts
@@ -70,7 +70,7 @@ def fire(event) -> None:
     from . import settings
 
     places = settings.read()
-    if not places.settings["snapshot.auto"]:
+    if not places.settings["snapshot.session_end"]:
         return None
     if not os.path.lexists(places.root / ".git"):
         return None

@@ -455,7 +455,7 @@ class Gateway:
             if self.kind == "tcp" and (err.errno in _IN_USE
                                        or getattr(err, "winerror", None) in (10013, 10048)):
                 text = (f"port {self.port} was held by another program; the tunnel entry "
-                        f"was removed; free the port and run `moxi ui gateway on`")
+                        f"was removed; free the port and run `moxi ui gateway enable`")
             else:
                 text = f"the gateway's endpoint can't be bound: {err}"
             await self._failed(text)

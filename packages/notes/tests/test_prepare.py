@@ -144,12 +144,12 @@ def test_blob_ids_come_from_the_changes_and_no_path_goes_in_argv(root):
 
 
 def test_a_blob_over_max_mb_is_left_out_unread(root):
-    configure(max_mb=1)
+    configure(max_mib=1)
     big = blob(root, b"x" * (1024 * 1024 + 1))
     ctx = context(root, Change("A", "big.txt", None, big))
     got = prepare.prepare(ctx)
     assert [p for p, _ in got.drop] == ["big.txt"]
-    assert got.drop[0][1].startswith("notes/too-large (1 MiB, over max_mb 1")
+    assert got.drop[0][1].startswith("notes/too-large (1 MiB, over max_mib 1")
     assert sum(1 for c in ctx.calls if "--batch" in c) == 0
 
 

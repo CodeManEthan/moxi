@@ -155,14 +155,14 @@ def test_hook_commands_carry_the_endpoints_event_budget():
     )
     commands = [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "-c"]
     joined = "\n".join(commands)
-    assert "--wait-seconds 5 Stop" in joined
-    assert "--wait-seconds 7 SessionStart" in joined
-    assert "--wait-seconds 7 UserPromptSubmit" in joined
-    assert "--wait-seconds 7 PostCompact" in joined
-    assert "--wait-seconds 3 Interrupt" in joined
+    assert "--wait-s 5 Stop" in joined
+    assert "--wait-s 7 SessionStart" in joined
+    assert "--wait-s 7 UserPromptSubmit" in joined
+    assert "--wait-s 7 PostCompact" in joined
+    assert "--wait-s 3 Interrupt" in joined
     assert shlex.split(codex_hooks.command(
         ["ping"], "/run/hooks.sock", codex_hooks.EVENTS[0], 5,
-    )) == ["ping", "--socket", "/run/hooks.sock", "--wait-seconds", "5",
+    )) == ["ping", "--socket", "/run/hooks.sock", "--wait-s", "5",
            "SessionStart"]
 
 
@@ -185,12 +185,12 @@ def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_e
     harness.start_turn()
     try:
         output = _ping(monkeypatch, server.socket_path, "SessionStart",
-                       {"session_id": "thread-1"}, "--wait-seconds", "5")
+                       {"session_id": "thread-1"}, "--wait-s", "5")
         assert json.loads(output)["hookSpecificOutput"]["additionalContext"] == \
             "late but in budget"
         output = _ping(monkeypatch, server.socket_path, "Stop", {
             "session_id": "thread-1", "turn_id": harness.open_turn,
-        }, "--wait-seconds", "5")
+        }, "--wait-s", "5")
         assert json.loads(output)["reason"] == "hold in budget"
     finally:
         hold.close()
@@ -217,10 +217,10 @@ def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
     harness.start_turn()
     try:
         assert _ping(monkeypatch, server.socket_path, "SessionStart",
-                     {"session_id": "thread-1"}, "--wait-seconds", "0.1") == ""
+                     {"session_id": "thread-1"}, "--wait-s", "0.1") == ""
         assert _ping(monkeypatch, server.socket_path, "Stop", {
             "session_id": "thread-1", "turn_id": harness.open_turn,
-        }, "--wait-seconds", "0.1") == ""
+        }, "--wait-s", "0.1") == ""
         assert endpoint.facts().turn_open and harness.settled == []
         assert harness.ending == [harness.open_turn]   # no block came: unblocked
     finally:

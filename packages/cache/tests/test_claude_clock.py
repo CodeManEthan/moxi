@@ -303,7 +303,7 @@ def test_no_tiered_line_to_the_start_uses_the_config(tmp_path, own_roots):
                                                    assistant_line(1000)])
     got = read(SESS_A, tmp_path)
     assert (got.kind, got.ttl_s, got.ttl_source) == ("warm", 3600, "config")
-    write_cache_config(own_roots, "[claude]\nttl_seconds = 900\n")
+    write_cache_config(own_roots, "[claude]\nttl_s = 900\n")
     got = read(SESS_A, tmp_path)
     assert (got.kind, got.ttl_s, got.ttl_source) == ("cold", 900, "config")
 

@@ -215,10 +215,10 @@ def test_doctor_judges_each_record_by_its_own_stale_after(own_roots, capsys):
     import time
 
     # the config's tick would call a 60 s old record fresh (or stale); the record decides
-    write_cache_config(own_roots, "[watch]\ntick = 100\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 100\n")
     _record(time.time() - 60, stale_after=45)
     assert "the watcher has stopped" in run(capsys, "doctor")[1]
-    write_cache_config(own_roots, "[watch]\ntick = 1\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
     _record(time.time() - 60, stale_after=300)
     assert "has stopped" not in run(capsys, "doctor")[1]
 

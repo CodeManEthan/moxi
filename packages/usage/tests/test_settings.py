@@ -13,8 +13,8 @@ DEFAULTS = {
                   "model_prices_and_context_window.json",
     "prices.max_age_days": 120,
     "index.workers": 0,
-    "index.wait_seconds": 30.0,
-    "limits.codex_pull_after": 600,
+    "index.wait_s": 30,
+    "limits.codex_pull_after_s": 600,
     "limits.history_days": 8,
     "limits.projection_minutes": 60,
     "marks.default": "off",
@@ -24,7 +24,7 @@ DEFAULTS = {
     "restart_point.interactive_only": True,
     "restart_point.interactive_originators": ["codex-tui", "Codex Desktop"],
     "restart_point.measure_weekly": False,
-    "ceiling.on": False,
+    "ceiling.enabled": False,
     "ceiling.warn_tokens": 0,
     "ceiling.hard_tokens": 0,
     "ceiling.return_tools": ["StructuredOutput"],
@@ -100,7 +100,7 @@ def test_config_check_runs_the_schema_first():
 @pytest.mark.parametrize("text, key, said", [
     ("[limits]\nhistory_days = 0\n", "limits.history_days", "every limits reading"),
     ("[limits]\nprojection_minutes = 0\n", "limits.projection_minutes", "projection off"),
-    ("[limits]\ncodex_pull_after = -1\n", "limits.codex_pull_after", "stale"),
+    ("[limits]\ncodex_pull_after_s = -1\n", "limits.codex_pull_after_s", "stale"),
     ("[restart_point]\ndays = 0\n", "restart_point.days", "empty measure"),
     ("[marks]\nmax_age_days = 0\n", "marks.max_age_days", "said again"),
     ("[marks]\nmax_age_days = -3\n", "marks.max_age_days", "said again"),
@@ -114,8 +114,21 @@ def test_config_check_refuses_a_value_that_destroys_state_or_switches_off(text, 
     assert caught.value.key == key and caught.value.fix
 
 
+@pytest.mark.parametrize("text, old, new", [
+    ("[index]\nwait_seconds = 5\n", "index.wait_seconds", "index.wait_s"),
+    ("[limits]\ncodex_pull_after = 120\n", "limits.codex_pull_after",
+     "limits.codex_pull_after_s"),
+    ("[ceiling]\non = true\n", "ceiling.on", "ceiling.enabled"),
+])
+def test_a_renamed_key_is_refused_naming_the_new_one(text, old, new):
+    with pytest.raises(ConfigError) as caught:
+        settings.check(text)
+    assert caught.value.key == old
+    assert caught.value.fix == f"renamed: set {new} instead"
+
+
 @pytest.mark.parametrize("text", [
-    "[limits]\nhistory_days = 1\nprojection_minutes = 1\ncodex_pull_after = 0\n",
+    "[limits]\nhistory_days = 1\nprojection_minutes = 1\ncodex_pull_after_s = 0\n",
     "[restart_point]\ndays = 1\n[marks]\nmax_age_days = 1\n[ceiling]\nmax_age_days = 1\n",
     "[ceiling]\nwarn_tokens = 100\nhard_tokens = 200\n",
     "[ceiling]\nwarn_tokens = 300\nhard_tokens = 0\n",

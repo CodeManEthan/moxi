@@ -157,7 +157,7 @@ Three settings name a root when it is not the usual one: `claude.projects`,
 With turns installed (the `turns` extra), sessions offers turns a guard,
 `sessions.transcript-read`, that keeps agents out of harness transcripts. It is off until
 you turn it on, with `guard.transcript_read` (the install asks) or by adding
-`sessions.transcript-read` to turns' `guards.on`:
+`sessions.transcript-read` to turns' `guards.run`:
 
     moxi config set sessions guard.transcript_read true
 

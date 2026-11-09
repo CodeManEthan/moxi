@@ -37,17 +37,17 @@ default = ["launcher", "comms", "notes"]
 doc = "What adds start context, in order: module names and file paths; setting it replaces the whole list."
 read = "start"
 
-[start.limit]
+[start.limit_chars]
 type = "int"
 default = 0
 doc = "The most start context a session gets, in characters; 0 (or a value past the harness's ceiling) means the ceiling."
 read = "start"
 
 # Guards: checks that run before a tool call and may refuse it. A guard runs only when its
-# id or its file is on guards.on, or its module's switch for it reads true. turns' own
+# id or its file is on guards.run, or its module's switch for it reads true. turns' own
 # three guards each have a switch below, asked once at install, all off by default.
 
-[guards.on]
+[guards.run]
 type = "list"
 items = "str"
 default = []
@@ -96,3 +96,9 @@ read = "use"
 
 [hold.wait_ms]
 retired = "set stop_handler.wait_ms instead: the hold is now the stop handler"
+
+[start.limit]
+retired = "renamed: set start.limit_chars instead"
+
+[guards.on]
+retired = "renamed: set guards.run instead"

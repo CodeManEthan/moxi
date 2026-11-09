@@ -49,7 +49,7 @@ def test_managed_adds_each_part_and_off_takes_exactly_it_out(lo):
     (lo / "global.md").write_text("Be briefer.\n")
     assert install.install().code == 0
     assert "Be briefer." in harness.global_file("codex").read_text()
-    assert cli.main(["global", "off"]) == 0
+    assert cli.main(["global", "remove"]) == 0
     assert claude.read_text() == mine
     assert not harness.global_file("codex").exists()    # nothing else was in it
     assert "instructions" not in json.loads(harness.settings_file("opencode").read_text())
@@ -144,6 +144,6 @@ def test_a_global_file_not_in_utf8_comes_back_byte_equal(lo):
     claude = harness.global_file("claude").read_bytes()
     assert claude.startswith(mine) and claude.endswith(f"@{lo / 'global.md'}\n".encode())
     assert install.status().code == 0
-    assert cli.main(["global", "off"]) == 0
+    assert cli.main(["global", "remove"]) == 0
     for name in ("claude", "codex"):
         assert harness.global_file(name).read_bytes() == mine

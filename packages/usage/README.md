@@ -117,9 +117,9 @@ Every limits reading usage sees is kept for `limits.history_days` (8) in
 - **Codex** readings come from its rollouts (the newest rollout is read on each call,
   and the token index's pass reads the rest) and, with turns installed, from Codex's
   app-server as turns hears it. When the newest Codex reading is older than
-  `limits.codex_pull_after` seconds (600), `limits` asks Codex for a new one through
+  `limits.codex_pull_after_s` seconds (600), `limits` asks Codex for a new one through
   turns; when it can't, it keeps the stored reading and says why, and it waits
-  `limits.codex_pull_after` again before the next try.
+  `limits.codex_pull_after_s` again before the next try.
 - **Claude** readings come from Claude Code's own session report, which turns hands
   usage after each turn. Without turns there are none, and Claude's rows say so. A
   headless `claude -p` run has no turns endpoint, so it gives no Claude reading.
@@ -272,11 +272,11 @@ session's marks, thresholds and states; `moxi usage marks` lists the fired marks
 
 With turns installed, usage offers turns a guard, `usage.ceiling`, that stops a subagent
 whose context has grown too far since its first request. It is off until you turn it on,
-with `ceiling.on` (the install asks) or by adding `usage.ceiling` to turns' `guards.on`,
+with `ceiling.enabled` (the install asks) or by adding `usage.ceiling` to turns' `guards.run`,
 and it acts only when `ceiling.warn_tokens` and `ceiling.hard_tokens` are both above 0
 (both start at 0):
 
-    moxi config set usage ceiling.on true
+    moxi config set usage ceiling.enabled true
     moxi config set usage ceiling.warn_tokens 250000
     moxi config set usage ceiling.hard_tokens 300000
 
@@ -339,7 +339,7 @@ left out as imported, the rows held and why, each file whose every request anoth
 holds (named as a duplicate of the file that holds its first request), the last pass and
 the index's schema version
 (also `api.report("status")`). Only one pass writes at a time: another waits
-up to `index.wait_seconds` (30) and then exits 75; `--no-wait` exits 75 at once.
+up to `index.wait_s` (30) and then exits 75; `--no-wait` exits 75 at once.
 `--rebuild` reads every source again from its start, in `index.workers` processes (0 picks
 one per core, up to 8). A schema change that would drop the rows of an archive lane whose
 drive is offline is refused (exit 3) until the drive is back, or until `--rebuild --force`

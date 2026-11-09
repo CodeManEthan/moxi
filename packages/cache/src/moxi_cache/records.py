@@ -16,8 +16,8 @@ is idle. The file goes when the session leaves Claude Code's live list.
 
 **A clock record carries every value a reader needs to render or judge it, so
 no reader takes a record's band or staleness from cache's config.** `warn_before` is the
-effective `segment.warn_before`: the band turns from warm to near at `ttl - warn_before`.
-`stale_after` is three times the watcher's effective tick (`watch.tick`, at least one
+effective `segment.warn_before_s`: the band turns from warm to near at `ttl - warn_before`.
+`stale_after` is three times the watcher's effective tick (`watch.tick_s`, at least one
 second): a record whose `seen_at` is older than that shows dim. The watcher writes both at
 every tick from its config as it read it at that tick, so a config change reaches every
 record within one tick. A record without them, one an older watcher wrote, renders

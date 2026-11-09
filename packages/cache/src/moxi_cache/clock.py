@@ -50,7 +50,7 @@ CLOCK_BLOCK = 64 * 1024
 CLOCK_SCAN_LIMIT = 64 * 1024 * 1024
 
 #: Where a Claude read's lifetime came from (`Clock.ttl_source`): the cache tier the
-#: requests wrote, or config `claude.ttl_seconds` when no line read named one.
+#: requests wrote, or config `claude.ttl_s` when no line read named one.
 TTL_TIER, TTL_CONFIG = "tier", "config"
 
 # ---------------------------------------------------------------------------- codes

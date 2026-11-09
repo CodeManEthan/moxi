@@ -258,9 +258,9 @@ def test_a_pid_that_cant_be_recorded_after_the_spawn_still_starts_the_job(
 def test_a_confirmed_acts_repeat_finds_its_record(lo, monkeypatch):
     calls = fake_spawn(monkeypatch)
     key = "A" * 43
-    assert pagejob.start(["global", "off"], job=key) == pagejob.Started(key, True)
+    assert pagejob.start(["global", "remove"], job=key) == pagejob.Started(key, True)
     # A restarted page server holds no memory of the key; the record is enough.
-    assert pagejob.start(["global", "off"], job=key) == pagejob.Started(key, False)
+    assert pagejob.start(["global", "remove"], job=key) == pagejob.Started(key, False)
     assert len(calls) == 1
     with pytest.raises(pagejob.Clash):
         pagejob.start(["install"], job=key)

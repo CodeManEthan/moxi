@@ -5,12 +5,12 @@
 
 * **Codex, between passes**: the newest rollout by mtime is read backward for the
   readings written since the store's newest one from it.
-* **Codex, a pull**: when the newest Codex reading is older than `limits.codex_pull_after`
+* **Codex, a pull**: when the newest Codex reading is older than `limits.codex_pull_after_s`
   seconds and turns is installed, turns' `codex_rate_limits(timeout=3)` asks a live Codex
   host or a short-lived app-server for one more. A pull that fails, or turns absent,
   leaves the stored readings in place, and each Codex row older than the threshold says
   why no newer reading came. A failed pull's time is kept in the store's `meta`, and no
-  pull is tried again until `limits.codex_pull_after` has passed since it.
+  pull is tried again until `limits.codex_pull_after_s` has passed since it.
 * **Claude** readings come only from turns' `usage` event (`moxi_usage.listeners`), so
   with turns absent Claude's rows are `unavailable`, "turns is not installed".
 
@@ -216,7 +216,7 @@ def limits(*, harness: str | None = None, now: float | None = None, pull: bool =
             notes.extend(_read_rollout(conn, now=now, days=days, env=env))
             if pull:
                 pulled = _maybe_pull(conn, now=now, days=days,
-                                     after=float(settings["limits.codex_pull_after"]))
+                                     after=float(settings["limits.codex_pull_after_s"]))
         found = _stored(conn, wanted, store.cutoff(now, days))
     finally:
         conn.close()
@@ -231,7 +231,7 @@ def limits(*, harness: str | None = None, now: float | None = None, pull: bool =
                                  projection_minutes=float(
                                      settings["limits.projection_minutes"])))
     if pulled is not None and not pulled.ok:
-        after = float(settings["limits.codex_pull_after"])
+        after = float(settings["limits.codex_pull_after_s"])
         rows = [_with_note(row, now, after, pulled.reason) for row in rows]
     return Limits(now=now, rows=tuple(rows), pull=pulled, notes=tuple(notes))
 
@@ -428,7 +428,7 @@ def _maybe_pull(conn: sqlite3.Connection, *, now: float, days: float,
     if failed is not None and 0 <= now - failed < after:
         return Pull(tried=False, ok=False,
                     reason=f"the last pull, {_ago(now - failed)} ago, brought no reading; "
-                           "the next waits for limits.codex_pull_after")
+                           "the next waits for limits.codex_pull_after_s")
     pulled = _pull(conn, now=now, days=days)
     if pulled.tried:
         store.note_pull(conn, now=now, failed=not pulled.ok)

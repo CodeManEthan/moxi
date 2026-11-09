@@ -96,7 +96,7 @@ def test_root_warns_when_it_is_inside_a_repo_but_not_its_top():
 def test_a_config_that_cannot_be_read_fails_the_root_row():
     path = Path(moxi.paths.Layout("notes").config_file())
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("max_mb = 'many'\n", encoding="utf-8")
+    path.write_text("max_mib = 'many'\n", encoding="utf-8")
     found = list(doctor.rows())
     assert [(r.name, r.state) for r in found] == [("root", "fail")]
 
@@ -115,11 +115,11 @@ def test_after_setup_every_row_is_ok():
 @posix
 def test_snapshot_is_off_with_both_triggers_off_and_warns_on_a_spec_that_differs():
     set_up()
-    configure(snapshot__interval=30)
+    configure(snapshot__interval_minutes=30)
     row = rows()["snapshot"]
     assert row.state == "warn" and "differs" in row.detail
     assert row.fix == "moxi notes setup"
-    configure(snapshot__auto=False)
+    configure(snapshot__session_end=False)
     assert state("snapshot") == "off"
     configure(snapshot__timer=True)
     assert state("snapshot") == "warn"

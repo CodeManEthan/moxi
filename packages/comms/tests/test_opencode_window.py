@@ -64,7 +64,7 @@ def oc_rig(rig, tmp_path):
         if free is not None:
             env["FAKE_OPENCODE_FREE"] = free
         proc = OpenCodePty([IDENTITY, "--opencode", str(stub),
-                            "--notice-hold", "0.5", "--ready-wait", "20", *extra], env)
+                            "--notice-hold-s", "0.5", "--ready-wait-s", "20", *extra], env)
         launched.append(proc)
         return proc
 

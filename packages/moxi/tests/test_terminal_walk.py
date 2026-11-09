@@ -417,8 +417,8 @@ def test_a_launchd_job_naming_the_tmux_pid_stops_it():
 @pytest.mark.parametrize("line, unit", [
     (b"0::/user.slice/user-1000.slice/user@1000.service/app.slice/moxi-slots-server.service\n",
      "moxi-slots-server.service"),
-    (b"12:pids:/x\n1:name=systemd:/user.slice/user@1000.service/moxi-ui-serve.service\n",
-     "moxi-ui-serve.service"),
+    (b"12:pids:/x\n1:name=systemd:/user.slice/user@1000.service/moxi-ui-shell.service\n",
+     "moxi-ui-shell.service"),
     (b"0::/user.slice/user-1000.slice/user@1000.service/app.slice/vte-spawn-1.scope\n", None),
     (b"0::/user.slice/user-1000.slice/user@1000.service/app.slice/moxi.service\n", None),
 ])

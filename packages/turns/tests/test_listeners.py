@@ -484,7 +484,7 @@ def test_the_start_plan_reads_the_list_shares_and_file_sizes_and_runs_nothing(
                             Entry("launcher", [("start", "listener_targets:cache")]),
                             Entry("cache", [("start", "listener_targets:cache")])]
     write_config(turns_env, f'[start]\norder = ["launcher", "{brief}", "comms", "notes", '
-                            f'"comms", "{tmp_path / "gone.md"}"]\nlimit = 0\n')
+                            f'"comms", "{tmp_path / "gone.md"}"]\nlimit_chars = 0\n')
     got = turns.start_plan("claude")
     assert isinstance(got, turns.StartPlan)
     assert (got.harness, got.total, got.limit, got.ceiling) == ("claude", 9500, 0, 9500)
@@ -513,11 +513,11 @@ def test_the_start_plan_limits_to_the_harness_and_reads_a_file_up_to_the_total(
 
     brief = tmp_path / "brief.md"
     brief.write_text("x" * 20_000)
-    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit = 50000\n')
+    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit_chars = 50000\n')
     got = turns.start_plan("codex")
     assert (got.total, got.limit, got.ceiling) == (9000, 50000, 9000)
     assert got.entries == (turns.StartEntry(str(brief), "file", 9000, 9000),)
-    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit = 100\n')
+    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit_chars = 100\n')
     assert turns.start_plan("opencode").entries[0] == turns.StartEntry(str(brief), "file",
                                                                        100, 100)
 
@@ -528,7 +528,7 @@ def test_the_start_plan_reads_the_config_from_the_env_it_is_given(installed, tur
 
     other = tmp_path / "other-cfg"
     (other / "turns").mkdir(parents=True)
-    (other / "turns" / "config.toml").write_text('[start]\norder = []\nlimit = 10\n')
+    (other / "turns" / "config.toml").write_text('[start]\norder = []\nlimit_chars = 10\n')
     write_config(turns_env, '[start]\norder = ["comms"]\n')
     installed["entries"] = [Entry("comms", [("start", "listener_targets:comms")])]
     assert [e.name for e in turns.start_plan("claude").entries] == ["comms"]

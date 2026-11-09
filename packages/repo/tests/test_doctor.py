@@ -373,7 +373,7 @@ def test_git_and_spec_fix_lines_quote_a_root_with_a_space(demo, clock):
     assert shlex.split(clear) == ["moxi", "doctor", "--clear", "repo", push_key(repo, "side")]
 
     # A saved spec that can't be read.
-    git(repo, "config", "moxi-repo.spec.demo/snap.min-interval", "soon")
+    git(repo, "config", "moxi-repo.spec.demo/snap.min-interval-s", "soon")
     [row] = [r for r in problems(f"spec {repo} demo/snap") if "can't be read" in r.detail]
     assert row.fix == pasted("moxi", "repo", "specs", "remove", repo, "demo/snap")
 

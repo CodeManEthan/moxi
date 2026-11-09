@@ -318,9 +318,9 @@ def replace(call: Any) -> Any:
 
 
 def global_off(call: Any) -> Any:
-    """`POST /api/global-off`, confirmed: `moxi loadout global off`, as a job under the
+    """`POST /api/global-off`, confirmed: `moxi loadout global remove`, as a job under the
     act's key."""
-    return _start(["global", "off"], key=call.key)
+    return _start(["global", "remove"], key=call.key)
 
 
 __all__ = ["status", "listing", "global_preview", "projects", "drift", "job", "add", "remove",

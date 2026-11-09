@@ -181,7 +181,7 @@ def send_as(module: str, name: str, to, text: str, *, expires=None,
 
 def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResult:
     """Withdraw `message_id`, which `sender` sent, from every recipient that hasn't had
-    it in a digest (`moxi comms delete`). The `DeleteResult` names who it was withdrawn
+    it in a digest (`moxi comms remove`). The `DeleteResult` names who it was withdrawn
     from, who had it already and whose copy expired first."""
     if not isinstance(sender, Sender):
         raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")

@@ -5,7 +5,7 @@
     moxi loadout add|remove KIND NAME [--user | --project P] [--json]
     moxi loadout enable|disable ID [--user | --project P] [--json]
     moxi loadout list [--json]
-    moxi loadout global show [--diff] | global mode MODE | global off
+    moxi loadout global show [--diff] | global mode MODE | global remove
 
 `install` takes over the module skills you said yes to, plans the whole manifest and
 applies the steps in scope (all of them without a flag). `--replace` takes a path or an id,
@@ -15,7 +15,7 @@ applies the steps in scope (all of them without a flag). `--replace` takes a pat
 installs with that item's steps as the scope. `list` prints every item with its kind,
 scope, harnesses and source. `global show` prints, for each harness, its global file and
 what the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
-(off, managed or if-absent) and installs the global file alone; `global off` sets `off`
+(off, managed or if-absent) and installs the global file alone; `global remove` sets `off`
 and takes loadout's part out, leaving the user's own text.
 
 KIND is skill, agent, hook, permissions or mcp. Exit codes: 0 done (every item `ok` or
@@ -91,8 +91,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     show.add_argument("--diff", action="store_true", help="print it as a diff")
     mode = parts.add_parser("mode", help="set the global mode, then install it")
     mode.add_argument("mode", metavar="MODE", choices=MODES)
-    parts.add_parser("off", help="take loadout's part out of every global file")
-    for sub in (show, mode, parts.choices["off"]):
+    parts.add_parser("remove", help="take loadout's part out of every global file")
+    for sub in (show, mode, parts.choices["remove"]):
         sub.add_argument("--json", action="store_true", help="print JSON")
     for extra in EXTRA_VERBS:
         extra(verbs, verb)
@@ -262,7 +262,7 @@ def _global(args) -> int:
 
     if args.part == "show":
         return _global_show(args)
-    mode = "off" if args.part == "off" else args.mode
+    mode = "off" if args.part == "remove" else args.mode
     changed = writes.set_mode(mode)
     line = f"global mode {mode}" + ("" if changed else " already")
     return _run_install(args, Scope(item=(GLOBAL_KIND, GLOBAL_KIND)), written=[line])

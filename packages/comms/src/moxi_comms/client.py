@@ -290,14 +290,14 @@ class DaemonClient:
         return self._call("send", params, no_answer=DaemonNoAnswer)
 
     def delete(self, as_: str, token: str | None, message_id, *, user=None) -> dict:
-        """`delete` as `as_` with its `token`: the result's `message_id`, `withdrawn`
+        """`remove` as `as_` with its `token`: the result's `message_id`, `withdrawn`
         and `delivered` (names), and `expired`. A request that left this process and got
         no answer raises `DaemonNoAnswer`, since the message may have been withdrawn.
         `user` is the operator's user id, for `as_` "operator"."""
         params = {"as": as_, "token": token, "message_id": str(message_id)}
         if user is not None:
             params["user"] = user
-        return self._call("delete", params, no_answer=DaemonNoAnswer)
+        return self._call("remove", params, no_answer=DaemonNoAnswer)
 
     def attributed_message(self, message_id) -> dict | None:
         """One message with its author as the daemon attributes it, or None when the

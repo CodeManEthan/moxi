@@ -416,7 +416,7 @@ def test_on_windows_the_shell_is_planned_as_a_logon_task_with_no_socket():
 
     changes = units.plan("ui")
     assert [c.kind for c in changes] == ["daemon"]
-    assert "moxi-ui-serve" in changes[0].text and "--restart" in changes[0].text
+    assert "moxi-ui-shell" in changes[0].text and "--restart" in changes[0].text
 
 
 def test_the_modules_value_holds_only_declared_keys():

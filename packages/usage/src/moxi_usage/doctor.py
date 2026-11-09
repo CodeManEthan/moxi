@@ -24,7 +24,7 @@ at what usage's answers rest on:
 * `marks`: deletes the warn-at mark's fired-mark files older than `marks.max_age_days`
   and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
   many it deleted and kept; `warn` when one could not be deleted, or when the worker
-  ceiling runs (by `ceiling.on`, or by turns' `guards.on` as turns' guard loader reports
+  ceiling runs (by `ceiling.enabled`, or by turns' `guards.run` as turns' guard loader reports
   it) while `ceiling.warn_tokens` or `ceiling.hard_tokens` is 0, so it allows every call.
 * `turns`: `off` when turns is not installed, saying what needs it; else `ok`, naming
   the events usage registers with turns and what each is for, and the worker ceiling's
@@ -489,7 +489,7 @@ CEILING_FIX = ("moxi config set usage ceiling.warn_tokens <tokens> and "
 
 def ceiling_unset(settings: Any, *, env: Mapping[str, str] | None = None) -> str | None:
     """Why the worker ceiling runs with nothing to do, or None: it is on (by
-    `ceiling.on`, or by turns' guard loader reporting `usage.ceiling` on) while
+    `ceiling.enabled`, or by turns' guard loader reporting `usage.ceiling` on) while
     `ceiling.warn_tokens` or `ceiling.hard_tokens` is 0, so it allows every call."""
     from .ceiling import GUARD_ID, SWITCH
 
@@ -507,13 +507,13 @@ def ceiling_unset(settings: Any, *, env: Mapping[str, str] | None = None) -> str
 
 
 def ceiling_on_in_turns(env: Mapping[str, str] | None = None) -> str | None:
-    """What turned `usage.ceiling` on, as turns' guard loader reports it (`guards.on`,
-    `ceiling.on` or both), or None when it is off, turns is absent or the loader can't
+    """What turned `usage.ceiling` on, as turns' guard loader reports it (`guards.run`,
+    `ceiling.enabled` or both), or None when it is off, turns is absent or the loader can't
     be read.
 
     This reaches past turns' API: turns' public names (`moxi_turns`) offer no read of
     which guards are on, so it imports turns' guard loader, `moxi_turns.guards`, and
-    reads `load(env=).get(id).by`. A failure there leaves `ceiling.on` as the only
+    reads `load(env=).get(id).by`. A failure there leaves `ceiling.enabled` as the only
     answer; the ceiling's tests run the real loader, so a rename fails them."""
     import importlib
 
@@ -526,11 +526,11 @@ def ceiling_on_in_turns(env: Mapping[str, str] | None = None) -> str | None:
     try:
         loader = importlib.import_module("moxi_turns.guards")
         found = loader.load(env=env).get(GUARD_ID)
-    except Exception:  # noqa: BLE001 - a loader that can't be read leaves ceiling.on alone
+    except Exception:  # noqa: BLE001 - a loader that can't be read leaves ceiling.enabled alone
         return None
     if found is None:
         return None
-    said = {"list": "turns' guards.on", "switch": SWITCH}
+    said = {"list": "turns' guards.run", "switch": SWITCH}
     return " and ".join(said.get(b, b) for b in found.by)
 
 

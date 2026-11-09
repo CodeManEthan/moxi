@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"moxi-connector-server: {e}", file=sys.stderr)
         return codes.ERROR
     if not values["enabled"]:
-        print("moxi-connector-server: the connector is off; moxi connector on turns it on",
+        print("moxi-connector-server: the connector is off; moxi connector enable turns it on",
               file=sys.stderr)
         return codes.REFUSED
     taken = listen.take(values["port"])

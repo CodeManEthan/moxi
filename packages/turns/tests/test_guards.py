@@ -448,7 +448,7 @@ def test_a_tilde_entry_is_a_file(tmp_path, monkeypatch):
 
 def test_turns_settings_declare_the_keys_with_their_defaults():
     keys = config.schema().keys
-    expect = {"guards.on": ("list", [], "use"),
+    expect = {"guards.run": ("list", [], "use"),
               "guards.removal": ("bool", False, "use"),
               "guards.no_nested_agents": ("bool", False, "use"),
               "guards.question_mode": ("bool", False, "use"),
@@ -459,6 +459,18 @@ def test_turns_settings_declare_the_keys_with_their_defaults():
         key = keys[name]
         assert (key.type, key.default, key.read, key.env) == (kind, default, read, None)
     assert guards.MAX_WAIT_MS == keys["guards.max_wait_ms"].default
+
+
+@pytest.mark.parametrize("text, old, new", [
+    ('[guards]\non = ["turns.removal"]\n', "guards.on", "guards.run"),
+    ("[start]\nlimit = 100\n", "start.limit", "start.limit_chars"),
+])
+def test_a_renamed_key_is_refused_naming_the_new_one(turns_env, text, old, new):
+    write_config(turns_env, text)
+    with pytest.raises(moxi_config.ConfigError) as caught:
+        config.load()
+    assert caught.value.key == old
+    assert caught.value.fix == f"renamed: set {new} instead"
 
 
 def test_questions_name_exactly_the_three_switches_each_a_switch_and_a_noun_phrase():
@@ -489,7 +501,7 @@ def test_a_shipped_switch_turns_its_guard_on_and_nothing_else_does(turns_env):
     write_config(turns_env, "[guards]\nremoval = true\n")
     loaded = guards.load(None, entries=[entry], env=env)
     assert [(o.id, o.by) for o in loaded.on] == [("turns.removal", ("switch",))]
-    write_config(turns_env, '[guards]\nremoval = false\non = ["turns.removal"]\n')
+    write_config(turns_env, '[guards]\nremoval = false\nrun = ["turns.removal"]\n')
     loaded = guards.load(None, entries=[entry], env=env)
     assert [(o.id, o.by) for o in loaded.on] == [("turns.removal", ("list",))]
     assert loaded.problems == ()

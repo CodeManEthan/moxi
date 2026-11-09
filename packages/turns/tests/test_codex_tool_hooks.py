@@ -276,7 +276,7 @@ def test_tool_hooks_join_the_flags_with_their_matcher_and_one_state_holds_every_
         assert group["matcher"] == matcher
         [one] = group["hooks"]
         assert one["timeout"] == codex_hooks.TOOL_TIMEOUT and one["async"] is False
-        assert one["command"].endswith(f"--wait-seconds {wait} {event}")
+        assert one["command"].endswith(f"--wait-s {wait} {event}")
         assert keys[codex_hooks.hook_key(label)] == verified_hash(label, one, matcher)
     # The five session hooks keep their matcher-less form.
     [group] = parsed["groups"]["Stop"]
@@ -338,21 +338,21 @@ def test_an_after_tool_row_registers_post_tool_use_for_every_tool(turns_env):
         [group] = parsed["groups"]["PostToolUse"]
         assert group["matcher"] == "*"
         assert "PreToolUse" not in parsed["groups"]
-        wait = f"--wait-seconds {endpoint.after_tool_wait_s + 1:g} PostToolUse"
+        wait = f"--wait-s {endpoint.after_tool_wait_s + 1:g} PostToolUse"
         assert group["hooks"][0]["command"].endswith(wait)
     finally:
         end_endpoint(endpoint)
 
 
 def test_the_guard_list_in_turns_config_sets_the_matcher_and_the_pings_wait(turns_env):
-    write_config(turns_env, '[guards]\non = ["turns.no-nested-agents"]\nmax_wait_ms = 1200\n')
+    write_config(turns_env, '[guards]\nrun = ["turns.no-nested-agents"]\nmax_wait_ms = 1200\n')
     endpoint, harness, _ = host(turns_env)
     try:
         [group] = _registered(harness)["groups"]["PreToolUse"]
         assert group["matcher"] == "spawn_agent"
-        assert group["hooks"][0]["command"].endswith("--wait-seconds 2.2 PreToolUse")
+        assert group["hooks"][0]["command"].endswith("--wait-s 2.2 PreToolUse")
         # A later ready reads a larger wait, but no guard's bound passes the ping's.
-        write_config(turns_env, '[guards]\non = ["turns.no-nested-agents"]\n'
+        write_config(turns_env, '[guards]\nrun = ["turns.no-nested-agents"]\n'
                                 'max_wait_ms = 9000\n')
         harness.guards_ready()
         assert harness._guard_settings()[1] == 1200

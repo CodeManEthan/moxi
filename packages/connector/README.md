@@ -13,7 +13,7 @@ one-time code minted at your own terminal.
 
 ## Commands
 
-- `moxi connector on` turns it on and prints the next steps. `moxi connector off` revokes
+- `moxi connector enable` turns it on and prints the next steps. `moxi connector disable` revokes
   every grant, then turns it off; the tunnel entry stays until you remove it.
 - `moxi connector status [--json]` shows the URL to paste into Claude, the ports, the
   process, each provider with its tools, the grants, the last call and every warning.
@@ -31,7 +31,7 @@ Its settings are `enabled`, `port` (the loopback port, 8452 by default), `public
 
 ## Setting it up
 
-1. `moxi connector on`.
+1. `moxi connector enable`.
 2. Give it a public address. With the tunnel module, `moxi tunnel add connector/mcp`;
    without it, set `public_url` to an HTTPS address you forward to the loopback port
    yourself. Use port 443: Claude's connector service has so far been seen reaching only

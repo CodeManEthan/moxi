@@ -756,14 +756,16 @@ def line_state(texts: dict[str, str], row: Row, rows: Sequence[Row] = ()) -> str
     if text is None:
         return "not here"
     lines = {line.strip() for line in text.splitlines()}
-    if row.kind == "keep":
-        return "applied" if row.scope in lines else "not here"
-    if row.scope in lines:
-        return "to apply"
     # Every `use` row naming this line changes it at once.
     siblings = [one for one in rows if one.kind == "use" and one.path == row.path
-                and one.scope == row.scope] or [row]
-    return "applied" if _used(row.scope, siblings) in lines else "not here"
+                and one.scope == row.scope]
+    if row.kind == "keep":
+        # A keep row's line may also carry a `use` row: it is here as those leave it.
+        here = row.scope in lines or (siblings and _used(row.scope, siblings) in lines)
+        return "applied" if here else "not here"
+    if row.scope in lines:
+        return "to apply"
+    return "applied" if _used(row.scope, siblings or [row]) in lines else "not here"
 
 
 def _use_pattern(old: str) -> re.Pattern[str]:

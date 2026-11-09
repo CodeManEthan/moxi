@@ -195,11 +195,11 @@ test("the global view offers the modes not in force, and off unless chosen off",
   assert.equal(globalView({ problem: null, mode: "off", chosen: true, files: [] }).canTurnOff, false);
 });
 
-test("the global off sheet says what leaves each file", () => {
+test("the global remove sheet says what leaves each file", () => {
   const lines = globalOffSheet({ problem: null, mode: "managed", chosen: true, files: [
     { file: "/h/.claude/CLAUDE.md", changes: false, diff: "", placed: false, state: null },
     { file: "/h/.codex/AGENTS.md", changes: false, diff: "", placed: true, state: "ok" }] });
-  assert.match(lines[0], /global off/);
+  assert.match(lines[0], /global remove/);
   assert.deepEqual(lines.slice(1), ["/h/.claude/CLAUDE.md: loadout's part comes out.",
                                     "/h/.codex/AGENTS.md: the copy loadout placed is removed."]);
 });

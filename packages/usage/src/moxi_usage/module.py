@@ -29,7 +29,7 @@ SESSION_ENV = {
 SETTINGS = "settings.toml"
 #: The install question: the worker ceiling's switch, asked as "usage: <text>? [y/N]".
 QUESTIONS = {
-    "ceiling.on": "the worker ceiling (warn a subagent, then refuse its tools except to "
+    "ceiling.enabled": "the worker ceiling (warn a subagent, then refuse its tools except to "
                   "hand off, once its context grows past ceiling.warn_tokens and "
                   "ceiling.hard_tokens)",
 }

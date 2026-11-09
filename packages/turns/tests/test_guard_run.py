@@ -258,7 +258,7 @@ def test_a_break_lets_the_call_through_with_the_agents_line_and_a_record(rig, fn
     assert [(b.id, b.why, b.denied) for b in got.breaks] == [("t.b", why, False)]
     assert r.written() == [("record", f"guard t.b could not check a Bash call on claude "
                             f"({why}); the call ran unchecked", "guard:t.b",
-                            "moxi config set turns guards.on --remove /g/t.py")]
+                            "moxi config set turns guards.run --remove /g/t.py")]
 
 
 def test_on_error_deny_refuses_with_the_guard_and_the_reason(rig):
@@ -367,7 +367,7 @@ def test_records_reach_the_doctor(turns_env):
         assert str(path).startswith(os.environ["MOXI_TURNS_STATE_HOME"])
         records = json.loads(path.read_text())
         assert "it raised Boom: broken" in records["guard:t.real"]["text"]
-        assert records["guard:t.real"]["fix"] == "moxi config set turns guards.on --remove /g/t.py"
+        assert records["guard:t.real"]["fix"] == "moxi config set turns guards.run --remove /g/t.py"
         state["fail"] = False
         runner.ask(ToolCall("claude", "s", None, "Bash", input={"command": "x"}), ["t.real"])
         assert runner.flush(5)
@@ -505,7 +505,7 @@ def test_the_table_comes_from_turns_config_and_custom_files(turns_env, tmp_path)
                   "def j(call):\n    return Deny('judged ' + call.input['command'])\n"
                   "GUARDS = (Guard(name='j', calls={'claude': ('Bash',), 'codex': ('Bash',)},"
                   " judge=':j', deadline_ms=900),)\n")
-    write_config(turns_env, f'[guards]\non = ["{toml}", "{py}"]\nmax_wait_ms = 250\n')
+    write_config(turns_env, f'[guards]\nrun = ["{toml}", "{py}"]\nmax_wait_ms = 250\n')
     runner = GuardRunner("claude", env=dict(os.environ))
     try:
         table = runner.reload()
