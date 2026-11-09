@@ -40,7 +40,7 @@ var z=globalThis,j=z.ShadowRoot&&(z.ShadyCSS===void 0||z.ShadyCSS.nativeShadow)&
   .empty { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); padding: 4px 6px; }
   .options { display: grid; gap: 8px; min-width: 0; }
   .option { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-  .option label { flex: 1 1 12em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .option .name { flex: 1 1 12em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
   button, input { font: inherit; color: var(--moxi-text); max-width: 100%; }
   button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
            background: var(--moxi-bg-raised); cursor: pointer; }
@@ -106,7 +106,7 @@ var z=globalThis,j=z.ShadowRoot&&(z.ShadyCSS===void 0||z.ShadyCSS.nativeShadow)&
             @click=${()=>this.#o((l,a)=>Zt(l,o.name,a))}>↓</button>
         </span>`:c}
       </li>`)}</ul>`}#l(e,s,r,n){return u`<div class="option" data-option=${e}>
-      <label><span>${P[e]}</span>${this.#n(e)}</label>
+      <span class="name"><span>${P[e]}</span>${this.#n(e)}</span>
       <input type="number" min="1" max=${n} step="1" .value=${gt(String(s))} ?disabled=${!r}
         aria-label=${P[e]}
         @change=${o=>{let l=o.target,a=Number(l.value);if(l.value.trim()===""||!Number.isInteger(a)){l.value=String(s);return}this.#r(e,a)}}>
@@ -114,12 +114,12 @@ var z=globalThis,j=z.ShadowRoot&&(z.ShadyCSS===void 0||z.ShadyCSS.nativeShadow)&
       <h2>Options</h2>
       <div class="options">
         <div class="option" data-option="separator">
-          <label><span>${P.separator}</span>${this.#n("separator")}</label>
+          <span class="name"><span>${P.separator}</span>${this.#n("separator")}</span>
           <input type="text" .value=${gt(r.separator)} ?disabled=${!s} aria-label=${P.separator}
             @input=${n=>this.#r("separator",n.target.value)}>
         </div>
         <div class="option" data-option="color">
-          <label><span>${P.color}</span>${this.#n("color")}</label>
+          <span class="name"><span>${P.color}</span>${this.#n("color")}</span>
           <button class="switch ${r.color?"on":""}" role="switch" aria-checked=${r.color?"true":"false"}
             aria-label=${P.color} ?disabled=${!s}
             @click=${()=>this.#r("color",!r.color)}>${r.color?"On":"Off"}</button>

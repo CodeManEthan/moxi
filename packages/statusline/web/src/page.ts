@@ -63,7 +63,7 @@ const STYLES = css`
   .empty { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); padding: 4px 6px; }
   .options { display: grid; gap: 8px; min-width: 0; }
   .option { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-  .option label { flex: 1 1 12em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .option .name { flex: 1 1 12em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
   button, input { font: inherit; color: var(--moxi-text); max-width: 100%; }
   button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
            background: var(--moxi-bg-raised); cursor: pointer; }
@@ -235,7 +235,7 @@ export class StatuslinePage extends LitElement {
 
   #number(key: "dir.parts" | "context.warn_at" | "context.alert_at", value: number, editable: boolean, max: number) {
     return html`<div class="option" data-option=${key}>
-      <label><span>${OPTION_LABELS[key]}</span>${this.#key(key)}</label>
+      <span class="name"><span>${OPTION_LABELS[key]}</span>${this.#key(key)}</span>
       <input type="number" min="1" max=${max} step="1" .value=${live(String(value))} ?disabled=${!editable}
         aria-label=${OPTION_LABELS[key]}
         @change=${(event: Event) => {
@@ -257,12 +257,12 @@ export class StatuslinePage extends LitElement {
       <h2>Options</h2>
       <div class="options">
         <div class="option" data-option="separator">
-          <label><span>${OPTION_LABELS.separator}</span>${this.#key("separator")}</label>
+          <span class="name"><span>${OPTION_LABELS.separator}</span>${this.#key("separator")}</span>
           <input type="text" .value=${live(v.separator)} ?disabled=${!editable} aria-label=${OPTION_LABELS.separator}
             @input=${(event: Event) => this.#change("separator", (event.target as HTMLInputElement).value)}>
         </div>
         <div class="option" data-option="color">
-          <label><span>${OPTION_LABELS.color}</span>${this.#key("color")}</label>
+          <span class="name"><span>${OPTION_LABELS.color}</span>${this.#key("color")}</span>
           <button class="switch ${v.color ? "on" : ""}" role="switch" aria-checked=${v.color ? "true" : "false"}
             aria-label=${OPTION_LABELS.color} ?disabled=${!editable}
             @click=${() => this.#change("color", !v.color)}>${v.color ? "On" : "Off"}</button>
