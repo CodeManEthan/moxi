@@ -410,6 +410,25 @@ def test_no_lock_file_lands_in_a_harness_home(lo):
         assert not [p for p in home.rglob("*.lock")]
 
 
+def test_a_tilde_in_claude_config_dir_puts_settings_and_mcp_file_under_the_home(
+        lo, monkeypatch, tmp_path):
+    home = Path(os.environ["HOME"])
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)   # where a `~` taken literally would land
+    given = {"HOME": "/given/home", "CLAUDE_CONFIG_DIR": "~/cc"}
+    assert harness.claude_home(given) / "settings.json" == Path("/given/home/cc/settings.json")
+    assert harness.claude_json(given) == Path("/given/home/cc/.claude.json")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/cc")
+    assert harness.settings_file("claude") == home / "cc" / "settings.json"
+    assert harness.claude_json() == home / "cc" / ".claude.json"
+    write(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert read(home / "cc" / "settings.json")["hooks"]["PreToolUse"]
+    assert list(work.iterdir()) == []
+
+
 SHAPES = {
     # OpenCode's published config takes a whole permission as one action, and a tool's
     # permission as one action in place of an object of patterns.

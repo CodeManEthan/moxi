@@ -141,7 +141,8 @@ def test_a_private_name_from_an_api_is_refused(repo):
 
 def test_the_core_modules_another_module_may_import(repo):
     shared = ("names", "paths", "config", "modules", "cli", "files", "store", "proc", "log",
-              "exit", "aio", "ipc", "units", "doctor", "place", "terminal", "render")
+              "exit", "aio", "ipc", "units", "doctor", "place", "terminal", "render",
+              "harnessfile")
     assert contract.CORE_MODULES == frozenset(shared)
     repo.src("core.py", f"from moxi import {', '.join(shared)}\nfrom moxi.doctor import Row\n")
     assert repo.findings("1") == []
