@@ -79,8 +79,16 @@ class Hit:
     line: int
     text: str
     stale: bool = False
+    #: For a `.refs-allow` line (`stale`): "unused", "malformed" or "duplicate".
+    fault: str = "unused"
 
     def __str__(self) -> str:
+        if self.stale and self.fault == "malformed":
+            return (f"{self.path}:{self.line}: refs: {self.text!r} is not "
+                    "path<TAB>name<TAB>why; fix or remove the .refs-allow line")
+        if self.stale and self.fault == "duplicate":
+            return (f"{self.path}:{self.line}: refs: exception for {self.text!r} repeats an "
+                    "earlier line; remove one of the .refs-allow lines")
         if self.stale:
             return (f"{self.path}:{self.line}: refs: exception for {self.text!r} is unused; "
                     "remove the .refs-allow line")
@@ -130,16 +138,19 @@ def _allow(root: Path) -> tuple[dict[tuple[str, str], int], list[Hit]]:
     except OSError:
         return {}, []
     entries: dict[tuple[str, str], int] = {}
-    malformed = []
+    faults = []
     for number, line in enumerate(lines, 1):
         if not line.strip() or line.startswith("#"):
             continue
         parts = line.split("\t")
         if len(parts) != 3 or not all(parts):
-            malformed.append(Hit(ALLOW_FILE, number, line, stale=True))
+            faults.append(Hit(ALLOW_FILE, number, line, stale=True, fault="malformed"))
+            continue
+        if (parts[0], parts[1]) in entries:
+            faults.append(Hit(ALLOW_FILE, number, parts[1], stale=True, fault="duplicate"))
             continue
         entries[(parts[0], parts[1])] = number
-    return entries, malformed
+    return entries, faults
 
 
 def scan(root: Path | str) -> list[Hit]:
@@ -211,9 +222,9 @@ def scan(root: Path | str) -> list[Hit]:
             identifiers.update(_WORD.findall(text))
             flags.update(_FLAG.findall(text))
 
-    allowed, malformed = _allow(root)
+    allowed, faults = _allow(root)
     used: set[tuple[str, str]] = set()
-    hits = list(malformed)
+    hits = list(faults)
     for cite in cites:
         key = (cite.path, cite.text)
         if key in allowed:

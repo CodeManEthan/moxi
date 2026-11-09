@@ -62,3 +62,45 @@ def test_files_with_runtime_shapes_are_not_checked(tmp_path):
 
 def test_the_frozen_standard_library_contains_this_python():
     assert sys.stdlib_module_names <= refs.STDLIB_MODULE_NAMES
+
+
+def test_a_repeated_allow_line_is_refused_and_a_malformed_one_says_so(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/a/x.py": "# `OutsideName`\n",
+        ".refs-allow": ("packages/a/src/a/x.py\tOutsideName\toutside API\n"
+                        "packages/a/src/a/x.py\tOutsideName\tsaid again\n"
+                        "packages/a/src/a/x.py OutsideName no tabs\n"),
+    })
+    found = refs.scan(root)
+    assert [(hit.line, hit.fault) for hit in found] == [(2, "duplicate"), (3, "malformed")]
+    assert "repeats an earlier line" in str(found[0])
+    assert "is not path<TAB>name<TAB>why" in str(found[1])
+
+
+def test_builtins_and_standard_library_names_need_no_definition(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/a/x.py": "# `isinstance`, `shlex.quote` and `zoneinfo.ZoneInfo`\npass\n",
+    })
+    assert refs.scan(root) == []
+
+
+def test_names_and_flags_in_tracked_data_files_count_as_defined(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/a/x.py": "# `made_in_data` and --from-data\npass\n",
+        "packages/a/src/a/rows.toml": '[made_in_data]\nrun = "x --from-data"\n',
+    })
+    assert refs.scan(root) == []
+
+
+def test_a_file_cite_is_found_through_a_code_string_naming_it(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/a/x.py": 'RUNNER = "bin/spawned_helper.py"\n# runs `spawned_helper.py`\n',
+    })
+    assert refs.scan(root) == []
+
+
+def test_the_vendored_tree_is_not_checked(tmp_path):
+    root = tree(tmp_path, {
+        "packages/moxi/src/moxi/_vendor/lib.py": "# `VendoredMissing`\n",
+    })
+    assert refs.scan(root) == []

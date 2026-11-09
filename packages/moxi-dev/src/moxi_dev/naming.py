@@ -9,6 +9,7 @@ import io
 import re
 import subprocess
 import sys
+import textwrap
 import tokenize
 import tomllib
 import warnings
@@ -43,6 +44,24 @@ _BAD_VERBS = frozenset({"delete", "rm", "on", "off", "state", "ls"})
 _SWITCH_KEYS = frozenset({"on", "off", "auto", "active", "enable", "disable",
                           "disabled"})
 _MX_CODE = re.compile(r"\bMX[1-4]\b")
+#: The house unit for each unit word a name, a flag or a metavar may carry.
+_HOUSE = {"seconds": "s", "secs": "s", "sec": "s", "mb": "mib", "millis": "ms", "msecs": "ms",
+          "msec": "ms", "milliseconds": "ms", "ms": "ms", "mins": "minutes", "min": "minutes",
+          "minutes": "minutes", "hrs": "hours", "hr": "hours", "hours": "hours",
+          "days": "days"}
+
+
+def _house(word: str | None, sep: str) -> str:
+    """The house suffix for the unit `word` with `sep` before it, or the duration
+    suffixes to choose from when the name carries no unit word."""
+    if word and word.lower() in _HOUSE:
+        return f"{sep}{_HOUSE[word.lower()]}"
+    return ", ".join(f"{sep}{unit}" for unit in ("s", "ms", "minutes", "hours")) + f" or {sep}days"
+
+
+def _other_unit(name: str) -> str | None:
+    match = _OTHER_UNIT.search(name)
+    return match.group(0)[1:] if match else None
 
 
 @dataclass(frozen=True, order=True)
@@ -119,7 +138,7 @@ def _settings(root: Path) -> tuple[list[Hit], dict[str, list[tuple[str, str, str
             if _OTHER_UNIT.search(leaf):
                 hits.append(Hit(path, line, "MX1", "key unit",
                                 f"{key} uses a non-house unit suffix",
-                                "use _ms, _s, _minutes, _hours, _days, _mib, _chars or _tokens"))
+                                f"end the key with {_house(_other_unit(leaf), '_')}"))
                 continue
             match = _UNIT_DOC.search(str(item.get("doc", "")))
             if not match:
@@ -179,15 +198,16 @@ def _flags_and_verbs(root: Path) -> list[Hit]:
                             continue
                         why = None
                         if _OTHER_UNIT.search(bare):
-                            why = "uses a non-house unit suffix"
+                            why, unit = "uses a non-house unit suffix", _other_unit(bare)
                         elif metavar in _METAVARS:
-                            why = f"uses the {metavar} metavar"
+                            why = f"takes {metavar} but has no unit suffix"
+                            unit = metavar.lower()
                         elif typ in ("int", "float") and _DURATION.search(bare) and not _POINT.search(bare):
-                            why = f"is a numeric duration ({typ})"
+                            why, unit = f"is a numeric duration ({typ}) without a unit suffix", None
                         if why:
                             hits.append(Hit(path, node.lineno, "MX1", "flag unit",
-                                            f"{option} {why} but has no house unit suffix",
-                                            "add the unit suffix to the flag"))
+                                            f"{option} {why}",
+                                            f"end the flag with {_house(unit, '-')}"))
                 elif node.func.attr == "add_parser" and node.args:
                     verb = _constant(node.args[0])
                     if verb in _BAD_VERBS:
@@ -256,7 +276,13 @@ def _source_location(root: Path, obj, qualified: str) -> tuple[str, int]:
     try:
         source = Path(inspect.getsourcefile(obj) or "").resolve()
         path = str(source.relative_to(root.resolve()))
-        line = inspect.getsourcelines(obj)[1]
+        lines, line = inspect.getsourcelines(obj)
+        try:
+            # A decorated definition's source starts at its first decorator; a mark goes
+            # on the def line.
+            line += ast.parse(textwrap.dedent("".join(lines))).body[0].lineno - 1
+        except (SyntaxError, IndexError):
+            pass
         if path.startswith("packages/"):
             return path, line
     except (OSError, TypeError, ValueError):
@@ -277,14 +303,13 @@ def _source_location(root: Path, obj, qualified: str) -> tuple[str, int]:
 
 def _parameters(root: Path) -> list[Hit]:
     core_dir = root / "packages" / "moxi" / "src" / "moxi"
-    surfaces = [("moxi", f"moxi.{name}") for name in sorted(CORE_MODULES)
+    surfaces = [(f"moxi.{name}", "packages/moxi/src/moxi") for name in sorted(CORE_MODULES)
                 if (core_dir / f"{name}.py").is_file() or (core_dir / name).is_dir()]
     for path, text, _tree in _python_sources(root):
         if path.endswith("/module.py"):
             match = re.search(r'^API\s*=\s*["\']([^"\']+)["\']', text, re.M)
             if match:
-                package = path.split("/src/", 1)[1].split("/", 1)[0]
-                surfaces.append((package, match.group(1)))
+                surfaces.append((match.group(1), path))
     additions = [str(root / "packages" / package / "src")
                  for package in sorted((root / "packages").iterdir())
                  if (root / "packages" / package / "src").is_dir()]
@@ -297,10 +322,14 @@ def _parameters(root: Path) -> list[Hit]:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            for package, module_name in surfaces:
+            for module_name, declared in surfaces:
                 try:
                     module = importlib.import_module(module_name)
-                except Exception:
+                except Exception as exc:
+                    hits.append(Hit(declared, 1, "MX1", "public parameter",
+                                    f"{module_name} did not import, so its parameters went "
+                                    f"unread: {type(exc).__name__}: {exc}",
+                                    "fix the import, then run the check again"))
                     continue
                 top = module_name.split(".")[0]
                 names = (set(getattr(module, "__all__", ()))
@@ -343,9 +372,9 @@ def _parameters(root: Path) -> list[Hit]:
                             name = parameter.name
                             if _UNIT.search(name) or _UNIT_ONLY.fullmatch(name):
                                 continue
-                            reason = None
+                            reason, unit = None, None
                             if _OTHER_UNIT.search(name) and _numeric(parameter):
-                                reason = "uses a non-house unit suffix"
+                                reason, unit = "uses a non-house unit suffix", _other_unit(name)
                             elif (_POINT.search(name) and _numeric(parameter)
                                   and type(parameter.default) in (int, float)
                                   and parameter.default > 0):
@@ -356,7 +385,7 @@ def _parameters(root: Path) -> list[Hit]:
                             if reason:
                                 hits.append(Hit(path, line, "MX1", "public parameter",
                                                 f"{module_name}.{qualified} parameter {name!r} {reason}",
-                                                "end the parameter with its unit"))
+                                                f"end the parameter with {_house(unit, '_')}"))
     finally:
         sys.path[:] = old_path
         for name in set(sys.modules) - old_modules:

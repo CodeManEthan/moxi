@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from moxi_dev import rename
 
 
@@ -395,3 +397,57 @@ def test_a_keep_row_on_a_line_a_use_row_changes_stays_applied(tmp_path, capsys):
     assert rename.run(root, renames, dry_run=True) == 0
     assert "0 to apply, 3 applied, 0 not here" in capsys.readouterr().out
 
+
+
+REFUSED = {
+    "new-name-already-local": ('''
+def launch(req, environ=None):
+    env = build(req)
+    return send(env, environ)
+''', ("launch", "environ", "env"), "'env' is already bound or read in launch"),
+    "nested-lambda-and-def": ('''
+def run(timeout=1):
+    pick = lambda timeout: timeout * 2
+    return pick(3) + timeout
+''', ("run", "timeout", "timeout_s"), "a scope inside run has its own 'timeout'"),
+    "field-and-method-parameter": ('''
+class Clock:
+    age_seconds: float = 0.0
+    def with_age(self, age_seconds):
+        return Clock(age_seconds=age_seconds)
+''', ("Clock", "age_seconds", "age_s"), "a scope inside Clock has its own 'age_seconds'"),
+    "module-name-and-function-local": ('''
+HOME = "P_HOME"
+def read(env):
+    HOME = env.get("X")
+    return HOME
+''', ("-", "HOME", "HOME_ENV"), "'HOME' is also a local of a function there"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(REFUSED))
+def test_a_row_that_would_change_what_a_token_means_is_refused(tmp_path, capsys, case):
+    text, (scope, old, new), why = REFUSED[case]
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: text})
+    assert rename.run(root, table(tmp_path, row(path, scope, "name", old, new))) == 2
+    out = capsys.readouterr().out
+    assert f"row 2 ({path} {scope} {old} -> {new}): {path}:" in out and why in out
+    assert (root / path).read_text() == text
+
+
+def test_a_local_renamed_out_of_a_parameters_way_applies_with_it(tmp_path):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: '''
+def launch(req, environ=None):
+    """Sends `env`, built from `req`."""
+    env = build(req)
+    return send(env, environ)
+'''})
+    renames = table(tmp_path, row(path, "launch", "name", "environ", "env"),
+                    row(path, "launch", "name", "env", "launch_env"))
+    assert rename.run(root, renames) == 0
+    text = (root / path).read_text()
+    assert "def launch(req, env=None):" in text and "launch_env = build(req)" in text
+    assert "send(launch_env, env)" in text and "`launch_env`" in text
+    assert rename.run(root, renames, dry_run=True) == 0

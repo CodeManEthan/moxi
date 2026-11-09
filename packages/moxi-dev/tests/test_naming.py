@@ -130,3 +130,113 @@ def collapse(after: int = 1):  # noqa: MX1 -- after is a row count
     sys.modules.pop("moxi_marked", None)
     sys.modules.pop("moxi_marked.api", None)
     assert naming.scan(root) == []
+
+
+def test_an_enabled_key_must_be_a_bool(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/moxi_a/settings.toml": '[part.enabled]\ntype = "int"\ndoc = "How many."\n',
+    })
+    [hit] = naming.scan(root)
+    assert (hit.code, hit.part) == ("MX4", "switch key") and "has type 'int'" in hit.message
+
+
+def test_non_house_units_are_hit_naming_the_house_suffix(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/moxi_a/settings.toml": '[hold_seconds]\ntype = "float"\ndoc = "A hold."\n',
+        "packages/a/src/moxi_a/cli.py": '''
+def parser(p):
+    p.add_argument("--hold-secs", type=float)
+    p.add_argument("--size-mb", type=int)
+    p.add_argument("--grace", metavar="MINUTES")
+    p.add_argument("--retry", type=float)
+''',
+        "packages/a/src/moxi_a/__init__.py": "",
+        "packages/a/src/moxi_a/module.py": 'API = "moxi_a.api"\n',
+        "packages/a/src/moxi_a/api.py": '''
+__all__ = ["hold"]
+def hold(pause_millis: int = 5):
+    pass
+''',
+    })
+    sys.modules.pop("moxi_a", None)
+    sys.modules.pop("moxi_a.api", None)
+    fixes = {(hit.part, hit.message.split()[0], hit.fix) for hit in naming.scan(root)}
+    assert fixes == {
+        ("key unit", "hold_seconds", "end the key with _s"),
+        ("flag unit", "--hold-secs", "end the flag with -s"),
+        ("flag unit", "--size-mb", "end the flag with -mib"),
+        ("flag unit", "--grace", "end the flag with -minutes"),
+        ("flag unit", "--retry", "end the flag with -s, -ms, -minutes, -hours or -days"),
+        ("public parameter", "moxi_a.api.hold", "end the parameter with _ms"),
+    }
+
+
+def test_a_retired_key_is_not_read(tmp_path):
+    root = tree(tmp_path, {
+        "packages/a/src/moxi_a/settings.toml": '''
+[old_seconds]
+type = "int"
+doc = "Wait in seconds."
+retired = "renamed: set wait_s instead"
+[wait_s]
+type = "float"
+doc = "Wait in seconds."
+[other.old_seconds]
+type = "float"
+retired = "renamed: set other.wait_s instead"
+''',
+    })
+    assert naming.scan(root) == []
+
+
+def test_names_a_module_getattr_serves_are_read(tmp_path):
+    root = tree(tmp_path, {
+        "packages/lazy/src/moxi_lazy/__init__.py": "",
+        "packages/lazy/src/moxi_lazy/module.py": 'API = "moxi_lazy.api"\n',
+        "packages/lazy/src/moxi_lazy/_impl.py": "def wait(timeout: float):\n    pass\n",
+        "packages/lazy/src/moxi_lazy/api.py": '''
+_SERVED = {"wait": "moxi_lazy._impl"}
+def __getattr__(name):
+    if name in _SERVED:
+        import importlib
+        return getattr(importlib.import_module(_SERVED[name]), name)
+    raise AttributeError(name)
+''',
+    })
+    for name in ("moxi_lazy", "moxi_lazy.api", "moxi_lazy._impl"):
+        sys.modules.pop(name, None)
+    [hit] = naming.scan(root)
+    assert hit.part == "public parameter" and "'timeout'" in hit.message
+
+
+def test_a_mark_on_a_decorated_definitions_def_line_suppresses_its_hit(tmp_path):
+    root = tree(tmp_path, {
+        "packages/deco/src/moxi_deco/__init__.py": "",
+        "packages/deco/src/moxi_deco/module.py": 'API = "moxi_deco.api"\n',
+        "packages/deco/src/moxi_deco/api.py": '''
+__all__ = ["collapse", "Box"]
+def deco(f):
+    return f
+@deco
+def collapse(after: int = 1):  # noqa: MX1 -- after is a row count
+    return after
+class Box:
+    @staticmethod
+    def shut(after: int = 1):  # noqa: MX1 -- a count
+        return after
+''',
+    })
+    sys.modules.pop("moxi_deco", None)
+    sys.modules.pop("moxi_deco.api", None)
+    assert naming.scan(root) == []
+
+
+def test_an_api_module_that_does_not_import_is_a_hit(tmp_path):
+    root = tree(tmp_path, {
+        "packages/broken/src/moxi_broken/__init__.py": "",
+        "packages/broken/src/moxi_broken/module.py": 'API = "moxi_broken.api"\n',
+        "packages/broken/src/moxi_broken/api.py": "raise RuntimeError('no')\n",
+    })
+    sys.modules.pop("moxi_broken", None)
+    [hit] = naming.scan(root)
+    assert hit.path == "packages/broken/src/moxi_broken/module.py" and "did not import" in hit.message

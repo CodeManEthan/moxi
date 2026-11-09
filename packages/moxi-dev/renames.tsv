@@ -245,6 +245,7 @@ connector	packages/connector/tests/test_control.py	client.call("status", None, t
 connector	packages/connector/tests/test_signin.py	d = await door(page=page)	keep	page	page
 launcher	packages/launcher/src/moxi_launcher/api.py	check	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/api.py	launch	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/api.py	launch	name	env	launch_env
 launcher	packages/launcher/src/moxi_launcher/api.py	launch_kind	name	timeout	timeout_s
 launcher	packages/launcher/src/moxi_launcher/api.py	launch_kinds	name	timeout	timeout_s
 launcher	packages/launcher/src/moxi_launcher/api.py	preview	name	environ	env
