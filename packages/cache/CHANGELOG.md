@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5 (2026-11-08)
+
+- The render audit hook moved to the core as `moxi.render`; `moxi_cache.render` is
+  gone. `moxi cache segment` installs the core's hook, which refuses the same things.
+- cache needs moxi 0.1.8 or later, for that hook.
+
 ## 0.1.4 (2026-11-08)
 
 - A lifetime row's `ruling` key is now `basis`: the stated reason a number is counted

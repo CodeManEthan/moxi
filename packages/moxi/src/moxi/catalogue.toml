@@ -1,7 +1,7 @@
 # Moxi's catalogue: the first-party modules `moxi install` installs by name.
 # `moxi modules --available` lists it; `moxi modules --available --refresh` fetches a newer
 # copy from the repository. Raise `version` whenever a line changes.
-version = 2
+version = 3
 
 [[module]]
 name = "cache"
@@ -62,6 +62,11 @@ summary = "Read a harness's own session records: find a session, read its transc
 name = "slots"
 distribution = "moxi-slots"
 summary = "Numbered tmux sessions to launch into, on one supervised tmux server"
+
+[[module]]
+name = "statusline"
+distribution = "moxi-statusline"
+summary = "A Claude Code status line: your directory, branch, model and context, with the figures installed modules add"
 
 [[module]]
 name = "tunnel"

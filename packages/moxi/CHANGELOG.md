@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.8 (2026-11-08)
+
+- New `moxi.modules.announced(name)`: what `load` finds for a module (its distribution,
+  its entry point, its announcement imported and checked) without importing its `API`
+  module. It shares `load`'s record and never raises; an absent or broken module's record
+  says so, with `segment` None.
+- The `SEGMENT` field says how a segment is called: `segment(session_id, now=None)`, or
+  `from_input(payload, now)` when the module defines it, given Claude's status line input
+  as parsed JSON. Each returns an object with `text` and `coloured()`, or None.
+- New `moxi.render`, the render audit hook, moved here from moxi-cache unchanged:
+  `install()`, `installed()`, `Refused` and `load_segment(name)`. A process that renders a
+  status line segment installs it first, and can then read and do nothing else.
+- The catalogue lists statusline, the Claude Code status line. Its version is 3.
+
 ## 0.1.7 (2026-11-08)
 
 - The catalogue lists all sixteen first-party modules, so `moxi install <module>` and
