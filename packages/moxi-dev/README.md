@@ -60,7 +60,7 @@ step still reads the whole tree, but paths limit the findings it prints.
 
 `moxi-dev rename [--table PATH] [--dry-run] [--main REF] [ROOT]` reads tab-separated
 rows of `<package> TAB <path> TAB <scope> TAB <kind> TAB <old> TAB <new>` from
-`renames.tsv`. The shipped table starts with a comment header and no rows. A normal
+`renames.tsv`. The shipped table holds this repository's renames. A normal
 scope is the qualified enclosing function or class, or `-` for module scope. Rows sort
 by package and path.
 
@@ -81,7 +81,14 @@ Before editing, the script classifies each row as `to apply`, `applied` or `not 
 A second run changes nothing. It resolves direct names, module aliases, from-imports,
 re-exports through API modules, class constructors and methods, and a local assigned
 from a resolved class constructor. It edits resolved tokens, matching `__all__` and
-module `__getattr__` strings, and backticked citations in files it edits. A call resolved
+module `__getattr__` strings, and backticked citations of the old name where they mean
+the row's definition: a parameter's or a function local's inside its function, a field's
+inside its class, any other name's in the files the row edits. A parameter row leaves
+`self.<name>` alone. A row whose edit would change what a token means is refused before
+anything is written, naming its table line and the code line: its new name already bound
+or read in the scope it edits, a nested function, lambda or comprehension with its own
+binding of the old name, or a module-level name that is also a function's local. A
+local that another row of the same scope renames away is no collision. A call resolved
 to the standard library or a dependency is outside the repository, so its keyword is
 left alone and is not a leftover. A callee that cannot be resolved is a leftover. For a
 `kwonly` row on `Class.__init__`, resolved `Class(...)` calls reach the constructor and
@@ -89,7 +96,8 @@ the parameter position excludes `self`; an unresolved call named `Class` that pa
 that position is a leftover.
 
 The final list also includes unresolved old calls, attributes and keywords, string
-lookups, old citations in files the script did not edit, and ambiguous moved scopes.
+lookups, old citations the script did not rewrite (a parameter's only in its own file),
+and ambiguous moved scopes.
 The command exits 1 while any remains. Settle a real unresolved use with a `use` row and
 an unrelated token with a `keep` row. If several modules have the same qualified scope,
 add a normal row at the definition's real path; that row clears the moved row. Use the

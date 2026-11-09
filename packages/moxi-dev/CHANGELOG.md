@@ -10,6 +10,16 @@
   `use` row's old text may be longer than the name and changes every match on its line;
   a `keep` row also guards a cite on its line; a keyword on a later line of a call is
   covered by a row on that line; a keep row on a line a use row changed stays applied.
+  A relative import in a package's `__init__` resolves from the package; a parameter row
+  leaves `self.<name>` alone and reads its state from the signature; a parameter's cite
+  left unrewritten is listed only in its own file.
+- `moxi-dev rename` refuses, before writing, a row whose edit would change what a token
+  means (its new name already in the scope, a nested scope with its own old name, a
+  module-level name that is also a function local), naming the table line and the code
+  line. A row may rename a function's local out of a parameter's way.
+- `moxi-dev check`'s naming check names the house suffix in each unit hit, reads a mark
+  on a decorated function's def line, and reports an API module that does not import;
+  the refs check refuses a repeated `.refs-allow` line.
 - `renames.tsv` holds this release's renames.
 
 The first public release.
