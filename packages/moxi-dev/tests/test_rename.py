@@ -529,13 +529,14 @@ def test_a_use_row_changes_every_match_on_its_line_and_stops_at_a_word_end(tmp_p
     assert "0 to apply, 1 applied, 0 not here" in capsys.readouterr().out
 
 
-def test_a_kwonly_call_with_a_star_at_its_position_is_a_leftover(tmp_path, capsys):
+def test_a_kwonly_call_with_a_star_at_or_before_its_position_is_a_leftover(tmp_path, capsys):
     root = repo(tmp_path, {
         "packages/p/src/p/git.py": "def changes(root, staged=True, rng=None):\n    return root\n",
         "packages/p/src/p/use.py": '''
 from p.git import changes
 rest = [False]
 changes('.', *rest)
+changes(*rest)
 changes('.', False)
 ''',
     })
@@ -543,7 +544,9 @@ changes('.', False)
                     row("packages/p/src/p/git.py", "changes", "kwonly", "staged", "staged"))
     assert rename.run(root, renames) == 1
     out = capsys.readouterr().out
-    assert ("use.py:4: changes call passes a starred argument that may reach keyword-only "
-            "'staged'") in out and "1 leftovers" in out
+    message = "changes call passes a starred argument that may reach keyword-only 'staged'"
+    assert f"use.py:4: {message}" in out and f"use.py:5: {message}" in out
+    assert "2 leftovers" in out
     use = (root / "packages/p/src/p/use.py").read_text()
-    assert "changes('.', *rest)" in use and "changes('.', staged=False)" in use
+    assert "changes('.', *rest)\nchanges(*rest)\n" in use
+    assert "changes('.', staged=False)" in use

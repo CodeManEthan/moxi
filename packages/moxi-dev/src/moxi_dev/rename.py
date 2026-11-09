@@ -977,10 +977,14 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                 # A call never reaches a parameter outside its function.
                 named = [(row, target) for row, target in by_old.get(name, ())
                          if row.kind == "name" and target.kind not in inner] if name else []
+                # A star at or before the position may reach it however few arguments
+                # the call spells.
                 positional = [(row, target, function_name)
                               for row, target, function_name in kwonly
                               if name == function_name and target.position is not None
-                              and len(node.args) > target.position]
+                              and (len(node.args) > target.position or any(
+                                  isinstance(argument, ast.Starred)
+                                  for argument in node.args[:target.position + 1]))]
                 # A row covers a keyword on its own line or on the call's first line.
                 passed = [keyword for keyword in passed if not is_covered(node.lineno)
                           and not is_covered(keyword.value.lineno)]
