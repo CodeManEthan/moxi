@@ -1,6 +1,6 @@
 """`moxi cache read`, `moxi cache doctor`, and the verbs' wiring (`segment`'s render is in
-test_render, the watcher in test_watch). The watcher's unit is the core's to write; the
-doctor reads it through `moxi.units.status`, which these tests stand in for."""
+test_segment_command, the watcher in test_watch). The watcher's unit is the core's to
+write; the doctor reads it through `moxi.units.status`, which these tests stand in for."""
 
 from __future__ import annotations
 

@@ -22,8 +22,8 @@ it; the next tick rewrites it). The age is counted from the record's `last_reque
 read.
 
 This module imports only the standard library and the core (through `records`), so a
-renderer can load it alone. `moxi cache segment` loads it inside the render audit hook
-(`render`).
+renderer can load it alone. `moxi cache segment` loads it inside the core's render audit
+hook (`moxi.render`).
 """
 
 from __future__ import annotations
