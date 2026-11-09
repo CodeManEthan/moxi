@@ -12,7 +12,7 @@ import sys
 import time
 
 import pytest
-from conftest import wait_until, write_config
+from conftest import ADDITIONS_COMMS_ONLY_PATCH, wait_until, write_config
 
 import fake_opencode
 from moxi_comms.adapters import opencode as oc
@@ -31,7 +31,9 @@ class OpenCodePty(PtyWrapper):
         master, slave = os.openpty()
         self.fd = master
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "moxi_comms.adapters.opencode", *argv], env=env,
+            [sys.executable, "-c", ADDITIONS_COMMS_ONLY_PATCH + "import runpy; "
+             "runpy.run_module('moxi_comms.adapters.opencode', run_name='__main__', "
+             "alter_sys=True)", *argv], env=env,
             stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
             preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))
         os.close(slave)

@@ -54,11 +54,12 @@ def fake_claude(tmp_path):
 
 def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
         rig, fake_claude, turns_plugins):
-    from conftest import files_under
+    from conftest import ADDITIONS_COMMS_ONLY_PATCH, files_under
 
     script, out, release = fake_claude
     before = files_under(turns_plugins)
-    code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("
+    code = (ADDITIONS_COMMS_ONLY_PATCH +
+            "from moxi_comms.adapters import session; raise SystemExit(session.main("
             f"['--name', {NAME!r}, '--session-id', {SID!r}, '--claude', {str(script)!r}, "
             "'--', '--model', 'haiku']))")
     proc = subprocess.Popen([sys.executable, "-c", code], env=dict(os.environ),
