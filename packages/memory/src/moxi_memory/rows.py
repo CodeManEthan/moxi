@@ -69,9 +69,10 @@ UNSCANNED = "[REDACTED:unscanned]"
 
 #: The characters stripped from each end of a word before it is tested as a path.
 _PUNCTUATION = "\"'`()[]{}<>,;:|&"
-#: The characters a word is split at, so that a path joined to an assignment or a shell
-#: redirection (`--env-file=.env`, `cat<.env`, `x>/a/.env`) is tested, and shown, alone.
-_JOINS = re.compile(r"[=<>|;&]+")
+#: The characters a word is split at, so that a path joined to an assignment, a shell
+#: redirection or other text (`--env-file=.env`, `cat<.env`, `x>/a/.env`,
+#: `{"path":"/a/.env","content":"A=1"}`) is tested, and shown, alone.
+_JOINS = re.compile(r"[=<>|;&,:\"'`()\[\]{}\x00]+")
 
 
 @dataclass(frozen=True)
@@ -194,7 +195,7 @@ def _is_secret(word: str) -> bool:
 
 def _candidates(text: str) -> Iterable[str]:
     """The words of `text` to test as paths, narrowest first: for each
-    whitespace-separated word, the pieces between `=`, `<`, `>`, `|`, `;` and `&`, then
+    whitespace-separated word, the pieces between the characters of `_JOINS`, then
     the word with quotes and brackets taken off its ends, then the word itself. None of
     them holds whitespace, so the path a call is shown with is never more than one word."""
     for word in text.split():

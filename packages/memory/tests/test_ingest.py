@@ -314,7 +314,10 @@ PLAIN = "hunter2-plain"         # a password no redaction set catches
 @pytest.mark.parametrize("command, path", [
     (f"cat > /work/app/.env <<EOF\nDB_PASS={PLAIN}\nEOF", "/work/app/.env"),
     (f"cat ~/.ssh/id_rsa && echo {PLAIN}", "~/.ssh/id_rsa"),
-    (f"echo PASS={PLAIN}>/work/app/.env", "/work/app/.env")])
+    (f"echo PASS={PLAIN}>/work/app/.env", "/work/app/.env"),
+    (f"printf '{{\"path\":\"/work/app/.env\",\"content\":\"DB_PASS={PLAIN}\"}}'",
+     "/work/app/.env"),
+    (f"tool --out=/work/app/.env,DB_PASS:{PLAIN}", "/work/app/.env")])
 def test_a_secret_path_command_with_more_text_keeps_only_the_path(command, path):
     t = claude()
     call = t.request().tool_use("Bash", {"command": command, "description": "x"})
