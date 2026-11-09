@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `moxi launcher state` is now `moxi launcher show`, with no alias.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;
+  `moxi_launcher.api.launch`: `environ` is now `env`; `moxi_launcher.api.launch_kind`:
+  `timeout` is now `timeout_s`; `moxi_launcher.api.launch_kinds`: `timeout` is now
+  `timeout_s`; `moxi_launcher.api.preview`: `environ` is now `env`.
 - `moxi launcher handoffs --key KEY` reads KEY's own handoff folder, the one of KEY's
   newest launch, so it finds the handoffs of a seat that works in another project. A key
   with no launch is read in the folder of the caller's directory, as before. It says on

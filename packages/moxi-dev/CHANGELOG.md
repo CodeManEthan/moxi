@@ -2,6 +2,16 @@
 
 ## 0.1.1 (2026-11-08)
 
+- `moxi-dev rename` can apply a real table: it is fast; reads tests, conftest and
+  scripts; resolves submodule imports, lazy `__getattr__` re-export tables and imports
+  inside functions; renames dataclass field keywords; makes `kwonly` rows work with an
+  existing star; rewrites `__all__` only in its list and backticked cites only where
+  they mean the renamed definition; refuses to write a file that would not parse. A
+  `use` row's old text may be longer than the name and changes every match on its line;
+  a `keep` row also guards a cite on its line; a keyword on a later line of a call is
+  covered by a row on that line; a keep row on a line a use row changed stays applied.
+- `renames.tsv` holds this release's renames.
+
 The first public release.
 
 - `moxi-dev check` now runs whole-tree comment-reference and public-name steps, reports

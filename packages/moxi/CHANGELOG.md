@@ -2,6 +2,23 @@
 
 ## 0.1.7 (2026-11-08)
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi.cli.shortcut_text`: `windows` is now `is_windows`;
+  `moxi.config.Key`: `type` is now `value_type`; `moxi.files`: `CLAIM_VARIABLE` is now
+  `LOCK_FD_ENV`; `moxi.files.edit_toml`: `timeout` is now `timeout_s`;
+  `moxi.files.lock`: `timeout` is now `timeout_s`; `moxi.ipc._client.Client`: `timeout`
+  is now `timeout_s`; `moxi.ipc._client.Client.call`: `timeout` is now `timeout_s`;
+  `moxi.ipc._client.connect`: `timeout` is now `timeout_s`; `moxi.ipc._server.Server`:
+  `write_deadline` is now `write_timeout_s`; `moxi.ipc._server.serve`: `write_deadline`
+  is now `write_timeout_s`; `moxi.names`: `is_skill_folder` is now `is_skill_dir`;
+  `moxi.paths`: `ANCHOR_HOME` is now `ANCHOR_HOME_ENV`; `moxi.paths`: `DEVICE` is now
+  `DEVICE_ENV`; `moxi.paths`: `HOME` is now `HOME_ENV`; `moxi.place`: `folders` is now
+  `harness_dirs`; `moxi.place.plan`: `git_seconds` is now `git_s`; `moxi.proc`:
+  `environ` is now `process_env`; `moxi.proc.run`: `input` is now `stdin_data`;
+  `moxi.proc.run`: `timeout` is now `timeout_s`; `moxi.store.connect`: `timeout` is now
+  `timeout_s`; `moxi.terminal`: `MARK` is now `STARTED_BY_ENV`;
+  `moxi.terminal._record.read`: `retry` is now `retry_s`; `moxi.units._act.stop`:
+  `record` is now `stopped`; `moxi.units._home`: `environment` is now `unit_env`.
 - The catalogue lists all sixteen first-party modules, so `moxi install <module>` and
   `moxi modules --available` know each by name. Its version is 2.
 - The README says what the core needs (psutil, and its own copies of tomlkit and

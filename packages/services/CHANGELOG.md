@@ -2,6 +2,9 @@
 
 ## 0.1.2 (2026-11-08)
 
+- `moxi services watch --every` is now `--every-s`, with no alias.
+- The process fields `uptime_seconds` and `cpu_seconds` are now `uptime_s` and `cpu_s`.
+
 The first public release.
 
 - One list of every daemon and timer on the machine: each installed module's, commands

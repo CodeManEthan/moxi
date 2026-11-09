@@ -2,6 +2,14 @@
 
 ## 0.2.6 (2026-11-08)
 
+- Docs name turns' `guards.run` key.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_sessions.claude.projects_root`: `environ` is now
+  `env`; `moxi_sessions.read.Window`: `has_earlier` is now keyword-only;
+  `moxi_sessions.read.records_back`: `head` is now `read_head`;
+  `moxi_sessions.reader.read_back`: `head` is now `read_head`;
+  `moxi_sessions.retention.retention`: `environ` is now `env`;
+  `moxi_sessions.source.root`: `environ` is now `env`.
 - New setting `guard.transcript_read_escapes`: the verbs of this environment's `moxi`
   whose commands the transcript-read guard lets name a transcript path. The default is
   `["sessions"]`; add a module's verb to let it through too.

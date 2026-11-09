@@ -2,6 +2,8 @@
 
 ## 0.1.4 (2026-11-08)
 
+- `moxi loadout global off` is now `moxi loadout global remove`, with no alias.
+
 The first public release.
 
 - loadout needs moxi 0.1.6 or later.

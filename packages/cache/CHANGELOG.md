@@ -2,6 +2,13 @@
 
 ## 0.1.4 (2026-11-08)
 
+- Config keys `claude.ttl_seconds`, `watch.tick` and `segment.warn_before` are now
+  `claude.ttl_s`, `watch.tick_s` and `segment.warn_before_s`. An old key, set in the
+  config file, is refused, naming the new one.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_cache.api.projects_root`: `environ` is now `env`;
+  `moxi_cache.clock.Clock`: `age_seconds` is now `age_s`; `moxi_cache.clock.Clock`:
+  `ttl_seconds` is now `ttl_s`.
 - A lifetime row's `ruling` key is now `basis`: the stated reason a number is counted
   where the source doesn't promise it. A row in your config that still says `ruling` is
   read as `basis`; a row that says both is refused. `Row.ruling` is now `Row.basis`.
