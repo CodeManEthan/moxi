@@ -267,7 +267,7 @@ def _named(paths: list[str]) -> str:
 def _cadence_rows(repo, label: str, name: str, spec: dict, item: dict, changed: list[str],
                   now: float) -> list[Row]:
     root = str(repo.root)
-    interval = float(spec["min_interval"] or 0)
+    interval = float(spec["min_interval_s"] or 0)
     left = set(item["left"])
     waiting = [p for p in changed if p not in left
                and any(_covers(sp, p) for sp in spec["paths"])]

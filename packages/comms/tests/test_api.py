@@ -107,12 +107,12 @@ def test_the_send_and_check_signatures():
     for fn in (api.send, api.check):
         params = inspect.signature(fn).parameters
         assert list(params) == ["sender", "to", "text", "posture", "reply_to", "new",
-                                "audience", "held", "cap", "no_cap", "deadline",
+                                "audience", "held", "cap", "no_cap", "timeout_s",
                                 "standing", "new_name", "interrupt", "expires"], fn
         assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY
                    for n in list(params)[3:])
         assert params["posture"].default is inspect.Parameter.empty
-        assert params["deadline"].default == 30.0
+        assert params["timeout_s"].default == 30.0
         assert [params[n].default for n in ("reply_to", "new", "audience", "held", "cap",
                                             "no_cap", "standing", "new_name")] == [
             None, False, None, False, None, False, False, False]
@@ -144,11 +144,11 @@ def test_waiting_has_one_meaning_bound_with_no_endpoint():
 
 
 def test_the_reads_and_names_are_pinned():
-    for name, params in {"attributed": ["message_id", "deadline"],
-                         "session": ["identity", "deadline"],
-                         "roster": ["deadline"], "owner": ["session_id", "deadline"],
-                         "roster_rows": ["deadline"],
-                         "identity_state": ["name", "scope", "deadline"],
+    for name, params in {"attributed": ["message_id", "timeout_s"],
+                         "session": ["identity", "timeout_s"],
+                         "roster": ["timeout_s"], "owner": ["session_id", "timeout_s"],
+                         "roster_rows": ["timeout_s"],
+                         "identity_state": ["name", "scope", "timeout_s"],
                          "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
@@ -166,7 +166,7 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
         "directors", "session_id", "bound_at", "awaiting"]
-    assert inspect.signature(api.roster_rows).parameters["deadline"].default == \
+    assert inspect.signature(api.roster_rows).parameters["timeout_s"].default == \
         api.READ_DEADLINE
 
 

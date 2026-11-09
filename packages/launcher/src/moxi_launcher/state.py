@@ -307,7 +307,7 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
     window = None
     if sid:
         clock = cache_read(cache, row, sid, env)
-        ttl = getattr(clock, "ttl_seconds", None) if clock is not None else None
+        ttl = getattr(clock, "ttl_s", None) if clock is not None else None
         if keepwarm.no_window(ttl):
             window = f"no window: lifetime {ttl:g} s"
     return KeepWarmState(True, tuple(store.open_holds(conn, row.request_id)), nudges,

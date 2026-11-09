@@ -462,7 +462,7 @@ def test_a_session_answer_with_no_verdict_refuses_the_post(rig, monkeypatch, old
         if older == "no session query":
             raise Refusal("unknown query kind 'session'")
         answer = real(frame)
-        for key in ("cache_kind", "age_seconds", "cache_reason"):
+        for key in ("cache_kind", "age_s", "cache_reason"):
             answer.pop(key)
         return answer
 
@@ -1087,7 +1087,7 @@ def test_comms_cache_reads_its_kind_from_the_daemon(rig, monkeypatch):
     real = rig.daemon._session_query
 
     def says_cold(frame):
-        return {**real(frame), "cache_kind": "cold", "age_seconds": 3 * HOUR}
+        return {**real(frame), "cache_kind": "cold", "age_s": 3 * HOUR}
 
     monkeypatch.setattr(rig.daemon, "_session_query", says_cold)   # ... the daemon's not
     code, out = rig.cli(["cache", "reviewer@proj-a"], env={"MOXI_COMMS_OPERATOR": "900001"})

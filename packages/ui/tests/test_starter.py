@@ -286,7 +286,7 @@ def test_an_export_command_past_its_time_is_run_again_for_each_module_alone(shel
         modules = argv[4:]
         calls.append(modules)
         if "stslow" in modules:
-            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout_s"])
         return proc.run(argv, **kwargs)
 
     found = export_tables(["stpage", "stslow", "stnopage"], cwd=shell_dirs[0], run=one_slow)

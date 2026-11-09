@@ -301,7 +301,7 @@ def test_async_with_closes_the_server(sock_dir):
 
 
 @pytest.mark.parametrize("options", [
-    {"max_line": 0}, {"queue": 0}, {"queue": True}, {"write_deadline": 0},
+    {"max_line": 0}, {"queue": 0}, {"queue": True}, {"write_timeout_s": 0},
 ])
 def test_serve_refuses_bad_options(sock_dir, options):
     with pytest.raises(ValueError):

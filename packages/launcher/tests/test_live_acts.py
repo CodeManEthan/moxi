@@ -364,8 +364,8 @@ class Cache:
         self.kind, self.age, self.ttl = kind, age, ttl
 
     def read(self, harness, session_id, **options):
-        return types.SimpleNamespace(kind=self.kind, age_seconds=self.age,
-                                     ttl_seconds=self.ttl)
+        return types.SimpleNamespace(kind=self.kind, age_s=self.age,
+                                     ttl_s=self.ttl)
 
 
 def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):

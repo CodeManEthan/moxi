@@ -6,7 +6,7 @@ from git's object store with `git cat-file` and the ids on stdin. So no path is 
 from a diff header, and a commit, a range and a snapshot use one reader.
 
 Every function takes `git`, a callable that runs git in the repo being judged:
-`git(*args, input=None, timeout=..., binary=True)` returning a finished process. Both
+`git(*args, stdin_data=None, timeout_s=..., binary=True)` returning a finished process. Both
 `HookContext.git` and `PrepareContext.git` have that shape, so a git hook piece reads the
 index git is committing and a prepare step reads the snapshot's.
 

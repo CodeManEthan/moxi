@@ -547,11 +547,11 @@ def test_a_tracked_occupant_is_cause_tracked_when_git_answers_in_the_time_given(
 
 @pytest.mark.timed
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
-@pytest.mark.parametrize("how", ["git_seconds", "each call"])
+@pytest.mark.parametrize("how", ["git_s", "each call"])
 def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
         tmp_path, monkeypatch, skill, how):
     """A git that doesn't answer in time never makes an occupant `tracked`: it stays
-    `occupant`, its reason says so, and `git_seconds` bounds every folder's calls
+    `occupant`, its reason says so, and `git_s` bounds every folder's calls
     together."""
     bin_dir = tmp_path / "slow-bin"
     bin_dir.mkdir()
@@ -566,8 +566,8 @@ def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
         targets.append(target)
     items = [Item(skill(), "claude", "x", dest=targets[0]),
              Item(skill("y"), "claude", "x", dest=targets[1])]
-    if how == "git_seconds":
-        options = {"git_seconds": 0.5}
+    if how == "git_s":
+        options = {"git_s": 0.5}
     else:
         monkeypatch.setattr(place, "_GIT_SECONDS", 0.5)
         options = {}
@@ -579,11 +579,11 @@ def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
     for s in steps:
         assert s.reason == (f"{s.target} is a folder the placer did not mark; git did not "
                             f"answer in time, so whether it tracks it is unknown")
-    assert took < (2 if how == "git_seconds" else 4), took
+    assert took < (2 if how == "git_s" else 4), took
 
 
-def test_git_seconds_must_be_a_number(skill):
-    with pytest.raises(ValueError, match="git_seconds"):
+def test_git_s_must_be_a_number(skill):
+    with pytest.raises(ValueError, match="git_s"):
         place.plan("loadout", [Item(skill(), "claude", "x")], git_s=-1)
 
 

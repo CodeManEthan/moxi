@@ -1751,7 +1751,7 @@ class Daemon:
 
         It is NOT resolution: `identity` is a qualified name taken literally, and the
         answer says nothing about where mail goes. `cache_kind` (`warm`, `cold`, `fresh`,
-        `no-cache` or `unknown`), `age_seconds` and `cache_reason` are the daemon's own
+        `no-cache` or `unknown`), `age_s` and `cache_reason` are the daemon's own
         read of the bound session's cache, the one its gate delivers by, with
         `cache_ttl` (the lifetime that read used, None when it used none), `cache_key`
         (what the lifetime was looked up by, in words), `cache_code` (the read's code,
@@ -1771,7 +1771,7 @@ class Daemon:
             if b is None:
                 return {"identity": identity, "bound": False, "adapter": None,
                         "session_id": None, "session_seen_at": None, "bound_at": None,
-                        "bound_for": None, "cache_kind": None, "age_seconds": None,
+                        "bound_for": None, "cache_kind": None, "age_s": None,
                         "cache_reason": None, "cache_ttl": None, "cache_key": None,
                         "cache_code": None, "cache_source": None, "endpoint": None,
                         "endpoint_for": None}
@@ -1784,7 +1784,7 @@ class Daemon:
         # The daemon's own read of the bound session's cache, by the function the gate
         # delivers by: the verb's hold and `moxi comms cache` read these.
         clock = self._read(b)
-        answer.update(cache_kind=clock.kind, age_seconds=clock.age_s,
+        answer.update(cache_kind=clock.kind, age_s=clock.age_s,
                       cache_reason=clock.reason, cache_ttl=clock.ttl_s,
                       cache_key=clock.key, cache_code=clock.code)
         return answer
@@ -3046,7 +3046,7 @@ class Daemon:
         lifetime, `cold (<reason>; last request 3m ago)` for one without a lifetime, and
         `unreadable (<reason>)`."""
         if clock is not None and clock.kind == cache.COLD:
-            age, ttl = clock.age_s, getattr(clock, "ttl_seconds", None)
+            age, ttl = clock.age_s, getattr(clock, "ttl_s", None)
             if age is not None and ttl is not None:
                 return f"cold for {cache.span(age - ttl)} (last request {cache.span(age)} ago)"
             reason = clock.reason or "no cache lifetime to count it by"

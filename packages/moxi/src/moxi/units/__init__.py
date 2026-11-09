@@ -7,7 +7,7 @@ file it did not mark unless told to move it aside (`replace=True`).
 
     backend()                      the supervisor here: "systemd", "launchd", "schtasks", None
     home_tag()                     the tag in this home's unit names (None: the default home)
-    environment(module)            the variables the module's units are written with
+    unit_env(module)               the variables the module's units are written with
     ids(module, name, kind="daemon")
                                    the supervisor's ids for one unit, with this home's tag
     declarations(module)           the module's merged declarations (`Declarations`)
@@ -16,7 +16,7 @@ file it did not mark unless told to move it aside (`replace=True`).
     remove(module)                 remove every unit the module's mark is on (uninstall)
     start|stop|restart|enable|disable(module, names, foreign=False, kinds=None)
                                    act on named units now (`Acted` per name)
-    stop(module, names, record=[]) and resume(record)
+    stop(module, names, stopped=[]) and resume(record)
                                    stop what runs, with a record, and start exactly that
     status(modules, foreign=(), kinds=None)
                                    what the supervisor says (`UnitState` per unit)

@@ -366,7 +366,7 @@ def _specs(args) -> int:
             spec = item.get("spec")
             if spec:
                 print(f"    paths: {', '.join(spec['paths'])}; every "
-                      f"{spec['min_interval']} s; push: {spec['push'] or 'none'}")
+                      f"{spec['min_interval_s']} s; push: {spec['push'] or 'none'}")
             if last.get("line"):
                 print(f"    {last['line']}")
             if item.get("refused_since"):

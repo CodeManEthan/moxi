@@ -231,7 +231,7 @@ def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: An
             return Verdict(None, "run-open", str(open_run))
         if verdict is not None:
             return _blocked(conn, run, verdict)
-        age = getattr(clock, "age_seconds", None)
+        age = getattr(clock, "age_s", None)
         return _act(conn, run, found.session, command, reading.turn_number, age)
     finally:
         found.close()

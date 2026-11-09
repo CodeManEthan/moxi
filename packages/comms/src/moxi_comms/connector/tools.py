@@ -129,7 +129,7 @@ def _object(properties: dict, optional=()) -> dict:
 _NULL_STR = {"type": ["string", "null"]}
 _AUTHOR = _object({"name": _STR, "tier": _NULL_STR, "attribution": _NULL_STR})
 _MESSAGE = _object({"id": _STR, "from": _AUTHOR, "at": _NULL_STR,
-                    "age_seconds": {"type": ["number", "null"]}, "posture": _STR,
+                    "age_s": {"type": ["number", "null"]}, "posture": _STR,
                     "reply_to": _NULL_STR, "text": _STR,
                     "already_shown": {"type": "boolean"}})
 _RECIPIENTS = {"type": "array", "items": _object({
@@ -565,7 +565,7 @@ class Tools:
                 "from": {"name": str(author.get("name") or "unknown"),
                          "tier": author.get("tier"),
                          "attribution": author.get("attribution")},
-                "at": at, "age_seconds": None if epoch is None
+                "at": at, "age_s": None if epoch is None
                 else max(0.0, self.clock() - epoch),
                 "posture": p.get("posture") or machine_line.POSTURE_OPEN,
                 "reply_to": None if p.get("reply_to") is None else str(p["reply_to"]),
@@ -575,7 +575,7 @@ class Tools:
         """One message as it is read aloud: who, how long ago, its id, what it asks, and
         its text."""
         who = m["from"]["name"] + frame_marks(m["from"])
-        bits = [f"From {who}", _ago(m["age_seconds"]), f"msg {m['id']}"]
+        bits = [f"From {who}", _ago(m["age_s"]), f"msg {m['id']}"]
         if m["reply_to"]:
             bits.append(f"in reply to msg {m['reply_to']}")
         ask = _ASKS.get(m["posture"])

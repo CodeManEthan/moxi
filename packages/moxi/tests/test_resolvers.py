@@ -2,7 +2,7 @@
 are given, and only names of the set the core records.
 
 The resolvers: every `Layout` method, `paths.core()`, `paths.core_lock`, `paths.home`,
-`paths._expanduser`, `place.folders` and `paths.which`. Each runs over a mapping that
+`paths._expanduser`, `place.harness_dirs` and `paths.which`. Each runs over a mapping that
 notes every name read, on Linux and macOS and on Windows (the core's Windows branch, with
 the shell's folders made up), and under a process environment poisoned in every name the
 set holds, so a direct read of the process shows as a wrong answer.

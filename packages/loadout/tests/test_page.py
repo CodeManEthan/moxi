@@ -313,7 +313,7 @@ def test_status_gives_git_the_doctors_time(lo, monkeypatch):
 
     def spy(*a, git=None, git_seconds=None, **kw):
         seen.update(git=git, git_seconds=git_seconds)
-        return real(*a, git=git, git_s=git_seconds, **kw)
+        return real(*a, git=git, git_seconds=git_seconds, **kw)
 
     monkeypatch.setattr(install, "status", spy)
     read("/api/status")

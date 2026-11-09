@@ -390,7 +390,7 @@ READS = [
                     "standing"}),
     ("session", {"identity": PLANNER},
      {"identity", "bound", "adapter", "session_id", "session_seen_at", "bound_at",
-      "bound_for", "cache_kind", "age_seconds", "cache_reason", "cache_ttl", "cache_key",
+      "bound_for", "cache_kind", "age_s", "cache_reason", "cache_ttl", "cache_key",
       "cache_code", "cache_source", "endpoint", "endpoint_for"}),
     ("owner", {"session_id": "no-such-session"},
      {"session_id", "owner", "adapter", "awaiting"}),

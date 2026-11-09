@@ -262,7 +262,7 @@ def held(lock) -> bool:
     """Whether lock file `lock` is held, asked by a fresh process: within this one a
     second take raises instead of saying."""
     code = ("import sys\nfrom moxi import files\n"
-            "try:\n    with files.lock(sys.argv[1], timeout=0): print('free')\n"
+            "try:\n    with files.lock(sys.argv[1], timeout_s=0): print('free')\n"
             "except files.LockTimeout: print('held')\n")
     out = subprocess.run([sys.executable, "-c", code, str(lock)], capture_output=True,
                          timeout=30, check=True).stdout
@@ -732,7 +732,7 @@ def test_a_stuck_peer_is_dropped_at_the_write_deadline_and_others_go_on(pipe_ser
     def on_close(conn):
         closed.append(time.monotonic())
 
-    srv = pipe_serving(handler, write_deadline=deadline, queue=1000, on_close=on_close)
+    srv = pipe_serving(handler, write_timeout_s=deadline, queue=1000, on_close=on_close)
     stuck = PipeRaw(srv.address)
     stuck.send(req(1, "flood"))
     wait_for(lambda: pushed, what="the flood")

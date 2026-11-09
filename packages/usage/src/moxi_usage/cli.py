@@ -322,7 +322,7 @@ def limits_lines(result: Any) -> list[str]:
         rows = result.of(harness)
         cells = [f"{harness:<7}"] + [_cell(row, result.now) for row in rows]
         line = "   ".join(cells)
-        ages = [row.age_seconds for row in rows if row.age_seconds is not UNKNOWN]
+        ages = [row.age_s for row in rows if row.age_s is not UNKNOWN]
         if ages:
             line += f"   as of {format_age(max(ages))} ago"
         lines.append(line)

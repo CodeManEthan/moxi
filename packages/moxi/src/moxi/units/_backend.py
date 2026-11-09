@@ -292,7 +292,7 @@ class Spec:
     the gate, `moxi run [--if <module>.<switch>] --record <module>/<name> -- <command>`,
     with no `--if` when `switch` is None. `doc` is the entry's one line (the unit's name when
     it has none). `entry` is the declaration as read. `environment` is the variables the
-    unit runs with (`moxi.units.environment`), as `(name, value)` pairs: `MOXI_HOME` for a
+    unit runs with (`moxi.units.unit_env`), as `(name, value)` pairs: `MOXI_HOME` for a
     tagged home, none for the default home.
     """
 

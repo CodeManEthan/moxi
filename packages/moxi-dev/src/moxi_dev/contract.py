@@ -40,7 +40,7 @@ finding names them:
    the checks `moxi.modules.load` runs; a name it leaves out passes, as it takes its
    default. The `SKILLS` folder, beside the announcement in its package and written
    with `/` (a backslash fails, as POSIX reads it as part of a name), must be there;
-   each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named
+   each skill in it (a subfolder `moxi.names.is_skill_dir` counts) is named
    `moxi-<name>` and holds a `SKILL.md` whose frontmatter `name:` is the folder name.
    A symlink along the way (the folder, a skill, its `SKILL.md`) is followed. In a staged
    run the link's target is read against the link's folder and looked up in the index,

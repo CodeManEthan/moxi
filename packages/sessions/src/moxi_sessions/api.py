@@ -24,7 +24,7 @@ Finding sessions:
 Reading one source (`Read`, `Back`, `LastRequest`, `Batch`, `Window`):
 
 * `records(source, *, kinds=None, keep_raw=False)`: every record, forward.
-* `records_back(source, *, kinds=None, block=BLOCK, limit=BACK_LIMIT, head=False)`: the
+* `records_back(source, *, kinds=None, block=BLOCK, limit=BACK_LIMIT, read_head=False)`: the
   records newest first.
 * `last_request(source, *, synthetic=False, limit=BACK_LIMIT)`: the newest request on the
   source's own chain.
@@ -58,7 +58,7 @@ Each harness's mapping, and the line reads under the records:
   (`MissingSession`, `UnknownSchema`, `QueryFailed`, each an `Unreadable`), the versions
   the mapping was checked against (`CHECKED_VERSIONS`) and the session row's totals
   (`TOTALS`).
-* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines
+* `read_back(path, *, block, limit, read_head=False)`: a record read backwards, its lines
   newest first with the unterminated flag, line 1 when asked, and how the read ended.
 * `projects_root(environ)`: Claude Code's projects root in an environment; with None, the
   root for a session that stated none (config `claude.projects`).

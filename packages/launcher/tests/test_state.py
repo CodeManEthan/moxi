@@ -43,7 +43,7 @@ class FakeCache:
 
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id))
-        return SimpleNamespace(kind="warm", age_seconds=10.0, ttl_seconds=self.ttl)
+        return SimpleNamespace(kind="warm", age_s=10.0, ttl_s=self.ttl)
 
 
 @pytest.fixture

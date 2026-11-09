@@ -109,7 +109,7 @@ from moxi import files
 from settle_procs import note
 
 def _yields(event, module):
-    with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):
+    with files.lock(moxi.paths.core_lock(), nested=True, timeout_s=0):
         note("listener", **{event: module})
 
 def on_install(module, found):

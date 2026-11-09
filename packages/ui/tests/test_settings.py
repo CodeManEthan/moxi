@@ -130,7 +130,7 @@ def test_every_command_is_python_dash_p_dash_m_moxi_from_the_runtime_dir():
     argv, kwargs = run.calls[0]
     assert argv[:4] == [str(python()), "-P", "-m", "moxi"]
     assert argv[4:] == ["config", "demo", "show", "--json"]
-    assert kwargs == {"timeout": settings.CONFIG_TIMEOUT, "cwd": "/rt", "env": {"A": "1"}}
+    assert kwargs == {"timeout_s": settings.CONFIG_TIMEOUT, "cwd": "/rt", "env": {"A": "1"}}
     settings.change("demo", "count", value="-4", cwd="/rt", env=None, run=run)
     assert run.calls[-1][0][:4] == [str(python()), "-P", "-m", "moxi"]
     assert run.calls[-1][0][-3:] == ["demo", "count", "-4"]

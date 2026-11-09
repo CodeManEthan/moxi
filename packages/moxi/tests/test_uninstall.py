@@ -324,7 +324,7 @@ def on_install(module, found):
 
 def on_uninstall(module):
     # A core call under the uninstall's lock: it yields, so trying once never fails.
-    with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):
+    with files.lock(moxi.paths.core_lock(), nested=True, timeout_s=0):
         pass
     with open(os.environ["MOXITEST_HEARD"], "a") as fh:
         fh.write(json.dumps({"who": WHO, "module": module}) + "\\n")
@@ -409,7 +409,7 @@ def test_units_remove_under_the_uninstall_s_own_lock_yields(torn, capsys, monkey
     code, _, err = moxi_uninstall(capsys, "turns")
     assert code == 0, err
     # The uninstall's own hold, then units.remove's nested call, which yields.
-    assert taken[0] == {"timeout": 0} and {"nested": True} in taken[1:]
+    assert taken[0] == {"timeout_s": 0} and {"nested": True} in taken[1:]
 
 
 def test_a_second_uninstall_waits_for_a_running_install(fake, capsys):

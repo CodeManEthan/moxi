@@ -235,8 +235,8 @@ def spec_problem(spec: Spec) -> str | None:
             or not all(isinstance(x, str) and x.strip() for x in spec.author)
             or any(c in "".join(spec.author) for c in "<>\n\0")):
         return "author is (name, email), each non-empty, with no '<', '>' or newline"
-    for label, value in (("min_interval", spec.min_interval_s),
-                         ("push_backoff", spec.push_backoff_s)):
+    for label, value in (("min_interval_s", spec.min_interval_s),
+                         ("push_backoff_s", spec.push_backoff_s)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             return f"{label} is a number of seconds, 0 or more"
     if spec.max_bytes is not None and (isinstance(spec.max_bytes, bool)
@@ -764,7 +764,7 @@ def _unstage(p: _Pass, spec: Spec, paths: list[str], judged: dict) -> bool:
     for delay in (0, 0.05, 0.2):
         if delay:
             time.sleep(delay)
-        _g(p, "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", input=data)
+        _g(p, "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", stdin_data=data)
         still = _blobs(_staged(p, spec.paths, renames=False))
         left = [x for x in paths if x in still]
         if not left:
@@ -807,7 +807,7 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
             p.end("clean")
             return
         done = _g(p, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul",
-                  input=_stdin(stage))
+                  stdin_data=_stdin(stage))
         if done.returncode == 0:
             break
         if _index_locked(p):
@@ -911,8 +911,8 @@ def _after_staging(spec: Spec, p: _Pass, before: dict, stage: list[str],
     args += ["--pathspec-from-file=-", "--pathspec-file-nul"]
     old_head = head_commit(p.where.top)
     try:
-        done = _g(p, *args, input=_stdin(every), author=tuple(spec.author),
-                  extra_env={COMMITTER_ENV: spec.name}, timeout=COMMIT_TIMEOUT)
+        done = _g(p, *args, stdin_data=_stdin(every), author=tuple(spec.author),
+                  extra_env={COMMITTER_ENV: spec.name}, timeout_s=COMMIT_TIMEOUT)
         code, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as exc:
         code = None
@@ -1145,7 +1145,7 @@ def _push_clear(p: _Pass, branch: str, state: dict) -> None:
 def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
     try:
         done = _g(p, "push", "-q", remote, f"refs/heads/{branch}:refs/heads/{branch}",
-                  timeout=PUSH_TIMEOUT)
+                  timeout_s=PUSH_TIMEOUT)
         code, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as exc:
         code, out = None, _text(exc.stdout) + _text(exc.stderr)
@@ -1376,9 +1376,9 @@ def listing(root) -> list[dict]:
             try:
                 spec = _from_section(where.top, name, saved[name])
                 item["spec"] = {"paths": list(spec.paths), "author": list(spec.author),
-                                "min_interval": spec.min_interval_s, "message": spec.message,
+                                "min_interval_s": spec.min_interval_s, "message": spec.message,
                                 "trailers": spec.trailers, "prepare": spec.prepare,
-                                "push": spec.push, "push_backoff": spec.push_backoff_s,
+                                "push": spec.push, "push_backoff_s": spec.push_backoff_s,
                                 "max_bytes": spec.max_bytes}
             except SpecError as exc:
                 item["problem"] = str(exc)

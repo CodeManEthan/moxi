@@ -776,10 +776,10 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
         return fake.Seen(fake.SCREENS[name] if name else None, True, "",
                          dead=frame.get("dead", False), pane_id="%7")
 
-    def answer_screen(slot, screen, wait=5):
-        seen.answers.append(wait)
+    def answer_screen(slot, screen, wait_s=5):
+        seen.answers.append(wait_s)
         answer = answers[min(len(seen.answers) - 1, len(answers) - 1)]
-        clock.now += min(answer_takes, wait) + overrun
+        clock.now += min(answer_takes, wait_s) + overrun
         last = fake.Seen(screen, False, answer.get("why", ""),
                          dead=answer.get("dead", False), pane_id="%7")
         return fake.Answer(answer["outcome"], screen, answer.get("why", ""), last,
@@ -1087,7 +1087,7 @@ def test_slots_that_cant_answer_stop_the_loop_without_failing(conn, error):
     clock = Clock()
     seen = loop_api(clock, [SHOWING], [])
 
-    def answer_screen(slot, screen, wait=5):
+    def answer_screen(slot, screen, wait_s=5):
         raise error
 
     seen.api.answer_screen = answer_screen

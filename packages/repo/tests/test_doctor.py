@@ -269,7 +269,7 @@ def test_paths_left_out_over_an_hour_are_shown_and_gone_once_committed(demo, clo
 
 def test_changed_paths_waiting_past_the_interval(demo, clock):
     repo = demo.repo()
-    moxi_repo.save_spec(spec(repo, min_interval=600))
+    moxi_repo.save_spec(spec(repo, min_interval_s=600))
     write(repo, "notes/a.md")
     assert moxi_repo.commit_saved(repo, "demo/snap").status == "committed"
     write(repo, "notes/b.md")
@@ -352,7 +352,7 @@ def test_git_and_spec_fix_lines_quote_a_root_with_a_space(demo, clock):
     assert fix.endswith(f"({pasted('moxi', 'repo', 'commit', repo)})")
 
     # Saved, with changed paths waiting past the interval and commits not pushed.
-    moxi_repo.save_spec(spec(repo, push="origin", min_interval=600))
+    moxi_repo.save_spec(spec(repo, push="origin", min_interval_s=600))
     write(repo, "notes/waiting.md")
     now = checks._now
     demo.mp.setattr(checks, "_now", lambda: time.time() + 600 + 3601 + 5)

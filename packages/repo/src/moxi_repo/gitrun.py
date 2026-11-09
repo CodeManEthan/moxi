@@ -13,7 +13,7 @@ git's local variables (`GIT_DIR`, `GIT_INDEX_FILE` and the rest that
 made from inside a git hook acts on the repo it names, and pathspecs read as git's
 defaults. It never sets a pathspec variable.
 
-`changes(root, staged=True | range=(a, b), paths=())` lists what changed, from git's `-z`
+`changes(root, staged=True | rev_range=(a, b), paths=())` lists what changed, from git's `-z`
 output, with each path exactly as git gave it. Every path handed to git is written in its
 literal form, `literal_pathspec(path)`, so `[`, `*`, `?` and a leading `:` in a file name
 are plain characters.
@@ -263,7 +263,7 @@ def changes(root: str | os.PathLike, *, staged: bool = True,
         args = ["diff-tree", "-r", "--raw", "-z", find, a, b, *tail]
     else:
         if not staged:
-            raise ValueError("changes() reads what is staged, or a range=(a, b)")
+            raise ValueError("changes() reads what is staged, or a rev_range=(a, b)")
         base = head_commit(root, timeout=timeout_s) or empty_tree(root, timeout=timeout_s)
         args = ["diff-index", "--cached", "--raw", "-z", find, base, *tail]
     done = git(root, *args, binary=True, timeout_s=timeout_s)

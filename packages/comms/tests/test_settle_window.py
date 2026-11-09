@@ -67,9 +67,9 @@ def seam(monkeypatch):
             hook()
         notes = s.notes.get(q)
         if kind == cache.WARM:
-            return cache.Clock(cache.WARM, age_seconds=1.0, ttl_seconds=HOUR, notes=notes)
+            return cache.Clock(cache.WARM, age_s=1.0, ttl_s=HOUR, notes=notes)
         if kind == cache.COLD:
-            return cache.Clock(cache.COLD, age_seconds=2 * HOUR, ttl_seconds=HOUR,
+            return cache.Clock(cache.COLD, age_s=2 * HOUR, ttl_s=HOUR,
                                notes=notes)
         return cache.Clock(kind, notes=notes)
 

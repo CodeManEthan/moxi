@@ -104,7 +104,7 @@ def test_throttled_busy_and_index_busy_passes_leave_the_record(demo):
     key = commit_key(repo)
     assert is_open(key) == OPEN
     demo.act(gate="ok")
-    assert moxi_repo.commit(spec(repo, min_interval=3600)).status == "throttled"
+    assert moxi_repo.commit(spec(repo, min_interval_s=3600)).status == "throttled"
     assert is_open(key) == OPEN
     with files.lock(cgd(repo) / "moxi-repo" / "lock"):
         assert moxi_repo.commit(spec(repo)).status == "busy"
@@ -308,7 +308,7 @@ def test_a_remote_with_no_tracking_ref_is_pushed_once_per_new_commit(demo, clock
     # A push-only remote: a url and no fetch refspec, so no remote-tracking ref is kept.
     git(repo, "config", "remote.backup.url", str(bare))
     write(repo, "notes/a.md")
-    s = spec(repo, push="backup", min_interval=3600)
+    s = spec(repo, push="backup", min_interval_s=3600)
     first = moxi_repo.commit(s)
     assert first.status == "committed" and first.pushed == ("main",)
     assert state(repo)["pushed_sha"] == {"main": first.sha}
@@ -333,7 +333,7 @@ def test_lines_a_push_prints_on_a_throttled_pass_reach_the_commit_record(demo, c
     demo.act(push_check="print")
     deny(bare, True)
     write(repo, "notes/a.md")
-    s = spec(repo, push="origin", min_interval=3600)
+    s = spec(repo, push="origin", min_interval_s=3600)
     assert moxi_repo.commit(s).push_error
     key = commit_key(repo)
     assert is_open(key) == set()

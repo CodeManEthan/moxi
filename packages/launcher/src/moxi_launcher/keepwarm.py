@@ -186,7 +186,7 @@ def window(clock: Any | None) -> Verdict | None:
     end that says why not."""
     if clock is None:
         return Verdict(None, "no-cache", "the session's cache was not read: cache is absent")
-    ttl, age = getattr(clock, "ttl_seconds", None), getattr(clock, "age_seconds", None)
+    ttl, age = getattr(clock, "ttl_s", None), getattr(clock, "age_s", None)
     if not isinstance(ttl, (int, float)) or not isinstance(age, (int, float)):
         kind = getattr(clock, "kind", None) or "unknown"
         return Verdict(None, kind, f"the session's cache is {kind}, with no age and lifetime "

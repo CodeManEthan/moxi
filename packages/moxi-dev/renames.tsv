@@ -11,6 +11,8 @@ cache	packages/cache/src/moxi_cache/clock.py	Clock	name	ttl_seconds	ttl_s
 cache	packages/cache/src/moxi_cache/timer.py	self.environ = environ	keep	environ	environ
 cache	packages/cache/src/moxi_cache/timer.py	environ = self.environ(pid)	keep	environ	environ
 cache	packages/cache/src/moxi_cache/timer.py	subscriptions now: a callable, run at each tick, or a fixed list), `environ` (a	keep	environ	environ
+cache	packages/cache/src/moxi_cache/timer.py	environment the session's process started with (`moxi.proc.environ`) and starts `run`	use	moxi.proc.environ`	moxi.proc.process_env`
+cache	packages/cache/src/moxi_cache/timer.py	on Windows, and for a process that is gone or another user's (`moxi.proc.environ`)."""	use	moxi.proc.environ`	moxi.proc.process_env`
 cache	packages/cache/src/moxi_cache/watch.py	home = environ.get("HOME") or str(Path.home())	keep	HOME	HOME
 cache	packages/cache/src/moxi_cache/watch.py	"ttl": clock.ttl_seconds, "read_at": seen.read_at, "seen_at": now,	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/src/moxi_cache/watch.py	seen.last_request = (now - clock.age_seconds	use	clock.age_seconds	clock.age_s
@@ -102,6 +104,8 @@ comms	packages/comms/src/moxi_comms/api/__init__.py	session	name	deadline	timeou
 comms	packages/comms/src/moxi_comms/api/__init__.py	session_of	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)	keep	environ	environ
 comms	packages/comms/src/moxi_comms/api/__init__.py	ctx = _sending.Context(env=sender.environ(os.environ), deadline=timeout_s)	keep	environ	environ
+comms	packages/comms/src/moxi_comms/cache.py	Clock	name	age_seconds	age_s
+comms	packages/comms/src/moxi_comms/cache.py	Clock	name	ttl_seconds	ttl_s
 comms	packages/comms/src/moxi_comms/cache.py	state.kind, state.reason, state.age_seconds = t.settled, t.reason, t.age_seconds	keep	age_seconds	age_seconds
 comms	packages/comms/src/moxi_comms/cache.py	state.ttl_seconds, state.key, state.cache_source = (t.ttl_seconds, t.key,	keep	ttl_seconds	ttl_seconds
 comms	packages/comms/src/moxi_comms/cache.py	state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_seconds	use	clock.age_seconds	clock.age_s
@@ -109,6 +113,7 @@ comms	packages/comms/src/moxi_comms/cache.py	state.ttl_seconds, state.key, state
 comms	packages/comms/src/moxi_comms/cache.py	age, ttl = state.age_seconds, state.ttl_seconds	keep	age_seconds	age_seconds
 comms	packages/comms/src/moxi_comms/cache.py	age, ttl = state.age_seconds, state.ttl_seconds	keep	ttl_seconds	ttl_seconds
 comms	packages/comms/src/moxi_comms/cache.py	words = f"{model}, {spoken_span(state.ttl_seconds)} after a request"	keep	ttl_seconds	ttl_seconds
+comms	packages/comms/src/moxi_comms/cache.py	lookup (`unknown`, with `reason`). `age_seconds` comes with it. A Target with no	keep	age_seconds	age_seconds
 comms	packages/comms/src/moxi_comms/claimhold.py	answer = client.call(method, {}, timeout=timeout)	use	timeout=	timeout_s=
 comms	packages/comms/src/moxi_comms/cli.py	h.add_argument("--limit", type=int, default=200)	keep	type	type
 comms	packages/comms/src/moxi_comms/client.py	timeout=self.timeout if timeout is None else timeout)	use	timeout=	timeout_s=
@@ -117,9 +122,11 @@ comms	packages/comms/src/moxi_comms/constants.py	# A cache's lifetime is cache's
 comms	packages/comms/src/moxi_comms/daemon.py	self.host.run_on_loop(endpoint.start(), timeout=wire.START_WAIT)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/daemon.py	t.join(timeout=1.0)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/daemon.py	answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,	use	clock.age_seconds	clock.age_s
+comms	packages/comms/src/moxi_comms/daemon.py	answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,	use	age_seconds=	age_s=
 comms	packages/comms/src/moxi_comms/daemon.py	cache_reason=clock.reason, cache_ttl=clock.ttl_seconds,	use	clock.ttl_seconds	clock.ttl_s
 comms	packages/comms/src/moxi_comms/daemon.py	event = self._sub.next_event(timeout=0.2)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/daemon.py	age, ttl = clock.age_seconds, getattr(clock, "ttl_seconds", None)	use	clock.age_seconds	clock.age_s
+comms	packages/comms/src/moxi_comms/daemon.py	age, ttl = clock.age_seconds, getattr(clock, "ttl_seconds", None)	use	"ttl_seconds"	"ttl_s"
 comms	packages/comms/src/moxi_comms/mcp/listen.py	three `LISTEN_*` variables are removed from `environ` either way, so no process the	keep	environ	environ
 comms	packages/comms/src/moxi_comms/provision.py	record=getattr(record, "path", "the record")))	keep	record	record
 comms	packages/comms/src/moxi_comms/record.py	SOURCE_ENV = "environment"	keep	environment	environment
@@ -143,6 +150,14 @@ comms	packages/comms/tests/test_api.py	base = {"HOME": "/h", "MOXI_COMMS_CLAIM_S
 comms	packages/comms/tests/test_api.py	assert api.Sender.session().environ(base) == base	keep	environ	environ
 comms	packages/comms/tests/test_api.py	assert api.Sender.socket(tmp_path / "s.sock").environ(base)[	keep	environ	environ
 comms	packages/comms/tests/test_api.py	op = api.Sender.operator("900001").environ(base)	keep	environ	environ
+comms	packages/comms/tests/test_api.py	"audience", "held", "cap", "no_cap", "deadline",	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	assert params["deadline"].default == 30.0	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	for name, params in {"attributed": ["message_id", "deadline"],	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	"session": ["identity", "deadline"],	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	"roster": ["deadline"], "owner": ["session_id", "deadline"],	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	"roster_rows": ["deadline"],	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	"identity_state": ["name", "scope", "deadline"],	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_api.py	assert inspect.signature(api.roster_rows).parameters["deadline"].default == \	use	"deadline"	"timeout_s"
 comms	packages/comms/tests/test_audience.py	original.id], **REVIEWER, record=broken)	keep	record	record
 comms	packages/comms/tests/test_audience.py	code, out = rig.cli(["reply", original.id, "hi"], **REVIEWER, record=broken)	keep	record	record
 comms	packages/comms/tests/test_audience.py	original.id], **REVIEWER, record=offline)	keep	record	record
@@ -200,6 +215,7 @@ comms	packages/comms/tests/test_nudge.py	record=cli_record)	keep	record	record
 comms	packages/comms/tests/test_opencode_kind.py	assert (target.settled, target.age_seconds, target.ttl_seconds) == \	keep	age_seconds	age_seconds
 comms	packages/comms/tests/test_opencode_kind.py	assert (target.settled, target.age_seconds, target.ttl_seconds) == \	keep	ttl_seconds	ttl_seconds
 comms	packages/comms/tests/test_opencode_tools.py	return [tmp_path, os.environ["HOME"], os.environ["MOXI_COMMS_RUNTIME_DIR"]]	keep	HOME	HOME
+comms	packages/comms/tests/test_page.py	assert asked == [{"deadline": 2.0}] and pagehandlers.DEADLINE == 2.0	use	"deadline"	"timeout_s"
 comms	packages/comms/tests/test_policy.py	other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
 comms	packages/comms/tests/test_posture.py	record=ReadFails(rig.record, error, what=what))	keep	record	record
 comms	packages/comms/tests/test_posture_intent.py	record=StaleHistory(rig.record, first.id), **CRITIC)	keep	record	record
@@ -207,6 +223,8 @@ comms	packages/comms/tests/test_posture_intent.py	record=HistoryFails(rig.record
 comms	packages/comms/tests/test_queue.py	return [self.client.call("open_digest", {"ids": ids}, timeout=5.0)["digest"]]	keep	timeout	timeout
 comms	packages/comms/tests/test_queue.py	answer = self.client.call("turn_ended", fields, timeout=5.0)	keep	timeout	timeout
 comms	packages/comms/tests/test_roles.py	other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
+comms	packages/comms/tests/test_roster_rows.py	assert asked == [{"deadline": api.READ_DEADLINE}]	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_roster_rows.py	assert asked[-1] == {"deadline": 3}	use	"deadline"	"timeout_s"
 comms	packages/comms/tests/test_send_rule.py	answers = json.loads(child.communicate(timeout=60)[0])	keep	timeout	timeout
 comms	packages/comms/tests/test_send_rule.py	out = child.communicate(timeout=60)[0]	keep	timeout	timeout
 comms	packages/comms/tests/test_settings.py	env = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}	keep	HOME	HOME
@@ -282,7 +300,6 @@ launcher	packages/launcher/tests/test_replay.py	base = {"PATH": "/then/bin", "HO
 launcher	packages/launcher/tests/test_replay.py	assert got == {"PATH": "/then/bin", "HOME": "/home/then", "TOKEN": "t"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	assert not common.no_credentials({"HOME": "/h", "CLAUDE_CONFIG_DIR": "/c"}, [])	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	assert env["PATH"] == os.environ["PATH"] and env["HOME"] == os.environ["HOME"]	keep	HOME	HOME
-launcher	packages/launcher/tests/test_resume.py	return Launch()(request, environ=environ, warn=warn)	keep	environ	environ
 launcher	packages/launcher/tests/test_resume_store.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_resume_store.py	assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/home/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
@@ -296,9 +313,10 @@ loadout	packages/loadout/src/moxi_loadout/gitpiece.py	timeout=GIT_SECONDS)	use	t
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	done = link.git(root, "rev-parse", "--short", "HEAD", timeout=GIT_SECONDS)	use	timeout=	timeout_s=
 loadout	packages/loadout/src/moxi_loadout/homes.py	return api.check(places(reads=reads(argv)), programs=PROGRAMS, page=True)	use	page=	for_page=
 loadout	packages/loadout/src/moxi_loadout/homes.py	return api.check(places(reads=reads()), programs=PROGRAMS, page=page)	use	page=	for_page=
+loadout	packages/loadout/src/moxi_loadout/homes.py	(`moxi.place.folders`);	use	moxi.place.folders`	moxi.place.harness_dirs`
 loadout	packages/loadout/src/moxi_loadout/ignores.py	"""Bring each of loadout's ignore files in `folders` (every recorded one when None)	keep	folders	folders
-loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)	use	git_seconds=	git_s=
-loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	preview = install.global_preview(git_seconds=doctor.PLACE_GIT_SECONDS)	use	git_seconds=	git_s=
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)	keep	git_seconds	git_seconds
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	preview = install.global_preview(git_seconds=doctor.PLACE_GIT_SECONDS)	keep	git_seconds	git_seconds
 loadout	packages/loadout/tests/conftest.py	The kit (`moxi_dev.testing`) already points `HOME`, `MOXI_HOME`, every `MOXI_<MODULE>_HOME`,	keep	HOME	HOME
 loadout	packages/loadout/tests/conftest.py	HARNESS_HOMES = ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME")	keep	HOME	HOME
 loadout	packages/loadout/tests/loadout_kit.py	return Path(os.environ["HOME"]) / ".agents" / "skills"	keep	HOME	HOME
@@ -316,14 +334,17 @@ loadout	packages/loadout/tests/test_browser_page.py	home = Path(ui_shell.env["HO
 loadout	packages/loadout/tests/test_browser_page.py	claude_md = Path(shell.env["HOME"]) / ".claude" / "CLAUDE.md"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	occupant = Path(ui_shell.env["HOME"]) / ".claude" / "skills" / "review-diff"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_doctor.py	script = os.path.join(os.environ["HOME"], "bin", "guard.sh")	keep	HOME	HOME
+loadout	packages/loadout/tests/test_doctor.py	seen.append(kwargs["timeout"])	use	["timeout"]	["timeout_s"]
 loadout	packages/loadout/tests/test_homes.py	monkeypatch.setenv("HOME", str(tmp_path / "other-home"))	keep	HOME	HOME
 loadout	packages/loadout/tests/test_homes.py	("XDG_CONFIG_HOME", "OpenCode's home"), ("HOME", "the home folder")])	keep	HOME	HOME
 loadout	packages/loadout/tests/test_listener.py	out, err = child.communicate(timeout=60)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_page.py	seen.update(git=git, git_seconds=git_seconds)	keep	git_seconds	git_seconds
-loadout	packages/loadout/tests/test_page.py	return real(*a, git=git, git_seconds=git_seconds, **kw)	use	git_seconds=	git_s=
+loadout	packages/loadout/tests/test_page.py	return real(*a, git=git, git_seconds=git_seconds, **kw)	keep	git_seconds	git_seconds
 loadout	packages/loadout/tests/test_pagejob.py	holder.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_pagejob.py	child.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_repo_piece.py	assert env["SAMPLE_KEPT"] == "yes" and env["HOME"] == os.environ["HOME"]	keep	HOME	HOME
+moxi	packages/moxi/src/moxi/_settle.py	handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.CLAIM_VARIABLE	use	CLAIM_VARIABLE	LOCK_FD_ENV
+moxi	packages/moxi/src/moxi/_settle.py	is_skill_folder` counts, sorted) and the folder, read through	use	is_skill_folder`	is_skill_dir`
 moxi	packages/moxi/src/moxi/cli.py	shortcut_text	name	windows	is_windows
 moxi	packages/moxi/src/moxi/config.py	Key.__init__	name	type	value_type
 moxi	packages/moxi/src/moxi/config.py	with a `type` (or a `retired`) is a key; any other table groups keys. So the schema	keep	type	type
@@ -331,6 +352,7 @@ moxi	packages/moxi/src/moxi/files.py	-	name	CLAIM_VARIABLE	LOCK_FD_ENV
 moxi	packages/moxi/src/moxi/files.py	edit_toml	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/files.py	lock	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/files.py	if not gate.acquire(timeout=max(timeout, 0)):	keep	timeout	timeout
+moxi	packages/moxi/src/moxi/home.py	before it stops the next (`moxi.units.stop(..., record=...)`).	use	record=...	stopped=...
 moxi	packages/moxi/src/moxi/install.py	"receipt_entry", "receipt_options", "tool_command", "environment",	keep	environment	environment
 moxi	packages/moxi/src/moxi/ipc/_client.py	Client.__init__	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/ipc/_client.py	Client.call	name	timeout	timeout_s
@@ -373,17 +395,24 @@ moxi	packages/moxi/src/moxi/run.py	reader.join(timeout=2.0)  # a grandchild may 
 moxi	packages/moxi/src/moxi/store.py	connect	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/strays.py	environ.get("HOME") or os.path.expanduser("~"), ".local", "share")	keep	HOME	HOME
 moxi	packages/moxi/src/moxi/terminal/__init__.py	-	name	MARK	STARTED_BY_ENV
+moxi	packages/moxi/src/moxi/terminal/_lines.py	#: The variable only test kits set (`moxi.paths.ANCHOR_HOME`, repeated here so the words	use	moxi.paths.ANCHOR_HOME`	moxi.paths.ANCHOR_HOME_ENV`
 moxi	packages/moxi/src/moxi/terminal/_record.py	read	name	retry	retry_s
 moxi	packages/moxi/src/moxi/terminal/_record.py	`paths.LOCATORS` or `DEVICE`, but not `MOXI_ANCHOR_HOME`, which places the record	keep	DEVICE	DEVICE
 moxi	packages/moxi/src/moxi/terminal/_record.py	`XDG_RUNTIME_DIR`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`,	keep	HOME	HOME
 moxi	packages/moxi/src/moxi/terminal/_record.py	"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",	keep	HOME	HOME
 moxi	packages/moxi/src/moxi/terminal/_record.py	_PREFIXED = re.compile(r"MOXI_[A-Z0-9_]+_(?:%s)" % "|".join((*paths.LOCATORS, "DEVICE")))	keep	DEVICE	DEVICE
+moxi	packages/moxi/src/moxi/terminal/_record.py	methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.folders` and	use	place.folders`	place.harness_dirs`
 moxi	packages/moxi/src/moxi/terminal/_view.py	`environ` and `cgroup`. A process whose `/proc/<pid>` another uid owns is shielded: it	keep	environ	environ
 moxi	packages/moxi/src/moxi/terminal/_view.py	for what in ("name", "cmdline", "environ", "exe"):	keep	environ	environ
 moxi	packages/moxi/src/moxi/terminal/_view.py	None if shielded else read["environ"], image=read["exe"],	keep	environ	environ
+moxi	packages/moxi/src/moxi/units/__init__.py	stop(module, names, record=[]) and resume(record)	use	record=[]	stopped=[]
+moxi	packages/moxi/src/moxi/units/__init__.py	environment(module)            the variables the module's units are written with	use	environment(module)   	unit_env(module)      
 moxi	packages/moxi/src/moxi/units/_act.py	stop	name	record	stopped
 moxi	packages/moxi/src/moxi/units/_act.py	before its service) to `record`. `resume(record)` starts exactly those entries again, in	use	`record`	`stopped`
+moxi	packages/moxi/src/moxi/units/_act.py	The stop record. `stop(module, names, record=[])` first reads, in one supervisor call,	use	record=[]	stopped=[]
+moxi	packages/moxi/src/moxi/units/_act.py	"""Start again exactly the units `stop(..., record=...)` stopped, in the order	use	record=...	stopped=...
 moxi	packages/moxi/src/moxi/units/_backend.py	it has none). `entry` is the declaration as read. `environment` is the variables the	keep	environment	environment
+moxi	packages/moxi/src/moxi/units/_backend.py	unit runs with (`moxi.units.environment`), as `(name, value)` pairs: `MOXI_HOME` for a	use	moxi.units.environment`	moxi.units.unit_env`
 moxi	packages/moxi/src/moxi/units/_fence.py	proc = runner(cmd, env=dict(env) if env else None, timeout=TIMEOUT)	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/units/_home.py	-	name	environment	unit_env
 moxi	packages/moxi/src/moxi/units/_launchd.py	body["EnvironmentVariables"] = {"MOXI_LOG_FILE": log, **dict(spec.environment)}	keep	environment	environment
@@ -392,6 +421,7 @@ moxi	packages/moxi/src/moxi/units/_plan.py	environment=self.environment)	keep	en
 moxi	packages/moxi/src/moxi/units/_schtasks.py	home = dict(spec.environment).get("MOXI_HOME")	keep	environment	environment
 moxi	packages/moxi/src/moxi/units/_systemd.py	environ.get("HOME") or os.path.expanduser("~"), ".config")	keep	HOME	HOME
 moxi	packages/moxi/src/moxi/units/_systemd.py	return [environment_line(name, value) for name, value in spec.environment]	keep	environment	environment
+moxi	packages/moxi/src/moxi/units/_types.py	"""One backend unit that `stop(..., record=...)` stopped, so `resume` can start it	use	record=...	stopped=...
 moxi	packages/moxi/tests/fake_backend.py	env = [f"env = {name}={value}" for name, value in spec.environment]	keep	environment	environment
 moxi	packages/moxi/tests/settle_procs.py	done = super().__call__(cmd, env=env, timeout=timeout)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_config.py	env = {"HOME": str(tmp_path), "MOXI_DEMO_CONFIG_HOME": str(tmp_path / "config")}	keep	HOME	HOME
@@ -401,6 +431,12 @@ moxi	packages/moxi/tests/test_config_set.py	s = config.load("demo", schema, path
 moxi	packages/moxi/tests/test_config_set.py	reader = config.Config("demo", schema, path=str(named), env={"HOME": str(tmp_path)})	keep	HOME	HOME
 moxi	packages/moxi/tests/test_doctor.py	monkeypatch.setenv("HOME", str(tmp_path / "home"))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_doctor_run.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_files.py	"try:\n    with files.lock(sys.argv[1], timeout=0): pass\n"	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_files.py	with files.lock(path, nested=True, timeout=0.3):	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_files.py	with files.lock(path, nested=True, timeout=0):	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_files.py	out = {"variable": os.environ.get(files.CLAIM_VARIABLE),	use	CLAIM_VARIABLE	LOCK_FD_ENV
+moxi	packages/moxi/tests/test_files.py	named = os.environ[files.CLAIM_VARIABLE]	use	CLAIM_VARIABLE	LOCK_FD_ENV
+moxi	packages/moxi/tests/test_files.py	"variable": os.environ.get(files.CLAIM_VARIABLE)}	use	CLAIM_VARIABLE	LOCK_FD_ENV
 moxi	packages/moxi/tests/test_install.py	monkeypatch.setattr(install, "environment", self.environment)	keep	environment	environment
 moxi	packages/moxi/tests/test_install_uv.py	uv_env["HOME"] = str(tmp_path / "home")	keep	HOME	HOME
 moxi	packages/moxi/tests/test_ipc_client.py	assert client.call("echo", [1], timeout=10) == [1]	use	timeout=	timeout_s=
@@ -422,8 +458,13 @@ moxi	packages/moxi/tests/test_ipc_client.py	bounded(lambda: f.client.call("echo"
 moxi	packages/moxi/tests/test_ipc_client.py	assert bounded(lambda: f.client.call("echo", [2], timeout=10)) == "ok"	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_ipc_client.py	results[k] = [client.call("echo", [k, i], timeout=20) for i in range(50)]	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_ipc_client.py	assert client.call("push", [100], timeout=20) == "pushed"	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_ipc_client.py	" 'peer': c.call('peer', timeout=10), 'push': c.call('push', timeout=10),"	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_ipc_client.py	f = fake(timeout=0.2)	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_ipc_server.py	srv = serving(handler, write_deadline=deadline, queue=1000, on_close=on_close)	use	write_deadline=	write_timeout_s=
+moxi	packages/moxi/tests/test_ipc_server.py	{"max_line": 0}, {"queue": 0}, {"queue": True}, {"write_deadline": 0},	use	"write_deadline"	"write_timeout_s"
 moxi	packages/moxi/tests/test_ipc_server_windows.py	assert client.call("go", timeout=10) == {"method": "go", "params": None}	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_ipc_server_windows.py	"try:\n    with files.lock(sys.argv[1], timeout=0): print('free')\n"	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_ipc_server_windows.py	srv = pipe_serving(handler, write_deadline=deadline, queue=1000, on_close=on_close)	use	write_deadline=	write_timeout_s=
 moxi	packages/moxi/tests/test_ipc_wire.py	agreed = ipc.hello({"versions": [1, 3], "capabilities": ["watch", "environ"]}, HELLO)	keep	environ	environ
 moxi	packages/moxi/tests/test_ipc_wire.py	assert agreed.capabilities == frozenset({"watch", "environ"})	keep	environ	environ
 moxi	packages/moxi/tests/test_ipc_wire.py	ours = ipc.Hello((1, 2), {"watch", "environ"})	keep	environ	environ
@@ -449,6 +490,12 @@ moxi	packages/moxi/tests/test_place.py	monkeypatch.setenv("HOME", str(home))	kee
 moxi	packages/moxi/tests/test_place.py	given = {"HOME": str(tmp_path / "given"), "USERPROFILE": str(tmp_path / "given"),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_place.py	given = {**os.environ, "HOME": str(tmp_path / "given"),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_place.py	holder.wait(timeout=10)	keep	timeout	timeout
+moxi	packages/moxi/tests/test_place.py	@pytest.mark.parametrize("how", ["git_seconds", "each call"])	use	git_seconds	git_s
+moxi	packages/moxi/tests/test_place.py	`occupant`, its reason says so, and `git_seconds` bounds every folder's calls	use	git_seconds	git_s
+moxi	packages/moxi/tests/test_place.py	if how == "git_seconds":	use	git_seconds	git_s
+moxi	packages/moxi/tests/test_place.py	options = {"git_seconds": 0.5}	use	git_seconds	git_s
+moxi	packages/moxi/tests/test_place.py	assert took < (2 if how == "git_seconds" else 4), took	use	git_seconds	git_s
+moxi	packages/moxi/tests/test_place.py	with pytest.raises(ValueError, match="git_seconds"):	use	git_seconds	git_s
 moxi	packages/moxi/tests/test_place_windows.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_proc.py	assert child.wait(timeout=30) == 0	keep	timeout	timeout
 moxi	packages/moxi/tests/test_proc.py	assert child.wait(timeout=30) == 7	keep	timeout	timeout
@@ -472,6 +519,7 @@ moxi	packages/moxi/tests/test_resolvers.py	assert got["home"] == Path(values["HO
 moxi	packages/moxi/tests/test_resolvers.py	assert got["folders"] == {	keep	folders	folders
 moxi	packages/moxi/tests/test_resolvers.py	"codex's skills folder": Path(values["HOME"], ".agents", "skills"),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_resolvers.py	"given's skills folder": Path(values["HOME"], ".given", "skills")}	keep	HOME	HOME
+moxi	packages/moxi/tests/test_resolvers.py	`paths._expanduser`, `place.folders` and `paths.which`. Each runs over a mapping that	use	place.folders`	place.harness_dirs`
 moxi	packages/moxi/tests/test_run.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_run.py	for name in ("CONFIG_HOME", "STATE_HOME", "HOME", "RUNTIME_DIR"):	keep	HOME	HOME
 moxi	packages/moxi/tests/test_run.py	assert proc.wait(timeout=20) == 143	keep	timeout	timeout
@@ -484,7 +532,9 @@ moxi	packages/moxi/tests/test_settle_procs.py	for name in ("HOME", "USERPROFILE"
 moxi	packages/moxi/tests/test_settle_procs.py	out, err = proc.communicate(timeout=timeout)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_settle_procs.py	out, err = proc.communicate(timeout=WAIT)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_settle_procs.py	monkeypatch.setenv("HOME", str(user))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_settle_procs.py	with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_store.py	outs = [p.communicate(timeout=60)[0].strip() for p in procs]	keep	timeout	timeout
+moxi	packages/moxi/tests/test_store.py	conn = store.connect(sys.argv[1], timeout=30)	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_strays.py	assert strays.tool_dir({"XDG_DATA_HOME": "/x", "HOME": "/h"}) == "/x/uv/tools"	keep	HOME	HOME
 moxi	packages/moxi/tests/test_strays.py	assert strays.tool_dir({"HOME": "/h"}) == "/h/.local/share/uv/tools"	keep	HOME	HOME
 moxi	packages/moxi/tests/test_strays.py	assert strays.tool_dir({"HOME": "/h"}) == str(tmp_path / "tools")	keep	HOME	HOME
@@ -508,6 +558,7 @@ moxi	packages/moxi/tests/test_terminal_record.py	path = write({"HOME": "/h"}, mo
 moxi	packages/moxi/tests/test_terminal_record.py	path = write({"HOME": "a"}, moxi="1")	keep	HOME	HOME
 moxi	packages/moxi/tests/test_terminal_record.py	write({"HOME": str(n)}, moxi="1")	keep	HOME	HOME
 moxi	packages/moxi/tests/test_terminal_record.py	assert proc.wait(timeout=60) == 0	keep	timeout	timeout
+moxi	packages/moxi/tests/test_terminal_record.py	assert read.__kwdefaults__["retry"] == files.REPLACE_RETRY	use	["retry"]	["retry_s"]
 moxi	packages/moxi/tests/test_terminal_step.py	path = terminal.write({"HOME": "/x"})	keep	HOME	HOME
 moxi	packages/moxi/tests/test_terminal_step.py	@pytest.mark.parametrize("name", ["HOME", "MOXI_HOME", "XDG_DATA_HOME"])	keep	HOME	HOME
 moxi	packages/moxi/tests/test_terminal_walk.py	for name, raw in (("cmdline", cmdline), ("environ", environ), ("cgroup", cgroup)):	keep	environ	environ
@@ -516,6 +567,8 @@ moxi	packages/moxi/tests/test_terminal_walk.py	if os.access(d / "environ", os.R_
 moxi	packages/moxi/tests/test_terminal_walk.py	keep = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "HOME",	keep	HOME	HOME
 moxi	packages/moxi/tests/test_uninstall.py	monkeypatch.setattr(install, "environment", lambda: (_ for _ in ()).throw(	keep	environment	environment
 moxi	packages/moxi/tests/test_uninstall.py	monkeypatch.setenv("HOME", str(user))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_uninstall.py	with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_uninstall.py	assert taken[0] == {"timeout": 0} and {"nested": True} in taken[1:]	use	"timeout"	"timeout_s"
 moxi	packages/moxi/tests/test_units_fence.py	seen.update(env=env, timeout=timeout)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_units_home.py	seen = {(_home.home_tag({"MOXI_HOME": s, "HOME": str(tmp_path)}),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_home.py	_home.unit_env("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])	keep	HOME	HOME
@@ -545,6 +598,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	self.environ.add(bound)	keep
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	return ((isinstance(node, ast.Attribute) and node.attr in ("environ", "environb")	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	or (isinstance(node, ast.Name) and node.id in self.environ))	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	if not (self.os or self.environ or self.getenv):	keep	environ	environ
+moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named	use	moxi.names.is_skill_folder`	moxi.names.is_skill_dir`
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("--table", type=Path, default=default, metavar="PATH")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("root", nargs="?", type=Path, default=Path.cwd(), metavar="ROOT")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG	keep	HOME	HOME
@@ -576,8 +630,15 @@ moxi-dev	packages/moxi-dev/tests/test_fence.py	"XDG_DATA_HOME": "/d"}, "/h", win
 moxi-dev	packages/moxi-dev/tests/test_fence.py	assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", windows=False) == \	keep	windows	windows
 moxi-dev	packages/moxi-dev/tests/test_fence.py	dirs({}, "/h", windows=False)	keep	windows	windows
 moxi-dev	packages/moxi-dev/tests/test_fence.py	assert uv_env["HOME"] == str(fence.home)	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/model.py", "Clock", "name", "age_seconds", "age_s"))	keep	age_seconds	age_seconds
+moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row("packages/p/src/p/paths.py", "-", "name", "HOME", "HOME_ENV"),	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	"keep", "HOME", "HOME"))	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	"""The home is `HOME`, or `HOME`'s value."""	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/paths.py", '"""The home is `HOME`, or `HOME`\'s value."""',	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	assert "The home is `HOME`" in text and "x = HOME_ENV" in text	keep	HOME	HOME
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	input=	stdin_data=
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	timeout=	timeout_s=
+notes	packages/notes/src/moxi_notes/blobs.py	`git(*args, input=None, timeout=..., binary=True)` returning a finished process. Both	use	input=None, timeout=...	stdin_data=None, timeout_s=...
 notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit, default=60, metavar="N",	keep	type	type
 notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit, default=80, metavar="N",	keep	type	type
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
@@ -637,6 +698,15 @@ repo	packages/repo/src/moxi_repo/committer.py	backoff = spec.push_backoff	use	.p
 repo	packages/repo/src/moxi_repo/committer.py	f"{_plain(spec.push_backoff)} s tries again (moxi repo commit {quote_arg(p.where.top)})")	use	.push_backoff	.push_backoff_s
 repo	packages/repo/src/moxi_repo/committer.py	"min_interval": spec.min_interval, "message": spec.message,	use	.min_interval	.min_interval_s
 repo	packages/repo/src/moxi_repo/committer.py	"push": spec.push, "push_backoff": spec.push_backoff,	use	.push_backoff	.push_backoff_s
+repo	packages/repo/src/moxi_repo/committer.py	for label, value in (("min_interval", spec.min_interval),	use	"min_interval"	"min_interval_s"
+repo	packages/repo/src/moxi_repo/committer.py	("push_backoff", spec.push_backoff)):	use	"push_backoff"	"push_backoff_s"
+repo	packages/repo/src/moxi_repo/committer.py	"min_interval": spec.min_interval, "message": spec.message,	use	"min_interval"	"min_interval_s"
+repo	packages/repo/src/moxi_repo/committer.py	"push": spec.push, "push_backoff": spec.push_backoff,	use	"push_backoff"	"push_backoff_s"
+repo	packages/repo/src/moxi_repo/committer.py	_g(p, "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", input=data)	use	input=	stdin_data=
+repo	packages/repo/src/moxi_repo/committer.py	input=_stdin(stage))	use	input=	stdin_data=
+repo	packages/repo/src/moxi_repo/committer.py	done = _g(p, *args, input=_stdin(every), author=tuple(spec.author),	use	input=	stdin_data=
+repo	packages/repo/src/moxi_repo/committer.py	extra_env={COMMITTER_ENV: spec.name}, timeout=COMMIT_TIMEOUT)	use	timeout=	timeout_s=
+repo	packages/repo/src/moxi_repo/committer.py	timeout=PUSH_TIMEOUT)	use	timeout=	timeout_s=
 repo	packages/repo/src/moxi_repo/gitrun.py	changes	kwonly	staged	staged
 repo	packages/repo/src/moxi_repo/gitrun.py	changes	name	range	rev_range
 repo	packages/repo/src/moxi_repo/gitrun.py	changes	name	timeout	timeout_s
@@ -644,10 +714,31 @@ repo	packages/repo/src/moxi_repo/gitrun.py	git	name	input	stdin_data
 repo	packages/repo/src/moxi_repo/gitrun.py	git	name	timeout	timeout_s
 repo	packages/repo/src/moxi_repo/gitrun.py	environment's own variables are `environment()`'s to see."""	keep	environment	environment
 repo	packages/repo/src/moxi_repo/gitrun.py	__all__ = ["git", "changes", "Change", "literal_pathspec", "environment", "local_env_vars",	keep	environment	environment
+repo	packages/repo/src/moxi_repo/gitrun.py	`changes(root, staged=True | range=(a, b), paths=())` lists what changed, from git's `-z`	use	range=(a, b)	rev_range=(a, b)
+repo	packages/repo/src/moxi_repo/gitrun.py	raise ValueError("changes() reads what is staged, or a range=(a, b)")	use	range=(a, b)	rev_range=(a, b)
 repo	packages/repo/src/moxi_repo/pieces.py	HookContext.git	name	input	stdin_data
 repo	packages/repo/src/moxi_repo/pieces.py	HookContext.git	name	timeout	timeout_s
+repo	packages/repo/src/moxi_repo/pieces.py	`git(*args, input=None)` runs git with the git hook's own environment, so a partly	use	input=None	stdin_data=None
+repo	packages/repo/tests/conftest.py	done = ctx.git("hash-object", "--stdin", input="hello\\n")	use	input=	stdin_data=
 repo	packages/repo/tests/test_browser_page.py	repo = Path(ui_shell.env["HOME"]) / "alpha-notes"	keep	HOME	HOME
+repo	packages/repo/tests/test_commit_records.py	assert moxi_repo.commit(spec(repo, min_interval=3600)).status == "throttled"	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="backup", min_interval=3600)	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="origin", min_interval=3600)	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_committer.py	out, err = proc.communicate(timeout=120)	keep	timeout	timeout
+repo	packages/repo/tests/test_committer.py	assert moxi_repo.commit(spec(repo, min_interval=3600)).status == "committed"	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_committer.py	result = moxi_repo.commit(spec(repo, min_interval=3600))	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_committer.py	other = moxi_repo.commit(spec(repo, min_interval=3600, author=("snap", "snap@example.invalid")))	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_committer.py	dotted = moxi_repo.commit(spec(repo, min_interval=3600,	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_committer.py	s = spec(repo, push="origin", push_backoff=300, min_interval=3600)	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_committer.py	s = spec(repo, push="origin", push_backoff=300, min_interval=3600)	use	push_backoff=	push_backoff_s=
+repo	packages/repo/tests/test_committer.py	s0 = spec(repo, push="origin", push_backoff=300)	use	push_backoff=	push_backoff_s=
+repo	packages/repo/tests/test_committer.py	s = spec(repo, push="origin", push_backoff=300)	use	push_backoff=	push_backoff_s=
+repo	packages/repo/tests/test_committer.py	s = spec(repo, paths=("notes", "a[1].md", "with space.md"), min_interval=90.5,	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_committer.py	prepare="demo_pieces.committing:prepare", push="origin", push_backoff=60,	use	push_backoff=	push_backoff_s=
+repo	packages/repo/tests/test_committer.py	author=("snap-bot", "snap@example.invalid")), wait=wait)	use	wait=	wait_s=
+repo	packages/repo/tests/test_doctor.py	moxi_repo.save_spec(spec(repo, min_interval=600))	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_doctor.py	moxi_repo.save_spec(spec(repo, push="origin", min_interval=600))	use	min_interval=	min_interval_s=
+repo	packages/repo/tests/test_projects.py	functools.partial(moxi.store.connect, timeout=0.05))	use	timeout=	timeout_s=
 secrets	packages/secrets/src/moxi_secrets/_generate.py	parser.add_argument("rules", nargs="?", type=Path, default=RULES,	keep	type	type
 secrets	packages/secrets/src/moxi_secrets/fallback.py	line = self.replies.get(timeout=wait)	keep	timeout	timeout
 secrets	packages/secrets/src/moxi_secrets/fallback.py	self.proc.wait(timeout=5)	keep	timeout	timeout
@@ -662,6 +753,8 @@ services	packages/services/tests/browser_kit.py	cwd=shell.env["HOME"], stdin=sub
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
 services	packages/services/tests/test_live.py	base = _REAL.get("XDG_CONFIG_HOME") or os.path.join(_REAL["HOME"], ".config")	keep	HOME	HOME
 services	packages/services/tests/test_page.py	hidden = {str(store_path), str(store_path.parent), os.environ["HOME"],	keep	HOME	HOME
+sessions	packages/sessions/src/moxi_sessions/api.py	* `records_back(source, *, kinds=None, block=BLOCK, limit=BACK_LIMIT, head=False)`: the	use	head=False	read_head=False
+sessions	packages/sessions/src/moxi_sessions/api.py	* `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines	use	head=False	read_head=False
 sessions	packages/sessions/src/moxi_sessions/claude.py	projects_root	name	environ	env
 sessions	packages/sessions/src/moxi_sessions/claude.py	`~` and the home directory taken from its `HOME`. A process that reports its session's	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/claude.py	home = env.get("HOME") or str(Path.home())	keep	HOME	HOME
@@ -690,6 +783,8 @@ sessions	packages/sessions/tests/browser_seed.py	a.step(text="opencode done", in
 sessions	packages/sessions/tests/browser_seed.py	k.step(text="looked", input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/test_api.py	assert list(inspect.signature(api.retention).parameters) == ["environ"]	use	"environ"	"env"
 sessions	packages/sessions/tests/test_api.py	assert list(inspect.signature(api.projects_root).parameters) == ["environ"]	use	"environ"	"env"
+sessions	packages/sessions/tests/test_api.py	assert list(sig.parameters)[:4] == ["path", "block", "limit", "head"]	use	"head"	"read_head"
+sessions	packages/sessions/tests/test_api.py	assert sig.parameters["head"].default is False	use	"head"	"read_head"
 sessions	packages/sessions/tests/test_bench.py	a.step(input=900, output=120, text="It reads every file it is given. " * 10)	keep	input	input
 sessions	packages/sessions/tests/test_claude.py	assert projects_root({"CLAUDE_CONFIG_DIR": "/cfg", "HOME": "/h"}) == Path("/cfg/projects")	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	assert projects_root({"HOME": "/h"}) == Path("/h/.claude/projects")	keep	HOME	HOME
@@ -774,7 +869,13 @@ tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--port", type=_por
 tunnel	packages/tunnel/src/moxi_tunnel/locks.py	if not _gate.acquire(timeout=-1 if timeout is None else max(timeout, 0)):	keep	timeout	timeout
 tunnel	packages/tunnel/tests/test_locks.py	assert proc.wait(timeout=10) == 0	keep	timeout	timeout
 tunnel	packages/tunnel/tests/test_locks.py	waiter.wait(timeout=0.3)	keep	timeout	timeout
+tunnel	packages/tunnel/tests/test_locks.py	stack.enter_context(files.lock(paths.core_lock(), timeout=10))	use	timeout=	timeout_s=
+tunnel	packages/tunnel/tests/test_locks.py	stack.enter_context(files.lock(locks.lock_path(), timeout=10))	use	timeout=	timeout_s=
 tunnel	packages/tunnel/tests/test_uninstall_build.py	"HOME": str(self.home),	keep	HOME	HOME
+turns	packages/turns/src/moxi_turns/__init__.py	s = turns.wait_ready(session_id="…", timeout=30)   # or pid=: found, and its Ready seen	use	timeout=30	timeout_s=30
+turns	packages/turns/src/moxi_turns/__init__.py	d.wait_ended(timeout)    # Ended | Refused | Lost	use	d.wait_ended(timeout)	d.wait_ended(timeout_s)
+turns	packages/turns/src/moxi_turns/__init__.py	r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout=None,	use	timeout=None	timeout_s=None
+turns	packages/turns/src/moxi_turns/__init__.py	d.wait_started(timeout)  # Started | Refused | Lost	use	d.wait_started(timeout)	d.wait_started(timeout_s)
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	ep.command_ran(request.id, new_session_id=new_id, shells=shells)	keep	shells	shells
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	ep.command_ran(request.id, shells=shells)	keep	shells	shells
@@ -1019,10 +1120,15 @@ turns	packages/turns/tests/test_wire.py	assert R.from_wire(client.call("agents",
 turns	packages/turns/tests/test_wire.py	assert "facts" in connect(ep).call("watch", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	assert client.call("session", {}, timeout=5)["nonce"] == ep.nonce	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	client.call(method, {}, timeout=5)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_wire.py	"with files.lock(sys.argv[1], timeout=5):\n"	use	timeout=	timeout_s=
+ui	packages/ui/src/moxi_ui/api.py	found.api.check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
+ui	packages/ui/src/moxi_ui/api.py	* `check(places, *, programs=None, page=True)`: None when the folders `places(env)`	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/cli.py	"""The locator variables whose values differ between `environ` and the environment a	keep	environ	environ
 ui	packages/ui/src/moxi_ui/cli.py	"""The environment the unit's shell starts with: `environ` less the locators, then on	keep	environ	environ
 ui	packages/ui/src/moxi_ui/cli.py	log.add_argument("--days", type=int, default=1, metavar="N",	keep	type	type
+ui	packages/ui/src/moxi_ui/cli.py	core writes the ui's units with (`moxi.units.environment`), which a tagged home's	use	moxi.units.environment`	moxi.units.unit_env`
 ui	packages/ui/src/moxi_ui/gateway/endpoint.py	"""The locator text when `environ` gives the ui a runtime directory other than the one	keep	environ	environ
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	with the home its unit was written from (`moxi.units.environment`). The	use	moxi.units.environment`	moxi.units.unit_env`
 ui	packages/ui/src/moxi_ui/gateway/listener.py	the tunnel entry, and `environ` is the environment the runtime-directory check reads.	keep	environ	environ
 ui	packages/ui/src/moxi_ui/listen.py	least one; the three `LISTEN_*` variables are then removed from `environ`, so no	keep	environ	environ
 ui	packages/ui/src/moxi_ui/loopback/serve.py	parser.add_argument("--idle-s", type=_seconds, metavar="SECONDS",	keep	type	type
@@ -1033,6 +1139,7 @@ ui	packages/ui/src/moxi_ui/starter.py	self._sampling.shutdown(wait=False, cancel
 ui	packages/ui/src/moxi_ui/starter.py	done = run(argv, timeout=timeout, cwd=str(cwd))	use	timeout=	timeout_s=
 ui	packages/ui/src/moxi_ui/terminal.py	check	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	the next check pass. `page` words the line for the browser page (the default) or for a	use	`page	`for_page
+ui	packages/ui/src/moxi_ui/terminal.py	check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/testing/browser.py	page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	"?.shadowRoot?.querySelector('*') != null", timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/phone.py	conn = self.bridge.connection(timeout=timeout)	keep	timeout	timeout
@@ -1077,6 +1184,8 @@ ui	packages/ui/tests/test_loopback_export.py	site.module("pfails", page="raise I
 ui	packages/ui/tests/test_loopback_law_check.py	assert node.attr not in ("environ", "getenv", "monotonic", "time"), (	keep	environ	environ
 ui	packages/ui/tests/test_page.py	results.append(ui_shell.session(timeout=90).get("/m/ui/api/doctor?module=ui"))	keep	timeout	timeout
 ui	packages/ui/tests/test_push.py	got = [await late.next(timeout=2.0) for _ in range(3)]	keep	timeout	timeout
+ui	packages/ui/tests/test_settings.py	assert kwargs == {"timeout": settings.CONFIG_TIMEOUT, "cwd": "/rt", "env": {"A": "1"}}	use	"timeout"	"timeout_s"
+ui	packages/ui/tests/test_starter.py	raise subprocess.TimeoutExpired(argv, kwargs["timeout"])	use	["timeout"]	["timeout_s"]
 ui	packages/ui/tests/test_terminal.py	env.get("HOME")	keep	HOME	HOME
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": "ada"})	keep	HOME	HOME
 ui	packages/ui/tests/test_terminal.py	monkeypatch.setattr(paths, "_account_home", lambda: os.environ["HOME"])	keep	HOME	HOME
@@ -1084,7 +1193,8 @@ ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": ""})	k
 ui	packages/ui/tests/test_terminal.py	monkeypatch.setattr(core, "read", lambda path=None: real(path, retry=0.05))	use	retry=	retry_s=
 ui	packages/ui/tests/test_testing.py	for key in ("HOME", "MOXI_HOME", "XDG_STATE_HOME", "TMPDIR", "PYTHONPATH",	keep	HOME	HOME
 usage	packages/usage/src/moxi_usage/ceiling.py	home = env.get("HOME") if isinstance(env, dict) else None	keep	HOME	HOME
-usage	packages/usage/src/moxi_usage/cli.py	ages = [row.age_seconds for row in rows if row.age_seconds is not UNKNOWN]	keep	age_seconds	age_seconds
+usage	packages/usage/src/moxi_usage/cli.py	ages = [row.age_seconds for row in rows if row.age_seconds is not UNKNOWN]	use	row.age_seconds	row.age_s
+usage	packages/usage/src/moxi_usage/limits.py	Row	name	age_seconds	age_s
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT, listener.CROSSING_AT])	keep	environ	environ
 usage	packages/usage/tests/test_allowlist.py	"HOME": home,	keep	HOME	HOME
@@ -1100,8 +1210,8 @@ usage	packages/usage/tests/test_index.py	child = parent.child(title="look", dire
 usage	packages/usage/tests/test_index.py	answer.step(input=100, output=7)	keep	input	input
 usage	packages/usage/tests/test_index.py	proc.wait(timeout=30)	keep	timeout	timeout
 usage	packages/usage/tests/test_index.py	codes = sorted(proc.wait(timeout=120) for proc in procs)	keep	timeout	timeout
-usage	packages/usage/tests/test_limits.py	assert (five.used_percent, five.source, five.age_seconds) == (25.0, "rollout", 2 * MIN)	keep	age_seconds	age_seconds
-usage	packages/usage/tests/test_limits.py	assert five.age_seconds == 40 * MIN	keep	age_seconds	age_seconds
+usage	packages/usage/tests/test_limits.py	assert (five.used_percent, five.source, five.age_seconds) == (25.0, "rollout", 2 * MIN)	use	five.age_seconds	five.age_s
+usage	packages/usage/tests/test_limits.py	assert five.age_seconds == 40 * MIN	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_live.py	environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`, `HOME`), and nothing	keep	HOME	HOME
 usage	packages/usage/tests/test_live.py	if "HOME" not in _STARTED_IN:	keep	HOME	HOME
 usage	packages/usage/tests/test_live.py	env.update({k: _STARTED_IN[k] for k in ("HOME", "USER", "LOGNAME", "CLAUDE_CONFIG_DIR")	keep	HOME	HOME

@@ -5,7 +5,7 @@ environment, with its exact value, and nothing else. An empty value is kept as e
 name absent from the record was unset. Values compare as strings.
 
 The core set is every name read by the resolvers a page's check may use: `Layout`'s
-methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.folders` and
+methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs` and
 `paths.which`. `in_set(name)` matches it by name, so recording needs no module discovery:
 
 - `MOXI_HOME`, `MOXI_DEVICE`, and `MOXI_<P>_<S>` for any prefix `<P>` and `<S>` one of

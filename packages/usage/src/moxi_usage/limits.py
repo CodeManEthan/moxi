@@ -93,9 +93,9 @@ class Row:
     last two), from its winning reading.
 
     What the reading gives (`window_minutes`, `slot`, `used_percent`, `resets_at`,
-    `observed_at` in epoch seconds, `age_seconds`, `source`, `session_id`, `plan_type`)
+    `observed_at` in epoch seconds, `age_s`, `source`, `session_id`, `plan_type`)
     is `UNKNOWN` where the reading did not say, and all of it where no reading was found;
-    the state and `reason` say which. `age_seconds` is `now - observed_at`. `full_at` is
+    the state and `reason` say which. `age_s` is `now - observed_at`. `full_at` is
     the projection's time the window reaches 100%, None with `projection` saying why
     there is none; `fit` counts the readings it fitted. `reason` and `note` are None when
     there is nothing to say; `note` says why no newer reading came when one was wanted.
@@ -113,7 +113,7 @@ class Row:
     used_percent: Any = UNKNOWN
     resets_at: Any = UNKNOWN
     observed_at: Any = UNKNOWN
-    age_seconds: Any = UNKNOWN
+    age_s: Any = UNKNOWN
     source: Any = UNKNOWN
     session_id: Any = UNKNOWN
     plan_type: Any = UNKNOWN
@@ -135,7 +135,7 @@ class Row:
             "window_minutes": self.window_minutes, "label": self.label,
             "state": self.state, "reason": self.reason, "slot": self.slot,
             "used_percent": self.used_percent, "resets_at": iso(self.resets_at),
-            "observed_at": iso(self.observed_at), "age_seconds": self.age_seconds,
+            "observed_at": iso(self.observed_at), "age_s": self.age_s,
             "source": self.source, "session_id": self.session_id,
             "plan_type": self.plan_type, "full_at": iso(self.full_at),
             "projection": self.projection, "fit": self.fit, "note": self.note,
@@ -270,7 +270,7 @@ def window_row(harness: str, found: list[Reading], *, now: float,
                label=label(winner.window_minutes, winner.limit_id, winner.slot),
                state=state, reason=reason, slot=_said(winner.slot),
                used_percent=_said(winner.used_percent), resets_at=_said(winner.resets_at),
-               observed_at=winner.observed_at, age_seconds=now - winner.observed_at,
+               observed_at=winner.observed_at, age_s=now - winner.observed_at,
                source=winner.source, session_id=_said(winner.session_id),
                plan_type=_said(winner.plan_type), full_at=full_at, projection=projection,
                fit=fit, extra=_load_extra(winner.extra))

@@ -209,7 +209,7 @@ def test_run_hands_launch_the_typed_flags_and_the_warn_line_printer(work, monkey
                                                                     capsys):
     seen = {}
 
-    def launch(request, *, environ=None, warn=None):
+    def launch(request, *, env=None, warn=None):
         seen["request"] = request
         warn("identity planner is ignored")
         return result()

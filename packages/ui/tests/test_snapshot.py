@@ -70,7 +70,7 @@ def test_good_components_are_placed_and_a_module_without_a_page_places_none():
 
 
 def _fake_run(listing, exports, calls):
-    def run(argv, *, timeout, cwd, env=None):
+    def run(argv, *, timeout_s, cwd, env=None):
         calls.append((argv, cwd, env))
         out = listing if argv[3] == "moxi" else {m: exports[m] for m in argv[4:]}
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
@@ -122,10 +122,10 @@ def test_a_failed_refresh_is_run_again_on_a_look_with_a_growing_wait(tmp_path, m
     now = [100.0]
     answers = []
 
-    def run(argv, *, timeout, cwd, env=None):
+    def run(argv, *, timeout_s, cwd, env=None):
         answer = answers.pop(0) if answers else "ok"
         if answer == "slow":
-            raise snapshot_mod.subprocess.TimeoutExpired(argv, timeout)
+            raise snapshot_mod.subprocess.TimeoutExpired(argv, timeout_s)
         out = listing if argv[3] == "moxi" else {"usage": {"ok": True, "export": export}}
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
 

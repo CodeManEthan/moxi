@@ -11,7 +11,7 @@ Standard library only.
 
 from __future__ import annotations
 
-#: The variable only test kits set (`moxi.paths.ANCHOR_HOME`, repeated here so the words
+#: The variable only test kits set (`moxi.paths.ANCHOR_HOME_ENV`, repeated here so the words
 #: import nothing).
 ANCHOR_HOME = "MOXI_ANCHOR_HOME"
 

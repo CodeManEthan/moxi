@@ -150,11 +150,11 @@ def codex_host_available():
     return bool(script().get("codex_host", True))
 
 
-def wait_ready(*, session_id=None, pid=None, timeout):
-    record("wait_ready", session_id=session_id, pid=pid, timeout=timeout)
+def wait_ready(*, session_id=None, pid=None, timeout_s):
+    record("wait_ready", session_id=session_id, pid=pid, timeout=timeout_s)
     ready = script().get("ready", "ok")
     if ready == "timeout":
-        raise TimeoutError(f"no session ready after {timeout} s")
+        raise TimeoutError(f"no session ready after {timeout_s} s")
     if ready == "error":
         raise TurnsError("the endpoint's directory can't be read")
     harness = "codex" if pid is not None else "claude"

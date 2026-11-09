@@ -16,7 +16,7 @@ refused, so `foreign=True` never reaches a unit the writer may own or displace. 
 Task Scheduler honours (see `status`): a task named `"daemon"` gets a daemon's steps, read
 around `/run` and `/end`.
 
-The stop record. `stop(module, names, record=[])` first reads, in one supervisor call,
+The stop record. `stop(module, names, stopped=[])` first reads, in one supervisor call,
 which of the units are running, and stops only those; before it asks the supervisor to
 stop each one it appends a `Stopped` entry (the backend's exact id, a daemon's `.socket`
 before its service) to `stopped`. `resume(record)` starts exactly those entries again, in
@@ -116,7 +116,7 @@ def stop(module: str, names=None, *, replace: bool = False, stopped: list | None
 
 
 def resume(record: Iterable[Stopped], *, runner=None) -> list[Acted]:
-    """Start again exactly the units `stop(..., record=...)` stopped, in the order
+    """Start again exactly the units `stop(..., stopped=...)` stopped, in the order
     recorded, one `Acted` (act `start`) per entry.
 
     Only an entry whose token a `stop` of this process issued and no `resume` took yet

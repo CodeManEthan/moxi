@@ -89,7 +89,7 @@ def _status():
     from moxi_loadout import doctor, homes, install
 
     with homes.as_page():
-        return install.status(git=_git(), git_s=doctor.PLACE_GIT_SECONDS)
+        return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)
 
 
 def status(call: Any) -> dict[str, Any]:
@@ -131,7 +131,7 @@ def global_preview(call: Any) -> dict[str, Any]:
     from moxi_loadout import doctor, install, manifest, settings
 
     try:
-        preview = install.global_preview(git_s=doctor.PLACE_GIT_SECONDS)
+        preview = install.global_preview(git_seconds=doctor.PLACE_GIT_SECONDS)
         chosen = manifest.load(settings.read().source).mode is not None
     except Exception as err:  # noqa: BLE001
         return {"problem": _problem(err, "the global file"), "mode": "off", "chosen": False,

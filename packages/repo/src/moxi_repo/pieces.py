@@ -118,7 +118,7 @@ class HookContext:
     absolute paths, asked of git on first use. `message_path` is commit-msg's message
     file; `updates` are pre-push's ref lines.
 
-    `git(*args, input=None)` runs git with the git hook's own environment, so a partly
+    `git(*args, stdin_data=None)` runs git with the git hook's own environment, so a partly
     staged commit is judged as it will land. A piece that reads another repository uses
     `moxi_repo.git()`, which drops git's local variables first.
     """

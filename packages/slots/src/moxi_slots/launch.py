@@ -251,7 +251,7 @@ def wait_ended(slot: int | str, *, pane_id: str, timeout_s: float) -> Ended:
     wakes it; the read decides. A pane tmux no longer has counts as ended (`gone`).
     Refuses (`UsageError`) a pane that is not in that slot's session."""
     if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s < 0:
-        raise UsageError(f"timeout is a number of seconds, not {timeout_s!r}")
+        raise UsageError(f"timeout_s is a number of seconds, not {timeout_s!r}")
     number = resolve(slot, registry.read())
     deadline = time.monotonic() + timeout_s
     seen = launchfile.read_pane(pane_id)

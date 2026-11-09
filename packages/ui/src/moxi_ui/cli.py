@@ -348,7 +348,7 @@ def _same_dir(one: Path, other: Path) -> bool:
 def _unit_environ(environ: Mapping[str, str], stored: Mapping[str, str] | None) -> dict[str, str]:
     """The environment the unit's shell starts with: `environ` less the locators, then on
     Windows the user's stored environment's locators (`stored`), then the variables the
-    core writes the ui's units with (`moxi.units.environment`), which a tagged home's
+    core writes the ui's units with (`moxi.units.unit_env`), which a tagged home's
     unit carries as `MOXI_HOME` and which win over the stored ones."""
     from moxi import units
 

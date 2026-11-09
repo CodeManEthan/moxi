@@ -728,7 +728,7 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     if isinstance(queue, bool) or not isinstance(queue, int) or queue < 1:
         raise ValueError(f"queue is a whole number above 0, not {queue!r}")
     if not write_timeout_s > 0:
-        raise ValueError(f"write_deadline is a number of seconds above 0, not "
+        raise ValueError(f"write_timeout_s is a number of seconds above 0, not "
                          f"{write_timeout_s!r}")
     if hello is not None and not isinstance(hello, Hello):
         raise TypeError(f"hello is a moxi.ipc.Hello, not {hello!r}")

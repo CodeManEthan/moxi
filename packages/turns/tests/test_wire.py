@@ -233,7 +233,7 @@ def test_a_refused_connect_with_the_lock_held_removes_nothing(turns_env):
     holder = subprocess.Popen(
         [sys.executable, "-c",
          "import sys\nfrom moxi import files\n"
-         "with files.lock(sys.argv[1], timeout=5):\n"
+         "with files.lock(sys.argv[1], timeout_s=5):\n"
          "    print('held', flush=True)\n    sys.stdin.read()\n", address + ".lock"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:

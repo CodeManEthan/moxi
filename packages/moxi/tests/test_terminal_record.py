@@ -208,7 +208,7 @@ def test_a_read_error_that_persists_is_unreadable(fence, monkeypatch):
 
 
 def test_the_retry_is_the_writers_replace_window():
-    assert read.__kwdefaults__["retry"] == files.REPLACE_RETRY
+    assert read.__kwdefaults__["retry_s"] == files.REPLACE_RETRY
 
 
 def test_a_read_error_that_clears_within_the_retry_reads_the_record(fence, monkeypatch):

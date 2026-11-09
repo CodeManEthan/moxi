@@ -140,7 +140,7 @@ def test_an_edit_before_gone_inside_the_interval_is_committed_when_it_ends():
 
 
 def test_a_throttled_push_retry_never_clears_a_request():
-    # A commit's push fails; a gone pass is throttled inside push_backoff; the retry pass
+    # A commit's push fails; a gone pass is throttled inside push_backoff_s; the retry pass
     # is throttled too; the holder stays and commits the edit at the interval's end.
     w = world(remote_up=False)
     edit(w, "first")
@@ -242,7 +242,7 @@ def test_a_request_after_the_last_read_starts_a_new_streak_at_a_give_up():
 
 # --- the push duty -----------------------------------------------------------------------
 
-def test_a_failed_push_is_tried_once_more_after_push_backoff():
+def test_a_failed_push_is_tried_once_more_after_push_backoff_s():
     w = world(remote_up=False)
     edit(w, "a")
     ops = w.settler("gone")

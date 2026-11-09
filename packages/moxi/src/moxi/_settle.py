@@ -952,7 +952,7 @@ def _misnamed(module: str, skills: list[str]) -> set[str]:
 
 def _skill_folders(found) -> tuple[list[str] | None, object]:
     """The skill names in `found`'s `SKILLS` folder (its subfolders `moxi.names.
-    is_skill_folder` counts, sorted) and the folder, read through
+    is_skill_dir` counts, sorted) and the folder, read through
     `importlib.resources`; or None and the line that says why they can't be read. A
     package not on disk (in a zip, say) is refused, since a harness reads a skill from a
     folder."""
@@ -1230,7 +1230,7 @@ def main(argv: list[str] | None = None,
     runs after the handlers are in place and before the step (tests)."""
     from . import files, paths
 
-    handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.CLAIM_VARIABLE
+    handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.LOCK_FD_ENV
     if not files.adopt_core_claim(paths.core_lock()) and handed:
         say("the install's lock claim did not check; nothing done", err=True)
         return 1

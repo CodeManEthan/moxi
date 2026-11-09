@@ -14,7 +14,7 @@ writes it uses, from the environment it is given:
 - Moxi's state folder and settings file (`moxi.paths.core()`): the core lock, the
   placer's ledger, the harness table and the opencode row loadout adds to it;
 - each harness row's skills and agents folders, as the placer resolves them
-  (`moxi.place.folders`);
+  (`moxi.place.harness_dirs`);
 - Claude Code's, Codex's and OpenCode's homes (`moxi_loadout.harness`), which place the
   harness files loadout writes;
 - projects' data, state and config folders when the act reads a project section named by

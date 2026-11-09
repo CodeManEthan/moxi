@@ -308,7 +308,7 @@ def named(fd: int) -> str:
 def taken_elsewhere(path: Path) -> bool:
     """Whether another process finds `path` locked."""
     code = ("import sys\nfrom moxi import files\n"
-            "try:\n    with files.lock(sys.argv[1], timeout=0): pass\n"
+            "try:\n    with files.lock(sys.argv[1], timeout_s=0): pass\n"
             "except files.LockTimeout: sys.exit(3)\n")
     result = subprocess.run([sys.executable, "-c", code, str(path)], timeout=30)
     return result.returncode == 3
@@ -490,12 +490,12 @@ CHILD = textwrap.dedent("""
     import json, os, sys, time
     from moxi import files, paths
     path = paths.core_lock()
-    out = {"variable": os.environ.get(files.CLAIM_VARIABLE),
+    out = {"variable": os.environ.get(files.LOCK_FD_ENV),
            "descriptor": files._same_file(int(sys.argv[1]), path),
            "adopted": files.adopt_core_claim(path)}
     started = time.monotonic()
     try:
-        with files.lock(path, nested=True, timeout=0.3):
+        with files.lock(path, nested=True, timeout_s=0.3):
             out["took"] = True
     except files.LockTimeout as exc:
         out["waited"] = time.monotonic() - started
@@ -504,18 +504,18 @@ CHILD = textwrap.dedent("""
     '''
 
     path = paths.core_lock()
-    named = os.environ[files.CLAIM_VARIABLE]
+    named = os.environ[files.LOCK_FD_ENV]
     out = {"adopted": files.adopt_core_claim(path),
-           "variable": os.environ.get(files.CLAIM_VARIABLE)}
+           "variable": os.environ.get(files.LOCK_FD_ENV)}
     out["again"] = files.adopt_core_claim(path)
     out["inheritable"] = os.get_inheritable(int(named))
     started = time.monotonic()
-    with files.lock(path, nested=True, timeout=0):
-        with files.lock(path, nested=True, timeout=0):
+    with files.lock(path, nested=True, timeout_s=0):
+        with files.lock(path, nested=True, timeout_s=0):
             pass
     seen = []
     def other():
-        with files.lock(path, nested=True, timeout=0):
+        with files.lock(path, nested=True, timeout_s=0):
             seen.append(True)
     thread = threading.Thread(target=other)
     thread.start()
@@ -565,9 +565,9 @@ FORGED = textwrap.dedent("""
     from moxi import files, paths
     path = paths.core_lock()
     out = {"adopted": files.adopt_core_claim(path),
-           "variable": os.environ.get(files.CLAIM_VARIABLE)}
+           "variable": os.environ.get(files.LOCK_FD_ENV)}
     try:
-        with files.lock(path, nested=True, timeout=0.3):
+        with files.lock(path, nested=True, timeout_s=0.3):
             out["took"] = True
     except files.LockTimeout as exc:
         out["holder"] = exc.holder

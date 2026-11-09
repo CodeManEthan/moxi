@@ -71,7 +71,7 @@ class Projects:
         import moxi.store
 
         self.mp.setattr(moxi.store, "connect",
-                        functools.partial(moxi.store.connect, timeout=0.05))
+                        functools.partial(moxi.store.connect, timeout_s=0.05))
         holder = sqlite3.connect(self.store, isolation_level=None)
         try:
             holder.execute("PRAGMA locking_mode = EXCLUSIVE")

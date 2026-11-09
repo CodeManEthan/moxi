@@ -603,7 +603,7 @@ def clock_reads_warm(monkeypatch, *kinds):
 
     def reads(adapter, session_id, **kw):
         if adapter in kinds:
-            return cache.Clock(cache.WARM, age_seconds=0.0)
+            return cache.Clock(cache.WARM, age_s=0.0)
         return real(adapter, session_id, **kw)
 
     monkeypatch.setattr(cache, "clock_state", reads)

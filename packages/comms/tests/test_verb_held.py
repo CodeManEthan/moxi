@@ -54,13 +54,13 @@ def test_the_cold_at_is_written_per_tag_from_each_session_answer(rig, monkeypatc
     for slot, name in ((2, "x"), (3, "y"), (4, "f"), (5, "n")):
         rig.shim(name=name)
     answers(rig, monkeypatch, {
-        "x": dict(adapter="claude-shim", cache_kind="warm", age_seconds=600,
+        "x": dict(adapter="claude-shim", cache_kind="warm", age_s=600,
                          cache_ttl=3600),
-        "y": dict(adapter="codex", cache_kind="cold", age_seconds=600,
+        "y": dict(adapter="codex", cache_kind="cold", age_s=600,
                          cache_ttl=300),
-        "f": dict(adapter="claude-shim", cache_kind="fresh", age_seconds=None,
+        "f": dict(adapter="claude-shim", cache_kind="fresh", age_s=None,
                          cache_ttl=None),
-        "n": dict(adapter="pager", cache_kind="no-cache", age_seconds=None,
+        "n": dict(adapter="pager", cache_kind="no-cache", age_s=None,
                          cache_ttl=None, cache_reason="comms has no cache clock for pager"
                          " agents"),
     })
@@ -83,9 +83,9 @@ def test_a_cold_read_with_no_lifetime_writes_the_ask_time(rig, monkeypatch):
     rig.shim(name="y")
     rig.shim(name="w")
     answers(rig, monkeypatch, {
-        "y": dict(adapter="codex", cache_kind="cold", age_seconds=600,
+        "y": dict(adapter="codex", cache_kind="cold", age_s=600,
                          cache_ttl=None, cache_reason="the model changed"),
-        "w": dict(adapter="codex", cache_kind="warm", age_seconds=10,
+        "w": dict(adapter="codex", cache_kind="warm", age_s=10,
                          cache_ttl=None),
     })
     code, out = rig.cli(["send", "y,w", "hi", "--posture", "none"], **PLANNER,
@@ -101,9 +101,9 @@ def test_a_send_that_reads_only_live_writes_every_value_as_dash(rig, monkeypatch
     rig.shim(name="f")
     rig.shim(name="n")
     answers(rig, monkeypatch, {
-        "f": dict(adapter="claude-shim", cache_kind="fresh", age_seconds=None,
+        "f": dict(adapter="claude-shim", cache_kind="fresh", age_s=None,
                          cache_ttl=None),
-        "n": dict(adapter="opencode", cache_kind="no-cache", age_seconds=None,
+        "n": dict(adapter="opencode", cache_kind="no-cache", age_s=None,
                          cache_ttl=None),
     })
     code, out = rig.cli(["send", "f,n", "hi", "--posture", "none"], **PLANNER)
@@ -137,7 +137,7 @@ def test_an_unknown_read_refuses_the_send_held_or_not(rig, monkeypatch):
     rig.shim(name="x")
     rig.shim(name="w")
     answers(rig, monkeypatch, {
-        "x": dict(adapter="claude-shim", cache_kind="unknown", age_seconds=None,
+        "x": dict(adapter="claude-shim", cache_kind="unknown", age_s=None,
                          cache_ttl=None, cache_reason="no session id reported yet"),
     })
     before = posted(rig)
@@ -173,7 +173,7 @@ def test_the_refusal_reasons(rig):
 def test_a_cold_read_of_any_adapter_posts_and_holds(rig, monkeypatch):
     rig.shim(name="y")
     answers(rig, monkeypatch, {
-        "y": dict(adapter="codex", cache_kind="cold", age_seconds=4000,
+        "y": dict(adapter="codex", cache_kind="cold", age_s=4000,
                          cache_ttl=1800),
     })
     code, out = rig.cli(["send", "y", "hi", "--posture", "none"], **PLANNER)

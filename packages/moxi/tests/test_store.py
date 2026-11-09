@@ -504,7 +504,7 @@ MIGRATOR = textwrap.dedent("""
             time.sleep(0.05)
         return run
 
-    conn = store.connect(sys.argv[1], timeout=30)
+    conn = store.connect(sys.argv[1], timeout_s=30)
     print(store.migrate(conn, ["CREATE TABLE ran (n INTEGER)"] + [step(n) for n in range(1, 6)]))
     conn.close()
 """)

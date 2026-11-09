@@ -21,9 +21,9 @@ from moxi import files, paths
 from moxi_tunnel import locks
 with ExitStack() as stack:
     if "core" in sys.argv[1:]:
-        stack.enter_context(files.lock(paths.core_lock(), timeout=10))
+        stack.enter_context(files.lock(paths.core_lock(), timeout_s=10))
     if "tunnel" in sys.argv[1:]:
-        stack.enter_context(files.lock(locks.lock_path(), timeout=10))
+        stack.enter_context(files.lock(locks.lock_path(), timeout_s=10))
     print("held", flush=True)
     sys.stdin.readline()
 """

@@ -1,6 +1,6 @@
 """The check a page makes before it writes: would it write where the user's terminal does?
 
-    check(places, *, programs=None, page=True) -> str | None
+    check(places, *, programs=None, for_page=True) -> str | None
 
 `places(env)` returns `{label: path}`: every folder or file the act reads or writes while
 deciding or doing its write, each resolved from the mapping `env` alone by the resolver

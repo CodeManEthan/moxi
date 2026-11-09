@@ -71,7 +71,7 @@ def test_read_json(tmp_path, capsys):
     doc = json.loads(out)
     assert code == 0 and doc["harness"] == "claude"
     (one,) = doc["sessions"]
-    assert (one["session"], one["kind"], one["ttl_seconds"], one["ttl_source"]) == (
+    assert (one["session"], one["kind"], one["ttl_s"], one["ttl_source"]) == (
         SID, "cold", 3600, "tier")
 
 

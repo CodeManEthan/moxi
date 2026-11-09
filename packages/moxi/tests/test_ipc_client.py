@@ -1116,7 +1116,7 @@ def test_a_client_in_another_process(serving):
             "    agreed = c.hello((1, 1))\n"
             "    out = {'me': os.getpid(),"
             " 'agreed': [agreed.version, sorted(agreed.capabilities)],"
-            " 'peer': c.call('peer', timeout=10), 'push': c.call('push', timeout=10),"
+            " 'peer': c.call('peer', timeout_s=10), 'push': c.call('push', timeout_s=10),"
             " 'note': next(c.notifications())}\n"
             "print(json.dumps(out))\n")
     done = subprocess.run([sys.executable, "-c", code, srv.address], capture_output=True,
@@ -1149,7 +1149,7 @@ def test_a_read_in_progress_holds_no_write(fake):
 
 
 def test_connect_timeout_bounds_the_wait_for_the_hello(fake):
-    f = fake(timeout=0.2)
+    f = fake(timeout_s=0.2)
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
         f.client.hello((1, 1))
