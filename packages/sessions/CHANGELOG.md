@@ -2,6 +2,10 @@
 
 ## 0.2.6 (2026-11-08)
 
+- `moxi sessions read` without `--harness` reads the session from whichever harness's
+  root holds it, where before it read Claude Code's only. When more than one harness
+  holds the id it names them and exits 2; when none does it says what each was asked
+  and exits 1. `--harness` reads only that harness, as before.
 - New setting `guard.transcript_read_escapes`: the verbs of this environment's `moxi`
   whose commands the transcript-read guard lets name a transcript path. The default is
   `["sessions"]`; add a module's verb to let it through too.

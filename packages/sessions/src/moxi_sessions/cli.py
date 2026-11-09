@@ -19,8 +19,10 @@ summary and a tool result as its size and whether it failed, with every flag: no
 prints a tool's input past its summary, or its output. With the secrets module each
 message, tool call line and title is redacted with secrets' `credentials` and `broad` sets
 before it is cut; without it the read prints as written and says so once, on stderr.
-`--json` prints the same rows as one JSON object. A session no root holds, or a source
-that can't be read, exits 1 with the reason.
+`--json` prints the same rows as one JSON object. Without `--harness`, `read` asks each
+harness's root for the session, the way `find` does, and reads the one that holds it; when
+more than one holds it, it names them and exits 2 for `--harness` to choose. A session no
+root holds, or a source that can't be read, exits 1 with the reason.
 """
 
 from __future__ import annotations
@@ -78,8 +80,9 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> i
                     "output. Redacted with secrets' credentials and broad sets when the "
                     "secrets module is installed.")
     reader.add_argument("session", metavar="SESSION", help="the session or thread id")
-    reader.add_argument("--harness", choices=HARNESSES, default=CLAUDE,
-                        help="whose session it is (default: claude)")
+    reader.add_argument("--harness", choices=HARNESSES,
+                        help="whose session it is (default: the harness whose root holds "
+                             "it)")
     which = reader.add_mutually_exclusive_group()
     which.add_argument("--around", metavar="TIME",
                        help="the turns around TIME: ISO 8601 (2026-11-06T14:03:22Z; no "
@@ -170,15 +173,40 @@ def _iso(value: str) -> float:
     return moment.timestamp()
 
 
-def _source(harness: str, session: str, prog: str):
-    """The session's source, or the reason there is none."""
-    found = find(harness, session)
+def _probed(found) -> str:
+    return "; ".join(f"{probe.root}: {probe.outcome}" for probe in found.probes)
+
+
+def _pick(found):
+    """The source to read of what `find` found: the first that isn't compressed, else the
+    first, whose read then says why it can't be read."""
     hits = found.hits
-    if not hits:
-        said = "; ".join(f"{probe.root}: {probe.outcome}" for probe in found.probes)
-        return None, f"{prog} read: no {harness} session {session} was found ({said})"
-    hit = next((h for h in hits if not h.compressed), hits[0])
-    return hit.source, None
+    return next((h for h in hits if not h.compressed), hits[0]).source
+
+
+def _source(harness: str | None, session: str, prog: str):
+    """The harness and source to read, or the reason and the exit code when there is none.
+
+    With `harness` named, only that harness is asked. Without it, every harness is asked
+    in turn with `find`, which looks at names and, for OpenCode, one row, never a whole
+    transcript: the one that holds the session is read, and more than one is refused."""
+    if harness is not None:
+        found = find(harness, session)
+        if not found.found:
+            return None, None, (f"{prog} read: no {harness} session {session} was found "
+                                f"({_probed(found)})"), 1
+        return harness, _pick(found), None, 0
+    asked = [find(each, session) for each in HARNESSES]
+    held = [found for found in asked if found.found]
+    if len(held) == 1:
+        return held[0].harness, _pick(held[0]), None, 0
+    if held:
+        names = " and ".join(found.harness for found in held)
+        return None, None, (f"{prog} read: session {session} is held by {names}; give "
+                            "--harness to say which to read"), 2
+    probed = "; ".join(f"{found.harness}: {_probed(found)}" for found in asked)
+    return None, None, (f"{prog} read: no session {session} was found in any harness "
+                        f"({probed})"), 1
 
 
 def _shown_line(shown: view.Shown, count: int) -> str:
@@ -220,10 +248,11 @@ def _read(args, prog: str) -> int:
         except ValueError as exc:
             print(f"{prog} read: {exc}", file=sys.stderr)
             return 2
-    source, why = _source(args.harness, session, prog)
+    harness, source, why, code = _source(args.harness, session, prog)
     if source is None:
         print(why, file=sys.stderr)
-        return 1
+        return code
+    args.harness = harness
     redactor = view.redactor()
     if redactor.redact is None:
         print(f"{prog} read: not redacted: {redactor.reason}; install the secrets module "

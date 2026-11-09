@@ -23,7 +23,7 @@ classifiers = [
 # the only way memory reads a transcript (it needs the release that says which messages
 # the harness injected, and the one with `retention()`); secrets' sets redact every text
 # memory stores.
-dependencies = ["moxi>=0.1.6,<0.2", "moxi-turns>=0.2,<0.3", "moxi-sessions>=0.2.3,<0.3",
+dependencies = ["moxi>=0.1.6,<0.2", "moxi-turns>=0.2,<0.3", "moxi-sessions>=0.2.6,<0.3",
                 "moxi-secrets>=0.1,<0.2"]
 
 [project.optional-dependencies]
