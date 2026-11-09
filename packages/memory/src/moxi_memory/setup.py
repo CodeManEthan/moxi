@@ -306,8 +306,9 @@ def first_ingest(ask: Callable[[str], str] | None, out: TextIO) -> None:
         _say(out, f"the first full ingest didn't start: {exc}; start it with: "
                   f"{INGEST_LINE}")
         return
-    _say(out, f"the first full ingest is running in the background (process {pid}); "
-              f"watch it with: {STATUS_LINE}")
+    _say(out, f"asked for the first full ingest in the background (process {pid}); it "
+              "runs now, or, if an ingest holds memory's writer lock, as soon as that "
+              f"ingest ends; watch it with: {STATUS_LINE}")
 
 
 # -- SETUP and TEARDOWN -----------------------------------------------------------------

@@ -26,7 +26,7 @@ def config(**over):
 def run(mode="walk", **kw):
     kw.setdefault("config", config())
     kw.setdefault("launcher", links.Link(links.NONE))
-    kw.setdefault("then", lambda: None)
+    kw.setdefault("then", lambda args: None)
     return ingest.run(mode, **kw)
 
 
@@ -177,7 +177,8 @@ def slow_child(tmp_path, monkeypatch):
     return done
 
 
-@pytest.mark.parametrize("argv, args", [(["ingest"], "--walk"), (["ingest", "--all"], "--all"),
+@pytest.mark.parametrize("argv, args", [(["ingest"], "--walk --asked"),
+                                        (["ingest", "--all"], "--all"),
                                         (["reindex"], "--rebuild"),
                                         (["reindex", "--relabel"], "--relabel")])
 def test_ingest_and_reindex_return_before_their_child_finishes(capsys, slow_child, argv,
@@ -204,14 +205,51 @@ def test_reindex_says_what_a_rebuild_drops_before_it_starts_the_child(capsys, mo
     assert "process 4242" in out
 
 
-def test_reindex_starts_nothing_while_a_rebuild_runs(capsys, monkeypatch):
-    monkeypatch.setattr(start, "spawn", lambda args: pytest.fail("started a child"))
+def test_reindex_while_a_rebuild_runs_is_queued_behind_it(capsys, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(start, "spawn", lambda args: spawned.append(args) or 4242)
     with files.lock(index.rebuild_lock_path()):
-        code, out, _ = memory(capsys, "reindex")
-    assert code == 0 and "already running" in out and "moxi memory status" in out
+        code, out, _ = memory(capsys, "reindex", "--relabel")
+    assert code == 0 and spawned == [["--relabel"]]
+    assert "queued behind the rebuild that started" in out
+    assert "runs when that rebuild ends" in out and "moxi memory status" in out
+    assert "started" not in out.replace("rebuild that started", "")
+
+
+@pytest.mark.parametrize("argv, args", [
+    (["reindex"], ["--rebuild"]), (["reindex", "--relabel"], ["--relabel"]),
+    (["ingest", "--all"], ["--all"]), (["ingest"], ["--walk", "--asked"])])
+def test_a_request_never_says_started_and_touches_no_writer_lock(capsys, monkeypatch, argv,
+                                                                 args):
+    spawned, taken = [], []
+    monkeypatch.setattr(start, "spawn", lambda a: spawned.append(a) or 4242)
+    real = files.lock
+    monkeypatch.setattr(files, "lock",
+                        lambda path, **kw: taken.append(path) or real(path, **kw))
+    code, out, _ = memory(capsys, *argv)
+    assert code == 0 and spawned == [args] and taken == []
+    assert "process 4242" in out and "started" not in out
+    assert ("it runs now, or, if an ingest holds memory's writer lock, as soon as that "
+            "ingest ends; `moxi memory status` shows which") in out
 
 
 # -- status -----------------------------------------------------------------------------
+
+def test_status_shows_a_waiting_request(capsys):
+    run()
+    conn = state.connect()
+    try:
+        state.ask(conn, "rebuild", START)
+    finally:
+        conn.close()
+    code, out, _ = memory(capsys, "status")
+    assert code == 0 and f"request waiting: rebuild, asked {clock.show(START)}" in out
+    code, out, _ = memory(capsys, "status", "--json")
+    assert json.loads(out)["waiting"] == {"kind": "rebuild", "asked": START}
+    run("waiting")
+    code, out, _ = memory(capsys, "status")
+    assert "request waiting: none" in out
+
 
 def test_status_shows_every_field(capsys):
     t = claude()
@@ -238,6 +276,7 @@ def test_status_shows_every_field(capsys):
     assert doc["first_read"] is True and doc["filling"] is None
     assert doc["rebuilding"] is None and doc["tokenizer"] == index.TOKENIZER
     assert doc["dropped"] == 0 and doc["rebuilt"] is not None
+    assert doc["waiting"] is None
     assert doc["last_ingest"] is not None
     assert doc["backlog"]["claude"] == 1
     assert doc["sessions"]["total"] == 2 and doc["sessions"]["by_kind"] == {"none": 2}

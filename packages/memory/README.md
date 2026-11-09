@@ -33,11 +33,11 @@ moxi doctor memory
 | Command | Does |
 |---|---|
 | `moxi memory search WORDS [--project P] [--since TIME] [--harness H] [--results] [--subagents] [--scratch] [--limit N] [--json]` | search past sessions, best match first (below) |
-| `moxi memory ingest [--all]` | start a catch-up walk in the background, or with `--all` a read of every transcript from its start, and return at once |
-| `moxi memory reindex [--relabel]` | start a rebuild of the index in the background, and return at once (below) |
+| `moxi memory ingest [--all]` | ask for a catch-up walk in the background, or with `--all` a read of every transcript from its start, and return at once |
+| `moxi memory reindex [--relabel]` | ask for a rebuild of the index in the background, and return at once (below) |
 | `moxi memory status [--json]` | print the index's state (below) |
 
-Exit codes: 0 a search that ran, with or without a hit, a started ingest or rebuild, and a
+Exit codes: 0 a search that ran, with or without a hit, an ingest or rebuild asked for, and a
 status with an index; 1 no index, or one that can't be read; 2 bad arguments or a setting
 memory can't use.
 
@@ -102,17 +102,28 @@ index it prints `{"error": "missing" | "unreadable", "message": ...}` and exits 
 ### Ingest and reindex
 
 Neither runs the work itself. Each starts the ingest child, `moxi-memory-ingest`, detached,
-prints `started ... in the background (process N)` and `watch it with: moxi memory
-status`, and exits 0, so an agent that runs one is never held by it.
+and exits 0, so an agent that runs one is never held by it. The child records what was
+asked for before it tries memory's writer lock, so another ingest holding that lock
+delays the work but never loses it: the ingest that holds it starts the work when it
+ends. Two requests made while the lock is held run once, as the larger of the two: a
+relabel covers a rebuild, a rebuild covers a full read, and a full read covers a walk.
+
+The command can't see whether an ingest holds the lock, only whether a rebuild is
+running, so it never says the work started. It prints `asked for ... in the background
+(process N)`, then either that the work is queued behind the rebuild that started at a
+given time and runs when it ends, or that it runs now or, if an ingest holds memory's
+writer lock, as soon as that ingest ends; and `watch it with: moxi memory status`, which
+shows a request still waiting.
 
 `moxi memory reindex` builds a new index from every transcript the harnesses still keep.
-Before it starts it says that a rebuild drops every session whose transcript the harness
+Before it asks it says that a rebuild drops every session whose transcript the harness
 has deleted since memory read it, and that those sessions stay searchable until the
 rebuild ends. Searches keep reading the old index while it runs. When it ends it switches
 to the new index, removes the dropped sessions from the session table, records how many it
-dropped, and starts one catch-up walk for what was written meanwhile. A rebuild already
-running starts nothing. `--relabel` also derives each session's project label again from
-its folder where that folder still exists; a session whose folder is gone keeps its label.
+dropped, and starts one catch-up walk for what was written meanwhile, or the waiting
+request, which reads everything anyway. `--relabel` also derives each session's project
+label again from its folder where that folder still exists; a session whose folder is gone
+keeps its label.
 
 ### Status
 
@@ -120,8 +131,9 @@ its folder where that folder still exists; a session whose folder is gone keeps 
 harness; sources read, and those not read (compressed Codex rollouts); the time a source
 was last read and each harness's last walk; the backlog, the sources changed since the
 last walk; whether the first full read has finished; whether a rebuild is running, since
-when and its process id; what the last rebuild dropped; and the session table's count by
-launch kind and by whether a session has an identity. With no index, or one that can't
+when and its process id; a request waiting for the writer lock (walk, full read, rebuild
+or relabel) and when it was asked; what the last rebuild dropped; and the session table's
+count by launch kind and by whether a session has an identity. With no index, or one that can't
 be read, it says so, still prints the rebuild and session lines, names `moxi memory
 reindex` unless a rebuild is running, and exits 1. `--json` prints the same as one object.
 
@@ -179,8 +191,11 @@ read:*)`, OpenCode the matching `bash` rules. The second also lets `moxi session
 ## When transcripts are read
 
 Every read is a detached `moxi-memory-ingest` child; no turn, prompt or command waits for
-one. One child writes at a time, and a child that finds another writing exits at once and
-leaves the work to the next.
+one. One child writes at a time, and a child that finds another writing exits at once. A
+turn's or a timer's child leaves its work to the next walk, which reads every transcript
+that grew. Work someone asked for (`moxi memory ingest`, `reindex`, setup's first full
+read) waits instead, and the child writing starts it when it ends. A child killed while it
+runs that work doesn't run it again; a killed rebuild shows in the doctor's `index` row.
 
 - A turn of the main loop ended: that session's new lines, at most once a minute per
   session.
@@ -326,7 +341,8 @@ to see it again. In order, it:
    secrets' fast engine isn't installed, so the first full read takes longer, with
    `moxi install secrets --with re2`.
 5. **Offers the first full read**, every transcript from its start, in the background,
-   with `moxi memory status` to watch it; or prints `moxi memory ingest --all`.
+   asked for as `moxi memory ingest --all` asks, with `moxi memory status` to watch it;
+   or prints `moxi memory ingest --all`.
 
 Right after setup, `moxi install` asks whether to turn the `ingest` timer on, default no;
 `moxi config set memory ingest.timer true` turns it on later.
@@ -376,8 +392,8 @@ Two sessions share an identity only when comms' qualified names are the same, so
 
 | row | ok | otherwise |
 |---|---|---|
-| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped sessions | `warn` with no index yet; `fail` when it can't be read |
-| `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read | `warn` with no index yet, for a harness root that has no walk yet, or for compressed Codex sessions not read |
+| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since (fix: `moxi memory reindex`); `fail` when it can't be read |
+| `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet, for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened |

@@ -2,7 +2,9 @@
 
 No ingest work runs in a caller: a command, a turns listener or a timer only starts a
 child and returns. The child skips rather than waits (it exits at once when another child
-holds the writer lock), so starting one is always safe.
+holds the writer lock), so starting one is always safe. What someone asks for (a walk from
+`moxi memory ingest`, a full read, a rebuild, a relabel) the child records first, so a
+held lock delays it but doesn't lose it.
 
 - `start_turn(harness, session_id)`: a turn of the session ended. Reads that session
   since its cursor. At most one is started per session per minute; a later one in the
@@ -10,9 +12,11 @@ holds the writer lock), so starting one is always safe.
   skipped.
 - `start_gone(harness, session_id)`: the session's endpoint is ending. Reads the session
   to its end, then walks.
-- `start_walk()`: one catch-up walk.
+- `start_walk(asked=False)`: one catch-up walk; with `asked`, one someone asked for.
 - `start_all()`: one read of every source from its start.
-- `start_rebuild(relabel=False)`: the rebuild, which ends by starting a walk.
+- `start_rebuild(relabel=False)`: the rebuild, which ends by starting the waiting
+  request's child, or a walk.
+- `start_waiting()`: a child that runs the request waiting in the state store.
 - `fire(event)`: a turns `turn` or `gone` event, passed to `start_turn` or `start_gone`.
 
 Each returns the child's process id, or None when it started nothing. Standard library
@@ -92,9 +96,10 @@ def start_gone(harness: str, session_id: str) -> int | None:
     return spawn(["--gone", harness, session_id])
 
 
-def start_walk() -> int:
-    """Start one catch-up walk."""
-    return spawn(["--walk"])
+def start_walk(*, asked: bool = False) -> int:
+    """Start one catch-up walk. With `asked` (someone typed `moxi memory ingest`), the
+    child records it, so a held lock doesn't lose it."""
+    return spawn(["--walk", "--asked"] if asked else ["--walk"])
 
 
 def start_all() -> int:
@@ -106,6 +111,12 @@ def start_rebuild(*, relabel: bool = False) -> int:
     """Start the rebuild; with `relabel`, one that also derives each session's label
     again where its folder still exists."""
     return spawn(["--relabel"] if relabel else ["--rebuild"])
+
+
+def start_waiting() -> int:
+    """Start a child that runs the request waiting in the state store, if one still
+    waits when it takes the writer lock."""
+    return spawn(["--waiting"])
 
 
 def fire(event) -> None:
@@ -122,4 +133,4 @@ def fire(event) -> None:
 
 
 __all__ = ["SCRIPT", "DEBOUNCE", "spawn", "start_turn", "start_gone", "start_walk",
-           "start_all", "start_rebuild", "fire"]
+           "start_all", "start_rebuild", "start_waiting", "fire"]

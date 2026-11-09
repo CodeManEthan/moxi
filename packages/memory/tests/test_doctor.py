@@ -40,7 +40,7 @@ def ingest_one():
     t.request().text("they render twice")
     t.write()
     report = ingest.run("walk", None, None, launcher=links.Link(links.NONE),
-                        then=lambda: None)
+                        then=lambda args: None)
     assert not report.busy and report.sources == 1
 
 
@@ -92,7 +92,8 @@ def test_the_ingest_row_counts_what_status_counts_as_backlog():
     t = T.ClaudeTranscript(api.root("claude"), session_id="0190b000-0000-7000-8000-00000000c1a0")
     t.user("how do the widgets render")
     t.write()
-    ingest.run("walk", None, None, launcher=links.Link(links.NONE), then=lambda: None)
+    ingest.run("walk", None, None, launcher=links.Link(links.NONE),
+               then=lambda args: None)
     sub = t.subagent("a0190b0000000001")        # subagents are off: no backlog
     sub.user("subagent work item")
     sub.write()
@@ -101,6 +102,52 @@ def test_the_ingest_row_counts_what_status_counts_as_backlog():
     assert status.status().backlog == {"claude": 0}
     assert "claude: last walk " in by_name()["ingest"].detail
     assert "0 sources changed since" in by_name()["ingest"].detail
+
+
+def test_a_killed_rebuild_is_a_warn_on_the_index_row_until_a_rebuild_finishes():
+    ingest_one()
+    conn = state.connect()
+    try:
+        state.write_unfinished(conn, 1_700_000_000.0)
+    finally:
+        conn.close()
+    row = by_name()["index"]
+    assert row.state == "warn" and "did not finish" in row.detail
+    assert row.fix == "moxi memory reindex"
+    ingest.run("rebuild", launcher=links.Link(links.NONE), then=lambda args: None)
+    row = by_name()["index"]
+    assert row.state == "ok" and "did not finish" not in row.detail
+
+
+def ask(kind, asked):
+    conn = state.connect()
+    try:
+        state.ask(conn, kind, asked)
+    finally:
+        conn.close()
+
+
+def test_a_waiting_request_is_said_and_a_warn_only_when_no_child_started_it():
+    import time
+
+    from moxi import files
+
+    from moxi_memory import index
+
+    write_config("memory", 'harnesses = ["claude"]\n')
+    ingest_one()
+    ask("rebuild", time.time())
+    row = by_name()["ingest"]
+    assert row.state == "ok" and "a rebuild request waiting since" in row.detail
+    with files.lock(index.rebuild_lock_path()):
+        row = by_name()["ingest"]
+    assert row.state == "ok" and "queued behind the rebuild running since" in row.detail
+    ask("relabel", time.time() - doctor.WAITING_WARN - 60)
+    with files.lock(index.rebuild_lock_path()):
+        assert by_name()["ingest"].state == "ok"   # behind a rebuild: nothing to do
+    row = by_name()["ingest"]
+    assert row.state == "warn" and "a relabel request waiting since" in row.detail
+    assert row.fix == "moxi memory ingest"
 
 
 def test_a_harness_with_no_root_is_not_a_walk_missing():

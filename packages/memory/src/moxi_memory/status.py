@@ -49,6 +49,8 @@ class Status:
       while it hasn't.
     - `rebuilding`: the start time of a running rebuild (0.0 before it wrote its time),
       and `rebuild_pid` the process id it wrote, for information only.
+    - `waiting`: the request waiting for the writer lock (`{"kind", "asked"}`, kind
+      `walk`, `all`, `rebuild` or `relabel`), or None.
     - `tokenizer`: the generation's tokenizer.
     - `sessions`: the session table's rows (`total`), by launch kind (`none` for no
       kind), and by whether they have an identity (`with_identity`,
@@ -71,6 +73,7 @@ class Status:
     filling: Filling | None = None
     rebuilding: float | None = None
     rebuild_pid: int | None = None
+    waiting: dict[str, object] | None = None
     tokenizer: str | None = None
     sessions: dict[str, object] = field(default_factory=dict)
     dropped: int | None = None
@@ -194,6 +197,11 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
     if running is not None:
         out.rebuilding = running.started if running.started is not None else 0.0
         out.rebuild_pid = running.pid
+    from . import state
+
+    request, _ = state.peek(env)
+    if request is not None:
+        out.waiting = {"kind": request.kind, "asked": request.asked}
     try:
         reader = index.open_read(env)
     except index.IndexMissing as exc:
