@@ -13,7 +13,8 @@ project's seat.
 
 **The folder.** With notes installed, notes' `handoffs/` folder for the session's folder,
 the launch's `notes_dir` passed as notes' override. Else the launcher's own `handoffs`
-folder in its data directory.
+folder in its data directory. A key named from outside its sessions (`handoffs --key`) is
+read in the folder of its newest launch, else in the caller's directory's folder.
 
 **The file name.** `<YYYY-MM-DD>-<key>.md`, then `-2`, `-3` before `.md` when the day's name
 is taken. Files sort by their date, then that count.
@@ -32,10 +33,14 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from moxi import exit as exits
 from moxi import files, modules
 from moxi.paths import Layout
+
+if TYPE_CHECKING:
+    from .store import LaunchRow
 
 log = logging.getLogger("moxi.launcher.handoffs")
 
@@ -131,6 +136,58 @@ def folder_of_row(row, *, env: Mapping[str, str] | None = None,
     """A launch's handoff folder, for its cwd and its `notes_dir` value."""
     notes_dir = row.values.get("notes_dir")
     return folder(row.cwd, notes_dir=notes_dir or None, env=env, create=create)
+
+
+@dataclass(frozen=True)
+class KeyFolder:
+    """The handoff folder `folder_of_key` read for a key, and the launch it came from:
+    None when the key has no launch and the folder is the caller's directory's."""
+
+    folder: Path
+    launch: LaunchRow | None
+
+
+def folder_of_key(key: str, *, cwd: str | Path | None = None,
+                  env: Mapping[str, str] | None = None, create: bool = False) -> KeyFolder:
+    """`key`'s own handoff folder: the one of its newest launch (`folder_of_row`), so a
+    seat that works in another project is read where it files. A key with no launch, or
+    no launch log at all, gets the folder of `cwd` (this directory by default)."""
+    launch = newest_launch(key, env=env)
+    if launch is not None:
+        return KeyFolder(folder_of_row(launch, env=env, create=create), launch)
+    where = cwd if cwd is not None else Path.cwd()
+    return KeyFolder(folder(where, env=env, create=create), None)
+
+
+def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRow | None:
+    """The newest launch whose key (`key_of_row`) is `key`, or None, also when the launch
+    log was never made. Raises `moxi.store.StoreTooNew` when a newer launcher wrote it."""
+    from moxi import store as core_store
+
+    from . import store
+
+    try:
+        conn = store.connect(env=env, create=False)
+    except core_store.StoreTooNew:
+        raise
+    except core_store.StoreError:
+        return None
+    try:
+        # Every row that can have the key, newest first; `key_of_row` decides, since a
+        # row's identity outranks its seat's name and its project key.
+        cursor = conn.execute(
+            "SELECT " + ", ".join(store.COLUMNS) + " FROM launches WHERE identity = ? OR "
+            "substr(identity, 1, ?) = ? OR preset_name = ? OR project_key = ? "
+            "ORDER BY created_at DESC, rowid DESC",
+            (key, len(key) + 1, key + "@", key, key))
+        names = [column[0] for column in cursor.description]
+        for values in cursor:
+            row = store.LaunchRow(**dict(zip(names, values)))
+            if key_of_row(row) == key:
+                return row
+        return None
+    finally:
+        conn.close()
 
 
 def _notes_folder(cwd, notes_dir, create):
@@ -245,6 +302,7 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     return Current(key, folder(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
-__all__ = ["COMMS_NAME", "FOLDER", "Current", "Handoff", "NoKey", "check_key", "current",
-           "file_name", "folder", "folder_of_row", "handoffs", "key_of_env", "key_of_row",
-           "own_folder", "parse", "pointer", "unpicked", "waiting"]
+__all__ = ["COMMS_NAME", "FOLDER", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
+           "current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",
+           "key_of_env", "key_of_row", "newest_launch", "own_folder", "parse", "pointer",
+           "unpicked", "waiting"]

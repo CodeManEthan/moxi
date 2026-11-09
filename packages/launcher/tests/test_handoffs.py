@@ -200,3 +200,49 @@ def test_a_session_with_no_key_has_no_folder():
     with pytest.raises(handoffs.NoKey):
         handoffs.current({"MOXI_LAUNCHER_REQUEST": "unknown"})
     assert not store.path().exists()
+
+
+# -- a key's own folder ----------------------------------------------------------------------
+
+
+def launched(conn, rid, at, cwd="/work", values=None, **fields):
+    store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
+                 cwd=cwd, values=values or {}, argv=["codex"], env={}, posture="", at=at,
+                 **fields)
+
+
+def test_a_keys_newest_launch_is_the_newest_row_whose_key_it_is():
+    conn = store.connect()
+    try:
+        launched(conn, "r-1", "2026-11-01T00:00:00Z", identity="lead@home")
+        launched(conn, "r-2", "2026-11-02T00:00:00Z", preset_kind="seat",
+                 preset_name="lead")
+        launched(conn, "r-3", "2026-11-03T00:00:00Z", identity="coder", project_key="lead")
+        launched(conn, "r-4", "2026-11-04T00:00:00Z", identity="leader@home")
+        launched(conn, "r-5", "2026-11-05T00:00:00Z", identity="lead_x")
+    finally:
+        conn.close()
+    assert handoffs.newest_launch("lead").request_id == "r-2"
+    assert handoffs.newest_launch("coder").request_id == "r-3"
+    assert handoffs.newest_launch("lead_x").request_id == "r-5"
+    assert handoffs.newest_launch("lea") is None
+
+
+def test_with_no_launch_log_a_key_has_no_launch_and_none_is_made():
+    assert handoffs.newest_launch("lead") is None
+    assert not store.path().exists()
+
+
+def test_a_keys_folder_is_its_newest_launchs_else_the_callers(notes):
+    found = handoffs.folder_of_key("lead", cwd="/here")
+    assert (found.folder, found.launch) == (notes.answer["folder"], None)
+    assert notes.calls == [("/here", False, None)]
+    conn = store.connect()
+    try:
+        launched(conn, "r-1", "2026-11-01T00:00:00Z", cwd="/src/moxi", identity="lead",
+                 values={"notes_dir": "/srv/notes"})
+    finally:
+        conn.close()
+    found = handoffs.folder_of_key("lead", cwd="/here")
+    assert found.launch.request_id == "r-1"
+    assert notes.calls[-1] == ("/src/moxi", False, "/srv/notes")
