@@ -308,6 +308,81 @@ def test_a_secret_path_call_keeps_its_summary_line_only_and_drops_its_tail(tool_
     assert texts("tails") == []
 
 
+PLAIN = "hunter2-plain"         # a password no redaction set catches
+
+
+@pytest.mark.parametrize("command, path", [
+    (f"cat > /work/app/.env <<EOF\nDB_PASS={PLAIN}\nEOF", "/work/app/.env"),
+    (f"cat ~/.ssh/id_rsa && echo {PLAIN}", "~/.ssh/id_rsa"),
+    (f"echo PASS={PLAIN}>/work/app/.env", "/work/app/.env")])
+def test_a_secret_path_command_with_more_text_keeps_only_the_path(command, path):
+    t = claude()
+    call = t.request().tool_use("Bash", {"command": command, "description": "x"})
+    t.tool_result(call, "")
+    t.write()
+    run()
+    assert texts() == [f"Bash({path})"]
+
+
+def test_a_patch_to_an_env_file_keeps_only_the_path():
+    r = T.CodexRollout(api.root("codex"))
+    r.turn()
+    c = r.tool_call("apply_patch", "*** Begin Patch\n*** Update File: /work/app/.env\n@@\n"
+                    f"-ADMIN_PASS=old\n+ADMIN_PASS={PLAIN}\n*** End Patch\n")
+    r.tool_output(c, f"Success. Updated /work/app/.env with {PLAIN}")
+    r.write()
+    run()
+    assert texts() == ["apply_patch(/work/app/.env)"] and texts("tails") == []
+
+
+@pytest.mark.parametrize("value", [
+    "cat > /x/.env <<EOF\nA=1\nEOF", "cat ~/.ssh/id_rsa && echo done",
+    ["bash", "-lc", "cat /x/.env | head -n 3"], "*** Update File: /x/.env\n+A=1",
+    {"a": ["not this", {"b": "then /x/.env with words"}]}])
+def test_the_path_found_is_one_word(value):
+    found = rows.secret_path(value)
+    assert found is not None and found.split() == [found]
+
+
+def _runs(count, size, seed):
+    """`count` random letter-and-digit runs of `size`, which redaction turns into short
+    placeholders."""
+    import random
+    import string
+
+    rng = random.Random(seed)
+    return " ".join("".join(rng.choice(string.ascii_letters + string.digits)
+                            for _ in range(size)) for _ in range(count))
+
+
+@pytest.mark.parametrize("where", ["head", "tail"])
+def test_redaction_that_shrinks_the_window_does_not_pull_a_token_into_the_cut(where):
+    sets = ("credentials", "broad")
+    blob = _runs(500, 200, 5)
+    if where == "head":
+        edge = rows.MESSAGE_CHARS + rows.MARGIN
+        text = blob[:edge - 21] + " " + TOKEN + " plain words" * 20
+        kept = rows.keep_head(text, rows.MESSAGE_CHARS, sets)
+        assert kept == rows.redact(text, sets)        # the redacted whole fits
+    else:
+        edge = 1000 + rows.MARGIN
+        text = "plain words " * 10 + TOKEN + " " + blob[:edge - 21]
+        kept = rows.keep_tail(text, 1000, sets)
+        whole = rows.redact(text, sets)
+        assert kept == f"[... {len(whole) - 1000} earlier characters cut] {whole[-1000:]}"
+    for i in range(0, 31):
+        assert TOKEN[i:i + 10] not in kept
+
+
+def test_a_cut_of_a_long_shrinking_text_keeps_the_whole_limit():
+    sets = ("credentials", "broad")
+    text = _runs(400, 200, 6) + " plain words" * 20000
+    kept = rows.keep_head(text, rows.MESSAGE_CHARS, sets)
+    body, marker = kept.rsplit(" [... ", 1)
+    assert len(body) == rows.MESSAGE_CHARS and body == rows.redact(text, sets)[:len(body)]
+    assert marker.endswith(" more characters cut]")
+
+
 # -- the session table ----------------------------------------------------------------
 
 def test_a_child_writes_label_newest_and_settles_only_after_a_model_answer(tmp_path):

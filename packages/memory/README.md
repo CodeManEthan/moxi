@@ -251,17 +251,22 @@ next read. So a session no child has read yet is in no list.
 ## Redaction
 
 Every text memory stores goes through `moxi_secrets.redact` with the sets in `redact.sets`,
-`credentials` and `broad` by default, and is cut to its size only after, so a cut never
-leaves part of a secret whose shape no longer matches. A text secrets reports it could not
-scan is stored as `[REDACTED:unscanned]` alone. What search prints, and what the library
-returns, is the redacted text.
+`credentials` and `broad` by default, and is cut to its size only after, so a cut doesn't
+leave part of a secret whose shape no longer matches. A long text is redacted a window at a
+time, and the window grows until its redacted form runs 64 KiB past the cut, so only a
+secret longer than 64 KiB that straddles the window's edge could leave a part in what is
+kept. A text secrets reports it could not scan is stored as `[REDACTED:unscanned]` alone.
+What search prints, and what the library returns, is the redacted text.
 
-A tool call is a secret-path call when any string in its input, or any word of one, is a
-path secrets says must not be read (`.env*`, `auth.json`, anything under `.ssh/`, `*.pem`
-and the rest of secrets' list); strings inside lists, nested objects and JSON text count.
-Such a call is stored as one line, the tool's name and the path, `Read(/srv/app/.env)`:
-its input is not stored and its result gives no tail. The call stays findable; the file's
-content is not in the index. An `echo .env` is a false hit that costs that call's input.
+A tool call is a secret-path call when any whitespace-separated word of a string in its
+input is a path secrets says must not be read (`.env*`, `auth.json`, anything under
+`.ssh/`, `*.pem` and the rest of secrets' list); strings inside lists, nested objects and
+JSON text count, and a word is also split at `=`, `<`, `>`, `|`, `;` and `&`. Such a call
+is stored as one line, the tool's name and the path, `Read(/srv/app/.env)`: its input is
+not stored and its result gives no tail. The path is the one word that matched, so
+`cat > /srv/app/.env <<EOF ...` is stored as `Bash(/srv/app/.env)`, and a path with a space
+in it shows only its last part. The call stays findable; the file's content is not in the
+index. An `echo .env` is a false hit that costs that call's input.
 
 **What the default sets let through.** `broad` finds random-looking runs only when they
 hold no `/`. A secret that holds a `/`, such as an AWS secret access key, can reach the
