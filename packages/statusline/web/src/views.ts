@@ -56,6 +56,7 @@ export interface PageView {
   values: Values;
   /** Save and Discard show only while the draft differs from the saved config. */
   dirty: boolean;
+  /** How many settings the draft changes, as the bar beside Save says it. */
   countText: string;
   /** False when the saved config can't be read: nothing can be saved over it. */
   editable: boolean;
@@ -115,7 +116,8 @@ export function pageView(state: State, draft: Draft): PageView {
     off,
     values,
     dirty: draft.dirty,
-    countText: count === 1 ? "1 unsaved change" : `${count} unsaved changes`,
+    // The count is of settings, not edits: five moves in the line are one setting, `show`.
+    countText: count === 1 ? "1 setting changed" : `${count} settings changed`,
     editable: state.problem === null,
     problem: state.problem,
     claude: claudeView(state, draft.dirty),

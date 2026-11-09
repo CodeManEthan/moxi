@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Draft, parseState } from "../src/draft.ts";
-import { HOLD, pageView, timeText } from "../src/views.ts";
+import { Draft, moveUp, parseState, turnOn } from "../src/draft.ts";
+import { drawnBy, HOLD, pageView, timeText } from "../src/views.ts";
 
 const FIELDS = ["dir", "branch", "model", "effort", "context", "session", "transcript", "lines", "cost"];
 
@@ -34,12 +34,26 @@ test("Save and Discard show only while the draft differs", () => {
   assert.equal(pageView(s, draft).dirty, false);
   draft.set("color", false);
   assert.equal(pageView(s, draft).dirty, true);
-  assert.equal(pageView(s, draft).countText, "1 unsaved change");
+  assert.equal(pageView(s, draft).countText, "1 setting changed");
   draft.set("dir.parts", 3);
-  assert.equal(pageView(s, draft).countText, "2 unsaved changes");
+  assert.equal(pageView(s, draft).countText, "2 settings changed");
   draft.set("color", true);
   draft.set("dir.parts", 2);
   assert.equal(pageView(s, draft).dirty, false);
+});
+
+test("the count is of settings: many moves and a switch in the line are one", () => {
+  const s = state({ show: ["dir", "model", "context", "cost", "row", "usage"] });
+  const draft = new Draft(s);
+  const drawn = drawnBy(s);
+  let show = draft.values().show;
+  for (const item of ["model", "context", "cost", "context", "cost"]) show = moveUp(show, item, drawn);
+  show = turnOn(show, "branch", drawn);
+  draft.set("show", show);
+  assert.notDeepEqual(draft.values().show, s.values.show);
+  assert.equal(pageView(s, draft).countText, "1 setting changed");
+  draft.set("color", false);
+  assert.equal(pageView(s, draft).countText, "2 settings changed");
 });
 
 test("Discard gives back the saved lists", () => {

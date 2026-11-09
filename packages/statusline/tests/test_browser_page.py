@@ -58,7 +58,7 @@ def test_a_move_changes_the_preview_and_the_config_only_on_save(shell, ui_page):
 
     panel.get_by_role("button", name="Move Effort level up").click()
     expect(line).to_have_text("high / Sample")
-    expect(panel.locator("[data-count]")).to_have_text("1 unsaved change")
+    expect(panel.locator("[data-count]")).to_have_text("1 setting changed")
     expect(panel.get_by_role("button", name="Use Moxi's line")).to_be_disabled()
     expect(panel.locator("[data-held]")).to_have_text("Save or discard first")
     assert path.read_bytes() == saved

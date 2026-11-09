@@ -180,8 +180,9 @@ does: `moxi install statusline --with ui`.
   the render fails or runs past 2 seconds, the preview says why.
 - **Save and Discard.** Every change goes into a draft, and the preview shows it at
   once. Claude Code's line changes only when you press Save, which writes the draft to
-  the config in one checked write; Discard drops it. Both show, with the count of
-  unsaved changes, while the draft differs from the saved config. A draft the config's
+  the config in one checked write; Discard drops it. Both show while the draft differs
+  from the saved config, with how many settings it changes ("2 settings changed"): all
+  the moves and switches in the line are one setting, `show`. A draft the config's
   check refuses shows why in place of the preview, and Save stays off until you fix it.
   When the config file changed since the page read it, the page reads the new file,
   keeps your changes over it and says so. A config that can't be read shows why, with
