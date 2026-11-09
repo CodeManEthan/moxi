@@ -1,7 +1,10 @@
 """The render command, run as Claude runs it: a child process, input on stdin, under the
 core's audit hook."""
 
+import json
 import os
+import re
+import time
 
 import pytest
 from statusline_kit import (
@@ -15,6 +18,8 @@ from statusline_kit import (
     write_config,
 )
 
+from moxi import modules, paths
+
 SEP = " │ "
 
 
@@ -24,6 +29,31 @@ def test_the_default_line_with_no_config_file_and_no_folder_made():
     # usage shows nothing without rate_limits, cache nothing without a clock record.
     assert out(done) == [SEP.join(["…/work/tree", "Madeup 9", "high", "ctx:42%"])]
     assert not config_file().parent.exists()
+
+
+def test_the_default_line_shows_usage_and_cache_at_the_time_now():
+    """The render hands each segment the time now, in epoch seconds: usage's limit that
+    reset a minute ago shows `reset`, and cache's record from 150 s ago shows its age."""
+    for name in ("usage", "cache"):
+        found = modules.announced(name)
+        if found.state != modules.PRESENT or not found.segment:
+            pytest.skip(f"{name} is not installed here")
+    now = time.time()
+    # cache's clock record, where its watcher writes it.
+    folder = paths.Layout("cache").runtime_dir() / "clock"
+    folder.mkdir(parents=True)
+    session = INPUT["session_id"]
+    (folder / f"{session}.json").write_text(json.dumps({
+        "v": 1, "session": session, "harness": "claude", "pid": 1, "kind": "warm",
+        "last_request": now - 150, "ttl": 3600, "read_at": now, "seen_at": now,
+        "code": None, "warn_before": 900, "stale_after": 30}))
+    limits = {"five_hour": {"used_percentage": 23, "resets_at": now + 3600},
+              "seven_day": {"used_percentage": 61, "resets_at": now - 60}}
+    [shown] = out(render("--no-color", stdin={**INPUT, "rate_limits": limits}))
+    head, cache = shown.rsplit(SEP, 1)
+    assert head == SEP.join(["…/work/tree", "Madeup 9", "high", "ctx:42%",
+                             "5h:23% 7d:reset"])
+    assert re.fullmatch(r"cache:2m\d+s", cache), cache
 
 
 def test_every_base_field_on_two_rows_with_colour():
