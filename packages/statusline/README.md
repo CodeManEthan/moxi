@@ -185,7 +185,8 @@ does: `moxi install statusline --with ui`.
   check refuses shows why in place of the preview, and Save stays off until you fix it.
   When the config file changed since the page read it, the page reads the new file,
   keeps your changes over it and says so. A config that can't be read shows why, with
-  the defaults, and the page saves nothing over it.
+  the defaults, and the page saves nothing over it; the preview shows `config?`, the
+  line Claude Code prints until the config reads again.
 - **Claude Code's status line.** Whether Claude Code shows no line, this line, Moxi's
   line from another install or your own, with its command. "Use Moxi's line" sets it to
   Moxi's line with the saved `show`, keeping the line it replaces, as `moxi statusline

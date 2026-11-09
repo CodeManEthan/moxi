@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MOVED, Sync } from "../src/sync.ts";
+import { MOVED, Sync, UNREADABLE_LINE, UNREADABLE_NOTE } from "../src/sync.ts";
 
 const FIELDS = ["dir", "branch", "model", "effort", "context", "session", "transcript", "lines", "cost"];
 
-function wire(base, { show = ["dir", "model"], color = true } = {}) {
+function wire(base, { show = ["dir", "model"], color = true, problem = null } = {}) {
   return {
-    base, problem: null, fields: FIELDS, modules: [],
+    base, problem, fields: FIELDS, modules: [],
     values: { show, separator: " | ", color, dir: { parts: 2 }, context: { warn_at: 50, alert_at: 80 } },
     claude: { set: false, command: null, moxis: false, here: false, saved: false, problem: null },
   };
@@ -129,4 +129,69 @@ test("coming back to the window rebases only when the file moved", async () => {
   assert.equal(sync.draft.base, "b3");
   assert.deepEqual(sync.draft.changes, [{ key: "color", value: false }]);
   assert.equal(calls.filter((c) => c.path === "api/preview").length, 1);
+});
+
+const BROKEN = "The saved config can't be read: show has 'row' first.";
+
+test("a config that stops reading under the page shows the line Claude prints for it", async () => {
+  const { api, calls } = server({
+    "api/state": [{ status: 200, data: wire("b1") }, { status: 200, data: wire("b2", { problem: BROKEN }) }],
+    "api/preview": [{ status: 200, data: LINE }],
+  });
+  const sync = new Sync(api, () => {});
+  await sync.read();
+  await sync.previewNow();
+  assert.deepEqual(sync.preview, LINE);
+  await sync.refocus();
+  assert.deepEqual(sync.preview, { lines: [UNREADABLE_LINE], ms: null, notes: [UNREADABLE_NOTE], problem: null });
+  assert.equal(UNREADABLE_LINE, "config?");
+  assert.equal(calls.filter((c) => c.path === "api/preview").length, 1);
+});
+
+test("a page opened over a config that can't be read shows that line, not a pending one", async () => {
+  const { api, calls } = server({ "api/state": [{ status: 200, data: wire("b1", { problem: BROKEN }) }] });
+  const sync = new Sync(api, () => {});
+  await sync.read();
+  await sync.previewNow();
+  assert.deepEqual(sync.preview.lines, [UNREADABLE_LINE]);
+  assert.deepEqual(calls.map((c) => c.path), ["api/state"]);
+});
+
+test("a render in flight when the config stops reading is dropped", async () => {
+  let release;
+  const slow = new Promise((resolve) => { release = resolve; });
+  const states = [wire("b1"), wire("b2", { problem: BROKEN })];
+  const api = async (path) => (path === "api/state" ? { status: 200, data: states.shift() } : slow);
+  const sync = new Sync(api, () => {});
+  await sync.read();
+  const inFlight = sync.previewNow();
+  await sync.refocus();
+  release({ status: 200, data: LINE });
+  await inFlight;
+  assert.deepEqual(sync.preview.lines, [UNREADABLE_LINE]);
+});
+
+test("once the config reads again the draft is previewed again", async () => {
+  const { api } = server({
+    "api/state": [{ status: 200, data: wire("b1", { problem: BROKEN }) }, { status: 200, data: wire("b2") }],
+    "api/preview": [{ status: 200, data: LINE }],
+  });
+  const sync = new Sync(api, () => {});
+  await sync.read();
+  await sync.refocus();
+  assert.deepEqual(sync.preview, LINE);
+});
+
+test("an act that answers a config that can't be read shows that line", async () => {
+  const { api } = server({
+    "api/state": [{ status: 200, data: wire("b1") }],
+    "api/preview": [{ status: 200, data: LINE }],
+    "api/use": [{ status: 200, data: { ...wire("b2", { problem: BROKEN }), said: ["Switched."] } }],
+  });
+  const sync = new Sync(api, () => {});
+  await sync.read();
+  await sync.previewNow();
+  await sync.act("use");
+  assert.deepEqual(sync.preview.lines, [UNREADABLE_LINE]);
+  assert.equal(sync.message.kind, "ok");
 });

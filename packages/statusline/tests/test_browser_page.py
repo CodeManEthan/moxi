@@ -90,3 +90,16 @@ def test_a_refused_draft_says_why(shell, ui_page):
     warn.dispatch_event("change")
     expect(panel.locator("[data-problem=draft]")).to_contain_text("context.warn_at")
     expect(panel.get_by_role("button", name="Save")).to_be_disabled()
+
+
+def test_a_config_that_stops_reading_shows_the_line_claude_prints(shell, ui_page):
+    panel = open_page(ui_page)
+    line = panel.locator("pre.line")
+    expect(line).to_have_text("Sample / high")
+    shell.config_file("statusline").write_text('show = ["row", "model"]\n')
+    ui_page.evaluate("window.dispatchEvent(new Event('focus'))")
+    expect(panel.locator("[data-problem=config]")).to_contain_text("can't be read")
+    expect(line).to_have_text("config?")
+    expect(line).to_have_attribute("data-state", "unreadable")
+    expect(panel.locator("[data-note]")).to_have_text(
+        "Claude Code's line shows this until the saved config can be read.")

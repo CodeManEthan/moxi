@@ -181,7 +181,10 @@ export class StatuslinePage extends LitElement {
 
   #preview(sync: Sync) {
     const shown = sync.preview;
-    const state = this.#pending ? "pending" : sync.refused ? "refused" : shown?.problem ? "failed" : shown ? "up" : "pending";
+    // A config that can't be read shows the line Claude Code prints for it, marked apart
+    // from a rendered preview.
+    const state = sync.state?.problem ? "unreadable" : this.#pending ? "pending" : sync.refused ? "refused"
+      : shown?.problem ? "failed" : shown ? "up" : "pending";
     return html`<section data-part="preview">
       <h2>Preview</h2>
       <pre class="line" data-state=${state}>${sync.refused === null && shown !== null
