@@ -4,6 +4,7 @@
 
 - The catalogue lists all sixteen first-party modules, so `moxi install <module>` and
   `moxi modules --available` know each by name. Its version is 2.
+- The catalogue lists memory, the seventeenth module. Its version is 3.
 - The README says what the core needs (psutil, and its own copies of tomlkit and
   packaging), that macOS and Windows are untested, every command `moxi help` lists, and
   where `moxi install` writes outside Moxi's own folders: skills and agent files for

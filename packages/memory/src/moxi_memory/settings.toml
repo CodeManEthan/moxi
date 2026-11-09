@@ -1,0 +1,41 @@
+# The memory module's config schema. The file it governs is CONFIG/memory/config.toml;
+# `moxi config memory` shows every key and `moxi config memory init` writes the file.
+# Every key is read at its use, so an edit takes effect at the next read.
+
+[harnesses]
+type = "list"
+items = "str"
+default = ["claude", "codex", "opencode"]
+doc = "The harnesses whose transcripts are indexed: any of claude, codex and opencode."
+read = "use"
+
+[index.subagents]
+type = "bool"
+default = false
+doc = "Index subagent sessions too. They are searched only with --subagents."
+read = "use"
+
+[index.tail_chars]
+type = "int"
+default = 1000
+doc = "How many characters from the end of each tool result are kept, searched only with --results."
+read = "use"
+
+[redact.sets]
+type = "list"
+items = "str"
+default = ["credentials", "broad"]
+doc = "The secrets sets every stored text is redacted with."
+read = "use"
+
+[reminder]
+type = "bool"
+default = true
+doc = "Send the short reminder at each prompt."
+read = "use"
+
+[ingest.timer]
+type = "bool"
+default = false
+doc = "Run a catch-up ingest on a timer, outside agent sessions, as well."
+read = "use"
