@@ -801,7 +801,7 @@ def _core_lock():
         path = paths.core_lock()
         with ExitStack() as stack:
             try:
-                stack.enter_context(files.lock(path, timeout=0))
+                stack.enter_context(files.lock(path, timeout_s=0))
             except files.LockTimeout as exc:
                 who = f"pid {exc.holder}" if exc.holder else "another process"
                 print(f"waiting for another install or uninstall ({who}) to finish",

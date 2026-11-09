@@ -64,7 +64,7 @@ def locked(timeout: float = LOCK_WAIT) -> Iterator[None]:
     from moxi import files
 
     try:
-        with files.lock(places.module_lock(), timeout=timeout):
+        with files.lock(places.module_lock(), timeout_s=timeout):
             yield
     except files.LockTimeout as exc:
         raise TryAgain(f"the slots lock was not had in {timeout:g} s ({exc}); try "

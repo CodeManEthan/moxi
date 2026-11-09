@@ -196,7 +196,7 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
         except ConfigError as e:
             return unknown(_clock.CONFIG_ERROR, f"cache's config could not be read ({e})")
     age = max(0.0, now - found.ts)
-    return Clock(COLD if age >= ttl else WARM, age_seconds=age, ttl_seconds=ttl,
+    return Clock(COLD if age >= ttl else WARM, age_s=age, ttl_s=ttl,
                  ttl_source=source)
 
 

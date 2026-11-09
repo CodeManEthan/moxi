@@ -144,7 +144,7 @@ _gates: dict[str, threading.Lock] = {}
 #: The variable through which an install's parent names, to a settle or teardown child,
 #: the descriptor (on Windows the handle) of the core lock it holds. Only
 #: `adopt_core_claim` reads it; `lock` never reads the environment.
-CLAIM_VARIABLE = "MOXI_CORE_LOCK_FD"
+LOCK_FD_ENV = "MOXI_CORE_LOCK_FD"
 # The install's claim this process adopted: a descriptor open on the core lock file, or
 # None. Kept here, never in the environment, for the process's whole life.
 _claim: int | None = None
@@ -152,7 +152,7 @@ _adopted = False
 _claim_guard = threading.Lock()
 
 
-def lock(path: str | os.PathLike, *, timeout: float | None = None,
+def lock(path: str | os.PathLike, *, timeout_s: float | None = None,
          nested: bool = False) -> AbstractContextManager[None]:
     """Hold an exclusive lock on the lock file `path` for the length of the block.
 
@@ -187,12 +187,12 @@ def lock(path: str | os.PathLike, *, timeout: float | None = None,
     """
     path = Path(path)
     if not nested:
-        return _lock(path, timeout)
+        return _lock(path, timeout_s)
     from .paths import core_lock
 
     if os.path.abspath(path) != os.path.abspath(core_lock()):
         raise ValueError(f"lock(nested=True) is for the core lock alone, not {path}")
-    return _nested_lock(path, timeout)
+    return _nested_lock(path, timeout_s)
 
 
 @contextmanager
@@ -304,7 +304,7 @@ def adopt_core_claim(path: str | os.PathLike) -> bool:
         if _adopted:
             return _claim is not None
         _adopted = True
-        value = os.environ.pop(CLAIM_VARIABLE, None)
+        value = os.environ.pop(LOCK_FD_ENV, None)
         if value is None:
             return False
         fd = _claim_descriptor(value)
@@ -462,11 +462,11 @@ def update(path: str | os.PathLike, fn: Callable[[bytes | None], bytes], *,
 
 
 @contextmanager
-def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
+def edit_toml(path: str | os.PathLike, *, timeout_s: float | None = 10.0,
               lock: str | os.PathLike | None = None) -> Iterator:
     """Edit the TOML file `path` in a `with` block, keeping its comments and order.
 
-    Under the file's lock, `<path>.lock` or the lock file `lock` names (waiting `timeout`
+    Under the file's lock, `<path>.lock` or the lock file `lock` names (waiting `timeout_s`
     as `lock` does), the file is read and parsed with the core's vendored tomlkit, and
     the block gets the document (an empty one when the file is missing). When the block
     ends cleanly the document's text is written with `atomic_write`, keeping an existing
@@ -487,7 +487,7 @@ def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0,
 
     path = Path(path)
     held = _lock_path(path) if lock is None else Path(lock)
-    with _gated_lock(held, timeout=timeout):
+    with _gated_lock(held, timeout=timeout_s):
         target = Path(os.path.realpath(path))
         try:
             text = target.read_text(encoding="utf-8")

@@ -326,7 +326,7 @@ def _commit(args) -> int:
         else:
             print(f"no spec is saved in {where.top}")
         return 0
-    results = [committer.commit_saved(where.top, name, wait=args.wait) for name in names]
+    results = [committer.commit_saved(where.top, name, wait_s=args.wait) for name in names]
     codes = []
     for result in results:
         code = result.exit_code

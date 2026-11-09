@@ -211,7 +211,7 @@ def lock_held() -> bool:
     if not directory.is_dir():
         return False
     try:
-        with files.lock(directory / LOCK_FILE, timeout=0):
+        with files.lock(directory / LOCK_FILE, timeout_s=0):
             return False
     except files.LockTimeout:
         return True
@@ -360,7 +360,7 @@ def _unit_environ(environ: Mapping[str, str], stored: Mapping[str, str] | None) 
         for name in names:
             if name.upper() in folded:
                 out[name] = folded[name.upper()]
-    out.update(units.environment(MODULE, environ))
+    out.update(units.unit_env(MODULE, environ))
     return out
 
 
@@ -697,7 +697,7 @@ def _clear_stored() -> None:
     with contextlib.ExitStack() as held:
         try:
             held.enter_context(files.lock(layout().runtime_dir(create=True) / LOCK_FILE,
-                                          timeout=0))
+                                          timeout_s=0))
         except (files.LockTimeout, RuntimeError):
             raise Refused("a shell is starting or stopping; try again in a moment", 75) from None
         session.clear_stored(layout().state_dir())

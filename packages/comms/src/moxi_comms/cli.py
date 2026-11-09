@@ -252,7 +252,7 @@ def _agents_json(ctx: Context) -> int:
         return code
 
     try:
-        rows = api.roster_rows(deadline=_deadline(ctx))
+        rows = api.roster_rows(timeout_s=_deadline(ctx))
     except DaemonOffline as e:
         return fail(_offline(e), "offline", str(e))
     except DaemonTimeout as e:
@@ -514,7 +514,7 @@ def cmd_owner(args, ctx: Context) -> int:
     if not sid:
         return fail(moxi_exit.USAGE, "refused", "a session id is required")
     try:
-        got = api.owner(sid, deadline=_deadline(ctx))
+        got = api.owner(sid, timeout_s=_deadline(ctx))
     except DaemonOffline as e:
         return fail(_offline(e), "offline", str(e))
     except DaemonTimeout as e:

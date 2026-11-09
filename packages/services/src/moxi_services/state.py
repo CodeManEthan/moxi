@@ -168,7 +168,7 @@ def run_health(argv) -> tuple[str, str]:
     """Run a health command: exit 0 is `ok`, anything else `fail`, each with the first
     line of its output; past `HEALTH_SECONDS` it is `fail`, "did not finish in 5 s"."""
     try:
-        done = moxi.proc.run(list(argv), timeout=HEALTH_SECONDS)
+        done = moxi.proc.run(list(argv), timeout_s=HEALTH_SECONDS)
     except subprocess.TimeoutExpired:
         return "fail", f"did not finish in {HEALTH_SECONDS} s"
     except OSError as exc:

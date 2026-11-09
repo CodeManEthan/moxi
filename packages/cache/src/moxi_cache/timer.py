@@ -389,7 +389,7 @@ def load(config_entries, *, modules: Iterable[Subscription | Refusal] | None = N
 def proc_environ(pid: int) -> dict[str, str] | None:
     """A process's environment as it was started, or None when it cannot be read: always
     on Windows, and for a process that is gone or another user's (`moxi.proc.environ`)."""
-    return _proc.environ(pid)
+    return _proc.process_env(pid)
 
 
 def env_checkable() -> bool:
@@ -535,7 +535,7 @@ def _clock(record: Mapping) -> tuple[float, float] | None:
 class Timer:
     """The timer's state and its tick. The outside effects can be replaced for tests:
     `config_entries` (the user's tables now), `modules` (the modules' checked
-    subscriptions now: a callable, run at each tick, or a fixed list), `environ` (a
+    subscriptions now: a callable, run at each tick, or a fixed list), `process_env` (a
     process's environment), `spawn` and `log_file`. `spawn` is called with the argv alone,
     and on Windows with the ask's output file as `output=` too."""
 

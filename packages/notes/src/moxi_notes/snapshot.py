@@ -113,7 +113,7 @@ class Real:
         from moxi import files
 
         try:
-            self._lock.enter_context(files.lock(self.dir / _settle.LOCK, timeout=0))
+            self._lock.enter_context(files.lock(self.dir / _settle.LOCK, timeout_s=0))
         except (files.LockTimeout, RuntimeError):
             return False
         return True

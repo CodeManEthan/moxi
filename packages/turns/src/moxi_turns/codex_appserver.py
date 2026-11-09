@@ -173,21 +173,21 @@ class CodexLimits:
     via: str
 
 
-def codex_rate_limits(*, timeout: float = PULL_S) -> CodexLimits | None:
+def codex_rate_limits(*, timeout_s: float = PULL_S) -> CodexLimits | None:
     """The account's Codex rate limits now, or None, with the reason logged.
 
     First a live Codex host that offers `usage`, newest first: its `usage.codex_limits`
     reads them on the host's own app-server. Else, when `codex` is on `PATH`, an
     app-server of its own on a private socket: `initialize`, `account/rateLimits/read`,
     and it is stopped again. Neither starts a thread, so no message is sent. A host that
-    errs or does not answer passes to the next way while time is left; past `timeout`
+    errs or does not answer passes to the next way while time is left; past `timeout_s`
     seconds, None."""
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout_s
     reading = _from_hosts(deadline)
     if reading is not None:
         return reading
     if time.monotonic() >= deadline:
-        log.info("no Codex rate limits within %g s", timeout)
+        log.info("no Codex rate limits within %g s", timeout_s)
         return None
     binary = shutil.which(BINARY)
     if binary is None:

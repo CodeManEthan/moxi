@@ -604,12 +604,12 @@ TERMINAL_NAMES = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
 #: built from the core's own constants.
 _HARNESS = names.HARNESS.upper() + "_"
 _LOCATOR = re.compile(re.escape(_HARNESS) + "[A-Z0-9_]+_(?:" + "|".join(
-    re.escape(n) for n in (*paths.LOCATORS, paths.DEVICE.removeprefix(_HARNESS))) + ")")
+    re.escape(n) for n in (*paths.LOCATORS, paths.DEVICE_ENV.removeprefix(_HARNESS))) + ")")
 
 
 def locator(name: str) -> bool:
     """Whether `name` is one of the core's locators."""
-    return name in (paths.HOME, paths.DEVICE) or bool(_LOCATOR.fullmatch(name))
+    return name in (paths.HOME_ENV, paths.DEVICE_ENV) or bool(_LOCATOR.fullmatch(name))
 
 
 def env_class(name: str) -> str | None:

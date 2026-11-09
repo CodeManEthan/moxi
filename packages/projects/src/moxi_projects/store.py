@@ -122,7 +122,7 @@ def writing(where: str | None = None) -> Iterator[sqlite3.Connection]:
     `Unreadable`)."""
     where = where or path()
     try:
-        conn = moxi.store.connect(where, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, timeout_s=TIMEOUT)
     except (moxi.store.StoreError, sqlite3.Error, OSError) as exc:
         raise api._unreadable(where, exc) from exc
     try:
@@ -166,7 +166,7 @@ def setup() -> int:
     except OSError as exc:
         return _say(api._unreadable(where, exc), sys.stderr)
     try:
-        conn = moxi.store.connect(where, create=False, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, create=False, timeout_s=TIMEOUT)
     except moxi.store.StoreError as exc:
         if not os.path.exists(where):
             return 0

@@ -38,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     layout = Layout(serve.MODULE)
     runtime_dir = layout.runtime_dir(create=True)
     try:
-        with files.lock(runtime_dir / serve.LOCK_FILE, timeout=serve.LOCK_WAIT):
+        with files.lock(runtime_dir / serve.LOCK_FILE, timeout_s=serve.LOCK_WAIT):
             starters = Starters(runtime_dir=runtime_dir, state_dir=layout.state_dir(),
                                 log=cli.log_path(), child_args=child_args,
                                 failed_for=failed_for)

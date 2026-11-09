@@ -54,8 +54,8 @@ class Resolution:
 
     __slots__ = ("dir", "rule", "warning")
 
-    def __init__(self, dir, rule: str, warning: str | None = None):
-        object.__setattr__(self, "dir", dir)
+    def __init__(self, notes_dir, rule: str, warning: str | None = None):
+        object.__setattr__(self, "dir", notes_dir)
         object.__setattr__(self, "rule", rule)
         object.__setattr__(self, "warning", warning)
 

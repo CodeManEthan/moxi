@@ -190,7 +190,7 @@ def _locked() -> Iterator[None]:
     nothing written."""
     stack = ExitStack()
     try:
-        stack.enter_context(moxi.files.lock(moxi.paths.core_lock(), timeout=LOCK_TIMEOUT,
+        stack.enter_context(moxi.files.lock(moxi.paths.core_lock(), timeout_s=LOCK_TIMEOUT,
                                             nested=True))
     except moxi.files.LockTimeout as exc:
         who = f"pid {exc.holder}" if exc.holder else "another process"

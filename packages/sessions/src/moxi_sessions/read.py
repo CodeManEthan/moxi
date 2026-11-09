@@ -311,7 +311,7 @@ class Window:
 
     __slots__ = ("records", "has_earlier", "before", "ended", "_header")
 
-    def __init__(self, records: tuple[Record, ...], has_earlier: bool, before: Any,
+    def __init__(self, records: tuple[Record, ...], *, has_earlier: bool, before: Any,
                  ended: str | None, header: _Once):
         self.records = records
         self.has_earlier = has_earlier
@@ -706,7 +706,7 @@ def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
     _refuse_compressed(src)
     codex_file = src.harness == CODEX
     try:
-        reader = read_back(src.path, block=block, limit=limit, head=head or codex_file,
+        reader = read_back(src.path, block=block, limit=limit, read_head=head or codex_file,
                            end=end, offsets=True)
     except OSError as e:
         raise _cannot(src, e) from e
@@ -753,13 +753,13 @@ def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
 
 
 def records_back(source: Any, *, kinds: Iterable[str] | None = None, block: int = BLOCK,
-                 limit: int = BACK_LIMIT, head: bool = False, keep_raw: bool = False) -> Back:
+                 limit: int = BACK_LIMIT, read_head: bool = False, keep_raw: bool = False) -> Back:
     """The source's records, newest first, read backward from its end in `block`-byte
     reads up to `limit` bytes (`read_back`'s read), each request key once, from its newest
     line.
 
     A Claude request's `final` is true when a newer line belongs to another request or ends
-    the turn. With `head`, line 1 is read first and its records are `Back.first`. An
+    the turn. With `read_head`, line 1 is read first and its records are `Back.first`. An
     unterminated last line that does not decode is a `malformed` record with
     `unterminated` true. An OpenCode session is read whole, in one read transaction, and
     its records come in the exact reverse of a forward read's order. Raises Unreadable
@@ -768,8 +768,8 @@ def records_back(source: Any, *, kinds: Iterable[str] | None = None, block: int 
     src, bound = unpack(source)
     wanted = _wanted(kinds)
     if src.harness == OPENCODE:
-        return _opencode_back(src, wanted, head, keep_raw)
-    return _file_back(src, end=bound, wanted=wanted, block=block, limit=limit, head=head,
+        return _opencode_back(src, wanted, read_head, keep_raw)
+    return _file_back(src, end=bound, wanted=wanted, block=block, limit=limit, head=read_head,
                       keep_raw=keep_raw)
 
 
@@ -1106,8 +1106,8 @@ def window(source: Any, *, turns: int = 5, before: Any = None,
     has_earlier = taken.full or ended == LIMIT
     records_ = taken.records
     earliest = min((r.at["offset"] for r in records_), default=None)
-    return Window(tuple(reversed(records_)), has_earlier,
-                  earliest if has_earlier else None, ended, back._header)
+    return Window(tuple(reversed(records_)), has_earlier=has_earlier,
+                  before=earliest if has_earlier else None, ended=ended, header=back._header)
 
 
 def _opencode_window(src: Source, turns: int, before: Any) -> Window:
@@ -1134,9 +1134,9 @@ def _opencode_window(src: Source, turns: int, before: Any) -> Window:
         if skipping:
             raise ValueError(f"before names no message of session {session_id}: "
                              f"{before!r}")
-    return Window(tuple(reversed(taken.records)), taken.full,
-                  oldest if taken.full else None, oc.BACK_ENDED,
-                  _Once(value=opencode_header(src, row)))
+    return Window(tuple(reversed(taken.records)), has_earlier=taken.full,
+                  before=oldest if taken.full else None, ended=oc.BACK_ENDED,
+                  header=_Once(value=opencode_header(src, row)))
 
 
 __all__ = [

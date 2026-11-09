@@ -89,7 +89,7 @@ POSTURES = (_machine_line.POSTURE_NONE, _machine_line.POSTURE_OPTIONAL,
 
 def send(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = False,
          audience=None, held: bool = False, cap=None, no_cap: bool = False,
-         deadline: float = 30.0, standing: bool = False,
+         timeout_s: float = 30.0, standing: bool = False,
          new_name: bool = False, interrupt: bool = False,
          expires=None) -> SendResult:
     """Send `text` to `to` as `sender`, with every check `moxi comms send` makes.
@@ -101,28 +101,28 @@ def send(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = F
     reply, or the operator). `cap` is a whole number of replies. `standing` and
     `new_name` are the verb's `--standing` and `--new-name`. `interrupt` is
     `--interrupt`. `expires` is `--expires`: a duration (`30m`, `6h`, `3d`), `never`, a
-    whole number of seconds, or None for the config's default. `deadline` is seconds,
+    whole number of seconds, or None for the config's default. `timeout_s` is seconds,
     passed to every daemon call, to the claim socket and to the record's busy timeout.
 
     The result says whether it posted (`message_id`), and a post either commits or does
     not. Raises only on arguments the verb's parser would refuse (`ValueError`,
     `TypeError`)."""
     return _run(sender, to, text, posture=posture, reply_to=reply_to, new=new,
-                audience=audience, held=held, cap=cap, no_cap=no_cap, deadline=deadline,
+                audience=audience, held=held, cap=cap, no_cap=no_cap, deadline=timeout_s,
                 standing=standing, new_name=new_name, interrupt=interrupt,
                 expires=expires, check=False)
 
 
 def check(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = False,
           audience=None, held: bool = False, cap=None, no_cap: bool = False,
-          deadline: float = 30.0, standing: bool = False,
+          timeout_s: float = 30.0, standing: bool = False,
           new_name: bool = False, interrupt: bool = False,
           expires=None) -> SendResult:
     """`send`'s every check, stopping before the post: outcome `would-send`, with the
     recipients and notes the post would have, or the refusal the send would give.
     Posts, nudges and records nothing."""
     return _run(sender, to, text, posture=posture, reply_to=reply_to, new=new,
-                audience=audience, held=held, cap=cap, no_cap=no_cap, deadline=deadline,
+                audience=audience, held=held, cap=cap, no_cap=no_cap, deadline=timeout_s,
                 standing=standing, new_name=new_name, interrupt=interrupt,
                 expires=expires, check=True)
 
@@ -158,7 +158,7 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
 
 
 def send_as(module: str, name: str, to, text: str, *, expires=None,
-            interrupt: bool = False, deadline: float = 30.0) -> SendResult:
+            interrupt: bool = False, timeout_s: float = 30.0) -> SendResult:
     """Send `text` to `to` under `name`, a send-only name reserved for `module`, as that
     module's own code: its token is read through this process's credential chain and
     presented to the daemon, which refuses a sender inside a live session. The posture is
@@ -175,17 +175,17 @@ def send_as(module: str, name: str, to, text: str, *, expires=None,
                            no_cap=False, audience=None, new=False, held=False,
                            standing=False, new_name=False, interrupt=bool(interrupt),
                            expires=expires, check=False, reply_to=None, message_id=None)
-    ctx = _sending.Context(env=dict(os.environ), deadline=deadline)
+    ctx = _sending.Context(env=dict(os.environ), deadline=timeout_s)
     return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
 
 
-def delete(sender: Sender, message_id, *, deadline: float = 30.0) -> DeleteResult:
+def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResult:
     """Withdraw `message_id`, which `sender` sent, from every recipient that hasn't had
     it in a digest (`moxi comms delete`). The `DeleteResult` names who it was withdrawn
     from, who had it already and whose copy expired first."""
     if not isinstance(sender, Sender):
         raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")
-    ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)
+    ctx = _sending.Context(env=sender.environ(os.environ), deadline=timeout_s)
     return _sending.delete(ctx, message_id)
 
 
@@ -196,23 +196,23 @@ def _daemon(deadline: float):
     return _sending.Context(deadline=deadline).daemon()
 
 
-def attributed(message_id, *, deadline: float = READ_DEADLINE) -> dict | None:
+def attributed(message_id, *, timeout_s: float = READ_DEADLINE) -> dict | None:
     """One message with its author as the daemon attributes it, or None when the record
     holds no such id: `message_id`, `room`, `author` (`name`, `tier`, `attribution`),
     `recipients`, `resolved`, `text`, `timestamp`. Raises `DaemonOffline` or
     `DaemonError`."""
-    client = _daemon(deadline)
+    client = _daemon(timeout_s)
     try:
         return client.attributed_message(message_id)
     finally:
         client.close()
 
 
-def session(identity: str, *, deadline: float = READ_DEADLINE) -> dict:
+def session(identity: str, *, timeout_s: float = READ_DEADLINE) -> dict:
     """Which live session sits behind one bound name: the daemon's `session` answer
     (`bound`, `adapter`, `session_id`, `bound_at`, the cache read, ...). An unbound name
     answers `bound` False. Raises `DaemonOffline` or `DaemonError`."""
-    client = _daemon(deadline)
+    client = _daemon(timeout_s)
     try:
         answer = client.call("session", {"identity": str(identity)})
     finally:
@@ -220,11 +220,11 @@ def session(identity: str, *, deadline: float = READ_DEADLINE) -> dict:
     return {k: v for k, v in answer.items() if k not in ("id", "ok")}
 
 
-def session_of(identity: str, *, deadline: float = READ_DEADLINE) -> str | None:
+def session_of(identity: str, *, timeout_s: float = READ_DEADLINE) -> str | None:
     """The live session id behind the bound name `identity`, as its adapter reports it;
     None when the name isn't bound (a reserved name never is) or its binding has
     reported no session id yet. Raises what `session` raises."""
-    answer = session(identity, deadline=deadline)
+    answer = session(identity, timeout_s=timeout_s)
     sid = answer.get("session_id")
     return sid if answer.get("bound") and isinstance(sid, str) and sid else None
 
@@ -323,11 +323,11 @@ def _declared_directors() -> dict:
     return out
 
 
-def roster(*, deadline: float = READ_DEADLINE) -> Roster:
+def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
     """The bound agents with their declared directors, and the standing names: the
     directory's standing rows and the reserved send-only names, as the daemon's `agents`
     answer lists them. Raises `DaemonOffline` or `DaemonError`."""
-    client = _daemon(deadline)
+    client = _daemon(timeout_s)
     try:
         answer = client.call("agents")
     finally:
@@ -376,10 +376,10 @@ def _reserved(qualified: str) -> tuple[bool, str | None]:
     return (qualified in rows), rows.get(qualified, (None,))[0]
 
 
-def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
+def owner(session_id: str, *, timeout_s: float = READ_DEADLINE) -> Owner:
     """Which identity owns `session_id` now, with its declared directors and whom it
     awaits. Raises `DaemonOffline`, or `DaemonError` (an empty id among them)."""
-    client = _daemon(deadline)
+    client = _daemon(timeout_s)
     try:
         answer = client.call("owner", {"session_id": str(session_id)})
     finally:
@@ -416,19 +416,19 @@ class RosterRow:
     awaiting: tuple = ()
 
 
-def roster_rows(*, deadline: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
+def roster_rows(*, timeout_s: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
     """Who can be messaged, one row per address: `roster()` joined with each bound
     name's `session()` and its session's `owner()`. `moxi comms agents --json` prints
     these rows, and comms' page shows them.
 
     A bound name is a live row, carrying its standing row's `kind` and `module` when it
     has one; a standing name nobody holds is a standing row. Live rows come first, then
-    each group by `qualified`. `deadline` goes to every daemon call.
+    each group by `qualified`. `timeout_s` goes to every daemon call.
 
     Raises `DaemonOffline` the first time any call does, making no further call, and
     `DaemonError` when `roster()` does. A `DaemonError` on one name's `session()` or
     `owner()` leaves that row's `session_id`, `bound_at` and `awaiting` empty."""
-    got = roster(deadline=deadline)
+    got = roster(timeout_s=timeout_s)
     standing: dict = {}
     for row in got.standing:
         standing.setdefault(row.qualified, row)
@@ -436,7 +436,7 @@ def roster_rows(*, deadline: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
     for agent in got.bound:
         kept = standing.pop(agent.qualified, None)
         try:
-            session_id, bound_at, awaiting = _live_fields(agent.qualified, deadline)
+            session_id, bound_at, awaiting = _live_fields(agent.qualified, timeout_s)
         except DaemonError:
             session_id, bound_at, awaiting = None, None, ()
         rows.append(RosterRow(
@@ -455,7 +455,7 @@ def roster_rows(*, deadline: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
 def _live_fields(qualified: str, deadline: float) -> tuple:
     """(session_id, bound_at, awaiting) of one bound name, from `session()` and, when it
     names a session, `owner()`."""
-    held = session(qualified, deadline=deadline)
+    held = session(qualified, timeout_s=deadline)
     if not held.get("bound"):
         return None, None, ()
     at = held.get("bound_at")
@@ -464,7 +464,7 @@ def _live_fields(qualified: str, deadline: float) -> tuple:
     sid = held.get("session_id")
     if not (isinstance(sid, str) and sid):
         return None, bound_at, ()
-    return sid, bound_at, tuple(owner(sid, deadline=deadline).awaiting)
+    return sid, bound_at, tuple(owner(sid, timeout_s=deadline).awaiting)
 
 
 #: What `identity_state` says of a name.
@@ -503,7 +503,7 @@ class IdentityState:
 
 
 def identity_state(name: str, scope: str | None = None, *,
-                   deadline: float = READ_DEADLINE) -> IdentityState:
+                   timeout_s: float = READ_DEADLINE) -> IdentityState:
     """Whether `name` (in `scope`, else the global identity) is free for a launch to
     claim, from the daemon's `resolve` and `session` answers and the store's reserved
     names. `name` may be qualified (`name@scope`) when `scope` is None. Raises
@@ -512,7 +512,7 @@ def identity_state(name: str, scope: str | None = None, *,
     name, scope = _launch_name(name, scope)
     qualified = qualify(name, scope)
     try:
-        client = _daemon(deadline)
+        client = _daemon(timeout_s)
     except DaemonOffline as e:
         return IdentityState(qualified, "offline", reason=str(e))
     try:

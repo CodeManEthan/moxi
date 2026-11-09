@@ -316,10 +316,10 @@ def run_child(argv: list[str], *, env: dict[str, str] | None = None) -> Outcome:
 
 
 def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Popen:
-    from .files import CLAIM_VARIABLE
+    from .files import LOCK_FD_ENV
 
     if not _WINDOWS:
-        environ[CLAIM_VARIABLE] = str(fd)
+        environ[LOCK_FD_ENV] = str(fd)
         return subprocess.Popen(argv, env=environ, pass_fds=(fd,))
     import msvcrt
 
@@ -328,7 +328,7 @@ def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Pope
     try:
         info = subprocess.STARTUPINFO()
         info.lpAttributeList = {"handle_list": [handle]}
-        environ[CLAIM_VARIABLE] = str(handle)
+        environ[LOCK_FD_ENV] = str(handle)
         return subprocess.Popen(argv, env=environ, startupinfo=info, close_fds=True)
     finally:
         os.set_handle_inheritable(handle, False)
@@ -972,7 +972,7 @@ def _skill_folders(found) -> tuple[list[str] | None, object]:
                       f"can't be placed")
     try:
         skills = sorted(entry.name for entry in folder.iterdir()
-                        if names.is_skill_folder(entry.name) and entry.is_dir())
+                        if names.is_skill_dir(entry.name) and entry.is_dir())
     except OSError as exc:
         return None, f"SKILLS folder {folder} can't be read ({exc.strerror or exc})"
     return skills, folder

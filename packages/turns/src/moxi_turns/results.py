@@ -408,13 +408,13 @@ class Agents(_Value):
     complete: bool
     at: float
 
-    def busy(self, *, shells: bool = True) -> int | None:
+    def busy(self, *, include_shells: bool = True) -> int | None:
         """The count the busy checks read (`Facts.agents`): entries not final and pending,
-        running or waiting, or None when the list is not complete. With `shells` False
+        running or waiting, or None when the list is not complete. With `include_shells` False
         the `shell` entries are left out, as a command with `stop_shells` reads it."""
         if not self.complete:
             return None
-        return sum(1 for a in self.entries if a.busy and (shells or a.kind != "shell"))
+        return sum(1 for a in self.entries if a.busy and (include_shells or a.kind != "shell"))
 
 
 @dataclass(frozen=True)

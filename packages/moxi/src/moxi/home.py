@@ -211,7 +211,7 @@ def _stop(module: str, names: list[str], replace: bool, record: list) -> None:
     from . import units
 
     before = len(record)
-    acted = units.stop(module, names, replace=replace, record=record)
+    acted = units.stop(module, names, replace=replace, stopped=record)
     failed = [a for a in acted if not a.ok]
     if not failed:
         return

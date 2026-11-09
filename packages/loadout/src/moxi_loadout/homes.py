@@ -134,7 +134,7 @@ def places(*, reads: Sequence[str] = ()) -> Places:
                  "loadout's config file": mine.config_file(env),
                  "Moxi's state folder": core().state_dir(env),
                  "Moxi's settings file": core().config_file(env)}
-        found.update(place.folders(env))
+        found.update(place.harness_dirs(env))
         found.update({f"{NAMES[h]}'s home": harness.home(h, env)
                       for h in harness.HARNESSES})
         for m in modules:

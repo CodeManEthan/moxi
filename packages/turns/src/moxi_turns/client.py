@@ -302,9 +302,9 @@ class Session:
     """
 
     def __init__(self, address: str, info: dict[str, Any] | None = None, *,
-                 directory: Path | None = None):
+                 endpoint_dir: Path | None = None):
         self.address = address
-        self.dir = directory
+        self.dir = endpoint_dir
         self._info: dict[str, Any] = dict(info or {})
         self._capabilities: frozenset[str] | None = None
         self._short = _Link(self)
@@ -430,29 +430,29 @@ class Session:
         return dict(values)
 
     def codex_limits(self, *, cached: bool = False,
-                     timeout: float = READ_S) -> dict[str, Any]:
+                     timeout_s: float = READ_S) -> dict[str, Any]:
         """A Codex host's `usage.codex_limits`: `{payload, received_at}` read from its
         app-server now (`payload` null and a `reason` when it could not be), or with
         `cached` the last reading the host saw, `{payload, received_at, kind}`, each null
         before the first. Most callers want `moxi_turns.codex_rate_limits()`. Raises
         `TurnsError`: the `capability` error on a session without it."""
         params = {"cached": True} if cached else {}
-        answer = self._read(self._short, "usage.codex_limits", timeout, params)
+        answer = self._read(self._short, "usage.codex_limits", timeout_s, params)
         if not isinstance(answer, dict) or not isinstance(answer.get("payload"),
                                                           (dict, type(None))):
             raise TurnsError(f"the endpoint at {self.address} answered "
                              f"usage.codex_limits with something turns cannot read")
         return answer
 
-    def mcp_reload(self, *, timeout: float = MCP_RELOAD_S) -> dict[str, Any]:
+    def mcp_reload(self, *, timeout_s: float = MCP_RELOAD_S) -> dict[str, Any]:
         """A Codex host's `mcp.reload`: settle the MCP servers its launch rendered,
         reloading them once when one reads `failed`. Answers `{reloaded, servers}`,
         `servers` mapping each rendered server to the status it last read (null: never
         read, or unavailable). The host answers within its settle deadline, or twice
         that when the call waits behind a settle already past its first read, so the
-        default `timeout` is above both. Raises `TurnsError`: the `capability` error on a
-        session without `mcp-token`, or no answer within `timeout`."""
-        answer = self._read(self._short, "mcp.reload", timeout, {})
+        default `timeout_s` is above both. Raises `TurnsError`: the `capability` error on a
+        session without `mcp-token`, or no answer within `timeout_s`."""
+        answer = self._read(self._short, "mcp.reload", timeout_s, {})
         if (not isinstance(answer, dict) or not isinstance(answer.get("reloaded"), bool)
                 or not isinstance(answer.get("servers"), dict)):
             raise TurnsError(f"the endpoint at {self.address} answered mcp.reload with "
@@ -518,9 +518,9 @@ class Session:
     # -- commands -----------------------------------------------------------------------
 
     def command(self, name: str, *, if_turn_number: int | None = None,
-                timeout: float | None = None,
+                timeout_s: float | None = None,
                 stop_shells: bool = False) -> Ran | Refused | Failed:
-        """Run `clear`, `exit` or `compact`; `timeout` bounds this call's wait for the
+        """Run `clear`, `exit` or `compact`; `timeout_s` bounds this call's wait for the
         harness to settle it (None: 30 s for `clear` and `exit`, 330 s for `compact`,
         plus 10 s with `stop_shells`). A call that stops waiting first reads `Failed`,
         and the command may still run.
@@ -537,10 +537,10 @@ class Session:
             raise ValueError("a command is one of " + ", ".join(COMMANDS))
         if stop_shells and name == "exit":
             raise ValueError("stop_shells is valid with clear and compact only")
-        if timeout is None:
-            timeout = COMMAND_WAIT_S[name] + (STOP_SHELLS_WAIT_S if stop_shells else 0)
+        if timeout_s is None:
+            timeout_s = COMMAND_WAIT_S[name] + (STOP_SHELLS_WAIT_S if stop_shells else 0)
         params: dict[str, Any] = {"name": name, "if_turn_number": if_turn_number,
-                                  "timeout_ms": _ms(timeout)}
+                                  "timeout_ms": _ms(timeout_s)}
         if stop_shells:
             params["stop_shells"] = True
         proc_id, watched = None, False
@@ -554,7 +554,7 @@ class Session:
             log.info("command %s was never written: %s", name, exc.error)
             return Refused(REFUSED_GONE)
         try:
-            answer = _call(client, "command", params, timeout + READ_S)
+            answer = _call(client, "command", params, timeout_s + READ_S)
         except _Unanswered as exc:
             log.info("command %s was written and not answered: %s; it may still run",
                      name, exc.cause)
@@ -668,15 +668,15 @@ class Delivery:
     def __repr__(self) -> str:
         return f"Delivery({self.id!r}, ref={self.ref!r})"
 
-    def wait_started(self, timeout: float | None) -> Started | Refused | Lost:
+    def wait_started(self, timeout_s: float | None) -> Started | Refused | Lost:
         """The delivery's start: `Started`, or why it did not start. Raises
-        `TimeoutError` when `timeout` passes first; a later wait asks again."""
-        return self._wait("started", timeout)
+        `TimeoutError` when `timeout_s` passes first; a later wait asks again."""
+        return self._wait("started", timeout_s)
 
-    def wait_ended(self, timeout: float | None) -> Ended | Refused | Lost:
+    def wait_ended(self, timeout_s: float | None) -> Ended | Refused | Lost:
         """The end of the turn that took the delivery: `Ended`, or why there is none.
-        Raises `TimeoutError` when `timeout` passes first."""
-        return self._wait("ended", timeout)
+        Raises `TimeoutError` when `timeout_s` passes first."""
+        return self._wait("ended", timeout_s)
 
     def _wait(self, until: str, timeout: float | None):
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -936,7 +936,7 @@ def _probe(directory: Path, hello: dict[str, Any]) -> Session | None:
                 log.info("swept the dead endpoint directory %s", directory)
         return None
     client.close()
-    session = Session(address, info, directory=directory)
+    session = Session(address, info, endpoint_dir=directory)
     session._capabilities = frozenset(agreed.capabilities)
     return session
 
@@ -1055,15 +1055,15 @@ def find(*, session_id: str | None = None, pid: int | None = None,
 
 
 def wait_ready(*, session_id: str | None = None, pid: int | None = None,
-               timeout: float, proc: ProcView | None = None) -> Session:
+               timeout_s: float, proc: ProcView | None = None) -> Session:
     """The `Session` once an endpoint names the session and its `facts().ready` is set:
     the session started, resumed, was cleared or compacted. Polls `find` every 100 ms,
     backing off to 1 s, and reads `ready` from the facts, so a Ready raised before this
-    looked is not missed. Raises `TimeoutError` when `timeout` passes first, and
+    looked is not missed. Raises `TimeoutError` when `timeout_s` passes first, and
     `VersionError` as `find` does."""
     if (session_id is None) == (pid is None):
         raise TypeError("wait_ready() takes exactly one of session_id= or pid=")
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout_s
     delay = 0.1
     while True:
         session = find(session_id=session_id, pid=pid, proc=proc)
@@ -1077,7 +1077,7 @@ def wait_ready(*, session_id: str | None = None, pid: int | None = None,
         left = deadline - time.monotonic()
         if left <= 0:
             who = f"session {session_id}" if session_id is not None else f"pid {pid}"
-            raise TimeoutError(f"no ready endpoint for {who} in {timeout} s")
+            raise TimeoutError(f"no ready endpoint for {who} in {timeout_s} s")
         time.sleep(min(delay, left))
         delay = min(delay * 2, 1.0)
 

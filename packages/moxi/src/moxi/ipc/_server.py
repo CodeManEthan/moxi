@@ -319,14 +319,14 @@ class Server:
     """
 
     def __init__(self, address: str, handler: Handler, *, hello: Hello | None,
-                 max_line: int, write_deadline: float, queue: int,
+                 max_line: int, write_timeout_s: float, queue: int,
                  legacy: Callable[[bytes], object] | None,
                  on_close: Callable[[Connection], object] | None):
         self.address = address
         self._handler = handler
         self._hello = hello
         self._max_line = max_line
-        self._write_deadline = write_deadline
+        self._write_deadline = write_timeout_s
         self._queue = queue
         self._legacy = legacy
         self._on_close = on_close
@@ -476,7 +476,7 @@ class Server:
         deadline = self._loop.time() + LOCK_WAIT
         while True:
             try:
-                self._hold.enter_context(files.lock(path, timeout=0))
+                self._hold.enter_context(files.lock(path, timeout_s=0))
                 return
             except files.LockTimeout as exc:
                 if self._loop.time() >= deadline:
@@ -679,7 +679,7 @@ def _core_dir(directory: str) -> bool:
 
 
 async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
-                max_line: int = _wire.MAX_LINE, write_deadline: float = 5.0,
+                max_line: int = _wire.MAX_LINE, write_timeout_s: float = 5.0,
                 queue: int = 256, legacy: Callable[[bytes], object] | None = None,
                 on_close: Callable[[Connection], object] | None = None) -> Server:
     """Serve JSON-RPC 2.0 at `address` (`moxi.ipc.address(module, name)`), calling
@@ -694,7 +694,7 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     version and `hello.capabilities`, whatever the client offered; `conn.agreed` holds
     the version and the capabilities the client offered.
     `max_line`: the longest line read, in bytes without the newline; a longer one is
-    answered -32600 and closes the connection. `write_deadline`: seconds one write may
+    answered -32600 and closes the connection. `write_timeout_s`: seconds one write may
     take before the peer is dropped. `queue`: frames a connection may have waiting to
     be written before the peer is dropped. `legacy`: called as `legacy(line)` (sync or
     async) with a connection's first message, newline stripped, when it is not
@@ -727,9 +727,9 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
         raise ValueError(f"max_line is a whole number of bytes above 0, not {max_line!r}")
     if isinstance(queue, bool) or not isinstance(queue, int) or queue < 1:
         raise ValueError(f"queue is a whole number above 0, not {queue!r}")
-    if not write_deadline > 0:
+    if not write_timeout_s > 0:
         raise ValueError(f"write_deadline is a number of seconds above 0, not "
-                         f"{write_deadline!r}")
+                         f"{write_timeout_s!r}")
     if hello is not None and not isinstance(hello, Hello):
         raise TypeError(f"hello is a moxi.ipc.Hello, not {hello!r}")
     address = os.fspath(address)
@@ -741,7 +741,7 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     else:
         _socket_dir(os.path.dirname(os.path.abspath(address)))
     server = Server(address, handler, hello=hello, max_line=max_line,
-                    write_deadline=write_deadline, queue=queue, legacy=legacy,
+                    write_timeout_s=write_timeout_s, queue=queue, legacy=legacy,
                     on_close=on_close)
     await server._start()
     return server

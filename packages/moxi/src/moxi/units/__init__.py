@@ -68,7 +68,7 @@ from ._act import disable, enable, restart, resume, start, stop
 from ._apply import apply, apply_held, core_lock, remove
 from ._backend import Backend, backend
 from ._declare import UNITS_FROM_SECONDS, declarations, digest, switch_problem
-from ._home import environment, home_tag
+from ._home import unit_env, home_tag
 from ._plan import plan
 from ._status import last_runs, status
 from ._types import (
@@ -187,6 +187,6 @@ __all__ = [
     "Acted", "Applied", "Backend", "DeclarationError", "Declarations", "Stopped",
     "TASK_STATUS_CODES", "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped",
     "apply", "apply_switch", "backend", "core_lock", "declarations", "digest", "disable",
-    "enable", "environment", "home_tag", "ids", "last_runs", "plan", "remove", "restart",
+    "enable", "unit_env", "home_tag", "ids", "last_runs", "plan", "remove", "restart",
     "resume", "start", "starts", "status", "stop", "switch_problem", "switched_daemons",
     "unwrap", "wrap", "wraps"]

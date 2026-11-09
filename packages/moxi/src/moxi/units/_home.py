@@ -37,7 +37,7 @@ def home_path(env: Mapping[str, str] | None = None) -> str | None:
     from .. import paths
 
     environ = os.environ if env is None else env
-    value = environ.get(paths.HOME)
+    value = environ.get(paths.HOME_ENV)
     if not value:
         return None
     return os.path.realpath(os.path.abspath(paths._expanduser(value, environ)))
@@ -53,7 +53,7 @@ def home_tag(env: Mapping[str, str] | None = None) -> str | None:
     return "h" + digest[:TAG_DIGITS]
 
 
-def environment(module: str, env: Mapping[str, str] | None = None) -> dict[str, str]:
+def unit_env(module: str, env: Mapping[str, str] | None = None) -> dict[str, str]:
     """The variables `module`'s units are written with: `{"MOXI_HOME": home_path}` for a
     tagged home, nothing for the default home. Every module's units carry the same."""
     from .. import names
@@ -71,4 +71,4 @@ def locators_set(module: str, env: Mapping[str, str] | None = None) -> tuple[str
 
     environ = os.environ if env is None else env
     return tuple(name for name in paths.Layout(module).locators()
-                 if name != paths.HOME and environ.get(name))
+                 if name != paths.HOME_ENV and environ.get(name))

@@ -496,7 +496,7 @@ def run(*, bind: Callable[[Callable[[], int]], Listeners] = listen.take,
         say(f"moxi ui: the runtime directory cannot be made private: {err}")
         return 1
     try:
-        with files.lock(runtime_dir / LOCK_FILE, timeout=LOCK_WAIT):
+        with files.lock(runtime_dir / LOCK_FILE, timeout_s=LOCK_WAIT):
             return _run_held(layout, bind, say)
     except files.LockTimeout:
         say("moxi ui: another shell is running or starting (it holds page.lock)")

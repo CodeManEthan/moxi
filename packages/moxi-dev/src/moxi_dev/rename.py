@@ -66,6 +66,11 @@ class Source:
     parents: dict[int, ast.AST] = field(default_factory=dict)
     aliases: dict[str, str] = field(default_factory=dict)
     instances: dict[tuple[str, str], str] = field(default_factory=dict)
+    # The qualified name of the scope each node sits in, by node id, and every node in
+    # walk order: read once here, so each row doesn't walk every tree again.
+    enclosing: dict[int, str] = field(default_factory=dict)
+    nodes: list[ast.AST] = field(default_factory=list)
+    lines: list[str] = field(default_factory=list)
 
     def position(self, line: int, column: int) -> int:
         return self.offsets[line - 1] + column
@@ -75,7 +80,7 @@ class Source:
                 self.position(node.end_lineno, node.end_col_offset))
 
     def line_text(self, line: int) -> str:
-        return self.text.splitlines()[line - 1] if line > 0 else ""
+        return self.lines[line - 1] if 0 < line <= len(self.lines) else ""
 
 
 def read_table(path: Path) -> list[Row]:
@@ -115,13 +120,16 @@ def _module(path: str) -> str | None:
     return ".".join(dotted) if dotted and all(p.isidentifier() for p in dotted) else None
 
 
-def _scope_map(tree: ast.Module) -> tuple[dict[str, ast.AST], dict[int, ast.AST]]:
+def _scope_map(tree: ast.Module) -> tuple[dict[str, ast.AST], dict[int, ast.AST],
+                                          dict[int, str]]:
     scopes: dict[str, ast.AST] = {"-": tree}
     parents: dict[int, ast.AST] = {}
+    enclosing: dict[int, str] = {}
 
     def walk(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             parents[id(child)] = node
+            enclosing[id(child)] = prefix or "-"
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 qual = f"{prefix}.{child.name}" if prefix else child.name
                 scopes[qual] = child
@@ -130,7 +138,7 @@ def _scope_map(tree: ast.Module) -> tuple[dict[str, ast.AST], dict[int, ast.AST]
                 walk(child, prefix)
 
     walk(tree, "")
-    return scopes, parents
+    return scopes, parents, enclosing
 
 
 def _offsets(text: str) -> list[int]:
@@ -143,10 +151,11 @@ def _offsets(text: str) -> list[int]:
     return out
 
 
-def _relative(module: str, level: int, named: str | None) -> str:
+def _relative(module: str, level: int, named: str | None, package: bool = False) -> str:
     if level == 0:
         return named or ""
-    base = module.split(".")[:-1]
+    # A package's `__init__` is the package itself: one dot names it.
+    base = module.split(".") if package else module.split(".")[:-1]
     if level:
         base = base[:max(0, len(base) - level + 1)]
     if named:
@@ -181,9 +190,11 @@ class Project:
                 tree = ast.parse(text, filename=path)
             except SyntaxError:
                 continue
-            scopes, parents = _scope_map(tree)
+            scopes, parents, enclosing = _scope_map(tree)
             self.sources[path] = Source(path, text, tree, module, _offsets(text), scopes,
-                                        parents)
+                                        parents, enclosing=enclosing,
+                                        nodes=list(ast.walk(tree)),
+                                        lines=text.splitlines())
         self.modules = {source.module: source for source in self.sources.values()}
         for source in self.sources.values():
             self._index(source)
@@ -200,20 +211,33 @@ class Project:
                 for target in targets:
                     if isinstance(target, ast.Name):
                         source.aliases[target.id] = f"sym:{source.module}:{target.id}"
-            elif isinstance(node, ast.Import):
+        # Imports at module level bind first; an import inside a block or a function
+        # (an optional or late import) binds a name nothing at module level does.
+        top = {id(node) for node in source.tree.body}
+        imports = [node for node in source.tree.body
+                   if isinstance(node, (ast.Import, ast.ImportFrom))]
+        imports += [node for node in source.nodes
+                    if isinstance(node, (ast.Import, ast.ImportFrom)) and id(node) not in top]
+        for node in imports:
+            bind = (source.aliases.__setitem__ if id(node) in top
+                    else source.aliases.setdefault)
+            if isinstance(node, ast.Import):
                 for alias in node.names:
                     local = alias.asname or alias.name.split(".")[0]
                     module = alias.name if alias.asname else alias.name.split(".")[0]
-                    source.aliases[local] = (("mod:" if module in self.modules else "ext:")
-                                             + module)
-            elif isinstance(node, ast.ImportFrom):
-                module = _relative(source.module, node.level, node.module)
+                    bind(local, ("mod:" if module in self.modules else "ext:") + module)
+            else:
+                module = _relative(source.module, node.level, node.module,
+                                   source.path.endswith("/__init__.py"))
                 for alias in node.names:
                     if alias.name == "*":
                         continue
                     local = alias.asname or alias.name
-                    prefix = "sym:" if module in self.modules else "ext:"
-                    source.aliases[local] = f"{prefix}{module}:{alias.name}"
+                    if f"{module}.{alias.name}" in self.modules:
+                        bind(local, f"mod:{module}.{alias.name}")
+                    else:
+                        prefix = "sym:" if module in self.modules else "ext:"
+                        bind(local, f"{prefix}{module}:{alias.name}")
 
     def _settle_aliases(self) -> None:
         for _ in range(len(self.modules) + 2):
@@ -249,6 +273,8 @@ class Project:
                 return None
             if base.startswith("mod:"):
                 module = base[4:]
+                if f"{module}.{node.attr}" in self.modules:
+                    return f"mod:{module}.{node.attr}"
                 target = self.modules.get(module)
                 return target.aliases.get(node.attr, f"sym:{module}:{node.attr}") if target \
                     else f"ext:{module}:{node.attr}"
@@ -297,11 +323,23 @@ def _binding_nodes(source: Source, scope: str, name: str) -> list[ast.AST]:
             elif (isinstance(one, ast.Attribute) and isinstance(one.ctx, ast.Store)
                   and one.attr == name):
                 found.append(one)
+            elif (scope == "-" and isinstance(one, ast.alias) and one.asname == name
+                  and isinstance(statement, ast.ImportFrom)):
+                found.append(one)
     return found
 
 
 def _parameter(source: Source, scope: str, name: str) -> ast.arg | None:
     return next((arg for arg in _args(source.scopes.get(scope)) if arg.arg == name), None)
+
+
+def _field(source: Source, scope: str, name: str) -> bool:
+    """Whether class `scope` declares `name` as an annotated field in its body, which its
+    generated constructor takes by that keyword."""
+    node = source.scopes.get(scope)
+    return isinstance(node, ast.ClassDef) and any(
+        isinstance(one, ast.AnnAssign) and isinstance(one.target, ast.Name)
+        and one.target.id == name for one in node.body)
 
 
 def state(project: Project, row: Row) -> str:
@@ -334,6 +372,12 @@ def state(project: Project, row: Row) -> str:
         if new and new in source.scopes[row.scope].args.kwonlyargs:
             return "applied"
         return "not here"
+    # A parameter's state is its signature's: an attribute of the same name the function
+    # stores is another thing.
+    if _parameter(source, row.scope, row.old):
+        return "to apply"
+    if _parameter(source, row.scope, row.new):
+        return "applied"
     old = _binding_nodes(source, row.scope, row.old)
     new = _binding_nodes(source, row.scope, row.new)
     return "to apply" if old else "applied" if new else "not here"
@@ -349,6 +393,11 @@ def _name_edit(source: Source, node: ast.AST, old: str, new: str) -> Edit | None
     if isinstance(node, ast.Attribute):
         _start, end = source.span(node)
         return Edit(end - len(old), end, new)
+    if isinstance(node, ast.alias):
+        start, end = source.span(node)
+        matches = list(re.finditer(rf"\b{re.escape(old)}\b", source.text[start:end]))
+        return (Edit(start + matches[-1].start(), start + matches[-1].end(), new)
+                if matches else None)
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         line_start = source.position(node.lineno, 0)
         line_end = source.offsets[node.lineno] if node.lineno < len(source.offsets) else len(source.text)
@@ -358,30 +407,49 @@ def _name_edit(source: Source, node: ast.AST, old: str, new: str) -> Edit | None
 
 
 def _scope_of(source: Source, node: ast.AST) -> str:
-    current = node
-    while id(current) in source.parents:
-        current = source.parents[id(current)]
-        for qual, scope in source.scopes.items():
-            if scope is current:
-                return qual
-    return "-"
+    return source.enclosing.get(id(node), "-")
 
 
-def _target(project: Project, row: Row) -> tuple[str, str | None, int | None]:
+@dataclass(frozen=True)
+class Target:
+    """What a `name` or `kwonly` row reaches. `symbol` is the definition's canonical
+    symbol (the function, for a parameter). `kind` is "parameter", "field" (a class
+    body's annotated field) or None. A parameter's or field's `callee` is the symbol a
+    call reaches to pass it by keyword, and a parameter's `position` its index among the
+    positional arguments a call passes; `following` names the positional parameters from
+    it on, which a star before it makes keyword-only too."""
+
+    symbol: str
+    kind: str | None = None
+    position: int | None = None
+    callee: str | None = None
+    following: tuple[str, ...] = ()
+
+
+def _target(project: Project, row: Row) -> Target:
     source = project.sources.get(row.path)
     if source is None:
-        return "", None, None
-    function = f"sym:{source.module}:{row.scope}" if row.scope != "-" else None
-    parameter = _parameter(source, row.scope, row.old)
+        return Target("")
+    # After the rename the definition binds the new name; leftovers read that tree.
+    parameter = _parameter(source, row.scope, row.old) or _parameter(source, row.scope,
+                                                                     row.new)
     if parameter is not None:
+        function = f"sym:{source.module}:{row.scope}"
         fn = source.scopes[row.scope]
         positional = [*fn.args.posonlyargs, *fn.args.args]
         skip = 1 if positional and positional[0].arg in ("self", "cls") else 0
-        index = ((positional.index(parameter) if parameter in positional else len(positional))
-                 - skip)
-        return function or "", "parameter", index
+        if parameter in positional:
+            index = positional.index(parameter)
+            following = tuple(arg.arg for arg in positional[index:])
+        else:
+            index, following = len(positional), ()
+        return Target(function, "parameter", index - skip,
+                      function.removesuffix(".__init__"), following)
+    if _field(source, row.scope, row.old) or _field(source, row.scope, row.new):
+        owner = f"sym:{source.module}:{row.scope}"
+        return Target(f"{owner}.{row.old}", "field", callee=owner)
     qual = row.old if row.scope == "-" else f"{row.scope}.{row.old}"
-    return f"sym:{source.module}:{qual}", None, None
+    return Target(_canonical(project, f"sym:{source.module}:{qual}") or "")
 
 
 def _canonical(project: Project, value: str | None) -> str | None:
@@ -394,86 +462,199 @@ def _canonical(project: Project, value: str | None) -> str | None:
     return source.aliases.get(qual, value) if source else value
 
 
+def _known(project: Project, value: str | None) -> bool:
+    """Whether a resolved symbol names something: a module, an outside name, or a
+    function, class, module name or class attribute defined in the tree. An attribute
+    chain through an instance attribute resolves to a symbol no definition has."""
+    if value is None:
+        return False
+    if not value.startswith("sym:"):
+        return True
+    _, module, qual = value.split(":", 2)
+    source = project.modules.get(module)
+    if source is None:
+        return False
+    if qual in source.scopes or qual in source.aliases:
+        return True
+    head, _, attr = qual.rpartition(".")
+    return bool(head) and head in source.scopes and bool(_binding_nodes(source, head, attr))
+
+
 def _add(edits: dict[str, list[Edit]], path: str, edit: Edit | None) -> None:
     if edit is not None and edit.start != edit.end or edit is not None and edit.text:
         edits.setdefault(path, []).append(edit)
+
+
+def _call_name(node: ast.Call) -> str | None:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return None
+
+
+def _names_all(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Name) and node.id == "__all__"
+
+
+def _in_all(source: Source, node: ast.AST) -> bool:
+    """Whether a string sits in a list, tuple or set given to `__all__` (assigned,
+    added to, or passed to its `extend`)."""
+    parent = source.parents.get(id(node))
+    if not isinstance(parent, (ast.List, ast.Tuple, ast.Set)):
+        return False
+    holder = source.parents.get(id(parent))
+    while isinstance(holder, ast.BinOp):
+        holder = source.parents.get(id(holder))
+    if isinstance(holder, ast.Assign):
+        return any(_names_all(target) for target in holder.targets)
+    if isinstance(holder, (ast.AnnAssign, ast.AugAssign)):
+        return _names_all(holder.target)
+    if isinstance(holder, ast.Call) and isinstance(holder.func, ast.Attribute):
+        return _names_all(holder.func.value)
+    return False
 
 
 def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[str, list[Edit]]:
     edits: dict[str, list[Edit]] = {}
     active = [(row, _target(project, row)) for row, status in zip(rows, states)
               if status == "to apply" and row.kind in ("name", "kwonly")]
-    for row, (target, parameter_kind, position) in active:
+    touched: dict[int, set[str]] = {}
+
+    def put(row: Row, path: str, edit: Edit | None) -> None:
+        if edit is not None:
+            touched.setdefault(id(row), set()).add(path)
+        _add(edits, path, edit)
+
+    for row, target in active:
         source = project.sources[row.path]
         if row.kind == "name":
             for node in _binding_nodes(source, row.scope, row.old):
-                _add(edits, row.path, _name_edit(source, node, row.old, row.new))
+                if target.kind == "parameter" and isinstance(node, ast.Attribute):
+                    continue
+                put(row, row.path, _name_edit(source, node, row.old, row.new))
             if row.scope != "-":
                 scope_node = source.scopes[row.scope]
                 for node in ast.walk(scope_node):
                     if isinstance(node, ast.Name) and node.id == row.old:
-                        _add(edits, row.path, _name_edit(source, node, row.old, row.new))
-                    elif (isinstance(node, ast.Attribute) and node.attr == row.old
-                          and isinstance(node.value, ast.Name)
+                        put(row, row.path, _name_edit(source, node, row.old, row.new))
+                    elif (target.kind != "parameter" and isinstance(node, ast.Attribute)
+                          and node.attr == row.old and isinstance(node.value, ast.Name)
                           and node.value.id in ("self", "cls")):
-                        _add(edits, row.path, _name_edit(source, node, row.old, row.new))
+                        put(row, row.path, _name_edit(source, node, row.old, row.new))
         else:
             parameter = _parameter(source, row.scope, row.old)
             if parameter is not None:
                 start = source.position(parameter.lineno, parameter.col_offset)
                 # A star before this parameter makes it and every following parameter
                 # keyword-only. Rows are expected to name the first such parameter.
-                _add(edits, row.path, Edit(start, start, "*, "))
+                put(row, row.path, Edit(start, start, "*, "))
+                fn = source.scopes[row.scope]
+                if fn.args.vararg is None and fn.args.kwonlyargs:
+                    # The bare star that already stood before the keyword-only
+                    # parameters goes: there is one star, now earlier.
+                    positional = [*fn.args.posonlyargs, *fn.args.args]
+                    ends = [source.span(positional[-1])[1]]
+                    if fn.args.defaults:
+                        ends.append(source.span(fn.args.defaults[-1])[1])
+                    after = max(ends)
+                    first = fn.args.kwonlyargs[0]
+                    before = source.position(first.lineno, first.col_offset)
+                    star = re.search(r"\*\s*,\s*", source.text[after:before])
+                    if star:
+                        put(row, row.path,
+                             Edit(after + star.start(), after + star.end(), ""))
 
-        for other in project.sources.values():
-            for node in ast.walk(other.tree):
-                scope = _scope_of(other, node)
-                if isinstance(node, ast.ImportFrom):
-                    module = _relative(other.module, node.level, node.module)
-                    for alias in node.names:
-                        value = f"sym:{module}:{alias.name}"
-                        if _canonical(project, value) == target and alias.name == row.old:
+    by_old: dict[str, list[tuple[Row, Target]]] = {}
+    for row, target in active:
+        by_old.setdefault(row.old, []).append((row, target))
+    callers = [(row, target) for row, target in active if target.callee]
+    for other in project.sources.values():
+        for node in other.nodes:
+            if isinstance(node, ast.ImportFrom):
+                module = _relative(other.module, node.level, node.module,
+                                   other.path.endswith("/__init__.py"))
+                for alias in node.names:
+                    for row, target in by_old.get(alias.name, ()):
+                        if _canonical(project, f"sym:{module}:{alias.name}") == target.symbol:
                             start = other.position(alias.lineno, alias.col_offset)
-                            _add(edits, other.path, Edit(start, start + len(row.old), row.new))
-                elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                    if _canonical(project, project.resolve(other, node, scope)) == target \
-                            and node.id == row.old:
-                        _add(edits, other.path, _name_edit(other, node, row.old, row.new))
-                elif isinstance(node, ast.Attribute) and node.attr == row.old:
-                    if _canonical(project, project.resolve(other, node, scope)) == target:
-                        _add(edits, other.path, _name_edit(other, node, row.old, row.new))
-                elif isinstance(node, ast.Call):
-                    callee = _canonical(project, project.resolve(other, node.func, scope))
-                    expected = target
-                    if parameter_kind and target.endswith(".__init__"):
-                        expected = target.removesuffix(".__init__")
-                    if parameter_kind and callee == expected:
-                        for keyword in node.keywords:
-                            if keyword.arg == row.old:
-                                start = other.position(keyword.value.lineno,
-                                                       keyword.value.col_offset) - len(row.old) - 1
-                                _add(edits, other.path,
-                                     Edit(start, start + len(row.old), row.new))
-                        if row.kind == "kwonly" and position is not None and len(node.args) > position:
-                            argument = node.args[position]
+                            put(row, other.path, Edit(start, start + len(row.old), row.new))
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                for row, target in by_old.get(node.id, ()):
+                    scope = _scope_of(other, node)
+                    if _canonical(project, project.resolve(other, node, scope)) == target.symbol:
+                        put(row, other.path, _name_edit(other, node, row.old, row.new))
+            elif isinstance(node, ast.Attribute):
+                for row, target in by_old.get(node.attr, ()):
+                    scope = _scope_of(other, node)
+                    if _canonical(project, project.resolve(other, node, scope)) == target.symbol:
+                        put(row, other.path, _name_edit(other, node, row.old, row.new))
+            elif isinstance(node, ast.Call) and callers:
+                passed = {keyword.arg for keyword in node.keywords}
+                wanted = [(row, target) for row, target in callers
+                          if row.old in passed or row.kind == "kwonly"]
+                if not wanted:
+                    continue
+                callee = _canonical(project, project.resolve(other, node.func,
+                                                             _scope_of(other, node)))
+                for row, target in wanted:
+                    if callee != target.callee:
+                        continue
+                    for keyword in node.keywords:
+                        if keyword.arg == row.old:
+                            start = other.position(keyword.lineno, keyword.col_offset)
+                            put(row, other.path, Edit(start, start + len(row.old), row.new))
+                    if (row.kind == "kwonly" and target.position is not None
+                            and len(node.args) > target.position):
+                        # Every positional argument from this one on is now keyword-only.
+                        for offset, argument in enumerate(node.args[target.position:]):
+                            if (isinstance(argument, ast.Starred)
+                                    or offset >= len(target.following)):
+                                break
+                            keyword = row.new if offset == 0 else target.following[offset]
                             start = other.position(argument.lineno, argument.col_offset)
-                            _add(edits, other.path, Edit(start, start, f"{row.new}="))
+                            put(row, other.path, Edit(start, start, f"{keyword}="))
 
-            if row.kind == "name" and parameter_kind is None:
-                aliases_target = any(_canonical(project, value) == target
-                                     for value in other.aliases.values())
-                if other.module == source.module or aliases_target:
-                    for node in ast.walk(other.tree):
-                        if isinstance(node, ast.Constant) and node.value == row.old:
-                            parent = other.parents.get(id(node))
-                            in_getattr = any(scope.endswith("__getattr__") and node in ast.walk(one)
-                                             for scope, one in other.scopes.items())
-                            in_all = isinstance(parent, (ast.List, ast.Tuple, ast.Set))
-                            if in_getattr or in_all:
-                                start, end = other.span(node)
-                                literal = other.text[start:end]
-                                _add(edits, other.path,
-                                     Edit(start, end, literal.replace(row.old, row.new)))
+    for row, target in active:
+        if row.kind != "name" or target.kind is not None:
+            continue
+        source = project.sources[row.path]
+        for other in project.sources.values():
+            if other.module != source.module and not any(
+                    _canonical(project, value) == target.symbol
+                    for value in other.aliases.values()):
+                continue
+            for node in other.nodes:
+                if isinstance(node, ast.Constant) and node.value == row.old:
+                    parent = other.parents.get(id(node))
+                    in_getattr = any(scope.endswith("__getattr__") and node in ast.walk(one)
+                                     for scope, one in other.scopes.items())
+                    in_all = _in_all(other, node)
+                    if in_getattr or in_all:
+                        start, end = other.span(node)
+                        literal = other.text[start:end]
+                        put(row, other.path,
+                             Edit(start, end, literal.replace(row.old, row.new)))
+
+    # A backticked cite of the old name is renamed where it means this definition: a
+    # parameter's in its function, a field's in its class, any other name's in the files
+    # the row edited. Every other cite is a leftover.
+    for row, target in active:
+        if row.kind != "name":
+            continue
+        source = project.sources[row.path]
+        if target.kind in ("parameter", "field"):
+            node = source.scopes[row.scope]
+            regions = [(source, source.position(node.lineno, 0),
+                        source.position(node.end_lineno, node.end_col_offset))]
+        else:
+            regions = [(project.sources[path], 0, len(project.sources[path].text))
+                       for path in sorted(touched.get(id(row), ()))]
+        pattern = re.compile(rf"`{re.escape(row.old)}(?:\(\))?`")
+        for other, start, end in regions:
+            for match in pattern.finditer(other.text, start, end):
+                _add(edits, other.path,
+                     Edit(match.start() + 1, match.start() + 1 + len(row.old), row.new))
 
     for row, status in zip(rows, states):
         if row.kind != "use" or status != "to apply":
@@ -501,79 +682,97 @@ def _apply(text: str, edits: Iterable[Edit]) -> str:
     return text
 
 
-def _with_cites(text: str, pairs: Iterable[tuple[str, str]]) -> str:
-    for old, new in pairs:
-        text = re.sub(rf"`{re.escape(old)}(?P<call>\(\))?`",
-                      lambda match: f"`{new}{match.group('call') or ''}`", text)
-    return text
-
-
 def transformed(project: Project, edits: dict[str, list[Edit]], rows: Sequence[Row]) -> dict[str, str]:
     texts = {path: source.text for path, source in project.sources.items()}
-    pairs = [(row.old, row.new) for row in rows if row.kind in ("name", "kwonly")]
     for path, changes in edits.items():
-        texts[path] = _with_cites(_apply(texts[path], changes), pairs)
+        texts[path] = _apply(texts[path], changes)
     return texts
-
-
-def _covered(rows: Sequence[Row], source: Source, line: int) -> bool:
-    text = source.line_text(line).strip()
-    return any(row.kind in ("use", "keep") and row.path == source.path
-               and row.scope == text for row in rows)
 
 
 def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
     found: set[Leftover] = set()
-    for row in rows:
-        if row.kind not in ("name", "kwonly"):
-            continue
-        target, parameter_kind, position = _target(project, row)
-        function_name = row.scope.rsplit(".", 1)[-1]
-        if row.scope.endswith(".__init__"):
-            function_name = row.scope.rsplit(".", 2)[-2]
-        for source in project.sources.values():
-            for node in ast.walk(source.tree):
-                scope = _scope_of(source, node)
-                if _covered(rows, source, getattr(node, "lineno", 0)):
+    covered = {(row.path, row.scope) for row in rows if row.kind in ("use", "keep")}
+    targets = [(row, _target(project, row)) for row in rows if row.kind in ("name", "kwonly")]
+    by_old: dict[str, list[tuple[Row, Target]]] = {}
+    for row, target in targets:
+        by_old.setdefault(row.old, []).append((row, target))
+    kwonly = []
+    for row, target in targets:
+        if row.kind == "kwonly":
+            function_name = row.scope.rsplit(".", 1)[-1]
+            if row.scope.endswith(".__init__"):
+                function_name = row.scope.rsplit(".", 2)[-2]
+            kwonly.append((row, target, function_name))
+    # A parameter's name means something only in its function, so a cite of it is looked
+    # for in its own file; any other old name is looked for everywhere.
+    everywhere = {row.old for row, target in targets if target.kind != "parameter"}
+    own: dict[str, set[str]] = {}
+    for row, target in targets:
+        if target.kind == "parameter" and row.old != row.new:
+            own.setdefault(row.path, set()).add(row.old)
+    for source in project.sources.values():
+        def is_covered(line: int) -> bool:
+            return (source.path, source.line_text(line).strip()) in covered
+
+        for node in source.nodes:
+            if isinstance(node, ast.Call):
+                name = _call_name(node)
+                passed = [keyword for keyword in node.keywords if keyword.arg in by_old]
+                # A call never reaches a parameter outside its function.
+                named = [(row, target) for row, target in by_old.get(name, ())
+                         if row.kind == "name" and target.kind != "parameter"] if name else []
+                positional = [(row, function_name) for row, target, function_name in kwonly
+                              if name == function_name and target.position is not None
+                              and len(node.args) > target.position]
+                if not (passed or named or positional) or is_covered(node.lineno):
                     continue
-                if isinstance(node, ast.Call):
-                    callee = project.resolve(source, node.func, scope)
-                    canonical = _canonical(project, callee)
-                    expected = target.removesuffix(".__init__") if target.endswith(".__init__") else target
-                    for keyword in node.keywords:
-                        if keyword.arg == row.old and canonical is None:
-                            found.add(Leftover(source.path, keyword.value.lineno,
-                                               f"unresolved call still passes keyword {row.old!r}"))
-                    if (row.kind == "kwonly" and canonical is None and position is not None
-                            and len(node.args) > position):
-                        name = (node.func.id if isinstance(node.func, ast.Name)
-                                else node.func.attr if isinstance(node.func, ast.Attribute) else None)
-                        if name == function_name:
-                            found.add(Leftover(source.path, node.lineno,
-                                               f"unresolved {function_name} call still passes "
-                                               f"parameter {row.old!r} by position"))
-                    if canonical == expected:
-                        continue
-                    if (canonical is None and row.kind == "name"
-                            and ((isinstance(node.func, ast.Name) and node.func.id == row.old)
-                                 or (isinstance(node.func, ast.Attribute)
-                                     and node.func.attr == row.old))):
-                        found.add(Leftover(source.path, node.lineno,
-                                           f"unresolved call still uses {row.old!r}"))
-                if isinstance(node, ast.Attribute) and node.attr == row.old:
-                    resolved = project.resolve(source, node, scope)
-                    if resolved is None:
-                        found.add(Leftover(source.path, node.lineno,
-                                           f"unresolved attribute still uses {row.old!r}"))
-                if (parameter_kind is None and isinstance(node, ast.Constant)
-                        and node.value == row.old):
+                canonical = _canonical(project, project.resolve(source, node.func,
+                                                                _scope_of(source, node)))
+                unresolved = not _known(project, canonical)
+                if not unresolved:
+                    continue
+                for keyword in passed:
+                    found.add(Leftover(source.path, keyword.value.lineno,
+                                       f"unresolved call still passes keyword {keyword.arg!r}"))
+                for row, function_name in positional:
                     found.add(Leftover(source.path, node.lineno,
-                                       f"string lookup still names {row.old!r}"))
-            for token in tokenize.generate_tokens(io.StringIO(source.text).readline):
-                if token.type in (tokenize.COMMENT, tokenize.STRING) \
-                        and re.search(rf"`{re.escape(row.old)}(?:\(\))?`", token.string):
-                    found.add(Leftover(source.path, token.start[0],
-                                       f"comment still cites {row.old!r}"))
+                                       f"unresolved {function_name} call still passes "
+                                       f"parameter {row.old!r} by position"))
+                if named:
+                    found.add(Leftover(source.path, node.lineno,
+                                       f"unresolved call still uses {name!r}"))
+            elif isinstance(node, ast.Attribute):
+                # A parameter is never an attribute; any other old name can be.
+                if not any(target.kind != "parameter"
+                           for _row, target in by_old.get(node.attr, ())):
+                    continue
+                if is_covered(node.lineno):
+                    continue
+                resolved = project.resolve(source, node, _scope_of(source, node))
+                if not _known(project, _canonical(project, resolved)):
+                    found.add(Leftover(source.path, node.lineno,
+                                       f"unresolved attribute still uses {node.attr!r}"))
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if not any(target.kind != "parameter"
+                           for _row, target in by_old.get(node.value, ())):
+                    continue
+                if not is_covered(node.lineno):
+                    found.add(Leftover(source.path, node.lineno,
+                                       f"string lookup still names {node.value!r}"))
+        cited = everywhere | own.get(source.path, set())
+        if not cited or "`" not in source.text:
+            continue
+        cite = re.compile(r"`(" + "|".join(re.escape(old) for old in
+                                           sorted(cited, key=len, reverse=True))
+                          + r")(?:\(\))?`")
+        for token in tokenize.generate_tokens(io.StringIO(source.text).readline):
+            if token.type not in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            for match in cite.finditer(token.string):
+                line = token.start[0] + token.string.count("\n", 0, match.start())
+                if not is_covered(line):
+                    found.add(Leftover(source.path, line,
+                                       f"comment still cites {match.group(1)!r}"))
     return sorted(found)
 
 
@@ -641,6 +840,12 @@ def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None 
     states = [state(project, row) for row in rows]
     edits = plan(project, rows, states)
     texts = transformed(project, edits, rows)
+    for path in sorted(edits):
+        try:
+            ast.parse(texts[path], filename=path)
+        except SyntaxError as exc:
+            raise RenameError(f"{path}:{exc.lineno}: the renamed file would not parse: "
+                              f"{exc.msg}; nothing was written") from None
     after = Project(root, texts)
     remaining = leftovers(after, rows)
     moved, comparison = main_leftovers(root, after, rows, states, main_ref)

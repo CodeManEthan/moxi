@@ -149,7 +149,7 @@ def _version_of(path: str):
     from moxi import proc
 
     try:
-        done = proc.run([path, "version"], timeout=10)
+        done = proc.run([path, "version"], timeout_s=10)
     except Exception:  # noqa: BLE001 - a git that can't say is reported as having none
         return None
     if done.returncode != 0:

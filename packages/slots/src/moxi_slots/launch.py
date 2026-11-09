@@ -243,17 +243,17 @@ def respawn(slot: int | str, argv: Sequence[str], *, env: Mapping[str, str],
     return _verdict(number, path, window_id, pane_id, failure)
 
 
-def wait_ended(slot: int | str, *, pane_id: str, timeout: float) -> Ended:
-    """Wait at most `timeout` seconds for slot `slot`'s pane `pane_id` to end.
+def wait_ended(slot: int | str, *, pane_id: str, timeout_s: float) -> Ended:
+    """Wait at most `timeout_s` seconds for slot `slot`'s pane `pane_id` to end.
 
     The run window's `pane-died` hook signals a `wait-for` channel named for the pane;
     the wait wakes on it, or once a second, and then reads `pane_dead`. The hook only
     wakes it; the read decides. A pane tmux no longer has counts as ended (`gone`).
     Refuses (`UsageError`) a pane that is not in that slot's session."""
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
-        raise UsageError(f"timeout is a number of seconds, not {timeout!r}")
+    if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s < 0:
+        raise UsageError(f"timeout is a number of seconds, not {timeout_s!r}")
     number = resolve(slot, registry.read())
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout_s
     seen = launchfile.read_pane(pane_id)
     if seen.exists and seen.session != session_name(number):
         raise UsageError(f"pane {pane_id} is not slot {number}'s (it is in "

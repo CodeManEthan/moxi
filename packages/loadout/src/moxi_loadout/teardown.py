@@ -53,7 +53,7 @@ def teardown(*, say: Callable[[str], object] = print) -> int | str:
     from moxi import files, paths
 
     try:
-        with files.lock(paths.core_lock(), nested=True, timeout=CORE_WAIT):
+        with files.lock(paths.core_lock(), nested=True, timeout_s=CORE_WAIT):
             return _teardown(say)
     except files.LockTimeout as exc:
         return f"loadout: {exc}; run {AGAIN} again when the other install is done"

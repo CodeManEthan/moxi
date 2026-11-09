@@ -203,7 +203,7 @@ def ensure(*, wait: float = START_WAIT) -> int:
 
     places.runtime_dir(create=True)
     try:
-        with files.lock(places.server_lock(), timeout=LOCK_WAIT):
+        with files.lock(places.server_lock(), timeout_s=LOCK_WAIT):
             if (pid := tmux.ping()) is not None:
                 return pid
             return _start(wait)

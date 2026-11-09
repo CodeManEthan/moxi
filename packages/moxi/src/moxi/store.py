@@ -55,7 +55,7 @@ class StoreTooNew(StoreError):
 
 
 def connect(path: str | os.PathLike, *, private: bool = True, create: bool = True,
-            timeout: float = 5.0, check_same_thread: bool = True) -> sqlite3.Connection:
+            timeout_s: float = 5.0, check_same_thread: bool = True) -> sqlite3.Connection:
     """Open the SQLite store at `path` and return its connection.
 
     A missing file raises `StoreError` with `create=False`. With `create=True` each
@@ -84,7 +84,7 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     one this call creates; with `create=False` it is opened as it is, like any other, so
     a call that may not create writes nothing.
 
-    Every connection then gets `synchronous=NORMAL`, a busy timeout of `timeout` seconds
+    Every connection then gets `synchronous=NORMAL`, a busy timeout of `timeout_s` seconds
     and foreign keys on, and runs with no implicit transactions (`isolation_level=None`):
     each statement commits by itself unless a `transaction` holds it.
     `check_same_thread` is passed to `sqlite3.connect` as given.
@@ -115,10 +115,10 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
             fresh = path.stat().st_size == 0
         except FileNotFoundError:
             raise StoreError(f"{path} was removed while it was being opened") from None
-    conn = sqlite3.connect(path, timeout=timeout, isolation_level=None,
+    conn = sqlite3.connect(path, timeout=timeout_s, isolation_level=None,
                            check_same_thread=check_same_thread)
     try:
-        conn.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
+        conn.execute(f"PRAGMA busy_timeout = {int(timeout_s * 1000)}")
         if fresh:
             conn.execute("PRAGMA journal_mode = WAL")
         else:

@@ -462,12 +462,12 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
         return unknown(_clock.FUTURE_STAMP, skew)
     age = max(0.0, now - ts)
     if (last_provider, last_model) != (next_provider, next_model):
-        return Clock(COLD, age_seconds=age, reason=CHANGED, code=_clock.CHANGED)
+        return Clock(COLD, age_s=age, reason=CHANGED, code=_clock.CHANGED)
     row = table.lookup(HARNESS, last_provider, last_model)
     key = f"{HARNESS} {pair_text(last_provider, last_model)}"
     if row is None:
         # A model with no lifetime row has no clock to count by.
-        return Clock(NO_CACHE, age_seconds=age, reason=no_row(last_provider, last_model),
+        return Clock(NO_CACHE, age_s=age, reason=no_row(last_provider, last_model),
                      code=_clock.NO_ROW)
     if row.free:
         return Clock(NO_CACHE, reason=free_reason(last_provider, last_model),
@@ -508,7 +508,7 @@ def _measured_key(key, row, lifetime, lowered_at) -> str:
 
 def _verdict(age, lifetime, *, key, basis, provider, model, lowered_from=None) -> Clock:
     kind = COLD if age >= lifetime else WARM
-    return Clock(kind, age_seconds=age, ttl_seconds=lifetime, key=key, basis=basis,
+    return Clock(kind, age_s=age, ttl_s=lifetime, key=key, basis=basis,
                  provider=provider, model=model, lowered_from=lowered_from)
 
 

@@ -355,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
         return _usage_exit(argv)
     if args.home is not None:
         # Before anything reads a root: the switch, the run line and the command follow it.
-        os.environ[paths.HOME] = args.home
+        os.environ[paths.HOME_ENV] = args.home
     if args.condition:
         return condition(args)
     if args.result:

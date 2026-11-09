@@ -129,7 +129,7 @@ class TmuxPane:
     def ended(self, timeout: float) -> bool:
         from .launch import wait_ended
 
-        return wait_ended(self.number, pane_id=self.pane_id, timeout=timeout).ended
+        return wait_ended(self.number, pane_id=self.pane_id, timeout_s=timeout).ended
 
     def ansi(self) -> str:
         result = tmux.attempt("capture-pane", "-p", "-e", "-t", self.pane_id)
@@ -352,20 +352,20 @@ def read_screen(slot: int | str, screens) -> Seen:
     return _seen(held, frame, pane_id, screens)
 
 
-def answer_screen(slot: int | str, screen: Screen, wait: float = 5) -> Answer:
+def answer_screen(slot: int | str, screen: Screen, wait_s: float = 5) -> Answer:
     """Answer `screen` on the slot's run pane by its keys, after a full match; see the
     module's text for the steps. Returns an `Answer` and never raises for what it found
     on the pane."""
     if not isinstance(screen, Screen):
         raise UsageError("screen is one Screen (CLAUDE_TRUST_FOLDER, CLAUDE_DEV_CHANNELS, "
                          "CLAUDE_EXIT_DIALOG)")
-    if isinstance(wait, bool) or not isinstance(wait, (int, float)) or wait < 0:
-        raise UsageError(f"wait is a number of seconds, not {wait!r}")
+    if isinstance(wait_s, bool) or not isinstance(wait_s, (int, float)) or wait_s < 0:
+        raise UsageError(f"wait is a number of seconds, not {wait_s!r}")
     number, pane_id = _run_pane(slot)
     if pane_id is None:
         return Answer("no-pane", screen, f"slot {number} has no run pane")
     pane = TmuxPane(number, pane_id)
-    done = drive(pane, screen, float(wait))
+    done = drive(pane, screen, float(wait_s))
     seen = None
     if done.frame is not None or done.outcome == "no-pane":
         seen = _seen(done.match, done.frame, pane_id, (screen,))

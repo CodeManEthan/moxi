@@ -223,7 +223,7 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
             say(line)
 
     try:
-        with files.lock(stores.install_lock(), timeout=INSTALL_WAIT):
+        with files.lock(stores.install_lock(), timeout_s=INSTALL_WAIT):
             with _core_lock(files, paths, tell):
                 out = _install(scope, list(replace), folder, resolver, lines)
     except files.LockTimeout as exc:
@@ -257,12 +257,12 @@ def _core_lock(files, paths, say: Callable[[str], object]):
     def held():
         with ExitStack() as stack:
             try:
-                stack.enter_context(files.lock(paths.core_lock(), nested=True, timeout=0))
+                stack.enter_context(files.lock(paths.core_lock(), nested=True, timeout_s=0))
             except files.LockTimeout as exc:
                 who = f"pid {exc.holder}" if exc.holder else "another process"
                 say(f"loadout: waiting for an install or uninstall ({who}) to finish")
                 stack.enter_context(files.lock(paths.core_lock(), nested=True,
-                                               timeout=CORE_WAIT))
+                                               timeout_s=CORE_WAIT))
             yield
     return held()
 

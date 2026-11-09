@@ -121,7 +121,7 @@ def write_example(folder: str | os.PathLike) -> bool:
         return False
     text = importlib.resources.files("moxi_loadout").joinpath(EXAMPLE).read_text(
         encoding="utf-8")
-    with lock(stores.manifest_lock(), timeout=10.0):
+    with lock(stores.manifest_lock(), timeout_s=10.0):
         if not _empty(folder):
             return False
         os.makedirs(folder, exist_ok=True)

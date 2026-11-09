@@ -118,7 +118,7 @@ class Noting(Mapping):
 
 
 def check(places: Places, *, programs: Mapping[str, str] | None = None,
-          page: bool = True) -> str | None:
+          for_page: bool = True) -> str | None:
     """None when this process's places agree with the last terminal run's, else the one
     line to refuse with (module doc). Raises `ValueError` when `places` reads a name
     outside the core's set."""
@@ -130,16 +130,16 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
     try:
         record = paths.terminal_record()
     except paths.NoAnchor as no:
-        return _with_anchor(no_place(no.cause, no.step, page=page), anchor, page)
+        return _with_anchor(no_place(no.cause, no.step, page=for_page), anchor, for_page)
     outcome = terminal.read(record)
     if isinstance(outcome, terminal.NoRecord):
-        return _with_anchor(no_record(str(record), page=page), anchor, page)
+        return _with_anchor(no_record(str(record), page=for_page), anchor, for_page)
     if isinstance(outcome, terminal.Unreadable):
-        return _with_anchor(unreadable(str(record), _error(outcome.error), page=page),
-                            anchor, page)
+        return _with_anchor(unreadable(str(record), _error(outcome.error), page=for_page),
+                            anchor, for_page)
     if isinstance(outcome, terminal.NewerFormat):
         return _with_anchor(newer(str(record), outcome.format, outcome.moxi,
-                                  outcome.reader, page=page), anchor, page)
+                                  outcome.reader, page=for_page), anchor, for_page)
     there_env = Noting(outcome.env, windows=windows)
     here = Noting(here_env, windows=windows)
     then = _resolve(places, there_env)
@@ -176,7 +176,7 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
     if not problems:
         return None
     sets, takes = _fix(read, there_env, here, givers, missing, windows)
-    return _with_anchor(fix(problems, sets, takes, page=page), anchor, page)
+    return _with_anchor(fix(problems, sets, takes, page=for_page), anchor, for_page)
 
 
 # -- the comparison --------------------------------------------------------------------------
@@ -392,7 +392,7 @@ def anchor_clause(*, page: bool) -> str:
     from moxi import paths
 
     whose = "This page's environment" if page else "This environment"
-    return (f"{whose} sets {paths.ANCHOR_HOME}, which only test kits set; take it out of "
+    return (f"{whose} sets {paths.ANCHOR_HOME_ENV}, which only test kits set; take it out of "
             "the browser shell's environment.")
 
 

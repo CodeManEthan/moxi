@@ -44,11 +44,11 @@ _END = object()
 _WINDOWS = sys.platform == "win32"
 
 
-def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LINE) -> Client:
+def connect(address: str, *, timeout_s: float = 5.0, max_line: int = _wire.MAX_LINE) -> Client:
     """A connection to the server at `address`. Raises `NotServing` when nothing listens
-    there and `Timeout` when no connection is made in `timeout` seconds. A busy server
+    there and `Timeout` when no connection is made in `timeout_s` seconds. A busy server
     (its listen backlog full, or on Windows every instance of its pipe taken) is tried
-    again every 50 ms until then. `timeout` is also the client's wait for `hello()`.
+    again every 50 ms until then. `timeout_s` is also the client's wait for `hello()`.
     On Windows, at an address `moxi.ipc.address` made, the pipe is closed unwritten and
     `IpcError` raised when the process serving it runs as another user or its user can't
     be read; a pipe of any other name is not checked, as no socket path is. A pipe
@@ -57,17 +57,17 @@ def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LIN
     match a server given a larger `serve(max_line=...)`."""
     if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
         raise ValueError(f"max_line is a whole number of bytes above 0, not {max_line!r}")
-    deadline = None if timeout is None else time.monotonic() + timeout
+    deadline = None if timeout_s is None else time.monotonic() + timeout_s
     while True:
         if _WINDOWS:
             conn = _open_pipe(address)
         else:
-            conn = _open_socket(address, deadline, timeout)
+            conn = _open_socket(address, deadline, timeout_s)
         if conn is not None:
-            return Client(conn, address, timeout=timeout, max_line=max_line)
+            return Client(conn, address, timeout_s=timeout_s, max_line=max_line)
         left = BUSY_RETRY if deadline is None else deadline - time.monotonic()
         if left <= 0:
-            raise Timeout(f"no connection to {address} in {timeout} s: the server "
+            raise Timeout(f"no connection to {address} in {timeout_s} s: the server "
                           f"is busy") from None
         time.sleep(min(BUSY_RETRY, left))
 
@@ -196,12 +196,12 @@ class Client:
     """
 
     def __init__(self, sock: socket.socket | _pipe.Pipe, address: str, *,
-                 timeout: float = 5.0,
+                 timeout_s: float = 5.0,
                  max_line: int = _wire.MAX_LINE):
         self.address = address
         self.agreed: Agreed | None = None
         self._sock = sock
-        self._timeout = timeout
+        self._timeout = timeout_s
         self._lines = _wire.Lines(max_line)
         self._write_lock = threading.Lock()
         self._lock = threading.Lock()
@@ -230,20 +230,20 @@ class Client:
         Raises `RpcError` -32001 when no version is common, and `NotRpc` when
         the server doesn't speak JSON-RPC."""
         ours = Hello(versions, capabilities)
-        answer = self.call(_wire.HELLO, _wire.hello_params(ours), timeout=self._timeout)
+        answer = self.call(_wire.HELLO, _wire.hello_params(ours), timeout_s=self._timeout)
         self.agreed = _wire.agreed_from(answer, ours)
         return self.agreed
 
     def call(self, method: str, params: object = None, *,
-             timeout: float | None = None) -> object:
+             timeout_s: float | None = None) -> object:
         """Send request `method` and return its result. Raises `RpcError` when the
-        server answers with an error, `Timeout` past `timeout` seconds (None waits with
+        server answers with an error, `Timeout` past `timeout_s` seconds (None waits with
         no limit), `NotRpc` when the server sends a line that isn't JSON-RPC, and
-        `IpcError` when the connection ends first. `timeout` covers the whole call:
+        `IpcError` when the connection ends first. `timeout_s` covers the whole call:
         the wait to write the request as well as the wait for its answer. A request
         the timeout cuts off partway ends the connection. On Windows so does any
         request whose write the timeout cancels, even one the server read none of."""
-        deadline = None if timeout is None else time.monotonic() + timeout
+        deadline = None if timeout_s is None else time.monotonic() + timeout_s
         call = _Call()
         with self._lock:
             if self._failure is not None:
@@ -252,11 +252,11 @@ class Client:
             self._calls[id] = call
         try:
             if not self._send(_wire.request(id, method, params), deadline):
-                raise Timeout(f"no answer to {method} in {timeout} s: its request could "
+                raise Timeout(f"no answer to {method} in {timeout_s} s: its request could "
                               f"not be written in that time")
             left = None if deadline is None else max(deadline - time.monotonic(), 0.0)
             if not call.done.wait(left):
-                raise Timeout(f"no answer to {method} in {timeout} s")
+                raise Timeout(f"no answer to {method} in {timeout_s} s")
         finally:
             with self._lock:
                 self._calls.pop(id, None)

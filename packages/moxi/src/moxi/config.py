@@ -191,9 +191,9 @@ class Key(_Frozen):
     __slots__ = ("name", "type", "default", "doc", "read", "values", "env", "retired",
                  "needs", "items")
 
-    def __init__(self, name, type, default, doc, read, values=None, env=None,
+    def __init__(self, name, value_type, default, doc, read, values=None, env=None,
                  retired=None, needs=None, items=None):
-        for field, value in zip(self.__slots__, (name, type, default, doc, read, values,
+        for field, value in zip(self.__slots__, (name, value_type, default, doc, read, values,
                                                  env, retired, needs, items)):
             object.__setattr__(self, field, value)
 
@@ -723,7 +723,7 @@ def _key(name, spec, source) -> Key:
     if retired is not None:
         if not isinstance(retired, str) or not retired.strip():
             raise bad("has an empty retired", "say what to do now instead")
-        return Key(name=name, type=spec.get("type"), default=spec.get("default"),
+        return Key(name=name, value_type=spec.get("type"), default=spec.get("default"),
                    doc=spec.get("doc", ""), read=spec.get("read"), retired=retired)
 
     for required in ("type", "default", "doc", "read"):
@@ -771,7 +771,7 @@ def _key(name, spec, source) -> Key:
         if items not in ITEMS:
             raise bad(f"has items {items!r}", f"use one of {', '.join(ITEMS)}")
 
-    key = Key(name=name, type=kind, default=spec["default"], doc=doc, read=read,
+    key = Key(name=name, value_type=kind, default=spec["default"], doc=doc, read=read,
               values=values, env=env, needs=needs, items=items)
     try:
         _check_value(key, key.default, source, os.environ)
@@ -1046,7 +1046,7 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
         _check_file(module, schema, check, "", path, key)
         return False
     try:
-        with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
+        with files.edit_toml(path, timeout_s=LOCK_TIMEOUT) as doc:
             parts = target.name.split(".")
             if entry is not None:
                 parts.append(entry)

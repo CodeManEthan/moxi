@@ -104,7 +104,7 @@ def _row(row: api.RosterRow) -> dict:
 def gather() -> dict[str, Any]:
     """The `roster` topic's value: `state`, `detail` and the rows. Never raises."""
     try:
-        rows = [_row(row) for row in api.roster_rows(deadline=DEADLINE)]
+        rows = [_row(row) for row in api.roster_rows(timeout_s=DEADLINE)]
     except api.DaemonOffline:
         return {"state": "offline", "detail": None, "rows": []}
     except api.DaemonError as err:

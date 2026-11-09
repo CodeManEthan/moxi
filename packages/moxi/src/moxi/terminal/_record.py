@@ -66,7 +66,7 @@ FIXED = frozenset({
 _PREFIXED = re.compile(r"MOXI_[A-Z0-9_]+_(?:%s)" % "|".join((*paths.LOCATORS, "DEVICE")))
 
 # The names a prefix would make that aren't a module's: the test kits' anchor variable.
-_NOT_PREFIXED = frozenset({paths.ANCHOR_HOME})
+_NOT_PREFIXED = frozenset({paths.ANCHOR_HOME_ENV})
 
 
 def in_set(name: str, *, fold: bool = _WINDOWS) -> bool:
@@ -86,8 +86,8 @@ def anchor_set(env: Mapping[str, str] | None = None, *, fold: bool = _WINDOWS) -
     can't disagree."""
     source = os.environ if env is None else env
     if fold:
-        return any(k.upper() == paths.ANCHOR_HOME and v for k, v in source.items())
-    return bool(source.get(paths.ANCHOR_HOME))
+        return any(k.upper() == paths.ANCHOR_HOME_ENV and v for k, v in source.items())
+    return bool(source.get(paths.ANCHOR_HOME_ENV))
 
 
 def of(env: Mapping[str, str] | None = None, *, fold: bool = _WINDOWS) -> dict[str, str]:
@@ -176,17 +176,17 @@ Read = Record | NoRecord | Unreadable | NewerFormat
 
 
 def read(path: str | os.PathLike | None = None, *,
-         retry: float = files.REPLACE_RETRY) -> Read:
+         retry_s: float = files.REPLACE_RETRY) -> Read:
     """Read the record at `path` (None: `paths.terminal_record()`, which raises
     `paths.NoAnchor` when the account's folder can't be placed).
 
     Only "not found" and "not this shape" read as no record. Any other error reading the
     file (Windows refuses an open while the writer replaces it) is tried again for up to
-    `retry` seconds, the writer's own replace window, and gives `Unreadable` when it
+    `retry_s` seconds, the writer's own replace window, and gives `Unreadable` when it
     persists.
     """
     path = paths.terminal_record() if path is None else Path(path)
-    deadline = time.monotonic() + retry
+    deadline = time.monotonic() + retry_s
     while True:
         try:
             data = path.read_bytes()

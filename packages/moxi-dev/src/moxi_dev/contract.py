@@ -1277,7 +1277,7 @@ class _Repo:
                                           "file, not a folder")
             return
         for name in listed:
-            if not names.is_skill_folder(name):
+            if not names.is_skill_dir(name):
                 continue
             where = f"{folder}/{name}"
             if self._link_problem(where):

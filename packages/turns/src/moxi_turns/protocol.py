@@ -220,7 +220,7 @@ def remove_lock(address: str) -> None:
     if not os.path.lexists(path):
         return
     try:
-        with files.lock(path, timeout=0):
+        with files.lock(path, timeout_s=0):
             os.unlink(path)
     except (files.LockTimeout, RuntimeError, OSError):
         pass

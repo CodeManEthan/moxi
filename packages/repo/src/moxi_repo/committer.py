@@ -97,11 +97,11 @@ class Spec:
     `name` is `<module>/<name>`. `paths` are relative to `root`, the work tree's top, and
     read literally: `"."` is the whole tree, a directory takes what is under it; at most
     64 paths and 8 KiB in all. `author` (name, email) is set as author and committer.
-    `min_interval` is the seconds since this author's last commit before another commit.
+    `min_interval_s` is the seconds since this author's last commit before another commit.
     `message` is the summary line, or fn(changes) -> str; None gives `<name>: N paths`.
     `trailers` is fn(changes, since) -> [(key, value)]. `prepare` is fn(PrepareContext) ->
     Prepared. Either callable may be given as a `"pkg.mod:fn"` string. `push` names the
-    remote to push to (None: no push); `push_backoff` is the seconds after a failed push
+    remote to push to (None: no push); `push_backoff_s` is the seconds after a failed push
     before the next attempt; `max_bytes` caps each file's size (None: no cap).
     """
 
@@ -109,12 +109,12 @@ class Spec:
     root: Path
     paths: tuple[str, ...]
     author: tuple[str, str]
-    min_interval: float = 0
+    min_interval_s: float = 0
     message: str | Callable | None = None
     trailers: Callable | str | None = None
     prepare: Callable | str | None = None
     push: str | None = None
-    push_backoff: float = 300
+    push_backoff_s: float = 300
     max_bytes: int | None = 10 * 1024 * 1024
 
 
@@ -139,9 +139,9 @@ class PrepareContext:
     changes: tuple[Change, ...]
     spec: str
 
-    def git(self, *args: str, input: bytes | str | None = None,
-            timeout: float = DEFAULT_TIMEOUT, binary: bool = False):
-        return git(self.root, *args, input=input, timeout=timeout, binary=binary)
+    def git(self, *args: str, stdin_data: bytes | str | None = None,
+            timeout_s: float = DEFAULT_TIMEOUT, binary: bool = False):
+        return git(self.root, *args, stdin_data=stdin_data, timeout_s=timeout_s, binary=binary)
 
 
 @dataclass(frozen=True)
@@ -350,7 +350,7 @@ def _take(where: _Where, wait: float | None):
         raise files.LockTimeout(path, os.getpid())
     try:
         left = None if deadline is None else max(0.0, deadline - time.monotonic())
-        with files.lock(path, timeout=left):
+        with files.lock(path, timeout_s=left):
             _held_here().add(key)
             try:
                 yield
@@ -458,10 +458,10 @@ def _from_section(top: Path, name: str, section: dict[str, list[str]]) -> Spec:
         raise SpecError(f"saved author = {author!r} is not 'name <email>'")
     spec = Spec(name=name, root=top, paths=tuple(section.get("paths", ())),
                 author=(found.group(1), found.group(2)),
-                min_interval=_number(section, "min-interval", 0),
+                min_interval_s=_number(section, "min-interval", 0),
                 message=_one(section, "message"), trailers=_one(section, "trailers"),
                 prepare=_one(section, "prepare"), push=_one(section, "push") or None,
-                push_backoff=_number(section, "push-backoff", 300),
+                push_backoff_s=_number(section, "push-backoff", 300),
                 max_bytes=_number(section, "max-bytes", 10 * 1024 * 1024, int))
     problem = spec_problem(spec)
     if problem:
@@ -498,13 +498,13 @@ def _fields(spec: Spec) -> list[tuple[str, str]]:
     return out
 
 
-def save_spec(spec: Spec, *, wait: float = 30) -> None:
+def save_spec(spec: Spec, *, wait_s: float = 30) -> None:
     """Write `spec` into its repo's git config as `[moxi-repo "spec.<name>"]`, replacing
     what was saved under that name, so `commit_saved` and `moxi repo commit` run it.
 
     Its callables must be `"pkg.mod:fn"` strings; a `message` is saved as the summary line
     it is. Raises SpecError for a spec that can't be saved, and `moxi.files.LockTimeout`
-    when a pass holds the committer's lock past `wait` seconds.
+    when a pass holds the committer's lock past `wait_s` seconds.
     """
     problem = spec_problem(spec)
     if problem:
@@ -515,7 +515,7 @@ def save_spec(spec: Spec, *, wait: float = 30) -> None:
             raise SpecError(f"{label} is a callable; a saved spec takes a 'pkg.mod:fn' "
                             "string" + (" (or a summary line)" if label == "message" else ""))
     where = _where(spec.root)
-    with _take(where, wait):
+    with _take(where, wait_s):
         section = f"{SPEC_PREFIX}{spec.name}"
         if spec.name in _config_specs(where.cgd):
             done = _config_write(where.top, "--remove-section", section)
@@ -541,12 +541,12 @@ def _config_write(top: Path, *args: str):
     return done
 
 
-def remove_spec(root, name: str, *, wait: float = 30) -> list[str]:
+def remove_spec(root, name: str, *, wait_s: float = 30) -> list[str]:
     """Forget a spec, saved or not: its saved section, its state-file entry and its doctor
     records. Returns a line for each thing removed (none when there was nothing)."""
     where = _where(root)
     lines: list[str] = []
-    with _take(where, wait):
+    with _take(where, wait_s):
         if name in _config_specs(where.cgd):
             done = _config_write(where.top, "--remove-section", f"{SPEC_PREFIX}{name}")
             if done.returncode != 0:
@@ -612,10 +612,10 @@ class _Pass:
             hook_lines=tuple(self.hook_lines), spec=self.name, detached=self.detached)
 
 
-def commit(spec: Spec, *, wait: float = 0) -> CommitResult:
+def commit(spec: Spec, *, wait_s: float = 0) -> CommitResult:
     """Run one pass of `spec`. Never raises.
 
-    `wait` is how long to wait for another pass's lock (0: try once, and a held lock
+    `wait_s` is how long to wait for another pass's lock (0: try once, and a held lock
     returns `busy` at once)."""
     name = getattr(spec, "name", "")
     try:
@@ -627,12 +627,12 @@ def commit(spec: Spec, *, wait: float = 0) -> CommitResult:
             where = _where(spec.root)
         except SpecError as exc:
             return CommitResult("error", str(exc), spec=name)
-        return _run(name, where, wait, lambda: spec)
+        return _run(name, where, wait_s, lambda: spec)
     except Exception as exc:  # noqa: BLE001 - a pass never raises at its caller
         return CommitResult("error", f"the pass failed: {_describe(exc)}", spec=str(name))
 
 
-def commit_saved(root, name: str, *, wait: float = 0) -> CommitResult:
+def commit_saved(root, name: str, *, wait_s: float = 0) -> CommitResult:
     """Run one pass of the spec saved as `name` in the repo at `root`. Never raises."""
     try:
         try:
@@ -646,7 +646,7 @@ def commit_saved(root, name: str, *, wait: float = 0) -> CommitResult:
                 return None
             return _from_section(where.top, name, section)
 
-        return _run(name, where, wait, load)
+        return _run(name, where, wait_s, load)
     except Exception as exc:  # noqa: BLE001
         return CommitResult("error", f"the pass failed: {_describe(exc)}", spec=name)
 

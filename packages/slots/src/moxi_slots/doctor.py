@@ -113,7 +113,7 @@ def linger_row() -> Row | None:
         return _row("linger", "warn", "loginctl is not on PATH, so linger can't be read")
     try:
         done = proc.run([loginctl, "show-user", user, "--property=Linger"],
-                        timeout=LINGER_TIMEOUT)
+                        timeout_s=LINGER_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return _row("linger", "warn", f"loginctl could not be read: {exc}")
     text = (done.stdout or b"").decode("utf-8", "replace").strip()

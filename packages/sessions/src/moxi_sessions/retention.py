@@ -211,12 +211,12 @@ def _opencode() -> Retention:
                      "OpenCode: no setting read")
 
 
-def retention(environ: Mapping[str, str] | None = None) -> tuple[Retention, ...]:
+def retention(env: Mapping[str, str] | None = None) -> tuple[Retention, ...]:
     """Each harness's retention as set, Claude Code, Codex, OpenCode in that order, over
-    `environ` (this process's when None). Reads two small files and lists one folder;
+    `env` (this process's when None). Reads two small files and lists one folder;
     writes nothing."""
-    environ = os.environ if environ is None else environ
-    return (_claude(environ), _codex(environ), _opencode())
+    env = os.environ if env is None else env
+    return (_claude(env), _codex(env), _opencode())
 
 
 def lines(environ: Mapping[str, str] | None = None) -> list[str]:

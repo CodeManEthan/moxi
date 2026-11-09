@@ -632,7 +632,7 @@ class _Version:
         is a count kept per connection."""
         try:
             if self.conn is None:
-                self.conn = core_store.connect(store.path(), create=False, timeout=1.0,
+                self.conn = core_store.connect(store.path(), create=False, timeout_s=1.0,
                                                check_same_thread=False)
                 self.opened += 1
             return self.opened, self.conn.execute("PRAGMA data_version").fetchone()[0]

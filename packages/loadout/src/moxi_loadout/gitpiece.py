@@ -175,7 +175,7 @@ def _install() -> str | None:
 
     argv = [os.fspath(paths.python()), "-m", "moxi_loadout", "install"]
     try:
-        done = proc.run(argv, timeout=INSTALL_SECONDS, env=clean_env())
+        done = proc.run(argv, timeout_s=INSTALL_SECONDS, env=clean_env())
     except subprocess.TimeoutExpired:
         return f"took longer than {INSTALL_SECONDS:.0f} s and was stopped"
     except OSError as exc:

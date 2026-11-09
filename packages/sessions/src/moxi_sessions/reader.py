@@ -30,7 +30,7 @@ LIMIT = "limit"
 _DONE = object()
 
 
-def read_back(path: str | Path, *, block: int, limit: int, head: bool = False,
+def read_back(path: str | Path, *, block: int, limit: int, read_head: bool = False,
               end: int | None = None, offsets: bool = False) -> Reader:
     """Open `path` and return a `Reader` over its lines, newest first.
 
@@ -49,7 +49,7 @@ def read_back(path: str | Path, *, block: int, limit: int, head: bool = False,
     1 or a negative limit. Use the reader as a context manager, or iterate it to its end,
     to close the file.
     """
-    return Reader(path, block=block, limit=limit, head=head, end=end, offsets=offsets)
+    return Reader(path, block=block, limit=limit, head=read_head, end=end, offsets=offsets)
 
 
 class Reader:

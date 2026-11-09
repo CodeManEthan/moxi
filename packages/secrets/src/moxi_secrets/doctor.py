@@ -176,7 +176,7 @@ def private_names_location_row() -> Row:
                    "such as a dotfiles repo, could publish the private names list in the "
                    "config file and a private allowlist kept beside it",
                    f"move the config root outside every work tree with "
-                   f"{layout.prefix}CONFIG_HOME or {paths.HOME}, and move the file "
+                   f"{layout.prefix}CONFIG_HOME or {paths.HOME_ENV}, and move the file "
                    "`moxi config secrets path` names there")
     return Row(MODULE, "private-names-location", "ok",
                "the config file, and a private allowlist kept beside it, are outside every "

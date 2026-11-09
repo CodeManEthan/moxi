@@ -475,7 +475,7 @@ def _take_lock(stack: ExitStack, path: Path, wait: float,
 
     deadline = clock() + max(wait, 0.0)
     while True:
-        held = moxi.files.lock(path, timeout=0)
+        held = moxi.files.lock(path, timeout_s=0)
         try:
             held.__enter__()
         except moxi.files.LockTimeout:

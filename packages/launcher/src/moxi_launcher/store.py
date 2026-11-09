@@ -449,7 +449,7 @@ def connect(db: str | Path | None = None, *, env: Mapping[str, str] | None = Non
     `moxi.store.StoreError`. A store written by a newer launcher raises
     `moxi.store.StoreTooNew`.
     """
-    conn = store.connect(path(env) if db is None else db, create=create, timeout=timeout)
+    conn = store.connect(path(env) if db is None else db, create=create, timeout_s=timeout)
     try:
         store.migrate(conn, STEPS)
     except BaseException:

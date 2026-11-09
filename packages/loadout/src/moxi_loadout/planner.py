@@ -492,7 +492,7 @@ def run(plan: Plan, *, git_seconds: float | None = None) -> Plan:
         for item in want.carried:
             items.append(item)
             owners.append(None)
-    steps = place.plan(OWNER, items, git_seconds=git_seconds)
+    steps = place.plan(OWNER, items, git_s=git_seconds)
     for want, step in zip(owners, steps[:len(items)]):
         if want is not None:
             want.step = step

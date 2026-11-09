@@ -313,7 +313,7 @@ class _held:
         self._gate.acquire()
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            self._lock = _files.lock(target.parent / LOCK, timeout=60.0)
+            self._lock = _files.lock(target.parent / LOCK, timeout_s=60.0)
             self._lock.__enter__()
             try:
                 self.conn = open_write(target, env=self.env)

@@ -145,7 +145,7 @@ def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow
         # switch an empty file to WAL, which is a write.
         return _not_set_up(where, strict)
     try:
-        conn = moxi.store.connect(where, create=False, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, create=False, timeout_s=TIMEOUT)
     except moxi.store.StoreError as exc:
         if not os.path.exists(where):
             return []
@@ -210,7 +210,7 @@ def writing(where: str | None = None) -> Iterator[sqlite3.Connection]:
     an `sqlite3.IntegrityError`, a store check the write broke, which is raised as it is)."""
     where = where or path()
     try:
-        conn = moxi.store.connect(where, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, timeout_s=TIMEOUT)
     except (moxi.store.StoreError, sqlite3.Error, OSError) as exc:
         raise unreadable(where, exc) from exc
     try:
@@ -252,7 +252,7 @@ def migrate_existing(where: str | None = None) -> bool:
     except OSError as exc:
         raise unreadable(where, exc) from exc
     try:
-        conn = moxi.store.connect(where, create=False, timeout=TIMEOUT)
+        conn = moxi.store.connect(where, create=False, timeout_s=TIMEOUT)
     except (moxi.store.StoreError, sqlite3.Error, OSError) as exc:
         raise unreadable(where, exc) from exc
     try:
