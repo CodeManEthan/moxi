@@ -6,9 +6,10 @@ they are built.
 """
 
 ANNOUNCES = 1
-INTERFACES = frozenset()
-API = None
-CLI = None
+INTERFACES = frozenset({1})
+API = "moxi_memory.api"
+#: What `moxi memory` runs, in process, as `main(argv, prog="moxi memory")`.
+CLI = "moxi_memory.cli:main"
 SUMMARY = ("Search past sessions: a stemmed keyword index of every harness's transcripts, "
            "read where the harness keeps them")
 OPTIONAL = {

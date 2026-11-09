@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections.abc import Mapping
@@ -423,6 +424,7 @@ class Ingest:
         """List each harness root and read each source that changed since the last walk
         (with `full`, every source the roots hold)."""
         api = _api()
+        absent: set[str] = set()
         for harness in self.harnesses:
             last = index.meta_get(self.conn, f"last_walk.{harness}")
             since = None if full or self.fresh or last is None else float(last)
@@ -433,6 +435,8 @@ class Ingest:
                 listing = None
             if listing is None or not listing.ok:
                 self.unlisted.add(harness)
+                if listing is not None and not os.path.lexists(listing.root):
+                    absent.add(harness)  # no root: this harness has nothing to read
                 continue
             mains, subs = [], []
             for entry in listing:
@@ -456,6 +460,12 @@ class Ingest:
                     mains.append((entry, header, role))
                 elif self.subagents:
                     subs.append((entry, header, role))
+            if since is None:
+                # A whole listing: how many sources this walk will record, so a search
+                # during the first full read can say how far it is.
+                noted = sum(1 for entry in listing if entry.compressed)
+                index.meta_set(self.conn, f"listed.{harness}",
+                               len(mains) + len(subs) + noted)
             for entry, header, role in mains + subs:
                 reuse = _reuse(entry)
                 if not self.fresh and reuse is not None:
@@ -466,7 +476,7 @@ class Ingest:
                         continue
                 self.read_source(entry, header, role, reuse=reuse)
             index.meta_set(self.conn, f"last_walk.{harness}", began)
-        if all(index.meta_get(self.conn, f"last_walk.{h}") is not None
+        if all(h in absent or index.meta_get(self.conn, f"last_walk.{h}") is not None
                for h in self.harnesses):
             index.meta_set(self.conn, "first_read", 1)
 
