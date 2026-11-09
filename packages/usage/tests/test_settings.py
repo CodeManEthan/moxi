@@ -13,7 +13,7 @@ DEFAULTS = {
                   "model_prices_and_context_window.json",
     "prices.max_age_days": 120,
     "index.workers": 0,
-    "index.wait_s": 30,
+    "index.wait_s": 30.0,
     "limits.codex_pull_after_s": 600,
     "limits.history_days": 8,
     "limits.projection_minutes": 60,
@@ -136,3 +136,7 @@ def test_a_renamed_key_is_refused_naming_the_new_one(text, old, new):
 ])
 def test_config_check_takes_the_least_values(text):
     settings.check(text)
+
+
+def test_a_pass_may_wait_part_of_a_second():
+    settings.check("[index]\nwait_s = 2.5\n")

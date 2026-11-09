@@ -3,8 +3,8 @@
 ## 0.2.0 (2026-11-08)
 
 - Config keys `index.wait_seconds`, `limits.codex_pull_after` and `ceiling.on` are now
-  `index.wait_s` (a whole number of seconds), `limits.codex_pull_after_s` and
-  `ceiling.enabled`. An old key, set in the config file, is refused, naming the new one.
+  `index.wait_s`, `limits.codex_pull_after_s` and `ceiling.enabled`. An old key, set in
+  the config file, is refused, naming the new one.
 - The limits row field `age_seconds` is now `age_s`.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_usage.api.Row`: `age_seconds` is now `age_s`.

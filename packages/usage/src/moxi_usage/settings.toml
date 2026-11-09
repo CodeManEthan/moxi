@@ -31,9 +31,9 @@ default = 0
 doc = "Processes a full rebuild of the token index reads sources with; 0 picks one per core."
 read = "use"
 
-[index.wait_s]
-type = "int"
-default = 30
+[index.wait_s]  # noqa: MX4 -- a pass may wait part of a second; launcher's waits are whole seconds
+type = "float"
+default = 30.0
 doc = "Seconds a pass waits for another pass to finish before it exits 75."
 read = "use"
 
