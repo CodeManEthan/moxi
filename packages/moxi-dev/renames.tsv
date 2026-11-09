@@ -640,6 +640,10 @@ moxi-dev	packages/moxi-dev/tests/test_rename.py	"keep", "HOME", "HOME"))	keep	HO
 moxi-dev	packages/moxi-dev/tests/test_rename.py	"""The home is `HOME`, or `HOME`'s value."""	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/paths.py", '"""The home is `HOME`, or `HOME`\'s value."""',	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	assert "The home is `HOME`" in text and "x = HOME_ENV" in text	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	''', ("launch", "environ", "env"), "'env' is already bound or read in launch"),	keep	environ	environ
+moxi-dev	packages/moxi-dev/tests/test_rename.py	''', ("Clock", "age_seconds", "age_s"), "a scope inside Clock has its own 'age_seconds'"),	keep	age_seconds	age_seconds
+moxi-dev	packages/moxi-dev/tests/test_rename.py	''', ("-", "HOME", "HOME_ENV"), "'HOME' is also a local of a function there"),	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "launch", "name", "environ", "env"),	keep	environ	environ
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	input=	stdin_data=
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	timeout=	timeout_s=
 notes	packages/notes/src/moxi_notes/blobs.py	`git(*args, input=None, timeout=..., binary=True)` returning a finished process. Both	use	input=None, timeout=...	stdin_data=None, timeout_s=...
