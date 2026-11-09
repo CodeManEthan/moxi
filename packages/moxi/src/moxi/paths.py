@@ -30,8 +30,7 @@ and macOS, else the user database's entry for this account; on Windows `USERPROF
 unset here too.
 
 `claude_home(env)` is Claude Code's own folder, `$CLAUDE_CONFIG_DIR` else `~/.claude`,
-with a leading `~` in the variable read as that same home folder. Every module that
-reads or writes Claude's files finds the folder there.
+with a leading `~` in the variable read as that same home folder.
 
 The anchor (`anchor_dir()`) is the one directory no variable a user sets moves: the core's
 data directory as the account itself places it, `~/.local/share/moxi/moxi` under the

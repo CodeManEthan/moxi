@@ -8,8 +8,8 @@ places (`moxi.paths.home`):
 - Claude Code: `$CLAUDE_CONFIG_DIR`, else `~/.claude`: `settings.json` (hooks and
   permission rules) and `CLAUDE.md` (the global file). Its MCP servers are in
   `$CLAUDE_CONFIG_DIR/.claude.json` when the variable is set, else `~/.claude.json`. A
-  leading `~` in `CLAUDE_CONFIG_DIR` is the home folder, for both (`moxi.paths.claude_home`,
-  the folder every Moxi module finds Claude's files in).
+  leading `~` in `CLAUDE_CONFIG_DIR` is the home folder, for both
+  (`moxi.paths.claude_home`).
 - Codex: `$CODEX_HOME`, else `~/.codex`: `hooks.json`, `rules/loadout.rules` (a whole file
   loadout owns), `AGENTS.md`, and `config.toml` (its MCP servers, read only: the `codex`
   CLI writes them). That Codex reads `hooks.json` and the rules file is taken from its
