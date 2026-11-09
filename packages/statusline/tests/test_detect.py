@@ -198,6 +198,45 @@ def test_the_date_and_hhmm_with_a_held_clock_find_no_lines(line, throwaway):
     assert found.pieces() == []
 
 
+def test_a_two_digit_year_with_a_held_clock_finds_no_context(line, throwaway):
+    # 8 November 2026: the year's 26 is no other clock number then, and the draw offers
+    # it first.
+    held = _held(2026, 11, 8, 14, 52, 30)
+    draw = Scripted(numbers={(11, 49): [26]})
+    found = run(line("""
+        import json, sys, time
+        d = json.load(sys.stdin)
+        t = time.localtime(d["rate_limits"]["five_hour"]["resets_at"] - 60)
+        print(time.strftime("%d/%m/%y", t))
+    """), throwaway, now=lambda: held, draw=draw)
+    assert found.problem is None
+    assert found.pieces() == []
+
+
+def test_the_cost_skips_an_hmm_time_with_a_held_clock(line, throwaway):
+    # 14:52 is 2.52 on a twelve-hour clock; the draw offers $2.52 first.
+    held = _held(2030, 3, 4, 14, 52, 30)
+    draw = Scripted(numbers={(2, 9): [2, 3], (1, 99): [52, 47]})
+    found = run(line("""
+        import json, sys, time
+        d = json.load(sys.stdin)
+        t = time.localtime(d["rate_limits"]["five_hour"]["resets_at"] - 60)
+        print(f"{t.tm_hour % 12 or 12}.{t.tm_min:02d}")
+    """), throwaway, now=lambda: held, draw=draw)
+    assert found.problem is None
+    assert found.pieces() == []
+
+
+def test_clock_numbers_hold_the_year_and_both_day_orders():
+    # 25 November 2037, 14:52:18: 37 is the year alone, 1125 the month and day alone,
+    # and 2511 the day and month alone.
+    held = _held(2037, 11, 25, 14, 52, 18)
+    two, four, _ = detect.clock_numbers(held, held + 60)
+    assert 37 in two
+    assert 1125 in four
+    assert 2511 in four
+
+
 def test_clock_numbers_cover_the_span_and_the_resets_in_both_zones():
     held = _held(2030, 3, 4, 14, 52, 30)
     two, four, hm = detect.clock_numbers(held, held + 60)
