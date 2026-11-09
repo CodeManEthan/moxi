@@ -270,6 +270,25 @@ def test_a_line_that_sleeps_past_the_limit_is_killed(line, throwaway, tmp_path):
         pytest.fail("the line's process outlived the run")
 
 
+def test_what_a_line_leaves_running_is_killed_when_it_exits(throwaway, tmp_path):
+    # The line exits at once and leaves a child that would write a second later. The
+    # child holds no pipe, so the run ends with the line.
+    late, pid_file = tmp_path / "late", tmp_path / "pid"
+    found = run(f"(sleep 1; echo x > {shlex.quote(str(late))}) >/dev/null 2>&1 & "
+                f"echo $! > {shlex.quote(str(pid_file))}; echo hello", throwaway)
+    assert found.problem is None
+    pid = int(pid_file.read_text())
+    for _ in range(25):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail("what the line left running outlived the run")
+    assert not late.exists()
+
+
 def test_a_non_zero_exit_detects_nothing(throwaway):
     found = run("echo /x; exit 3", throwaway)
     assert found.pieces() == [] and found.problem == (
