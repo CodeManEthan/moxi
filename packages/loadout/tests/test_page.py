@@ -498,7 +498,7 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
                       "projects": ["alpha"]},
      ["install", "--replace=skill:review@claude", "--replace=/srv/alpha/.claude/skills/x",
       "--project=alpha"]),
-    ("/api/global-off", {}, ["global", "off"]),
+    ("/api/global-off", {}, ["global", "remove"]),
 ])
 def test_a_confirmed_act_runs_as_the_job_its_key_names(lo, spawned, path, body, verb):
     status, answer = post(path, body, key=KEY)

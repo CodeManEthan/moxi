@@ -37,7 +37,7 @@ STAMPS = (TOKEN_ENV, URL_ENV, SHELL_REACH_ENV)
 #: The server's name in a launch, which harnesses put in each tool's name.
 SERVER = "comms"
 #: The six tools, as the endpoint names them.
-TOOLS = ("send", "reply", "agents", "whoami", "history", "delete")
+TOOLS = ("send", "reply", "agents", "whoami", "history", "remove")
 #: Claude's permission rule for each tool.
 CLAUDE_RULES = tuple(f"mcp__{SERVER}__{tool}" for tool in TOOLS)
 

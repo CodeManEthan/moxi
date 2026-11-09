@@ -59,7 +59,7 @@ def test_interface_3_adds_retention():
     from moxi_sessions import retention
     assert {"retention", "Retention"} <= set(api.__all__)
     assert api.retention is retention.retention and api.Retention is retention.Retention
-    assert list(inspect.signature(api.retention).parameters) == ["environ"]
+    assert list(inspect.signature(api.retention).parameters) == ["env"]
 
 
 def test_interface_2_keeps_what_cache_reads():
@@ -72,12 +72,12 @@ def test_interface_2_keeps_what_cache_reads():
 
 def test_the_interface_signatures_hold_their_parameters():
     sig = inspect.signature(api.read_back)
-    assert list(sig.parameters)[:4] == ["path", "block", "limit", "head"]
+    assert list(sig.parameters)[:4] == ["path", "block", "limit", "read_head"]
     assert sig.parameters["block"].kind is inspect.Parameter.KEYWORD_ONLY
     assert sig.parameters["block"].default is inspect.Parameter.empty
     assert sig.parameters["limit"].default is inspect.Parameter.empty
-    assert sig.parameters["head"].default is False
-    assert list(inspect.signature(api.projects_root).parameters) == ["environ"]
+    assert sig.parameters["read_head"].default is False
+    assert list(inspect.signature(api.projects_root).parameters) == ["env"]
 
 
 def test_interface_2_finds_and_lists():

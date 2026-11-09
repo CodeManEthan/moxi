@@ -17,7 +17,7 @@
                           (202)
     POST /api/install     `moxi loadout install [--user] [--project P]...`, as a job (202)
     POST /api/replace     `moxi loadout install --replace ID...`, confirmed, as a job (202)
-    POST /api/global-off  `moxi loadout global off`, confirmed, as a job (202)
+    POST /api/global-off  `moxi loadout global remove`, confirmed, as a job (202)
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before writing.** Every act starts a page job (`moxi_loadout.pagejob`), which runs the
@@ -25,7 +25,7 @@ verb through the CLI's own code path in a process of its own, and answers 202 wi
 job's status path, `/api/job?job=<id>`. The page server's threads never install. The
 reads run here, take no lock and bound every git call as the doctor does.
 
-`global mode off` is the same command as `global off`, so the page reaches it only
+`global mode off` is the same command as `global remove`, so the page reaches it only
 through the confirmed `/api/global-off`.
 
 Every value that can hold a path carries a mark: a file or a target is `path`, and a

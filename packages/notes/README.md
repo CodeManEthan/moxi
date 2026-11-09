@@ -132,7 +132,7 @@ snapshot takes the files they keep.
 ## Snapshots
 
 Each snapshot is one pass of repo's committer with notes' spec, `notes/snapshot`: the whole
-notes root, at most one commit per `snapshot.interval` minutes, authored `moxi notes` with
+notes root, at most one commit per `snapshot.interval_minutes` minutes, authored `moxi notes` with
 the email `notes+<device>@moxi.invalid` (one author per machine, so a snapshot fetched from
 another machine never throttles this one), and pushed to `snapshot.push` when set.
 The spec is rebuilt from notes' config at every pass notes starts, so a config edit takes
@@ -140,8 +140,8 @@ effect at the next pass; `moxi repo commit` runs it as last saved.
 
 - An ended turn starts a pass at most once a minute; an ended session always starts one.
   Neither waits for it.
-- A session's last edits are committed within `snapshot.interval` + 6 minutes after it
-  ends (21 minutes with the defaults), while the machine stays up and `snapshot.auto` is
+- A session's last edits are committed within `snapshot.interval_minutes` + 6 minutes after it
+  ends (21 minutes with the defaults), while the machine stays up and `snapshot.session_end` is
   on, even when no other event comes. A failed push of that commit is tried once more
   after the push backoff. If the notes repo's lock is held for five minutes, the wait ends
   and `moxi doctor` shows a `settle` record.
@@ -158,8 +158,8 @@ paths left out for over an hour.
 ### What is judged
 
 Every judge reads whole files from git's object store, never a diff, and scans each with
-the `credentials` and `private-names` sets at its path. A file larger than `max_mb` is a
-finding of its own: raise `max_mb` to have it judged. Two allowlist files keep hits you
+the `credentials` and `private-names` sets at its path. A file larger than `max_mib` is a
+finding of its own: raise `max_mib` to have it judged. Two allowlist files keep hits you
 have judged, each read where secrets accepts it:
 
 - `.secrets-allow` at the top of the notes folder: credentials lines only, and it may be
@@ -204,7 +204,7 @@ each author and committer line, and refuses the push on any hit not kept by an a
 
 With `action = redact`, a git clean filter puts the redacted text in the index at
 `git add`; the file on disk keeps the original. A file it can't redact (binary, over
-`max_mb`, one whose redaction would leave nothing but a placeholder, or one the filter
+`max_mib`, one whose redaction would leave nothing but a placeholder, or one the filter
 fails on) is staged as it is, then left out by the snapshot and refused at push. The
 filter is not required, so its failure costs only the files it failed on, never another git
 command. The attribute that runs it lives in the git dir's `info/attributes`, never in a
@@ -270,7 +270,7 @@ through a symlink; a second run adds nothing. The next snapshot commits what it 
 | row | ok | otherwise |
 |---|---|---|
 | `root` | the notes folder, a git work tree's top | `fail` when missing; `warn` when no git repo, or inside one below its top (snapshots and gates off) |
-| `snapshot` | a trigger is on, and the saved spec equals notes' config | `off` with `snapshot.auto` and the timer both off; `warn` when the saved spec differs or none is saved |
+| `snapshot` | a trigger is on, and the saved spec equals notes' config | `off` with `snapshot.session_end` and the timer both off; `warn` when the saved spec differs or none is saved |
 | `gates` | both gates registered and enabled in the notes repo | `fail` when either is missing or disabled |
 | `filter` | under redact: the driver, its attribute and its interpreter in place, not required | `fail` when one is missing under redact; `warn` for `required = true`, a driver written for another interpreter, or leftovers under leave-out |
 | `allowlist` | both files read, each where secrets accepts it | `fail` on a line that can't be read, or a git dir with no private allowlist; `warn` for a `.secrets-allow-private` at the root |
@@ -289,10 +289,10 @@ at the next read.
 | `prefix` | `""` | a subfolder under the root for the computed folders, topics and inbox, such as your user name |
 | `exclude` | `[]` | folders whose sessions get no notes directory |
 | `action` | `leave-out` | what a commit does with a file that holds a secret: `leave-out` or `redact` |
-| `max_mb` | `10` | the largest file a snapshot takes and a gate reads |
+| `max_mib` | `10` | the largest file a snapshot takes and a gate reads |
 | `types` | `doc-types.toml` | the document types file, relative to the root |
-| `snapshot.auto` | `true` | snapshot when an agent turn or session ends |
-| `snapshot.interval` | `15` | at most one snapshot commit per this many minutes |
+| `snapshot.session_end` | `true` | snapshot when an agent turn or session ends |
+| `snapshot.interval_minutes` | `15` | at most one snapshot commit per this many minutes |
 | `snapshot.push` | `""` | the remote snapshots are pushed to; empty means none |
 | `snapshot.author_name` | `moxi notes` | the name on snapshot commits |
 | `snapshot.author_email` | `""` | the email on snapshot commits; empty means one per machine at `moxi.invalid` |

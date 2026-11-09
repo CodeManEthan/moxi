@@ -7,7 +7,7 @@ its caller everything a reader of either harness uses, and decides nothing:
 
 * each non-blank line as raw bytes, newest first, with whether it is the file's last line
   and the file does not end in a newline (`unterminated`): a harness may be writing it;
-* line 1, read first, when asked (`head=True`): a Codex rollout's line 1 says whether the
+* line 1, read first, when asked (`read_head=True`): a Codex rollout's line 1 says whether the
   file is the thread's whole history, and the backward read then stops at line 2;
 * how the read ended (`ended`): `start` when every line back to its stopping line was
   yielded, `limit` when the byte limit stopped it with lines left, None while lines remain
@@ -30,13 +30,13 @@ LIMIT = "limit"
 _DONE = object()
 
 
-def read_back(path: str | Path, *, block: int, limit: int, head: bool = False,
+def read_back(path: str | Path, *, block: int, limit: int, read_head: bool = False,
               end: int | None = None, offsets: bool = False) -> Reader:
     """Open `path` and return a `Reader` over its lines, newest first.
 
     `block` is the size of each backward read in bytes, and `limit` the most bytes the
     backward read takes: it is checked before each block, so a read stops once it has taken
-    `limit` bytes or more. With `head=True`, line 1 is read first, from the start of the
+    `limit` bytes or more. With `read_head=True`, line 1 is read first, from the start of the
     file, by the same block size and under a limit of its own of `limit` bytes; it is held
     as `Reader.first` and the backward read stops at line 2.
 
@@ -49,7 +49,7 @@ def read_back(path: str | Path, *, block: int, limit: int, head: bool = False,
     1 or a negative limit. Use the reader as a context manager, or iterate it to its end,
     to close the file.
     """
-    return Reader(path, block=block, limit=limit, head=head, end=end, offsets=offsets)
+    return Reader(path, block=block, limit=limit, head=read_head, end=end, offsets=offsets)
 
 
 class Reader:
@@ -60,12 +60,12 @@ class Reader:
     file's last line when the file does not end in a newline; that line is yielded like
     any other, whether or not it parses. Blank lines are skipped and no other line is.
 
-    `first` is line 1's bytes without its newline when `head=True` (`b""` for an empty
-    file), and None without `head` or when line 1 does not end within the head's limit;
+    `first` is line 1's bytes without its newline when `read_head=True` (`b""` for an empty
+    file), and None without `read_head` or when line 1 does not end within the head's limit;
     the read then ends `limit` with no line yielded.
 
     `ended` is None until the read is over: `start` once the line the read stops at (line
-    1, or line 2 with `head`) has been yielded or there was none to yield, `limit` once the
+    1, or line 2 with `read_head`) has been yielded or there was none to yield, `limit` once the
     limit stopped it with lines left. It is set as soon as the reader knows, which can be
     while the caller holds the last line it will get. A caller that stops iterating before
     then sees None.

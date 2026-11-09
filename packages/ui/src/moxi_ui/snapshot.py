@@ -283,7 +283,7 @@ def read_modules(*, cwd: str | os.PathLike, env: Mapping[str, str] | None = None
     """Every module `moxi modules --json` lists, run in a fresh process from `cwd`:
     `(modules, None)`, each with a valid module name, or `(None, reason)`. Blocking."""
     try:
-        done = run(modules_argv(), timeout=timeout, cwd=str(cwd), env=env)
+        done = run(modules_argv(), timeout_s=timeout, cwd=str(cwd), env=env)
     except subprocess.TimeoutExpired:
         return None, f"moxi modules ran past {timeout:g} s"
     except OSError as err:

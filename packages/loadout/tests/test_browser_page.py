@@ -421,7 +421,7 @@ def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
         glob.get_by_role("button", name="Turn off…").click()
         page.locator("moxi-ui-confirm").get_by_role("button", name="Confirm").click()
         job = job_done(panel)
-        expect(job.locator('[data-line="command"]')).to_have_text("moxi loadout global off")
+        expect(job.locator('[data-line="command"]')).to_have_text("moxi loadout global remove")
         expect(glob).to_have_attribute("data-mode", "off")
         expect(glob).to_have_attribute("data-chosen", "true")
         assert claude_md.read_text() == OWN_TEXT

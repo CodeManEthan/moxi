@@ -330,14 +330,14 @@ def opencode_root(environ: Mapping[str, str] | None = None) -> Path:
     return base / "opencode" / "opencode.db"
 
 
-def root(harness: str, environ: Mapping[str, str] | None = None) -> Path:
+def root(harness: str, env: Mapping[str, str] | None = None) -> Path:
     """The harness's root (see `claude.projects_root`, `codex_root`, `opencode_root`)."""
     if harness == CLAUDE:
-        return claude.projects_root(environ)
+        return claude.projects_root(env)
     if harness == CODEX:
-        return codex_root(environ)
+        return codex_root(env)
     if harness == OPENCODE:
-        return opencode_root(environ)
+        return opencode_root(env)
     raise ValueError(f"{harness!r} is not a harness sessions reads")
 
 

@@ -1575,17 +1575,17 @@ def build_parser():
     import argparse
 
     ap = argparse.ArgumentParser(
-        prog="moxi-comms-opencode",
+        prog="moxi-comms-opencode", allow_abbrev=False,
         description="an OpenCode session with comms mail, in this terminal: one wrapper "
                     "per identity; closing the window takes the identity offline")
     ap.add_argument("identity", help="qualified roster identity, e.g. coder@proj-a")
     ap.add_argument("--opencode", help="the opencode binary (default: the roster's "
                                        "`binary`, else `opencode` on PATH, else "
                                        f"{opencode_roster.INSTALL_DIR}/opencode)")
-    ap.add_argument("--ready-wait", type=float, default=READY_WAIT, metavar="SECONDS",
+    ap.add_argument("--ready-wait-s", type=float, default=READY_WAIT, metavar="SECONDS",
                     help="how long to wait for the session to be ready before giving up "
                          f"with exit 3 (default {READY_WAIT:.0f})")
-    ap.add_argument("--notice-hold", type=float, default=NOTICE_HOLD, metavar="SECONDS",
+    ap.add_argument("--notice-hold-s", type=float, default=NOTICE_HOLD, metavar="SECONDS",
                     help="how long a launch notice stays on screen before the window "
                          f"opens (default {NOTICE_HOLD:.0f})")
     ap.add_argument("--config", metavar="PATH",
@@ -1714,10 +1714,10 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
             print(f"moxi-comms-opencode: {e}", file=sys.stderr, flush=True)
             return 4 if isinstance(e, DaemonOffline) else 2
         log.info("moxi-comms-opencode running for %s", agent.qualified)
-        show_notice(adapter, args.notice_hold, stopping)
+        show_notice(adapter, args.notice_hold_s, stopping)
         session = OpenCodeWindow(adapter, binary=binary, terminal=Terminal(tty),
                                  log_path=log_path, stopping=stopping, hangup=hangup,
-                                 ready_wait=args.ready_wait, env=adapter.window_env())
+                                 ready_wait=args.ready_wait_s, env=adapter.window_env())
         try:
             return session.run()
         except GaveUp as e:

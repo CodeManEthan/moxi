@@ -37,9 +37,9 @@ export const BASE = css`
   .meter[data-state="reset"] .line.state { color: var(--moxi-text-dim); }
 `;
 
-/** The series colours as classes `s0` to `s5`, for SVG marks and legend swatches: a
- * theme token reaches a mark through a class, since the page's policy allows no inline
- * style. */
+/** The series colours as classes, `s` and the token's index, for SVG marks and legend
+ * swatches: a theme token reaches a mark through a class, since the page's policy allows
+ * no inline style. */
 export const SERIES = unsafeCSS(SERIES_TOKENS.map((token, i) =>
   `.s${i} { fill: var(--moxi-${token}); background: var(--moxi-${token}); }`).join("\n"));
 

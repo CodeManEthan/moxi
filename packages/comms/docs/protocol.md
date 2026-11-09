@@ -287,7 +287,7 @@ is in [adapters.md](adapters.md).
 
 ### Delete and expiry
 
-`moxi comms delete <id>` withdraws a message its author sent from every recipient that
+`moxi comms remove <id>` withdraws a message its author sent from every recipient that
 hasn't had it in a digest, and prints one line per recipient: withdrawn, or already
 delivered. Only the author deletes, with its own credential. A recipient whose digest
 held it has had it, even when that turn ended unhandled, since the model may have read
@@ -429,7 +429,7 @@ Newline-delimited JSON-RPC 2.0 at `RUNTIME/comms/daemon.sock` (0600, in a 0700
 directory; Moxi's short socket path for it when that one is too long). Each adapter's
 claim socket speaks the same wire. Every connection opens with `rpc.hello`: the client
 offers a range of comms wire versions, and the daemon answers the highest common one and
-its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`), or refuses with
+its capabilities (`remove`, `expiry`, `interrupt`, `reserved-names`, `mcp`, `connector`), or refuses with
 -32001 naming both ranges. The wire is version 1. A version is raised only for a
 breaking change; an addition is a new capability, which a client tests by name. A verb
 or adapter refused at its hello says which side is older and the cure: restart the
@@ -456,7 +456,7 @@ line that isn't JSON-RPC 2.0 gets the JSON-RPC error and the connection closes.
 ```
 
 Methods any client may call: `send` (`as`, the sending identity, `token`, its
-credential, and `content`, line zero and body; answers `message_id`), `delete` (`as`,
+credential, and `content`, line zero and body; answers `message_id`), `remove` (`as`,
 `token`, `message_id`; answers `withdrawn` and `delivered`, each a list of names), and
 the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 `explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
@@ -569,7 +569,7 @@ refusal names. A verb exits 3 on a refusal and 75 on a try-again; a read that ti
 or a send whose answer never came exits 1, since the message may have been sent.
 
 `session` answers the daemon's own read of the bound session's cache:
-`cache_kind` (`warm`, `cold`, `fresh`, `no-cache` or `unknown`), `age_seconds`,
+`cache_kind` (`warm`, `cold`, `fresh`, `no-cache` or `unknown`), `age_s`,
 `cache_reason` (why it is `unknown`, a `cold` with no lifetime, or a free model's
 `no-cache`), `cache_ttl` (the lifetime the read used, in seconds, None when it used
 none), `cache_key` (what the lifetime was looked up by, in words, e.g. `codex

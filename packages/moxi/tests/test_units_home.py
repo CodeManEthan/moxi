@@ -103,7 +103,7 @@ def spec(kind="daemon", **kw) -> Spec:
 # -- the tag and the names --------------------------------------------------------------------
 
 def test_the_default_home_keeps_todays_names_on_every_backend(tmp_path, monkeypatch):
-    assert units.home_tag() is None and units.environment("comms") == {}
+    assert units.home_tag() is None and units.unit_env("comms") == {}
     assert _home.home_tag({"MOXI_HOME": ""}) is None
     assert SystemdBackend(tmp_path).ids("comms", "daemon", "daemon") == (
         "moxi-comms-daemon.socket", "moxi-comms-daemon.service")
@@ -143,7 +143,7 @@ def test_two_spellings_of_one_folder_give_one_tag_and_one_value(tmp_path, monkey
     spellings = [str(real), "real", "./real/../real", "~/homes/real", str(link)]
     want = os.path.realpath(real)
     seen = {(_home.home_tag({"MOXI_HOME": s, "HOME": str(tmp_path)}),
-             _home.environment("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])
+             _home.unit_env("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])
             for s in spellings}
     assert seen == {(tag_of(real), want)}
 
@@ -218,7 +218,7 @@ def test_a_tagged_homes_launchd_plist_carries_the_home(tmp_path, monkeypatch):
     monkeypatch.setenv("MOXI_HOME", str(tmp_path / "h"))
     tag = units.home_tag()
     backend = LaunchdBackend(agents=tmp_path / "agents", uid=501, gate="/opt/moxi")
-    home = units.environment("comms")["MOXI_HOME"]
+    home = units.unit_env("comms")["MOXI_HOME"]
     for kind in ("daemon", "timer"):
         [group] = backend.render(spec(kind, environment=(("MOXI_HOME", home),)))
         [(path, text)] = group.files
@@ -244,7 +244,7 @@ def tasks(tmp_path, monkeypatch):
 
 def test_a_tagged_homes_task_gives_its_gate_the_home(tasks, tmp_path, monkeypatch):
     monkeypatch.setenv("MOXI_HOME", str(tmp_path / "h"))
-    home = units.environment("comms")["MOXI_HOME"]
+    home = units.unit_env("comms")["MOXI_HOME"]
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
     for kind in ("daemon", "timer"):
         [group] = tasks.render(spec(kind, environment=(("MOXI_HOME", home),)))
@@ -392,7 +392,7 @@ def test_a_wrap_drop_in_is_per_home_and_tells_its_gate_the_home(w):
     w.sup.reload()
     w.home(w.tmp / "h")
     tag = units.home_tag()
-    home = units.environment("demo")["MOXI_HOME"]
+    home = units.unit_env("demo")["MOXI_HOME"]
     acted = units.wrap("backup.timer", module="demo", key="rows.backup", name="backup")
     assert acted.ok, acted.lines
     dropin = w.root / "backup-run.service.d" / f"50-moxi-{tag}-demo.conf"

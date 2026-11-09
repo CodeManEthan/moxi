@@ -56,7 +56,7 @@ def mint(runtime_dir: str | os.PathLike, address: Any, *,
     """Mint a pairing code for `address` (the tunnel's `Address`) and return its URL.
     Raises `NoAddress` when there is none."""
     if address is None:
-        raise NoAddress("the gateway has no address; run `moxi ui gateway on`")
+        raise NoAddress("the gateway has no address; run `moxi ui gateway enable`")
     code = tickets(runtime_dir, clock=clock).mint()
     return pair_url(address.host, address.port, code)
 

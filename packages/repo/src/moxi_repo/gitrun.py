@@ -13,7 +13,7 @@ git's local variables (`GIT_DIR`, `GIT_INDEX_FILE` and the rest that
 made from inside a git hook acts on the repo it names, and pathspecs read as git's
 defaults. It never sets a pathspec variable.
 
-`changes(root, staged=True | range=(a, b), paths=())` lists what changed, from git's `-z`
+`changes(root, staged=True | rev_range=(a, b), paths=())` lists what changed, from git's `-z`
 output, with each path exactly as git gave it. Every path handed to git is written in its
 literal form, `literal_pathspec(path)`, so `[`, `*`, `?` and a leading `:` in a file name
 are plain characters.
@@ -45,7 +45,7 @@ def local_env_vars() -> tuple[str, ...]:
         from moxi import proc
 
         try:
-            done = proc.run(["git", "rev-parse", "--local-env-vars"], timeout=DEFAULT_TIMEOUT)
+            done = proc.run(["git", "rev-parse", "--local-env-vars"], timeout_s=DEFAULT_TIMEOUT)
             names = done.stdout.decode("utf-8", "replace").split()
         except (OSError, subprocess.TimeoutExpired):
             names = []
@@ -90,25 +90,25 @@ def environment(*, clean_env: bool = True, author: tuple[str, str] | None = None
     return env
 
 
-def git(root: str | os.PathLike, *args: str, timeout: float = DEFAULT_TIMEOUT,
-        input: bytes | str | None = None, author: tuple[str, str] | None = None,
+def git(root: str | os.PathLike, *args: str, timeout_s: float = DEFAULT_TIMEOUT,
+        stdin_data: bytes | str | None = None, author: tuple[str, str] | None = None,
         clean_env: bool = True, binary: bool = False,
         extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run `git -C <root> <args>`; return the finished process.
 
     `stdout` and `stderr` are text (UTF-8, with bytes that aren't kept as surrogates);
-    with `binary`, `stdout` is the bytes git wrote. `input` is fed on stdin, else stdin is
+    with `binary`, `stdout` is the bytes git wrote. `stdin_data` is fed on stdin, else stdin is
     closed. The exit status is not checked; git missing raises `OSError`, and a run past
-    `timeout` seconds is killed and raises `subprocess.TimeoutExpired`. `author` (name,
+    `timeout_s` seconds is killed and raises `subprocess.TimeoutExpired`. `author` (name,
     email) is set as author and committer. `extra_env` adds variables to git's
     environment.
     """
     from moxi import proc
 
-    data = input.encode("utf-8") if isinstance(input, str) else input
-    batch = not _users_ssh(root, args, clean_env, timeout)
-    done = proc.run(["git", "-C", os.fspath(Path(root)), *args], timeout=timeout,
-                    input=data, env=environment(clean_env=clean_env, author=author,
+    data = stdin_data.encode("utf-8") if isinstance(stdin_data, str) else stdin_data
+    batch = not _users_ssh(root, args, clean_env, timeout_s)
+    done = proc.run(["git", "-C", os.fspath(Path(root)), *args], timeout_s=timeout_s,
+                    stdin_data=data, env=environment(clean_env=clean_env, author=author,
                                                 extra=extra_env, batch_ssh=batch))
     out = done.stdout or b""
     return subprocess.CompletedProcess(
@@ -147,7 +147,7 @@ def _users_ssh(root, args, clean_env: bool, timeout: float) -> bool:
 
     try:
         done = proc.run(["git", "-C", os.fspath(Path(root)), *lead, "config", "--get",
-                         "core.sshCommand"], timeout=timeout,
+                         "core.sshCommand"], timeout_s=timeout,
                         env=environment(clean_env=clean_env))
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -225,7 +225,7 @@ def parse_raw(data: bytes) -> list[Change]:
 
 def empty_tree(root: str | os.PathLike, *, timeout: float = DEFAULT_TIMEOUT) -> str:
     """The id of the empty tree in this repo's hash."""
-    done = git(root, "hash-object", "-t", "tree", "--stdin", input=b"", timeout=timeout)
+    done = git(root, "hash-object", "-t", "tree", "--stdin", stdin_data=b"", timeout_s=timeout)
     if done.returncode != 0:
         raise GitFailed(("hash-object",), done.returncode, done.stderr)
     return done.stdout.strip()
@@ -233,15 +233,15 @@ def empty_tree(root: str | os.PathLike, *, timeout: float = DEFAULT_TIMEOUT) -> 
 
 def head_commit(root: str | os.PathLike, *, timeout: float = DEFAULT_TIMEOUT) -> str | None:
     """`HEAD`'s commit id, or None on an unborn branch."""
-    done = git(root, "rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=timeout)
+    done = git(root, "rev-parse", "-q", "--verify", "HEAD^{commit}", timeout_s=timeout)
     return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
 
 
-def changes(root: str | os.PathLike, staged: bool = True, range: tuple[str, str] | None = None,
-            paths=(), *, renames: bool = True,
-            timeout: float = DEFAULT_TIMEOUT) -> list[Change]:
+def changes(root: str | os.PathLike, *, staged: bool = True,
+            rev_range: tuple[str, str] | None = None, paths=(), renames: bool = True,
+            timeout_s: float = DEFAULT_TIMEOUT) -> list[Change]:
     """What changed under `paths` (every path when none): what is staged against `HEAD`
-    (the empty tree on an unborn branch), or with `range=(a, b)` between two commits.
+    (the empty tree on an unborn branch), or with `rev_range=(a, b)` between two commits.
 
     Each path goes to git in its literal form, in argv: `paths` over `MAX_PATHS` paths or
     `MAX_PATH_BYTES` bytes raises `ValueError`. Renames are found (`-M`) unless
@@ -258,15 +258,15 @@ def changes(root: str | os.PathLike, staged: bool = True, range: tuple[str, str]
                          f"bytes in all; this list has {problem.split(',')[0]}")
     find = "-M" if renames else "--no-renames"
     tail = ["--", *(literal_pathspec(p) for p in paths)]
-    if range is not None:
-        a, b = range
+    if rev_range is not None:
+        a, b = rev_range
         args = ["diff-tree", "-r", "--raw", "-z", find, a, b, *tail]
     else:
         if not staged:
-            raise ValueError("changes() reads what is staged, or a range=(a, b)")
-        base = head_commit(root, timeout=timeout) or empty_tree(root, timeout=timeout)
+            raise ValueError("changes() reads what is staged, or a rev_range=(a, b)")
+        base = head_commit(root, timeout=timeout_s) or empty_tree(root, timeout=timeout_s)
         args = ["diff-index", "--cached", "--raw", "-z", find, base, *tail]
-    done = git(root, *args, binary=True, timeout=timeout)
+    done = git(root, *args, binary=True, timeout_s=timeout_s)
     if done.returncode != 0:
         raise GitFailed(args[:1], done.returncode, done.stderr)
     return parse_raw(done.stdout)

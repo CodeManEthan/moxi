@@ -80,8 +80,8 @@ class Real:
         return _settle.Pass(status=result.status, start=start, end=end,
                             held_lock=ran and result.status != "busy",
                             unpushed=unpushed,
-                            interval=float(spec.min_interval) if spec else 0.0,
-                            backoff=float(spec.push_backoff) if spec else 300.0,
+                            interval=float(spec.min_interval_s) if spec else 0.0,
+                            backoff=float(spec.push_backoff_s) if spec else 300.0,
                             line=result.line())
         yield  # a generator, so the steps can `yield from` it
 
@@ -113,7 +113,7 @@ class Real:
         from moxi import files
 
         try:
-            self._lock.enter_context(files.lock(self.dir / _settle.LOCK, timeout=0))
+            self._lock.enter_context(files.lock(self.dir / _settle.LOCK, timeout_s=0))
         except (files.LockTimeout, RuntimeError):
             return False
         return True

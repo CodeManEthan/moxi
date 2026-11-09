@@ -245,7 +245,7 @@ def _origin_fix(address: Any) -> str:
     if address.provider == "cloudflare":
         return ("route a new hostname to the tunnel, then `moxi tunnel remove ui/gateway` and "
                 "`moxi tunnel add ui/gateway --provider cloudflare --hostname <new>`")
-    return "moxi tunnel remove ui/gateway, then moxi ui gateway on"
+    return "moxi tunnel remove ui/gateway, then moxi ui gateway enable"
 
 
 def _fail(facts: Facts) -> tuple[str, str | None] | None:
@@ -272,16 +272,16 @@ def _fail(facts: Facts) -> tuple[str, str | None] | None:
             removed = ("the tunnel entry was removed" if facts.held.get("removed", True)
                        else "there was no tunnel entry to remove")
             return (f"port {facts.gateway_port} was held by another program; {removed}",
-                    "free the port and run `moxi ui gateway on`")
+                    "free the port and run `moxi ui gateway enable`")
         return (f"the gateway couldn't hold its socket ({facts.held.get('reason')}); the "
-                "tunnel entry was removed", "moxi ui gateway on")
+                "tunnel entry was removed", "moxi ui gateway enable")
     if facts.retired_problem:
         return (f"the gateway's copy of its retired origins, {facts.retired_problem}, so "
                 "tunnel refuses every ui/gateway add",
-                "move the file aside and run `moxi ui gateway on`; the copy refills from "
+                "move the file aside and run `moxi ui gateway enable`; the copy refills from "
                 "tunnel's record, unless tunnel was purged")
     if facts.switch and address is None:
-        return "there is no ui/gateway tunnel entry", "moxi ui gateway on"
+        return "there is no ui/gateway tunnel entry", "moxi ui gateway enable"
     if live and address.state != "on":
         return f"the ui/gateway tunnel entry is {address.state}", "moxi tunnel repair"
     reason = (facts.acts or {}).get("reason") if facts.shell_running else None

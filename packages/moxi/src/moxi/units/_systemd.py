@@ -57,7 +57,7 @@ from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, enabled_by_socket,
     listen_address, socket_name, socket_place, socket_state)
 from ._fence import Fence, Ran
-from ._home import environment, home_tag
+from ._home import unit_env, home_tag
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
 MARK = "# moxi unit: "
@@ -917,7 +917,7 @@ class SystemdBackend:
         record = f"{module}/{name}"
         # The gate is told the home rather than the service given `MOXI_HOME`, which
         # would reach the foreign unit's own command too.
-        home = environment(module).get("MOXI_HOME")
+        home = unit_env(module).get("MOXI_HOME")
         run = [gate, "run"] + (["--home", home] if home else [])
         text = _text([
             f"{WRAP_MARK}{record}",

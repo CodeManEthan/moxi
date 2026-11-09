@@ -81,7 +81,7 @@ def test_an_empty_terminal_value_is_named_as_empty(monkeypatch, at):
 def test_the_terminal_wording_says_what_the_page_does(monkeypatch, at):
     write_record({**os.environ, "MOXI_HOME": at("terminal")})
     monkeypatch.setenv("MOXI_HOME", at("page"))
-    line = terminal.check(store, page=False)
+    line = terminal.check(store, for_page=False)
     assert ("The browser page refuses to write while its shell differs from the last run "
             "in a terminal" in line)
     assert f"set MOXI_HOME to {at('terminal')}" in line
@@ -194,10 +194,10 @@ def test_the_anchor_variable_is_outside_the_set():
     write_record(None)
 
     def places(env):
-        env.get(paths.ANCHOR_HOME)
+        env.get(paths.ANCHOR_HOME_ENV)
         return store(env)
 
-    with pytest.raises(ValueError, match=paths.ANCHOR_HOME):
+    with pytest.raises(ValueError, match=paths.ANCHOR_HOME_ENV):
         terminal.check(places)
 
 
@@ -257,7 +257,7 @@ def test_a_persisting_read_error_gives_the_unreadable_line(monkeypatch):
     real = core.read
     monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(
         PermissionError(13, "Permission denied")))
-    monkeypatch.setattr(core, "read", lambda path=None: real(path, retry=0.05))
+    monkeypatch.setattr(core, "read", lambda path=None: real(path, retry_s=0.05))
     line = terminal.check(store)
     assert "can't be read (Permission denied), so this page refuses to write" in line
     assert "then type moxi modules in a terminal of your own" in line
@@ -296,7 +296,7 @@ def test_the_pages_anchor_variable_is_named():
 
 @pytest.mark.skipif(os.name == "nt", reason="the user database places the anchor on POSIX")
 def test_no_anchor_variable_no_clause_and_no_place_line(monkeypatch, tmp_path):
-    monkeypatch.delenv(paths.ANCHOR_HOME)
+    monkeypatch.delenv(paths.ANCHOR_HOME_ENV)
     monkeypatch.setattr(paths, "_account_home", lambda: str(tmp_path / "acct"))
     line = terminal.check(store)
     assert "MOXI_ANCHOR_HOME" not in line
@@ -406,6 +406,6 @@ def test_loading_the_api_imports_nothing_of_the_shell_or_the_core():
     code = ("import sys; before = set(sys.modules); import moxi_ui.api; "
             "print(sorted(m for m in set(sys.modules) - before "
             "if m.split('.')[0] in ('moxi', 'moxi_ui', 'moxi_loopback')))")
-    done = proc.run([str(python()), "-I", "-c", code], timeout=60)
+    done = proc.run([str(python()), "-I", "-c", code], timeout_s=60)
     assert done.returncode == 0, done.stderr
     assert done.stdout.decode().strip() == "['moxi_ui', 'moxi_ui.api', 'moxi_ui.terminal']"

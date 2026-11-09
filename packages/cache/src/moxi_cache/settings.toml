@@ -1,7 +1,7 @@
 # The cache module's config schema. The file it governs is CONFIG/cache/config.toml;
 # `moxi config cache` shows every key and `moxi config cache init` writes the file.
 
-[claude.ttl_seconds]
+[claude.ttl_s]
 type = "int"
 default = 3600
 doc = "Claude's cache lifetime in seconds, used only when no request read names the cache tier it wrote."
@@ -13,13 +13,13 @@ default = []
 doc = "Your own [[lifetime]] rows, in the shipped table's schema: each adds a Codex or OpenCode model the shipped table has no row for, with a source or a basis; a row that overlaps another is refused."
 read = "use"
 
-[watch.tick]
+[watch.tick_s]
 type = "int"
 default = 10
 doc = "Seconds between the watcher's ticks. The watcher writes three ticks into every clock record as stale_after, and a record not rewritten within its stale_after shows dim, because the watcher has stopped. A change reaches every record within one tick."
 read = "use"
 
-[segment.warn_before]
+[segment.warn_before_s]
 type = "int"
 default = 900
 doc = "Seconds before a cache's expiry at which the status line segment turns from warm to near. The watcher writes it into every clock record as warn_before, so a change reaches every record within one tick."
@@ -30,3 +30,15 @@ type = "list"
 default = []
 doc = "Your own timer subscriptions, as [[timer.subscriber]] tables of name, at, until, every, requires_env and run (see `moxi cache timers`); run[0] is an absolute path to an executable file."
 read = "use"
+
+# Keys an earlier cache read, kept declared so a file that still sets one is told what to
+# do rather than refused as unknown.
+
+[claude.ttl_seconds]
+retired = "renamed: set claude.ttl_s instead"
+
+[watch.tick]
+retired = "renamed: set watch.tick_s instead"
+
+[segment.warn_before]
+retired = "renamed: set segment.warn_before_s instead"

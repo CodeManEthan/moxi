@@ -2,7 +2,7 @@
 
 turns calls `judge(call)` before a covered tool call, in the session's endpoint, when the
 guard `sessions.transcript-read` is on: by sessions' switch `guard.transcript_read`, which
-the install asks about, or by naming the guard on turns' `guards.on`. It answers None (let
+the install asks about, or by naming the guard on turns' `guards.run`. It answers None (let
 the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <session>`.
 
 **What it refuses.** A call that names a path under a transcript root:

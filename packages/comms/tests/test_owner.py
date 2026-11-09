@@ -214,8 +214,8 @@ def test_the_verb_prints_what_api_owner_answers(rig, monkeypatch):
     read carries left out."""
     asked = []
 
-    def answer(session_id, *, deadline):
-        asked.append((session_id, deadline))
+    def answer(session_id, *, timeout_s):
+        asked.append((session_id, timeout_s))
         return api.Owner(session_id=session_id, identity=R, adapter="codex",
                          directors=("lead",), awaiting=(P, "critic"))
 

@@ -131,11 +131,11 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def projects_root(environ=None) -> str:
+def projects_root(env=None) -> str:
     """Claude Code's projects root, `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`, by the
-    environment `environ` (a session's own); with None, the root for a session that stated
+    environment `env` (a session's own); with None, the root for a session that stated
     none. sessions' rule, re-exported."""
-    return str(_sessions_projects_root(environ))
+    return str(_sessions_projects_root(env))
 
 
 __all__ = ["read", "KINDS", "CODES", "MISSING", "open_store", "projects_root", "Clock",

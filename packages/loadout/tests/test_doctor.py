@@ -181,7 +181,7 @@ def test_the_doctor_gives_git_short_calls(lo, monkeypatch):
 
     def run(argv, **kwargs):
         if os.path.basename(str(argv[0])) == "git":
-            seen.append(kwargs["timeout"])
+            seen.append(kwargs["timeout_s"])
         return real(argv, **kwargs)
 
     monkeypatch.setattr(proc, "run", run)

@@ -213,7 +213,7 @@ def test_a_user_row_adds_a_model(tmp_path, own_roots):
     assert (before.kind, before.code) == ("no-cache", "no-row")
     write_cache_config(own_roots, USER_ROW)
     after = api.read("codex", TID, cache_source=str(root), now=NOW)
-    assert (after.kind, after.ttl_seconds, after.key) == ("warm", 600, "codex openai/gpt-5.5")
+    assert (after.kind, after.ttl_s, after.key) == ("warm", 600, "codex openai/gpt-5.5")
     loaded = table.load_table()
     assert [r.models for r in loaded.of(table.USER)] == [("gpt-5.5",)]
     codex_rollout(root, model="gpt-5.5", age=600)

@@ -75,7 +75,7 @@ def argv(path: str, socket: str, args: Sequence[str]) -> list[str]:
 def _run(argv: list[str], timeout: float,
          env: Mapping[str, str]) -> subprocess.CompletedProcess:
     """The one place a tmux process starts."""
-    return proc.run(argv, timeout=timeout, env=env)
+    return proc.run(argv, timeout_s=timeout, env=env)
 
 
 def _text(data: bytes | str | None) -> str:

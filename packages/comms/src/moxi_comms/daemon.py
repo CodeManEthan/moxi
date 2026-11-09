@@ -226,7 +226,7 @@ CASE_REASONS = {
         "The message waited past its expiry and was dropped before it reached the "
         "model. Its sender was not told; the expiry is on its line zero."),
     CASE_WITHDRAWN: (
-        "Its author withdrew the message (moxi comms delete) before it reached the "
+        "Its author withdrew the message (moxi comms remove) before it reached the "
         "model, so it was never handed over."),
     CASE_RESERVED: (
         "The message was waiting for this name when a module reserved it as a send-only "
@@ -585,7 +585,7 @@ class Daemon:
             "bind": self._bind,
             # The reads take no connection.
             **{name: _read(self, f"_{name}_query") for name in READS},
-            "delete": self._delete,
+            "remove": self._delete,
             "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
             "injected": self._injected,
@@ -1337,7 +1337,7 @@ class Daemon:
                           code=wire.NAME_RESERVED, name=name)
 
     def _delete(self, conn, params: dict) -> dict:
-        """`delete`: the author withdraws `message_id` from every recipient that hasn't
+        """`remove`: the author withdraws `message_id` from every recipient that hasn't
         had it in a digest. Refused `not-sender` for anyone but its author,
         `already-delivered` when every recipient has had it, `unknown-message` for an
         id the record doesn't hold. A message withdrawn again answers as the first time
@@ -1460,8 +1460,9 @@ class Daemon:
         """(hwm, error): the record's high id for a register's catch-up boundary.
 
         One read per register, concurrent with every other register's: no register
-        waits out another's round trip. A failed read fails the register `transient`, and
-        the shim's backoff retries it a moment later. See `_register`.
+        waits out another's round trip. A failed read fails the register with
+        `wire.FAILED`, an error in the try-again range, and the shim's backoff retries it
+        a moment later. See `_register`.
         """
         try:
             return self.record.max_message_id(self._names_channel()) or "0", None
@@ -1751,7 +1752,7 @@ class Daemon:
 
         It is NOT resolution: `identity` is a qualified name taken literally, and the
         answer says nothing about where mail goes. `cache_kind` (`warm`, `cold`, `fresh`,
-        `no-cache` or `unknown`), `age_seconds` and `cache_reason` are the daemon's own
+        `no-cache` or `unknown`), `age_s` and `cache_reason` are the daemon's own
         read of the bound session's cache, the one its gate delivers by, with
         `cache_ttl` (the lifetime that read used, None when it used none), `cache_key`
         (what the lifetime was looked up by, in words), `cache_code` (the read's code,
@@ -1771,7 +1772,7 @@ class Daemon:
             if b is None:
                 return {"identity": identity, "bound": False, "adapter": None,
                         "session_id": None, "session_seen_at": None, "bound_at": None,
-                        "bound_for": None, "cache_kind": None, "age_seconds": None,
+                        "bound_for": None, "cache_kind": None, "age_s": None,
                         "cache_reason": None, "cache_ttl": None, "cache_key": None,
                         "cache_code": None, "cache_source": None, "endpoint": None,
                         "endpoint_for": None}
@@ -1784,8 +1785,8 @@ class Daemon:
         # The daemon's own read of the bound session's cache, by the function the gate
         # delivers by: the verb's hold and `moxi comms cache` read these.
         clock = self._read(b)
-        answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,
-                      cache_reason=clock.reason, cache_ttl=clock.ttl_seconds,
+        answer.update(cache_kind=clock.kind, age_s=clock.age_s,
+                      cache_reason=clock.reason, cache_ttl=clock.ttl_s,
                       cache_key=clock.key, cache_code=clock.code)
         return answer
 
@@ -1852,8 +1853,8 @@ class Daemon:
         id that is not a message id is refused as a bad param.
 
         A READ. It changes no hold, pend, delivery, cursor or ask state. Who may ask:
-        any process that can open this socket, as for `record_message`, `session` and
-        `owner`. It answers nothing those reads, `moxi comms history` and `moxi comms reply` do
+        any process that can open this socket, as for the `message`, `session` and
+        `owner` reads. It answers nothing those reads, `moxi comms history` and `moxi comms reply` do
         not already show any process of this user (the body, its author with tier and
         verified or unverified, its recipients), so no caller learns more through it.
         """
@@ -3046,7 +3047,7 @@ class Daemon:
         lifetime, `cold (<reason>; last request 3m ago)` for one without a lifetime, and
         `unreadable (<reason>)`."""
         if clock is not None and clock.kind == cache.COLD:
-            age, ttl = clock.age_seconds, getattr(clock, "ttl_seconds", None)
+            age, ttl = clock.age_s, getattr(clock, "ttl_s", None)
             if age is not None and ttl is not None:
                 return f"cold for {cache.span(age - ttl)} (last request {cache.span(age)} ago)"
             reason = clock.reason or "no cache lifetime to count it by"

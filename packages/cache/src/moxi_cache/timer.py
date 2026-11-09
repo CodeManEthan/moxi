@@ -43,7 +43,7 @@ an upgrade that changes them is read when the watcher restarts.
 each live session whose record has a last request and a lifetime, the timer compares the
 session's age with each subscription. On the first tick at or past `at`, then each
 `every` after the last ask, until `until`, it checks `requires_env` against the
-environment the session's process started with (`moxi.proc.environ`) and starts `run`
+environment the session's process started with (`moxi.proc.process_env`) and starts `run`
 detached. On Linux and macOS that is a session of its own (`setsid`), stdin and stdout on
 `/dev/null`, stderr where the watcher's goes. On Windows it is `moxi.proc.spawn`'s detached
 child, a process outside any job the watcher runs in, with no console, and its stdout and
@@ -388,8 +388,8 @@ def load(config_entries, *, modules: Iterable[Subscription | Refusal] | None = N
 
 def proc_environ(pid: int) -> dict[str, str] | None:
     """A process's environment as it was started, or None when it cannot be read: always
-    on Windows, and for a process that is gone or another user's (`moxi.proc.environ`)."""
-    return _proc.environ(pid)
+    on Windows, and for a process that is gone or another user's (`moxi.proc.process_env`)."""
+    return _proc.process_env(pid)
 
 
 def env_checkable() -> bool:
@@ -496,8 +496,8 @@ class Detached:
 
     def poll(self) -> int | None:
         """None while the process runs, else its exit status. Raises `LookupError` when
-        `moxi.proc` no longer holds it (its code was dropped past `moxi.proc`'s bound,
-        which a reap at every tick never reaches)."""
+        `moxi.proc` holds no code for it: `status` already returned it, or the code was
+        dropped past `moxi.proc`'s bound, which a reap at every tick never reaches."""
         return _proc.status(self.pid)
 
 

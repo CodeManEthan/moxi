@@ -5,7 +5,7 @@ manager placing a project's own skills, say). The caller names what it wants pla
 `Item`s, and the placer plans, applies, reads back and removes those placements, keeping
 a ledger of what each owner placed.
 
-    plan(owner, items, form=None, git_seconds=None)
+    plan(owner, items, form=None, git_s=None)
                                          what placing `items` would do (`Step` per item)
     apply(steps, replace=False)          carry a plan out (`Placed` per placement left)
     status(owner)                        each placement of `owner` read against the disk
@@ -101,7 +101,7 @@ the way is in git without reading the reason; its reason reads as an occupant's,
 ", and git tracks it" added. Whatever reads cause `occupant` reads `tracked` alike.
 
 The tracked check asks git once per folder that holds an occupant. Each git call gets 10
-seconds, or, with `plan`'s `git_seconds=`, the plan's git calls get that many seconds in
+seconds, or, with `plan`'s `git_s=`, the plan's git calls get that many seconds in
 all. When git doesn't answer in time, the occupant stays cause `occupant`, never
 `tracked`, and its reason says git did not answer: a slow git can only leave `tracked`
 out, never put it in. A marked folder this ledger lacks is then read as git not tracking
@@ -300,7 +300,7 @@ def harnesses(settings=None, env=None) -> tuple[dict[str, Harness], list[str]]:
             for name, row in rows.items()}, lines
 
 
-def folders(env=None, *, settings=None) -> dict[str, Path]:
+def harness_dirs(env=None, *, settings=None) -> dict[str, Path]:
     """Each harness row's skills and agents folders as the placer resolves them, by a
     label a person reads ("claude's skills folder"), resolved from `env` alone.
 
@@ -325,7 +325,7 @@ def folders(env=None, *, settings=None) -> dict[str, Path]:
 
 
 def _table(settings, env) -> tuple[dict[str, Harness], list[str]]:
-    """The harness rows as `folders` resolves them (not made absolute), and one line per
+    """The harness rows as `harness_dirs` resolves them (not made absolute), and one line per
     row skipped."""
     environ = os.environ if env is None else env
     rows: dict[str, Harness] = {}
@@ -380,7 +380,7 @@ def _row_problem(row, seen: dict, environ=None) -> str | None:
 
 def _folder(name: str, kind: str, value: str, environ=None) -> Path | None:
     """A row's folder of `kind`, or the built-in one, from `environ` alone; not made
-    absolute (`folders`)."""
+    absolute (`harness_dirs`)."""
     from .paths import _expanduser
 
     environ = os.environ if environ is None else environ
@@ -401,12 +401,12 @@ def _folder(name: str, kind: str, value: str, environ=None) -> Path | None:
 # -- plan ---------------------------------------------------------------------------------
 
 def plan(owner: str, items: list[Item], *, form: str | None = None,
-         git_seconds: float | None = None) -> list[Step]:
+         git_s: float | None = None) -> list[Step]:
     """What placing `items` for `owner` would do: one `Step` per item, in order, then one
     `remove` per ledger entry of `owner` that no item's target names.
 
     `items` is the owner's whole wanted set. `form` overrides `skills.form` for this
-    plan. `git_seconds` is how long the tracked check's git calls may take in all, for a
+    plan. `git_s` is how long the tracked check's git calls may take in all, for a
     caller with a time budget (a doctor check); None gives each call 10 seconds. Takes no
     lock and changes nothing (on Windows it may make and remove a test symlink,
     `.moxi-probe-<hex>`). Raises only for a wrong call (see the module's docs).
@@ -418,14 +418,14 @@ def plan(owner: str, items: list[Item], *, form: str | None = None,
         _check_item(item)
     if form is not None and form not in SETTINGS:
         raise ValueError(f"form must be one of {', '.join(SETTINGS)}, not {form!r}")
-    if git_seconds is not None and (isinstance(git_seconds, bool)
-                                    or not isinstance(git_seconds, (int, float))
-                                    or not git_seconds >= 0):
-        raise ValueError(f"git_seconds must be a number of seconds, not {git_seconds!r}")
+    if git_s is not None and (isinstance(git_s, bool)
+                              or not isinstance(git_s, (int, float))
+                              or not git_s >= 0):
+        raise ValueError(f"git_s must be a number of seconds, not {git_s!r}")
     settings = _core_settings()
     setting = form if form is not None else settings["skills.form"]
     rows, skipped = harnesses(settings)
-    planner = _Planner(owner, setting, rows, skipped, _read_ledger(), git_seconds)
+    planner = _Planner(owner, setting, rows, skipped, _read_ledger(), git_s)
     steps = [planner.step(item) for item in items]
     steps.extend(planner.removals())
     return steps
@@ -745,7 +745,7 @@ def _git_files(folder: str, seconds: float | None = None) -> frozenset | None | 
         timeout = _GIT_SECONDS if end is None else min(_GIT_SECONDS, end - time.monotonic())
         if timeout <= 0:
             raise subprocess.TimeoutExpired(argv, 0)
-        return proc.run(["git", "-C", folder, *argv], timeout=timeout, env=env)
+        return proc.run(["git", "-C", folder, *argv], timeout_s=timeout, env=env)
 
     try:
         inside = git("rev-parse", "--is-inside-work-tree")

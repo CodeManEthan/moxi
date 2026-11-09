@@ -70,7 +70,7 @@ def test_good_components_are_placed_and_a_module_without_a_page_places_none():
 
 
 def _fake_run(listing, exports, calls):
-    def run(argv, *, timeout, cwd, env=None):
+    def run(argv, *, timeout_s, cwd, env=None):
         calls.append((argv, cwd, env))
         out = listing if argv[3] == "moxi" else {m: exports[m] for m in argv[4:]}
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
@@ -122,10 +122,10 @@ def test_a_failed_refresh_is_run_again_on_a_look_with_a_growing_wait(tmp_path, m
     now = [100.0]
     answers = []
 
-    def run(argv, *, timeout, cwd, env=None):
+    def run(argv, *, timeout_s, cwd, env=None):
         answer = answers.pop(0) if answers else "ok"
         if answer == "slow":
-            raise snapshot_mod.subprocess.TimeoutExpired(argv, timeout)
+            raise snapshot_mod.subprocess.TimeoutExpired(argv, timeout_s)
         out = listing if argv[3] == "moxi" else {"usage": {"ok": True, "export": export}}
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
 
@@ -233,7 +233,7 @@ def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_rout
         assert {row["module"] for row in data["servers"]} >= {"snone", "sntwo"}
         assert data["shell"]["budget"] == {"rss": "80M", "fds": 64}
         assert _get(port, "/m/ui/api/servers", browser)[0] == 403
-        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
             found = health.probe(wait=2)
         assert found.state == "running" and health.shell_row(found).state in ("ok", "warn")
         status, _ = call(info, "POST", "/m/ui/api/stop", {})
@@ -286,7 +286,7 @@ def test_a_held_lock_with_no_file_is_starting_never_another_program(site, monkey
     seen = _no_connect(monkeypatch)
     _units(monkeypatch, [SimpleNamespace(module="ui", name="shell", kind="socket",
                                          state="active", detail="", backend="systemd")])
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         found = health.probe(wait=0.3)
     assert found.state == "starting" and health.shell_row(found).state == "warn" and seen == []
 
@@ -326,7 +326,7 @@ def test_a_held_lock_reads_a_runtime_file_whose_start_is_off_the_pids_and_compar
     called = []
     monkeypatch.setattr(health, "_servers", lambda found, timeout: called.append(found) or {
         "shell": {"pid": os.getpid(), "port": 8460}, "servers": []})
-    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
         found = health.probe(wait=0.3)
     assert found.state == "running" and [c.server_id for c in called] == [info.server_id]
 
@@ -344,7 +344,7 @@ def test_the_lock_is_tried_before_the_runtime_file_is_read(site, monkeypatch, he
     _units(monkeypatch, [])
     _no_connect(monkeypatch)
     if held:
-        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout_s=0):
             health.probe(wait=0.1)
     else:
         health.probe(wait=0.1)
@@ -416,7 +416,7 @@ def test_on_windows_the_shell_is_planned_as_a_logon_task_with_no_socket():
 
     changes = units.plan("ui")
     assert [c.kind for c in changes] == ["daemon"]
-    assert "moxi-ui-serve" in changes[0].text and "--restart" in changes[0].text
+    assert "moxi-ui-shell" in changes[0].text and "--restart" in changes[0].text
 
 
 def test_the_modules_value_holds_only_declared_keys():

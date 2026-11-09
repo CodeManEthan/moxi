@@ -116,7 +116,7 @@ def test_a_home_or_store_variable_does_not_move_the_file(fence, monkeypatch, tmp
 
 
 def test_no_place_for_the_record_raises_no_anchor(monkeypatch):
-    monkeypatch.setenv(paths.ANCHOR_HOME, "relative")
+    monkeypatch.setenv(paths.ANCHOR_HOME_ENV, "relative")
     with pytest.raises(paths.NoAnchor):
         read()
     with pytest.raises(paths.NoAnchor):
@@ -201,14 +201,14 @@ def test_a_read_error_that_persists_is_unreadable(fence, monkeypatch):
 
     monkeypatch.setattr(type(path), "read_bytes", refuse)
     started = time.monotonic()
-    got = read(retry=0.2)
+    got = read(retry_s=0.2)
     assert isinstance(got, Unreadable) and got.path == path
     assert isinstance(got.error, PermissionError)
     assert time.monotonic() - started >= 0.2 and len(calls) > 1
 
 
 def test_the_retry_is_the_writers_replace_window():
-    assert read.__kwdefaults__["retry"] == files.REPLACE_RETRY
+    assert read.__kwdefaults__["retry_s"] == files.REPLACE_RETRY
 
 
 def test_a_read_error_that_clears_within_the_retry_reads_the_record(fence, monkeypatch):
@@ -235,7 +235,7 @@ def test_no_retry_reads_once(fence, monkeypatch):
         raise OSError(5, "I/O error")
 
     monkeypatch.setattr(type(path), "read_bytes", refuse)
-    assert isinstance(read(retry=0), Unreadable) and calls == [1]
+    assert isinstance(read(retry_s=0), Unreadable) and calls == [1]
 
 
 @pytest.mark.skipif(not WINDOWS, reason="Windows refuses an open during a replace")
@@ -482,5 +482,5 @@ def test_a_new_console_on_the_input_is_a_keyboard(tmp_path):
 def test_a_child_of_moxi_proc_run_is_no_keyboard():
     from moxi import proc
 
-    done = proc.run([sys.executable, "-c", _SAYS], timeout=60, input=None)
+    done = proc.run([sys.executable, "-c", _SAYS], timeout_s=60, stdin_data=None)
     assert done.stdout.decode().split() == ["True", "False"], done.stderr

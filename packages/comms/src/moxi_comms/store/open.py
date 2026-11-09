@@ -159,7 +159,7 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
     report = report if report is not None else _log_report
     # The lock makes each missing directory down to the store's private to its owner,
     # and leaves one already there (a shared directory, or a link) as it is.
-    with _gate, _files.lock(target.parent / MIGRATE_LOCK, timeout=LOCK_WAIT):
+    with _gate, _files.lock(target.parent / MIGRATE_LOCK, timeout_s=LOCK_WAIT):
         found = zero_two_files(env, target)
         if found:
             try:
@@ -176,7 +176,7 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
                     "it exists beside comms 0.2's files "
                     f"({', '.join(str(p) for p in found)}) and wasn't made by moving "
                     "them; nothing was written"))
-        conn = _store.connect(target, timeout=timeout, check_same_thread=check_same_thread)
+        conn = _store.connect(target, timeout_s=timeout, check_same_thread=check_same_thread)
         try:
             _store.migrate(conn, STEPS)
         except BaseException:
@@ -206,7 +206,7 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
     if not target.exists():
         raise sqlite3.OperationalError(f"unable to open database file: {target} does not "
                                        "exist")
-    conn = _store.connect(target, create=False, timeout=timeout,
+    conn = _store.connect(target, create=False, timeout_s=timeout,
                           check_same_thread=check_same_thread)
     try:
         conn.execute("PRAGMA query_only = ON")

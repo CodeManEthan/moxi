@@ -320,7 +320,7 @@ class Launch:
     def __init__(self):
         self.requests = []
 
-    def __call__(self, request, *, environ=None, warn=None):
+    def __call__(self, request, *, env=None, warn=None):
         self.requests.append(request)
         return SimpleNamespace(line=f"started {request.request_id}", outcome=None,
                                exit_code=0, state="started", reason=None,

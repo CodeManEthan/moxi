@@ -218,7 +218,7 @@ BOTH_BACKENDS = (
     "test_directory_provision.py",  # provision against the seam
     "test_local_record.py",        # its rig tests state the no-op half on the mock too
     "test_audience.py",             # the audience mark, verb to frame
-    "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --next-turn
+    "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --held
     "test_cold_every_sender.py",    # THE RULE: the clock, the hold, the daemon's gate
     "test_cold_hold.py",            # a cold claude-shim recipient is posted and held
     "test_cache_clock.py",          # the codex and opencode clocks, drift, the free rows
@@ -256,10 +256,9 @@ def backend(request):
 def build_record(backend: str, clock):
     """One record, chosen by name. The record and the daemon always share one clock.
 
-    The local one takes no `secret_reader`: provision is the writer of every minted
+    The local one is given no tokens: provision is the writer of every minted
     token, so the rig lays the files down the way `moxi-comms-provision` does and the record
-    reads them back through its own resolver chain. The stand-in that used to serve them
-    out of memory is gone with it.
+    reads them back through its own resolver chain.
     """
     if backend == "local":
         return LocalRecord(clock=clock, poll_interval=0.02)
@@ -277,7 +276,7 @@ def build_store(backend: str):
 
 
 #: The verbs that post under the sender's identity.
-SEND_VERBS = ("send", "reply", "delete")
+SEND_VERBS = ("send", "reply", "remove")
 
 
 def _stamp_of(environ) -> SenderIdentity | None:
@@ -603,7 +602,7 @@ def clock_reads_warm(monkeypatch, *kinds):
 
     def reads(adapter, session_id, **kw):
         if adapter in kinds:
-            return cache.Clock(cache.WARM, age_seconds=0.0)
+            return cache.Clock(cache.WARM, age_s=0.0)
         return real(adapter, session_id, **kw)
 
     monkeypatch.setattr(cache, "clock_state", reads)
@@ -704,7 +703,7 @@ def raw_connection(path=None):
     from moxi import ipc
 
     from moxi_comms import wire
-    client = ipc.connect(str(path or daemon_socket()), timeout=5.0)
+    client = ipc.connect(str(path or daemon_socket()), timeout_s=5.0)
     try:
         client.hello(wire.VERSIONS)
         yield client
@@ -715,7 +714,7 @@ def raw_connection(path=None):
 def settle(client) -> None:
     """A round trip on `client`: the daemon handles one connection's messages in order,
     so its answer says every message sent before it has been handled."""
-    client.call("max_id", {}, timeout=5.0)
+    client.call("max_id", {}, timeout_s=5.0)
 
 
 def cursor_of(qualified: str):

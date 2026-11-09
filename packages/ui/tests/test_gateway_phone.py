@@ -273,7 +273,7 @@ def test_the_desktop_mints_a_pairing_url_lists_and_revokes_devices(served):
 def test_the_desktop_pairing_refuses_with_no_address_or_no_gateway(served):
     served.gw.address = None
     shell = SimpleNamespace(gateway=served.gw, phone=served.access, layout=Layout("ui"))
-    with pytest.raises(Refused, match="moxi ui gateway on"):
+    with pytest.raises(Refused, match="moxi ui gateway enable"):
         _at_desk(shell, desk.pair)
     with pytest.raises(Refused, match="no gateway"):
         _at_desk(SimpleNamespace(gateway=None, phone=None), desk.pair)

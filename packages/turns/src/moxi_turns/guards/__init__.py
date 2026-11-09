@@ -14,12 +14,12 @@ Guards come from two places:
 - a module's entry in the group `moxi.turns.guards`, named by the module, whose target is
   a Python module holding `GUARDS`, a tuple of `Guard` values. The guard's id is
   `<module>.<name>`;
-- a custom file on turns' `guards.on` list: a `.toml` file of `[[guard]]` tables, each a
+- a custom file on turns' `guards.run` list: a `.toml` file of `[[guard]]` tables, each a
   data-only guard (every field but `judge`), or a `.py` file holding `GUARDS`, whose
   `judge` may name a function of the same file as `":fn"`. Its id is
   `file:<stem>.<name>`.
 
-A guard runs only when its id or its file is on `guards.on`, or its `switch` passes the
+A guard runs only when its id or its file is on `guards.run`, or its `switch` passes the
 core's switch check and reads true. A switch is a setting of the offering module: a bool
 read at use, with no `env` and default false, or an entry of a switch table. One that
 fails the check reads off and is a problem, listed or not. A custom file has no module, so
@@ -64,7 +64,7 @@ log = logging.getLogger("moxi.turns.guards")
 #: The entry-point group modules declare their guards in.
 GROUP = "moxi.turns.guards"
 #: turns' config key: the guard ids and custom files that are on.
-ON_KEY = "guards.on"
+ON_KEY = "guards.run"
 #: turns' config key: the most any judge may take, in milliseconds.
 MAX_WAIT_KEY = "guards.max_wait_ms"
 #: The harnesses a guard may name in `calls`.
@@ -245,7 +245,7 @@ def _problems(g: Guard, source: str) -> list[str]:
     if g.switch is not None:
         if source != "module":
             out.append("a custom guard file has no module, so it can name no switch; put "
-                       "the file on guards.on to turn its guards on")
+                       "the file on guards.run to turn its guards on")
         elif not isinstance(g.switch, str) or not _SWITCH.fullmatch(g.switch):
             out.append(f"switch {g.switch!r} must name a setting of the module "
                        "(a dotted key such as guards.removal)")
@@ -361,7 +361,7 @@ class Found:
 
 @dataclass(frozen=True)
 class On:
-    """A guard that runs, and what turned it on: `list` (`guards.on`), `switch`, or
+    """A guard that runs, and what turned it on: `list` (`guards.run`), `switch`, or
     both."""
 
     found: Found
@@ -418,7 +418,7 @@ SwitchReader = Callable[[str, str], "tuple[bool, str | None]"]
 
 
 def is_file_entry(entry: str) -> bool:
-    """A `guards.on` entry naming a file: it holds a path separator or starts with `~`."""
+    """A `guards.run` entry naming a file: it holds a path separator or starts with `~`."""
     return entry.startswith("~") or "/" in entry or os.sep in entry \
         or bool(os.altsep and os.altsep in entry)
 
@@ -428,7 +428,7 @@ def load(on: Iterable[str] | None = None, *, entries: Iterable | None = None,
          ) -> Loaded:
     """Read every module's guards and the custom files on the list, and say which run.
 
-    `on` is `guards.on`, read from turns' config when None. `entries`, each with `.name`
+    `on` is `guards.run`, read from turns' config when None. `entries`, each with `.name`
     and `.load()`, stand in for the group (tests); `switches` reads a module's switch
     (`read_switch` by default, in `env`). Never raises."""
     if on is None:
@@ -481,11 +481,11 @@ def load(on: Iterable[str] | None = None, *, entries: Iterable | None = None,
         if is_file_entry(entry):
             found.extend(_file_guards(entry, problems))
         elif module not in loaded_modules:
-            problems.append(Problem(entry, "missing", f"guards.on names {entry}, but "
+            problems.append(Problem(entry, "missing", f"guards.run names {entry}, but "
                                     f"module {module} offers no guards: it is not "
                                     "installed, or declares none", on=True))
         elif entry not in known and not any(p.id == entry for p in problems):
-            problems.append(Problem(entry, "load", f"guards.on names {entry}, but module "
+            problems.append(Problem(entry, "load", f"guards.run names {entry}, but module "
                                     f"{module} declares no such guard", on=True))
     return _select(found, listed, switches, problems, import_ms)
 
@@ -496,7 +496,7 @@ def _list_setting(env) -> list[str]:
 
         from .. import config
     except ImportError as exc:  # pragma: no cover - turns always has its core
-        log.warning("guards.on not read: %s", exc)
+        log.warning("guards.run not read: %s", exc)
         return []
     try:
         return list(config.load(env)[ON_KEY])
@@ -723,7 +723,7 @@ NO_NESTED_AGENTS_DENY = (
     "whether to start another worker."
 )
 
-#: turns' shipped guards, each off until its switch or `guards.on` turns it on. The group
+#: turns' shipped guards, each off until its switch or `guards.run` turns it on. The group
 #: entry `turns = "moxi_turns.guards"` names this module.
 GUARDS = (
     Guard(name="removal", calls={"claude": ("Bash",)}, match={"command": REMOVAL_MATCH},

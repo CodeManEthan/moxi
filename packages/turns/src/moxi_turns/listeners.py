@@ -41,7 +41,7 @@ order. A module entry adds the answers of its `start` rows, joined in the order 
 `LISTENERS` declares them; a module that is not installed, or has no `start` row, is
 skipped. A file entry (one holding a path separator or starting with `~`) adds the file's
 text, read at each start; a missing or unreadable file adds nothing and is logged once
-per endpoint. The total is `start.limit`, at most the harness's ceiling. Each entry on the
+per endpoint. The total is `start.limit_chars`, at most the harness's ceiling. Each entry on the
 effective list gets an equal share; in list order, an answer shorter than what it holds
 passes the rest on to the entries after it, and one longer is cut on a line boundary,
 with a last line `[turns: <entry> cut at <n> characters]`. `start_plan` reads the list
@@ -260,7 +260,7 @@ def _start_settings(env) -> tuple[tuple[str, ...] | None, int]:
     except ConfigError as exc:
         log.warning("turns' config does not read (%s); the start list is the default", exc)
         return None, 0
-    return tuple(settings["start.order"]), int(settings["start.limit"])
+    return tuple(settings["start.order"]), int(settings["start.limit_chars"])
 
 
 def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None]], list[str]]:
@@ -383,7 +383,7 @@ def plan(registry: Registry, *, present: Callable[[str], bool] | None = None) ->
 
 
 def start_total(registry: Registry, harness: str) -> int:
-    """The start context's effective total for `harness`: `start.limit`, at most the
+    """The start context's effective total for `harness`: `start.limit_chars`, at most the
     harness's ceiling, 0 meaning the ceiling."""
     total = start_ceiling(harness)
     return registry.limit if 0 < registry.limit < total else total
@@ -413,7 +413,7 @@ class StartEntry:
 class StartPlan:
     """The start list as an endpoint of `harness` would order and limit it now.
 
-    `total` is the effective total (`limit`, the configured `start.limit` with 0 meaning
+    `total` is the effective total (`limit`, the configured `start.limit_chars` with 0 meaning
     the ceiling, at most `ceiling`, the harness's). `entries` are asked in order;
     `skipped` names each entry left out and each module whose `start` rows are off the
     list, with why.

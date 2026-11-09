@@ -118,7 +118,7 @@ class HookContext:
     absolute paths, asked of git on first use. `message_path` is commit-msg's message
     file; `updates` are pre-push's ref lines.
 
-    `git(*args, input=None)` runs git with the git hook's own environment, so a partly
+    `git(*args, stdin_data=None)` runs git with the git hook's own environment, so a partly
     staged commit is judged as it will land. A piece that reads another repository uses
     `moxi_repo.git()`, which drops git's local variables first.
     """
@@ -170,20 +170,20 @@ class HookContext:
                 out.append(PushUpdate(*parts))
         return tuple(out)
 
-    def git(self, *args: str, input: bytes | str | None = None,
-            timeout: float | None = None,
+    def git(self, *args: str, stdin_data: bytes | str | None = None,
+            timeout_s: float | None = None,
             binary: bool = False) -> subprocess.CompletedProcess:
         """Run `git <args>` with this git hook's environment, in its working directory.
 
-        `input` is fed on stdin (else stdin is closed). Returns the finished process with
+        `stdin_data` is fed on stdin (else stdin is closed). Returns the finished process with
         `stdout` and `stderr` as text (UTF-8; bytes that aren't are kept as surrogates);
         with `binary`, `stdout` is the bytes git wrote. The exit status is not checked.
-        `timeout` raises `subprocess.TimeoutExpired`.
+        `timeout_s` raises `subprocess.TimeoutExpired`.
         """
-        data = input.encode("utf-8") if isinstance(input, str) else input
+        data = stdin_data.encode("utf-8") if isinstance(stdin_data, str) else stdin_data
         proc = subprocess.run(["git", *args], input=data,
                               stdin=subprocess.DEVNULL if data is None else None,
-                              capture_output=True, timeout=timeout)
+                              capture_output=True, timeout=timeout_s)
         return subprocess.CompletedProcess(
             proc.args, proc.returncode,
             proc.stdout if binary else proc.stdout.decode("utf-8", "surrogateescape"),

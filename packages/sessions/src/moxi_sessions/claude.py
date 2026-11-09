@@ -267,10 +267,10 @@ def search_roots(*, live: str | Path, archives: Iterable[str | Path] | None = No
 
 # --- the projects root ----------------------------------------------------------------
 
-def projects_root(environ: Mapping[str, str] | None = None) -> Path:
+def projects_root(env: Mapping[str, str] | None = None) -> Path:
     """Where Claude Code writes transcripts, by its own rule over an environment.
 
-    With `environ`: `${CLAUDE_CONFIG_DIR:-~/.claude}/projects` as that environment says,
+    With `env`: `${CLAUDE_CONFIG_DIR:-~/.claude}/projects` as that environment says,
     `~` and the home directory taken from its `HOME`. A process that reports its session's
     root passes its own environment, which is the session's.
 
@@ -278,15 +278,15 @@ def projects_root(environ: Mapping[str, str] | None = None) -> Path:
     `claude.projects` when it is set, else the same rule over this process's environment.
     Raises `moxi.config.ConfigError` when the config file cannot be read.
     """
-    if environ is None:
+    if env is None:
         from .settings import configured_projects
 
         configured = configured_projects()
         if configured is not None:
             return configured
-        environ = os.environ
-    home = environ.get("HOME") or str(Path.home())
-    config = environ.get("CLAUDE_CONFIG_DIR")
+        env = os.environ
+    home = env.get("HOME") or str(Path.home())
+    config = env.get("CLAUDE_CONFIG_DIR")
     if config:
         if config == "~" or config.startswith("~/"):
             config = home + config[1:]

@@ -100,7 +100,7 @@ def test_the_trust_warning_on_a_fresh_config(claude_slot, tmp_path):
     keep(pane, "claude-trust", tmp_path)
     marked = [r for r in seen.rows if r.lstrip().startswith("❯")]
     assert marked and "No, exit" in marked[0]
-    done = answer_screen(1, CLAUDE_TRUST_FOLDER, wait=10)
+    done = answer_screen(1, CLAUDE_TRUST_FOLDER, wait_s=10)
     assert (done.outcome, done.why, done.keys) == ("gone", "", ("Down", "Enter"))
 
 
@@ -120,7 +120,7 @@ def test_the_dev_channels_warning(claude_slot, tmp_path):
                env, cwd)
     until_shown(CLAUDE_DEV_CHANNELS)
     keep(pane, "claude-dev-channels", tmp_path)
-    done = answer_screen(1, CLAUDE_DEV_CHANNELS, wait=10)
+    done = answer_screen(1, CLAUDE_DEV_CHANNELS, wait_s=10)
     assert (done.outcome, done.why, done.keys) == ("gone", "", ("Enter",))
 
 
@@ -154,5 +154,5 @@ def test_the_exit_dialog_with_a_background_shell(claude_slot, tmp_path):
     seen = until_shown(CLAUDE_EXIT_DIALOG, bound=30)
     keep(pane, "claude-exit-shell", tmp_path)
     assert any("sleep 600" in row for row in seen.rows), seen.rows
-    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=10)
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait_s=10)
     assert (done.outcome, done.why, done.keys) == ("ended", "", ("Enter",))

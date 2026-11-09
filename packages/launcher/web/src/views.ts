@@ -1,7 +1,7 @@
 // What the launcher's components show for each state of their data, worked out with no DOM
 // so the Node tests can read it. Every string here goes into the page as text.
 //
-// A session's lines say what `moxi launcher state` prints: whether it needs a look, its
+// A session's lines say what `moxi launcher show` prints: whether it needs a look, its
 // relaunch, its recycle and its keep-warm. Red is the server's: a component never judges a
 // run itself, it shows `red` and `word` as the state sent them.
 
@@ -46,7 +46,7 @@ export function headline(entry: SessionState): string {
   return `${entry.word ?? "failed"}${since}${entry.why ? `: ${entry.why}` : ""}`;
 }
 
-/** The relaunch, recycle and keep-warm lines, as `moxi launcher state` prints them. */
+/** The relaunch, recycle and keep-warm lines, as `moxi launcher show` prints them. */
 export function stateLines(entry: SessionState): string[] {
   const lines: string[] = [];
   const relaunch = entry.relaunch;

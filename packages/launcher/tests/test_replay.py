@@ -392,11 +392,31 @@ def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no
     assert "s3cr3t-value" not in new.base_env_json and "API_TOKEN" not in new.env_json
 
 
+def test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store(
+        work, harness, no_exec, tmp_path):
+    api.launch(request(work))
+    caller = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"),
+               env=caller)
+    # The child's environment is built from the row's recorded base, which names the
+    # first store; the new row still goes where the caller's environment says.
+    conn = store.connect(env=caller, create=False)
+    try:
+        assert store.get(conn, "r2") is not None
+    finally:
+        conn.close()
+    conn = store.connect(create=False)
+    try:
+        assert store.get(conn, "r2") is None
+    finally:
+        conn.close()
+
+
 def test_a_replayed_terminal_launch_carries_the_start_mark(work, harness, no_exec,
                                                            monkeypatch):
     from moxi import terminal
 
-    mark = terminal.MARK
+    mark = terminal.STARTED_BY_ENV
     api.launch(request(work))
     assert mark not in row("r1").base_env
     # The replaying shell's own mark is not carried over; the target adds its own.

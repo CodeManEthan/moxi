@@ -222,32 +222,32 @@ class LaunchResult:
     base: str | None = None
 
 
-def launch(request, *, environ: Mapping[str, str] | None = None,
+def launch(request, *, env: Mapping[str, str] | None = None,
            warn: Callable[[str], None] | None = None) -> LaunchResult:
     """Launch what `request` asks for. Raises a refusal, with nothing written, before the
     row; returns the row's outcome after it. See the module's text for the order.
 
     `warn` is called with each warning line just before the session starts, the last
     moment a launch in this terminal can show one; the result carries them too."""
-    caller = dict(os.environ if environ is None else environ)
+    caller = dict(os.environ if env is None else env)
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
     if bad_id is not None:
         raise bad_id
-    known = _known(getattr(request, "request_id", None), environ)
+    known = _known(getattr(request, "request_id", None), env)
     if known is not None:
         return _stored(known)
-    resolved = _resolve(request, environ)
+    resolved = _resolve(request, env)
     refusals = _check(resolved, caller)
     if refusals:
         raise refusals[0]
 
     ids = _with_ids(request, resolved.harness)
     child, base = _child_base(request, caller)
-    composition = compose.build(ids, resolved, environ=environ, child_environ=child,
+    composition = compose.build(ids, resolved, environ=env, child_environ=child,
                                 create=True)
     target = targets.get(composition.target)
-    env = common.environment(child, composition, moxi_modules.session_env())
-    command = target.prepare(composition, env)
+    launch_env = common.environment(child, composition, moxi_modules.session_env())
+    command = target.prepare(composition, launch_env)
     values = composition.values
     resume = bool(getattr(request, "resume_of", None))
     session_id = ids.session_id if composition.harness == "claude" or resume else None
@@ -255,7 +255,7 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
     handoff_key = handoffs.key_of_row(SimpleNamespace(
         identity=resolved.identity, preset_kind=resolved.preset_kind,
         preset_name=resolved.preset_name, project_key=resolved.project_key))
-    conn = store.connect(env=environ)
+    conn = store.connect(env=env)
     try:
         inserted = store.insert(
             conn, request_id=ids.request_id, actor=_actor(ids, caller),
@@ -267,7 +267,7 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             project_key=resolved.project_key,
             identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
             handoff_path=str(values.get("handoff") or "") or None,
-            handoff_key=handoff_key, base_env=common.base_env(env),
+            handoff_key=handoff_key, base_env=common.base_env(launch_env),
             relaunch_of=getattr(request, "relaunch_of", None),
             resume_of=getattr(request, "resume_of", None))
         if not inserted.new:
@@ -278,20 +278,20 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
         if base == "no-credentials":
             warnings += (NO_CREDENTIALS,)
         try:
-            _make_files(composition, environ, handoff_key)
+            _make_files(composition, env, handoff_key)
         except OSError as error:
             failed = targets.fail(conn, rid, targets.SPAWN_FAILED,
                                    f"the launch's files could not be made: {error}")
             return _result(composition, rid, session_id, failed, warnings)
         try:
-            targets.sweep(conn, env=environ)
+            targets.sweep(conn, env=env)
         except Exception as error:  # noqa: BLE001  (the sweep never stops a launch)
             log.warning("the run-file sweep stopped: %s", error)
         for line in warnings if warn is not None else ():
             warn(line)
         started = target.start(targets.Launch(
             conn=conn, request_id=rid, composition=composition, argv=composition.argv,
-            command=command, env=env, cwd=str(values["cwd"]), deliverer_env=caller,
+            command=command, env=launch_env, cwd=str(values["cwd"]), deliverer_env=caller,
             hold=getattr(request, "hold", None),
             respawn=bool(getattr(request, "respawn", False)),
             chain=_chain(conn, request, rid)))
@@ -300,7 +300,7 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
         conn.close()
 
 
-def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]:
+def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default), a directory that does not exist, a scratch folder's
@@ -309,32 +309,32 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
     named slot that is held, occupied or missing)."""
-    caller = dict(os.environ if environ is None else environ)
+    caller = dict(os.environ if env is None else env)
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
     if bad_id is not None:
         return [bad_id]
     try:
-        resolved = _resolve(request, environ)
+        resolved = _resolve(request, env)
     except Refusal as refusal:
         return [refusal]
     return _check(resolved, caller)
 
 
-def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition:
+def preview(request, *, env: Mapping[str, str] | None = None) -> Composition:
     """The composition `request` would launch: argv, the stamped environment, target and
     mode. Starts nothing and writes nothing of the launcher's. Its `warnings` are the
     ones `launch` gives: the resolver's, then the composer's."""
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
     if bad_id is not None:
         raise bad_id
-    resolved = _resolve(request, environ)
+    resolved = _resolve(request, env)
     if getattr(request, "replay", False):
-        caller = dict(os.environ if environ is None else environ)
+        caller = dict(os.environ if env is None else env)
         child, _ = _child_base(request, caller)
         composition = compose.build(_with_ids(request, resolved.harness), resolved,
-                                    environ=environ, child_environ=child)
+                                    environ=env, child_environ=child)
     else:
-        composition = compose.build(request, resolved, environ=environ)
+        composition = compose.build(request, resolved, environ=env)
     return dataclasses.replace(composition,
                                warnings=_warnings(resolved, composition))
 
@@ -636,21 +636,21 @@ KINDS = store.KINDS
 Busy = store.Busy
 
 
-def launch_kind(session_id: str, *, timeout: float = 1.0) -> str | None:
+def launch_kind(session_id: str, *, timeout_s: float = 1.0) -> str | None:
     """The launch kind of the session `session_id`: `scratch` when its launch works in a
     scratch folder, whatever its preset; else `seat` for a seat preset; else `project`
     when the launch names a project (a project preset or a project key); else `one-off`.
     None for a session the launcher didn't start (by hand, by a script, or from inside a
     launched session), and for a launch whose session id it never learned (a Codex launch
     without turns or in `exec` mode). Raises `Busy` when the launch log is held past
-    `timeout` seconds, and `moxi.store.StoreTooNew` when a newer launcher wrote it."""
-    return store.kinds((session_id,), timeout=timeout)[session_id]
+    `timeout_s` seconds, and `moxi.store.StoreTooNew` when a newer launcher wrote it."""
+    return store.kinds((session_id,), timeout=timeout_s)[session_id]
 
 
 def launch_kinds(session_ids: Iterable[str], *,
-                 timeout: float = 1.0) -> dict[str, str | None]:
+                 timeout_s: float = 1.0) -> dict[str, str | None]:
     """`launch_kind` for each of `session_ids`, read in one opening of the launch log."""
-    return store.kinds(session_ids, timeout=timeout)
+    return store.kinds(session_ids, timeout=timeout_s)
 
 
 def _result(composition: Composition, request_id: str, session_id: str | None,

@@ -101,13 +101,13 @@ default = "claude-app"
 doc = "The global comms name comms' tools in the Claude apps send and receive as, through the connector. Provisioned as a standing name when the connector starts them."
 read = "start"
 
-[connector.wait_default]
+[connector.wait_default_s]
 type = "int"
 default = 45
-doc = "How many seconds send_and_wait waits for a reply when the call names no wait; 1 to wait_max."
+doc = "How many seconds send_and_wait waits for a reply when the call names no wait; 1 to wait_max_s."
 read = "start"
 
-[connector.wait_max]
+[connector.wait_max_s]
 type = "int"
 default = 90
 doc = "The longest wait, in seconds, a send_and_wait call may ask for; 1 to 99, under Cloudflare's 100 s limit on an answer."
@@ -172,3 +172,9 @@ retired = "remove it: no name refuses a next-turn send"
 
 [provision.slots]
 retired = "remove it: comms has no slots"
+
+[connector.wait_default]
+retired = "renamed: set connector.wait_default_s instead"
+
+[connector.wait_max]
+retired = "renamed: set connector.wait_max_s instead"

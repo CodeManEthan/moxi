@@ -127,7 +127,7 @@ def test_a_load_whose_read_fails_still_loads_and_tells_no_row(turns_env):
 
 def test_usage_codex_limits_on_the_hosts_endpoint(turns_env):
     endpoint, harness, made = _host(turns_env, limits={"rateLimits": {}, "planType": "x"})
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    session = Session(endpoint.address, endpoint.session(), endpoint_dir=endpoint.dir)
     try:
         _told(1)
         assert "usage" in session.capabilities
@@ -187,7 +187,7 @@ def test_the_pull_reads_a_live_hosts_limits(turns_env, bare_path):
 
 
 def test_with_no_host_the_pull_starts_an_app_server_of_its_own(turns_env, stub_codex):
-    reading = moxi_turns.codex_rate_limits(timeout=10)
+    reading = moxi_turns.codex_rate_limits(timeout_s=10)
     assert reading is not None and reading.via == "app-server"
     assert reading.payload == fake_codex.LIMITS
     # initialize and the read, on one app-server: no thread, so no message was sent.
@@ -202,7 +202,7 @@ def test_a_host_that_cannot_read_passes_the_pull_to_an_app_server(turns_env, stu
     endpoint, harness, made = _host(
         turns_env, limits_error=proto.CodexError(-32603, "not available"))
     try:
-        reading = moxi_turns.codex_rate_limits(timeout=10)
+        reading = moxi_turns.codex_rate_limits(timeout_s=10)
         assert reading is not None and reading.via == "app-server"
     finally:
         endpoint.stop("the test ended")
@@ -218,14 +218,14 @@ def test_the_pull_is_none_when_the_app_server_errs(turns_env, stub_codex, monkey
                                                    caplog):
     monkeypatch.setenv("FAKE_CODEX_LIMITS", "error")
     caplog.set_level("INFO", logger="moxi.turns.codex.appserver")
-    assert moxi_turns.codex_rate_limits(timeout=10) is None
+    assert moxi_turns.codex_rate_limits(timeout_s=10) is None
     assert "not available" in caplog.text
     assert len(fake_codex.events(stub_codex, "app-server-exit")) == 1
 
 
 def test_the_pull_is_none_past_its_timeout(turns_env, stub_codex):
     started = time.monotonic()
-    assert moxi_turns.codex_rate_limits(timeout=0) is None
+    assert moxi_turns.codex_rate_limits(timeout_s=0) is None
     assert time.monotonic() - started < 2
     assert fake_codex.events(stub_codex, "app-server") == []
 
@@ -273,11 +273,11 @@ def test_a_claude_session_answers_usage_codex_limits_with_the_capability_error(
     from moxi_turns import results
 
     ep, _ = make_endpoint(FakeHarness(can=results.CAPABILITIES))
-    client = ipc.connect(ipc.address("turns", ep.dir.name), timeout=5)
+    client = ipc.connect(ipc.address("turns", ep.dir.name), timeout_s=5)
     try:
         client.hello((2, 2))
         with pytest.raises(ipc.RpcError) as caught:
-            client.call("usage.codex_limits", {}, timeout=5)
+            client.call("usage.codex_limits", {}, timeout_s=5)
         assert (caught.value.code, caught.value.data) == (
             results.ERROR_CAPABILITY, {"capability": "usage"})
     finally:

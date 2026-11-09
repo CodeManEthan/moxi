@@ -78,7 +78,7 @@ def upstream(*, environ: Mapping[str, str] | None = None, kind: str | None = Non
     port = endpoint.hold_port(layout.runtime_dir(environ), running=running)
     if port is None:
         raise _not_ready("the shell doesn't hold the gateway's port yet; "
-                         "run `moxi ui gateway on`")
+                         "run `moxi ui gateway enable`")
     return f"http://127.0.0.1:{port}"
 
 

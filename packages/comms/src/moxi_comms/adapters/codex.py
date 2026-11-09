@@ -183,7 +183,7 @@ def _turns_find(pid: int, timeout: float):
     Imported at the call: `import moxi_turns` loads nothing."""
     import moxi_turns as turns
 
-    return turns.wait_ready(pid=pid, timeout=timeout)
+    return turns.wait_ready(pid=pid, timeout_s=timeout)
 
 
 class HostGone(RuntimeError):
@@ -515,7 +515,7 @@ class CodexAdapter(HarnessAdapter):
                 self.log.info("the codex host of %s offers no mcp.reload; its servers are "
                               "not reloaded", self.agent.qualified)
                 return
-            answer = session.mcp_reload(timeout=RELOAD_WAIT)
+            answer = session.mcp_reload(timeout_s=RELOAD_WAIT)
         except Exception as e:                              # noqa: BLE001
             self.log.warning("mcp.reload for %s failed: %s", self.agent.qualified, e)
             return

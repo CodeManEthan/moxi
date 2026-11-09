@@ -290,7 +290,7 @@ spec = moxi_repo.Spec(
     root="/home/you/notes",              # the work tree's top
     paths=("notes",),                    # what it commits, read literally; "." is all
     author=("notes-bot", "bot@example.invalid"),
-    min_interval=300,                    # seconds since this author's last commit
+    min_interval_s=300,                  # seconds since this author's last commit
     push="origin",                       # None: no push
 )
 result = moxi_repo.commit(spec)          # one pass; never raises
@@ -298,7 +298,7 @@ print(result.line())
 ```
 
 A pass takes the committer's lock in the repo's common git dir (try once by default; pass
-`wait=` to wait). It commits only the paths the spec names, leaves a path someone else
+`wait_s=` to wait). It commits only the paths the spec names, leaves a path someone else
 staged for a later pass, and leaves out a file over `max_bytes`. A prepare step,
 `prepare(ctx) -> Prepared(drop=[(path, reason)], refuse=None)`, may drop paths or refuse
 the pass. The git hooks run on the committer's commits. The default message is
@@ -309,7 +309,7 @@ lists of changed paths go on stdin, never in argv.
 `result.status` is one of `committed`, `clean`, `throttled`, `busy` (another pass holds
 the lock), `index-busy` (git's own index lock is held), `refused` (a git hook or the
 prepare step refused) or `error`. The push part runs on every pass that holds the lock:
-it pushes when the branch is ahead, and retries a failed push after `push_backoff`
+it pushes when the branch is ahead, and retries a failed push after `push_backoff_s`
 seconds.
 
 `moxi_repo.save_spec(spec)` saves a spec whose callables are `"pkg.mod:fn"` strings into
@@ -317,9 +317,9 @@ the repo's git config, and `moxi_repo.commit_saved(root, name)` runs it. A saved
 `message` is kept as the summary line itself, not a target: `message="pkg.mod:fn"` makes
 that text the commit's subject, and a callable `message` can't be saved.
 
-- `moxi repo commit PATH [--spec NAME] [--wait SECONDS] [--json]` runs one saved spec, or
+- `moxi repo commit PATH [--spec NAME] [--wait-s SECONDS] [--json]` runs one saved spec, or
   every spec saved in that repo, and prints each pass's line. It exits 1 on an error or a
-  failed push, 3 when a pass was refused, 75 when `--wait` ran out on a busy lock, else 0.
+  failed push, 3 when a pass was refused, 75 when `--wait-s` ran out on a busy lock, else 0.
 - `moxi repo specs [PATH] [--json]` lists saved specs, and specs that ran without being
   saved, each with its last result. Its JSON also gives a saved spec's last commit (its
   author's newest) and each branch's last pushed commit.
@@ -330,9 +330,9 @@ A failure the committer can't show its caller, such as a refused pass run from a
 kept as a doctor record, replaced on each pass and cleared once the condition ends.
 
 repo also exports the small git helper the committer uses:
-`moxi_repo.git(root, *args, timeout=30)` runs git with no prompts and git's local and
+`moxi_repo.git(root, *args, timeout_s=30)` runs git with no prompts and git's local and
 pathspec variables removed, `moxi_repo.changes(root, staged=True)` returns the staged (or
-`range=(a, b)`) changes as `Change(status, path, old_path, blob)`, and
+`rev_range=(a, b)`) changes as `Change(status, path, old_path, blob)`, and
 `moxi_repo.literal_pathspec(path)` gives a path's literal pathspec form.
 
 ## Projects

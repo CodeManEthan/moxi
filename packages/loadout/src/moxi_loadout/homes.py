@@ -14,7 +14,7 @@ writes it uses, from the environment it is given:
 - Moxi's state folder and settings file (`moxi.paths.core()`): the core lock, the
   placer's ledger, the harness table and the opencode row loadout adds to it;
 - each harness row's skills and agents folders, as the placer resolves them
-  (`moxi.place.folders`);
+  (`moxi.place.harness_dirs`);
 - Claude Code's, Codex's and OpenCode's homes (`moxi_loadout.harness`), which place the
   harness files loadout writes;
 - projects' data, state and config folders when the act reads a project section named by
@@ -134,7 +134,7 @@ def places(*, reads: Sequence[str] = ()) -> Places:
                  "loadout's config file": mine.config_file(env),
                  "Moxi's state folder": core().state_dir(env),
                  "Moxi's settings file": core().config_file(env)}
-        found.update(place.folders(env))
+        found.update(place.harness_dirs(env))
         found.update({f"{NAMES[h]}'s home": harness.home(h, env)
                       for h in harness.HARNESSES})
         for m in modules:
@@ -199,7 +199,7 @@ def check(argv: Sequence[str] = ()) -> str | None:
     api, why = ui()
     if api is None:
         return unloadable(why)
-    return api.check(places(reads=reads(argv)), programs=PROGRAMS, page=True)
+    return api.check(places(reads=reads(argv)), programs=PROGRAMS, for_page=True)
 
 
 def note() -> str | None:
@@ -211,7 +211,7 @@ def note() -> str | None:
     if api is None:
         return unloadable(why) if page else None
     try:
-        return api.check(places(reads=reads()), programs=PROGRAMS, page=page)
+        return api.check(places(reads=reads()), programs=PROGRAMS, for_page=page)
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return f"loadout couldn't compare its folders with your terminal's: {exc}"
 

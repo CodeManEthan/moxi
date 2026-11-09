@@ -185,7 +185,7 @@ def build(snap: Snapshot) -> list[Row]:
     """The rows for `snap`."""
     if not snap.switch:
         rows = [Row(MODULE, "switch", "off", "the connector is off",
-                    "moxi connector on")]
+                    "moxi connector enable")]
         if getattr(snap.address, "state", None) == "on":
             rows.append(Row(MODULE, "address", "warn", ADDRESS_FORWARDS,
                             f"moxi tunnel remove {TARGET}"))

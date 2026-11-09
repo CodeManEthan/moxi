@@ -455,7 +455,7 @@ def test_a_caller_that_hangs_up_mid_wait_frees_the_slot_and_the_late_reply_stays
     with running as d:
         access = sign_in_over(d.port)
         hang_up(d.port, call("send_and_wait", {"to": "planner@proj-a", "text": "ok?",
-                                               "wait_seconds": 60}, rid=8),
+                                               "wait_s": 60}, rid=8),
                 token=access, until=lambda: tools.waiting == 1 and sent_by_me(rig))
         cut = time.monotonic()
         wait_for(lambda: tools.waiting == 0, within=10)
@@ -588,7 +588,7 @@ def test_arguments_outside_comms_schema_never_reach_comms(door, registry, rig):
                            ("check_messages", {"since": "yesterday"}),
                            ("send", {"to": "planner@proj-a"}),
                            ("send_and_wait", {"to": "planner@proj-a", "text": "x",
-                                              "wait_seconds": 500})):
+                                              "wait_s": 500})):
             got = await request(d.front, "POST", "/mcp", call(name, args), headers=access)
             result = got.json()["result"]
             assert result["isError"], (name, args)

@@ -77,10 +77,10 @@ CONFIG_FILE = "config.toml"
 LOCATORS = ("HOME", "DATA_HOME", "STATE_HOME", "CACHE_HOME", "CONFIG_HOME", "RUNTIME_DIR")
 
 #: The one home for every module's roots.
-HOME = "MOXI_HOME"
+HOME_ENV = "MOXI_HOME"
 
 #: The device label shared by every module that names none of its own.
-DEVICE = "MOXI_DEVICE"
+DEVICE_ENV = "MOXI_DEVICE"
 
 #: The longest socket path, in bytes, that `socket_path` returns under a runtime directory.
 #: macOS allows 104 bytes in a socket address and Linux 108.
@@ -124,7 +124,7 @@ class Layout:
     def locators(self) -> tuple[str, ...]:
         """The names of every variable that moves this module's roots."""
         own = tuple(f"{self.prefix}{suffix}" for suffix in LOCATORS) if self.prefix else ()
-        return (*own, HOME)
+        return (*own, HOME_ENV)
 
     def device(self, env: Mapping[str, str] | None = None, *,
                create: bool = True) -> str | None:
@@ -141,7 +141,7 @@ class Layout:
         if per_root := self._own(environ, "RUNTIME_DIR" if kind == "runtime"
                                  else f"{kind.upper()}_HOME"):
             return Path(per_root)
-        if home := self._own(environ, "HOME") or environ.get(HOME):
+        if home := self._own(environ, "HOME") or environ.get(HOME_ENV):
             return Path(home) / kind
         if _WINDOWS:
             roaming, local = _windows_folders(environ)
@@ -289,7 +289,7 @@ def device_label(module: str | None = None, env: Mapping[str, str] | None = None
 
 def _label(prefix: str, environ: Mapping[str, str], create: bool = True) -> str | None:
     own = environ.get(f"{prefix}DEVICE") if prefix else None
-    if label := own or environ.get(DEVICE):
+    if label := own or environ.get(DEVICE_ENV):
         return label
     if create:
         return device_id(environ)
@@ -550,7 +550,7 @@ def _which_windows(name: str, search: str, pathext: str | None) -> str | None:
 
 #: The variable only test kits set: it stands in for the account's own folder, so a test
 #: reads and writes its own anchor and never the real account's.
-ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+ANCHOR_HOME_ENV = "MOXI_ANCHOR_HOME"
 
 #: The core's record of the environment the user's terminal ran with, in the anchor.
 TERMINAL_RECORD = "terminal.json"
@@ -586,10 +586,10 @@ def anchor_dir(env: Mapping[str, str] | None = None) -> Path:
     A `MOXI_ANCHOR_HOME` that isn't a full path raises `NoAnchor` too.
     """
     environ = _environ(env)
-    if given := environ.get(ANCHOR_HOME):
+    if given := environ.get(ANCHOR_HOME_ENV):
         if not os.path.isabs(given):
-            raise NoAnchor(f"{ANCHOR_HOME} is {given!r}, not a full path",
-                           f"take {ANCHOR_HOME} out of this environment")
+            raise NoAnchor(f"{ANCHOR_HOME_ENV} is {given!r}, not a full path",
+                           f"take {ANCHOR_HOME_ENV} out of this environment")
         base = given
     elif _WINDOWS:
         from . import _win
@@ -616,7 +616,7 @@ def terminal_record(env: Mapping[str, str] | None = None) -> Path:
     return anchor_dir(env) / TERMINAL_RECORD
 
 
-__all__ = ["CONFIG_FILE", "LOCATORS", "HOME", "DEVICE", "DEVICE_ID", "SOCKET_MAX",
-           "ANCHOR_HOME", "TERMINAL_RECORD", "Layout", "NoAnchor", "core", "core_lock",
+__all__ = ["CONFIG_FILE", "LOCATORS", "HOME_ENV", "DEVICE_ENV", "DEVICE_ID", "SOCKET_MAX",
+           "ANCHOR_HOME_ENV", "TERMINAL_RECORD", "Layout", "NoAnchor", "core", "core_lock",
            "device_id", "device_label", "socket_path", "script", "python", "home", "which",
            "anchor_dir", "terminal_record"]

@@ -166,7 +166,7 @@ class FakeClient:
         self.failure = failure
         self.calls = []
 
-    def call(self, method, params=None, *, timeout=None):
+    def call(self, method, params=None, *, timeout_s=None):
         self.calls.append(method)
         raise self.failure
 

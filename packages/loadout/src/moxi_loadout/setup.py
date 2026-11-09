@@ -50,7 +50,7 @@ loadout: the global instruction file, global.md in your loadout folder, can reac
 session of every harness. Choose how:
   off        loadout touches no global file (the default)
   managed    your own CLAUDE.md and AGENTS.md stay; loadout adds a line or a block that
-             brings global.md in, and global off takes exactly that out
+             brings global.md in, and global remove takes exactly that out
   if-absent  global.md is placed where a harness has no global file; an existing one
              is left alone
 Global mode [off]: """
@@ -121,7 +121,7 @@ def write_example(folder: str | os.PathLike) -> bool:
         return False
     text = importlib.resources.files("moxi_loadout").joinpath(EXAMPLE).read_text(
         encoding="utf-8")
-    with lock(stores.manifest_lock(), timeout=10.0):
+    with lock(stores.manifest_lock(), timeout_s=10.0):
         if not _empty(folder):
             return False
         os.makedirs(folder, exist_ok=True)

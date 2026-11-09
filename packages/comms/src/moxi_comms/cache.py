@@ -128,7 +128,7 @@ def no_clock(adapter) -> str:
 @dataclass
 class Clock:
     """What `clock_state` read: a kind, the cache's age when there is a clock, the
-    lifetime the read used (`ttl_seconds`, None when it used none) and where it came from
+    lifetime the read used (`ttl_s`, None when it used none) and where it came from
     (`ttl_source`), what the lifetime was looked up by (`key`, in words), and why
     (`reason` in words, `code`) when the read is `unknown`, `no-cache` or a `cold` with no
     lifetime.
@@ -138,9 +138,9 @@ class Clock:
     lines about cold landings under the documented minimum; and `judged`, (thread id, the
     newest turn the drift scan judged)."""
     kind: str
-    age_seconds: float | None = None
+    age_s: float | None = None
     reason: str | None = None
-    ttl_seconds: float | None = None
+    ttl_s: float | None = None
     key: str | None = None
     basis: str | None = None             # "documented" or "measured", with a lifetime
     provider: str | None = None
@@ -397,7 +397,7 @@ def target_for_name(qualified: str, reply: dict | None = None, *,
                     error: str | None = None) -> Target:
     """A name, from the daemon's answer to `query kind="session"` (or why it failed).
 
-    The kind and age are the daemon's (`cache_kind`, `age_seconds`, `cache_reason`): the
+    The kind and age are the daemon's (`cache_kind`, `age_s`, `cache_reason`): the
     read it delivers by, with the lifetime it used (`cache_ttl`), what that was looked up
     by (`cache_key`) and a codex binding's root (`cache_source`), for every adapter: an
     adapter comms has no clock for reads as the daemon answers it. A reply whose
@@ -420,7 +420,7 @@ def target_for_name(qualified: str, reply: dict | None = None, *,
     kind = reply.get("cache_kind")
     if kind not in (WARM, COLD, FRESH, NO_CACHE, UNKNOWN):
         kind = UNKNOWN
-    age = reply.get("age_seconds")
+    age = reply.get("age_s")
     ttl = reply.get("cache_ttl")
     source = reply.get("cache_source")
     reason = reply.get("cache_reason") or None
@@ -488,8 +488,8 @@ def kind_of(t: Target) -> CacheState:
         state.code = t.code
         return state
     clock = clock_state(t.adapter or "claude-shim", t.session_id)
-    state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_seconds
-    state.ttl_seconds, state.key, state.code = clock.ttl_seconds, clock.key, clock.code
+    state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_s
+    state.ttl_seconds, state.key, state.code = clock.ttl_s, clock.key, clock.code
     return state
 
 

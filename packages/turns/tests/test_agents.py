@@ -29,7 +29,7 @@ def connect():
     clients = []
 
     def make(ep):
-        client = ipc.connect(ep.address, timeout=5)
+        client = ipc.connect(ep.address, timeout_s=5)
         clients.append(client)
         client.hello((2, 2))
         return client
@@ -66,7 +66,7 @@ def test_agents_reads_the_harness_record_and_facts_count_it(make_endpoint):
 def test_the_agents_answer_carries_its_kind_on_the_wire(make_endpoint, connect):
     ep, fake = make_endpoint()
     fake.entries = [entry("a1", parent_id="p")]
-    answer = connect(ep).call("agents", {}, timeout=5)
+    answer = connect(ep).call("agents", {}, timeout_s=5)
     assert answer["kind"] == "agents" and answer["complete"] is True
     assert answer["entries"] == [{"id": "a1", "kind": "subagent", "state": "running",
                                   "final": False, "description": None,

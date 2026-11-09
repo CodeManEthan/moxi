@@ -19,7 +19,7 @@ The walk (`moxi.terminal._walk`):
 - `walk(view=None, run=None)` goes up a run's process tree and returns `Evidence` (Moxi or
   an agent started it), `Undecided` (it can't tell), or None (nothing of Moxi's or an
   agent's).
-- `marked(env=None)` is a copy of an environment carrying the start mark, `MARK`
+- `marked(env=None)` is a copy of an environment carrying the start mark, `STARTED_BY_ENV`
   (`MOXI_STARTED_BY`), for a program that builds a child's environment from scratch.
 
 The `moxi` command's record step (`step()`, run by the `moxi` console script before it
@@ -37,7 +37,7 @@ environment.
 
 from __future__ import annotations
 
-from .._mark import NAME as MARK
+from .._mark import NAME as STARTED_BY_ENV
 from .._mark import marked
 from ._record import (FAILED, FORMAT, FOUND, NO_KEYBOARD, NO_PLACE, SAME, UNDECIDED,
                       WRITTEN, NewerFormat, NoRecord, Outcome, Read, Record, Unreadable,
@@ -62,7 +62,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["MARK", "marked", "walk", "Evidence", "Undecided", "Found", "Run",
+__all__ = ["STARTED_BY_ENV", "marked", "walk", "Evidence", "Undecided", "Found", "Run",
            "FORMAT", "in_set", "anchor_set", "of", "read", "write", "version", "keyboard",
            "Record", "NoRecord", "Unreadable", "NewerFormat", "Read", "Outcome", "step", "row",
            "last", "SAME", "WRITTEN", "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE",

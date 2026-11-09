@@ -316,10 +316,10 @@ def run_child(argv: list[str], *, env: dict[str, str] | None = None) -> Outcome:
 
 
 def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Popen:
-    from .files import CLAIM_VARIABLE
+    from .files import LOCK_FD_ENV
 
     if not _WINDOWS:
-        environ[CLAIM_VARIABLE] = str(fd)
+        environ[LOCK_FD_ENV] = str(fd)
         return subprocess.Popen(argv, env=environ, pass_fds=(fd,))
     import msvcrt
 
@@ -328,7 +328,7 @@ def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Pope
     try:
         info = subprocess.STARTUPINFO()
         info.lpAttributeList = {"handle_list": [handle]}
-        environ[CLAIM_VARIABLE] = str(handle)
+        environ[LOCK_FD_ENV] = str(handle)
         return subprocess.Popen(argv, env=environ, startupinfo=info, close_fds=True)
     finally:
         os.set_handle_inheritable(handle, False)
@@ -952,7 +952,7 @@ def _misnamed(module: str, skills: list[str]) -> set[str]:
 
 def _skill_folders(found) -> tuple[list[str] | None, object]:
     """The skill names in `found`'s `SKILLS` folder (its subfolders `moxi.names.
-    is_skill_folder` counts, sorted) and the folder, read through
+    is_skill_dir` counts, sorted) and the folder, read through
     `importlib.resources`; or None and the line that says why they can't be read. A
     package not on disk (in a zip, say) is refused, since a harness reads a skill from a
     folder."""
@@ -972,7 +972,7 @@ def _skill_folders(found) -> tuple[list[str] | None, object]:
                       f"can't be placed")
     try:
         skills = sorted(entry.name for entry in folder.iterdir()
-                        if names.is_skill_folder(entry.name) and entry.is_dir())
+                        if names.is_skill_dir(entry.name) and entry.is_dir())
     except OSError as exc:
         return None, f"SKILLS folder {folder} can't be read ({exc.strerror or exc})"
     return skills, folder
@@ -1230,7 +1230,7 @@ def main(argv: list[str] | None = None,
     runs after the handlers are in place and before the step (tests)."""
     from . import files, paths
 
-    handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.CLAIM_VARIABLE
+    handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.LOCK_FD_ENV
     if not files.adopt_core_claim(paths.core_lock()) and handed:
         say("the install's lock claim did not check; nothing done", err=True)
         return 1

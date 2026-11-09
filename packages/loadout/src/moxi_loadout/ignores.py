@@ -140,7 +140,7 @@ class Git:
             if seconds <= 0:
                 raise GitError("loadout's time for git ran out", timed_out=True)
         try:
-            return proc.run(argv, timeout=seconds, input=input,
+            return proc.run(argv, timeout_s=seconds, stdin_data=input,
                             env=self.env() if env is None else env)
         except subprocess.TimeoutExpired:
             raise GitError(f"git took longer than {seconds:.0f} s", timed_out=True) from None

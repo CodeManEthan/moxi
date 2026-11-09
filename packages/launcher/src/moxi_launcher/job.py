@@ -602,7 +602,7 @@ class RelaunchJob:
             self.check_stop()
             if pane:
                 try:
-                    ended = api.wait_ended(slot, pane_id=pane, timeout=1)
+                    ended = api.wait_ended(slot, pane_id=pane, timeout_s=1)
                 except api.TryAgain:
                     ended = None
                 except api.SlotsError as error:
@@ -669,7 +669,7 @@ class RelaunchJob:
         if person is not None:
             self.end("exit-pending", "person", f"{person.detail}; the exit dialog was left "
                                                "for them")
-        answer = api.answer_screen(slot, screen, wait=0)
+        answer = api.answer_screen(slot, screen, wait_s=0)
         outcome, why = answer.outcome, answer.why or ""
         detail = {"outcome": outcome, "why": why, "capture": answer.capture}
         if turns_gone:

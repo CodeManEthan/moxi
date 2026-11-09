@@ -147,7 +147,7 @@ def default_home(_no_real_core_roots, monkeypatch) -> None:
 
     import moxi.paths
 
-    monkeypatch.delenv(moxi.paths.HOME, raising=False)
+    monkeypatch.delenv(moxi.paths.HOME_ENV, raising=False)
     for name in list(os.environ):
         if (name.startswith("MOXI_")
                 and name.endswith(tuple(f"_{suffix}" for suffix in moxi.paths.LOCATORS))):

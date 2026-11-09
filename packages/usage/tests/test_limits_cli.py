@@ -20,8 +20,8 @@ HOUR = 3600.0
 def turns(monkeypatch):
     state = SimpleNamespace(available=True, calls=[])
 
-    def pull(*, timeout):
-        state.calls.append(timeout)
+    def pull(*, timeout_s):
+        state.calls.append(timeout_s)
         return None
 
     monkeypatch.setattr(limits, "_turns_available", lambda: state.available)

@@ -137,7 +137,7 @@ class DaemonClient:
         """Connect and agree a wire version. Raises `DaemonOffline` when nothing
         answers, and `VersionMismatch` when the daemon refuses this comms' version."""
         try:
-            client = ipc.connect(self.socket_path, timeout=self.timeout)
+            client = ipc.connect(self.socket_path, timeout_s=self.timeout)
         except (ipc.IpcError, OSError) as e:
             raise DaemonOffline(f"comms offline: {self.socket_path}: {e}") from e
         try:
@@ -200,7 +200,7 @@ class DaemonClient:
         first, self._asked = not self._asked, True
         try:
             result = self._client.call(method, dict(params or {}),
-                                       timeout=self.timeout if timeout is None else timeout)
+                                       timeout_s=self.timeout if timeout is None else timeout)
         except ipc.RpcError as e:
             if e.code == wire.BUSY and first and self._may_retry():
                 # The daemon had no room for this connection and closed it, having done
@@ -290,14 +290,14 @@ class DaemonClient:
         return self._call("send", params, no_answer=DaemonNoAnswer)
 
     def delete(self, as_: str, token: str | None, message_id, *, user=None) -> dict:
-        """`delete` as `as_` with its `token`: the result's `message_id`, `withdrawn`
+        """`remove` as `as_` with its `token`: the result's `message_id`, `withdrawn`
         and `delivered` (names), and `expired`. A request that left this process and got
         no answer raises `DaemonNoAnswer`, since the message may have been withdrawn.
         `user` is the operator's user id, for `as_` "operator"."""
         params = {"as": as_, "token": token, "message_id": str(message_id)}
         if user is not None:
             params["user"] = user
-        return self._call("delete", params, no_answer=DaemonNoAnswer)
+        return self._call("remove", params, no_answer=DaemonNoAnswer)
 
     def attributed_message(self, message_id) -> dict | None:
         """One message with its author as the daemon attributes it, or None when the

@@ -17,7 +17,7 @@ deny-list.
   empty). A key that refers to history kept elsewhere (`history_base`, `forked_from_id`,
   ...) is not on that list, and neither is any key not seen.
 * **Reading it.** Backwards through sessions' `records_back` in 64 KB blocks, to the
-  earliest record the verdict needs, and line 1 (`head=True`), with a 64 MB limit. The
+  earliest record the verdict needs, and line 1 (`read_head=True`), with a 64 MB limit. The
   read asks for every kind of record, because the evidence rule must see every line. A
   `malformed` record, or an `other` record sessions' lists do not recognise, is `unknown`.
   The one exception is a last line with no newline that does not decode: Codex is writing
@@ -204,7 +204,7 @@ def read(thread_id, *, cache_source, turned, new_session, now, drift=MISSING,
         return Clock(COLD, reason=COMPRESSED, code=_clock.COMPRESSED)
     limit = _clock.CLOCK_SCAN_LIMIT if limit is None else limit
     try:
-        with records_back(hits[0].source, head=True, block=_clock.CLOCK_BLOCK,
+        with records_back(hits[0].source, read_head=True, block=_clock.CLOCK_BLOCK,
                           limit=limit) as back:
             return _read_open(back, thread_id, table=table, turned=turned, now=now,
                               drift=drift, bound_at=bound_at, judged=judged)
@@ -462,12 +462,12 @@ def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
         return unknown(_clock.FUTURE_STAMP, skew)
     age = max(0.0, now - ts)
     if (last_provider, last_model) != (next_provider, next_model):
-        return Clock(COLD, age_seconds=age, reason=CHANGED, code=_clock.CHANGED)
+        return Clock(COLD, age_s=age, reason=CHANGED, code=_clock.CHANGED)
     row = table.lookup(HARNESS, last_provider, last_model)
     key = f"{HARNESS} {pair_text(last_provider, last_model)}"
     if row is None:
         # A model with no lifetime row has no clock to count by.
-        return Clock(NO_CACHE, age_seconds=age, reason=no_row(last_provider, last_model),
+        return Clock(NO_CACHE, age_s=age, reason=no_row(last_provider, last_model),
                      code=_clock.NO_ROW)
     if row.free:
         return Clock(NO_CACHE, reason=free_reason(last_provider, last_model),
@@ -508,7 +508,7 @@ def _measured_key(key, row, lifetime, lowered_at) -> str:
 
 def _verdict(age, lifetime, *, key, basis, provider, model, lowered_from=None) -> Clock:
     kind = COLD if age >= lifetime else WARM
-    return Clock(kind, age_seconds=age, ttl_seconds=lifetime, key=key, basis=basis,
+    return Clock(kind, age_s=age, ttl_s=lifetime, key=key, basis=basis,
                  provider=provider, model=model, lowered_from=lowered_from)
 
 

@@ -195,7 +195,7 @@ def default_runner() -> Runner:
         from .. import proc
 
         full = {**os.environ, "SYSTEMD_COLORS": "0", "NO_COLOR": "1", **(env or {})}
-        done = proc.run(cmd, timeout=timeout, env=full)
+        done = proc.run(cmd, timeout_s=timeout, env=full)
         return subprocess.CompletedProcess(done.args, done.returncode,
                                            _text(done.stdout), _text(done.stderr))
     return run

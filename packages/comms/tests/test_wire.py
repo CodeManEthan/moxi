@@ -190,7 +190,7 @@ def test_the_hello_agrees_the_version_and_answers_the_daemons_own_capabilities(r
     line = lines(hello=False)
     answer = result(line.hello(capabilities={"x-not-comms"}))
     assert answer["version"] == wire.VERSIONS[1]
-    assert set(answer["capabilities"]) == {"delete", "expiry", "interrupt", "reserved-names",
+    assert set(answer["capabilities"]) == {"remove", "expiry", "interrupt", "reserved-names",
                                            "mcp", "connector"}
     # Each side holds the other's set: the daemon's connection holds what the client
     # offered, not an intersection.
@@ -199,7 +199,7 @@ def test_the_hello_agrees_the_version_and_answers_the_daemons_own_capabilities(r
 
 
 def test_the_ipc_client_holds_the_daemons_capabilities(rig):
-    with ipc.connect(str(daemon_socket()), timeout=5.0) as client:
+    with ipc.connect(str(daemon_socket()), timeout_s=5.0) as client:
         agreed = client.hello(wire.VERSIONS, ["x-not-comms"])
     assert agreed.version == 1 and set(agreed.capabilities) == set(wire.CAPABILITIES)
 
@@ -390,7 +390,7 @@ READS = [
                     "standing"}),
     ("session", {"identity": PLANNER},
      {"identity", "bound", "adapter", "session_id", "session_seen_at", "bound_at",
-      "bound_for", "cache_kind", "age_seconds", "cache_reason", "cache_ttl", "cache_key",
+      "bound_for", "cache_kind", "age_s", "cache_reason", "cache_ttl", "cache_key",
       "cache_code", "cache_source", "endpoint", "endpoint_for"}),
     ("owner", {"session_id": "no-such-session"},
      {"session_id", "owner", "adapter", "awaiting"}),

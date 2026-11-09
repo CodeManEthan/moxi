@@ -83,7 +83,7 @@ def notes_repo(*pieces: str) -> Path:
     from moxi_repo import api
 
     root = repo(home() / "notes", commit=True)
-    configure(snapshot__interval=0)
+    configure(snapshot__interval_minutes=0)
     if pieces:
         api.add(root, *pieces)
     return root

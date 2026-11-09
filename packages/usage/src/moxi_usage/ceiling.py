@@ -1,8 +1,8 @@
 """The worker ceiling: turns' guard that stops a subagent whose context has grown too far.
 
 turns calls `judge(call)` before each tool call of a subagent, in the session's endpoint,
-when the guard `usage.ceiling` is on: by usage's switch `ceiling.on` or by turns'
-`guards.on`. It answers None (let the call run), `Allow(line)` (run it and add one line
+when the guard `usage.ceiling` is on: by usage's switch `ceiling.enabled` or by turns'
+`guards.run`. It answers None (let the call run), `Allow(line)` (run it and add one line
 for the model) or `Deny(reason)`, turns' own answers.
 
 **The rule.** The ceiling acts only when it is on and both `ceiling.warn_tokens` and
@@ -43,7 +43,7 @@ import os
 #: The guard's id, its name in usage's `GUARDS`, and its switch in usage's settings.
 GUARD_ID = "usage.ceiling"
 NAME = "ceiling"
-SWITCH = "ceiling.on"
+SWITCH = "ceiling.enabled"
 #: The markers' directory under usage's state directory.
 STATE_DIR = "ceiling"
 #: The marker kinds.

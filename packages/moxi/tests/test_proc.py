@@ -52,31 +52,31 @@ def child_env(**extra: str) -> dict[str, str]:
 
 def test_run_captures_bytes_by_default_and_text_for_text_input():
     done = proc.run([PY, "-c", "import sys; print('out'); print('err', file=sys.stderr)"],
-                    timeout=30)
+                    timeout_s=30)
     assert (done.returncode, done.stdout.strip(), done.stderr.strip()) == (0, b"out", b"err")
     fed = proc.run([PY, "-c", "import sys; sys.stdout.write(sys.stdin.read().upper())"],
-                   timeout=30, input="sécret")
+                   timeout_s=30, stdin_data="sécret")
     assert fed.stdout == "SÉCRET"
 
 
 def test_run_feeds_bytes_input():
     fed = proc.run([PY, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
-                   timeout=30, input=b"\x00\x01")
+                   timeout_s=30, stdin_data=b"\x00\x01")
     assert fed.stdout == b"\x00\x01"
 
 
 def test_run_closes_stdin_without_input():
-    done = proc.run([PY, "-c", "import sys; print(repr(sys.stdin.read()))"], timeout=30)
+    done = proc.run([PY, "-c", "import sys; print(repr(sys.stdin.read()))"], timeout_s=30)
     assert done.stdout.strip() == b"''"
 
 
 def test_run_does_not_check_the_exit_status():
-    assert proc.run([PY, "-c", "raise SystemExit(4)"], timeout=30).returncode == 4
+    assert proc.run([PY, "-c", "raise SystemExit(4)"], timeout_s=30).returncode == 4
 
 
 def test_run_uses_env_as_given_and_cwd(tmp_path):
     code = "import os; print(os.environ.get('ONLY'), os.environ.get('HOME'), os.getcwd())"
-    done = proc.run([PY, "-c", code], timeout=30, env=child_env(ONLY="yes"), cwd=tmp_path)
+    done = proc.run([PY, "-c", code], timeout_s=30, env=child_env(ONLY="yes"), cwd=tmp_path)
     only, home, cwd = done.stdout.decode().split()
     assert (only, home) == ("yes", "None")
     assert Path(cwd).resolve() == tmp_path.resolve()
@@ -91,23 +91,23 @@ def test_a_run_child_sees_no_lifeline_variable(monkeypatch, stale):
     else:
         monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
         env = child_env(**{proc.LIFELINE_ENV: "7"})
-    assert proc.run([PY, "-c", code], timeout=30, env=env).stdout.strip() == b"None"
+    assert proc.run([PY, "-c", code], timeout_s=30, env=env).stdout.strip() == b"None"
 
 
 def test_run_without_capture_leaves_output_alone(tmp_path):
-    done = proc.run([PY, "-c", "pass"], timeout=30, capture=False)
+    done = proc.run([PY, "-c", "pass"], timeout_s=30, capture=False)
     assert (done.stdout, done.stderr) == (None, None)
 
 
 def test_run_refuses_a_single_string():
     with pytest.raises(TypeError):
-        proc.run("echo hi", timeout=5)
+        proc.run("echo hi", timeout_s=5)
 
 
 @POSIX
 def test_run_starts_the_child_in_a_new_session():
     done = proc.run([PY, "-c", "import os; print(os.getpid(), os.getsid(0), os.getpgrp())"],
-                    timeout=30)
+                    timeout_s=30)
     pid, sid, pgrp = map(int, done.stdout.split())
     assert pid == sid == pgrp
     assert sid != os.getsid(0)
@@ -123,7 +123,7 @@ TREE = """
 
 def test_a_timed_out_run_kills_the_whole_tree_and_keeps_its_output(tmp_path):
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout=3)
+        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout_s=3)
     word, pid = caught.value.output.split()
     assert word == b"ready"
     assert caught.value.timeout == 3
@@ -142,7 +142,7 @@ def test_a_child_that_ignores_sigterm_is_killed_after_the_grace(tmp_path, monkey
     """
     start = time.monotonic()
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        proc.run([PY, script(tmp_path, "stubborn.py", stubborn)], timeout=2)
+        proc.run([PY, script(tmp_path, "stubborn.py", stubborn)], timeout_s=2)
     took = time.monotonic() - start
     assert caught.value.output == b"ready\n"
     assert 2.4 <= took < 10
@@ -181,7 +181,7 @@ def test_a_grandchild_that_ignores_sigterm_and_holds_no_pipe_is_killed(
     with pytest.raises(subprocess.TimeoutExpired) as caught:
         proc.run([PY, script(tmp_path, "tree.py", STARTS_A_STUBBORN_GRANDCHILD),
                   script(tmp_path, "grandchild.py", STUBBORN_GRANDCHILD), str(marker)],
-                 timeout=2, capture=capture)
+                 timeout_s=2, capture=capture)
     took = time.monotonic() - start
     grandchild = int(marker.read_text())
     try:
@@ -200,7 +200,7 @@ def test_a_tree_that_ends_on_sigterm_does_not_wait_out_the_grace(tmp_path, monke
     monkeypatch.setattr(proc, "KILL_GRACE", 5)
     start = time.monotonic()
     with pytest.raises(subprocess.TimeoutExpired):
-        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout=1)
+        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout_s=1)
     assert time.monotonic() - start < 4
 
 
@@ -973,7 +973,7 @@ def test_environ_reads_a_child_as_it_was_started():
         env["HOME"] = os.environ.get("HOME", "/")
     child = _child_with(env)
     try:
-        read = proc.environ(child.pid)
+        read = proc.process_env(child.pid)
     finally:
         _end(child)
     assert read is not None
@@ -983,14 +983,14 @@ def test_environ_reads_a_child_as_it_was_started():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
 def test_environ_of_this_process_reads_what_it_started_with():
-    read = proc.environ(os.getpid())
+    read = proc.process_env(os.getpid())
     assert read is not None and read.get("PATH") == os.environ.get("PATH")
 
 
 def test_environ_of_a_gone_process_is_none():
     child = subprocess.Popen([PY, "-c", "pass"])
     child.wait()
-    assert proc.environ(child.pid) is None
+    assert proc.process_env(child.pid) is None
 
 
 @LINUX
@@ -1002,7 +1002,7 @@ def test_environ_of_a_zombie_is_none():
         while _state(child.pid) != "Z" and time.monotonic() < deadline:
             time.sleep(0.01)
         assert _state(child.pid) == "Z"
-        assert proc.environ(child.pid) is None
+        assert proc.process_env(child.pid) is None
     finally:
         child.wait()
 
@@ -1016,14 +1016,14 @@ def _state(pid: int) -> str:
 def test_the_linux_reader_reads_an_empty_environment_of_a_running_process_as_empty():
     child = _child_with({})
     try:
-        assert proc.environ(child.pid) == {}
+        assert proc.process_env(child.pid) == {}
     finally:
         _end(child)
 
 
 @pytest.mark.parametrize("pid", [0, -1, True])
 def test_environ_of_no_pid_is_none(pid):
-    assert proc.environ(pid) is None
+    assert proc.process_env(pid) is None
 
 
 @LINUX
@@ -1032,7 +1032,7 @@ def test_environ_of_another_users_process_is_none():
         pytest.skip("root reads every process")
     if not os.path.exists("/proc/1/environ"):
         pytest.skip("no pid 1 under /proc")
-    assert proc.environ(1) is None
+    assert proc.process_env(1) is None
 
 
 @LINUX
@@ -1135,12 +1135,12 @@ def test_environ_on_macos_reads_a_process_whose_first_argument_is_empty():
 def test_environ_on_macos_of_another_users_process_is_none():
     if os.geteuid() == 0:
         pytest.skip("root reads every process")
-    assert proc.environ(1) is None  # launchd, root's
+    assert proc.process_env(1) is None  # launchd, root's
 
 
 @WINDOWS
 def test_environ_on_windows_is_none():
-    assert proc.environ(os.getpid()) is None
+    assert proc.process_env(os.getpid()) is None
 
 
 @WINDOWS
@@ -1162,7 +1162,7 @@ def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
     env = {k: v for k, v in os.environ.items() if k.upper() != _mark.NAME}
     code = ("import os, moxi._mark as m; "
             "print(m.started_by, os.environ[m.NAME] == m.program)")
-    done = proc.run([PY, "-c", code], timeout=30, env=None, capture=True)
+    done = proc.run([PY, "-c", code], timeout_s=30, env=None, capture=True)
     assert done.returncode == 0
     # proc.run marks a child it starts, so this child started with the mark.
     assert done.stdout.decode().split() == [_mark.program, "True"]
@@ -1177,7 +1177,7 @@ def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
     env = child_env()
     assert _mark.NAME not in env
     if start == "run":
-        out = proc.run([PY, "-c", code], timeout=30, env=env).stdout.decode()
+        out = proc.run([PY, "-c", code], timeout_s=30, env=env).stdout.decode()
     elif start == "spawn":
         child = proc.spawn([PY, "-c", code], env=env, stdout=subprocess.PIPE)
         out = child.stdout.read().decode()

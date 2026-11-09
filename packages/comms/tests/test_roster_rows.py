@@ -56,16 +56,16 @@ class Daemon:
         if key in self.fail:
             raise self.fail[key]
 
-    def roster(self, *, deadline):
-        self._called("roster", deadline)
+    def roster(self, *, timeout_s):
+        self._called("roster", timeout_s)
         return api.Roster(bound=self.bound, standing=self.standing)
 
-    def session(self, identity, *, deadline):
-        self._called(("session", identity), deadline)
+    def session(self, identity, *, timeout_s):
+        self._called(("session", identity), timeout_s)
         return self.sessions.get(identity, {"bound": False})
 
-    def owner(self, session_id, *, deadline):
-        self._called(("owner", session_id), deadline)
+    def owner(self, session_id, *, timeout_s):
+        self._called(("owner", session_id), timeout_s)
         return api.Owner(session_id=session_id, identity=None,
                          awaiting=tuple(self.owners.get(session_id, ())))
 
@@ -111,7 +111,7 @@ def test_one_row_per_address_live_first_then_by_name(monkeypatch):
 
 def test_the_deadline_reaches_every_call(monkeypatch):
     daemon = two_live().install(monkeypatch)
-    api.roster_rows(deadline=2)
+    api.roster_rows(timeout_s=2)
     assert len(daemon.calls) == 5 and {d for _, d in daemon.calls} == {2}
     daemon.calls.clear()
     api.roster_rows()
@@ -235,9 +235,9 @@ def test_agents_json_prints_exactly_what_roster_rows_returns(monkeypatch):
         "qualified": LEAD, "name": "lead", "scope": "proj-a", "live": True, "kind": None,
         "module": None, "tier": "chosen", "adapter": "codex", "directors": ["boss"],
         "session_id": SID_LEAD, "bound_at": 12.5, "awaiting": [PLAN]}]})
-    assert asked == [{"deadline": api.READ_DEADLINE}]
+    assert asked == [{"timeout_s": api.READ_DEADLINE}]
     agents_json(deadline=3)
-    assert asked[-1] == {"deadline": 3}
+    assert asked[-1] == {"timeout_s": 3}
 
 
 @pytest.mark.parametrize(("error", "code", "word"), [

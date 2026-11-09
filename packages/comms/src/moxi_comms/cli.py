@@ -9,7 +9,7 @@
                                          [--cap N | --no-cap] [--standing]
                                          [--audience NAME] [--held] [--interrupt]
                                          [--expires DURATION|never] [--check]
-    moxi comms delete <message-id>            [--json]
+    moxi comms remove <message-id>            [--json]
     moxi comms agents                         [--seats | --json]
     moxi comms history <identity>             [--limit N]
     moxi comms help [<term>]
@@ -197,7 +197,7 @@ def cmd_reply(args, ctx: Context) -> int:
 
 
 def cmd_delete(args, ctx: Context) -> int:
-    """`moxi comms delete`: withdraw one of your messages from every recipient that
+    """`moxi comms remove`: withdraw one of your messages from every recipient that
     hasn't had it yet. One line per recipient; exit `OK` when it was withdrawn from
     anyone, `REFUSED` when from no one, `TEMPFAIL` with the daemon down."""
     result = sending.delete(ctx, args.message_id)
@@ -252,7 +252,7 @@ def _agents_json(ctx: Context) -> int:
         return code
 
     try:
-        rows = api.roster_rows(deadline=_deadline(ctx))
+        rows = api.roster_rows(timeout_s=_deadline(ctx))
     except DaemonOffline as e:
         return fail(_offline(e), "offline", str(e))
     except DaemonTimeout as e:
@@ -514,7 +514,7 @@ def cmd_owner(args, ctx: Context) -> int:
     if not sid:
         return fail(moxi_exit.USAGE, "refused", "a session id is required")
     try:
-        got = api.owner(sid, deadline=_deadline(ctx))
+        got = api.owner(sid, timeout_s=_deadline(ctx))
     except DaemonOffline as e:
         return fail(_offline(e), "offline", str(e))
     except DaemonTimeout as e:
@@ -1067,7 +1067,7 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     r.add_argument("--check", action="store_true", help=CHECK_HELP)
     r.set_defaults(func=cmd_reply, reply_to=None)
 
-    dl = sub.add_parser("delete", help="withdraw a message you sent from every recipient "
+    dl = sub.add_parser("remove", help="withdraw a message you sent from every recipient "
                                        "that hasn't had it yet")
     dl.add_argument("message_id")
     dl.add_argument("--json", action="store_true",

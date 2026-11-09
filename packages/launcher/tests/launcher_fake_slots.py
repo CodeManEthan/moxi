@@ -375,8 +375,8 @@ def read_screen(slot, screens) -> Seen:
                 frame.get("why", ""), (), bool(frame.get("dead", False)), "%7")
 
 
-def answer_screen(slot, screen, wait=5) -> Answer:
-    record("answer_screen", slot=slot, screen=screen_name(screen), wait=wait)
+def answer_screen(slot, screen, wait_s=5) -> Answer:
+    record("answer_screen", slot=slot, screen=screen_name(screen), wait=wait_s)
     answers = script().get("answers") or [{"outcome": "gone"}]
     answer = _nth(answers, _turns.answers)
     _turns.answers += 1

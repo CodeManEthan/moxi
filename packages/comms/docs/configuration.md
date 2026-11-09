@@ -120,8 +120,8 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | `[mcp] enabled` | `true` | | serve comms' tools to sessions over MCP, from the daemon, on `127.0.0.1`. Off, the daemon loads nothing of the MCP libraries and launches get no tools. Read at the daemon's start; launches follow what the running daemon serves, not the file. |
 | `[mcp] port` | `8450` | | the loopback port the tools are served on, 1 to 65535. The address is always `127.0.0.1`. Read at the daemon's start; a launch uses the address the running daemon answers. |
 | `[connector] identity` | `claude-app` | | the global name comms' tools in the Claude apps send and receive as, through the connector. Provisioned as a standing name when the connector starts them; never the operator's name. Read at the connector's start. |
-| `[connector] wait_default` | `45` | | how many seconds `send_and_wait` waits for a reply when the call names none; 1 to `wait_max` |
-| `[connector] wait_max` | `90` | | the longest a `send_and_wait` call waits, 1 to 99 seconds (Cloudflare ends an answer at 100); a call that asks longer waits this long |
+| `[connector] wait_default_s` | `45` | | how many seconds `send_and_wait` waits for a reply when the call names none; 1 to `wait_max_s` |
+| `[connector] wait_max_s` | `90` | | the longest a `send_and_wait` call waits, 1 to 99 seconds (Cloudflare ends an answer at 100); a call that asks longer waits this long |
 | `[replay] messages` | `50` | | read only when comms 0.2's files move: a name with no cursor gets at most this many of its messages as waiting mail; 1 or more |
 | `[replay] hours` | `24` | | read only when comms 0.2's files move: a name with no cursor gets none of its messages older than this; 0 or more |
 | `block` | `false` | | stops all routing: while it is true the daemon neither delivers to nor routes from any identity, and `moxi comms send` says so and sends nothing. Read at every use, so a change needs no restart. |
@@ -133,7 +133,9 @@ channel` (comms passes Claude Code no channel),
 `[policy] never_held` (no sender is exempt from the cold-cache hold) and
 `[policy] next_turn_refused` (`--held` is accepted for every recipient).
 The old `[provision] slots` key and roster `slot` key are also retired; remove them.
-Remove all retired keys.
+Remove all retired keys. `[connector] wait_default` and `wait_max` are renamed
+`wait_default_s` and `wait_max_s`; a file that sets an old name is refused, naming the new
+one.
 
 ### Choosing the backend
 

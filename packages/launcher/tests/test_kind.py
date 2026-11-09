@@ -218,7 +218,7 @@ def test_a_log_held_past_the_wait_raises_busy_and_writes_nothing():
     raw.execute("BEGIN IMMEDIATE")
     try:
         with pytest.raises(api.Busy) as raised:
-            api.launch_kind(CLAUDE_ID, timeout=0.05)
+            api.launch_kind(CLAUDE_ID, timeout_s=0.05)
         assert raised.value.exit_code == 75
     finally:
         raw.execute("ROLLBACK")

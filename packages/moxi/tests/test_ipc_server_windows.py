@@ -105,7 +105,7 @@ def test_a_windows_sweep_of_a_held_lock_is_live(fake_windows, runtime):
     finally:
         child.stdin.close()
         child.wait(30)
-    with files.lock(lock, timeout=0):
+    with files.lock(lock, timeout_s=0):
         assert ipc.sweep(ipc.address("demo", "a")) == "live"
 
 
@@ -187,7 +187,7 @@ def test_a_pipe_peer_of_another_user_is_dropped_unread(monkeypatch, caplog, user
 
     async def main():
         server = _server.Server("x", handler, hello=None, max_line=100,
-                                write_deadline=1.0, queue=4, legacy=None, on_close=None)
+                                write_timeout_s=1.0, queue=4, legacy=None, on_close=None)
         writer = FakeWriter()
         await server._accept_pipe(None, writer)
         return writer, server
@@ -222,9 +222,9 @@ def test_the_lock_is_let_go_only_once_the_last_pipe_instance_has_closed(tmp_path
     lock = tmp_path / "a.lock"
 
     async def main():
-        server = _server.Server("x", echo, hello=None, max_line=100, write_deadline=1.0,
+        server = _server.Server("x", echo, hello=None, max_line=100, write_timeout_s=1.0,
                                 queue=4, legacy=None, on_close=None)
-        server._hold.enter_context(files.lock(lock, timeout=0))
+        server._hold.enter_context(files.lock(lock, timeout_s=0))
         listener = on_fake_pipe(server)
         one = _server._PipeProtocol(server, asyncio.StreamReader())
         two = _server._PipeProtocol(server, asyncio.StreamReader())
@@ -248,9 +248,9 @@ def test_a_closed_pipe_server_with_no_instance_open_lets_the_lock_go_at_once(tmp
     lock = tmp_path / "a.lock"
 
     async def main():
-        server = _server.Server("x", echo, hello=None, max_line=100, write_deadline=1.0,
+        server = _server.Server("x", echo, hello=None, max_line=100, write_timeout_s=1.0,
                                 queue=4, legacy=None, on_close=None)
-        server._hold.enter_context(files.lock(lock, timeout=0))
+        server._hold.enter_context(files.lock(lock, timeout_s=0))
         listener = on_fake_pipe(server)
         server.close()
         return listener.closed, server._listening, held(lock)
@@ -262,7 +262,7 @@ def held(lock) -> bool:
     """Whether lock file `lock` is held, asked by a fresh process: within this one a
     second take raises instead of saying."""
     code = ("import sys\nfrom moxi import files\n"
-            "try:\n    with files.lock(sys.argv[1], timeout=0): print('free')\n"
+            "try:\n    with files.lock(sys.argv[1], timeout_s=0): print('free')\n"
             "except files.LockTimeout: print('held')\n")
     out = subprocess.run([sys.executable, "-c", code, str(lock)], capture_output=True,
                          timeout=30, check=True).stdout
@@ -732,7 +732,7 @@ def test_a_stuck_peer_is_dropped_at_the_write_deadline_and_others_go_on(pipe_ser
     def on_close(conn):
         closed.append(time.monotonic())
 
-    srv = pipe_serving(handler, write_deadline=deadline, queue=1000, on_close=on_close)
+    srv = pipe_serving(handler, write_timeout_s=deadline, queue=1000, on_close=on_close)
     stuck = PipeRaw(srv.address)
     stuck.send(req(1, "flood"))
     wait_for(lambda: pushed, what="the flood")
@@ -1004,8 +1004,8 @@ def test_a_client_before_the_next_instance_is_made_is_busy_then_served(pipe_serv
             raise
 
     monkeypatch.setattr(_pipe, "open_pipe", open_pipe)
-    with ipc.connect(srv.address, timeout=10) as client:
-        assert client.call("go", timeout=10) == {"method": "go", "params": None}
+    with ipc.connect(srv.address, timeout_s=10) as client:
+        assert client.call("go", timeout_s=10) == {"method": "go", "params": None}
     assert time.monotonic() - start >= 0.3
     assert refused and set(refused) == {231}  # ERROR_PIPE_BUSY, tried again
     first.send(req(1, "go"))
@@ -1057,7 +1057,7 @@ def test_a_pipe_whose_list_doesnt_admit_this_user_refuses_connect(pipe):
     instance = _pipe.server_instance(pipe, f"D:P(A;;FA;;;{_pipe.SYSTEM})", first=True)
     try:
         with pytest.raises(ipc.IpcError) as caught:
-            ipc.connect(pipe, timeout=2)
+            ipc.connect(pipe, timeout_s=2)
     finally:
         import _winapi
 

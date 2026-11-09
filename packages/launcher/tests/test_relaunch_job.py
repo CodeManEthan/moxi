@@ -133,7 +133,7 @@ class FakeSlots:
         self.calls.append(("release", slot, holder))
         return True
 
-    def wait_ended(self, slot, *, pane_id, timeout):
+    def wait_ended(self, slot, *, pane_id, timeout_s):
         self.calls.append(("wait_ended", slot, pane_id))
         return SimpleNamespace(ended=self.ended, gone=False, dead_status=None)
 
@@ -150,8 +150,8 @@ class FakeSlots:
     def pane_use(self, slot):
         return self.pane
 
-    def answer_screen(self, slot, screen, wait=5):
-        self.calls.append(("answer", slot, wait))
+    def answer_screen(self, slot, screen, wait_s=5):
+        self.calls.append(("answer", slot, wait_s))
         return SimpleNamespace(outcome=self.answer, why=self.why, capture=None)
 
     def job(self, name):

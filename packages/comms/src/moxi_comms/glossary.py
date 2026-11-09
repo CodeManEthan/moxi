@@ -164,10 +164,10 @@ TERMS: tuple[Entry, ...] = (
     ),
     Entry(
         "withdrawn",
-        "a message its author took back with `moxi comms delete <id>` before it reached "
+        "a message its author took back with `moxi comms remove <id>` before it reached "
         "the recipient. It never arrives, `moxi comms explain` says `withdrawn`, and "
         "`moxi comms history` still shows it, marked `[withdrawn]`, so its id and replies "
-        "to it still hold. Only the author can delete a message, and only from those who "
+        "to it still hold. Only the author can remove a message, and only from those who "
         "have not had it yet: a recipient who has read it keeps it.",
         aliases=("delete", "withdraw"),
     ),

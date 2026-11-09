@@ -28,8 +28,8 @@ def turns(monkeypatch):
     """turns installed, with a pull that must not be reached unless a test says so."""
     state = SimpleNamespace(available=True, calls=[], answer=None, why=None)
 
-    def pull(*, timeout):
-        state.calls.append(timeout)
+    def pull(*, timeout_s):
+        state.calls.append(timeout_s)
         if isinstance(state.answer, BaseException):
             raise state.answer
         return state.answer
@@ -98,7 +98,7 @@ def test_codex_picks_the_newest_reading_from_either_source():
     put(codex(30.0, 300, NOW + HOUR, NOW - 5 * MIN, source="app-server", session_id=None),
         codex(25.0, 300, NOW + HOUR, NOW - 2 * MIN))
     five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
-    assert (five.used_percent, five.source, five.age_seconds) == (25.0, "rollout", 2 * MIN)
+    assert (five.used_percent, five.source, five.age_s) == (25.0, "rollout", 2 * MIN)
 
 
 def test_claude_picks_the_latest_future_reset_then_the_highest_percent():
@@ -108,7 +108,7 @@ def test_claude_picks_the_latest_future_reset_then_the_highest_percent():
         claude(5.0, 300, NOW + 3 * HOUR - 30, NOW - MIN, session_id="c"))
     five = row(limits.limits(harness="claude", now=NOW, pull=False), "claude", "5h")
     assert (five.used_percent, five.session_id, five.state) == (25.0, "b", "fresh")
-    assert five.age_seconds == 40 * MIN
+    assert five.age_s == 40 * MIN
 
 
 def test_an_idle_sessions_old_number_cannot_pass_for_fresh():
@@ -346,7 +346,7 @@ def test_a_fresh_codex_reading_is_not_pulled(turns):
     put(codex(5.0, 300, NOW + HOUR, NOW - 5 * MIN))
     result = limits.limits(harness="codex", now=NOW)
     assert turns.calls == [] and result.pull is None
-    write_config("[limits]\ncodex_pull_after = 120\n")
+    write_config("[limits]\ncodex_pull_after_s = 120\n")
     turns.answer = pulled()
     limits.limits(harness="codex", now=NOW)
     assert turns.calls == [3.0]
@@ -432,7 +432,7 @@ def test_api_limits_answers_with_as_dict_for_json():
     data = json.loads(json.dumps(result.as_dict()))
     assert data["now"] == "2026-10-30T22:40:00Z"
     five = data["rows"][0]
-    assert (five["label"], five["state"], five["used_percent"], five["age_seconds"]) == (
+    assert (five["label"], five["state"], five["used_percent"], five["age_s"]) == (
         "5h", "fresh", 10.0, 60.0)
     assert five["resets_at"] == "2026-10-30T23:40:00Z"
     assert data["pull"] is None
@@ -450,7 +450,7 @@ def test_what_a_reading_did_not_say_is_unknown_and_named_in_json():
     assert set(data["unknown"]) == {"resets_at", "session_id", "plan_type"}
     # no reading at all: every fact a reading gives is unknown, the reason says why
     assert seven.state == "unavailable" and "no Codex reading" in seven.reason
-    for name in ("used_percent", "resets_at", "observed_at", "age_seconds", "source",
+    for name in ("used_percent", "resets_at", "observed_at", "age_s", "source",
                  "session_id", "plan_type", "slot"):
         assert getattr(seven, name) is api.UNKNOWN, name
     data = json.loads(json.dumps(result.as_dict()))

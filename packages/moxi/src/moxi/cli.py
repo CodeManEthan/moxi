@@ -642,10 +642,10 @@ def _shortcut_path(where: str, module: str) -> str:
     return os.path.join(where, f"{module}.cmd" if _on_windows() else module)
 
 
-def shortcut_text(module: str, *, windows: bool | None = None) -> str:
+def shortcut_text(module: str, *, is_windows: bool | None = None) -> str:
     """The content of module `module`'s shortcut file: a `/bin/sh` script, or on Windows
     a `.cmd` file (with CRLF line ends)."""
-    if windows if windows is not None else _on_windows():
+    if is_windows if is_windows is not None else _on_windows():
         return f"@echo off\r\n{CMD_SHORTCUT_MARKER}{module}\r\nmoxi {module} %*\r\n"
     return f'#!/bin/sh\n{SHORTCUT_MARKER}{module}\nexec moxi {module} "$@"\n'
 

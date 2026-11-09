@@ -46,8 +46,9 @@ VERSIONS = (1, 1)
 #: version. `mcp` is the adapter method `mcp_token`, which registers the hash of the
 #: session's token for comms' tools; an adapter calls it only when the hello lists it.
 #: `connector` is the read `replies_to`, the replies one identity can read to one message,
-#: which comms' connector provider asks only when the hello lists it.
-CAPABILITIES = frozenset({"delete", "expiry", "interrupt", "reserved-names", "mcp",
+#: which comms' connector provider asks only when the hello lists it. `remove` is the
+#: method that withdraws a message, so a daemon that lists `delete` instead is older.
+CAPABILITIES = frozenset({"remove", "expiry", "interrupt", "reserved-names", "mcp",
                           "connector"})
 
 # -- error codes -------------------------------------------------------------------------
@@ -332,7 +333,7 @@ class Host:
                 server = await ipc.serve(
                     self.address, self._handle,
                     hello=ipc.Hello(VERSIONS, self.capabilities),
-                    write_deadline=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
+                    write_timeout_s=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
                     on_close=self._on_close)
             except BaseException as exc:
                 ready.set_exception(exc)

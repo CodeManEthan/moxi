@@ -50,12 +50,12 @@ PROJECTS_UNREADABLE = ("projects could not be read; a project may keep its notes
 
 class Resolution:
     """The resolver's answer: `dir` (a `Path` or None), `rule` (one of `RULES`) and
-    `warning` (a sentence, or None)."""
+    `warning` (a sentence, or None). The constructor takes the first as `notes_dir`."""
 
     __slots__ = ("dir", "rule", "warning")
 
-    def __init__(self, dir, rule: str, warning: str | None = None):
-        object.__setattr__(self, "dir", dir)
+    def __init__(self, notes_dir, rule: str, warning: str | None = None):
+        object.__setattr__(self, "dir", notes_dir)
         object.__setattr__(self, "rule", rule)
         object.__setattr__(self, "warning", warning)
 

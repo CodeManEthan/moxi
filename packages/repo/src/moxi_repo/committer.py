@@ -7,7 +7,7 @@ every committer on that repo:
 
 - the commit part: cadence, what changed, what to leave out, stage, prepare, commit;
 - the push part, which runs on every pass that holds the lock, whatever the commit part
-  returned, so a failed push is retried by the first pass after `push_backoff`;
+  returned, so a failed push is retried by the first pass after `push_backoff_s`;
 - the record part: the repo's state file, then the doctor records, then the sweep.
 
 Only a `busy` pass, which never took the lock, skips the push and record parts. A failure
@@ -97,11 +97,11 @@ class Spec:
     `name` is `<module>/<name>`. `paths` are relative to `root`, the work tree's top, and
     read literally: `"."` is the whole tree, a directory takes what is under it; at most
     64 paths and 8 KiB in all. `author` (name, email) is set as author and committer.
-    `min_interval` is the seconds since this author's last commit before another commit.
+    `min_interval_s` is the seconds since this author's last commit before another commit.
     `message` is the summary line, or fn(changes) -> str; None gives `<name>: N paths`.
     `trailers` is fn(changes, since) -> [(key, value)]. `prepare` is fn(PrepareContext) ->
     Prepared. Either callable may be given as a `"pkg.mod:fn"` string. `push` names the
-    remote to push to (None: no push); `push_backoff` is the seconds after a failed push
+    remote to push to (None: no push); `push_backoff_s` is the seconds after a failed push
     before the next attempt; `max_bytes` caps each file's size (None: no cap).
     """
 
@@ -109,12 +109,12 @@ class Spec:
     root: Path
     paths: tuple[str, ...]
     author: tuple[str, str]
-    min_interval: float = 0
+    min_interval_s: float = 0
     message: str | Callable | None = None
     trailers: Callable | str | None = None
     prepare: Callable | str | None = None
     push: str | None = None
-    push_backoff: float = 300
+    push_backoff_s: float = 300
     max_bytes: int | None = 10 * 1024 * 1024
 
 
@@ -139,9 +139,9 @@ class PrepareContext:
     changes: tuple[Change, ...]
     spec: str
 
-    def git(self, *args: str, input: bytes | str | None = None,
-            timeout: float = DEFAULT_TIMEOUT, binary: bool = False):
-        return git(self.root, *args, input=input, timeout=timeout, binary=binary)
+    def git(self, *args: str, stdin_data: bytes | str | None = None,
+            timeout_s: float = DEFAULT_TIMEOUT, binary: bool = False):
+        return git(self.root, *args, stdin_data=stdin_data, timeout_s=timeout_s, binary=binary)
 
 
 @dataclass(frozen=True)
@@ -235,8 +235,8 @@ def spec_problem(spec: Spec) -> str | None:
             or not all(isinstance(x, str) and x.strip() for x in spec.author)
             or any(c in "".join(spec.author) for c in "<>\n\0")):
         return "author is (name, email), each non-empty, with no '<', '>' or newline"
-    for label, value in (("min_interval", spec.min_interval),
-                         ("push_backoff", spec.push_backoff)):
+    for label, value in (("min_interval_s", spec.min_interval_s),
+                         ("push_backoff_s", spec.push_backoff_s)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             return f"{label} is a number of seconds, 0 or more"
     if spec.max_bytes is not None and (isinstance(spec.max_bytes, bool)
@@ -350,7 +350,7 @@ def _take(where: _Where, wait: float | None):
         raise files.LockTimeout(path, os.getpid())
     try:
         left = None if deadline is None else max(0.0, deadline - time.monotonic())
-        with files.lock(path, timeout=left):
+        with files.lock(path, timeout_s=left):
             _held_here().add(key)
             try:
                 yield
@@ -451,17 +451,26 @@ def _number(section, var: str, default, kind=float):
         raise SpecError(f"saved {var} = {value!r} is not a number") from None
 
 
+#: Spec keys an earlier repo saved, by the key that replaced each. A saved spec that still
+#: has one is refused, naming the new key: `save_spec` writes the new keys.
+RENAMED_SPEC_KEYS = {"min-interval": "min-interval-s", "push-backoff": "push-backoff-s"}
+
+
 def _from_section(top: Path, name: str, section: dict[str, list[str]]) -> Spec:
+    for old, new in RENAMED_SPEC_KEYS.items():
+        if old in section:
+            raise SpecError(f"saved {old} is renamed: set {new} instead (save the spec "
+                            "again)")
     author = _one(section, "author") or ""
     found = re.fullmatch(r"(.+?) <([^<>]+)>", author)
     if not found:
         raise SpecError(f"saved author = {author!r} is not 'name <email>'")
     spec = Spec(name=name, root=top, paths=tuple(section.get("paths", ())),
                 author=(found.group(1), found.group(2)),
-                min_interval=_number(section, "min-interval", 0),
+                min_interval_s=_number(section, "min-interval-s", 0),
                 message=_one(section, "message"), trailers=_one(section, "trailers"),
                 prepare=_one(section, "prepare"), push=_one(section, "push") or None,
-                push_backoff=_number(section, "push-backoff", 300),
+                push_backoff_s=_number(section, "push-backoff-s", 300),
                 max_bytes=_number(section, "max-bytes", 10 * 1024 * 1024, int))
     problem = spec_problem(spec)
     if problem:
@@ -488,23 +497,23 @@ def _plain(x: float) -> str:
 def _fields(spec: Spec) -> list[tuple[str, str]]:
     out = [("paths", p) for p in spec.paths]
     out.append(("author", f"{spec.author[0]} <{spec.author[1]}>"))
-    out.append(("min-interval", _plain(spec.min_interval)))
+    out.append(("min-interval-s", _plain(spec.min_interval_s)))
     for var, value in (("message", spec.message), ("trailers", spec.trailers),
                        ("prepare", spec.prepare), ("push", spec.push)):
         if value is not None:
             out.append((var, value))
-    out.append(("push-backoff", _plain(spec.push_backoff)))
+    out.append(("push-backoff-s", _plain(spec.push_backoff_s)))
     out.append(("max-bytes", "none" if spec.max_bytes is None else str(spec.max_bytes)))
     return out
 
 
-def save_spec(spec: Spec, *, wait: float = 30) -> None:
+def save_spec(spec: Spec, *, wait_s: float = 30) -> None:
     """Write `spec` into its repo's git config as `[moxi-repo "spec.<name>"]`, replacing
     what was saved under that name, so `commit_saved` and `moxi repo commit` run it.
 
     Its callables must be `"pkg.mod:fn"` strings; a `message` is saved as the summary line
     it is. Raises SpecError for a spec that can't be saved, and `moxi.files.LockTimeout`
-    when a pass holds the committer's lock past `wait` seconds.
+    when a pass holds the committer's lock past `wait_s` seconds.
     """
     problem = spec_problem(spec)
     if problem:
@@ -515,7 +524,7 @@ def save_spec(spec: Spec, *, wait: float = 30) -> None:
             raise SpecError(f"{label} is a callable; a saved spec takes a 'pkg.mod:fn' "
                             "string" + (" (or a summary line)" if label == "message" else ""))
     where = _where(spec.root)
-    with _take(where, wait):
+    with _take(where, wait_s):
         section = f"{SPEC_PREFIX}{spec.name}"
         if spec.name in _config_specs(where.cgd):
             done = _config_write(where.top, "--remove-section", section)
@@ -541,12 +550,12 @@ def _config_write(top: Path, *args: str):
     return done
 
 
-def remove_spec(root, name: str, *, wait: float = 30) -> list[str]:
+def remove_spec(root, name: str, *, wait_s: float = 30) -> list[str]:
     """Forget a spec, saved or not: its saved section, its state-file entry and its doctor
     records. Returns a line for each thing removed (none when there was nothing)."""
     where = _where(root)
     lines: list[str] = []
-    with _take(where, wait):
+    with _take(where, wait_s):
         if name in _config_specs(where.cgd):
             done = _config_write(where.top, "--remove-section", f"{SPEC_PREFIX}{name}")
             if done.returncode != 0:
@@ -612,10 +621,10 @@ class _Pass:
             hook_lines=tuple(self.hook_lines), spec=self.name, detached=self.detached)
 
 
-def commit(spec: Spec, *, wait: float = 0) -> CommitResult:
+def commit(spec: Spec, *, wait_s: float = 0) -> CommitResult:
     """Run one pass of `spec`. Never raises.
 
-    `wait` is how long to wait for another pass's lock (0: try once, and a held lock
+    `wait_s` is how long to wait for another pass's lock (0: try once, and a held lock
     returns `busy` at once)."""
     name = getattr(spec, "name", "")
     try:
@@ -627,12 +636,12 @@ def commit(spec: Spec, *, wait: float = 0) -> CommitResult:
             where = _where(spec.root)
         except SpecError as exc:
             return CommitResult("error", str(exc), spec=name)
-        return _run(name, where, wait, lambda: spec)
+        return _run(name, where, wait_s, lambda: spec)
     except Exception as exc:  # noqa: BLE001 - a pass never raises at its caller
         return CommitResult("error", f"the pass failed: {_describe(exc)}", spec=str(name))
 
 
-def commit_saved(root, name: str, *, wait: float = 0) -> CommitResult:
+def commit_saved(root, name: str, *, wait_s: float = 0) -> CommitResult:
     """Run one pass of the spec saved as `name` in the repo at `root`. Never raises."""
     try:
         try:
@@ -646,7 +655,7 @@ def commit_saved(root, name: str, *, wait: float = 0) -> CommitResult:
                 return None
             return _from_section(where.top, name, section)
 
-        return _run(name, where, wait, load)
+        return _run(name, where, wait_s, load)
     except Exception as exc:  # noqa: BLE001
         return CommitResult("error", f"the pass failed: {_describe(exc)}", spec=name)
 
@@ -764,7 +773,7 @@ def _unstage(p: _Pass, spec: Spec, paths: list[str], judged: dict) -> bool:
     for delay in (0, 0.05, 0.2):
         if delay:
             time.sleep(delay)
-        _g(p, "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", input=data)
+        _g(p, "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul", stdin_data=data)
         still = _blobs(_staged(p, spec.paths, renames=False))
         left = [x for x in paths if x in still]
         if not left:
@@ -779,9 +788,9 @@ def _unstage(p: _Pass, spec: Spec, paths: list[str], judged: dict) -> bool:
 def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
     now = _now()
     since = _last_commit(p, spec.author)
-    if spec.min_interval and since is not None and now - since < spec.min_interval:
+    if spec.min_interval_s and since is not None and now - since < spec.min_interval_s:
         p.end("throttled", f"the last commit by {spec.author[0]} was {int(now - since)} s "
-                           f"ago; the interval is {_plain(spec.min_interval)} s")
+                           f"ago; the interval is {_plain(spec.min_interval_s)} s")
         return
     stranded = state.get("stranded") or {}
     for attempt in (1, 2):
@@ -807,7 +816,7 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
             p.end("clean")
             return
         done = _g(p, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul",
-                  input=_stdin(stage))
+                  stdin_data=_stdin(stage))
         if done.returncode == 0:
             break
         if _index_locked(p):
@@ -911,8 +920,8 @@ def _after_staging(spec: Spec, p: _Pass, before: dict, stage: list[str],
     args += ["--pathspec-from-file=-", "--pathspec-file-nul"]
     old_head = head_commit(p.where.top)
     try:
-        done = _g(p, *args, input=_stdin(every), author=tuple(spec.author),
-                  extra_env={COMMITTER_ENV: spec.name}, timeout=COMMIT_TIMEOUT)
+        done = _g(p, *args, stdin_data=_stdin(every), author=tuple(spec.author),
+                  extra_env={COMMITTER_ENV: spec.name}, timeout_s=COMMIT_TIMEOUT)
         code, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as exc:
         code = None
@@ -1122,7 +1131,7 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
             _push_clear(p, b, state)
             continue
         failed_at = ((state.get("push") or {}).get(b) or {}).get("failed_at")
-        if failed_at is not None and _now() - failed_at < spec.push_backoff:
+        if failed_at is not None and _now() - failed_at < spec.push_backoff_s:
             continue
         _push_one(spec, p, r, b, tip_sha)
 
@@ -1130,7 +1139,7 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
 def _pushable(spec: Spec) -> bool:
     """Whether the spec's push fields can be read, so the push part can run even when
     another field is wrong."""
-    backoff = spec.push_backoff
+    backoff = spec.push_backoff_s
     return ((spec.push is None or (isinstance(spec.push, str)
                                    and bool(_REMOTE.fullmatch(spec.push))))
             and isinstance(backoff, (int, float)) and not isinstance(backoff, bool))
@@ -1145,7 +1154,7 @@ def _push_clear(p: _Pass, branch: str, state: dict) -> None:
 def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
     try:
         done = _g(p, "push", "-q", remote, f"refs/heads/{branch}:refs/heads/{branch}",
-                  timeout=PUSH_TIMEOUT)
+                  timeout_s=PUSH_TIMEOUT)
         code, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as exc:
         code, out = None, _text(exc.stdout) + _text(exc.stderr)
@@ -1168,7 +1177,7 @@ def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
         f"repo: {spec.name} push of {branch} to {remote} failed: {error}"
         + "".join(f"\n  {x}" for x in lines[-20:]),
         f"fix the remote or what refused the push; the first pass after "
-        f"{_plain(spec.push_backoff)} s tries again (moxi repo commit {quote_arg(p.where.top)})")
+        f"{_plain(spec.push_backoff_s)} s tries again (moxi repo commit {quote_arg(p.where.top)})")
 
 
 def _push_reason(lines: list[str], code: int) -> str:
@@ -1376,9 +1385,9 @@ def listing(root) -> list[dict]:
             try:
                 spec = _from_section(where.top, name, saved[name])
                 item["spec"] = {"paths": list(spec.paths), "author": list(spec.author),
-                                "min_interval": spec.min_interval, "message": spec.message,
+                                "min_interval_s": spec.min_interval_s, "message": spec.message,
                                 "trailers": spec.trailers, "prepare": spec.prepare,
-                                "push": spec.push, "push_backoff": spec.push_backoff,
+                                "push": spec.push, "push_backoff_s": spec.push_backoff_s,
                                 "max_bytes": spec.max_bytes}
             except SpecError as exc:
                 item["problem"] = str(exc)

@@ -25,7 +25,7 @@ stopped the pass.
 without `now`) and `index`. The `limits` topic is fed by one poller, an asyncio task
 started by the first call to the stream route and run for the page server's life; loopback
 stops an idle server once nothing is open, and a Codex pull stays bounded by
-`limits.codex_pull_after`. It gathers at once and then every `PERIOD` seconds, and its
+`limits.codex_pull_after_s`. It gathers at once and then every `PERIOD` seconds, and its
 `Snapshot` publishes only when the windows changed; a window's age is left to the page,
 worked out from `observed_at`, so time passing alone changes nothing. The poller survives
 every exception: a failed gather is logged once per class and the next period gathers
@@ -569,7 +569,7 @@ def gather_limits() -> dict[str, Any]:
 
 def limits(call: Any) -> dict[str, Any]:
     """`GET /api/limits`: each plan window now, with a Codex pull through turns when the
-    newest Codex reading is older than `limits.codex_pull_after`."""
+    newest Codex reading is older than `limits.codex_pull_after_s`."""
     now, value = _limits()
     return {"now": now, **value}
 

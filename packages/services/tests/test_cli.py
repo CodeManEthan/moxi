@@ -125,6 +125,23 @@ def test_show_a_running_daemon(fake, no_modules, capsys):
     assert said["log"] == "journalctl --user -u web"
 
 
+def test_show_a_running_daemon_reads_its_process_fields(fake, no_modules, capsys,
+                                                        monkeypatch):
+    import os
+
+    process = cli._process(os.getpid())
+    assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}
+    monkeypatch.setattr(cli, "_process", lambda pid: process)
+    add(**written("web", enabled=True))
+    fake.written["web"] = Unit("daemon", True, active=True)
+    code, out, _ = run(capsys, "show", "web")
+    assert code == 0
+    [line] = [line for line in out.splitlines() if line.startswith("  process")]
+    assert line.endswith(f"{process['cpu_s']:g} s of CPU")
+    code, out, _ = run(capsys, "show", "web", "--json")
+    assert code == 0 and json.loads(out)["process"] == process
+
+
 AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add it again "
             "without --timer")
 
@@ -350,12 +367,17 @@ def test_watch_prints_a_line_when_a_verdict_changes(fake, no_modules, capsys, mo
             fake.written["web"].active = False
 
     rounds(monkeypatch, 4, between)
-    code, out, _ = run(capsys, "watch", "web", "--every", "1")
+    code, out, _ = run(capsys, "watch", "web", "--every-s", "1")
     lines = out.splitlines()
     assert code == 0 and len(lines) == 2
     assert lines[0].split("  ")[1:4] == ["services/web", "ok", "running"]
     assert lines[1].split("  ")[1:4] == ["services/web", "fail", "not running"]
     assert lines[1].endswith("(fix: moxi services start web)")
+
+
+def test_watch_refuses_the_old_every_flag(capsys):
+    code, _, err = run(capsys, "watch", "--every", "1", "web")
+    assert code == 2 and "unrecognized arguments: --every" in err
 
 
 def test_watch_json_and_a_row_that_goes(fake, no_modules, capsys, monkeypatch):

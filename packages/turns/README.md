@@ -73,7 +73,7 @@ its switch, for example `moxi config set turns guards.removal true`:
   gets a one-line reminder of this.
 
 Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
-`usage.ceiling`), and a guard can also be a file of your own. `guards.on` lists the
+`usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
 guards that run beyond the switches: guard ids or paths to guard files.
 
 ## Settings
@@ -93,9 +93,9 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
   compacted, in order: module names and file paths. A module not installed is skipped.
   Default `["launcher", "comms", "notes"]`; setting it replaces the whole list.
-- `start.limit`: the most start context a session gets, in characters; 0 means the
+- `start.limit_chars`: the most start context a session gets, in characters; 0 means the
   harness's own ceiling. Default 0.
-- `guards.on`: the guards that run besides those switched on: guard ids and paths to
+- `guards.run`: the guards that run besides those switched on: guard ids and paths to
   guard files. Default none.
 - `guards.removal`, `guards.no_nested_agents`, `guards.question_mode`: the switches of
   turns' three guards. Default off.

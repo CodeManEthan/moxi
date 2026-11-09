@@ -1,5 +1,5 @@
 """Cold sends: the session id, the cache read, the hold,
-`moxi comms cache`, and `--next-turn`.
+`moxi comms cache`, and `--held`.
 
 Every rig test here runs on both backends (BOTH_BACKENDS). No test targets Discord. The
 cache clock is comms' own read of a session's transcript: the transcripts live under
@@ -12,7 +12,7 @@ sender has its own cases in `test_cold_every_sender.py`, and a held claude-shim 
 
 A cold recipient of any adapter is posted and held; a read comms cannot make refuses the
 post, exit 6, `--held` included;
-`--next-turn` is `--held`, and held mail is a row in the queue, released only at a
+held mail is a row in the queue, released only at a
 release point (a `turn` carrying `handled`, a `ready` with a source, a register for
 unflagged rows) and deleted only when the adapter names it handled.
 
@@ -563,7 +563,7 @@ def test_comms_cache_refuses_any_other_caller_and_reads_nothing(rig, who):
     assert out.strip().endswith("nothing was read."), out
 
 
-# ========================================================== (f) --next-turn
+# ============================================================== (f) --held
 
 def test_the_mark_rides_line_zero_in_its_place():
     # An old record's `[next-turn]` and `[speaker]` still parse.

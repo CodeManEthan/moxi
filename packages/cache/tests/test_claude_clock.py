@@ -33,8 +33,8 @@ def test_a_warm_and_a_cold_clock(tmp_path):
     write_transcript(SESS_B, 2 * HOUR, root=tmp_path)
     warm = read(SESS_A, tmp_path)
     cold = read(SESS_B, tmp_path)
-    assert warm.kind == "warm" and 55 <= warm.age_seconds <= 120
-    assert cold.kind == "cold" and cold.age_seconds >= 2 * HOUR
+    assert warm.kind == "warm" and 55 <= warm.age_s <= 120
+    assert cold.kind == "cold" and cold.age_s >= 2 * HOUR
     assert warm.code is None and cold.code is None
 
 
@@ -73,7 +73,7 @@ def test_an_id_from_someones_record_is_read_from_its_transcript(tmp_path, age, k
     write_sessions_config(tmp_path, f'[claude]\nprojects = "{tmp_path}"\n')
     write_transcript(SESS_B, age, root=tmp_path)
     clock = api.read("claude", SESS_B, projects_root=None, turned=True)
-    assert clock.kind == kind and clock.age_seconds >= age - 1
+    assert clock.kind == kind and clock.age_s >= age - 1
 
 
 def test_an_id_from_someones_record_with_no_transcript_is_unknown(tmp_path):
@@ -251,7 +251,7 @@ def test_a_stamp_in_the_future_is_unknown(tmp_path):
     assert "stamped in the future" in got.reason
     write_transcript(SESS_A, -4, root=tmp_path)
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.age_seconds, got.ttl_seconds) == ("warm", 0.0, 3600)
+    assert (got.kind, got.age_s, got.ttl_s) == ("warm", 0.0, 3600)
 
 
 # ============================================================ the lifetime: the tier
@@ -260,7 +260,7 @@ def test_a_stamp_in_the_future_is_unknown(tmp_path):
 def test_the_clock_lines_tier_is_the_lifetime(tmp_path, tier, ttl):
     write_transcript(SESS_A, root=tmp_path, lines=[assistant_line(ttl - 30, tier=tier)])
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.ttl_seconds, got.ttl_source) == ("warm", ttl, "tier")
+    assert (got.kind, got.ttl_s, got.ttl_source) == ("warm", ttl, "tier")
     write_transcript(SESS_A, root=tmp_path, lines=[assistant_line(ttl, tier=tier)])
     assert read(SESS_A, tmp_path).kind == "cold"
 
@@ -270,7 +270,7 @@ def test_a_five_minute_user_reads_cold_past_five_minutes(tmp_path):
     cold, where the old constant hour read it warm for 55 more minutes."""
     write_transcript(SESS_A, root=tmp_path, lines=[assistant_line(600, tier="5m")])
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.ttl_seconds) == ("cold", 300)
+    assert (got.kind, got.ttl_s) == ("cold", 300)
 
 
 @pytest.mark.parametrize("untiered", ["none", None], ids=["wrote-nothing", "no-field"])
@@ -282,9 +282,9 @@ def test_a_clock_line_with_no_tier_reads_on_past_it_to_one(tmp_path, untiered):
              assistant_line(90, tier="1h", isSidechain=True)]
     path = write_transcript(SESS_A, root=tmp_path, lines=lines)
     got = read(SESS_A, tmp_path)
-    assert (got.ttl_seconds, got.ttl_source) == (300, "tier"), \
+    assert (got.ttl_s, got.ttl_source) == (300, "tier"), \
         "the newest tiered line at or before the clock line; a sidechain's does not count"
-    assert 95 <= got.age_seconds <= 160, "the clock is still the newest request"
+    assert 95 <= got.age_s <= 160, "the clock is still the newest request"
     assert got.kind == "warm" and claude.last_request(path).tier == 300
 
 
@@ -295,17 +295,17 @@ def test_lines_after_the_clock_line_name_no_tier(tmp_path):
              assistant_line(10, tier="5m", isSidechain=True)]
     write_transcript(SESS_A, root=tmp_path, lines=lines)
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.ttl_seconds) == ("warm", 3600)
+    assert (got.kind, got.ttl_s) == ("warm", 3600)
 
 
 def test_no_tiered_line_to_the_start_uses_the_config(tmp_path, own_roots):
     write_transcript(SESS_A, root=tmp_path, lines=[assistant_line(2000, tier="none"),
                                                    assistant_line(1000)])
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.ttl_seconds, got.ttl_source) == ("warm", 3600, "config")
-    write_cache_config(own_roots, "[claude]\nttl_seconds = 900\n")
+    assert (got.kind, got.ttl_s, got.ttl_source) == ("warm", 3600, "config")
+    write_cache_config(own_roots, "[claude]\nttl_s = 900\n")
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.ttl_seconds, got.ttl_source) == ("cold", 900, "config")
+    assert (got.kind, got.ttl_s, got.ttl_source) == ("cold", 900, "config")
 
 
 def test_the_tier_read_that_ends_at_the_limit_uses_the_config(tmp_path, monkeypatch):
@@ -314,12 +314,12 @@ def test_the_tier_read_that_ends_at_the_limit_uses_the_config(tmp_path, monkeypa
     tail = [{"type": "user", "pad": "x" * 1000} for _ in range(400)]
     lines = [assistant_line(4000, tier="5m"), *tail, assistant_line(1000, tier="none")]
     path = write_transcript(SESS_A, root=tmp_path, lines=lines)
-    assert read(SESS_A, tmp_path).ttl_seconds == 300
+    assert read(SESS_A, tmp_path).ttl_s == 300
     monkeypatch.setattr(clock, "CLOCK_SCAN_LIMIT", 2 * clock.CLOCK_BLOCK)
     found = claude.last_request(path)
     assert (found.outcome, found.tier, found.tier_ended) == ("clock", None, "limit")
     got = read(SESS_A, tmp_path)
-    assert (got.kind, got.ttl_seconds, got.ttl_source) == ("warm", 3600, "config")
+    assert (got.kind, got.ttl_s, got.ttl_source) == ("warm", 3600, "config")
 
 
 def test_a_config_that_cannot_be_read_holds_only_the_reads_that_need_it(tmp_path,

@@ -347,7 +347,7 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     if not _valid_module(module):
         return _section(module, error=f"{module!r} is not a module name")
     try:
-        done = run(show_argv(module), timeout=CONFIG_TIMEOUT, cwd=cwd, env=env)
+        done = run(show_argv(module), timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
         return _section(module, error=f"moxi config {module} show ran past "
                                       f"{CONFIG_TIMEOUT:g} s")
@@ -390,7 +390,7 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
     except ValueError as err:
         raise Refused(str(err)) from None
     try:
-        done = run(argv, timeout=CONFIG_TIMEOUT, cwd=cwd, env=env)
+        done = run(argv, timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
         raise Conflict(f"moxi config ran past {CONFIG_TIMEOUT:g} s; the change may not "
                        "be written") from None

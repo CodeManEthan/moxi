@@ -1066,7 +1066,7 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
         return found
     argv = export_argv(modules)
     try:
-        done = run(argv, timeout=timeout, cwd=str(cwd))
+        done = run(argv, timeout_s=timeout, cwd=str(cwd))
     except subprocess.TimeoutExpired:
         if len(modules) > 1:
             for module in modules:

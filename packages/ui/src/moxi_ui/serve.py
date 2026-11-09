@@ -1,4 +1,4 @@
-"""`moxi ui serve`, also `python -P -m moxi_ui.serve` and `moxi-ui-serve`: the shell.
+"""`moxi ui serve`, also `python -P -m moxi_ui.serve` and `moxi-ui-shell`: the shell.
 
 It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 
@@ -496,7 +496,7 @@ def run(*, bind: Callable[[Callable[[], int]], Listeners] = listen.take,
         say(f"moxi ui: the runtime directory cannot be made private: {err}")
         return 1
     try:
-        with files.lock(runtime_dir / LOCK_FILE, timeout=LOCK_WAIT):
+        with files.lock(runtime_dir / LOCK_FILE, timeout_s=LOCK_WAIT):
             return _run_held(layout, bind, say)
     except files.LockTimeout:
         say("moxi ui: another shell is running or starting (it holds page.lock)")
@@ -549,7 +549,7 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="moxi-ui-serve", description="Run Moxi's browser shell in the foreground.")
+        prog="moxi-ui-shell", description="Run Moxi's browser shell in the foreground.")
     parser.parse_args(argv)
     from moxi import log
 

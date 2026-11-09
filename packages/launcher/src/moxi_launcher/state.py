@@ -2,7 +2,7 @@
 look.
 
     state(session_id) -> SessionState     # any launched session, from the launch log
-    show(session_id=None) -> Result       # moxi launcher state [SESSION_ID] [--json]
+    show(session_id=None) -> Result       # moxi launcher show [SESSION_ID] [--json]
 
 Read from the launch log. **Its one live read is the job test of an open run**, so an open
 run whose job is gone shows `stale`; and for a launch that keeps warm, cache's read of
@@ -144,7 +144,7 @@ class SessionState:
         return asdict(self)
 
     def lines(self) -> tuple[str, ...]:
-        """What `moxi launcher state` prints."""
+        """What `moxi launcher show` prints."""
         head = f"session {self.session_id} (launch {self.request_id}): "
         head += (f"red, {self.word} since {self.since}: {self.why}" if self.red else "ok")
         relaunched = self.relaunch
@@ -307,7 +307,7 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
     window = None
     if sid:
         clock = cache_read(cache, row, sid, env)
-        ttl = getattr(clock, "ttl_seconds", None) if clock is not None else None
+        ttl = getattr(clock, "ttl_s", None) if clock is not None else None
         if keepwarm.no_window(ttl):
             window = f"no window: lifetime {ttl:g} s"
     return KeepWarmState(True, tuple(store.open_holds(conn, row.request_id)), nudges,
@@ -320,7 +320,7 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
 def show(session_id: str | None = None, *, pid: int | None = None, turns: Any | None = None,
          slots_api: Any = LOOK, cache: Any = LOOK, conn: sqlite3.Connection | None = None,
          environ: Mapping[str, str] | None = None) -> relaunch.Result:
-    """`moxi launcher state [SESSION_ID]`: the state of the session named, or with none,
+    """`moxi launcher show [SESSION_ID]`: the state of the session named, or with none,
     of the session this process runs in (found through turns). Exits 0 with the state;
     raises a refusal for a session no launch holds."""
     env = dict(os.environ if environ is None else environ)

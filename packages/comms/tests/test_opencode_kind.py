@@ -50,7 +50,7 @@ def test_held_is_taken_by_an_opencode_name(rig, bind, monkeypatch):
     """`--held` is accepted for every recipient; an opencode one is no exception."""
     rig.shim(**REVIEWER)
     bind(**CODER)
-    coder_reads(rig, monkeypatch, cache_kind="cold", age_seconds=4000, cache_ttl=1800)
+    coder_reads(rig, monkeypatch, cache_kind="cold", age_s=4000, cache_ttl=1800)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a,coder@proj-a", "later",
                          "--held"], **PLANNER)
     assert code == 0, out
@@ -61,7 +61,7 @@ def test_held_is_taken_by_an_opencode_name(rig, bind, monkeypatch):
 
 def test_a_cold_opencode_name_is_posted_and_held(rig, bind, monkeypatch):
     bind(**CODER)
-    coder_reads(rig, monkeypatch, cache_kind="cold", age_seconds=4000, cache_ttl=1800)
+    coder_reads(rig, monkeypatch, cache_kind="cold", age_s=4000, cache_ttl=1800)
     code, out = rig.cli(["send", "--posture", "none", "coder@proj-a", "hello"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[1].startswith("held: coder@proj-a's cache went cold")
@@ -73,7 +73,7 @@ def test_an_opencode_name_takes_the_daemons_verdict(rig, bind):
     verdict, with its age and lifetime. A reply with no verdict reads `unknown`; a bare
     bind that reported no evidence reads `unknown` with the reason."""
     target = cache.target_for_name("coder@proj-a", {
-        "bound": True, "adapter": "opencode", "cache_kind": "cold", "age_seconds": 4000,
+        "bound": True, "adapter": "opencode", "cache_kind": "cold", "age_s": 4000,
         "cache_ttl": 1800})
     assert (target.settled, target.age_seconds, target.ttl_seconds) == \
         (cache.COLD, 4000.0, 1800.0)

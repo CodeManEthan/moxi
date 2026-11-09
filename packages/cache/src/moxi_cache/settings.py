@@ -1,11 +1,11 @@
 """cache's config, read through `moxi.config` at each use.
 
-Keys: `claude.ttl_seconds`, Claude's lifetime when no request read names a cache tier;
-`lifetime`, the user's own `[[lifetime]]` rows (see `table`); `watch.tick`, the watcher's
-tick; `segment.warn_before`, where the status line segment turns from warm to near; and
+Keys: `claude.ttl_s`, Claude's lifetime when no request read names a cache tier;
+`lifetime`, the user's own `[[lifetime]]` rows (see `table`); `watch.tick_s`, the watcher's
+tick; `segment.warn_before_s`, where the status line segment turns from warm to near; and
 `timer.subscriber`, the user's own `[[timer.subscriber]]` tables (see `timer`).
 
-The watcher writes `segment.warn_before` and three times `watch.tick` into every clock
+The watcher writes `segment.warn_before_s` and three times `watch.tick_s` into every clock
 record (`records`), so the segment and doctor's watcher line read them from the
 record, not from here.
 """

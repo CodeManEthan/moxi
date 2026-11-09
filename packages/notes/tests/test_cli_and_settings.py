@@ -118,8 +118,8 @@ def test_the_defaults():
     s = places.settings
     assert (places.root, places.base, places.exclude) == (home() / "notes",
                                                           home() / "notes", ())
-    assert (s["action"], s["max_mb"], s["types"]) == ("leave-out", 10, "doc-types.toml")
-    assert (s["snapshot.auto"], s["snapshot.interval"], s["snapshot.push"],
+    assert (s["action"], s["max_mib"], s["types"]) == ("leave-out", 10, "doc-types.toml")
+    assert (s["snapshot.session_end"], s["snapshot.interval_minutes"], s["snapshot.push"],
             s["snapshot.author_name"], s["snapshot.author_email"],
             s["snapshot.timer"]) == (True, 15, "", "moxi notes", "", False)
 
@@ -136,6 +136,18 @@ def test_the_config_check_refuses(text, key):
     with pytest.raises(ConfigError) as caught:
         settings.check_text(text)
     assert caught.value.key == key
+
+
+@pytest.mark.parametrize("text, old, new", [
+    ("max_mb = 5\n", "max_mb", "max_mib"),
+    ("[snapshot]\nauto = false\n", "snapshot.auto", "snapshot.session_end"),
+    ("[snapshot]\ninterval = 30\n", "snapshot.interval", "snapshot.interval_minutes"),
+])
+def test_a_renamed_key_is_refused_naming_the_new_one(text, old, new):
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(text)
+    assert caught.value.key == old
+    assert caught.value.fix == f"renamed: set {new} instead"
 
 
 def test_the_config_check_takes_good_values_and_set_runs_it():

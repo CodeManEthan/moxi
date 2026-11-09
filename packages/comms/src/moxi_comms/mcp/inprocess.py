@@ -10,7 +10,7 @@ keep it on that one thread:
     runs for a socket request, under a connection with no peer. A request through it and
     the same request over the socket get the same answer and the same `DaemonError`
     classes from the same codes, so `sending.run` branches as it does for the verbs. It
-    serves the reads, `send` and `delete`; an adapter's methods (`bind` among them) are
+    serves the reads, `send` and `remove`; an adapter's methods (`bind` among them) are
     refused, since nothing here holds a binding. It refuses, before dispatch, a request
     whose `as` names a reserved name or that names the operator's `user`: no tool sends
     under a reserved name or on the operator's lane.
@@ -47,8 +47,8 @@ log = logging.getLogger("comms.mcp.inprocess")
 #: threads; the rest stay for adapters' binds, acks and turn ends and the verbs.
 TOOLS_AT_ONCE = 8
 
-#: The daemon methods a tool reaches: the reads, `send` and `delete`.
-SERVED = frozenset({*READS, "send", "delete", "mcp_endpoint"})
+#: The daemon methods a tool reaches: the reads, `send` and `remove`.
+SERVED = frozenset({*READS, "send", "remove", "mcp_endpoint"})
 
 
 class InProcessConnection:

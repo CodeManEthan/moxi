@@ -23,6 +23,8 @@ def _parser() -> argparse.ArgumentParser:
                           "the module contract")
     verbs.add_parser("new", add_help=False,
                      help="new <module>: start a new package under packages/")
+    verbs.add_parser("rename", add_help=False,
+                     help="rename [--dry-run] [ROOT]: apply the identifier rename table")
     verbs.add_parser("stamp", add_help=False,
                      help="check that each web page's build stamp matches its sources")
     return parser
@@ -41,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     if verb == "stamp":
         from moxi_dev import stamp
         return stamp.main(args[1:])
+    if verb == "rename":
+        from moxi_dev import rename
+        return rename.main(args[1:])
     from moxi_dev import new
     return new.main(args[1:])
 

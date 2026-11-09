@@ -49,7 +49,7 @@ def test_compact_needs_its_own_consent(make_endpoint):
 def test_compact_settles_ran_at_its_ready_and_keeps_the_session(make_endpoint):
     ep, fake, s = granted(make_endpoint)
     fake.compact_ready = False
-    t, out = in_thread(lambda: s.command("compact", timeout=3))
+    t, out = in_thread(lambda: s.command("compact", timeout_s=3))
     assert until(lambda: fake.commands)
     time.sleep(0.2)
     assert out == []                           # the call's return alone settles nothing
@@ -70,7 +70,7 @@ def test_compact_refusals_slot_and_rate(make_endpoint, monkeypatch):
     assert s.command("compact") == turns.Refused("draft")
     fake.draft = False
     fake.auto_commands = False
-    t, out = in_thread(lambda: s.command("compact", timeout=3))
+    t, out = in_thread(lambda: s.command("compact", timeout_s=3))
     assert until(lambda: fake.commands)
     assert s.command("clear") == turns.Refused("in-flight")
     fake.run_command(fake.commands[0])
@@ -83,7 +83,7 @@ def test_a_compact_with_no_ready_expires_failed(make_endpoint, monkeypatch):
     monkeypatch.setattr(endpoint, "PENDING_TTL_S", 0.3)
     ep, fake, s = granted(make_endpoint)
     fake.compact_ready = False
-    r = s.command("compact", timeout=3)
+    r = s.command("compact", timeout_s=3)
     assert isinstance(r, turns.Failed) and r.reason.startswith("expired")
 
 
@@ -92,7 +92,7 @@ def test_a_ready_before_the_hand_off_settles_nothing(make_endpoint):
     fake.auto_commands = False
     fake.compact_ready = False
     ep._worker.put(lambda: time.sleep(0.4))     # hold the worker before the hand-off
-    t, out = in_thread(lambda: s.command("compact", timeout=3))
+    t, out = in_thread(lambda: s.command("compact", timeout_s=3))
     time.sleep(0.1)
     ep.ready("compact", "s-1")                  # an automatic compaction, not this one
     assert until(lambda: fake.commands)
@@ -124,7 +124,7 @@ def test_a_subagent_still_holds_a_command_with_stop_shells(make_endpoint):
 def test_nothing_is_stopped_when_the_command_is_refused(make_endpoint):
     ep, fake, s = granted(make_endpoint)
     fake.auto_commands = False
-    t, out = in_thread(lambda: s.command("compact", stop_shells=True, timeout=3))
+    t, out = in_thread(lambda: s.command("compact", stop_shells=True, timeout_s=3))
     assert until(lambda: fake.commands)
     fake.start_turn()                          # a turn opens before it takes effect
     fake.run_command(fake.commands[0])
@@ -136,7 +136,7 @@ def test_a_compaction_with_stop_shells_settles_at_the_later_of_ready_and_the_rep
         make_endpoint):
     ep, fake, s = granted(make_endpoint)
     fake.compact_ready = False
-    t, out = in_thread(lambda: s.command("compact", stop_shells=True, timeout=3))
+    t, out = in_thread(lambda: s.command("compact", stop_shells=True, timeout_s=3))
     assert until(lambda: fake.stops)           # the report came first
     time.sleep(0.2)
     assert out == []
@@ -154,7 +154,7 @@ def test_a_stop_that_never_reports_reads_ran_unvouched_not_expired(make_endpoint
     monkeypatch.setattr(endpoint, "SHELL_REPORT_MARGIN_S", 0.2)
     ep, fake, s = granted(make_endpoint)
     fake.auto_commands = False
-    t, out = in_thread(lambda: s.command("clear", stop_shells=True, timeout=5))
+    t, out = in_thread(lambda: s.command("clear", stop_shells=True, timeout_s=5))
     assert until(lambda: fake.commands)
     request = fake.commands[0]
     assert ep.command_entering(request.id) is None

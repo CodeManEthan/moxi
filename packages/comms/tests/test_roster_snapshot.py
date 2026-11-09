@@ -88,8 +88,8 @@ def test_the_snapshot_injects_no_seat_context(rig, capsys):
 
 
 def test_the_verb_output_is_unchanged_by_the_extraction(rig):
-    """`test_agents_lists_bindings_and_pending` pins the shape; this pins the empty
-    roster's exact line, which the race note keys on."""
+    """`test_agents_lists_the_names_you_can_message` in `test_cli.py` pins the shape;
+    this pins the empty roster's exact line, which the race note keys on."""
     code, out = rig.cli(["agents"])
     assert code == 0
     assert out == f"{roster_view.NO_BINDINGS}\n"

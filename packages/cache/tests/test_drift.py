@@ -72,7 +72,7 @@ def test_a_learning_read_writes_the_lowering_before_it_returns(tmp_path, learner
     root, now = write_rollout(tmp_path, drifting(gap))
     clock = read(root, now, learner)
     lowered = codex.lower_to(gap, 1800)
-    assert clock.lowering["lifetime"] == lowered and clock.ttl_seconds == lowered
+    assert clock.lowering["lifetime"] == lowered and clock.ttl_s == lowered
     doc = json.loads(drift.record_path().read_text())
     assert [e["lifetime"] for e in doc["entries"]] == [lowered]
     entry = doc["entries"][0]
@@ -90,7 +90,7 @@ def test_the_judged_turn_lives_in_the_store(tmp_path, learner):
     assert learner.judged(TID) == "t2"
     again = read(root, now, learner)
     assert again.lowering is None, "a turn already judged is not judged again"
-    assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"
+    assert again.ttl_s == first.ttl_s, "the written lowering is in force"
 
 
 def test_a_read_only_store_writes_nothing_and_creates_nothing(tmp_path, own_roots):
@@ -99,7 +99,7 @@ def test_a_read_only_store_writes_nothing_and_creates_nothing(tmp_path, own_root
     root, now = write_rollout(tmp_path, drifting(measured_seconds() - 1200))
     clock = read(root, now, store)
     assert clock.lowering is not None, "the read observes the lowering ..."
-    assert clock.ttl_seconds == clock.lowering["lifetime"], "... and counts it this once"
+    assert clock.ttl_s == clock.lowering["lifetime"], "... and counts it this once"
     assert not drift.record_path().parent.exists(), "no directory is made"
     assert drift.learner_holds_lock() is None
 
@@ -113,7 +113,7 @@ def test_a_read_only_store_reads_what_the_learner_wrote(tmp_path, learner):
     root2, _ = write_rollout(late, one_turn(60, "gpt-5.6-sol"))
     clock = api.read("codex", TID, cache_source=str(root2),
                      now=1_791_300_000.0, store=reader)
-    assert clock.ttl_seconds == lowered
+    assert clock.ttl_s == lowered
     assert "lowered from" in clock.key
 
 

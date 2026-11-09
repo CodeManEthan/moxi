@@ -2,6 +2,13 @@
 
 ## 0.1.1 (2026-11-08)
 
+- Config keys `max_mb`, `snapshot.interval` and `snapshot.auto` are now `max_mib`,
+  `snapshot.interval_minutes` and `snapshot.session_end`. An old key, set in the config
+  file, is refused, naming the new one.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_notes.api.Resolution`: the keyword `dir` is now
+  `notes_dir` (the attribute is still `dir`).
+
 The first public release.
 
 - `moxi notes dir` says why a folder has no notes directory: an excluded folder, a

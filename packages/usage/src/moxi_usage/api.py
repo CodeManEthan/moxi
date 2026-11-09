@@ -20,7 +20,7 @@ Limits (`moxi_usage.limits`):
   state (`fresh`, `reset` or `unavailable`, with a reason), percent used, reset time,
   the age of its reading and, when the window is filling, `full_at`, the time it
   reaches 100% at the recent rate. With `pull`, a Codex reading older than
-  `limits.codex_pull_after` is refreshed through turns when turns is installed. Returns
+  `limits.codex_pull_after_s` is refreshed through turns when turns is installed. Returns
   `Limits`, whose `pull` says what the pull did. What a reading did not say, and every
   fact of a window with no reading, is `UNKNOWN`; the state's reason says which.
 

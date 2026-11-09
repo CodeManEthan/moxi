@@ -65,9 +65,9 @@ def reads(monkeypatch):
         if isinstance(kind, BaseException):
             raise kind
         if kind == cache.WARM:
-            return cache.Clock(cache.WARM, age_seconds=60.0, ttl_seconds=HOUR)
+            return cache.Clock(cache.WARM, age_s=60.0, ttl_s=HOUR)
         if kind == cache.COLD:
-            return cache.Clock(cache.COLD, age_seconds=2 * HOUR, ttl_seconds=HOUR)
+            return cache.Clock(cache.COLD, age_s=2 * HOUR, ttl_s=HOUR)
         if kind == cache.UNKNOWN:
             return cache.Clock(cache.UNKNOWN, reason="the rig says unknown")
         return cache.Clock(kind)

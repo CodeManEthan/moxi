@@ -209,7 +209,7 @@ def test_the_terminal_writes_its_pid_and_started_before_it_execs(work, harness, 
     assert deliverers == []
     assert result.state == "started" and result.exit_code == exits.OK
     # The harness is known as one Moxi started, whatever environment it was built from.
-    assert handed["env"][terminal.MARK] == terminal.marked({})[terminal.MARK]
+    assert handed["env"][terminal.STARTED_BY_ENV] == terminal.marked({})[terminal.STARTED_BY_ENV]
 
 
 def test_the_warnings_are_given_before_the_session_starts(work, harness, no_exec,
@@ -283,7 +283,8 @@ def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
     # Its pid recorded, then the deliverer given that pid, then the child's exit code.
     assert deliverers[0]["pid"] == Child.pid and deliverers[0]["row"].state == "started"
     assert result.exit_code == 5 and row().pid == Child.pid
-    assert Child.seen["env"][terminal.MARK] == terminal.marked({})[terminal.MARK]
+    marked = terminal.marked({})[terminal.STARTED_BY_ENV]
+    assert Child.seen["env"][terminal.STARTED_BY_ENV] == marked
 
 
 def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(
@@ -376,7 +377,7 @@ def test_a_headless_run_log_goes_where_the_callers_environment_puts_the_store(
     seen = []
     monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(kw) or 99)
     environ = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
-    api.launch(request(work, target="headless", brief=BRIEF), environ=environ)
+    api.launch(request(work, target="headless", brief=BRIEF), env=environ)
     [handed] = seen
     assert handed["output"] == targets.run_log("r1", environ)
     assert handed["output"] != targets.run_log("r1")

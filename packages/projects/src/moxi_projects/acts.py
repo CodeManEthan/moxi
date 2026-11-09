@@ -195,7 +195,7 @@ def _mint(planned: Planned, git: str | None, command: str,
     import moxi.proc
 
     try:
-        done = moxi.proc.run([git, "init", root], timeout=timeout)
+        done = moxi.proc.run([git, "init", root], timeout_s=timeout)
         why = None if done.returncode == 0 else _git_said(done)
     except subprocess.TimeoutExpired:
         why = f"it ran past {timeout:g} s and was stopped"

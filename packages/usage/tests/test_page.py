@@ -735,7 +735,7 @@ def test_limits_sends_each_window_with_its_dollars_as_a_list():
     assert five["observed_at"].endswith("Z") and five["unknown"] == []
     seven = windows[("codex", "7d")]
     assert seven["state"] == "unavailable" and seven["used_percent"] is None
-    assert "used_percent" in seven["unknown"] and "age_seconds" not in seven["unknown"]
+    assert "used_percent" in seven["unknown"] and "age_s" not in seven["unknown"]
     assert windows[("claude", "5h")]["state"] == "unavailable"
 
 

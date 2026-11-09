@@ -258,7 +258,7 @@ def test_the_gather_asks_with_the_pages_deadline(monkeypatch):
     asked = []
     monkeypatch.setattr(api, "roster_rows", lambda **kw: asked.append(kw) or ())
     assert pagehandlers.gather() == {"state": "up", "detail": None, "rows": []}
-    assert asked == [{"deadline": 2.0}] and pagehandlers.DEADLINE == 2.0
+    assert asked == [{"timeout_s": 2.0}] and pagehandlers.DEADLINE == 2.0
 
 
 # --- /api/events and the poller ---------------------------------------------------------------

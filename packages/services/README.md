@@ -37,7 +37,7 @@ moxi services add NAME --unit REF (--enable | --disable) [--timer] [--health "CM
 moxi services remove ID
 moxi services start|stop|restart ID...
 moxi services enable|disable ID...
-moxi services watch [ID...] [--every SECONDS] [--json]
+moxi services watch [ID...] [--every-s SECONDS] [--json]
 ```
 
 A command you add starts off unless you give `--enable`. `stop` stops a daemon until the

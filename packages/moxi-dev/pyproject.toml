@@ -42,10 +42,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/moxi_dev"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"renames.tsv" = "moxi_dev/renames.tsv"
+
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "src/moxi_dev",
-                "tests"]
+only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py", "renames.tsv",
+                "src/moxi_dev", "tests"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

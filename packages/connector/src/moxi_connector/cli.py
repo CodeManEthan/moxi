@@ -1,7 +1,7 @@
 """`moxi connector`: the public MCP door, from the command line.
 
-    moxi connector on
-    moxi connector off
+    moxi connector enable
+    moxi connector disable
     moxi connector status [--json]
     moxi connector check [--json]
     moxi connector log [--days N] [--json]
@@ -94,17 +94,17 @@ def _revoke_row(**fields: Any) -> None:
 
 
 def revoke_every_grant() -> str | None:
-    """Revoke every grant in the grants file, before `off` sets the switch false, so no
-    grant stays valid behind a port nothing holds. Returns the line `off` prints about
+    """Revoke every grant in the grants file, before `disable` sets the switch false, so no
+    grant stays valid behind a port nothing holds. Returns the line `disable` prints about
     it. Raises when the file can't be written."""
-    count = _store().revoke_all(by="off")
+    count = _store().revoke_all(by="disable")
     if count:
-        _revoke_row(all=True, by="off", count=count)
+        _revoke_row(all=True, by="disable", count=count)
     return REVOKED_ALL
 
 
 def _on(args, out: TextIO) -> int:
-    for line in _set_switch(True, "moxi connector on"):
+    for line in _set_switch(True, "moxi connector enable"):
         print(line, file=out)
     snap = doctor.take(ask=_no_ask)
     print("The connector is on.", file=out)
@@ -133,7 +133,7 @@ def _off(args, out: TextIO) -> int:
     else:
         if said:
             print(said, file=out)
-    for line in _set_switch(False, "moxi connector off"):
+    for line in _set_switch(False, "moxi connector disable"):
         print(line, file=out)
     print("The connector is off.", file=out)
     address = doctor.take(ask=_no_ask).address
@@ -158,7 +158,7 @@ def _status(args, out: TextIO) -> int:
         print(json.dumps(_status_json(snap, rows), indent=2), file=out)
         return codes.OK
     if not snap.switch:
-        print("The connector is off; moxi connector on turns it on.", file=out)
+        print("The connector is off; moxi connector enable turns it on.", file=out)
     if snap.origin is not None:
         print(f"URL: {snap.origin.resource}   (paste into {ADD_IN_CLAUDE})", file=out)
     else:
@@ -224,7 +224,7 @@ def _check(args, out: TextIO, *, fetch: probe.Fetch | None = None) -> int:
 
     snap = doctor.take()
     if not snap.switch:
-        raise Refused("the connector is off", "moxi connector on")
+        raise Refused("the connector is off", "moxi connector enable")
     if snap.answer is None:
         raise Refused(f"the connector's process doesn't answer: {snap.error}",
                       checks.RESTART)
@@ -327,7 +327,7 @@ def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
             return NOPERM
     if not settings.enabled():
         print(f"{name}: the connector is off, so it can't mint a code.", file=sys.stderr)
-        print("  fix: moxi connector on", file=sys.stderr)
+        print("  fix: moxi connector enable", file=sys.stderr)
         return codes.TEMPFAIL
     try:
         got = checks.ask("mint_code", {"label": mint.clean_label(args.label)})
@@ -402,7 +402,7 @@ def _revoke(args, out: TextIO) -> int:
 # -- the parser and the dispatch -------------------------------------------------------------
 
 VERBS: dict[str, Callable[[argparse.Namespace, TextIO], int]] = {
-    "on": _on, "off": _off, "status": _status, "check": _check, "log": _log,
+    "enable": _on, "disable": _off, "status": _status, "check": _check, "log": _log,
     "code": _code, "grants": _grants, "revoke": _revoke,
 }
 
@@ -415,10 +415,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    verbs.add_parser("on", help="turn the connector on",
+    verbs.add_parser("enable", help="turn the connector on",
                      description="Set the switch; the core writes and starts the daemon. "
                                  "Prints the next steps.")
-    verbs.add_parser("off", help="revoke every grant and turn the connector off",
+    verbs.add_parser("disable", help="revoke every grant and turn the connector off",
                      description="Revoke every grant, so the next sign-in needs a code, "
                                  "then set the switch false. The tunnel entry stays.")
     p = verbs.add_parser("status", help="the address, the process, the providers",

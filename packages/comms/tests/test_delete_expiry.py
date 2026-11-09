@@ -1,5 +1,5 @@
 """Delete, expiry and the interrupt mark: line zero's tokens, the verb's flags, the
-daemon's `delete`, the drops at routing, release and the sweep, and `explain`'s two
+daemon's `remove`, the drops at routing, release and the sweep, and `explain`'s two
 cases."""
 
 from __future__ import annotations
@@ -99,10 +99,10 @@ def test_delete_withdraws_a_waiting_message_and_refuses_a_second_author(rig):
     mid = last(rig).id
     wait_until(lambda: mid in rig.daemon.queue.get("main@proj-a", {}))
     rig.shim(name="other")
-    code, out = rig.cli(["delete", mid], name="other")
+    code, out = rig.cli(["remove", mid], name="other")
     assert code == moxi_exit.REFUSED, out
     assert "not yours" in out
-    code, out = rig.cli(["delete", mid], name="planner")
+    code, out = rig.cli(["remove", mid], name="planner")
     assert code == moxi_exit.OK, out
     assert "withdrawn from main@proj-a" in out
     assert not rig.daemon.queue.get("main@proj-a")
@@ -110,13 +110,13 @@ def test_delete_withdraws_a_waiting_message_and_refuses_a_second_author(rig):
     info = rig.daemon._explain_query({"identity": "main@proj-a", "message_id": mid})
     assert info["case"] == "withdrawn"
     # A second delete answers as the first did.
-    code, out = rig.cli(["delete", mid], name="planner")
+    code, out = rig.cli(["remove", mid], name="planner")
     assert code == moxi_exit.OK, out
 
 
 def test_delete_of_an_unknown_id_is_refused(rig):
     rig.shim(name="planner")
-    code, out = rig.cli(["delete", "4611686018427399999", "--json"], name="planner")
+    code, out = rig.cli(["remove", "4611686018427399999", "--json"], name="planner")
     assert code == moxi_exit.REFUSED, out
     assert '"outcome": "refused"' in out
 
@@ -220,7 +220,7 @@ def test_delete_after_a_digest_is_already_delivered(rig, reader):
     mid = last(rig).id
     assert wait_until(lambda: mid in reader.handed())
     reader.open(mid)
-    code, out = rig.cli(["delete", mid], name="planner")
+    code, out = rig.cli(["remove", mid], name="planner")
     assert code == moxi_exit.REFUSED, out
     assert f"already delivered to {REVIEWER}" in out
     assert rig.record.get_message(mid).withdrawn_at is None
@@ -233,7 +233,7 @@ def test_a_handed_row_not_yet_in_a_digest_is_still_withdrawn(rig, reader):
     assert code == 0, out
     mid = last(rig).id
     assert wait_until(lambda: mid in reader.handed() and handed_rows(REVIEWER, [mid]))
-    code, out = rig.cli(["delete", mid], name="planner")
+    code, out = rig.cli(["remove", mid], name="planner")
     assert code == moxi_exit.OK, out
     assert f"withdrawn from {REVIEWER}" in out
     opened = reader.open(mid)
@@ -248,7 +248,7 @@ def test_delete_withdraws_from_some_and_says_who_had_it(rig, reader):
     mid = last(rig).id
     assert wait_until(lambda: mid in reader.handed())
     opened = reader.open(mid)
-    code, out = rig.cli(["delete", mid, "--json"], name="planner")
+    code, out = rig.cli(["remove", mid, "--json"], name="planner")
     assert code == moxi_exit.OK, out
     assert '"withdrawn": ["main@proj-a"]' in out and '"delivered": ["reviewer@proj-a"]' in out
     # The reviewer's digest ends unhandled: the message, withdrawn now, isn't replayed.
@@ -328,7 +328,7 @@ def test_history_marks_a_withdrawn_and_an_expired_message(rig):
     assert code == 0, out
     withdrawn = last(rig).id
     assert wait_until(lambda: withdrawn in rig.daemon.queue.get(MAIN, {}))
-    code, out = rig.cli(["delete", withdrawn], name="planner")
+    code, out = rig.cli(["remove", withdrawn], name="planner")
     assert code == moxi_exit.OK, out
     stale = post(rig, [MAIN, REVIEWER], "stale", expires_at=int(rig.clock()) - 1)
     assert wait_until(lambda: rig.daemon.books.dropped_reason(REVIEWER, stale))
@@ -346,7 +346,7 @@ def test_explain_with_the_daemon_down_reads_dropped(rig):
     code, out = rig.send(MAIN, "take it back", sender=dict(name="planner"))
     mid = last(rig).id
     assert wait_until(lambda: mid in rig.daemon.queue.get(MAIN, {}))
-    code, out = rig.cli(["delete", mid], name="planner")
+    code, out = rig.cli(["remove", mid], name="planner")
     assert code == moxi_exit.OK, out
     stale = post(rig, [MAIN], "stale", expires_at=int(rig.clock()) - 1)
     assert wait_until(lambda: rig.daemon.books.dropped_reason(MAIN, stale))

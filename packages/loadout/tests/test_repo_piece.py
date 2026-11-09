@@ -131,20 +131,20 @@ def _env():
             if not k.startswith("GIT_") or k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")}
 
 
-def git(root, *args, timeout=30.0, input=None):
-    done = subprocess.run(["git", "-C", os.fspath(root), *args], input=input,
-                          capture_output=True, timeout=timeout, env=_env())
+def git(root, *args, timeout_s=30.0, stdin_data=None):
+    done = subprocess.run(["git", "-C", os.fspath(root), *args], input=stdin_data,
+                          capture_output=True, timeout=timeout_s, env=_env())
     return subprocess.CompletedProcess(done.args, done.returncode,
                                        done.stdout.decode(), done.stderr.decode())
 
 
-def changes(root, staged=True, range=None, paths=(), *, timeout=30.0):
-    _log("changes", root, *range, *paths)
-    a, b = range
+def changes(root, *, staged=True, rev_range=None, paths=(), timeout_s=30.0):
+    _log("changes", root, *rev_range, *paths)
+    a, b = rev_range
     tail = ["--", *(":(literal)" + p for p in paths)]
     done = subprocess.run(["git", "-C", os.fspath(root), "diff-tree", "-r", "--name-only",
                            "-z", a, b, *tail], capture_output=True, check=True,
-                          timeout=timeout, env=_env())
+                          timeout=timeout_s, env=_env())
     return [p for p in done.stdout.decode().split("\\0") if p]
 '''
 
@@ -388,7 +388,7 @@ def test_a_commit_that_changes_the_folder_runs_the_install_with_a_clean_env(
     from moxi import paths
 
     assert call["argv"] == [os.fspath(paths.python()), "-m", "moxi_loadout", "install"]
-    assert call["timeout"] == gitpiece.INSTALL_SECONDS == 180
+    assert call["timeout_s"] == gitpiece.INSTALL_SECONDS == 180
     assert not {"GIT_DIR", "GIT_INDEX_FILE", "GIT_LITERAL_PATHSPECS"} & set(call["env"])
     assert records() == {}
 

@@ -205,7 +205,7 @@ def test_segment_is_none_for_a_record_naming_another_session():
 
 def test_segment_reads_the_records_thresholds_and_no_config(own_roots):
     # the config says otherwise; the record's own values decide the band and the dim
-    write_cache_config(own_roots, "[segment]\nwarn_before = 300\n[watch]\ntick = 20\n")
+    write_cache_config(own_roots, "[segment]\nwarn_before_s = 300\n[watch]\ntick_s = 20\n")
     put(record(age=3000, seen_ago=50, warn_before=3599, stale_after=300))
     found = segment.segment(SID, now=NOW)
     assert found.band == "near" and not found.dim

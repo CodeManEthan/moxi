@@ -112,7 +112,7 @@ def test_the_pairing_url_is_new_each_time_and_names_the_port_unless_443():
 
 
 def test_minting_with_no_address_refuses_naming_gateway_on(tmp_path):
-    with pytest.raises(pairing.NoAddress, match="moxi ui gateway on"):
+    with pytest.raises(pairing.NoAddress, match="moxi ui gateway enable"):
         pairing.mint(tmp_path, None)
     assert not (tmp_path / pairing.PAIR_DIR).exists()
 

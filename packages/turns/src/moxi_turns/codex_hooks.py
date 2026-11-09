@@ -132,7 +132,7 @@ def command(ping: list[str], socket_path, event: HookEvent,
     argv = [*ping, "--socket", str(socket_path)]
     if refuse is not None:
         argv += ["--refuse-unanswered", refuse]
-    argv += ["--wait-seconds", f"{wait_seconds:g}", event.event]
+    argv += ["--wait-s", f"{wait_seconds:g}", event.event]
     if event.source:
         argv += ["--source", event.source]
     return shlex.join(argv)
@@ -617,27 +617,27 @@ def _deny(event: str, reason: str) -> str:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="moxi-turns-ping")
+    parser = argparse.ArgumentParser(prog="moxi-turns-ping", allow_abbrev=False)
     parser.add_argument("event", choices=PING_EVENTS)
     parser.add_argument("--socket", required=True)
     parser.add_argument("--source")
-    parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,
+    parser.add_argument("--wait-s", type=float, default=PING_TIMEOUT,
                         help=argparse.SUPPRESS)
     parser.add_argument("--refuse-unanswered", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.wait_seconds <= 0:
-        parser.error("--wait-seconds must be greater than zero")
+    if args.wait_s <= 0:
+        parser.error("--wait-s must be greater than zero")
 
     from .hooks.run import run
 
     from .hooks.run import emit
 
-    ping = _Ping(Path(args.socket), args.event, args.source, args.wait_seconds, _STARTED,
+    ping = _Ping(Path(args.socket), args.event, args.source, args.wait_s, _STARTED,
                  args.refuse_unanswered)
     render = _block if args.event == "Stop" else \
         ping.render if args.event == "PreToolUse" else None
     kwargs = {"render": render} if render is not None else {}
-    run(args.event, ping.body, seconds=args.wait_seconds, on_error=ping.error,
+    run(args.event, ping.body, seconds=args.wait_s, on_error=ping.error,
         on_emitted=ping.emitted, **kwargs)
     # The wall is down and nothing was printed: a covered call is refused here.
     refusal = ping.unanswered()

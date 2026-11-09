@@ -94,7 +94,7 @@ class FakeSlots:
     def show(self, slot):
         return SimpleNamespace(state="occupied", hold=None, created=1.0)
 
-    def wait_ended(self, slot, *, pane_id, timeout):
+    def wait_ended(self, slot, *, pane_id, timeout_s):
         self.calls.append("wait_ended")
         return SimpleNamespace(ended=self.ended, gone=False, dead_status=None)
 
@@ -111,8 +111,8 @@ class FakeSlots:
     def pane_use(self, slot):
         return self.pane
 
-    def answer_screen(self, slot, screen, wait=5):
-        self.calls.append(("answer", wait))
+    def answer_screen(self, slot, screen, wait_s=5):
+        self.calls.append(("answer", wait_s))
         return SimpleNamespace(outcome=self.answer, why=self.why, capture=None)
 
     def job(self, name):
@@ -339,7 +339,7 @@ def test_a_slot_launch_where_slots_does_not_run_is_treated_as_outside_a_slot(con
 
 def test_a_fault_ends_the_run_and_logs_it_not_exited(conn):
     class Broken(FakeSlots):
-        def wait_ended(self, slot, *, pane_id, timeout):
+        def wait_ended(self, slot, *, pane_id, timeout_s):
             raise ZeroDivisionError("bug")
 
     result = go(conn, slots_api=Broken())

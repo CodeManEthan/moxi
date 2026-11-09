@@ -931,7 +931,7 @@ def test_a_failed_runtime_read_stops_nothing_and_records_nothing(w):
     path.write_text("{not json")
     w.sup.calls.clear()
     record: list = []
-    [done] = units.stop("demo", record=record, runner=w.sup)
+    [done] = units.stop("demo", stopped=record, runner=w.sup)
     assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
     assert record == [] and w.sup.calls == []
 
@@ -942,7 +942,7 @@ def test_stop_with_replace_ends_an_unmarked_task_by_its_path_and_resume_runs_it(
     w.sup.tasks[task] = {"enabled": True, "running": True}
     live_runtime("demo", "relay")
     record: list = []
-    [done] = units.stop("demo", replace=True, record=record, runner=w.sup)
+    [done] = units.stop("demo", replace=True, stopped=record, runner=w.sup)
     assert done.ok and done.lines == (f"{task} stopped",)
     assert [(e.unit, e.marked, e.backend) for e in record] == [(task, False, "schtasks")]
     assert w.sup.calls == [("/end", task)] and not w.sup.tasks[task]["running"]

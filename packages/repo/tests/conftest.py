@@ -127,7 +127,7 @@ def _run(name, ctx):
             fh.write("added by a piece\\n")
         ctx.git("add", "staged-by-piece.txt")
     if action == "input":
-        done = ctx.git("hash-object", "--stdin", input="hello\\n")
+        done = ctx.git("hash-object", "--stdin", stdin_data="hello\\n")
         print("hash " + done.stdout.strip())
     if action == "none":
         return None

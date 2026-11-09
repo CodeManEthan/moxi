@@ -4,7 +4,7 @@ turns reads `GUARDS` from the `moxi.turns.guards` entry `sessions`, so the guard
 `sessions.transcript-read`. It covers Claude Code's Read, Grep, Glob and Bash and Codex's
 shell calls, the main loop's and every subagent's, and runs only when turned on: by
 sessions' switch `guard.transcript_read`, which the install asks about, or by naming
-`sessions.transcript-read` on turns' `guards.on`. A break lets the call run, as the judge
+`sessions.transcript-read` on turns' `guards.run`. A break lets the call run, as the judge
 itself does on any error.
 
 turns is reached through `moxi.modules.load`, since sessions installs it only as an extra;

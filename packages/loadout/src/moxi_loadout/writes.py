@@ -66,7 +66,7 @@ def edit(change: Callable, *, folder: str | os.PathLike | None = None,
     result = None
     entered = False
     try:
-        with edit_toml(path, timeout=timeout, lock=lock) as doc:
+        with edit_toml(path, timeout_s=timeout, lock=lock) as doc:
             entered = True
             before = parse(doc.as_string(), path=path)
             result = change(doc, before)

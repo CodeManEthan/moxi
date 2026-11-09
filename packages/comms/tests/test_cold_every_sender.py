@@ -14,7 +14,7 @@ read is decided by the send's `[cold-at:…]` on line zero: `-` or a time still 
 delivers, a time reached or no token at all makes a row. A row goes out only at a
 release point: a `turn` carrying `handled` on a passing read, a `ready` with a source, a
 register (unflagged rows) on a passing read. Never with another message: no piggyback.
-There is no gate file, no `cold_refusals` and no `never_held`.
+There is no gate file and no `never_held`.
 
 Sections: (a) `clock_state`, (b) the verb with no exemption, (c) `--cold`, (d) the
 daemon's gate, past the verb, (e) the race, (f) a turn's read and a session id two
@@ -309,7 +309,7 @@ def test_a_warm_and_a_cold_clock_through_the_seam(tmp_path):
     root = str(projects_root())
     assert cache.clock_state("claude-shim", SESS_A, projects_root=root).kind == "warm"
     cold = cache.clock_state("claude-shim", SESS_B, projects_root=root)
-    assert (cold.kind, cold.ttl_seconds) == ("cold", HOUR)
+    assert (cold.kind, cold.ttl_s) == ("cold", HOUR)
     fresh = cache.clock_state("claude-shim", SESS_C, projects_root=root, turned=False)
     assert fresh.kind == "fresh", "no transcript, on the session's own word"
 
@@ -462,7 +462,7 @@ def test_a_session_answer_with_no_verdict_refuses_the_post(rig, monkeypatch, old
         if older == "no session query":
             raise Refusal("unknown query kind 'session'")
         answer = real(frame)
-        for key in ("cache_kind", "age_seconds", "cache_reason"):
+        for key in ("cache_kind", "age_s", "cache_reason"):
             answer.pop(key)
         return answer
 
@@ -1087,7 +1087,7 @@ def test_comms_cache_reads_its_kind_from_the_daemon(rig, monkeypatch):
     real = rig.daemon._session_query
 
     def says_cold(frame):
-        return {**real(frame), "cache_kind": "cold", "age_seconds": 3 * HOUR}
+        return {**real(frame), "cache_kind": "cold", "age_s": 3 * HOUR}
 
     monkeypatch.setattr(rig.daemon, "_session_query", says_cold)   # ... the daemon's not
     code, out = rig.cli(["cache", "reviewer@proj-a"], env={"MOXI_COMMS_OPERATOR": "900001"})

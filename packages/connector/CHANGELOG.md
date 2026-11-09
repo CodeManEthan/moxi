@@ -2,6 +2,9 @@
 
 ## 0.1.0 (2026-11-08)
 
+- `moxi connector on` and `off` are now `moxi connector enable` and `disable`, with no
+  alias.
+
 The first public release.
 
 - An MCP server for the Claude apps' custom connectors: a loopback listener behind its

@@ -34,9 +34,9 @@ line of doc and, for a few, the one variable that overrides it for one process:
     port    = 8450                          # on 127.0.0.1, always
 
     [connector]                             # comms' tools in the Claude apps
-    identity     = "claude-app"             # the name they send and receive as
-    wait_default = 45                       # send_and_wait's wait, in seconds
-    wait_max     = 90                       # the longest wait a call may ask for
+    identity       = "claude-app"           # the name they send and receive as
+    wait_default_s = 45                     # send_and_wait's wait, in seconds
+    wait_max_s     = 90                     # the longest wait a call may ask for
 
     [codex.agents."planner@proj-a"]         # the Codex roster (adapters/codex_roster)
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
@@ -200,7 +200,7 @@ class McpConfig:
     port: int = _default("mcp.port")
 
 
-#: The longest `[connector] wait_max` may be, in seconds: Cloudflare ends an origin's
+#: The longest `[connector] wait_max_s` may be, in seconds: Cloudflare ends an origin's
 #: answer at 100 s, and a JSON reply sends nothing until the wait is over.
 CONNECTOR_WAIT_CEILING = 99
 
@@ -211,8 +211,8 @@ class ConnectorConfig:
     `send_and_wait` waits. Read by comms' provider when the connector starts it."""
 
     identity: str = _default("connector.identity")
-    wait_default: int = _default("connector.wait_default")
-    wait_max: int = _default("connector.wait_max")
+    wait_default: int = _default("connector.wait_default_s")
+    wait_max: int = _default("connector.wait_max_s")
 
 
 @dataclass
@@ -487,14 +487,14 @@ def _connector(bad, v, operator: str) -> ConnectorConfig:
     if identity == operator:
         raise bad("connector.identity", f"is {identity!r}, the operator's own name",
                   "name an identity of the tools' own; they never send as the operator")
-    wait_max, wait_default = v["connector.wait_max"], v["connector.wait_default"]
+    wait_max, wait_default = v["connector.wait_max_s"], v["connector.wait_default_s"]
     if not 1 <= wait_max <= CONNECTOR_WAIT_CEILING:
-        raise bad("connector.wait_max", f"is {wait_max}",
+        raise bad("connector.wait_max_s", f"is {wait_max}",
                   f"set it to a whole number of seconds from 1 to "
                   f"{CONNECTOR_WAIT_CEILING}")
     if not 1 <= wait_default <= wait_max:
-        raise bad("connector.wait_default", f"is {wait_default}",
-                  f"set it to a whole number of seconds from 1 to wait_max ({wait_max})")
+        raise bad("connector.wait_default_s", f"is {wait_default}",
+                  f"set it to a whole number of seconds from 1 to wait_max_s ({wait_max})")
     return ConnectorConfig(identity=identity, wait_default=wait_default,
                            wait_max=wait_max)
 

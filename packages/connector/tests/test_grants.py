@@ -269,19 +269,19 @@ def _snap(view):
 
 # -- the switch-off rule ------------------------------------------------------------------
 
-def test_off_revokes_every_grant(config_file, applied, no_tunnel, capsys):
+def test_disable_revokes_every_grant(config_file, applied, no_tunnel, capsys):
     config_file("enabled = true\n")
     store = grants.Store()
     a, b = made(store), made(store)
-    assert cli.main(["off"]) == 0
+    assert cli.main(["disable"]) == 0
     data = grants.Store().view()["grants"]
-    assert data[a]["revoked_by"] == data[b]["revoked_by"] == "off"
+    assert data[a]["revoked_by"] == data[b]["revoked_by"] == "disable"
     assert cli.REVOKED_ALL in capsys.readouterr().out
 
 
-def test_off_with_no_grants_file_writes_none(config_file, applied, no_tunnel):
+def test_disable_with_no_grants_file_writes_none(config_file, applied, no_tunnel):
     config_file("enabled = true\n")
-    assert cli.main(["off"]) == 0
+    assert cli.main(["disable"]) == 0
     assert not grants.Store().exists()
 
 

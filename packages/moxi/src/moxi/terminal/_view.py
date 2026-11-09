@@ -254,7 +254,7 @@ class MacView(_View):
             from moxi import proc
 
             try:
-                done = proc.run(["launchctl", "list"], timeout=10)
+                done = proc.run(["launchctl", "list"], timeout_s=10)
             except Exception as error:  # noqa: BLE001 - a timeout, a missing launchctl
                 self._units_error = _words(error)
                 return None

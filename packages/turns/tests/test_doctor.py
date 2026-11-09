@@ -329,12 +329,12 @@ def test_a_guard_on_names_its_source_and_where_it_runs(turns_env, registry, guar
         a_guard("both"), a_guard("claude-only", calls={"claude": ("Bash",)}),
         a_guard("by-switch", switch="mod.switch"), a_guard("idle", doc="Idle guard.")])]
     guard_group["switches"][("mod", "mod.switch")] = (True, None)
-    write_config(turns_env, "[guards]\non = ['mod.both', 'mod.claude-only']\n")
+    write_config(turns_env, "[guards]\nrun = ['mod.both', 'mod.claude-only']\n")
     rows = guard_rows()
     detail = rows["guards"].detail
-    assert "mod.both (on by guards.on): runs claude in the runner, codex behind the hook" \
+    assert "mod.both (on by guards.run): runs claude in the runner, codex behind the hook" \
         in detail
-    assert "mod.claude-only (on by guards.on): runs claude in the runner" in detail
+    assert "mod.claude-only (on by guards.run): runs claude in the runner" in detail
     assert "mod.by-switch (on by its switch)" in detail
     assert rows["guard mod.claude-only: codex"].state == "ok"
     assert "covers no call on codex" in rows["guard mod.claude-only: codex"].detail
@@ -344,7 +344,7 @@ def test_a_guard_on_names_its_source_and_where_it_runs(turns_env, registry, guar
         assert row.state == "ok" and "no pre-tool point" in row.detail
     idle = rows["guard mod.idle"]
     assert (idle.state, idle.detail) == ("off", "Idle guard.")
-    assert idle.fix == "moxi config set turns guards.on --add mod.idle"
+    assert idle.fix == "moxi config set turns guards.run --add mod.idle"
     assert not any(r.state in ("fail", "warn") for r in rows.values())
 
 
@@ -355,15 +355,15 @@ def test_guards_on_the_list_that_do_not_load_fail(turns_env, registry, guard_gro
                            a_guard("judged", judge="test_doctor:judge_ok"),
                            a_guard("unlisted-alias", calls={"codex": ("Write",)})]),
         GuardEntry("broken", ImportError("no such module"))]
-    write_config(turns_env, "[guards]\non = ['mod.alias', 'mod.nojudge', 'mod.judged', "
+    write_config(turns_env, "[guards]\nrun = ['mod.alias', 'mod.nojudge', 'mod.judged', "
                             "'broken.g', 'mod.typo']\n")
     rows = guard_rows()
     alias = rows["guard mod.alias"]
     assert alias.state == "fail" and "spawn_agent" in alias.detail
-    assert alias.fix == "moxi config set turns guards.on --remove mod.alias"
+    assert alias.fix == "moxi config set turns guards.run --remove mod.alias"
     nojudge = rows["guard mod.nojudge"]
     assert nojudge.state == "fail" and "does not import" in nojudge.detail
-    assert nojudge.fix == "moxi config set turns guards.on --remove mod.nojudge"
+    assert nojudge.fix == "moxi config set turns guards.run --remove mod.nojudge"
     assert "guard mod.judged" not in rows
     assert rows["guard broken.g"].state == "fail"
     assert "no such module" in rows["guard broken.g"].detail
@@ -385,11 +385,11 @@ def test_a_switch_that_fails_the_core_check_fails_listed_or_not(turns_env, regis
 def test_a_listed_module_not_installed_and_a_slow_import_warn(turns_env, registry,
                                                              guard_group):
     guard_group["entries"] = [GuardEntry("slow", [a_guard("g")], delay=0.03)]
-    write_config(turns_env, "[guards]\non = ['usage.ceiling', 'slow.g']\n")
+    write_config(turns_env, "[guards]\nrun = ['usage.ceiling', 'slow.g']\n")
     rows = guard_rows()
     missing = rows["guard usage.ceiling"]
     assert missing.state == "warn" and "not installed" in missing.detail
-    assert missing.fix == "moxi config set turns guards.on --remove usage.ceiling"
+    assert missing.fix == "moxi config set turns guards.run --remove usage.ceiling"
     slow = rows["guard slow.g"]
     assert slow.state == "warn" and "over 10 ms" in slow.detail
 

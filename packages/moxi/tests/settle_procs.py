@@ -251,7 +251,7 @@ def child(argv: list[str]) -> int:
         for signum in _settle.signals():
             if signal.getsignal(signum) is real:
                 signal.signal(signum, logged)
-        note("child", started=argv, variable=os.environ.get(files.CLAIM_VARIABLE),
+        note("child", started=argv, variable=os.environ.get(files.LOCK_FD_ENV),
              claim=files._claim is not None, pgid=os.getpgrp())
 
     try:

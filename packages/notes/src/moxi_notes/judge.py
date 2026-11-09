@@ -7,7 +7,7 @@ allowlist files read where secrets accepts each: the public `.secrets-allow` at 
 tree's top (credentials lines only) and the private `secrets-allow-private` in the repo's
 common git dir, which git never tracks.
 
-A file can't be judged when it is too big to read (`max_mb`): that is a finding of its
+A file can't be judged when it is too big to read (`max_mib`): that is a finding of its
 own, `notes/too-large`, which no allowance keeps. An allowlist that can't be read is read
 as empty, which only takes allowances away; the judge goes on with none and says why.
 
@@ -27,7 +27,7 @@ SETS = ("credentials", "private-names")
 PUBLIC = ".secrets-allow"
 #: The private allowlist, in the common git dir.
 PRIVATE = "secrets-allow-private"
-#: The finding for a blob over `max_mb`.
+#: The finding for a blob over `max_mib`.
 TOO_LARGE = "notes/too-large"
 MIB = 1024 * 1024
 
@@ -51,7 +51,7 @@ class Finding:
 def too_large(size: int, max_bytes: int) -> Finding:
     mb = max(1, round(size / MIB))
     cap = max_bytes // MIB if max_bytes % MIB == 0 else f"{max_bytes / MIB:.1f}"
-    return Finding(TOO_LARGE, None, f"{mb} MiB, over max_mb {cap}; raise max_mb to judge it")
+    return Finding(TOO_LARGE, None, f"{mb} MiB, over max_mib {cap}; raise max_mib to judge it")
 
 
 def of_hit(hit) -> Finding:
@@ -76,7 +76,7 @@ def config():
 
 
 def max_bytes(settings) -> int:
-    return int(settings["max_mb"]) * MIB
+    return int(settings["max_mib"]) * MIB
 
 
 def allowlist(root, common_dir) -> tuple[object, str | None]:

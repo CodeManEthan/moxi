@@ -451,7 +451,7 @@ class Row:
         names one module it needs: the row's first."""
         values = self.values if self.type == "enum" else None
         items = "str" if self.type == "list" else None
-        return Key(name=self.name, type=self.type, default=self.default, doc=self.doc,
+        return Key(name=self.name, value_type=self.type, default=self.default, doc=self.doc,
                    read="use", values=values, env=self.env, retired=self.retired,
                    needs=self.required[0] if self.required else None, items=items)
 
@@ -1417,7 +1417,7 @@ def _run_help(argv: Sequence[str]) -> str | None:
     exe = shutil.which(argv[0])
     if exe is None:
         return None
-    done = proc.run([exe, *argv[1:]], timeout=HELP_TIMEOUT)
+    done = proc.run([exe, *argv[1:]], timeout_s=HELP_TIMEOUT)
     return (done.stdout or b"").decode("utf-8") + (done.stderr or b"").decode("utf-8")
 
 

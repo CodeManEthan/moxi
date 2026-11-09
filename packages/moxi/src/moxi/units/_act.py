@@ -16,10 +16,10 @@ refused, so `foreign=True` never reaches a unit the writer may own or displace. 
 Task Scheduler honours (see `status`): a task named `"daemon"` gets a daemon's steps, read
 around `/run` and `/end`.
 
-The stop record. `stop(module, names, record=[])` first reads, in one supervisor call,
+The stop record. `stop(module, names, stopped=[])` first reads, in one supervisor call,
 which of the units are running, and stops only those; before it asks the supervisor to
 stop each one it appends a `Stopped` entry (the backend's exact id, a daemon's `.socket`
-before its service) to `record`. `resume(record)` starts exactly those entries again, in
+before its service) to `stopped`. `resume(record)` starts exactly those entries again, in
 the order recorded, with the backend's start verb alone (never an enable verb, so a unit
 the user disabled stays disabled), and only entries a `stop` of this process issued and
 no `resume` has taken yet. A start the supervisor refuses is an `Acted` with `ok=False`
@@ -82,24 +82,24 @@ def disable(module: str, names, *, foreign: bool = False, kinds=None,
     return _act("disable", module, names, foreign, runner, kinds)
 
 
-def stop(module: str, names=None, *, replace: bool = False, record: list | None = None,
+def stop(module: str, names=None, *, replace: bool = False, stopped: list | None = None,
          foreign: bool = False, kinds=None, runner=None) -> list[Acted]:
     """Stop each named unit: a daemon, or a timer's run in progress.
 
     `names=None` takes every daemon `declarations(module)` reads, its rejected run-time
     daemons included (an older unit of one may be running), and raises its
-    `DeclarationError`. With `record` (a list), `stop` reads which units run in one
+    `DeclarationError`. With `stopped` (a list), `stop` reads which units run in one
     supervisor call, stops only those, and appends one `Stopped` per backend unit before
     stopping it. `replace=True` also takes the unmarked unit of a declared daemon's name
-    (one the unit step will move aside); it needs a `record`, so an unmarked unit is
+    (one the unit step will move aside); it needs a `stopped`, so an unmarked unit is
     never stopped without an entry that starts it again, and raises `ValueError`
     without one. `foreign=True` takes no record.
     """
     _kinds(kinds, foreign)
-    if replace and record is None:
+    if replace and stopped is None:
         raise ValueError("stop(replace=True) needs a record, so an unmarked unit is never "
                          "stopped without an entry that starts it again")
-    if foreign and (record is not None or replace):
+    if foreign and (stopped is not None or replace):
         raise ValueError("the stop record and replace=True are for a module's own units, "
                          "not foreign=True")
     if names is None:
@@ -110,13 +110,13 @@ def stop(module: str, names=None, *, replace: bool = False, record: list | None 
         decl = declarations(module)
         names = list(decl.daemons) + [name for kind, name in decl.rejected
                                       if kind == "daemon" and name not in decl.daemons]
-    if record is None:
+    if stopped is None:
         return _act("stop", module, names, foreign, runner, kinds)
-    return _stop_recorded(module, _names(names), replace, record, runner)
+    return _stop_recorded(module, _names(names), replace, stopped, runner)
 
 
 def resume(record: Iterable[Stopped], *, runner=None) -> list[Acted]:
-    """Start again exactly the units `stop(..., record=...)` stopped, in the order
+    """Start again exactly the units `stop(..., stopped=...)` stopped, in the order
     recorded, one `Acted` (act `start`) per entry.
 
     Only an entry whose token a `stop` of this process issued and no `resume` took yet

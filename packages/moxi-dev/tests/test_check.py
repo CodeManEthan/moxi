@@ -269,6 +269,34 @@ def run_check(repo, runs, **kw):
     return check.check(repo, run=runs, **kw)
 
 
+def test_reference_and_name_failures_are_recorded_and_later_steps_run(repo, monkeypatch):
+    commit_file(repo, "packages/sessions/x.py")
+    monkeypatch.setattr(check.refs, "scan", lambda root: [
+        check.refs.Hit("packages/sessions/x.py", 1, "Gone")])
+    monkeypatch.setattr(check.naming, "scan", lambda root: [
+        check.naming.Hit("packages/sessions/x.py", 1, "MX1", "unit", "bad", "fix")])
+    runs = Runs()
+    result = run_check(repo, runs)
+    assert result.code == 1 and result.refs == "fail" and result.names == "fail"
+    assert runs.suites(), "the package suites still run after whole-tree findings"
+
+
+def test_only_runs_one_scanner_reads_the_whole_tree_and_filters_printing(tmp_path,
+                                                                         monkeypatch,
+                                                                         capsys):
+    root = tmp_path / "root"
+    root.mkdir()
+    seen = []
+    monkeypatch.setattr(check.refs, "scan", lambda given: seen.append(given) or [
+        check.refs.Hit("packages/a/x.py", 1, "A"),
+        check.refs.Hit("packages/b/y.py", 2, "B")])
+    monkeypatch.setattr(check.naming, "scan", lambda root: pytest.fail("names ran"))
+    assert check.only(root, "refs", ["packages/a"]) == 1
+    out = capsys.readouterr().out
+    assert "packages/a/x.py" in out and "packages/b/y.py" not in out
+    assert seen == [root]
+
+
 def test_steps_run_in_order_from_the_right_places(repo):
     commit_file(repo, "packages/sessions/x.py")
     runs = Runs()
@@ -375,8 +403,8 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert ("lock fail | tags not run | release not run | stamps not run | web not run | "
-            "sync not run | lint not run") in result.line()
+    assert ("lock fail | tags not run | refs not run | names not run | release not run | "
+            "stamps not run | web not run | sync not run | lint not run") in result.line()
 
 
 def test_a_failed_sync_runs_no_suite(repo):
@@ -390,8 +418,9 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert ("packages: none | lock pass | tags pass | release pass | stamps skipped | "
-            "web skipped | sync skipped | lint not run | no suites run") in result.line()
+    assert ("packages: none | lock pass | tags pass | refs pass | names pass | release pass "
+            "| stamps skipped | web skipped | sync skipped | lint not run | no suites run") \
+        in result.line()
 
 
 # --- the tag check and the lint -------------------------------------------------------
@@ -413,7 +442,8 @@ def test_the_release_step_runs_whatever_the_change_picks(repo, capsys):
     runs = Runs()
     result = run_check(repo, runs, base="HEAD")
     assert result.code == 1 and result.release == "fail"
-    assert "| packages: none | lock pass | tags pass | release fail |" in result.line()
+    assert ("| packages: none | lock pass | tags pass | refs pass | names pass | "
+            "release fail |") in result.line()
     assert ("moxi-dev check: packages/turns: CHANGELOG.md: its first version heading is "
             "0.0.9, but project.version is 0.1.0;") in capsys.readouterr().out
 
@@ -717,6 +747,8 @@ LINE = re.compile(
     r"moxi-dev check: commit (?P<commit>[0-9a-f]{12}(\+dirty)?) \| "
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
     r"tags (pass|fail|not run) \| "
+    r"refs (pass|fail|not run) \| "
+    r"names (pass|fail|not run) \| "
     r"release (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "

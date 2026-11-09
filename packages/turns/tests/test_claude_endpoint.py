@@ -391,7 +391,7 @@ def test_context_asks_reach_the_listeners_and_a_clear_follows_the_id(claude):
 
 
 def _command(s, name, out):
-    out.put(s.command(name, timeout=5))
+    out.put(s.command(name, timeout_s=5))
 
 
 def test_clear_runs_through_the_gate_and_reads_ran_with_the_new_id(claude, monkeypatch):
@@ -698,7 +698,7 @@ def test_a_clear_with_stop_shells_settles_at_the_stop_report_not_its_session_sta
     s = turns.find(session_id="s-1")
     out: queue.Queue = queue.Queue()
     threading.Thread(target=lambda: out.put(s.command("clear", stop_shells=True,
-                                                      timeout=5)), daemon=True).start()
+                                                      timeout_s=5)), daemon=True).start()
     line = runner.next_line()
     assert line["name"] == "clear" and line["stop_shells"] is True
     _gate_pass(runner, line)
@@ -724,7 +724,7 @@ def test_a_compact_with_stop_shells_settles_at_the_later_of_ready_and_report(
     s = turns.find(session_id="s-1")
     out: queue.Queue = queue.Queue()
     threading.Thread(target=lambda: out.put(s.command("compact", stop_shells=True,
-                                                      timeout=5)), daemon=True).start()
+                                                      timeout_s=5)), daemon=True).start()
     line = runner.next_line()
     _gate_pass(runner, line)
     runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "compact",
@@ -740,7 +740,7 @@ def test_a_stop_the_runner_turned_down_reads_unsupported(claude, monkeypatch):
     s = turns.find(session_id="s-1")
     out: queue.Queue = queue.Queue()
     threading.Thread(target=lambda: out.put(s.command("clear", stop_shells=True,
-                                                      timeout=5)), daemon=True).start()
+                                                      timeout_s=5)), daemon=True).start()
     line = runner.next_line()
     runner.report(leg.R_COMMAND_DONE, request=line["request"], state="refused",
                   reason="unsupported", new_session_id=None)

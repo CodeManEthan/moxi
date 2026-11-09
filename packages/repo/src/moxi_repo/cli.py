@@ -6,7 +6,7 @@
     moxi repo git-hooks remove PATH [PIECE...]
     moxi repo git-hooks enable|disable PATH PIECE
     moxi repo git-hooks refresh [PATH]
-    moxi repo commit PATH [--spec NAME] [--wait SECONDS] [--json]
+    moxi repo commit PATH [--spec NAME] [--wait-s SECONDS] [--json]
     moxi repo specs [PATH] [--json]
     moxi repo specs remove PATH NAME
 
@@ -101,12 +101,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     rf.add_argument("path", nargs="?", metavar="PATH")
 
     cm = verbs.add_parser(
-        "commit", help="run a repo's saved committer specs",
+        "commit", allow_abbrev=False, help="run a repo's saved committer specs",
         description="Run one pass of the spec saved as NAME in the repo at PATH, or of every "
                     "spec saved there, and print each pass's line.", epilog=note)
     cm.add_argument("path", metavar="PATH")
     cm.add_argument("--spec", metavar="NAME", help="the saved spec to run")
-    cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",
+    cm.add_argument("--wait-s", type=float, default=0, metavar="SECONDS",
                     help="wait this long for another pass's lock (default: try once)")
     cm.add_argument("--json", action="store_true", help="print one JSON array")
 
@@ -326,11 +326,11 @@ def _commit(args) -> int:
         else:
             print(f"no spec is saved in {where.top}")
         return 0
-    results = [committer.commit_saved(where.top, name, wait=args.wait) for name in names]
+    results = [committer.commit_saved(where.top, name, wait_s=args.wait_s) for name in names]
     codes = []
     for result in results:
         code = result.exit_code
-        if result.status == "busy" and args.wait:
+        if result.status == "busy" and args.wait_s:
             code = 75
         codes.append(code)
         if not args.json:
@@ -366,7 +366,7 @@ def _specs(args) -> int:
             spec = item.get("spec")
             if spec:
                 print(f"    paths: {', '.join(spec['paths'])}; every "
-                      f"{spec['min_interval']} s; push: {spec['push'] or 'none'}")
+                      f"{spec['min_interval_s']} s; push: {spec['push'] or 'none'}")
             if last.get("line"):
                 print(f"    {last['line']}")
             if item.get("refused_since"):

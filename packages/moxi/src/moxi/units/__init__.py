@@ -7,7 +7,7 @@ file it did not mark unless told to move it aside (`replace=True`).
 
     backend()                      the supervisor here: "systemd", "launchd", "schtasks", None
     home_tag()                     the tag in this home's unit names (None: the default home)
-    environment(module)            the variables the module's units are written with
+    unit_env(module)               the variables the module's units are written with
     ids(module, name, kind="daemon")
                                    the supervisor's ids for one unit, with this home's tag
     declarations(module)           the module's merged declarations (`Declarations`)
@@ -16,7 +16,7 @@ file it did not mark unless told to move it aside (`replace=True`).
     remove(module)                 remove every unit the module's mark is on (uninstall)
     start|stop|restart|enable|disable(module, names, foreign=False, kinds=None)
                                    act on named units now (`Acted` per name)
-    stop(module, names, record=[]) and resume(record)
+    stop(module, names, stopped=[]) and resume(record)
                                    stop what runs, with a record, and start exactly that
     status(modules, foreign=(), kinds=None)
                                    what the supervisor says (`UnitState` per unit)
@@ -68,7 +68,7 @@ from ._act import disable, enable, restart, resume, start, stop
 from ._apply import apply, apply_held, core_lock, remove
 from ._backend import Backend, backend
 from ._declare import UNITS_FROM_SECONDS, declarations, digest, switch_problem
-from ._home import environment, home_tag
+from ._home import unit_env, home_tag
 from ._plan import plan
 from ._status import last_runs, status
 from ._types import (
@@ -187,6 +187,6 @@ __all__ = [
     "Acted", "Applied", "Backend", "DeclarationError", "Declarations", "Stopped",
     "TASK_STATUS_CODES", "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped",
     "apply", "apply_switch", "backend", "core_lock", "declarations", "digest", "disable",
-    "enable", "environment", "home_tag", "ids", "last_runs", "plan", "remove", "restart",
+    "enable", "unit_env", "home_tag", "ids", "last_runs", "plan", "remove", "restart",
     "resume", "start", "starts", "status", "stop", "switch_problem", "switched_daemons",
     "unwrap", "wrap", "wraps"]

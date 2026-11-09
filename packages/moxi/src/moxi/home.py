@@ -15,7 +15,7 @@ The rule the move keeps, with the settle step around it:
 2. A unit file among them that moxi did not write for the module makes it refuse, naming
    `--replace`, unless `replace=True`.
 3. Whatever it stops, marked or not, it records as it stops it, one unit at a time,
-   before it stops the next (`moxi.units.stop(..., record=...)`).
+   before it stops the next (`moxi.units.stop(..., stopped=...)`).
 4. On every way out of the settle step, the settle step starts exactly the recorded units
    again (`moxi.units.resume`), and nothing else.
 5. An interrupt never ends the settle step before that start has run (see `moxi._settle`).
@@ -211,7 +211,7 @@ def _stop(module: str, names: list[str], replace: bool, record: list) -> None:
     from . import units
 
     before = len(record)
-    acted = units.stop(module, names, replace=replace, record=record)
+    acted = units.stop(module, names, replace=replace, stopped=record)
     failed = [a for a in acted if not a.ok]
     if not failed:
         return

@@ -154,13 +154,13 @@ def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path
 
 def test_folders_names_each_rows_folders_as_the_placer_resolves_them(home):
     rows, _ = place.harnesses()
-    assert place.folders() == {
+    assert place.harness_dirs() == {
         "claude's skills folder": home / ".claude" / "skills",
         "claude's agents folder": home / ".claude" / "agents",
         "codex's skills folder": home / ".agents" / "skills",
         "codex's agents folder": home / ".codex" / "agents"}
     assert {f"{name}'s {kind} folder": row.skills if kind == "skills" else row.agents
-            for name, row in rows.items() for kind in ("skills", "agents")} == place.folders()
+            for name, row in rows.items() for kind in ("skills", "agents")} == place.harness_dirs()
 
 
 def test_folders_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
@@ -171,7 +171,7 @@ def test_folders_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
     config.parent.mkdir(parents=True)
     config.write_text('harnesses = [{ name = "claude", skills = "", agents = "" },\n'
                       '             { name = "oc", skills = "~/.oc/skills", agents = "" }]\n')
-    assert place.folders(given) == {
+    assert place.harness_dirs(given) == {
         "claude's skills folder": tmp_path / "given" / ".claude" / "skills",
         "claude's agents folder": tmp_path / "given" / ".claude" / "agents",
         "oc's skills folder": tmp_path / "given" / ".oc" / "skills"}
@@ -182,7 +182,7 @@ def test_folders_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
 
 def test_folders_keeps_a_relative_value_that_harnesses_makes_absolute(home, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "relative-cc")
-    assert place.folders()["claude's skills folder"] == Path("relative-cc", "skills")
+    assert place.harness_dirs()["claude's skills folder"] == Path("relative-cc", "skills")
     rows, _ = place.harnesses()
     assert rows["claude"].skills == Path(os.path.abspath("relative-cc"), "skills")
 
@@ -191,8 +191,9 @@ def test_a_row_folder_expands_its_tilde_from_the_mapping(home, tmp_path):
     set_core("harnesses", [{"name": "oc", "skills": "~/.oc/skills", "agents": "~"}])
     given = {**os.environ, "HOME": str(tmp_path / "given"),
              "USERPROFILE": str(tmp_path / "given")}
-    assert place.folders(given) == {"oc's skills folder": tmp_path / "given" / ".oc" / "skills",
-                                    "oc's agents folder": tmp_path / "given"}
+    assert place.harness_dirs(given) == {
+        "oc's skills folder": tmp_path / "given" / ".oc" / "skills",
+        "oc's agents folder": tmp_path / "given"}
     assert place.harnesses(env=given)[1] == []
 
 
@@ -539,18 +540,18 @@ def test_a_tracked_occupant_is_cause_tracked_when_git_answers_in_the_time_given(
     git("init", "-q", repo)
     git("-C", repo, "add", ".")
     step = one(place.plan("loadout", [Item(skill(), "claude", "x", dest=target)],
-                          git_seconds=5), "refuse")
+                          git_s=5), "refuse")
     assert (step.cause, step.reason) == (
         "tracked", f"{target} is a folder the placer did not mark, and git tracks it")
 
 
 @pytest.mark.timed
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
-@pytest.mark.parametrize("how", ["git_seconds", "each call"])
+@pytest.mark.parametrize("how", ["git_s", "each call"])
 def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
         tmp_path, monkeypatch, skill, how):
     """A git that doesn't answer in time never makes an occupant `tracked`: it stays
-    `occupant`, its reason says so, and `git_seconds` bounds every folder's calls
+    `occupant`, its reason says so, and `git_s` bounds every folder's calls
     together."""
     bin_dir = tmp_path / "slow-bin"
     bin_dir.mkdir()
@@ -565,8 +566,8 @@ def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
         targets.append(target)
     items = [Item(skill(), "claude", "x", dest=targets[0]),
              Item(skill("y"), "claude", "x", dest=targets[1])]
-    if how == "git_seconds":
-        options = {"git_seconds": 0.5}
+    if how == "git_s":
+        options = {"git_s": 0.5}
     else:
         monkeypatch.setattr(place, "_GIT_SECONDS", 0.5)
         options = {}
@@ -578,12 +579,12 @@ def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
     for s in steps:
         assert s.reason == (f"{s.target} is a folder the placer did not mark; git did not "
                             f"answer in time, so whether it tracks it is unknown")
-    assert took < (2 if how == "git_seconds" else 4), took
+    assert took < (2 if how == "git_s" else 4), took
 
 
-def test_git_seconds_must_be_a_number(skill):
-    with pytest.raises(ValueError, match="git_seconds"):
-        place.plan("loadout", [Item(skill(), "claude", "x")], git_seconds=-1)
+def test_git_s_must_be_a_number(skill):
+    with pytest.raises(ValueError, match="git_s"):
+        place.plan("loadout", [Item(skill(), "claude", "x")], git_s=-1)
 
 
 def _occupy(case, target, src, other):

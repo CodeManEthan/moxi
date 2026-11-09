@@ -159,7 +159,7 @@ def test_an_empty_file_ends_start_with_no_line(tmp_path):
     path = write(tmp_path, b"")
     with read_back(path, block=BLOCK, limit=LIMIT_BYTES) as reader:
         assert list(reader) == [] and reader.ended == START
-    with read_back(path, block=BLOCK, limit=LIMIT_BYTES, head=True) as reader:
+    with read_back(path, block=BLOCK, limit=LIMIT_BYTES, read_head=True) as reader:
         assert list(reader) == [] and reader.first == b"" and reader.ended == START
 
 
@@ -228,7 +228,7 @@ def test_only_the_files_last_line_carries_the_flag(tmp_path):
 
 def test_head_reads_line_1_first_and_the_backward_read_stops_at_line_2(tmp_path):
     path = write(tmp_path, b'{"meta": 1}\n{"n": 2}\n{"n": 3}\n')
-    with read_back(path, block=5, limit=LIMIT_BYTES, head=True) as reader:
+    with read_back(path, block=5, limit=LIMIT_BYTES, read_head=True) as reader:
         assert reader.first == b'{"meta": 1}'
         assert [raw for raw, _ in reader] == [b'{"n": 3}', b'{"n": 2}']
         assert reader.ended == START
@@ -244,7 +244,7 @@ def test_without_head_the_read_runs_to_line_1(tmp_path):
 def test_a_file_of_line_1_alone_yields_nothing_and_ends_start(tmp_path):
     for body in (b'{"meta": 1}\n', b'{"meta": 1}'):
         path = write(tmp_path, body)
-        with read_back(path, block=4, limit=LIMIT_BYTES, head=True) as reader:
+        with read_back(path, block=4, limit=LIMIT_BYTES, read_head=True) as reader:
             assert reader.first == b'{"meta": 1}'
             assert list(reader) == [] and reader.ended == START
 
@@ -252,7 +252,7 @@ def test_a_file_of_line_1_alone_yields_nothing_and_ends_start(tmp_path):
 def test_line_1_is_not_yielded_even_when_it_is_long(tmp_path):
     meta = json.dumps({"meta": "m" * 500}).encode()
     path = write(tmp_path, meta + b'\n{"n": 2}\n')
-    with read_back(path, block=16, limit=LIMIT_BYTES, head=True) as reader:
+    with read_back(path, block=16, limit=LIMIT_BYTES, read_head=True) as reader:
         assert reader.first == meta
         assert [raw for raw, _ in reader] == [b'{"n": 2}']
 
@@ -261,7 +261,7 @@ def test_line_1_that_does_not_end_within_the_limit_is_not_read(tmp_path):
     """No line 1 within the limit: no line 2 to stop at, so the read ends at the limit."""
     meta = json.dumps({"meta": "m" * 500}).encode()
     path = write(tmp_path, meta + b'\n{"n": 2}\n')
-    with read_back(path, block=16, limit=64, head=True) as reader:
+    with read_back(path, block=16, limit=64, read_head=True) as reader:
         assert reader.first is None
         assert list(reader) == [] and reader.ended == LIMIT
 
@@ -272,13 +272,13 @@ def test_the_backward_limit_counts_only_backward_bytes(tmp_path):
     rest = [b'{"n": %d}' % n for n in range(5)]
     path = write(tmp_path, b"\n".join([meta] + rest) + b"\n")
     backward = sum(len(r) + 1 for r in rest)
-    with read_back(path, block=backward, limit=backward, head=True) as reader:
+    with read_back(path, block=backward, limit=backward, read_head=True) as reader:
         assert len(list(reader)) == 5 and reader.ended == START
 
 
 def test_an_unterminated_line_after_line_1_carries_the_flag(tmp_path):
     path = write(tmp_path, b'{"meta": 1}\n{"n": 2}\n{"n": 3')
-    with read_back(path, block=BLOCK, limit=LIMIT_BYTES, head=True) as reader:
+    with read_back(path, block=BLOCK, limit=LIMIT_BYTES, read_head=True) as reader:
         assert list(reader) == [(b'{"n": 3', True), (b'{"n": 2}', False)]
 
 
@@ -333,7 +333,7 @@ def test_parity_with_the_walk_that_reads_line_1_first(tmp_path, seed):
         limit = rng.randint(body.index(b"\n") + 1 if b"\n" in body else len(body) + 1,
                             len(body) + block + 1)
         first, pairs, reached_start, hit_limit = codex_walk(path, block, limit)
-        with read_back(path, block=block, limit=limit, head=True) as reader:
+        with read_back(path, block=block, limit=limit, read_head=True) as reader:
             got = list(reader)
             assert reader.first == first, (seed, case)
             ended = reader.ended

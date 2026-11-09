@@ -26,7 +26,7 @@ def acct(tmp_path, monkeypatch):
     that finds nothing; returns the record's path."""
     folder = tmp_path / "acct"
     folder.mkdir()
-    monkeypatch.delenv(paths.ANCHOR_HOME)
+    monkeypatch.delenv(paths.ANCHOR_HOME_ENV)
     if os.name == "nt":
         real = _win.known_folder
         monkeypatch.setattr(_win, "known_folder",
@@ -270,12 +270,12 @@ def test_each_command_a_line_names_is_a_core_verb(command):
 @pytest.mark.parametrize("fold", [False, True])
 def test_anchor_set_answers_as_the_row_reads_it(acct, monkeypatch, fold):
     assert not terminal.anchor_set({}, fold=fold)
-    assert not terminal.anchor_set({paths.ANCHOR_HOME: ""}, fold=fold)
-    assert terminal.anchor_set({paths.ANCHOR_HOME: "/t"}, fold=fold)
-    assert terminal.anchor_set({paths.ANCHOR_HOME.lower(): "/t"}, fold=fold) is fold
+    assert not terminal.anchor_set({paths.ANCHOR_HOME_ENV: ""}, fold=fold)
+    assert terminal.anchor_set({paths.ANCHOR_HOME_ENV: "/t"}, fold=fold)
+    assert terminal.anchor_set({paths.ANCHOR_HOME_ENV.lower(): "/t"}, fold=fold) is fold
     assert not terminal.anchor_set() and row().name == "terminal record"
     assert row().detail.startswith("the record at")
-    monkeypatch.setenv(paths.ANCHOR_HOME, str(acct.parent))
+    monkeypatch.setenv(paths.ANCHOR_HOME_ENV, str(acct.parent))
     assert terminal.anchor_set()
     assert row().detail.startswith("MOXI_ANCHOR_HOME is set")
 

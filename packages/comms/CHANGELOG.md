@@ -2,6 +2,27 @@
 
 ## 0.3.0 (2026-11-08)
 
+- Config keys `connector.wait_default` and `connector.wait_max` are now
+  `connector.wait_default_s` and `connector.wait_max_s`. An old key, set in the config
+  file, is refused, naming the new one.
+- `moxi comms delete` is now `moxi comms remove`, with no alias; the MCP tool `delete`
+  and the daemon method `delete` are now `remove`.
+- `moxi-comms-opencode --ready-wait` and `--notice-hold` are now `--ready-wait-s` and
+  `--notice-hold-s`.
+- The connector's `send_and_wait` input `wait_seconds` is now `wait_s`; the `session`
+  answer's and the connector read result's `age_seconds` are now `age_s`.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_comms.api.attributed`: `deadline` is now `timeout_s`;
+  `moxi_comms.api.check`: `deadline` is now `timeout_s`; `moxi_comms.api.delete`:
+  `deadline` is now `timeout_s`; `moxi_comms.api.identity_state`: `deadline` is now
+  `timeout_s`; `moxi_comms.api.owner`: `deadline` is now `timeout_s`;
+  `moxi_comms.api.roster`: `deadline` is now `timeout_s`; `moxi_comms.api.roster_rows`:
+  `deadline` is now `timeout_s`; `moxi_comms.api.send`: `deadline` is now `timeout_s`;
+  `moxi_comms.api.send_as`: `deadline` is now `timeout_s`; `moxi_comms.api.session`:
+  `deadline` is now `timeout_s`; `moxi_comms.api.session_of`: `deadline` is now
+  `timeout_s`; `moxi_comms.cache.Clock`: `age_seconds` is now `age_s`;
+  `moxi_comms.cache.Clock`: `ttl_seconds` is now `ttl_s`.
+
 The first public release on PyPI.
 
 - The README is the package's PyPI page, and its links work from there. It says that the

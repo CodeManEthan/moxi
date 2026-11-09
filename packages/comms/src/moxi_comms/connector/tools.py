@@ -78,7 +78,7 @@ DESCRIPTIONS = {
                        "read. It returns at most limit messages and says how many more "
                        "wait. " + UNTRUSTED),
     "send_and_wait": ("Send one agent a message that asks for one reply, and wait up to "
-                      "wait_seconds for it. If the agent can't read it now, or no reply "
+                      "wait_s seconds for it. If the agent can't read it now, or no reply "
                       "comes in time, the answer says so and the reply shows in "
                       "check_messages later. " + UNTRUSTED),
 }
@@ -92,9 +92,9 @@ _TO = {"anyOf": [{"type": "string", "minLength": 1},
 
 def inputs() -> dict[str, dict]:
     """Each tool's input schema. They are built before the config is read, so
-    `wait_seconds` is bounded here by the ceiling no config may pass, and its description
-    names the default `[connector] wait_max`; the tool cuts a longer wait to the
-    configured `wait_max`, which it reads at start."""
+    `wait_s` is bounded here by the ceiling no config may pass, and its description
+    names the default `[connector] wait_max_s`; the tool cuts a longer wait to the
+    configured `wait_max_s`, which it reads at start."""
     return {
         "agents": {"type": "object", "properties": {}, "additionalProperties": False},
         "send": {"type": "object", "properties": {
@@ -110,13 +110,13 @@ def inputs() -> dict[str, dict]:
         "send_and_wait": {"type": "object", "properties": {
             "to": {"type": "string", "minLength": 1, "description": "one agent's name"},
             "text": _STR,
-            "wait_seconds": {"type": "integer", "minimum": 1,
-                             "maximum": CONNECTOR_WAIT_CEILING,
-                             "description": "seconds to wait; leave it out for the usual "
-                                            "wait. The longest wait is "
-                                            f"{ConnectorConfig.wait_max} seconds unless "
-                                            "comms is configured otherwise; a longer "
-                                            "one is cut to it"},
+            "wait_s": {"type": "integer", "minimum": 1,
+                       "maximum": CONNECTOR_WAIT_CEILING,
+                       "description": "seconds to wait; leave it out for the usual "
+                                      "wait. The longest wait is "
+                                      f"{ConnectorConfig.wait_max} seconds unless "
+                                      "comms is configured otherwise; a longer "
+                                      "one is cut to it"},
         }, "required": ["to", "text"], "additionalProperties": False},
     }
 
@@ -129,7 +129,7 @@ def _object(properties: dict, optional=()) -> dict:
 _NULL_STR = {"type": ["string", "null"]}
 _AUTHOR = _object({"name": _STR, "tier": _NULL_STR, "attribution": _NULL_STR})
 _MESSAGE = _object({"id": _STR, "from": _AUTHOR, "at": _NULL_STR,
-                    "age_seconds": {"type": ["number", "null"]}, "posture": _STR,
+                    "age_s": {"type": ["number", "null"]}, "posture": _STR,
                     "reply_to": _NULL_STR, "text": _STR,
                     "already_shown": {"type": "boolean"}})
 _RECIPIENTS = {"type": "array", "items": _object({
@@ -416,9 +416,9 @@ class Tools:
         unbound = self._unbound()
         if unbound is not None:
             return unbound
-        wait = int(args.get("wait_seconds", self.wait_default))
+        wait = int(args.get("wait_s", self.wait_default))
         if wait < 1:
-            return self.refused("wait-shape", f"wait_seconds {wait} is under 1. Nothing "
+            return self.refused("wait-shape", f"wait_s {wait} is under 1. Nothing "
                                 "was sent.")
         # The schema can't know the configured longest wait; a longer ask is cut to it,
         # and the answer says how long it waited.
@@ -565,7 +565,7 @@ class Tools:
                 "from": {"name": str(author.get("name") or "unknown"),
                          "tier": author.get("tier"),
                          "attribution": author.get("attribution")},
-                "at": at, "age_seconds": None if epoch is None
+                "at": at, "age_s": None if epoch is None
                 else max(0.0, self.clock() - epoch),
                 "posture": p.get("posture") or machine_line.POSTURE_OPEN,
                 "reply_to": None if p.get("reply_to") is None else str(p["reply_to"]),
@@ -575,7 +575,7 @@ class Tools:
         """One message as it is read aloud: who, how long ago, its id, what it asks, and
         its text."""
         who = m["from"]["name"] + frame_marks(m["from"])
-        bits = [f"From {who}", _ago(m["age_seconds"]), f"msg {m['id']}"]
+        bits = [f"From {who}", _ago(m["age_s"]), f"msg {m['id']}"]
         if m["reply_to"]:
             bits.append(f"in reply to msg {m['reply_to']}")
         ask = _ASKS.get(m["posture"])

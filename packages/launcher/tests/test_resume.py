@@ -136,7 +136,7 @@ class Launch:
     def __init__(self):
         self.requests = []
 
-    def __call__(self, request, *, environ=None, warn=None):
+    def __call__(self, request, *, env=None, warn=None):
         self.requests.append(request)
         return SimpleNamespace(line=f"started {request.request_id}", outcome=None,
                                exit_code=0, state="started", reason=None,
@@ -368,9 +368,9 @@ def test_a_codex_resume_with_a_comms_name_continues_its_thread(conn, monkeypatch
                                          "model": "gpt-5"})
     composed = []
 
-    def launch(request, *, environ=None, warn=None):
-        composed.append(api.preview(request, environ=environ))
-        return Launch()(request, environ=environ, warn=warn)
+    def launch(request, *, env=None, warn=None):
+        composed.append(api.preview(request, env=env))
+        return Launch()(request, env=env, warn=warn)
 
     result = resume.resume(THREAD, conn=conn, turns=None, slots_api=None, launch=launch,
                            request_id="r2", environ={first.COMMS_NAME: "ann"})
@@ -470,7 +470,7 @@ def test_a_terminal_resume_names_no_slot(conn):
 def test_a_failed_launch_is_the_resumes_outcome(conn):
     launched(conn)
 
-    def failing(request, *, environ=None, warn=None):
+    def failing(request, *, env=None, warn=None):
         return SimpleNamespace(line="failed: no harness", outcome=None, exit_code=1,
                                state="failed", reason="not-on-path",
                                request_id=request.request_id, session_id=SID,

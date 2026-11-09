@@ -129,7 +129,7 @@ root, n, wait = pathlib.Path(sys.argv[1]), sys.argv[2], float(sys.argv[3])
 (root / "notes" / ("storm-%s.md" % n)).write_text("# storm %s\\n" % n)
 result = moxi_repo.commit(moxi_repo.Spec(
     name="demo/storm", root=root, paths=("notes",),
-    author=("snap-bot", "snap@example.invalid")), wait=wait)
+    author=("snap-bot", "snap@example.invalid")), wait_s=wait)
 print(json.dumps(result.as_dict()))
 raise SystemExit(result.exit_code)
 """
@@ -170,7 +170,7 @@ def test_a_held_lock_is_busy_and_wait_takes_it_once_freed(demo):
         result = moxi_repo.commit(spec(repo))
     assert result.status == "busy" and result.exit_code == 0
     assert staged(repo) == [] and "notes/a.md" not in in_head(repo)
-    assert moxi_repo.commit(spec(repo), wait=5).status == "committed"
+    assert moxi_repo.commit(spec(repo), wait_s=5).status == "committed"
 
 
 # -- what a pass takes ---------------------------------------------------------------------------
@@ -178,16 +178,16 @@ def test_a_held_lock_is_busy_and_wait_takes_it_once_freed(demo):
 def test_cadence_reads_only_this_authors_commits(demo):
     repo = demo.repo()
     write(repo, "notes/a.md")
-    assert moxi_repo.commit(spec(repo, min_interval=3600)).status == "committed"
+    assert moxi_repo.commit(spec(repo, min_interval_s=3600)).status == "committed"
     write(repo, "notes/b.md")
-    result = moxi_repo.commit(spec(repo, min_interval=3600))
+    result = moxi_repo.commit(spec(repo, min_interval_s=3600))
     assert result.status == "throttled" and "interval is 3600 s" in result.detail
     # An author whose name is a prefix of that one, or whose email differs only where a
     # regex dot would match, has no commit yet.
-    other = moxi_repo.commit(spec(repo, min_interval=3600, author=("snap", "snap@example.invalid")))
+    other = moxi_repo.commit(spec(repo, min_interval_s=3600, author=("snap", "snap@example.invalid")))
     assert other.status == "committed"
     write(repo, "notes/c.md")
-    dotted = moxi_repo.commit(spec(repo, min_interval=3600,
+    dotted = moxi_repo.commit(spec(repo, min_interval_s=3600,
                                    author=("snap-bot", "snap@exampleXinvalid")))
     assert dotted.status == "committed"
 
@@ -504,10 +504,10 @@ def test_changes_reads_staged_and_ranged_changes(demo):
     git(repo, "commit", "-q", "-m", "two")
     git(repo, "mv", "notes/b.md", "notes/c.md")
     git(repo, "commit", "-q", "-m", "moved")
-    ranged = moxi_repo.changes(repo, range=(first, "HEAD"))
+    ranged = moxi_repo.changes(repo, rev_range=(first, "HEAD"))
     assert {(c.status, c.path, c.old_path) for c in ranged} == {
         ("A", "notes/a[1].md", None), ("A", "notes/c.md", None)}
-    moved = moxi_repo.changes(repo, range=("HEAD~1", "HEAD"))
+    moved = moxi_repo.changes(repo, rev_range=("HEAD~1", "HEAD"))
     assert [(c.status, c.path, c.old_path) for c in moved] == [
         ("R", "notes/c.md", "notes/b.md")]
     raw = moxi_repo.git(repo, "cat-file", "blob", moved[0].blob, binary=True)
@@ -545,7 +545,7 @@ def test_a_failed_push_keeps_the_commit_and_throttled_and_clean_passes_retry(dem
     bare = make_remote(demo, repo)
     deny(bare, True)
     write(repo, "notes/a.md")
-    s = spec(repo, push="origin", push_backoff=300, min_interval=3600)
+    s = spec(repo, push="origin", push_backoff_s=300, min_interval_s=3600)
     first = moxi_repo.commit(s)
     assert first.status == "committed" and first.push_error
     assert "remote says no" in first.push_error and first.exit_code == 1
@@ -562,7 +562,7 @@ def test_a_failed_push_keeps_the_commit_and_throttled_and_clean_passes_retry(dem
     assert remote_head(bare) == first.sha
     # The same with a clean pass.
     deny(bare, True)
-    s0 = spec(repo, push="origin", push_backoff=300)
+    s0 = spec(repo, push="origin", push_backoff_s=300)
     second = moxi_repo.commit(s0)
     assert second.status == "committed" and second.push_error
     deny(bare, False)
@@ -579,7 +579,7 @@ def test_a_busy_pass_never_pushes_and_an_index_busy_pass_does(demo, clock):
     bare = make_remote(demo, repo)
     deny(bare, True)
     write(repo, "notes/a.md")
-    s = spec(repo, push="origin", push_backoff=300)
+    s = spec(repo, push="origin", push_backoff_s=300)
     assert moxi_repo.commit(s).push_error
     deny(bare, False)
     clock[0] += 400
@@ -599,7 +599,7 @@ def test_a_busy_pass_never_pushes_and_an_index_busy_pass_does(demo, clock):
 def test_a_failed_push_of_one_branch_is_retried_from_another_and_from_detached(demo, clock):
     repo = demo.repo()
     bare = make_remote(demo, repo)
-    s = spec(repo, push="origin", push_backoff=300)
+    s = spec(repo, push="origin", push_backoff_s=300)
     git(repo, "switch", "-q", "-c", "a")
     deny(bare, True)
     write(repo, "notes/a.md")
@@ -630,16 +630,36 @@ def test_a_failed_push_of_one_branch_is_retried_from_another_and_from_detached(d
 
 def test_a_saved_spec_round_trips_through_git_config(demo):
     repo = demo.repo()
-    s = spec(repo, paths=("notes", "a[1].md", "with space.md"), min_interval=90.5,
+    s = spec(repo, paths=("notes", "a[1].md", "with space.md"), min_interval_s=90.5,
              message="snapshot", trailers="demo_pieces.committing:trailers",
-             prepare="demo_pieces.committing:prepare", push="origin", push_backoff=60,
+             prepare="demo_pieces.committing:prepare", push="origin", push_backoff_s=60,
              max_bytes=None)
     moxi_repo.save_spec(s)
     back = committer.saved_spec(repo, "demo/snap")
     assert back == s
-    assert git(repo, "config", "moxi-repo.spec.demo/snap.min-interval").stdout == "90.5\n"
+    assert git(repo, "config", "moxi-repo.spec.demo/snap.min-interval-s").stdout == "90.5\n"
     with pytest.raises(committer.SpecError):
         moxi_repo.save_spec(spec(repo, prepare=lambda ctx: None))
+
+
+@pytest.mark.parametrize("old, new", [("min-interval", "min-interval-s"),
+                                      ("push-backoff", "push-backoff-s")])
+def test_a_saved_spec_with_a_renamed_key_is_refused_naming_the_new_one(demo, old, new):
+    repo = demo.repo()
+    moxi_repo.save_spec(spec(repo))
+    git(repo, "config", f"moxi-repo.spec.demo/snap.{old}", "60")
+    with pytest.raises(committer.SpecError, match=f"saved {old} is renamed: set {new} "
+                                                  "instead"):
+        committer.saved_spec(repo, "demo/snap")
+    moxi_repo.save_spec(spec(repo))
+    assert committer.saved_spec(repo, "demo/snap") == spec(repo)
+
+
+def test_moxi_repo_commit_refuses_the_old_wait_flag(tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["commit", str(tmp_path), "--wait", "0.1"])
+    assert exc.value.code == 2
+    assert "unrecognized arguments: --wait" in capsys.readouterr().err
 
 
 def test_moxi_repo_commit_runs_saved_specs_and_gives_exit_codes(demo, capsys):
@@ -658,7 +678,7 @@ def test_moxi_repo_commit_runs_saved_specs_and_gives_exit_codes(demo, capsys):
     with files.lock(repo / ".git" / "moxi-repo" / "lock"):
         assert cli.main(["commit", str(repo), "--spec", "demo/snap"]) == 0
         assert "busy" in capsys.readouterr().out
-        assert cli.main(["commit", str(repo), "--spec", "demo/snap", "--wait", "0.2"]) == 75
+        assert cli.main(["commit", str(repo), "--spec", "demo/snap", "--wait-s", "0.2"]) == 75
     (repo / ".git" / "index.lock").write_text("", encoding="utf-8")
     write(repo, "notes/c.md")
     try:
@@ -853,7 +873,7 @@ def test_wait_queues_behind_another_thread_of_this_process(demo):
         assert taken.wait(10)
         assert moxi_repo.commit(spec(repo)).status == "busy"
         threading.Timer(0.3, release.set).start()
-        assert moxi_repo.commit(spec(repo), wait=10).status == "committed"
+        assert moxi_repo.commit(spec(repo), wait_s=10).status == "committed"
     finally:
         release.set()
         thread.join(10)
@@ -864,9 +884,9 @@ def test_wait_queues_behind_another_thread_of_this_process(demo):
     try:
         assert taken.wait(10)
         with pytest.raises(files.LockTimeout):
-            moxi_repo.save_spec(spec(repo), wait=0.2)
+            moxi_repo.save_spec(spec(repo), wait_s=0.2)
         threading.Timer(0.3, release.set).start()
-        moxi_repo.save_spec(spec(repo), wait=10)
+        moxi_repo.save_spec(spec(repo), wait_s=10)
     finally:
         release.set()
         thread.join(10)

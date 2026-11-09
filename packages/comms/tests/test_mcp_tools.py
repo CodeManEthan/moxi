@@ -78,7 +78,7 @@ def listed() -> list[dict]:
 
 def test_six_tools_by_their_names():
     assert [t["name"] for t in listed()] == list(mcp_tools.NAMES_OF_TOOLS) == [
-        "send", "reply", "agents", "whoami", "history", "delete"]
+        "send", "reply", "agents", "whoami", "history", "remove"]
 
 
 def test_the_parameters_are_the_designed_ones():
@@ -89,7 +89,7 @@ def test_the_parameters_are_the_designed_ones():
                  "new_name"},
         "reply": {"message_id", "text", "posture", "expires", "interrupt"},
         "agents": set(), "whoami": set(), "history": {"identity", "limit"},
-        "delete": {"message_id"}}
+        "remove": {"message_id"}}
     assert got["send"]["required"] == ["to", "text", "posture"]
     assert got["send"]["properties"]["posture"]["enum"] == ["none", "optional", "once",
                                                             "open"]
@@ -98,7 +98,7 @@ def test_the_parameters_are_the_designed_ones():
         "type": "string", "enum": ["none", "optional", "once", "open"],
         "description": "unset: a reply to a once message asks nothing back; in an open "
                        "exchange it stays open"}
-    assert got["delete"]["required"] == ["message_id"]
+    assert got["remove"]["required"] == ["message_id"]
     limit = got["history"]["properties"]["limit"]
     assert (limit["minimum"], limit["maximum"], limit["default"]) == (1, 200, 20)
     for name in ("interrupt", "new", "new_name"):
@@ -127,7 +127,7 @@ def test_no_tool_names_a_sender():
     for tool in listed():
         names = set(walk(tool["inputSchema"]))
         assert not names & {"as", "from", "sender", "user"}, tool["name"]
-        if tool["name"] in ("send", "reply", "delete"):
+        if tool["name"] in ("send", "reply", "remove"):
             assert "identity" not in names
 
 
@@ -143,7 +143,7 @@ def test_descriptions_are_the_designed_texts_in_plain_words():
     assert ("expires after 24 hours unless you set expires"
             in mcp_tools.descriptions()["send"])
     assert "Set new_name to message a name that hasn't started yet." in tools["send"]
-    assert tools["delete"].endswith("the result says who had it.")
+    assert tools["remove"].endswith("the result says who had it.")
     # An unset posture on a reply to a once message goes out asking nothing back: the
     # text must not invite setting once to keep the exchange's posture.
     assert ("A reply to a once message asks nothing back unless you set a posture; in "
@@ -479,7 +479,7 @@ def test_each_tool_answers_over_http(rig, serving):
                     out["history"] = await session.call_tool("history", {"limit": 5})
                     out["reply"] = await session.call_tool("reply", {
                         "message_id": mid, "text": "and more"})
-                    out["delete"] = await session.call_tool("delete", {"message_id": mid})
+                    out["remove"] = await session.call_tool("remove", {"message_id": mid})
                     return out
 
     out = asyncio.run(asyncio.wait_for(run(), 30))
@@ -492,7 +492,7 @@ def test_each_tool_answers_over_http(rig, serving):
     assert sent.structured_content["message_id"] in {
         m["id"] for m in out["history"].structured_content["messages"]}
     assert out["reply"].structured_content["outcome"] == "sent", out["reply"].content
-    assert out["delete"].structured_content["message_id"] == sent.structured_content[
+    assert out["remove"].structured_content["message_id"] == sent.structured_content[
         "message_id"]
     author = rig.record.get_message(sent.structured_content["message_id"])
     assert author is not None

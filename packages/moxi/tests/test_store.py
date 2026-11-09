@@ -31,7 +31,7 @@ def pragma(conn: sqlite3.Connection, name: str):
 
 def test_connect_creates_a_wal_store_with_the_house_pragmas(tmp_path):
     path = tmp_path / "s" / "record.db"
-    conn = store.connect(path, timeout=2.5)
+    conn = store.connect(path, timeout_s=2.5)
     try:
         assert path.is_file()
         assert pragma(conn, "journal_mode") == "wal"
@@ -370,7 +370,7 @@ def test_transaction_rolls_back_and_raises_again(tmp_path):
 def test_transaction_holds_the_write_lock_from_its_start(tmp_path):
     path = tmp_path / "s.db"
     conn = store.connect(path)
-    other = store.connect(path, timeout=0)
+    other = store.connect(path, timeout_s=0)
     try:
         with store.transaction(conn):
             with pytest.raises(sqlite3.OperationalError, match="locked"):
@@ -390,7 +390,7 @@ def test_a_block_that_ends_its_own_transaction_is_an_error(tmp_path):
 
 def test_a_commit_that_fails_rolls_back_and_leaves_the_connection_usable(tmp_path):
     path = tmp_path / "s.db"
-    conn = store.connect(path, timeout=0.05)
+    conn = store.connect(path, timeout_s=0.05)
     conn.execute("PRAGMA journal_mode = DELETE")
     conn.execute("CREATE TABLE t (x)")
     # A reader in a transaction keeps its shared lock, so a delete-journal COMMIT, which
@@ -504,7 +504,7 @@ MIGRATOR = textwrap.dedent("""
             time.sleep(0.05)
         return run
 
-    conn = store.connect(sys.argv[1], timeout=30)
+    conn = store.connect(sys.argv[1], timeout_s=30)
     print(store.migrate(conn, ["CREATE TABLE ran (n INTEGER)"] + [step(n) for n in range(1, 6)]))
     conn.close()
 """)

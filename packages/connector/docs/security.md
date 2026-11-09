@@ -81,7 +81,7 @@ add it again with the new URL."
 
 `moxi connector revoke <id>` revokes one grant, and `moxi connector revoke --all` revokes
 every grant and forgets every client; either works with the process up or down, and takes
-effect on the next call. `moxi connector off` revokes every grant before it turns the
+effect on the next call. `moxi connector disable` revokes every grant before it turns the
 switch off, and the process does the same when it stops with the switch off, so no grant
 outlives the door it was made for.
 
@@ -109,7 +109,7 @@ It can still deny service:
   its own, its wrong codes count toward the burn at 20, which drops every live code,
   yours included, and writes a `code-burned` row.
 
-Each lasts only while the caller keeps going. `moxi connector off` closes the door.
+Each lasts only while the caller keeps going. `moxi connector disable` closes the door.
 
 ## What crosses the door
 

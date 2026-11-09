@@ -2,6 +2,13 @@
 
 ## 0.2.3 (2026-11-08)
 
+- The shell's console script `moxi-ui-serve` is now `moxi-ui-shell`. Run `moxi install
+  ui` so the install plans the shell's unit again under the new script.
+- `moxi ui gateway on` and `off` are now `moxi ui gateway enable` and `disable`, with no
+  alias.
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_ui.api.check`: `page` is now `for_page`.
+
 The first public release.
 
 - The README gains a section for using the shell: install, the verbs, how the shell

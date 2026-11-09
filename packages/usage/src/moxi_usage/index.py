@@ -3,7 +3,7 @@
 `pass_(...)` runs one pass under `STATE/usage/index.lock`:
 
 1. **The lock.** One pass writes at a time. A caller waits up to `wait` seconds
-   (`index.wait_seconds` by default) for another pass to end, then `LockTimeout` (exit 75)
+   (`index.wait_s` by default) for another pass to end, then `LockTimeout` (exit 75)
    names the holder. `wait=0` tries once.
 2. **The listings.** Each lane lists its sources through sessions' `sources(...)`:
    `claude` (live transcripts, subagent and workflow agent files, rank 0), `codex`
@@ -389,7 +389,7 @@ def pass_(*, lanes: Iterable[str] | None = None, rebuild: bool = False,
       runs every lane and also drops lanes whose archive id left the config.
     * `rebuild`: read every listed source again from no cursor. `force`: let a schema
       step drop the rows of offline archive lanes (`store.MigrationRefused` otherwise).
-    * `wait`: seconds to wait for another pass's lock, `index.wait_seconds` when None;
+    * `wait`: seconds to wait for another pass's lock, `index.wait_s` when None;
       past it `moxi.files.LockTimeout` (exit 75). `clock` and `sleep` time the wait.
     * `projects`: the projects API (anything with `for_path`), None for none; by default
       the installed module when there is one.
@@ -415,7 +415,7 @@ def pass_(*, lanes: Iterable[str] | None = None, rebuild: bool = False,
             raise ValueError(f"no such lane: {', '.join(sorted(unknown))}")
     chosen = [lane for lane in every if wanted is None or lane.id in wanted]
     if wait is None:
-        wait = float(current["index.wait_seconds"])
+        wait = float(current["index.wait_s"])
     if workers is None:
         workers = int(current["index.workers"])
     if readings is None:
@@ -475,7 +475,7 @@ def _take_lock(stack: ExitStack, path: Path, wait: float,
 
     deadline = clock() + max(wait, 0.0)
     while True:
-        held = moxi.files.lock(path, timeout=0)
+        held = moxi.files.lock(path, timeout_s=0)
         try:
             held.__enter__()
         except moxi.files.LockTimeout:

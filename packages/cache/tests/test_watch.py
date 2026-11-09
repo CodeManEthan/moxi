@@ -412,9 +412,9 @@ def test_a_config_change_reaches_every_record_within_one_tick(own_roots, root, s
             note()
             write_cache_config(own_roots, text)
         return step
-    write_cache_config(own_roots, "[watch]\ntick = 10\n")
-    stop = Steps([change("[segment]\nwarn_before = 1800\n[watch]\ntick = 25\n"),
-                  change("[segment]\nwarn_before = 120\n"),
+    write_cache_config(own_roots, "[watch]\ntick_s = 10\n")
+    stop = Steps([change("[segment]\nwarn_before_s = 1800\n[watch]\ntick_s = 25\n"),
+                  change("[segment]\nwarn_before_s = 120\n"),
                   note])
     assert watch.run(watcher=w, stop=stop) == 0
     assert seen == [
@@ -427,7 +427,7 @@ def test_a_config_change_reaches_every_record_within_one_tick(own_roots, root, s
 
 
 def test_stale_after_is_three_effective_ticks(own_roots, sessions):
-    write_cache_config(own_roots, "[watch]\ntick = 0\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 0\n")
     fake = Fake([entry(11, A)])
     w = make(fake, sessions)
     stop = Steps([])
@@ -477,14 +477,14 @@ def test_run_keeps_going_after_a_failed_tick(own_roots, sessions, caplog):
                 raise RuntimeError("boom")
             stop.set()
             return []
-    write_cache_config(own_roots, "[watch]\ntick = 1\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         assert watch.run(watcher=Flaky(agents=lambda: [], sessions=sessions), stop=stop) == 0
     assert len(count) == 2 and "boom" in caplog.text
 
 
 def test_run_refuses_to_start_on_a_config_in_error(own_roots, capsys):
-    write_cache_config(own_roots, "[watch]\ntick = 'ten'\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 'ten'\n")
     assert watch.run(stop=threading.Event()) == 2
     assert "refuses the start" in capsys.readouterr().err
 
@@ -494,13 +494,13 @@ def test_a_tick_below_one_second_ticks_every_second(own_roots, sessions, caplog)
 
     from moxi_cache.settings import MODULE, schema
 
-    write_cache_config(own_roots, "[watch]\ntick = 0\n")
+    write_cache_config(own_roots, "[watch]\ntick_s = 0\n")
     config = Config(MODULE, schema())
     config.start()
     w = watch.Watcher(agents=lambda: [], sessions=sessions)
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         assert watch._interval(config, w) == 1.0
-    assert "watch.tick is 0" in caplog.text
+    assert "watch.tick_s is 0" in caplog.text
 
 
 def test_main_takes_no_arguments(capsys):

@@ -258,7 +258,7 @@ def test_a_full_backlog_is_busy_until_the_timeout(sock_dir):
     try:
         start = time.monotonic()
         with pytest.raises(ipc.Timeout) as caught:
-            ipc.connect(listener.getsockname(), timeout=0.3)
+            ipc.connect(listener.getsockname(), timeout_s=0.3)
         assert 0.3 - EARLY <= time.monotonic() - start < 3
         assert "busy" in str(caught.value)
     finally:
@@ -279,7 +279,7 @@ def test_a_busy_server_is_tried_again_until_it_accepts(sock_dir):
     thread = threading.Thread(target=accept_later, daemon=True)
     thread.start()
     try:
-        client = bounded(lambda: ipc.connect(listener.getsockname(), timeout=5.0))
+        client = bounded(lambda: ipc.connect(listener.getsockname(), timeout_s=5.0))
         client.close()
         thread.join(10)
     finally:
@@ -359,7 +359,7 @@ def test_on_windows_a_pipe_that_isnt_there_is_not_serving(opens, code):
 def test_on_windows_a_busy_pipe_is_tried_every_50_ms_until_the_timeout(opens):
     start = time.monotonic()
     with pytest.raises(ipc.Timeout) as caught:
-        ipc.connect(PIPE, timeout=0.3)
+        ipc.connect(PIPE, timeout_s=0.3)
     assert 0.3 - EARLY <= time.monotonic() - start < 3
     assert "busy" in str(caught.value) and isinstance(caught.value, TimeoutError)
     # every 50 ms, and in the clock's last step before the deadline a few more times
@@ -370,7 +370,7 @@ def test_on_windows_a_busy_pipe_is_tried_again_until_it_opens(opens):
     end = Opened()
     opens.answers = [win_error(231), win_error(231), win_error(231), end]
     start = time.monotonic()
-    with ipc.connect(PIPE, timeout=5.0) as client:
+    with ipc.connect(PIPE, timeout_s=5.0) as client:
         assert client._sock is end and client.address == PIPE
     assert 0.15 - EARLY <= time.monotonic() - start < 3
     assert len(opens.tried) == 4
@@ -503,7 +503,7 @@ def test_a_real_pipe_of_this_users_server_is_connected(serving):
     srv = serving(handler)
     with ipc.connect(srv.address) as client:
         assert client._sock.server_pid() == os.getpid()
-        assert client.call("echo", [1], timeout=10) == [1]
+        assert client.call("echo", [1], timeout_s=10) == [1]
 
 
 @windows
@@ -529,7 +529,7 @@ def test_a_real_pipe_whose_server_runs_as_another_user_is_refused(serving, monke
     assert asked == [os.getpid()]
     monkeypatch.setattr(_users, "user_of", real)
     with ipc.connect(srv.address) as client:  # the server serves on
-        assert client.call("echo", [2], timeout=10) == [2]
+        assert client.call("echo", [2], timeout_s=10) == [2]
 
 
 @windows
@@ -561,7 +561,7 @@ def test_a_pipe_with_every_instance_taken_is_busy_until_the_timeout():
     try:
         start = time.monotonic()
         with pytest.raises(ipc.Timeout) as caught:
-            ipc.connect(name, timeout=0.3)
+            ipc.connect(name, timeout_s=0.3)
         assert 0.3 - EARLY <= time.monotonic() - start < 3
         assert "busy" in str(caught.value)
     finally:
@@ -582,7 +582,7 @@ def test_a_busy_pipe_is_tried_again_until_an_instance_is_free():
     thread.start()
     try:
         start = time.monotonic()
-        client = bounded(lambda: ipc.connect(name, timeout=5.0))
+        client = bounded(lambda: ipc.connect(name, timeout_s=5.0))
         assert time.monotonic() - start >= 0.3 - EARLY
         client.close()
         thread.join(10)
@@ -594,11 +594,11 @@ def test_a_busy_pipe_is_tried_again_until_an_instance_is_free():
 def test_connect_passes_its_line_cap_to_the_client(serving):
     srv = serving(handler)
     with ipc.connect(srv.address, max_line=100) as client:
-        assert client.call("echo", ["x" * 40], timeout=10) == ["x" * 40]
+        assert client.call("echo", ["x" * 40], timeout_s=10) == ["x" * 40]
         with pytest.raises(ipc.IpcError, match="longer than 100 bytes"):
-            client.call("echo", ["x" * 120], timeout=10)
+            client.call("echo", ["x" * 120], timeout_s=10)
     with ipc.connect(srv.address) as client:
-        assert client.call("echo", ["x" * 120], timeout=10) == ["x" * 120]
+        assert client.call("echo", ["x" * 120], timeout_s=10) == ["x" * 120]
     with pytest.raises(ValueError):
         ipc.connect(srv.address, max_line=0)
 
@@ -636,11 +636,11 @@ def test_a_call_past_its_timeout_raises_and_its_late_answer_is_dropped(serving):
     with ipc.connect(srv.address) as client:
         start = time.monotonic()
         with pytest.raises(ipc.Timeout) as caught:
-            client.call("sleep", [0.5], timeout=0.1)
+            client.call("sleep", [0.5], timeout_s=0.1)
         assert time.monotonic() - start < 0.5
         assert isinstance(caught.value, TimeoutError)
         # The server answers the slow call first, and the client drops that answer.
-        assert client.call("echo", ["next"], timeout=10) == ["next"]
+        assert client.call("echo", ["next"], timeout_s=10) == ["next"]
 
 
 #: Far more than a socket pair buffers, so a write of it blocks while nobody reads.
@@ -651,11 +651,11 @@ def test_a_call_whose_request_cannot_be_written_times_out_and_ends_the_connectio
     f = fake()
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
-        bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+        bounded(lambda: f.client.call("echo", [BIG], timeout_s=0.3))
     assert 0.3 - EARLY <= time.monotonic() - start < 3
     # Part of the request was written, so the connection can't carry another frame.
     with pytest.raises(ipc.IpcError) as caught:
-        bounded(lambda: f.client.call("echo", [1], timeout=1))
+        bounded(lambda: f.client.call("echo", [1], timeout_s=1))
     assert not isinstance(caught.value, ipc.Timeout)
 
 
@@ -667,7 +667,7 @@ def test_a_call_waiting_on_another_calls_blocked_write_times_out(fake):
     time.sleep(0.2)  # the untimed call holds the write lock, blocked in its write
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
-        bounded(lambda: f.client.call("echo", [1], timeout=0.3))
+        bounded(lambda: f.client.call("echo", [1], timeout_s=0.3))
     assert 0.3 - EARLY <= time.monotonic() - start < 3
     f.client.close()
     stuck.join(10)
@@ -683,7 +683,7 @@ def test_a_timed_call_writes_a_large_request_the_server_reads(fake):
     answer = threading.Thread(target=lambda: (reader.join(20), f.answer(got["id"], "ok")),
                               daemon=True)
     answer.start()
-    assert bounded(lambda: f.client.call("echo", [payload], timeout=20)) == "ok"
+    assert bounded(lambda: f.client.call("echo", [payload], timeout_s=20)) == "ok"
     assert got["params"] == [payload]
 
 
@@ -789,7 +789,7 @@ def test_answers_out_of_order_reach_their_calls(fake):
     out = {}
 
     def call(name):
-        out[name] = f.client.call(name, timeout=10)
+        out[name] = f.client.call(name, timeout_s=10)
 
     threads = [threading.Thread(target=call, args=(n,)) for n in ("a", "b")]
     for t in threads:
@@ -838,7 +838,7 @@ def test_each_call_after_a_failure_raises_a_fresh_exception(fake):
     f.client._reader.join(10)
     raised, depths = [], []
     for _ in range(4):
-        for fn in (lambda: f.client.call("again", timeout=1), lambda: f.client.notify("n")):
+        for fn in (lambda: f.client.call("again", timeout_s=1), lambda: f.client.notify("n")):
             with pytest.raises(ipc.IpcError) as caught:
                 fn()
             raised.append(caught.value)
@@ -887,7 +887,7 @@ def test_an_error_with_no_id_fails_every_waiting_call(fake):
 
     def call():
         try:
-            f.client.call("x", timeout=10)
+            f.client.call("x", timeout_s=10)
         except ipc.RpcError as exc:
             errors.append(exc.code)
 
@@ -909,7 +909,7 @@ def test_a_line_over_the_clients_cap_ends_the_connection(fake):
 
     def call():
         try:
-            f.client.call("x", timeout=10)
+            f.client.call("x", timeout_s=10)
         except ipc.IpcError as exc:
             errors.append(exc)
 
@@ -990,7 +990,7 @@ def test_closed_after_a_write_that_failed(fake):
 def test_closed_after_a_request_cut_off_by_its_timeout(fake):
     f = fake()
     with pytest.raises(ipc.Timeout):
-        bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+        bounded(lambda: f.client.call("echo", [BIG], timeout_s=0.3))
     assert f.client.closed is True
     _raise_at_once(f.client)
 
@@ -1001,7 +1001,7 @@ def test_a_request_the_server_read_in_part_before_its_timeout_ends_the_connectio
     reader = threading.Thread(target=lambda: read.append(f.server.recv(65536)), daemon=True)
     reader.start()
     with pytest.raises(ipc.Timeout):
-        bounded(lambda: f.client.call("echo", [BIG], timeout=0.5))
+        bounded(lambda: f.client.call("echo", [BIG], timeout_s=0.5))
     reader.join(10)
     assert read and read[0].startswith(b'{"jsonrpc"')
     # The server holds the start of a frame, so the next can't follow it.
@@ -1012,13 +1012,13 @@ def test_a_request_the_server_read_in_part_before_its_timeout_ends_the_connectio
 def test_a_call_that_only_timed_out_leaves_closed_false(fake):
     f = fake()
     with pytest.raises(ipc.Timeout):
-        bounded(lambda: f.client.call("echo", [1], timeout=0.2))
+        bounded(lambda: f.client.call("echo", [1], timeout_s=0.2))
     assert f.client.closed is False
     request = f.request()
     f.answer(request["id"], [1])  # late: dropped, and the connection still carries calls
     thread = threading.Thread(target=lambda: f.answer(f.request()["id"], "ok"))
     thread.start()
-    assert bounded(lambda: f.client.call("echo", [2], timeout=10)) == "ok"
+    assert bounded(lambda: f.client.call("echo", [2], timeout_s=10)) == "ok"
     thread.join(10)
     assert f.client.closed is False
 
@@ -1082,7 +1082,7 @@ def test_one_client_shared_by_many_threads(serving):
 
         def work(k):
             try:
-                results[k] = [client.call("echo", [k, i], timeout=20) for i in range(50)]
+                results[k] = [client.call("echo", [k, i], timeout_s=20) for i in range(50)]
                 client.notify("tick", [k])
             except Exception as exc:  # noqa: BLE001 - reported below
                 errors.append(exc)
@@ -1091,7 +1091,7 @@ def test_one_client_shared_by_many_threads(serving):
         for t in threads:
             t.start()
         # Pushed notifications interleave with the threads' answers on the one connection.
-        assert client.call("push", [100], timeout=20) == "pushed"
+        assert client.call("push", [100], timeout_s=20) == "pushed"
         for t in threads:
             t.join(30)
         assert not errors and not any(t.is_alive() for t in threads)
@@ -1116,7 +1116,7 @@ def test_a_client_in_another_process(serving):
             "    agreed = c.hello((1, 1))\n"
             "    out = {'me': os.getpid(),"
             " 'agreed': [agreed.version, sorted(agreed.capabilities)],"
-            " 'peer': c.call('peer', timeout=10), 'push': c.call('push', timeout=10),"
+            " 'peer': c.call('peer', timeout_s=10), 'push': c.call('push', timeout_s=10),"
             " 'note': next(c.notifications())}\n"
             "print(json.dumps(out))\n")
     done = subprocess.run([sys.executable, "-c", code, srv.address], capture_output=True,
@@ -1144,12 +1144,12 @@ def test_a_read_in_progress_holds_no_write(fake):
     assert f.request()["method"] == "tick"
     thread = threading.Thread(target=lambda: f.answer(f.request()["id"], "ok"))
     thread.start()
-    assert bounded(lambda: f.client.call("echo", [2], timeout=10)) == "ok"
+    assert bounded(lambda: f.client.call("echo", [2], timeout_s=10)) == "ok"
     thread.join(10)
 
 
 def test_connect_timeout_bounds_the_wait_for_the_hello(fake):
-    f = fake(timeout=0.2)
+    f = fake(timeout_s=0.2)
     start = time.monotonic()
     with pytest.raises(ipc.Timeout):
         f.client.hello((1, 1))

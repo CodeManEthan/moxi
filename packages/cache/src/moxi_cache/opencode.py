@@ -264,18 +264,18 @@ def _read(session: _Session, session_id, *, table, cache_source, turned, new_ses
         return unknown(_clock.FUTURE_STAMP, skew)
     age = max(0.0, now - ts)
     if (provider, model) != tuple(upcoming):
-        return Clock(COLD, age_seconds=age, reason=CHANGED, code=_clock.CHANGED)
+        return Clock(COLD, age_s=age, reason=CHANGED, code=_clock.CHANGED)
     row_ = table.lookup(HARNESS, provider, model)
     key = f"{HARNESS} {pair_text(provider, model)}"
     if row_ is None:
         # A model with no lifetime row has no clock to count by.
-        return Clock(NO_CACHE, age_seconds=age, reason=no_row(provider, model),
+        return Clock(NO_CACHE, age_s=age, reason=no_row(provider, model),
                      code=_clock.NO_ROW)
     if row_.free:
         return Clock(NO_CACHE, reason=free_reason(provider, model), key=f"{key} (free)",
                      code=_clock.FREE)
     kind = COLD if age >= row_.seconds else WARM
-    return Clock(kind, age_seconds=age, ttl_seconds=row_.seconds, key=key,
+    return Clock(kind, age_s=age, ttl_s=row_.seconds, key=key,
                  basis="documented", provider=provider, model=model)
 
 

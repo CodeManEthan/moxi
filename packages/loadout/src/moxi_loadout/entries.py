@@ -884,7 +884,7 @@ def _cli(a: Action, run: Run, keep: int, say) -> None:
         if a.op in ("add", "update"):
             steps.append(_add_argv(exe, harness, name, e.sent))
         for argv in steps:
-            done = proc.run(argv, timeout=CLI_SECONDS, input=None)
+            done = proc.run(argv, timeout_s=CLI_SECONDS, stdin_data=None)
             if done.returncode != 0 and argv[2] in ("add", "add-json"):
                 text = (done.stderr or b"").decode("utf-8", "replace").strip()
                 raise RuntimeError(text.splitlines()[-1] if text else

@@ -1,11 +1,11 @@
 """A test shell's process: `python -P -m moxi_ui.testing.run '<options as JSON>'`.
 
-`TestShell` starts it; nothing else should. It runs the shell as `moxi-ui-serve` does,
+`TestShell` starts it; nothing else should. It runs the shell as `moxi-ui-shell` does,
 with three differences a test needs: it binds the port its options name, or one the
 system picks, it takes the test-only options (`child_args` for every page server it
 starts, `leave_out` for the modules its snapshot leaves out, `failed_for` for the seconds
 a failed start answers with its failure, `gateway` to run the shell's gateway as
-`moxi-ui-serve` does) from its one argument, never from a setting or a variable, and it
+`moxi-ui-shell` does) from its one argument, never from a setting or a variable, and it
 stops when its lifeline closes (`moxi.proc.spawn(..., lifeline="fd")`).
 
 Once it serves, it prints one line, `ready <JSON>`, holding its runtime file's fields
@@ -38,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     layout = Layout(serve.MODULE)
     runtime_dir = layout.runtime_dir(create=True)
     try:
-        with files.lock(runtime_dir / serve.LOCK_FILE, timeout=serve.LOCK_WAIT):
+        with files.lock(runtime_dir / serve.LOCK_FILE, timeout_s=serve.LOCK_WAIT):
             starters = Starters(runtime_dir=runtime_dir, state_dir=layout.state_dir(),
                                 log=cli.log_path(), child_args=child_args,
                                 failed_for=failed_for)

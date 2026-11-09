@@ -187,7 +187,7 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             # is read from the clock again after it. A watch can so run up to 5 s past
             # `startup.wait_s`, which is accepted.
             try:
-                answer = api.answer_screen(slot, screen, wait=wait)
+                answer = api.answer_screen(slot, screen, wait_s=wait)
             except failures as error:
                 return _stopped(conn, request_id, error, done)
             outcome, why = answer.outcome, answer.why or ""

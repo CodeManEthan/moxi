@@ -123,8 +123,8 @@ PARSES = [
     (["keep-warm", "release", "build-7"], {"action": "release", "name": "build-7"}),
     (["keep-warm", "holds"], {"action": "holds", "json": False}),
     (["keep-warm", "holds", "--json"], {"action": "holds", "json": True}),
-    (["state"], {"verb": "state", "session_id": None, "json": False}),
-    (["state", SID, "--json"], {"session_id": SID, "json": True}),
+    (["show"], {"verb": "show", "session_id": None, "json": False}),
+    (["show", SID, "--json"], {"session_id": SID, "json": True}),
     (["log", "--table", "runs"], {"verb": "log", "table": "runs"}),
     (["log"], {"table": "launches"}),
 ]
@@ -165,7 +165,7 @@ REFUSED = [
     ["keep-warm", "open", "x"],
     ["keep-warm", "hold", "x", "--json"],
     ["keep-warm", "holds", "x"],
-    ["state", SID, OTHER],
+    ["show", SID, OTHER],
     ["log", "--table", "nope"],
 ]
 
@@ -646,7 +646,7 @@ def test_keep_warm_on_a_launch_that_is_off_is_refused(monkeypatch, capsys):
 
 def test_state_of_a_quiet_launch_is_ok(conn, capsys):
     launched(conn)
-    status, out, err = run(["state", SID], capsys)
+    status, out, err = run(["show", SID], capsys)
     assert (status, err) == (codes.OK, "")
     lines = out.splitlines()
     assert lines[0] == f"session {SID} (launch r1): ok"
@@ -656,10 +656,10 @@ def test_state_of_a_quiet_launch_is_ok(conn, capsys):
 def test_state_of_a_failed_run_is_red_and_still_exits_0(conn, capsys):
     launched(conn)
     ended_run(conn, "relaunch-failed", mode="director", word="no-pane", detail="gone")
-    status, out, _ = run(["state", SID], capsys)
+    status, out, _ = run(["show", SID], capsys)
     assert status == codes.OK
     assert out.splitlines()[0].startswith(f"session {SID} (launch r1): red, failed since ")
-    status, out, _ = run(["state", SID, "--json"], capsys)
+    status, out, _ = run(["show", SID, "--json"], capsys)
     data = json.loads(out)
     assert status == codes.OK and data["outcome"] == "failed" and data["red"] is True
     assert data["why"] == "no-pane: gone"
@@ -667,20 +667,20 @@ def test_state_of_a_failed_run_is_red_and_still_exits_0(conn, capsys):
 
 def test_state_json_of_a_quiet_launch_says_ok(conn, capsys):
     launched(conn)
-    status, out, _ = run(["state", SID, "--json"], capsys)
+    status, out, _ = run(["show", SID, "--json"], capsys)
     data = json.loads(out)
     assert status == codes.OK and data["outcome"] == "ok" and data["red"] is False
 
 
 def test_state_with_no_session_named_asks_for_this_ones(monkeypatch, capsys):
     seen = calls(monkeypatch, state, "show", result(codes.OK, "session x: ok", outcome="ok"))
-    assert run(["state"], capsys)[:2] == (codes.OK, "session x: ok\n")
+    assert run(["show"], capsys)[:2] == (codes.OK, "session x: ok\n")
     assert seen == [((None,), {})]
 
 
 @pytest.mark.parametrize("argv, short", [
-    (["state", OTHER], "not-launched"),
-    (["state"], "no-turns"),
+    (["show", OTHER], "not-launched"),
+    (["show"], "no-turns"),
 ])
 def test_state_refusals(argv, short, conn, capsys):
     launched(conn)
@@ -768,7 +768,7 @@ def test_the_store_reads_only_its_tables(conn):
 
 def test_every_act_has_a_handler_and_help():
     parser = cli.build_parser()
-    acts = {"relaunch", "exit-session", "exits", "sessions", "resume", "keep-warm", "state"}
+    acts = {"relaunch", "exit-session", "exits", "sessions", "resume", "keep-warm", "show"}
     assert acts <= set(cli.VERBS)
     choices = next(a for a in parser._actions if a.dest == "verb").choices
     for act in acts:
@@ -778,7 +778,7 @@ def test_every_act_has_a_handler_and_help():
 
 @pytest.mark.parametrize("argv, code, err", [
     (["exits"], codes.OK, "no exits\n"),
-    (["state", SID], codes.REFUSED, "[not-launched]"),
+    (["show", SID], codes.REFUSED, "[not-launched]"),
 ])
 def test_the_acts_reach_this_cli_through_the_cores_command(argv, code, err, tmp_path):
     moxi = shutil.which("moxi", path=str(Path(sys.executable).parent))

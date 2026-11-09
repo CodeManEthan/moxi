@@ -2,6 +2,10 @@
 
 ## 0.1.0 (2026-11-08)
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_slots.api.answer_screen`: `wait` is now `wait_s`;
+  `moxi_slots.api.wait_ended`: `timeout` is now `timeout_s`.
+
 The first public release.
 
 - Numbered tmux sessions, slots 1 to 999, on one tmux server of the module's own, run

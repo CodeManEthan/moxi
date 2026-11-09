@@ -5,12 +5,12 @@
 
 * **Codex, between passes**: the newest rollout by mtime is read backward for the
   readings written since the store's newest one from it.
-* **Codex, a pull**: when the newest Codex reading is older than `limits.codex_pull_after`
-  seconds and turns is installed, turns' `codex_rate_limits(timeout=3)` asks a live Codex
+* **Codex, a pull**: when the newest Codex reading is older than `limits.codex_pull_after_s`
+  seconds and turns is installed, turns' `codex_rate_limits(timeout_s=3)` asks a live Codex
   host or a short-lived app-server for one more. A pull that fails, or turns absent,
   leaves the stored readings in place, and each Codex row older than the threshold says
   why no newer reading came. A failed pull's time is kept in the store's `meta`, and no
-  pull is tried again until `limits.codex_pull_after` has passed since it.
+  pull is tried again until `limits.codex_pull_after_s` has passed since it.
 * **Claude** readings come only from turns' `usage` event (`moxi_usage.listeners`), so
   with turns absent Claude's rows are `unavailable`, "turns is not installed".
 
@@ -93,9 +93,9 @@ class Row:
     last two), from its winning reading.
 
     What the reading gives (`window_minutes`, `slot`, `used_percent`, `resets_at`,
-    `observed_at` in epoch seconds, `age_seconds`, `source`, `session_id`, `plan_type`)
+    `observed_at` in epoch seconds, `age_s`, `source`, `session_id`, `plan_type`)
     is `UNKNOWN` where the reading did not say, and all of it where no reading was found;
-    the state and `reason` say which. `age_seconds` is `now - observed_at`. `full_at` is
+    the state and `reason` say which. `age_s` is `now - observed_at`. `full_at` is
     the projection's time the window reaches 100%, None with `projection` saying why
     there is none; `fit` counts the readings it fitted. `reason` and `note` are None when
     there is nothing to say; `note` says why no newer reading came when one was wanted.
@@ -113,7 +113,7 @@ class Row:
     used_percent: Any = UNKNOWN
     resets_at: Any = UNKNOWN
     observed_at: Any = UNKNOWN
-    age_seconds: Any = UNKNOWN
+    age_s: Any = UNKNOWN
     source: Any = UNKNOWN
     session_id: Any = UNKNOWN
     plan_type: Any = UNKNOWN
@@ -135,7 +135,7 @@ class Row:
             "window_minutes": self.window_minutes, "label": self.label,
             "state": self.state, "reason": self.reason, "slot": self.slot,
             "used_percent": self.used_percent, "resets_at": iso(self.resets_at),
-            "observed_at": iso(self.observed_at), "age_seconds": self.age_seconds,
+            "observed_at": iso(self.observed_at), "age_s": self.age_s,
             "source": self.source, "session_id": self.session_id,
             "plan_type": self.plan_type, "full_at": iso(self.full_at),
             "projection": self.projection, "fit": self.fit, "note": self.note,
@@ -216,7 +216,7 @@ def limits(*, harness: str | None = None, now: float | None = None, pull: bool =
             notes.extend(_read_rollout(conn, now=now, days=days, env=env))
             if pull:
                 pulled = _maybe_pull(conn, now=now, days=days,
-                                     after=float(settings["limits.codex_pull_after"]))
+                                     after=float(settings["limits.codex_pull_after_s"]))
         found = _stored(conn, wanted, store.cutoff(now, days))
     finally:
         conn.close()
@@ -231,7 +231,7 @@ def limits(*, harness: str | None = None, now: float | None = None, pull: bool =
                                  projection_minutes=float(
                                      settings["limits.projection_minutes"])))
     if pulled is not None and not pulled.ok:
-        after = float(settings["limits.codex_pull_after"])
+        after = float(settings["limits.codex_pull_after_s"])
         rows = [_with_note(row, now, after, pulled.reason) for row in rows]
     return Limits(now=now, rows=tuple(rows), pull=pulled, notes=tuple(notes))
 
@@ -270,7 +270,7 @@ def window_row(harness: str, found: list[Reading], *, now: float,
                label=label(winner.window_minutes, winner.limit_id, winner.slot),
                state=state, reason=reason, slot=_said(winner.slot),
                used_percent=_said(winner.used_percent), resets_at=_said(winner.resets_at),
-               observed_at=winner.observed_at, age_seconds=now - winner.observed_at,
+               observed_at=winner.observed_at, age_s=now - winner.observed_at,
                source=winner.source, session_id=_said(winner.session_id),
                plan_type=_said(winner.plan_type), full_at=full_at, projection=projection,
                fit=fit, extra=_load_extra(winner.extra))
@@ -428,7 +428,7 @@ def _maybe_pull(conn: sqlite3.Connection, *, now: float, days: float,
     if failed is not None and 0 <= now - failed < after:
         return Pull(tried=False, ok=False,
                     reason=f"the last pull, {_ago(now - failed)} ago, brought no reading; "
-                           "the next waits for limits.codex_pull_after")
+                           "the next waits for limits.codex_pull_after_s")
     pulled = _pull(conn, now=now, days=days)
     if pulled.tried:
         store.note_pull(conn, now=now, failed=not pulled.ok)
@@ -445,7 +445,7 @@ def _pull(conn: sqlite3.Connection, *, now: float, days: float) -> Pull:
     if fn is None:
         return Pull(tried=False, ok=False, reason=why)
     try:
-        got = fn(timeout=PULL_TIMEOUT)
+        got = fn(timeout_s=PULL_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - a failed pull leaves the stored readings
         return Pull(tried=True, ok=False, reason=f"the pull failed: {_describe(exc)}")
     if got is None:

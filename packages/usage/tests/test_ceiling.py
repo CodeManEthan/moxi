@@ -99,16 +99,16 @@ def test_the_guard_is_declared_as_turns_reads_it():
     (g,) = GUARDS
     assert isinstance(g, turns.Guard)
     assert (g.name, g.who, g.judge, g.switch, g.on_error) == (
-        "ceiling", "agents", "moxi_usage.ceiling:judge", "ceiling.on", "allow")
+        "ceiling", "agents", "moxi_usage.ceiling:judge", "ceiling.enabled", "allow")
     assert g.calls == {"claude": ("*",), "codex": ("*",)}
     assert g.problems() == []
 
 
 def test_the_switch_passes_the_cores_check_and_is_the_install_question():
-    assert switch_problem(settings.schema(), "ceiling.on") is None
+    assert switch_problem(settings.schema(), "ceiling.enabled") is None
     found = modules.load("usage")
     assert found.ok, found.reason
-    text = found.questions["ceiling.on"]
+    text = found.questions["ceiling.enabled"]
     assert text.startswith("the worker ceiling (") and text.endswith(")")
     assert "\n" not in text
 
@@ -125,7 +125,7 @@ def test_off_with_thresholds_set_the_guard_does_not_run():
 
 
 def test_on_by_the_switch_with_both_thresholds_the_ceiling_acts():
-    write_config(THRESHOLDS + "on = true\n")
+    write_config(THRESHOLDS + "enabled = true\n")
     on = loader().load(on=[]).get("usage.ceiling")
     assert on is not None and on.by == ("switch",)
     a = started()
@@ -137,9 +137,9 @@ def test_on_by_the_switch_with_both_thresholds_the_ceiling_acts():
 
 
 @pytest.mark.parametrize("config", [
-    "[ceiling]\non = true\nwarn_tokens = 100000\n",
-    "[ceiling]\non = true\nhard_tokens = 150000\n",
-    "[ceiling]\non = true\n",
+    "[ceiling]\nenabled = true\nwarn_tokens = 100000\n",
+    "[ceiling]\nenabled = true\nhard_tokens = 150000\n",
+    "[ceiling]\nenabled = true\n",
 ])
 def test_on_with_a_threshold_at_zero_every_call_is_allowed_and_marks_warns(config):
     write_config(config)
@@ -150,17 +150,17 @@ def test_on_with_a_threshold_at_zero_every_call_is_allowed_and_marks_warns(confi
     assert not ceiling.state_dir().exists()
     row = doctor.marks_row(now=NOW)
     assert row.state == "warn"
-    assert "the worker ceiling is on (ceiling.on)" in row.detail
+    assert "the worker ceiling is on (ceiling.enabled)" in row.detail
     assert "allows every call" in row.detail
 
 
 def test_on_by_turns_list_alone_the_ceiling_acts_and_marks_warns_without_thresholds():
-    write_turns_config('[guards]\non = ["usage.ceiling"]\n')
+    write_turns_config('[guards]\nrun = ["usage.ceiling"]\n')
     on = loader().load().get("usage.ceiling")
     assert on is not None and on.by == ("list",)
     row = doctor.marks_row(now=NOW)
-    assert row.state == "warn" and "on (turns' guards.on)" in row.detail
-    write_config(THRESHOLDS)                 # ceiling.on stays false
+    assert row.state == "warn" and "on (turns' guards.run)" in row.detail
+    write_config(THRESHOLDS)                 # ceiling.enabled stays false
     assert doctor.marks_row(now=NOW).state == "ok"
     a = started()
     a.context(20_000 + HARD)
@@ -168,10 +168,10 @@ def test_on_by_turns_list_alone_the_ceiling_acts_and_marks_warns_without_thresho
 
 
 def test_marks_reads_only_ceiling_on_when_turns_is_absent(monkeypatch):
-    write_turns_config('[guards]\non = ["usage.ceiling"]\n')
+    write_turns_config('[guards]\nrun = ["usage.ceiling"]\n')
     monkeypatch.setattr(modules, "available", lambda name: name != "turns")
     assert doctor.marks_row(now=NOW).state == "ok"
-    write_config("[ceiling]\non = true\n")
+    write_config("[ceiling]\nenabled = true\n")
     assert doctor.marks_row(now=NOW).state == "warn"
 
 
@@ -471,7 +471,7 @@ def test_the_config_check_takes_roots_from_home_and_word_lists():
 
 
 def test_a_config_that_cannot_be_read_allows_every_call(caplog):
-    write_config(THRESHOLDS + "on = \"maybe\"\n")
+    write_config(THRESHOLDS + "enabled = \"maybe\"\n")
     a = started()
     a.context(20_000 + HARD)
     with caplog.at_level(logging.WARNING, logger="moxi.usage"):

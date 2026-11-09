@@ -282,7 +282,7 @@ class _Lane:
 
 # -- the runner --------------------------------------------------------------------------
 
-#: `() -> (guards.on, guards.max_wait_ms)`.
+#: `() -> (guards.run, guards.max_wait_ms)`.
 Settings = Callable[[], "tuple[list[str], int]"]
 #: `(text, key, fix) -> None` and `(key) -> None`: the doctor's record and clear.
 Record = Callable[[str, str, "str | None"], None]
@@ -338,7 +338,7 @@ class GuardRunner:
         return [e.to_leg() for e in self.entries]
 
     def reload(self) -> list[dict[str, Any]]:
-        """Read `guards.on`, the switches and `guards.max_wait_ms` again, load what they
+        """Read `guards.run`, the switches and `guards.max_wait_ms` again, load what they
         name, and make the table. Returns it in the leg's form. Never raises."""
         try:
             on, max_wait = self._settings()

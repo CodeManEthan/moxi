@@ -114,8 +114,8 @@ def test_connector_settings_default():
 
 
 def test_connector_settings_read_from_the_file():
-    write_config(None, "[connector]\nidentity = \"phone-app\"\nwait_default = 20\n"
-                       "wait_max = 60\n")
+    write_config(None, "[connector]\nidentity = \"phone-app\"\nwait_default_s = 20\n"
+                       "wait_max_s = 60\n")
     got = config.load().connector
     assert (got.identity, got.wait_default, got.wait_max) == ("phone-app", 20, 60)
 
@@ -124,10 +124,10 @@ def test_connector_settings_read_from_the_file():
     ('[connector]\nidentity = "operator"\n', "connector.identity"),
     ('[connector]\nidentity = "app@proj-a"\n', "connector.identity"),
     ('[connector]\nidentity = "agent-4"\n', "connector.identity"),
-    ('[connector]\nwait_max = 100\n', "connector.wait_max"),
-    ('[connector]\nwait_max = 0\n', "connector.wait_max"),
-    ('[connector]\nwait_default = 91\n', "connector.wait_default"),
-    ('[connector]\nwait_default = 0\n', "connector.wait_default"),
+    ('[connector]\nwait_max_s = 100\n', "connector.wait_max_s"),
+    ('[connector]\nwait_max_s = 0\n', "connector.wait_max_s"),
+    ('[connector]\nwait_default_s = 91\n', "connector.wait_default_s"),
+    ('[connector]\nwait_default_s = 0\n', "connector.wait_default_s"),
     ('[provision]\noperator = "boss"\n[connector]\nidentity = "boss"\n',
      "connector.identity"),
 ])

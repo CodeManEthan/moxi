@@ -576,7 +576,7 @@ def test_sockets_on_this_boxs_user_manager(site, tmp_path, monkeypatch, capsys):
             # unit step applied, then resume. The sockets start before the service, so
             # resume finds them running and is done.
             stops: list = []
-            stopped = units.stop(row.module, ["shell"], record=stops)
+            stopped = units.stop(row.module, ["shell"], stopped=stops)
             assert all(a.ok for a in stopped)
             declare("127.0.0.1", "::1", doc="the throwaway shell, rewritten")
             done = row.apply()
@@ -741,7 +741,7 @@ def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
             assert row.show(service, "ActiveState")["ActiveState"] == "active"
 
             stops: list = []
-            assert all(a.ok for a in units.stop(row.module, ["relay"], record=stops))
+            assert all(a.ok for a in units.stop(row.module, ["relay"], stopped=stops))
             assert [e.unit for e in stops] == [sock, service]
             down = (row.show(sock, "ActiveState"), row.show(service, "ActiveState"))
             declare("relay-next")

@@ -302,7 +302,7 @@ export const CLASSES = [
 /** The theme colours series take, in turn: series `i` takes `SERIES_TOKENS[seriesClass(i)]`. */
 export const SERIES_TOKENS = ["series-1", "series-2", "series-3", "series-4", "series-5", "series-6"] as const;
 
-/** A series' colour class, `s0` to `s5`. */
+/** A series' colour class: `s` and the series' index, wrapped at the token count. */
 export function seriesClass(i: number): string {
   return `s${i % SERIES_TOKENS.length}`;
 }

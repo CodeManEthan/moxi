@@ -61,7 +61,7 @@ from pathlib import Path
 from . import _backend
 from ._backend import RenderError, Schedule, Socket, Spec, UnitRef
 from ._declare import digest, merge, switch_problem, switch_value
-from ._home import environment, locators_set
+from ._home import unit_env, locators_set
 from ._types import DeclarationError, Declarations, UnitChange
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -122,7 +122,7 @@ def plan(module: str, *, only: Iterable[str] | None = None,
         return _refuse_all(module, declared, marked, wanted, "editable", reason)
 
     own = frozenset(path for refs in marked.values() for ref in refs for path in ref.paths)
-    planner = _Planner(found, impl, env, environment(module), own)
+    planner = _Planner(found, impl, env, unit_env(module), own)
     out: list[UnitChange] = []
     for kind, name, entry in declared:
         refs = marked.pop(name, [])

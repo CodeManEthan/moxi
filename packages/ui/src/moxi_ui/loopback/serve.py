@@ -749,7 +749,7 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
 
     held = contextlib.ExitStack()
     try:
-        held.enter_context(files.lock(runtime / "page.lock", timeout=LOCK_WAIT))
+        held.enter_context(files.lock(runtime / "page.lock", timeout_s=LOCK_WAIT))
     except files.LockTimeout as err:
         log.warning("another page server holds the lock: %s", err)
         return codes.TEMPFAIL

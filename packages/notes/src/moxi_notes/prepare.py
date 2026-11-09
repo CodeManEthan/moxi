@@ -8,7 +8,7 @@ whole and holds back deletions when an added file is dropped, and names every dr
 path in the pass's record. The rest commits. Under either action the step is the same: a
 file the clean filter redacted judges clean, and one it couldn't is left out.
 
-One file costs one file: a blob over `max_mb` is left out, and an allowlist that can't be
+One file costs one file: a blob over `max_mib` is left out, and an allowlist that can't be
 read leaves out every file with a hit, each reason naming the allowlist's file and line.
 The step refuses the whole pass only when it can judge no file: a set that can't run,
 notes' config that can't be read, or a git call that fails.

@@ -68,7 +68,7 @@ def keys(log: Path) -> list[str]:
 
 def test_the_exit_dialog_answered_ends_the_pane(wide, tmp_path):
     pane, log = draw(tmp_path, EXIT, choices=EXIT_CHOICES)
-    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=5)
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait_s=5)
     assert (done.outcome, done.why, done.keys) == ("ended", "", ("Enter",))
     assert done.capture is None
     assert keys(log) == ["Enter"]
@@ -80,13 +80,13 @@ def test_the_exit_step_with_wait_zero_after_a_read(wide, tmp_path):
     seen = read_screen(1, [CLAUDE_EXIT_DIALOG])
     assert (seen.screen, seen.full, seen.dead, seen.pane_id) == \
         (CLAUDE_EXIT_DIALOG, True, False, pane)
-    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=0)
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait_s=0)
     assert done.outcome == "ended" and keys(log) == ["Enter"]
 
 
 def test_a_changed_screen_is_a_mismatch_and_no_key_is_received(wide, tmp_path):
     _, log = draw(tmp_path, SUBAGENT, choices=EXIT_CHOICES)
-    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=1)
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait_s=1)
     assert done.outcome == "mismatch" and "subagent" in done.why
     assert done.keys == () and keys(log) == []
     record = json.loads(Path(done.capture).read_text())
@@ -101,7 +101,7 @@ def test_a_changed_screen_is_a_mismatch_and_no_key_is_received(wide, tmp_path):
 def test_an_exit_dialog_that_ignores_enter_is_not_ended(wide, tmp_path, monkeypatch):
     monkeypatch.setattr(answer, "ENDED_WAIT", 1.0)
     pane, log = draw(tmp_path, EXIT, choices=EXIT_CHOICES, on_enter="ignore")
-    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=5)
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait_s=5)
     assert done.outcome == "not-ended" and keys(log) == ["Enter"]
     assert pane_field(pane, "pane_dead") == "0"
 
@@ -110,7 +110,7 @@ def test_the_trust_screen_gets_down_then_enter(wide, tmp_path):
     _, log = draw(tmp_path, TRUST, choices=TRUST_CHOICES, on_enter="leave")
     seen = read_screen(1, SCREENS)
     assert seen.screen is CLAUDE_TRUST_FOLDER and seen.full
-    done = answer_screen(1, CLAUDE_TRUST_FOLDER, wait=10)
+    done = answer_screen(1, CLAUDE_TRUST_FOLDER, wait_s=10)
     assert (done.outcome, done.why) == ("gone", "")
     assert keys(log) == ["Down", "Enter"] and done.keys == ("Down", "Enter")
     assert read_screen(1, SCREENS).screen is None
@@ -118,7 +118,7 @@ def test_the_trust_screen_gets_down_then_enter(wide, tmp_path):
 
 def test_dev_channels_gets_enter(wide, tmp_path):
     _, log = draw(tmp_path, DEV, choices=DEV_CHOICES, on_enter="leave")
-    done = answer_screen(1, CLAUDE_DEV_CHANNELS, wait=5)
+    done = answer_screen(1, CLAUDE_DEV_CHANNELS, wait_s=5)
     assert done.outcome == "gone" and keys(log) == ["Enter"]
 
 
@@ -128,7 +128,7 @@ def test_a_dead_pane_is_ended_without_screen(wide, tmp_path):
     wait_for(lambda: pane_field(pane, "pane_dead") == "1", what="the pane to die")
     seen = read_screen(1, [CLAUDE_EXIT_DIALOG])
     assert seen.dead and not seen.full
-    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=0)
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait_s=0)
     assert done.outcome == "ended-without-screen" and done.keys == ()
 
 
@@ -148,7 +148,7 @@ def test_an_unknown_slot_is_refused(wide):
     with pytest.raises(UsageError):
         read_screen(1, ["CLAUDE_TRUST_FOLDER"])
     with pytest.raises(UsageError):
-        answer_screen(1, CLAUDE_TRUST_FOLDER, wait=-1)
+        answer_screen(1, CLAUDE_TRUST_FOLDER, wait_s=-1)
 
 
 def test_pane_use_reads_copy_mode_and_activity(wide, tmp_path):

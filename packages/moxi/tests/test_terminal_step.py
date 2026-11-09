@@ -283,7 +283,7 @@ def test_a_home_or_store_change_does_not_move_the_file(
 def no_account(monkeypatch):
     """No entry for this uid in the user database (no local folder on Windows), and no
     test kit's anchor variable, so the anchor has no place."""
-    monkeypatch.delenv(paths.ANCHOR_HOME)
+    monkeypatch.delenv(paths.ANCHOR_HOME_ENV)
     if WINDOWS:
         from moxi import _win
 
