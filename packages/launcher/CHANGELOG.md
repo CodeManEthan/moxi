@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4 (2026-11-08)
+
+- The `usage` extra accepts moxi-usage 0.3.
+
 ## 0.1.3 (2026-11-08)
 
 The first public release.
