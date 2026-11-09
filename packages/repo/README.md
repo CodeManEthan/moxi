@@ -330,9 +330,9 @@ A failure the committer can't show its caller, such as a refused pass run from a
 kept as a doctor record, replaced on each pass and cleared once the condition ends.
 
 repo also exports the small git helper the committer uses:
-`moxi_repo.git(root, *args, timeout=30)` runs git with no prompts and git's local and
+`moxi_repo.git(root, *args, timeout_s=30)` runs git with no prompts and git's local and
 pathspec variables removed, `moxi_repo.changes(root, staged=True)` returns the staged (or
-`range=(a, b)`) changes as `Change(status, path, old_path, blob)`, and
+`rev_range=(a, b)`) changes as `Change(status, path, old_path, blob)`, and
 `moxi_repo.literal_pathspec(path)` gives a path's literal pathspec form.
 
 ## Projects

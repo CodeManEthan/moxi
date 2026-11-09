@@ -241,7 +241,7 @@ def changes(root: str | os.PathLike, *, staged: bool = True,
             rev_range: tuple[str, str] | None = None, paths=(), renames: bool = True,
             timeout_s: float = DEFAULT_TIMEOUT) -> list[Change]:
     """What changed under `paths` (every path when none): what is staged against `HEAD`
-    (the empty tree on an unborn branch), or with `range=(a, b)` between two commits.
+    (the empty tree on an unborn branch), or with `rev_range=(a, b)` between two commits.
 
     Each path goes to git in its literal form, in argv: `paths` over `MAX_PATHS` paths or
     `MAX_PATH_BYTES` bytes raises `ValueError`. Renames are found (`-M`) unless

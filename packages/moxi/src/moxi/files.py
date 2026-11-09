@@ -156,8 +156,8 @@ def lock(path: str | os.PathLike, *, timeout_s: float | None = None,
          nested: bool = False) -> AbstractContextManager[None]:
     """Hold an exclusive lock on the lock file `path` for the length of the block.
 
-    `timeout=None` waits as long as it takes; `timeout=0` tries once; a number waits that
-    many seconds. When the wait runs out, `LockTimeout` names the holder's pid.
+    `timeout_s=None` waits as long as it takes; `timeout_s=0` tries once; a number waits
+    that many seconds. When the wait runs out, `LockTimeout` names the holder's pid.
 
     The lock file is created (0600) and never removed. Once the lock is taken, the
     holder's pid is written at the start of the file, so a waiting process can name it.

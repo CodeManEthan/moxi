@@ -17,7 +17,7 @@ deny-list.
   empty). A key that refers to history kept elsewhere (`history_base`, `forked_from_id`,
   ...) is not on that list, and neither is any key not seen.
 * **Reading it.** Backwards through sessions' `records_back` in 64 KB blocks, to the
-  earliest record the verdict needs, and line 1 (`head=True`), with a 64 MB limit. The
+  earliest record the verdict needs, and line 1 (`read_head=True`), with a 64 MB limit. The
   read asks for every kind of record, because the evidence rule must see every line. A
   `malformed` record, or an `other` record sessions' lists do not recognise, is `unknown`.
   The one exception is a last line with no newline that does not decode: Codex is writing

@@ -647,8 +647,8 @@ notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("cat-file", "-e", f"{oid}^{{commit}}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
 notes	packages/notes/src/moxi_notes/resolve.py	Resolution.__init__	name	dir	notes_dir
-notes	packages/notes/src/moxi_notes/resolve.py	`dir` is a `Path`, or None: no notes directory, no start line, no folder. The resolver	use	`dir	`notes_dir
-notes	packages/notes/src/moxi_notes/resolve.py	"""The resolver's answer: `dir` (a `Path` or None), `rule` (one of `RULES`) and	use	`dir	`notes_dir
+notes	packages/notes/src/moxi_notes/resolve.py	`dir` is a `Path`, or None: no notes directory, no start line, no folder. The resolver	keep	dir	dir
+notes	packages/notes/src/moxi_notes/resolve.py	"""The resolver's answer: `dir` (a `Path` or None), `rule` (one of `RULES`) and	keep	dir	dir
 notes	packages/notes/src/moxi_notes/settle.py	the committing pass's own attempt fails, a pass tries once more `push_backoff` later. Each	use	`push_backoff	`push_backoff_s
 notes	packages/notes/src/moxi_notes/settle.py	attempt these steps make starts within `push_backoff` plus 6 minutes of the commit. This	use	`push_backoff	`push_backoff_s
 notes	packages/notes/src/moxi_notes/settle.py	The push duty. One due time, `push_backoff` after the pass ended, per commit this	use	`push_backoff	`push_backoff_s

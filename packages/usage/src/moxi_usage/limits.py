@@ -6,7 +6,7 @@
 * **Codex, between passes**: the newest rollout by mtime is read backward for the
   readings written since the store's newest one from it.
 * **Codex, a pull**: when the newest Codex reading is older than `limits.codex_pull_after_s`
-  seconds and turns is installed, turns' `codex_rate_limits(timeout=3)` asks a live Codex
+  seconds and turns is installed, turns' `codex_rate_limits(timeout_s=3)` asks a live Codex
   host or a short-lived app-server for one more. A pull that fails, or turns absent,
   leaves the stored readings in place, and each Codex row older than the threshold says
   why no newer reading came. A failed pull's time is kept in the store's `meta`, and no

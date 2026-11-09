@@ -35,7 +35,7 @@ Reading one source (`Read`, `Back`, `LastRequest`, `Batch`, `Window`):
 
 Each harness's transcript retention (interface 3):
 
-* `retention(environ=None)`: how long each harness keeps its transcripts, as set: Claude
+* `retention(env=None)`: how long each harness keeps its transcripts, as set: Claude
   Code's `cleanupPeriodDays`, Codex's compression switch and its archive folder, and that
   sessions reads no setting for OpenCode (`Retention`, with the lines a setup prints).
   It reads and changes nothing else.

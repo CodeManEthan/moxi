@@ -4,19 +4,20 @@
 
 - Config keys `start.limit` and `guards.on` are now `start.limit_chars` and
   `guards.run`. An old key, set in the config file, is refused, naming the new one.
-- `moxi-turns-ping --wait-seconds` is now `--wait-s`. Run `moxi install turns` so the
-  setup writes the new flag into the Codex hook commands; until then every Codex hook
-  call fails on the old flag.
+- `moxi-turns-ping --wait-seconds` is now `--wait-s`, with no alias. A Codex session's
+  hook commands are built when it launches, so a session launched after the upgrade
+  needs nothing. A Codex session already running keeps the old flag, and each of its
+  hook calls fails until it is relaunched.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
-  the old name must change): `moxi_turns.client.Delivery.wait_ended`: `timeout` is now
-  `timeout_s`; `moxi_turns.client.Delivery.wait_started`: `timeout` is now `timeout_s`;
-  `moxi_turns.client.Session`: `directory` is now `endpoint_dir`;
-  `moxi_turns.client.Session.codex_limits`: `timeout` is now `timeout_s`;
-  `moxi_turns.client.Session.command`: `timeout` is now `timeout_s`;
-  `moxi_turns.client.Session.mcp_reload`: `timeout` is now `timeout_s`;
-  `moxi_turns.client.wait_ready`: `timeout` is now `timeout_s`;
-  `moxi_turns.codex_appserver.codex_rate_limits`: `timeout` is now `timeout_s`;
-  `moxi_turns.results.Agents.busy`: `shells` is now `include_shells`.
+  the old name must change): `moxi_turns.Agents.busy`: `shells` is now `include_shells`;
+  `moxi_turns.codex_rate_limits`: `timeout` is now `timeout_s`;
+  `moxi_turns.Delivery.wait_ended`: `timeout` is now `timeout_s`;
+  `moxi_turns.Delivery.wait_started`: `timeout` is now `timeout_s`;
+  `moxi_turns.Session`: `directory` is now `endpoint_dir`;
+  `moxi_turns.Session.codex_limits`: `timeout` is now `timeout_s`;
+  `moxi_turns.Session.command`: `timeout` is now `timeout_s`;
+  `moxi_turns.Session.mcp_reload`: `timeout` is now `timeout_s`;
+  `moxi_turns.wait_ready`: `timeout` is now `timeout_s`.
 - `start.order`'s default is `["launcher", "comms", "notes"]`, the start-context modules
   in this repository. A config that sets the key keeps its own list.
 - The README is written for a newcomer: what turns is, its three guards and what each

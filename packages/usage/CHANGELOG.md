@@ -7,7 +7,7 @@
   `ceiling.enabled`. An old key, set in the config file, is refused, naming the new one.
 - The limits row field `age_seconds` is now `age_s`.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
-  the old name must change): `moxi_usage.limits.Row`: `age_seconds` is now `age_s`.
+  the old name must change): `moxi_usage.api.Row`: `age_seconds` is now `age_s`.
 
 The first public release.
 

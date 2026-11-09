@@ -1,7 +1,7 @@
 """Where a session's notes live: the resolver, stated once.
 
 `notes_dir(path, *, override=None)` answers with a `Resolution(dir, rule, warning)`.
-`notes_dir` is a `Path`, or None: no notes directory, no start line, no folder. The resolver
+`dir` is a `Path`, or None: no notes directory, no start line, no folder. The resolver
 never creates a folder, and nothing here reads the process environment for the
 override; the caller passes it.
 
@@ -49,8 +49,8 @@ PROJECTS_UNREADABLE = ("projects could not be read; a project may keep its notes
                        "elsewhere, check before creating")
 
 class Resolution:
-    """The resolver's answer: `notes_dir` (a `Path` or None), `rule` (one of `RULES`) and
-    `warning` (a sentence, or None)."""
+    """The resolver's answer: `dir` (a `Path` or None), `rule` (one of `RULES`) and
+    `warning` (a sentence, or None). The constructor takes the first as `notes_dir`."""
 
     __slots__ = ("dir", "rule", "warning")
 
