@@ -101,6 +101,18 @@ moved. Without `--main`, or when REF is not an ancestor, it prints that the comp
 did not run. `--dry-run` performs every classification and leftover check without
 writing files.
 
+The script reads every Python file under `packages/`: a file outside a `src/` (tests,
+conftest, scripts) is read for uses, and none of its definitions is a row's. It
+resolves `from package import submodule`, imports inside functions, and a module's lazy
+`__getattr__` table (a dict of names to the module that holds each). A field row on a
+class renames the keyword at its resolved constructor calls; a `kwonly` row passes every
+later positional argument by keyword and drops a star that stood later. A `use` row's old
+text may be longer than the name, such as `clock.age_seconds` or `timeout=`, to pick one
+token, and it changes every match on its line; `use` rows on one line apply together, and
+a `keep` row on a line they change stays applied. A `keep` row also stops the cite
+rewrite on its line. A keyword on a later line of a call is settled by a row on that
+line. A run that would leave a file that does not parse writes nothing.
+
 ## The tag check
 
 Code, tests and docs in this repository give their reasons in plain words. The tag
