@@ -75,7 +75,7 @@ def test_setup_and_teardown_on_a_fresh_environment_with_no_harness_roots(spawned
     for name in ("Claude Code", "Codex", "OpenCode"):
         assert f"memory: {name}: no sessions found" in said
     assert "not started through turns" not in said
-    assert "Claude Code's auto memory is on" in said
+    assert "auto memory" not in said            # no Claude Code here: nothing to turn off
     assert f"start the first full ingest with: {setup.INGEST_LINE}" in said
     assert spawned == []
     assert not os.path.lexists(settings_file)
@@ -144,6 +144,14 @@ def test_auto_memory_is_offered_only_when_it_is_on(spawned, settings_file):
     code, said = run(Asker("n"))
     assert "Claude Code's auto memory is on" in said
     assert "Bringing Claude Code's saved memories into Moxi may come later" in said
+
+
+def test_auto_memory_is_offered_where_claude_codes_folder_exists_without_settings(
+        spawned, settings_file):
+    os.makedirs(os.path.dirname(settings_file), exist_ok=True)
+    code, said = run(Asker("n"))
+    assert "Claude Code's auto memory is on" in said
+    assert not os.path.lexists(settings_file)
 
 
 def test_no_setting_is_written_without_a_yes(spawned, settings_file):
@@ -227,12 +235,24 @@ def test_the_first_full_ingest_starts_detached_only_on_a_yes(spawned, settings_f
     assert "asked for the first full ingest" in said and "running" not in said
 
 
-def test_the_fast_engine_line_shows_only_where_it_is_missing(monkeypatch):
-    out = io.StringIO()
-    monkeypatch.setattr(setup, "RE2_MODULE", "no_such_engine_here")
-    setup.re2_line(out)
-    assert out.getvalue() == f"memory: {setup.RE2_LINE}\n"
-    out = io.StringIO()
-    monkeypatch.setattr(setup, "RE2_MODULE", "json")
-    setup.re2_line(out)
-    assert out.getvalue() == ""
+def test_setup_never_offers_the_fast_engine(spawned, monkeypatch):
+    # Its install builds from source where no ready wheel fits; secrets' doctor offers it.
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name, *a: None if name == "re2" else real(name, *a))
+    code, said = run()
+    assert code == 0 and "--with re2" not in said and "fallback" not in said
+
+
+def test_the_codex_client_name_is_the_one_turns_gives_codex():
+    # Read from the source: importing the module needs turns' optional Codex extra.
+    import ast
+    import importlib.util
+
+    spec = importlib.util.find_spec("moxi_turns.codex_ws")
+    tree = ast.parse(open(spec.origin).read())
+    names = [node.value.value for node in tree.body if isinstance(node, ast.Assign)
+             and any(getattr(t, "id", None) == "CLIENT_NAME" for t in node.targets)]
+    assert names == [setup.TURNS_CODEX_CLIENT]

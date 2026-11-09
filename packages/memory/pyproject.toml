@@ -19,11 +19,12 @@ classifiers = [
     "Topic :: Software Development",
     "Topic :: Text Processing :: Indexing",
 ]
-# turns calls the start line, the lists, the reminder and the ingest trigger; sessions is
+# turns calls the start line, the lists, the reminder and the ingest trigger (0.2.4 is the
+# first turns whose default start order names memory); sessions is
 # the only way memory reads a transcript (it needs the release that says which messages
 # the harness injected, and the one with `retention()`); secrets' sets redact every text
 # memory stores.
-dependencies = ["moxi>=0.1.6,<0.2", "moxi-turns>=0.2,<0.3", "moxi-sessions>=0.2.6,<0.3",
+dependencies = ["moxi>=0.1.6,<0.2", "moxi-turns>=0.2.4,<0.3", "moxi-sessions>=0.2.6,<0.3",
                 "moxi-secrets>=0.1,<0.2"]
 
 [project.optional-dependencies]

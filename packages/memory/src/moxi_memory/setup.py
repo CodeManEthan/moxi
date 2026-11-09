@@ -17,11 +17,13 @@
    value. The file is written back from its parsed form, so key order and indentation may
    change, and setup says so before it asks. It refuses a file it can't parse, and says
    why. With no yes, or nobody at the keyboard, it writes nothing and prints the key to
-   set. When auto memory is already off it says nothing.
+   set. When auto memory is already off it says nothing, and so it does on a machine with
+   no Claude Code, where neither its settings file nor the folder that holds it exists.
 4. **The first full ingest.** It offers to start it, detached, with the line to watch it.
 
-Redaction speed: where secrets' fast engine is not installed, setup says the first full
-ingest runs on secrets' slower fallback and prints how to add the fast one.
+Redaction speed: setup says nothing about secrets' engine. The first full ingest runs
+fast enough on secrets' fallback, and where no ready wheel of the fast engine fits, its
+install would build from source; `moxi doctor secrets` offers it where one fits.
 
 `teardown()` is the announcement's `TEARDOWN`. It leaves Claude Code's settings as they
 are and says that auto memory is not turned back on.
@@ -49,11 +51,6 @@ TIMER_LINE = "moxi config set memory ingest.timer true"
 #: The line that starts a full ingest by hand, and the one that watches it.
 INGEST_LINE = "moxi memory ingest --all"
 STATUS_LINE = "moxi memory status"
-#: Where secrets' fast engine is missing: what setup says, and the line that adds it.
-RE2_LINE = ("redaction runs on secrets' fallback engine here, so the first full ingest "
-            "takes longer; secrets' fast engine adds it: moxi install secrets --with re2")
-#: The Python module secrets' fast engine imports.
-RE2_MODULE = "re2"
 
 
 def _say(out: TextIO, text: str) -> None:
@@ -236,10 +233,18 @@ def write_off(path: str) -> str:
     return target
 
 
+def _no_claude_code(path: str) -> bool:
+    """Whether this machine shows no sign of Claude Code: neither its settings file nor
+    the folder that holds it exists."""
+    return not os.path.lexists(path) and not os.path.isdir(os.path.dirname(path))
+
+
 def auto_memory(ask: Callable[[str], str] | None, out: TextIO, env) -> bool:
     """Step 3. Returns False only when a write failed."""
     try:
         path = _settings_file(env)
+        if _no_claude_code(path):
+            return True
         data = _load(os.path.realpath(path))
     except Unreadable as exc:
         if env.get(AUTO_MEMORY_ENV):
@@ -275,18 +280,6 @@ def auto_memory(ask: Callable[[str], str] | None, out: TextIO, env) -> bool:
 
 
 # -- 4. the first full ingest -----------------------------------------------------------
-
-def re2_line(out: TextIO) -> None:
-    """Say so when secrets' fast engine is not installed."""
-    import importlib.util
-
-    try:
-        found = importlib.util.find_spec(RE2_MODULE) is not None
-    except (ImportError, ValueError):
-        found = False
-    if not found:
-        _say(out, RE2_LINE)
-
 
 def first_ingest(ask: Callable[[str], str] | None, out: TextIO) -> None:
     """Step 4: offer the first full ingest, started detached."""
@@ -339,7 +332,6 @@ def setup(*, ask: Callable[[str], str] | None = None, out: TextIO | None = None,
     ok = True
     if "claude" in harnesses:
         ok = auto_memory(ask, out, env)
-    re2_line(out)
     first_ingest(ask, out)
     return 0 if ok else 1
 
@@ -358,7 +350,7 @@ def teardown(*, out: TextIO | None = None, env: Mapping[str, str] | None = None)
     return 0
 
 
-__all__ = ["AUTO_MEMORY_ENV", "AUTO_MEMORY_KEY", "INGEST_LINE", "RE2_LINE", "STATUS_LINE",
+__all__ = ["AUTO_MEMORY_ENV", "AUTO_MEMORY_KEY", "INGEST_LINE", "STATUS_LINE",
            "TIMER_LINE", "TURNS_CODEX_CLIENT", "Unreadable", "auto_memory",
-           "auto_memory_on", "first_ingest", "re2_line", "retention_lines", "roots",
+           "auto_memory_on", "first_ingest", "retention_lines", "roots",
            "setup", "teardown", "timer_lines", "write_off"]

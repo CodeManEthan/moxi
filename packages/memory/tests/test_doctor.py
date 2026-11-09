@@ -51,6 +51,8 @@ def test_a_fresh_home_gives_every_row_and_writes_nothing():
     assert list(rows) == NAMES
     assert rows["index"].state == "warn" and "no index yet" in rows["index"].detail
     assert rows["ingest"].state == "warn"
+    # the same command search and status name for a missing index
+    assert rows["index"].fix == rows["ingest"].fix == "moxi memory reindex"
     assert rows["sets"].state == "ok" and "credentials, broad" in rows["sets"].detail
     assert rows["sessions"].state == "ok" and "no session table yet" in rows["sessions"].detail
     assert rows["retention"].state == "ok"
@@ -176,6 +178,10 @@ def test_a_set_secrets_does_not_have_fails_the_sets_row():
     write_config("memory", '[redact]\nsets = ["credentials", "no-such-set"]\n')
     row = by_name()["sets"]
     assert row.state == "fail" and "no-such-set" in row.detail
+    assert row.fix == "moxi config set memory redact.sets --remove no-such-set"
+    assert "credentials" in row.detail.split("Secrets' sets:")[1]
+    write_config("memory", '[redact]\nsets = ["no-such-set"]\n')
+    assert by_name()["sets"].fix == "moxi config unset memory redact.sets"
 
 
 def test_the_start_row_reads_turns_start_list():
@@ -225,6 +231,20 @@ def test_the_announcement_names_every_part():
     from moxi_memory import settings
 
     assert "ingest.timer" in settings.schema().keys
+
+
+def test_the_index_is_a_declared_rebuildable_store_and_the_session_table_is_kept():
+    from moxi.modules import load
+    from moxi_memory import index, settings
+
+    stores = load("memory").stores
+    entry = stores["index"]
+    assert entry["kind"] == "dir" and entry["rebuildable"] is True
+    assert settings.cache_dir() / entry["path"] == index.index_dir()
+    assert stores["sessions"]["rebuildable"] is False
+    ingest_one()
+    assert index.db_path(index.current()).parent == index.index_dir()
+    assert {p.name for p in settings.cache_dir().iterdir()} == {entry["path"]}
 
 
 # -- the additions -----------------------------------------------------------------------------

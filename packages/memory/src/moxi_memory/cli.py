@@ -58,11 +58,16 @@ _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
 
 def parse_since(text: str, *, now: float | None = None) -> float:
     """`--since`'s TIME as seconds since the epoch: an age (`30m`, `12h`, `7d`, `2w`),
-    ISO 8601 (no zone is local time), or seconds since the epoch."""
+    ISO 8601 (no zone is local time), or seconds since the epoch. A bare whole number of
+    four digits or fewer is refused: it reads like a year, which as epoch seconds would
+    be a moment in 1970 and keep every row."""
     value = text.strip()
     now = time.time() if now is None else now
     if m := _RELATIVE.fullmatch(value):
         return now - float(m.group(1)) * _UNITS[m.group(2)]
+    if value.isdigit() and len(value) <= 4:
+        raise ValueError(f"{text!r} is not a time: for a year give ISO 8601 "
+                         f"({value}-01-01); epoch seconds are ten digits today")
     try:
         if value.replace(".", "", 1).isdigit():
             return float(value)

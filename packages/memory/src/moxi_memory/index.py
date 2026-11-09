@@ -1,9 +1,10 @@
 """The index: its schema, its generation files, and the locks that keep readers safe.
 
 The index is derived: it can be deleted and rebuilt from the transcripts, and holds
-nothing they can't give back. It lives in memory's cache directory as a series of
-generation files, `index-<n>.db`, each with a lock file `index-<n>.lock` beside it. A
-small pointer file, `index.current`, names the current generation and is replaced in one
+nothing they can't give back. It lives in the `index` folder of memory's cache directory
+(a store the announcement declares rebuildable, so an uninstall's purge removes it) as a
+series of generation files, `index-<n>.db`, each with a lock file `index-<n>.lock`
+beside it. A small pointer file, `index.current`, names the current generation and is replaced in one
 step (`moxi.files.atomic_write`). No file is ever renamed over, or removed from under, a
 database a process may hold open.
 
@@ -59,7 +60,10 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     import sqlite3
 
-#: The pointer file's name in memory's cache directory.
+#: The folder in memory's cache directory that holds the generations, their locks and the
+#: pointer.
+INDEX_DIR = "index"
+#: The pointer file's name in the index folder.
 POINTER = "index.current"
 #: The writer lock's file name in memory's state directory.
 WRITER_LOCK = "writer.lock"
@@ -212,10 +216,11 @@ class Rebuilding:
 # -- places ---------------------------------------------------------------------------
 
 def index_dir(env: Mapping[str, str] | None = None) -> Path:
-    """Where the generations and the pointer live: memory's cache directory."""
+    """Where the generations, their locks and the pointer live: the `index` folder of
+    memory's cache directory."""
     from .settings import cache_dir
 
-    return cache_dir(env)
+    return cache_dir(env) / INDEX_DIR
 
 
 def db_path(n: int, env: Mapping[str, str] | None = None) -> Path:
@@ -643,7 +648,8 @@ def _has_table(conn, name: str) -> bool:
                         (name,)).fetchone() is not None
 
 
-__all__ = ["POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "SCHEMA", "IndexMissing",
+__all__ = ["INDEX_DIR", "POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "SCHEMA",
+           "IndexMissing",
            "IndexUnreadable", "StateUnreadable", "WriterBusy", "Rebuilding", "Reader",
            "Writer", "index_dir",
            "db_path", "lock_path", "pointer_path", "writer_lock_path", "rebuild_lock_path",

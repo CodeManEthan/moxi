@@ -11,8 +11,8 @@ names at least one set.
 
 memory reads no environment variable of its own. Its folders move with the core's root
 variables like every module's (`moxi.paths.Layout`): `state_dir()` holds the session table,
-the writer lock and the rebuild lock; `cache_dir()` holds the index generations, which
-can be deleted and rebuilt from the transcripts.
+the writer lock and the rebuild lock; `cache_dir()` holds the index generations, in its
+`index` folder, which can be deleted and rebuilt from the transcripts.
 
 Standard library and `moxi.config` only at import.
 """
@@ -88,7 +88,8 @@ def state_dir(env: Mapping[str, str] | None = None) -> Path:
 
 
 def cache_dir(env: Mapping[str, str] | None = None) -> Path:
-    """memory's cache directory: the index generations and their pointer."""
+    """memory's cache directory: the index generations and their pointer, in its `index`
+    folder."""
     return layout().cache_dir(env)
 
 

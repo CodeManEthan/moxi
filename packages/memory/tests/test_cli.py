@@ -181,6 +181,13 @@ def test_since_takes_an_age_iso_or_epoch_seconds():
         cli.parse_since("soon")
 
 
+def test_since_refuses_a_bare_year():
+    for text in ("2026", " 2025 ", "99"):
+        with pytest.raises(ValueError, match="ISO 8601"):
+            cli.parse_since(text)
+    assert cli.parse_since("2026-01-01") > 1_700_000_000.0
+
+
 def test_clock_show_is_local_time_to_the_minute():
     assert clock.show(START) == time.strftime("%Y-%m-%d %H:%M", time.localtime(START))
     assert clock.show(None) == "-"

@@ -33,7 +33,6 @@ from collections.abc import Iterator
 from moxi.doctor import Row
 
 MODULE = "memory"
-INGEST_ALL = "moxi memory ingest --all"
 CONFIG = "moxi config memory"
 REINDEX = "moxi memory reindex"
 #: A request waiting this many seconds for the writer lock, with no rebuild running, is
@@ -77,10 +76,9 @@ def _index() -> Row:
         reader = index.open_read()
     except index.IndexMissing:
         return Row(MODULE, "index", "warn", "no index yet; the first ingest makes it",
-                   INGEST_ALL)
+                   REINDEX)
     except index.IndexUnreadable as exc:
-        return Row(MODULE, "index", "fail", f"the index can't be read: {exc}",
-                   "moxi memory reindex")
+        return Row(MODULE, "index", "fail", f"the index can't be read: {exc}", REINDEX)
     with reader as r:
         conn = r.conn
         tiers = conn.execute("SELECT count(*) FROM rows").fetchone()[0]
@@ -134,7 +132,7 @@ def _ingest(harnesses) -> Row:
         reader = index.open_read()
     except (index.IndexMissing, index.IndexUnreadable):
         return Row(MODULE, "ingest", "warn", "; ".join(
-            ["no index yet, so nothing is ingested", *waiting]), INGEST_ALL)
+            ["no index yet, so nothing is ingested", *waiting]), REINDEX)
     with reader as r:
         walks = {h: index.meta_get(r.conn, f"last_walk.{h}") for h in harnesses}
         compressed = ingest.not_read(r.conn)
@@ -201,8 +199,12 @@ def _sets(config) -> Row:
     sets = tuple(config["redact.sets"])
     unknown = [s for s in sets if s not in moxi_secrets.SETS]
     if unknown:
+        # Remove one unknown name; with no known name left, go back to the default sets.
+        fix = ("moxi config unset memory redact.sets" if len(unknown) == len(sets) else
+               f"moxi config set memory redact.sets --remove {unknown[0]}")
+        known = ", ".join(moxi_secrets.SETS)
         return Row(MODULE, "sets", "fail", f"secrets has no set {', '.join(unknown)}; "
-                   "every ingest stops on it", "moxi config set memory redact.sets ...")
+                   f"every ingest stops on it. Secrets' sets: {known}", fix)
     try:
         moxi_secrets.redact("memory doctor", sets)
     except moxi_secrets.SetUnavailable as exc:

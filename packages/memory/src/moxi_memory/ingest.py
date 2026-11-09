@@ -49,8 +49,9 @@ and reads each source whose reuse keys changed. **The rebuild** makes a new gene
 reads every live source into it, keeps each session's label from the session table,
 switches the pointer, removes from the table each session it found no source for (except
 a row written after it started, and every row of a harness it didn't list: one whose root
-couldn't be listed, or one config `harnesses` leaves out), records that count as the generation's `dropped`, frees
-its locks and starts one child: the waiting request's when one waits, else one walk. Its
+couldn't be listed, or one config `harnesses` leaves out), records that count as the
+generation's `dropped`, frees its locks and starts one child: the waiting request's when
+one waits, else one walk. Its
 first full read is marked finished under the walk's rule, so a harness whose root is
 there but couldn't be listed leaves the new generation still filling.
 

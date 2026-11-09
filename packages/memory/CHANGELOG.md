@@ -20,8 +20,9 @@ The first public release.
 - A detached ingest child, `moxi-memory-ingest`, started when a turn ends and when a
   session ends, by a catch-up walk, and by an optional hourly timer. One child writes at a
   time.
-- The index is a series of generation files behind a pointer: a rebuild builds a new one
-  while searches read the old, and drops the sessions whose transcripts are gone.
+- The index is a series of generation files behind a pointer, in a rebuildable store that
+  `moxi uninstall memory --purge` removes: a rebuild builds a new one while searches read
+  the old, and drops the sessions whose transcripts are gone.
 - Through turns, each session gets one start line, its agent's and its project's recent
   sessions, and a one-line reminder at each prompt. The lists read only memory's session
   table and answer within 1.5 s.
@@ -29,7 +30,9 @@ The first public release.
   launch kind, which keeps scratch launches out of default search and the lists.
 - Setup counts each harness's sessions, prints how long each harness keeps transcripts,
   offers to turn Claude Code's auto memory off, and offers the first full read.
-- Interface 1, `moxi_memory.api`: `search`, `status` and `cut`.
+- Interface 1, `moxi_memory.api`: `search`, `status` and `cut`. A search raises
+  `IndexMissing` or `IndexUnreadable`, or `StateUnreadable` when only the state store
+  can't be read.
 - `moxi doctor memory` rows: `index`, `ingest`, `sets`, `start`, `sessions`, `links` and
   `retention`.
-- Linux only. Requires moxi 0.1.6 or later.
+- Linux only. Requires moxi 0.1.6 or later and turns 0.2.4 or later.

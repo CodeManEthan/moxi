@@ -52,7 +52,9 @@ query keeps at most 64 tokens of at most 100 characters each.
 
 - `--project P`: only sessions whose project label is P (below).
 - `--since TIME`: only rows at or after TIME: an age (`30m`, `12h`, `7d`, `2w`), ISO 8601
-  (`2026-11-06`, `2026-11-06T14:03:22Z`; no zone means local time) or epoch seconds.
+  (`2026-11-06`, `2026-11-06T14:03:22Z`; no zone means local time) or epoch seconds. A
+  bare number of four digits or fewer, such as `2026`, is refused rather than read as a
+  moment in 1970; give `2026-01-01` for a year.
 - `--harness H`: only `claude`, `codex` or `opencode` sessions.
 - `--results`: search the ends of tool results too.
 - `--subagents`: search subagent sessions too, which are indexed only while
@@ -340,11 +342,10 @@ to see it again. In order, it:
    target), and every other key's value; the file is written back from its parsed form, so
    key order and indentation may change, which it says before it asks. It won't write a
    file it can't parse, and says why. With no yes it prints the key to set. When auto
-   memory is already off it says nothing. Skipped when `harnesses` leaves out `claude`.
-4. **Says when redaction runs on secrets' slower engine**, when the `re2` module of
-   secrets' fast engine isn't installed, so the first full read takes longer, with
-   `moxi install secrets --with re2`.
-5. **Offers the first full read**, every transcript from its start, in the background,
+   memory is already off it says nothing. Skipped when `harnesses` leaves out `claude`,
+   and on a machine with no Claude Code, where neither its settings file nor its folder
+   exists.
+4. **Offers the first full read**, every transcript from its start, in the background,
    asked for as `moxi memory ingest --all` asks, with `moxi memory status` to watch it;
    or prints `moxi memory ingest --all`.
 
@@ -352,9 +353,9 @@ Right after setup, `moxi install` asks whether to turn the `ingest` timer on, de
 `moxi config set memory ingest.timer true` turns it on later.
 
 `moxi uninstall memory` leaves Claude Code's settings as they are and says so: auto memory
-stays off if setup turned it off. With `--purge` it offers to remove the session table;
-the index files in memory's cache folder are not a declared store, so delete that folder
-yourself.
+stays off if setup turned it off. With `--purge` it removes the index (the `index`
+folder in memory's cache folder), which a reindex can make again, and offers to remove the
+session table, which can't be made again.
 
 ## Settings
 
@@ -376,8 +377,8 @@ lists off, take `memory` off turns' `start.order`.
 
 memory reads no environment variable of its own. Its folders move with the core's, like
 every module's: the session table, the writer lock and the rebuild lock in its state
-folder (`~/.local/state/moxi/memory` by default), the index in its cache folder
-(`~/.cache/moxi/memory`). `moxi paths memory` prints both.
+folder (`~/.local/state/moxi/memory` by default), the index in the `index` folder of its
+cache folder (`~/.cache/moxi/memory/index`). `moxi paths memory` prints both.
 
 ## The optional links
 
@@ -396,9 +397,9 @@ Two sessions share an identity only when comms' qualified names are the same, so
 
 | row | ok | otherwise |
 |---|---|---|
-| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since (fix: `moxi memory reindex`); `fail` when it can't be read |
-| `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet, for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
-| `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have or can't run, which stops every ingest; `off` when memory's config can't be read |
+| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since; `fail` when it can't be read (fix for each: `moxi memory reindex`) |
+| `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet (fix: `moxi memory reindex`), for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
+| `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
 | `links` | whether comms and the launcher load, and what memory does without each | `warn` when one is installed but fails to load |

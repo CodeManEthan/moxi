@@ -327,4 +327,5 @@ def stamp(epoch: float | None) -> str:
 
 
 __all__ = ["MAX_TOKENS", "Hit", "Filling", "Result", "IndexMissing", "IndexUnreadable",
-           "StateUnreadable", "cut", "match", "since_seconds", "filling", "rebuilding", "search", "stamp"]
+           "StateUnreadable", "cut", "match", "since_seconds", "filling", "rebuilding",
+           "search", "stamp"]

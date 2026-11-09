@@ -19,6 +19,7 @@ repository holds all of them.
 | `packages/connector` | `moxi-connector` | An MCP server for the Claude apps: its sign-in, its address, and the tools other modules provide |
 | `packages/launcher` | `moxi-launcher` | Launch Claude Code and Codex sessions from presets: in this terminal, headless or in a tmux slot |
 | `packages/loadout` | `moxi-loadout` | Your own skills, agents and settings, placed for Claude Code, Codex and OpenCode |
+| `packages/memory` | `moxi-memory` | Search past sessions: a keyword index of every harness's transcripts, read where the harness keeps them |
 | `packages/notes` | `moxi-notes` | Where each session keeps its notes, snapshots of the notes repository, and the secret checks that guard it |
 | `packages/projects` | `moxi-projects` | A list of named places: projects, their roots, kinds and agents |
 | `packages/repo` | `moxi-repo` | Git hooks run as declared pieces, and one shared committer |

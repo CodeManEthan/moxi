@@ -38,10 +38,12 @@ TIMERS = {"ingest": {"command": "moxi-memory-ingest", "args": ["--walk"], "every
                      "switch": "ingest.timer",
                      "doc": "read the transcripts that changed since the last walk"}}
 #: The session table, which holds each session's identity and launch kind and can't be
-#: rebuilt from the transcripts. The index generations live in the cache directory and
-#: are rebuilt with `moxi memory reindex`.
+#: rebuilt from the transcripts; and the index folder, which holds the index generations,
+#: their locks and the pointer, and is rebuilt with `moxi memory reindex`.
 STORES = {
     "sessions": {"root": "state", "path": "state.db", "kind": "sqlite", "private": True,
                  "retention": "keep", "rebuildable": False, "lazy": True},
+    "index": {"root": "cache", "path": "index", "kind": "dir", "private": True,
+              "retention": "keep", "rebuildable": True, "lazy": True},
 }
 SEGMENT = None
