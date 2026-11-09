@@ -201,6 +201,10 @@ def whole_workspace(installs, monkeypatch) -> None:
     monkeypatch.setattr(reserved, "declared_names", _DECLARED_NAMES)
 
 
+#: The entry-point group turns reads launch additions from.
+ADDITIONS_GROUP = "moxi.turns.additions"
+
+
 @pytest.fixture(autouse=True)
 def only_comms_additions(monkeypatch) -> None:
     """turns' launch additions in this test come from comms alone.
@@ -208,26 +212,25 @@ def only_comms_additions(monkeypatch) -> None:
     The workspace installs every module together, so a launch would otherwise also carry
     what any other installed module contributes (memory's tool permissions, say), and a
     test that reads a launch line word by word would meet them."""
-    from moxi_turns import additions
+    from moxi import modules
 
-    real = additions.load
+    real = modules.extensions
 
-    def load(entries=None):
-        if entries is None:
-            from moxi import modules
+    def extensions(group, *args, **kwargs):
+        found = real(group, *args, **kwargs)
+        if group != ADDITIONS_GROUP:
+            return found
+        return [e for e in found if e.name == "comms"]
 
-            entries = [e for e in modules.extensions(additions.GROUP) if e.name == "comms"]
-        return real(entries)
-
-    monkeypatch.setattr(additions, "load", load)
+    monkeypatch.setattr(modules, "extensions", extensions)
 
 
 #: Python a child process runs first, so turns' launch additions in it come from comms
 #: alone, as `only_comms_additions` gives a test.
 ADDITIONS_COMMS_ONLY_PATCH = (
-    "import moxi_turns.additions as _ad; from moxi import modules as _mo; _ld = _ad.load; "
-    "_ad.load = lambda entries=None: _ld([e for e in _mo.extensions(_ad.GROUP) "
-    "if e.name == 'comms'] if entries is None else entries); ")
+    "from moxi import modules as _mo; _ex = _mo.extensions; "
+    "_mo.extensions = lambda group, *a, **k: [e for e in _ex(group, *a, **k) "
+    f"if group != {ADDITIONS_GROUP!r} or e.name == 'comms']; ")
 
 
 #: Python a child process runs first, so the reserve step in it sees no module's names,
