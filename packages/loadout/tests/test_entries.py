@@ -249,6 +249,25 @@ def test_json_with_comments_is_refused_and_its_entries_stand(lo):
     assert read(harness.codex_home() / "hooks.json")["hooks"]   # the other harness goes on
 
 
+def test_a_refused_json_file_names_what_loadout_does_about_it(tmp_path):
+    """loadout's two lines after the core's: held whole, so a change in the core's
+    wording can't drop what loadout says it does."""
+    path = tmp_path / "settings.json"
+    path.write_text("{ // c }")
+    try:
+        json.loads("{ // c }")
+    except ValueError as exc:
+        why = str(exc)
+    with pytest.raises(harness.Refused) as refused:
+        harness.Doc(path, "json")
+    assert str(refused.value) == (f"{path} is not plain JSON ({why}); loadout leaves it, "
+                                  "so its entries for this harness are not written")
+    path.write_text("[]")
+    with pytest.raises(harness.Refused) as refused:
+        harness.Doc(path, "json")
+    assert str(refused.value) == f"{path} is not a JSON object; loadout leaves it"
+
+
 def test_a_file_changed_while_planning_is_not_written(lo, monkeypatch):
     write(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
     settings().parent.mkdir(parents=True)
