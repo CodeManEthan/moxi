@@ -277,7 +277,7 @@ def build_store(backend: str):
 
 
 #: The verbs that post under the sender's identity.
-SEND_VERBS = ("send", "reply", "delete")
+SEND_VERBS = ("send", "reply", "remove")
 
 
 def _stamp_of(environ) -> SenderIdentity | None:

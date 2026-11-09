@@ -82,7 +82,7 @@ def test_with_both_it_adds_the_server_at_the_stamped_url_and_six_claude_rules():
                                                    token_env="MOXI_COMMS_MCP_TOKEN")},
         tool_permissions={"claude": ("mcp__comms__send", "mcp__comms__reply",
                                      "mcp__comms__agents", "mcp__comms__whoami",
-                                     "mcp__comms__history", "mcp__comms__delete")})
+                                     "mcp__comms__history", "mcp__comms__remove")})
     assert contributor.TOOLS == mcp_tools.NAMES_OF_TOOLS, "the rules name the tools served"
     assert VALUE not in repr(got), "it never returns the value"
 

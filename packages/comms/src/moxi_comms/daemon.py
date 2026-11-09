@@ -226,7 +226,7 @@ CASE_REASONS = {
         "The message waited past its expiry and was dropped before it reached the "
         "model. Its sender was not told; the expiry is on its line zero."),
     CASE_WITHDRAWN: (
-        "Its author withdrew the message (moxi comms delete) before it reached the "
+        "Its author withdrew the message (moxi comms remove) before it reached the "
         "model, so it was never handed over."),
     CASE_RESERVED: (
         "The message was waiting for this name when a module reserved it as a send-only "

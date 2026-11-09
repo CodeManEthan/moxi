@@ -285,7 +285,7 @@ def _spy(monkeypatch, daemon, method):
 def test_a_send_or_delete_under_a_reserved_name_is_refused_before_the_daemon(
         rig, console, monkeypatch):
     sends = _spy(monkeypatch, rig.daemon, "send")
-    deletes = _spy(monkeypatch, rig.daemon, "delete")
+    deletes = _spy(monkeypatch, rig.daemon, "remove")
     client = inprocess.InProcessClient(rig.daemon)
     for spelling in (CONSOLE, f"{CONSOLE}@global"):
         with pytest.raises(DaemonError) as refused:

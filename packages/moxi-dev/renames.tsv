@@ -774,6 +774,9 @@ sessions	packages/sessions/src/moxi_sessions/read.py	also among the records iter
 sessions	packages/sessions/src/moxi_sessions/reader.py	read_back	name	head	read_head
 sessions	packages/sessions/src/moxi_sessions/reader.py	file), and None without `head` or when line 1 does not end within the head's limit;	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/reader.py	1, or line 2 with `head`) has been yielded or there was none to yield, `limit` once the	use	`head	`read_head
+sessions	packages/sessions/src/moxi_sessions/reader.py	* line 1, read first, when asked (`head=True`): a Codex rollout's line 1 says whether the	use	`head=	`read_head=
+sessions	packages/sessions/src/moxi_sessions/reader.py	`limit` bytes or more. With `head=True`, line 1 is read first, from the start of the	use	`head=	`read_head=
+sessions	packages/sessions/src/moxi_sessions/reader.py	`first` is line 1's bytes without its newline when `head=True` (`b""` for an empty	use	`head=	`read_head=
 sessions	packages/sessions/src/moxi_sessions/readguard.py	home = _absolute(env.get("HOME"))	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/retention.py	retention	name	environ	env
 sessions	packages/sessions/src/moxi_sessions/retention.py	return environ.get("HOME") or str(Path.home())	keep	HOME	HOME
@@ -841,6 +844,8 @@ slots	packages/slots/src/moxi_slots/answer.py	1. With `wait=0` it reads once. Wi
 slots	packages/slots/src/moxi_slots/answer.py	opens), or `wait` runs out (`mismatch`). A caller passing `wait=0` has seen the	use	`wait	`wait_s
 slots	packages/slots/src/moxi_slots/answer.py	is too little of `wait` left to settle. Enter goes only on a settled read with the	use	`wait	`wait_s
 slots	packages/slots/src/moxi_slots/answer.py	`wait` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has	use	`wait	`wait_s
+slots	packages/slots/src/moxi_slots/answer.py	`answer_screen(slot, screen, wait)` presses the screen's keys, and only those: Up and	use	wait)	wait_s)
+slots	packages/slots/src/moxi_slots/answer.py	after the screen appeared. With `wait=0` on a screen that takes Enter alone (the exit	use	`wait=	`wait_s=
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("numbers", metavar="N", nargs="*", type=int)	keep	type	type
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--count", type=int, default=1, metavar="K",	keep	type	type
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--for", dest="seconds", required=True, type=float, metavar="S",	keep	type	type

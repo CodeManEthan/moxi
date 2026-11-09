@@ -4,7 +4,7 @@
 `pane_in_mode` and width, in one tmux call) and says which of `screens` is there and
 whether it fully matches (see `screens` for the rule). It sends nothing.
 
-`answer_screen(slot, screen, wait)` presses the screen's keys, and only those: Up and
+`answer_screen(slot, screen, wait_s)` presses the screen's keys, and only those: Up and
 Down toward the option on a screen that allows them, then Enter on the option. There is
 no other way to send a key or text into a pane: a session is typed into only through
 its own channel.
@@ -34,7 +34,7 @@ its own channel.
 
 `wait_s` bounds steps 1 and 2, the Enter included, so a caller's bound holds; step 3 has
 its own bound. One call presses Enter at most once, and every key follows a read taken
-after the screen appeared. With `wait=0` on a screen that takes Enter alone (the exit
+after the screen appeared. With `wait_s=0` on a screen that takes Enter alone (the exit
 dialog), the call is one read and at most Enter, back to back.
 
 A `mismatch` saves the screen's region, plain and with its escape sequences, as one

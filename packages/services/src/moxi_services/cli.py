@@ -547,7 +547,7 @@ def _show(args, out) -> int:
     if process is not None:
         put("process", f"pid {process['pid']}, up {_duration(process['uptime_s'])}, "
                        f"{process['rss_bytes'] / 1048576:.1f} MiB resident, "
-                       f"{process['cpu_seconds']:g} s of CPU")
+                       f"{process['cpu_s']:g} s of CPU")
     elif st is not None and st.pid:
         put("pid", st.pid)
     if row.kind == "timer":

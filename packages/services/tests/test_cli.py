@@ -125,6 +125,23 @@ def test_show_a_running_daemon(fake, no_modules, capsys):
     assert said["log"] == "journalctl --user -u web"
 
 
+def test_show_a_running_daemon_reads_its_process_fields(fake, no_modules, capsys,
+                                                        monkeypatch):
+    import os
+
+    process = cli._process(os.getpid())
+    assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}
+    monkeypatch.setattr(cli, "_process", lambda pid: process)
+    add(**written("web", enabled=True))
+    fake.written["web"] = Unit("daemon", True, active=True)
+    code, out, _ = run(capsys, "show", "web")
+    assert code == 0
+    [line] = [line for line in out.splitlines() if line.startswith("  process")]
+    assert line.endswith(f"{process['cpu_s']:g} s of CPU")
+    code, out, _ = run(capsys, "show", "web", "--json")
+    assert code == 0 and json.loads(out)["process"] == process
+
+
 AS_TIMER = ("judged as a timer, so if it should keep running, remove it and add it again "
             "without --timer")
 
