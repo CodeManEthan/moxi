@@ -12,7 +12,11 @@ SETTINGS = "settings.toml"
 #: The whole check of the config file's text: the schema, then the rules of `show` and the
 #: two context bands.
 CONFIG_CHECK = "moxi_statusline.settings:check"
-SETUP = None
+#: After each install: keep Claude Code's line on this environment's render, or ask once
+#: whether to use it.
+SETUP = "moxi_statusline.setup:setup"
+#: Before an uninstall: put back the line Moxi's replaced, or remove Moxi's line.
+TEARDOWN = "moxi_statusline.setup:teardown"
 SEGMENT = None
 #: Its doctor rows: what `moxi doctor` adds for statusline.
 DOCTOR = "moxi_statusline.doctor:rows"

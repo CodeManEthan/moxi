@@ -30,6 +30,38 @@ modules.
 At each module's install, statusline compiles the bytecode a render loads (the core, this
 package, and each installed module's segment), since a render can't write it.
 
+### Claude Code's setting
+
+After the install, statusline looks at the `statusLine` setting in Claude Code's user
+`settings.json` (in `$CLAUDE_CONFIG_DIR`, else `~/.claude`):
+
+- Moxi's line already: it points the setting at this environment's render, and asks
+  nothing.
+- No status line: it asks "Use Moxi's status line in Claude Code? [Y/n]". Yes sets Moxi's
+  line with the default items.
+- Your own line: it is left as it is; `moxi statusline use` switches.
+
+It asks once and records the answer, so a later install asks nothing; `moxi statusline
+use` asks again. With nobody at the keyboard it asks nothing, records nothing and says
+how to switch. An install never edits your own command: it replaces the setting whole or
+leaves it alone.
+
+Moxi's line is a `statusLine` whose command is the absolute path of a
+`moxi-statusline-render`. A script of your own that calls it stays yours.
+
+Each write keeps the old bytes of `settings.json` (the newest 5) in statusline's state
+folder, and is dropped, with one line, if the file changed since it was read. The file
+keeps its mode, key order and indent; a `settings.json` that is a link stays one; a file
+that isn't a plain JSON object is left alone. When the switch replaces a line, the line is
+kept so `restore` can put it back. Moxi's line keeps that line's `padding` and
+`refreshInterval`, and refreshes every 5 seconds when it set none, so the cache timer
+counts while a session is idle. A project's own `.claude/settings.json` is never touched,
+though Claude Code uses its line in that project.
+
+`moxi uninstall statusline` puts your old line back, or removes Moxi's line when there was
+none before it. A line of your own is left as it is; any `moxi-statusline-render --only`
+pieces it calls stop working.
+
 ## The line
 
 The items, in the order `show` gives them:
@@ -68,6 +100,15 @@ Every key is read at each render; `moxi config statusline` shows them.
 
 ## Commands
 
+- `moxi statusline use` sets Claude Code's status line to Moxi's, keeping the line it
+  replaces. Over Moxi's line it points it at this environment's render. With no line it
+  asks first; with nobody at the keyboard the command is the yes.
+- `moxi statusline restore [--force]` puts back the line `use` replaced, or removes the
+  setting when there was none. When Claude Code's line is no longer Moxi's (you set
+  another since), it refuses with one line; `--force` puts the saved line back over it.
+- `moxi statusline status [--json]` says whether Claude Code's line is Moxi's, its
+  command, the line kept to put back, the items shown and which show nothing, modules
+  named like a base field, and a project's own status line in the current folder.
 - `moxi statusline preview [--show a,b,c] [--no-color]` renders a sample input with the
   real command and prints the line and how long the render took. `--show` renders these
   items in place of `show`.
@@ -76,7 +117,8 @@ Every key is read at each render; `moxi config statusline` shows them.
   else; `--config` reads that file in place of the module's config file, and prints
   `config?` when it is missing or can't be read.
 
-`moxi doctor` checks that what a render loads is compiled, times one sample render
+`moxi doctor` checks that the command Claude Code's setting names resolves to an
+executable, that what a render loads is compiled, times one sample render
 against the module's budget (three times the start of `python -I -c pass`), and names
 `show` items with nothing behind them and installed modules named like a base field.
 

@@ -13,7 +13,16 @@ The first release.
 - Config keys `show`, `separator`, `color`, `dir.parts`, `context.warn_at` and
   `context.alert_at`, with a check that refuses an unknown item, more than one `row`, a
   `row` first or last, `warn_at` above `alert_at` and `dir.parts` under 1.
+- Claude Code's `statusLine` setting: `moxi statusline use` switches it to Moxi's line,
+  keeping the old line, and `moxi statusline restore [--force]` puts it back. Each write
+  keeps a backup of `settings.json`, drops itself when the file changed since it was
+  read, and keeps the file's mode, key order, indent and link.
+- Setup keeps Moxi's line on this environment's render, and with no line asks once
+  whether to use it, recording the answer. Uninstall puts the old line back, or removes
+  Moxi's.
+- `moxi statusline status [--json]`.
 - `moxi statusline preview` renders a sample input and prints the line and its time.
 - An install listener compiles the bytecode a render loads at every module's install.
-- Doctor rows: bytecode for what a render loads, one sample render against the budget,
-  `show` items with nothing behind them, and installed modules named like a base field.
+- Doctor rows: the command Claude Code's setting names resolves, bytecode for what a
+  render loads, one sample render against the budget, `show` items with nothing behind
+  them, and installed modules named like a base field.

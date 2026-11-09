@@ -2,23 +2,27 @@
 
 from statusline_kit import write_config
 
+import json
+
+from moxi import paths
 from moxi.doctor import Row
-from moxi_statusline import doctor
+from moxi_statusline import doctor, switch
 
 
 def test_rows_are_rows_in_order():
     rows = doctor.rows()
     assert all(isinstance(r, Row) and r.module == "statusline" for r in rows)
-    assert [r.name for r in rows] == ["bytecode", "sample render", "show", "module names"]
+    assert [r.name for r in rows] == ["command", "bytecode", "sample render", "show",
+                                      "module names"]
 
 
 def test_a_config_that_cant_be_read_is_one_warn_row_and_the_rest_read_the_default():
     write_config('show = ["row", "dir"]\n')
     rows = doctor.rows()
-    assert rows[0].name == "config"
-    assert rows[0].state == "warn"
-    assert "'row' first" in rows[0].detail
-    assert [r.name for r in rows[1:]] == ["bytecode", "sample render", "show",
+    assert rows[1].name == "config"
+    assert rows[1].state == "warn"
+    assert "'row' first" in rows[1].detail
+    assert [r.name for r in rows[2:]] == ["bytecode", "sample render", "show",
                                           "module names"]
 
 
@@ -57,3 +61,69 @@ def test_an_installed_module_named_like_a_base_field(seen):
     row = doctor.names_row()
     assert row.state == "warn"
     assert row.detail.endswith(": branch")
+
+
+# -- the statusLine command ------------------------------------------------------------
+
+def _line(command):
+    path = paths.claude_home() / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = {} if command is None else {"statusLine": {"type": "command",
+                                                       "command": command}}
+    path.write_text(json.dumps(value))
+
+
+def test_no_status_line_is_ok():
+    row = doctor.command_row()
+    assert (row.name, row.state, row.detail) == ("command", "ok",
+                                                 "Claude Code sets no status line")
+
+
+def test_moxis_line_here_is_ok():
+    _line(switch.render_command())
+    row = doctor.command_row()
+    assert row.state == "ok" and row.detail.startswith("Moxi's line, /")
+
+
+def test_moxis_line_at_a_path_that_is_gone_fails():
+    _line("/gone/env/bin/moxi-statusline-render")
+    row = doctor.command_row()
+    assert row.state == "fail"
+    assert row.detail == ("Claude Code's status line runs "
+                          "/gone/env/bin/moxi-statusline-render, which is not an "
+                          "executable here")
+    assert row.fix == "moxi statusline use"
+
+
+def test_moxis_line_in_another_environment_warns(tmp_path):
+    other = tmp_path / "other" / "bin" / "moxi-statusline-render"
+    other.parent.mkdir(parents=True)
+    other.write_text("#!/bin/sh\n")
+    other.chmod(0o755)
+    _line(str(other))
+    row = doctor.command_row()
+    assert row.state == "warn" and "another environment's render" in row.detail
+
+
+def test_an_own_line_is_checked_by_its_first_word(tmp_path):
+    script = tmp_path / "line.sh"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    _line(f"{script} --flag")
+    row = doctor.command_row()
+    assert row.state == "ok" and str(script) in row.detail
+    _line("sh -c 'echo hi'")
+    assert doctor.command_row().state == "ok"
+    _line(str(tmp_path / "missing.sh"))
+    row = doctor.command_row()
+    assert row.state == "warn" and "doesn't resolve" in row.detail
+    _line("no-such-command-anywhere")
+    assert doctor.command_row().state == "warn"
+
+
+def test_settings_that_cant_be_read_warn():
+    path = paths.claude_home() / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{bad")
+    row = doctor.command_row()
+    assert row.state == "warn" and "can't be checked" in row.detail

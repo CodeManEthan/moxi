@@ -1,6 +1,19 @@
 """`moxi statusline`: the status line's verbs.
 
+    moxi statusline use
+    moxi statusline restore [--force]
+    moxi statusline status [--json]
     moxi statusline preview [--show a,b,c] [--no-color]
+
+`use` sets Claude Code's status line to Moxi's. Over Moxi's line it points it at this
+environment's render; with no line it asks first, and with nobody at the keyboard the
+command is the yes. The line it replaces is kept for `restore`.
+
+`restore` puts back the line `use` replaced, only while Claude Code's line is still
+Moxi's: a line set since is the user's, and `--force` is the one way over it.
+
+`status` says whether Claude Code's line is Moxi's, its command, the line kept to put
+back, the items shown and which show nothing, and a project's own line in this folder.
 
 `preview` renders the sample input with the real command, as Claude would run it, and
 prints the line and the time the render took. `--show` renders these items in place of
@@ -49,6 +62,50 @@ def _items(text: str) -> list[str]:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
+# -- use, restore, status ------------------------------------------------------------------
+
+def _no_arguments(parser: argparse.ArgumentParser) -> None:
+    pass
+
+
+def _use(args: argparse.Namespace) -> int:
+    from .setup import use
+
+    return use()
+
+
+def _restore_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--force", action="store_true",
+                        help="put the saved line back even over a line that isn't Moxi's")
+
+
+def _restore(args: argparse.Namespace) -> int:
+    from .switch import restore
+
+    act = restore(force=args.force)
+    for line in act.lines:
+        print(line, file=sys.stdout if act.ok else sys.stderr)
+    return act.code
+
+
+def _status_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", help="print it as JSON")
+
+
+def _status(args: argparse.Namespace) -> int:
+    import json
+
+    from .status import lines, report
+
+    data = report()
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        for line in lines(data):
+            print(line)
+    return 0
+
+
 # -- preview ---------------------------------------------------------------------------
 
 def _preview_arguments(parser: argparse.ArgumentParser) -> None:
@@ -81,6 +138,19 @@ def _preview(args: argparse.Namespace) -> int:
 
 
 VERBS: list[Verb] = [
+    Verb("use", "use Moxi's status line in Claude Code",
+         "Set Claude Code's status line to Moxi's, keeping the line it replaces for "
+         "restore. Over Moxi's line it points it at this environment's render.",
+         _no_arguments, _use),
+    Verb("restore", "put back the status line use replaced",
+         "Put back the status line that use replaced, or remove the setting when there "
+         "was none. Refused when Claude Code's line is no longer Moxi's, unless --force.",
+         _restore_arguments, _restore),
+    Verb("status", "say whether Claude Code's status line is Moxi's, and what it shows",
+         "Whether Claude Code's status line is Moxi's, its command, the line kept to put "
+         "back, the items shown and which show nothing, modules named like a base field, "
+         "and a project's own status line in this folder. Writes nothing.",
+         _status_arguments, _status),
     Verb("preview", "render the sample input and print the line and its time",
          "Render the sample input with the real command, as Claude runs it, and print "
          "the line and how long the render took. Writes nothing.",
