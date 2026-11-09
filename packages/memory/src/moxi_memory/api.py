@@ -8,6 +8,8 @@
 * `status() -> Status`: the index, its reads, a running rebuild and the session table.
 * `IndexMissing` and `IndexUnreadable`: what `search` raises when there is no index to
   read, or one that can't be read. A search never answers those with an empty list.
+  `StateUnreadable`, a kind of `IndexUnreadable`, says the index reads but memory's
+  state store, which holds the session table, doesn't.
 * `cut(query)`: the tokens a query is searched for.
 
 Reading a session is sessions' (`moxi sessions read`), not memory's: a hit names its
@@ -16,9 +18,9 @@ harness, session and time for that.
 
 from __future__ import annotations
 
-from .index import IndexMissing, IndexUnreadable
+from .index import IndexMissing, IndexUnreadable, StateUnreadable
 from .search import Filling, Hit, Result, cut, search
 from .status import Status, status
 
 __all__ = ["search", "Result", "Hit", "Filling", "status", "Status", "IndexMissing",
-           "IndexUnreadable", "cut"]
+           "IndexUnreadable", "StateUnreadable", "cut"]

@@ -54,7 +54,8 @@ class Status:
     - `tokenizer`: the generation's tokenizer.
     - `sessions`: the session table's rows (`total`), by launch kind (`none` for no
       kind), and by whether they have an identity (`with_identity`,
-      `without_identity`).
+      `without_identity`). `sessions_unreadable`: why memory's state store, which holds
+      the table, can't be read, or None; the index's own state is apart from it.
     - `dropped`: how many sessions the last rebuild dropped; `rebuilt`: when it started.
 
     Times are seconds since the epoch.
@@ -76,6 +77,7 @@ class Status:
     waiting: dict[str, object] | None = None
     tokenizer: str | None = None
     sessions: dict[str, object] = field(default_factory=dict)
+    sessions_unreadable: str | None = None
     dropped: int | None = None
     rebuilt: float | None = None
 
@@ -105,23 +107,27 @@ def _rows(conn) -> dict[str, dict[str, int]]:
     return tiers
 
 
-def _sessions_alone(env) -> dict[str, object]:
-    """The session table's counts with no index to attach it to."""
+def _sessions_alone(out: Status, env) -> None:
+    """The session table's counts with no index to attach it to, into `out`."""
     import sqlite3
 
     from moxi import store
 
     from . import state
 
+    where = state.path(env)
     try:
-        conn = store.connect(state.path(env), create=False, timeout=0.25)
-    except (store.StoreError, sqlite3.Error):
-        return {}
+        conn = store.connect(where, create=False, timeout=0.25)
+    except store.StoreError:
+        return
+    except sqlite3.Error as exc:
+        out.sessions_unreadable = f"{where}: {exc}"
+        return
     try:
         conn.execute("PRAGMA query_only = 1")
-        return _sessions_of(conn, "main")
-    except sqlite3.Error:
-        return {}
+        out.sessions = _sessions_of(conn, "main")
+    except sqlite3.Error as exc:
+        out.sessions_unreadable = f"{where}: {exc}"
     finally:
         conn.close()
 
@@ -206,11 +212,11 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
         reader = index.open_read(env)
     except index.IndexMissing as exc:
         out.index, out.reason = MISSING, str(exc)
-        out.sessions = _sessions_alone(env)
+        _sessions_alone(out, env)
         return out
     except index.IndexUnreadable as exc:
         out.index, out.reason = UNREADABLE, str(exc)
-        out.sessions = _sessions_alone(env)
+        _sessions_alone(out, env)
         return out
     with reader:
         conn = reader.conn
@@ -230,8 +236,13 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
             out.tokenizer = meta.get("tokenizer")
             out.dropped = _number(meta.get("dropped"), int)
             out.rebuilt = _number(meta.get("rebuilt"))
-            if reader.attach_state(STATE):
-                out.sessions = _sessions_of(conn, STATE)
+            try:
+                if reader.attach_state(STATE):
+                    out.sessions = _sessions_of(conn, STATE)
+            except sqlite3.DatabaseError as exc:
+                from . import state
+
+                out.sessions_unreadable = f"{state.path(env)}: {exc}"
             if with_backlog:
                 out.backlog = backlog(conn, env)
         except sqlite3.DatabaseError as exc:

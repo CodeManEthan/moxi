@@ -48,7 +48,8 @@ by `not_read`.
 and reads each source whose reuse keys changed. **The rebuild** makes a new generation,
 reads every live source into it, keeps each session's label from the session table,
 switches the pointer, removes from the table each session it found no source for (except
-a row written after it started), records that count as the generation's `dropped`, frees
+a row written after it started, and every row of a harness it didn't list: one whose root
+couldn't be listed, or one config `harnesses` leaves out), records that count as the generation's `dropped`, frees
 its locks and starts one child: the waiting request's when one waits, else one walk. Its
 first full read is marked finished under the walk's rule, so a harness whose root is
 there but couldn't be listed leaves the new generation still filling.
@@ -536,10 +537,13 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
             finally:
                 conn.close()
             w.switch(n)
+            # A harness the rebuild didn't list keeps all its rows: one it tried and
+            # couldn't list, and one config `harnesses` leaves out. Its identities and
+            # launch kinds can't be read back from a transcript.
             seen = set(job.seen)
-            for harness in job.unlisted:
-                seen.update(sc.execute("SELECT harness, session_id FROM sessions "
-                                       "WHERE harness = ?", (harness,)).fetchall())
+            seen.update((h, s) for h, s in sc.execute(
+                "SELECT harness, session_id FROM sessions")
+                if h in job.unlisted or h not in job.harnesses)
             dropped = table.remove_unseen(sc, seen, started)
             state.clear_unfinished(sc)
         finally:

@@ -11,7 +11,7 @@ and under them one `moxi sessions read` command that opens the first hit's sessi
 around its time. A search that ran exits 0, also with no hit ("no match in N rows"), and
 adds one line for each state it can see that leaves its answer incomplete: the first
 full read still filling, or a rebuild running. A missing or unreadable index exits 1
-with what to run.
+with what to run; so does a state store that can't be read, naming the store.
 
 `ingest` and `reindex` only start the detached ingest child and exit 0 at once, with the
 `moxi memory status` line to watch it by; no rebuild ever runs inside this command.
@@ -113,6 +113,10 @@ def incomplete(result) -> list[str]:
 
 
 def _missing_message(exc, rebuilding: float | None) -> str:
+    if isinstance(exc, searching.StateUnreadable):
+        return (f"memory's state store can't be read ({exc}). A rebuild doesn't repair "
+                "it. Moved aside, it is made again empty at the next ingest, without "
+                "the session table's identities and launch kinds.")
     what = ("no index to search" if isinstance(exc, searching.IndexMissing)
             else f"the index can't be read ({exc})")
     if rebuilding is not None:
@@ -276,7 +280,10 @@ def _status(args, out, prog: str) -> int:
             print(f"last rebuild: started {show(s.rebuilt)}, dropped "
                   f"{s.dropped or 0} sessions whose transcript was gone", file=out)
     sessions = s.sessions
-    if sessions:
+    if s.sessions_unreadable is not None:
+        print(f"sessions: the state store can't be read ({s.sessions_unreadable})",
+              file=out)
+    elif sessions:
         print(f"sessions: {sessions['total']} (by launch kind: "
               f"{_counts(sessions['by_kind'])}); {sessions['with_identity']} with an "
               f"identity, {sessions['without_identity']} without", file=out)

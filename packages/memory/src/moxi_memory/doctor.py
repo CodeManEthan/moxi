@@ -17,7 +17,7 @@
   import. `warn` when it is off the list (no start line, no lists); `fail` when a row
   doesn't import.
 - sessions: rows in the session table, with an identity, settled, and with each launch
-  kind.
+  kind. `warn` when memory's state store can't be opened or read.
 - links: whether comms and the launcher load, and what memory does without each.
 - retention: each harness's transcript retention, from sessions. `warn` where sessions
   warns.
@@ -246,6 +246,8 @@ def _start(harnesses) -> Row:
 # -- sessions ---------------------------------------------------------------------------
 
 def _sessions() -> Row:
+    import sqlite3
+
     from moxi.store import StoreError
 
     from . import state
@@ -255,7 +257,7 @@ def _sessions() -> Row:
                    "started or been read since install")
     try:
         conn = state.connect(timeout=2.0, create=False)
-    except (StoreError, state.Late) as exc:
+    except (StoreError, state.Late, sqlite3.DatabaseError) as exc:
         return Row(MODULE, "sessions", "warn", f"the session table can't be opened: {exc}")
     try:
         total, with_identity, settled = conn.execute(
@@ -263,6 +265,8 @@ def _sessions() -> Row:
         ).fetchone()
         kinds = conn.execute("SELECT coalesce(kind, 'none'), count(*) FROM sessions "
                              "GROUP BY 1 ORDER BY 1").fetchall()
+    except sqlite3.DatabaseError as exc:
+        return Row(MODULE, "sessions", "warn", f"the session table can't be read: {exc}")
     finally:
         conn.close()
     by_kind = ", ".join(f"{kind} {n}" for kind, n in kinds) or "none"

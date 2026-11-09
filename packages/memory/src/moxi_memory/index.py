@@ -184,6 +184,12 @@ class IndexUnreadable(Exception):
     version of memory, or a generation lock that stayed held."""
 
 
+class StateUnreadable(IndexUnreadable):
+    """The index can be read but memory's state store, which holds the session table a
+    search reads beside it, can't. A rebuild doesn't repair it: the rebuild opens the
+    same store."""
+
+
 class WriterBusy(Exception):
     """Another child holds the writer lock."""
 
@@ -638,7 +644,8 @@ def _has_table(conn, name: str) -> bool:
 
 
 __all__ = ["POINTER", "WRITER_LOCK", "REBUILD_LOCK", "TOKENIZER", "SCHEMA", "IndexMissing",
-           "IndexUnreadable", "WriterBusy", "Rebuilding", "Reader", "Writer", "index_dir",
+           "IndexUnreadable", "StateUnreadable", "WriterBusy", "Rebuilding", "Reader",
+           "Writer", "index_dir",
            "db_path", "lock_path", "pointer_path", "writer_lock_path", "rebuild_lock_path",
            "current", "generations", "meta_get", "meta_set", "open_read",
            "rebuild_running", "writer"]

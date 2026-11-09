@@ -498,6 +498,20 @@ def test_a_rebuild_drops_gone_sessions_and_keeps_labels_and_relabel_rederives(tm
         assert {r[0] for r in rd.conn.execute("SELECT label FROM rows")} == {"repo"}
 
 
+def test_a_rebuild_keeps_the_table_rows_of_a_harness_config_leaves_out():
+    corpus()
+    run()
+    sc = state.connect()
+    table.write_start(sc, "codex", "codex-session", "codex-label", now=1.0)
+    table.write_identity(sc, "codex", "codex-session", "planner", now=1.0)
+    report = run("rebuild", config=config(harnesses=["claude"]))
+    assert report.dropped == 0
+    row = table.row(sc, "codex", "codex-session")
+    assert row is not None and row.identity == "planner"
+    with index.open_read() as rd:
+        assert index.meta_get(rd.conn, "dropped") == "0"
+
+
 # -- a first full read and the roots ---------------------------------------------------
 
 def test_a_rebuild_marks_its_first_read_finished_only_when_every_root_was_listed(

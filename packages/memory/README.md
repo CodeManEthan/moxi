@@ -90,7 +90,9 @@ shows while a rebuild runs: a search reads the index from before it.
 With no index, or one that can't be read, search exits 1 and says so on stderr, names
 `moxi memory status`, and either says a rebuild is running or names `moxi memory reindex`,
 which "starts a detached rebuild; this search can't wait for it". A missing index is never
-answered with an empty list.
+answered with an empty list. When the index reads but memory's state store (`state.db`,
+which holds the session table) doesn't, search exits 1 the same way and names that file;
+a rebuild doesn't repair it.
 
 `--json` prints one object: `tokens`, `rows`, `hits` (each with `harness`, `session_id`,
 `agent_id`, `time` in epoch seconds, `at` in UTC ISO 8601, `project`, `kind`, `tier` (`1`,
@@ -120,7 +122,8 @@ Before it asks it says that a rebuild drops every session whose transcript the h
 has deleted since memory read it, and that those sessions stay searchable until the
 rebuild ends. Searches keep reading the old index while it runs. When it ends it switches
 to the new index, removes the dropped sessions from the session table, records how many it
-dropped, and starts one catch-up walk for what was written meanwhile, or the waiting
+dropped (a harness it didn't list, because its folder couldn't be read or `harnesses`
+leaves it out, keeps its session table rows), and starts one catch-up walk for what was written meanwhile, or the waiting
 request, which reads everything anyway. `--relabel` also derives each session's project
 label again from its folder where that folder still exists; a session whose folder is gone
 keeps its label.
@@ -133,8 +136,9 @@ was last read and each harness's last walk; the backlog, the sources changed sin
 last walk; whether the first full read has finished; whether a rebuild is running, since
 when and its process id; a request waiting for the writer lock (walk, full read, rebuild
 or relabel) and when it was asked; what the last rebuild dropped; and the session table's
-count by launch kind and by whether a session has an identity. With no index, or one that can't
-be read, it says so, still prints the rebuild and session lines, names `moxi memory
+count by launch kind and by whether a session has an identity, or that memory's state
+store, which holds the session table, can't be read (the index line is apart from it).
+With no index, or one that can't be read, it says so, still prints the rebuild and session lines, names `moxi memory
 reindex` unless a rebuild is running, and exits 1. `--json` prints the same as one object.
 
 ## What each session gets
@@ -396,7 +400,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet, for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
-| `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened |
+| `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
 | `links` | whether comms and the launcher load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
 
@@ -416,7 +420,8 @@ failed ingest child.
   were searched), `tokens`, `filling` (a `Filling(read, listed)` while the first full read
   hasn't finished, else None), `rebuilding` (a running rebuild's start time, else None)
   and `generation`. With no index it raises `IndexMissing`, with one that can't be read
-  `IndexUnreadable`; it never answers either with an empty result.
+  `IndexUnreadable`, and with a state store that can't be read `StateUnreadable`, a kind
+  of `IndexUnreadable`; it never answers any of them with an empty result.
 - `status() -> Status`: what `moxi memory status` prints, as fields. It doesn't raise for
   a missing index: `Status.index` is `ok`, `missing` or `unreadable`.
 - `cut(query)`: the tokens a query is searched for.

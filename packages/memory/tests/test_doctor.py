@@ -244,3 +244,16 @@ def test_turns_puts_the_additions_into_a_launch(monkeypatch):
     assert "--allowedTools=Bash(moxi sessions read:*)" in adds.argv
     codex = turns.launch_additions("codex", cwd="/", env={})
     assert not any("moxi memory" in a for a in codex.argv)
+
+
+def test_a_state_store_that_cant_be_read_is_a_warn_on_the_sessions_row():
+    ingest_one()
+    path = state.path()
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(f"{path}{suffix}"):
+            os.remove(f"{path}{suffix}")
+    path.write_bytes(b"not a database " * 200)
+    rows = by_name()
+    assert rows["sessions"].state == "warn"
+    assert "the check failed" not in rows["sessions"].detail
+    assert rows["index"].state == "ok"

@@ -20,8 +20,9 @@ rows were written applies at the next search with no rewrite of the index.
 **What a search can see that leaves its answer incomplete**, and returns beside the hits:
 `filling`, while the first full read hasn't finished, and `rebuilding`, the start time of
 a rebuild that is running (the search reads the generation from before it). A missing
-or unreadable index raises `IndexMissing` or `IndexUnreadable`; it is never an empty
-answer.
+or unreadable index raises `IndexMissing` or `IndexUnreadable`, and a state store that can't
+be read raises `StateUnreadable`, a kind of `IndexUnreadable` that names the store; none
+is ever an empty answer.
 
 A search only reads. It holds the shared lock of the generation it opened until it ends,
 so a rebuild that switches meanwhile leaves that generation for it to read to the end,
@@ -37,7 +38,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from . import index
-from .index import IndexMissing, IndexUnreadable
+from .index import IndexMissing, IndexUnreadable, StateUnreadable
 
 #: The most tokens a query keeps; the rest are dropped.
 MAX_TOKENS = 64
@@ -277,8 +278,9 @@ def search(query: str, *, project: str | None = None,
     (`claude`, `codex` or `opencode`). `results` searches tier 2, the ends of tool
     results, too; `subagents` subagent rows too; `scratch` scratch-kind sessions too.
 
-    Raises `IndexMissing` when there is no index and `IndexUnreadable` when there is one
-    that can't be read. A query with no token in it finds nothing.
+    Raises `IndexMissing` when there is no index, `IndexUnreadable` when there is one
+    that can't be read, and `StateUnreadable` (an `IndexUnreadable`) when the index reads
+    but memory's state store doesn't. A query with no token in it finds nothing.
     """
     import sqlite3
 
@@ -291,6 +293,11 @@ def search(query: str, *, project: str | None = None,
         conn = reader.conn
         try:
             with_state = reader.attach_state(STATE) and _has_sessions(conn)
+        except sqlite3.DatabaseError as exc:
+            from . import state
+
+            raise StateUnreadable(f"{state.path(env)}: {exc}") from None
+        try:
             tables = ("rows", "tails") if results else ("rows",)
             found = []
             rows = 0
@@ -320,4 +327,4 @@ def stamp(epoch: float | None) -> str:
 
 
 __all__ = ["MAX_TOKENS", "Hit", "Filling", "Result", "IndexMissing", "IndexUnreadable",
-           "cut", "match", "since_seconds", "filling", "rebuilding", "search", "stamp"]
+           "StateUnreadable", "cut", "match", "since_seconds", "filling", "rebuilding", "search", "stamp"]

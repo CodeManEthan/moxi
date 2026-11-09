@@ -108,6 +108,28 @@ def test_an_unreadable_index_exits_1(capsys):
     assert code == 1 and "can't be read" in err and "moxi memory reindex" in err
 
 
+def spoil_state():
+    path = state.path()
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(f"{path}{suffix}"):
+            os.remove(f"{path}{suffix}")
+    path.write_bytes(b"not a database " * 200)
+
+
+def test_a_state_store_that_cant_be_read_is_named_and_the_index_stays_ok(capsys):
+    run()
+    spoil_state()
+    code, _, err = memory(capsys, "search", "anything")
+    assert code == 1 and "state.db" in err and "state store can't be read" in err
+    assert "index-" not in err and "moxi memory reindex" not in err
+    code, out, _ = memory(capsys, "status")
+    assert code == 0 and "index: generation" in out
+    assert "sessions: the state store can't be read" in out and "state.db" in out
+    code, out, _ = memory(capsys, "status", "--json")
+    got = json.loads(out)
+    assert got["index"] == "ok" and "state.db" in got["sessions_unreadable"]
+
+
 def test_a_filling_index_and_a_running_rebuild_each_add_one_line(capsys):
     with index.writer() as w:
         conn = w.connect()
