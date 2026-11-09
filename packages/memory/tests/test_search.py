@@ -46,7 +46,7 @@ def run(mode="walk", harness=None, sid=None, *, kinds=None, **kw):
     kw.setdefault("config", config())
     kw.setdefault("launcher", links.Link(links.READY, FakeLauncher(kinds))
                   if kinds is not None else links.Link(links.NONE))
-    kw.setdefault("then", lambda: None)
+    kw.setdefault("then", lambda args: None)
     return ingest.run(mode, harness, sid, **kw)
 
 

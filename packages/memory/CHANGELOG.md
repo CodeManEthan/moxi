@@ -14,8 +14,9 @@ The first public release.
   path. A secret that holds a `/` can reach the index under the default sets.
 - `moxi memory search`, `ingest`, `reindex` and `status`. A search that ran exits 0 and
   says in one line each when the first full read is still filling the index or a rebuild
-  is running; a missing or unreadable index exits 1. `ingest` and `reindex` start the
-  work in the background and return at once.
+  is running; a missing or unreadable index exits 1. `ingest` and `reindex` ask for the
+  work in the background and return at once. What they ask for waits, and is not lost,
+  while another ingest holds the writer lock; `status` and the doctor show it waiting.
 - A detached ingest child, `moxi-memory-ingest`, started when a turn ends and when a
   session ends, by a catch-up walk, and by an optional hourly timer. One child writes at a
   time.

@@ -224,6 +224,7 @@ def test_the_first_full_ingest_starts_detached_only_on_a_yes(spawned, settings_f
     code, said = run(Asker("y"))
     assert spawned == [["--all"]]
     assert f"watch it with: {setup.STATUS_LINE}" in said
+    assert "asked for the first full ingest" in said and "running" not in said
 
 
 def test_the_fast_engine_line_shows_only_where_it_is_missing(monkeypatch):

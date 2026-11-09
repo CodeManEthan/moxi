@@ -3,13 +3,34 @@
     moxi-memory-ingest --turn HARNESS SESSION   read one session since its cursor
     moxi-memory-ingest --gone HARNESS SESSION   read one session to its end, then walk
     moxi-memory-ingest --walk                   a catch-up walk
+    moxi-memory-ingest --walk --asked           a catch-up walk someone asked for
     moxi-memory-ingest --all                    read every source from its start
     moxi-memory-ingest --rebuild                build a new generation from every source
     moxi-memory-ingest --relabel                the rebuild, deriving labels again
+    moxi-memory-ingest --waiting                run the request waiting, if one still is
 
-One child writes at a time, under the writer lock. A child that finds it held exits at
-once with nothing done; the next trigger catches up. Every read goes through
-`moxi_sessions.api`, and every row through `moxi_memory.rows`.
+One child writes at a time, under the writer lock, and a child that finds it held exits
+at once. Every read goes through `moxi_sessions.api`, and every row through
+`moxi_memory.rows`.
+
+**Nothing asked for is lost to a held lock.** A turn's, a `gone`'s or a timer's walk
+that finds the lock held leaves nothing behind: a later walk reads every source that grew.
+Work someone asked for (`--walk --asked`, `--all`, `--rebuild`, `--relabel`) is a request
+(`moxi_memory.state`):
+
+1. The child records its request in the state store, then tries the writer lock once.
+   A request already waiting takes it in, keeping the higher kind and the earlier time.
+2. The child that takes the lock to run a request reads and clears the waiting one in
+   one transaction and runs what it read; when nothing waits (another child ran it), it
+   does nothing. A request written after that take keeps waiting.
+3. Every child that held the writer lock reads the store after it frees the lock, also
+   when it stopped on an error, and when a request waits starts a `--waiting` child to
+   run it. A rebuild starts that in place of its closing walk.
+4. A `--waiting` child records nothing: when it finds the lock held it exits, and the
+   request stays for the holder to start on its way out.
+
+A run killed after its take is not run again, since its request was cleared at the take;
+a killed rebuild is recorded for the doctor by the next child's tidy.
 
 **Cursors.** Each source's cursor lives in the index's `sources` table beside the rows it
 produced, written in the same transaction. A cursor sessions can't trust restarts the
@@ -28,7 +49,9 @@ and reads each source whose reuse keys changed. **The rebuild** makes a new gene
 reads every live source into it, keeps each session's label from the session table,
 switches the pointer, removes from the table each session it found no source for (except
 a row written after it started), records that count as the generation's `dropped`, frees
-its locks and starts one walk.
+its locks and starts one child: the waiting request's when one waits, else one walk. Its
+first full read is marked finished under the walk's rule, so a harness whose root is
+there but couldn't be listed leaves the new generation still filling.
 
 **The session table.** For each main session it reads, a child writes the label when the
 row has none, the newest record's time, and the launch kind. It asks the launcher for the
@@ -73,6 +96,7 @@ class Report:
 
     mode: str
     busy: bool = False
+    idle: bool = False
     sources: int = 0
     rows: int = 0
     tails: int = 0
@@ -85,6 +109,8 @@ class Report:
     def line(self) -> str:
         if self.busy:
             return "another ingest is running; nothing done"
+        if self.idle:
+            return "nothing waiting: another child ran the request"
         text = (f"{self.mode}: {self.sources} sources read, {self.rows} rows and "
                 f"{self.tails} tails written, {self.sessions} sessions")
         if self.skipped:
@@ -216,7 +242,14 @@ class Ingest:
         return label
 
     def answered(self, harness: str, main: str) -> bool:
-        """Whether the index holds a model answer of the main session."""
+        """Whether the index holds a model answer of the main session.
+
+        A row's key leaves out the session id, so a line a Claude `--resume` copied from
+        its parent lands under whichever session was read first. A full read takes
+        sources in path order, so a resume can be read before its parent; the parent's
+        copied answers are then the resume's, and the parent has no answer of its own
+        here, is never settled and is in no start list. The resume holds the content and
+        is listed, and a session settles only on answers it holds."""
         return self.conn.execute(
             "SELECT 1 FROM rows WHERE harness = ? AND session_id = ? AND agent_id IS NULL "
             "AND kind IN ('assistant', ?) LIMIT 1", (harness, main, rows.TOOL)
@@ -483,14 +516,16 @@ class Ingest:
 
 # -- the modes -------------------------------------------------------------------------
 
-def rebuild(*, env: Mapping[str, str] | None = None, relabel: bool = False,
-            config=None, launcher: links.Link | None = None, then=None) -> Report:
-    """Build a new generation from every live source, switch to it, drop the sessions
-    with no source from the session table, and start one walk (`then`, by default
-    `moxi_memory.start.start_walk`). Raises `index.WriterBusy` when another child holds
-    the writer lock."""
-    config = settings.read(env) if config is None else config
-    with index.writer(env) as w, w.rebuilding() as started:
+#: The modes a trigger starts: never recorded, and lost harmlessly to a held lock.
+TRIGGERS = ("turn", "gone", "walk")
+#: The mode of a child started to run the waiting request.
+WAITING = "waiting"
+
+
+def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
+    """Build a new generation from every live source under the held writer lock `w`,
+    switch to it, and drop the sessions with no source from the session table."""
+    with w.rebuilding() as started:
         n, conn = w.new_generation()
         sc = state.connect(env)
         try:
@@ -498,7 +533,6 @@ def rebuild(*, env: Mapping[str, str] | None = None, relabel: bool = False,
                 job = Ingest(conn, sc, config, mode="relabel" if relabel else "rebuild",
                              fresh=True, relabel=relabel, launcher=launcher)
                 job.walk(full=True)
-                index.meta_set(conn, "first_read", 1)
             finally:
                 conn.close()
             w.switch(n)
@@ -507,6 +541,7 @@ def rebuild(*, env: Mapping[str, str] | None = None, relabel: bool = False,
                 seen.update(sc.execute("SELECT harness, session_id FROM sessions "
                                        "WHERE harness = ?", (harness,)).fetchall())
             dropped = table.remove_unseen(sc, seen, started)
+            state.clear_unfinished(sc)
         finally:
             sc.close()
         conn = w.connect()
@@ -516,40 +551,116 @@ def rebuild(*, env: Mapping[str, str] | None = None, relabel: bool = False,
         finally:
             conn.close()
         job.report.dropped = dropped
-    if then is None:
-        from .start import start_walk as then
-    then()
     return job.report
 
 
-def run(mode: str, harness: str | None = None, session_id: str | None = None, *,
-        env: Mapping[str, str] | None = None, config=None,
-        launcher: links.Link | None = None, then=None) -> Report:
-    """Run one child's work: `turn`, `gone`, `walk`, `all`, `rebuild` or `relabel`.
-    A held writer lock gives a busy report at once."""
+def _do(w, mode: str, harness: str | None, session_id: str | None, *, env, config,
+        launcher) -> Report:
+    """One mode's work under the held writer lock `w`."""
+    if mode in ("rebuild", "relabel"):
+        return _rebuild(w, env=env, relabel=mode == "relabel", config=config,
+                        launcher=launcher)
+    conn = w.connect()
+    sc = state.connect(env)
     try:
-        if mode in ("rebuild", "relabel"):
-            return rebuild(env=env, relabel=mode == "relabel", config=config,
-                           launcher=launcher, then=then)
-        config = settings.read(env) if config is None else config
+        job = Ingest(conn, sc, config, mode=mode, fresh=mode == "all", launcher=launcher)
+        if mode in ("turn", "gone"):
+            job.read_session(harness, session_id)
+        if mode in ("gone", "walk"):
+            job.walk()
+        elif mode == "all":
+            job.walk(full=True)
+    finally:
+        conn.close()
+        sc.close()
+    return job.report
+
+
+def _take(env) -> state.Request | None:
+    sc = state.connect(env)
+    try:
+        return state.take_request(sc)
+    finally:
+        sc.close()
+
+
+def _after(env, then, *, walk: bool) -> None:
+    """After the writer lock is freed: start a child for the waiting request, or, when
+    none waits and `walk`, one walk."""
+    try:
+        sc = state.connect(env)
+        try:
+            waiting = state.read_request(sc)
+        finally:
+            sc.close()
+    except Exception:  # noqa: BLE001 - a store that can't be read starts nothing it holds
+        waiting = None
+    if waiting is not None:
+        then([f"--{WAITING}"])
+    elif walk:
+        then(["--walk"])
+
+
+def run(mode: str, harness: str | None = None, session_id: str | None = None, *,
+        asked: bool = False, env: Mapping[str, str] | None = None, config=None,
+        launcher: links.Link | None = None, then=None) -> Report:
+    """Run one child's work: `turn`, `gone` or `walk` for a trigger; `walk` with `asked`,
+    `all`, `rebuild` or `relabel` for a request; `waiting` to run the request waiting.
+
+    A held writer lock gives a busy report at once; a request stays recorded for the
+    holder to start. After it frees the lock, the child starts the next child with
+    `then(args)` (by default `moxi_memory.start.spawn`): the waiting request's, or after
+    a rebuild that finished with none waiting, one walk.
+    """
+    if then is None:
+        from .start import spawn as then
+    if mode not in (*TRIGGERS, *state.KINDS, WAITING):
+        raise ValueError(f"{mode!r} is not a mode of the ingest child")
+    config = settings.read(env) if config is None else config
+    kind = mode if mode in state.KINDS and (asked or mode not in TRIGGERS) else None
+    if kind is not None:
+        sc = state.connect(env)
+        try:
+            state.ask(sc, kind)
+        finally:
+            sc.close()
+    held = False
+    try:
         with index.writer(env) as w:
-            conn = w.connect()
-            sc = state.connect(env)
-            try:
-                job = Ingest(conn, sc, config, mode=mode, fresh=mode == "all",
+            held = True
+            if kind is None and mode != WAITING:
+                report = _do(w, mode, harness, session_id, env=env, config=config,
                              launcher=launcher)
-                if mode in ("turn", "gone"):
-                    job.read_session(harness, session_id)
-                if mode in ("gone", "walk"):
-                    job.walk()
-                elif mode == "all":
-                    job.walk(full=True)
-            finally:
-                conn.close()
-                sc.close()
-        return job.report
+            else:
+                taken = _take(env)
+                report = (Report(mode, idle=True) if taken is None else
+                          _do(w, taken.kind, None, None, env=env, config=config,
+                              launcher=launcher))
     except index.WriterBusy:
+        if held:
+            raise
         return Report(mode, busy=True)
+    except BaseException:
+        if held:
+            try:
+                _after(env, then, walk=False)
+            except Exception:  # noqa: BLE001 - the error that stopped the child is raised
+                pass
+        raise
+    _after(env, then, walk=report.mode in ("rebuild", "relabel") and not report.idle)
+    return report
+
+
+def rebuild(*, env: Mapping[str, str] | None = None, relabel: bool = False,
+            config=None, launcher: links.Link | None = None, then=None) -> Report:
+    """Ask for a rebuild (a relabel with `relabel`) and run it when this child takes the
+    writer lock. Raises `index.WriterBusy` when another child holds it; the request then
+    waits for that child to start it."""
+    report = run("relabel" if relabel else "rebuild", env=env, config=config,
+                 launcher=launcher, then=then)
+    if report.busy:
+        raise index.WriterBusy("another ingest holds memory's writer lock")
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -563,17 +674,24 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--all", action="store_true")
     group.add_argument("--rebuild", action="store_true")
     group.add_argument("--relabel", action="store_true")
+    group.add_argument(f"--{WAITING}", action="store_true")
+    parser.add_argument("--asked", action="store_true",
+                        help="with --walk: someone asked for it, so a held lock "
+                             "doesn't lose it")
     args = parser.parse_args(argv)
+    if args.asked and not args.walk:
+        parser.error("--asked goes with --walk only")
     harness = session_id = None
     if args.turn or args.gone:
         mode = "turn" if args.turn else "gone"
         harness, session_id = args.turn or args.gone
     else:
-        mode = next(m for m in ("walk", "all", "rebuild", "relabel") if getattr(args, m))
+        mode = next(m for m in ("walk", "all", "rebuild", "relabel", WAITING)
+                    if getattr(args, m))
     from moxi import doctor
 
     try:
-        report = run(mode, harness, session_id)
+        report = run(mode, harness, session_id, asked=args.asked)
     except Exception as exc:  # noqa: BLE001 - a failed child leaves a record and exits
         doctor.record(settings.MODULE, f"an ingest ({mode}) stopped: {exc}", key=RECORD,
                       fix="moxi memory ingest")
@@ -585,5 +703,5 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["MAX_BYTES", "RECORD", "Report", "Role", "Ingest", "source_key", "imported",
-           "not_read", "rebuild", "run", "main"]
+__all__ = ["MAX_BYTES", "RECORD", "TRIGGERS", "WAITING", "Report", "Role", "Ingest",
+           "source_key", "imported", "not_read", "rebuild", "run", "main"]

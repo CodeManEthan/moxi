@@ -15,13 +15,18 @@ with what to run.
 
 `ingest` and `reindex` only start the detached ingest child and exit 0 at once, with the
 `moxi memory status` line to watch it by; no rebuild ever runs inside this command.
-`ingest` starts a catch-up walk, `--all` a read of every source from its start.
-`reindex` builds a new index from every transcript the harnesses still keep, and
-`--relabel` derives each session's project label again where its folder still exists.
+`ingest` asks for a catch-up walk, `--all` for a read of every source from its start.
+What either asks for is recorded, so another ingest holding memory's writer lock delays
+it but doesn't lose it. Neither command touches that lock, so neither says the work
+started: each says it is queued behind a running rebuild, or that it runs now or once the
+ingest holding the lock ends. `reindex` builds a new index from every transcript the
+harnesses still keep, and `--relabel` derives each session's project label again where
+its folder still exists.
 
 `status` prints the index's rows, reads and backlog, whether the first full read has
-finished, whether a rebuild is running, the session table's counts and what the last
-rebuild dropped. It exits 1 when there is no index, or one that can't be read.
+finished, whether a rebuild is running, a request waiting, the session table's counts
+and what the last rebuild dropped. It exits 1 when there is no index, or one that can't
+be read.
 """
 
 from __future__ import annotations
@@ -167,38 +172,46 @@ def _search(args, out, prog: str) -> int:
     return codes.OK
 
 
+def _asked(what: str, go, out) -> None:
+    """Start the child that asks for `what` (`go()`, which returns its process id), and
+    say what can be known without touching the writer lock: a running rebuild it is
+    queued behind, or else a line true whether the child runs it now or waits for the
+    ingest holding the lock. The rebuild is looked for before the child starts, so a
+    rebuild the child itself starts is never taken for one it waits behind."""
+    running = searching.rebuilding()
+    pid = go()
+    print(f"asked for {what} in the background (process {pid})", file=out)
+    if running is not None:
+        at = f"at {show(running)}" if running else "a moment ago"
+        print(f"it is queued behind the rebuild that started {at}, and runs when that "
+              "rebuild ends", file=out)
+    else:
+        print("it runs now, or, if an ingest holds memory's writer lock, as soon as that "
+              f"ingest ends; `{WATCH}` shows which", file=out)
+    print(f"watch it with: {WATCH}", file=out)
+
+
 def _ingest(args, out, prog: str) -> int:
     from . import start
 
     if args.all:
-        pid = start.start_all()
-        what = "a read of every source from its start"
+        _asked("a read of every source from its start", start.start_all, out)
     else:
-        pid = start.start_walk()
-        what = "a catch-up walk"
-    print(f"started {what} in the background (process {pid})", file=out)
-    print(f"watch it with: {WATCH}", file=out)
+        _asked("a catch-up walk", lambda: start.start_walk(asked=True), out)
     return codes.OK
 
 
 def _reindex(args, out, prog: str) -> int:
     from . import start
 
-    running = searching.rebuilding()
-    if running is not None:
-        since = show(running) if running else "a moment ago"
-        print(f"a rebuild is already running since {since}; nothing started", file=out)
-        print(f"watch it with: {WATCH}", file=out)
-        return codes.OK
     print("A rebuild drops every session whose transcript the harness has deleted since "
           "memory read it; until the rebuild ends, those sessions stay searchable.",
           file=out)
     if args.relabel:
         print("--relabel derives each session's project label again where its folder "
               "still exists; a session whose folder is gone keeps its label.", file=out)
-    pid = start.start_rebuild(relabel=args.relabel)
-    print(f"started the rebuild in the background (process {pid})", file=out)
-    print(f"watch it with: {WATCH}", file=out)
+    _asked("a relabel" if args.relabel else "a rebuild",
+           lambda: start.start_rebuild(relabel=args.relabel), out)
     return codes.OK
 
 
@@ -251,6 +264,11 @@ def _status(args, out, prog: str) -> int:
         since = show(s.rebuilding) if s.rebuilding else "a moment ago"
         pid = f" (process {s.rebuild_pid})" if s.rebuild_pid else ""
         print(f"rebuild: running since {since}{pid}", file=out)
+    if s.waiting is None:
+        print("request waiting: none", file=out)
+    else:
+        print(f"request waiting: {s.waiting['kind']}, asked {show(s.waiting['asked'])}",
+              file=out)
     if s.index == stat.OK:
         if s.rebuilt is None:
             print("last rebuild: none yet", file=out)
@@ -302,16 +320,19 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="how many hits (default 10)")
     p.add_argument("--json", action="store_true", help="print one JSON object")
 
-    p = verbs.add_parser("ingest", help="start reading new transcript lines, and return",
-                         description="Start a catch-up read of every harness root in the "
-                                     "background, and return at once.")
+    p = verbs.add_parser("ingest", help="ask for new transcript lines to be read, and "
+                                        "return",
+                         description="Ask for a catch-up read of every harness root in the "
+                                     "background, and return at once. Another ingest "
+                                     "holding the writer lock delays it; it is not lost.")
     p.add_argument("--all", action="store_true",
                    help="read every source from its start instead")
 
-    p = verbs.add_parser("reindex", help="start a rebuild of the index, and return",
-                         description="Start a rebuild of the index from every transcript "
+    p = verbs.add_parser("reindex", help="ask for a rebuild of the index, and return",
+                         description="Ask for a rebuild of the index from every transcript "
                                      "the harnesses still keep, in the background, and "
-                                     "return at once.")
+                                     "return at once. Another ingest holding the writer "
+                                     "lock delays it; it is not lost.")
     p.add_argument("--relabel", action="store_true",
                    help="also derive each session's project label again from its folder")
 

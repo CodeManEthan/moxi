@@ -50,7 +50,7 @@ NO_LAUNCHER = links.Link(links.NONE)
 def run(mode="walk", harness=None, sid=None, **kw):
     kw.setdefault("config", config())
     kw.setdefault("launcher", NO_LAUNCHER)
-    kw.setdefault("then", lambda: None)
+    kw.setdefault("then", lambda args: None)
     return ingest.run(mode, harness, sid, **kw)
 
 
@@ -379,8 +379,8 @@ def test_a_rebuild_equals_a_fresh_ingest_by_key_and_text_and_starts_a_walk():
     run()
     fresh = (index_rows(), index_rows("tails"))
     walks = []
-    report = run("rebuild", then=lambda: walks.append(1))
-    assert walks == [1] and report.dropped == 0
+    report = run("rebuild", then=walks.append)
+    assert walks == [["--walk"]] and report.dropped == 0
     assert (index_rows(), index_rows("tails")) == fresh
 
 
@@ -421,6 +421,252 @@ def test_a_rebuild_drops_gone_sessions_and_keeps_labels_and_relabel_rederives(tm
     assert row.label == "repo"
     with index.open_read() as rd:
         assert {r[0] for r in rd.conn.execute("SELECT label FROM rows")} == {"repo"}
+
+
+# -- a first full read and the roots ---------------------------------------------------
+
+def test_a_rebuild_marks_its_first_read_finished_only_when_every_root_was_listed(
+        monkeypatch):
+    corpus()
+    run()
+    real = api.sources
+
+    def sources(harness, **kw):
+        if harness == "codex":
+            raise OSError("the root can't be listed")
+        return real(harness, **kw)
+
+    monkeypatch.setattr(api, "sources", sources)
+    assert os.path.lexists(api.root("codex"))
+    run("rebuild")
+    with index.open_read() as rd:
+        assert index.meta_get(rd.conn, "first_read") == "0"
+    monkeypatch.setattr(api, "sources", real)
+    run()                                             # a walk that lists it finishes it
+    with index.open_read() as rd:
+        assert index.meta_get(rd.conn, "first_read") == "1"
+    run("rebuild")                                    # every root listed
+    with index.open_read() as rd:
+        assert index.meta_get(rd.conn, "first_read") == "1"
+
+
+# -- requests: a walk, full read, rebuild or relabel someone asked for ------------------
+
+def waiting():
+    sc = state.connect()
+    try:
+        return state.read_request(sc)
+    finally:
+        sc.close()
+
+
+def ask(kind, asked=None):
+    sc = state.connect()
+    try:
+        state.ask(sc, kind, asked)
+    finally:
+        sc.close()
+
+
+def during(monkeypatch, action):
+    """Run `action` once, while the next child holds the writer lock, as another child
+    started meanwhile would."""
+    real = ingest.Ingest.__init__
+    done = []
+
+    def init(self, *a, **kw):
+        if not done:
+            done.append(None)
+            done[0] = action()
+        real(self, *a, **kw)
+
+    monkeypatch.setattr(ingest.Ingest, "__init__", init)
+    return done
+
+
+def generation():
+    return index.current()
+
+
+def other(mode, asked=False):
+    """Run a child of `mode` in another process, as a child started meanwhile is, and
+    return its report as (busy, idle), and what waits in the store after it."""
+    import subprocess
+    import sys
+
+    code = ("import sys\nfrom moxi_memory import ingest, links\n"
+            "r = ingest.run(sys.argv[1], asked=sys.argv[2] == '1', then=lambda a: None, "
+            "launcher=links.Link(links.NONE))\nprint(int(r.busy), int(r.idle))\n")
+    done = subprocess.run([sys.executable, "-c", code, mode, "1" if asked else "0"],
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    busy, idle = (bool(int(x)) for x in done.stdout.split())
+    return busy, idle, waiting()
+
+
+@pytest.mark.parametrize("holder", ["turn", "walk", "rebuild"])
+@pytest.mark.parametrize("kind", ["rebuild", "relabel", "all", "walk"])
+def test_a_request_that_finds_the_lock_held_is_started_by_the_holder(monkeypatch, holder,
+                                                                     kind):
+    t, _ = corpus()
+    run()
+    before = generation()
+    done = during(monkeypatch, lambda: other(kind, asked=True))
+    started = []
+    run(holder, "claude", t.session_id, then=started.append)
+    assert done[0][0]                               # it found the lock held
+    assert started == [["--waiting"]]               # in place of a rebuild's own walk
+    assert waiting().kind == kind
+    report = run("waiting", then=started.append)
+    assert report.mode == kind and not report.idle and waiting() is None
+    held_by_rebuild = 1 if holder == "rebuild" else 0
+    if kind in ("rebuild", "relabel"):
+        assert generation() == before + held_by_rebuild + 1
+        assert started[1:] == [["--walk"]]
+    else:
+        assert generation() == before + held_by_rebuild
+        assert started[1:] == []
+
+
+def test_requests_merge_to_the_highest_kind_and_the_earliest_time():
+    ask("rebuild", 200.0)
+    ask("rebuild", 100.0)
+    assert waiting() == state.Request("rebuild", 100.0)
+    ask("relabel", 300.0)
+    assert waiting() == state.Request("relabel", 100.0)
+    ask("rebuild", 50.0)                    # a rebuild asked while a relabel waits
+    ask("all", 400.0)
+    ask("walk", 500.0)
+    assert waiting() == state.Request("relabel", 50.0)
+    sc = state.connect()
+    try:
+        assert state.take_request(sc) == state.Request("relabel", 50.0)
+        assert state.take_request(sc) is None
+    finally:
+        sc.close()
+    ask("walk", 1.0)
+    ask("all", 2.0)                          # a full read asked while a walk waits
+    assert waiting() == state.Request("all", 1.0)
+
+
+def test_requests_asked_at_once_from_many_processes_keep_the_highest_kind():
+    import subprocess
+    import sys
+
+    state.connect().close()       # the store is made once, before the children ask
+    code = ("import sys\nfrom moxi_memory import state\nc = state.connect()\n"
+            "for _ in range(50):\n    state.ask(c, sys.argv[1])\n")
+    procs = [subprocess.Popen([sys.executable, "-c", code, kind])
+             for kind in ("rebuild", "relabel", "rebuild", "all", "walk", "rebuild")]
+    assert [p.wait(timeout=60) for p in procs] == [0] * len(procs)
+    assert waiting().kind == "relabel"
+
+
+def test_a_child_that_takes_the_lock_and_finds_nothing_waiting_does_nothing(monkeypatch):
+    corpus()
+    run()
+    before = generation()
+    real = index.writer
+
+    def writer(env=None, **kw):
+        # another child ran this request between its write and its try
+        ctx = real(env, **kw)
+        sc = state.connect(env)
+        try:
+            state.take_request(sc)
+        finally:
+            sc.close()
+        return ctx
+
+    monkeypatch.setattr(index, "writer", writer)
+    started = []
+    report = run("rebuild", then=started.append)
+    assert report.idle and report.line().startswith("nothing waiting")
+    assert generation() == before and started == []
+    assert run("waiting", then=started.append).idle and started == []
+
+
+def test_a_request_written_after_the_take_keeps_waiting_and_is_started_after(monkeypatch):
+    corpus()
+    run()
+    during(monkeypatch, lambda: ask("relabel"))
+    started = []
+    report = run("rebuild", then=started.append)
+    assert report.mode == "rebuild"
+    assert waiting().kind == "relabel" and started == [["--waiting"]]
+
+
+def test_a_waiting_child_that_finds_the_lock_held_exits_and_records_nothing(monkeypatch):
+    t, _ = corpus()
+    run()
+    ask("all", 10.0)
+    done = during(monkeypatch, lambda: other("waiting"))
+    started = []
+    run("turn", "claude", t.session_id, then=started.append)
+    busy, _, seen = done[0]
+    assert busy and seen == state.Request("all", 10.0)
+    assert started == [["--waiting"]]
+
+
+def test_a_request_left_by_a_killed_holder_is_started_by_the_next_holder():
+    t, _ = corpus()
+    run()
+    ask("rebuild")        # its child failed its try; the holder was killed before its read
+    started = []
+    report = run("turn", "claude", t.session_id, then=started.append)
+    assert not report.busy and started == [["--waiting"]]
+    assert waiting().kind == "rebuild"              # a turn child never clears it
+
+
+def test_a_child_that_stops_on_an_error_after_its_take_still_starts_the_waiting_one(
+        monkeypatch):
+    corpus()
+    run()
+
+    def broken(self, **kw):
+        ask("relabel")
+        raise RuntimeError("a read that stops the child")
+
+    monkeypatch.setattr(ingest.Ingest, "walk", broken)
+    started = []
+    with pytest.raises(RuntimeError):
+        run("rebuild", then=started.append)
+    assert started == [["--waiting"]] and waiting().kind == "relabel"
+
+
+def test_the_tidy_leaves_a_waiting_request_and_records_the_killed_rebuild():
+    from moxi import files
+
+    t, _ = corpus()
+    run()
+    with files.lock(index.rebuild_lock_path(), timeout=0):
+        pass                                    # free, as a killed rebuild leaves it
+    sc = state.connect()
+    try:
+        state.write_entry(sc, 1234.0, 1)
+        state.ask(sc, "relabel", 1300.0)
+        started = []
+        run("turn", "claude", t.session_id, then=started.append)
+        assert state.read_entry(sc) is None
+        assert state.read_unfinished(sc) == 1234.0
+        assert state.read_request(sc) == state.Request("relabel", 1300.0)
+        assert started == [["--waiting"]]
+        run("waiting")
+        assert state.read_unfinished(sc) is None   # a rebuild has finished since
+    finally:
+        sc.close()
+
+
+def test_a_trigger_walk_records_nothing_and_an_asked_walk_does(monkeypatch):
+    t, _ = corpus()
+    run()
+    done = during(monkeypatch, lambda: (other("walk"), other("walk", asked=True)))
+    run("turn", "claude", t.session_id)
+    (busy, _, seen), (asked_busy, _, asked_seen) = done[0]
+    assert busy and seen is None
+    assert asked_busy and asked_seen.kind == "walk"
+    with pytest.raises(SystemExit):
+        ingest.main(["--rebuild", "--asked"])
 
 
 # -- the starters ----------------------------------------------------------------------

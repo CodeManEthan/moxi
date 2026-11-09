@@ -2,11 +2,15 @@
 
 - index: the current generation, its schema and tokenizer, rows per tier, whether the
   first full read is still filling it, a rebuild running, older generations left to
-  remove and the sessions the last rebuild dropped. `warn` with no index yet.
+  remove and the sessions the last rebuild dropped. `warn` with no index yet, and when a
+  rebuild was killed before it finished and none has finished since.
 - ingest: each harness's last catch-up walk, the sources changed since it (behind, the
-  same count as `moxi memory status`'s backlog), and the compressed Codex rollouts
-  memory can't read. A failed child's message is the
-  core's record row `record ingest`, not this one.
+  same count as `moxi memory status`'s backlog), the compressed Codex rollouts memory
+  can't read, and a request waiting for the writer lock. A request queued behind a
+  running rebuild, or one younger than `WAITING_WARN`, is said and needs nothing; an
+  older one is a `warn` whose fix is `moxi memory ingest`, since any child that takes
+  and frees the lock starts it. A failed child's message is the core's record row
+  `record ingest`, not this one.
 - sets: memory's redaction sets load in secrets. `fail` when one can't run: every child
   stops on it.
 - start: memory is on turns' start list for each harness it reads, and its listener rows
@@ -31,6 +35,10 @@ from moxi.doctor import Row
 MODULE = "memory"
 INGEST_ALL = "moxi memory ingest --all"
 CONFIG = "moxi config memory"
+REINDEX = "moxi memory reindex"
+#: A request waiting this many seconds for the writer lock, with no rebuild running, is
+#: a `warn`: the child that held the lock didn't start it on its way out.
+WAITING_WARN = 600.0
 
 
 def rows() -> Iterator[Row]:
@@ -99,7 +107,16 @@ def _index() -> Row:
     if dropped not in (None, "", 0, "0"):
         parts.append(f"the last rebuild dropped {dropped} sessions whose transcripts are "
                      "gone")
-    return Row(MODULE, "index", state, "; ".join(parts))
+    from . import state as store
+
+    _, unfinished = store.peek()
+    if unfinished is not None:
+        from .clock import show
+
+        parts.append(f"a rebuild started at {show(unfinished)} did not finish")
+        state = "warn"
+    return Row(MODULE, "index", state, "; ".join(parts),
+               REINDEX if state == "warn" else None)
 
 
 # -- ingest -----------------------------------------------------------------------------
@@ -112,11 +129,12 @@ def _ingest(harnesses) -> Row:
     from . import index, ingest, status
     from .clock import show
 
+    waiting, waiting_warn = _waiting()
     try:
         reader = index.open_read()
     except (index.IndexMissing, index.IndexUnreadable):
-        return Row(MODULE, "ingest", "warn", "no index yet, so nothing is ingested",
-                   INGEST_ALL)
+        return Row(MODULE, "ingest", "warn", "; ".join(
+            ["no index yet, so nothing is ingested", *waiting]), INGEST_ALL)
     with reader as r:
         walks = {h: index.meta_get(r.conn, f"last_walk.{h}") for h in harnesses}
         compressed = ingest.not_read(r.conn)
@@ -142,8 +160,35 @@ def _ingest(harnesses) -> Row:
         parts.append(f"{_plural(compressed, 'Codex session')} not read: Codex compressed "
                      "the rollout, which sessions can't read")
         state = "warn"
+    parts += waiting
+    if waiting_warn:
+        state = "warn"
     return Row(MODULE, "ingest", state, "; ".join(parts) or "no harness configured",
                "moxi memory ingest" if state == "warn" else None)
+
+
+def _waiting(now: float | None = None) -> tuple[list[str], bool]:
+    """The ingest row's words for a request waiting for the writer lock, and whether it
+    is a `warn`."""
+    import time
+
+    from . import index, state
+    from .clock import show
+
+    request, _ = state.peek()
+    if request is None:
+        return [], False
+    what = f"a {request.kind} request waiting since {show(request.asked)}"
+    running = index.rebuild_running()
+    if running is not None:
+        return [f"{what}, queued behind the rebuild running since "
+                f"{show(running.started) if running.started else 'a moment ago'}; "
+                "it runs when that rebuild ends"], False
+    now = time.time() if now is None else now
+    if now - request.asked < WAITING_WARN:
+        return [f"{what}, for the ingest holding the writer lock"], False
+    return [f"{what}: no child has started it; any child that takes and frees the "
+            "writer lock does"], True
 
 
 # -- sets -------------------------------------------------------------------------------

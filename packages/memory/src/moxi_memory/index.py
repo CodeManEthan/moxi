@@ -15,10 +15,12 @@ takes the writer lock, even for a moment.
 
 Writers (the ingest child, the rebuild) work inside `writer()`, which holds the writer
 lock (`moxi.files.lock` on `writer.lock` in memory's state directory) for the length of
-the block. A child that finds it held gets `WriterBusy` and exits; the next trigger
-catches up. On entry the writer tidies:
+the block. A child that finds it held gets `WriterBusy` and exits (what it was asked to
+do waits in the state store when someone asked for it; see `moxi_memory.ingest`). On
+entry the writer tidies:
 
-- it clears a rebuild entry whose rebuild lock is free (a crashed rebuild's);
+- it clears a rebuild entry whose rebuild lock is free (a crashed rebuild's), and records
+  that rebuild's start as unfinished, for the doctor; it leaves a waiting request alone;
 - it removes the file of a generation past the pointer, which a crashed rebuild left
   half built;
 - it removes each generation older than the current one whose lock file it can take
@@ -561,8 +563,15 @@ class Writer:
         except (store.StoreError, sqlite3.Error):
             return
         try:
-            if _has_table(conn, "rebuild") and state.read_entry(conn) is not None:
-                state.clear_entry(conn)
+            entry = state.read_entry(conn) if _has_table(conn, "rebuild") else None
+            if entry is not None:
+                # The rebuild was killed: say so for the doctor. Its request was cleared
+                # when it took it, so nothing runs it again. A request written while it
+                # ran is left waiting, for this child to start when it frees the lock.
+                with store.transaction(conn):
+                    if _has_table(conn, "unfinished"):
+                        state.write_unfinished(conn, entry.started)
+                    state.clear_entry(conn)
         finally:
             conn.close()
 
