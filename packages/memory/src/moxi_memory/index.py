@@ -91,7 +91,8 @@ _DB_SUFFIXES = ("", "-wal", "-shm", "-journal")
 #: under that record's key, with whether the tool failed.
 #:
 #: `sources` holds each source's read cursor and reuse keys, so a cursor goes when the
-#: index goes. `meta` holds the schema version, the tokenizer and whether the first full
+#: index goes. `secret_calls` holds the call ids of each source's secret-path calls, whose
+#: results give no tail. `meta` holds the schema version, the tokenizer and whether the first full
 #: read has finished (`first_read`, "0" or "1"), and whatever else a writer records.
 SCHEMA = (
     f"""
@@ -155,6 +156,12 @@ SCHEMA = (
         read REAL,
         PRIMARY KEY (harness, source)
     );
+    CREATE TABLE secret_calls (
+        harness TEXT NOT NULL,
+        source TEXT NOT NULL,
+        call_id TEXT NOT NULL,
+        PRIMARY KEY (harness, source, call_id)
+    ) WITHOUT ROWID;
     CREATE TABLE meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL

@@ -43,8 +43,9 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 memory = "moxi_memory.module"
 
-# The ingest child's console script, `moxi-memory-ingest`, goes in a [project.scripts]
-# table here when the ingest child exists.
+# The ingest child, which every trigger starts detached (`moxi_memory.start`).
+[project.scripts]
+moxi-memory-ingest = "moxi_memory.ingest:main"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
