@@ -212,7 +212,9 @@ answer = sessions.session_facts([("claude", "0190b000-0000-7000-8000-00000000000
                                  ("codex", "0190c000-0000-7000-8000-000000000002")])
 # {"sessions": [{"harness": "claude", "session": "0190b000-0000-7000-8000-000000000001",
 #                "name": "fix the tests", "folder": "/work/proj-a",
-#                "started": 1793354400.0}],
+#                "started": 1793354400.0},
+#               {"harness": "codex", "session": "0190c000-0000-7000-8000-000000000002",
+#                "name": None, "folder": "/work/proj-b", "started": 1793354405.0}],
 #  "roots": []}
 ```
 
