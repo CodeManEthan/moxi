@@ -284,9 +284,9 @@ and nothing has gone well since; a session merely waiting is never red.
 ## The page
 
 With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
-in the shell, and two small views other pages can show: a launched session's state, red
-when it needs a look, and a block on the shell's home listing each running launched
-session with its state.
+in the shell and three pieces other pages can show: the box on the shell's home that
+starts a session, a launched session's state, red when it needs a look, and a block on
+the shell's home listing each running launched session with its state.
 
 The page has four parts.
 
@@ -320,9 +320,26 @@ The page has four parts.
   the `moxi launcher resume` command to copy. The refusals `moxi launcher resume` gives
   (headless, live, a relaunch or recycle still under way) come back at once.
 
-A launch from the page runs with the shell's environment, so its harness must be on the
-shell's `PATH`; the preview says which `PATH` it searched when it isn't. The page server
-starts when the page is first opened and stops once nothing has used it for a while.
+**The box on Home.** The shell's home opens on a box that starts a session without a
+visit to the page. Type what the agent should do and press the button. The line above
+the box says where the session starts, a project or a folder: it opens on the place you
+last launched in, and its menu takes a typed folder path, lists your recent places and,
+with projects installed, every project. The chip in the box sets the harness, the model
+and the effort. The button names where the launch runs, and its caret opens the choices:
+each slot with its state, your terminal, or headless. With slots it starts at the lowest
+free slot, without slots at your terminal, and the choice is not kept from one visit to
+the next. A launch from the box runs where its button says, whatever `[defaults]` sets
+for `target` and `slot`; every other row is filled from `[defaults]` as the page's form
+is, with no preset. The text in the box is the brief: an empty box starts a session
+with no first turn, and a brief your `[defaults]` set is not sent. A slot or headless
+launch is previewed and handed to a detached job as on the page, and a line under the
+box says where it started, or why it failed or was refused. A terminal launch is not
+run: its command is copied for you to paste.
+
+A launch from the page or from the box runs with the shell's environment, so its harness
+must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
+The page server starts when the page or the shell's home is first opened and stops once
+nothing has used it for a while.
 
 ## Commands
 
