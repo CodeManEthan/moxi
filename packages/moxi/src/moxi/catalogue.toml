@@ -1,7 +1,7 @@
 # Moxi's catalogue: the first-party modules `moxi install` installs by name.
 # `moxi modules --available` lists it; `moxi modules --available --refresh` fetches a newer
 # copy from the repository. Raise `version` whenever a line changes.
-version = 2
+version = 3
 
 [[module]]
 name = "cache"
@@ -42,6 +42,11 @@ summary = "A list of named places: projects, their roots, kinds and agents"
 name = "repo"
 distribution = "moxi-repo"
 summary = "Git hooks run as declared pieces, and one shared committer"
+
+[[module]]
+name = "rounds"
+distribution = "moxi-rounds"
+summary = "A piece of work tracked from design to landing: its questions, rulings, builds and gates"
 
 [[module]]
 name = "secrets"

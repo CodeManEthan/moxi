@@ -1,0 +1,90 @@
+# The rounds module's config schema. The file it governs is CONFIG/rounds/config.toml;
+# `moxi config rounds` shows every key and `moxi config rounds init` writes the file.
+# Every key is read at its use, so an edit takes effect at the next command.
+
+[flows]
+type = "table"
+default = {}
+doc = "Your own flows by name, each a list of steps. One named like a built-in flow replaces it."
+read = "use"
+
+[tiers]
+type = "list"
+items = "str"
+default = ["fix", "small", "full"]
+doc = "The flows from lightest to heaviest."
+read = "use"
+
+[models]
+type = "table"
+default = {}
+doc = "Tier names to model names, per harness. The next step's line prints them."
+read = "use"
+
+[worktree_dir]
+type = "path"
+default = ""
+doc = "Where build worktrees go, as <repo>/<branch> under it. Empty means worktrees in rounds' data directory."
+read = "use"
+
+[defaults.flow]
+type = "string"
+default = "full"
+doc = "The flow a round opens with when none is named."
+read = "use"
+
+[defaults.dir]
+type = "string"
+default = "rounds"
+doc = "A project's rounds folder: absolute, or relative to the project's notes folder. A rounds folder belongs to one project: two projects that reach one folder are refused."
+read = "use"
+
+[defaults.ratify]
+type = "enum"
+values = ["majors", "majors+minors", "off"]
+default = "majors"
+doc = "Which of a build's recorded decisions wait for the operator: the major ones, the minor ones too, or none."
+read = "use"
+
+[defaults.trace]
+type = "bool"
+default = false
+doc = "Run the trace check: a design says where it carries, amends or cuts each ruling in its scope."
+read = "use"
+
+[defaults.check_on]
+type = "enum"
+values = ["merged", "tip"]
+default = "merged"
+doc = "What a build's check must have passed on before it finishes: its tip merged with the target, or its tip alone."
+read = "use"
+
+[defaults.idle_days]
+type = "int"
+default = 14
+doc = "Days without a commit before a build shows as idle."
+read = "use"
+
+[defaults.dormant_days]
+type = "int"
+default = 30
+doc = "Days without an event before a round shows as dormant."
+read = "use"
+
+[defaults.slice_minutes]
+type = "int"
+default = 45
+doc = "The most minutes the sizing check allows one slice of a build."
+read = "use"
+
+[defaults.sitting_at]
+type = "int"
+default = 10
+doc = "The count of open questions at which a sitting is suggested. 0 never suggests one."
+read = "use"
+
+[projects]
+type = "table"
+default = {}
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, check, finish, shared_paths, keep_branch, lock_ref and brief."
+read = "use"

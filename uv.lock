@@ -18,6 +18,7 @@ members = [
     "moxi-notes",
     "moxi-projects",
     "moxi-repo",
+    "moxi-rounds",
     "moxi-secrets",
     "moxi-services",
     "moxi-sessions",
@@ -749,7 +750,7 @@ wheels = [
 
 [[package]]
 name = "moxi"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "packages/moxi" }
 dependencies = [
     { name = "psutil" },
@@ -1180,6 +1181,40 @@ dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
     { name = "playwright", specifier = ">=1.56,<2" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-rounds"
+version = "0.1.0"
+source = { editable = "packages/rounds" }
+dependencies = [
+    { name = "moxi" },
+    { name = "moxi-projects" },
+]
+
+[package.optional-dependencies]
+notes = [
+    { name = "moxi-notes" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
+    { name = "moxi-projects", editable = "packages/projects" },
+]
+provides-extras = ["notes"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "pytest" },
 ]
 

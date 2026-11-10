@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 (unreleased)
+
+- The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
+  modules --available` know it by name. Its version is 3.
+
 ## 0.1.7 (2026-11-08)
 
 - Public names renamed for the naming rules (callers passing the old keyword or reading
