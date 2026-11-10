@@ -170,6 +170,12 @@ def asked(state: states.State, *, name: str = "ROUND") -> Asked | None:
                      f"v{current.n} was sent back and the design was not frozen "
                      "since: a re-check reads what changed", tier=tier, since=since,
                      instead=(fold,))
+    if (stands.word != versions.NONE and since is not None
+            and versions.text_unchanged_since(state, since)):
+        return Asked(RECHECK, stands,
+                     f"v{since} was sent back and the design's text was not changed "
+                     "since: a re-check reads what changed", tier=tier, since=since,
+                     instead=(fold,))
     return Asked(RECHECK, stands,
                  f"the design changed since v{since}, the last version a pass read",
                  tier=tier, version=current.n, since=since)

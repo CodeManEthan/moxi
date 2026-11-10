@@ -257,7 +257,10 @@ standing: publishable@v1
 A verdict is `publishable` or `fold-first`, which sends the design back with findings.
 It is recorded against the version the report says its pass read, whatever was frozen
 or edited since. The design's standing is the newest verdict of its current version,
-and `none` once the design is frozen again.
+and `none` once a changed design is frozen again. A design frozen again with its text
+unchanged keeps the standing it had, whatever that was, and a verdict for a version
+whose text is the current one's gives the standing: it belongs to the text a pass
+read. Only the version before counts, so the text of an older version is a change.
 
 ### How many passes
 
@@ -269,8 +272,9 @@ Verification is bounded, so that passes do not feed themselves:
 2. `publishable` is final: no further pass is asked for, and a later report that sends
    the same version back is recorded and shown and changes no standing. The same holds
    for a version that stands at `lead-decision`.
-3. A design frozen again has no standing until a re-check reads what changed. `next`
-   names the two frozen files to compare.
+3. A design frozen again with its text changed has no standing until a re-check reads
+   what changed. `next` names the two frozen files to compare. One frozen again
+   unchanged costs no pass, and one that was sent back stays sent back.
 4. A version that changes records only needs no pass: `fold --records-only --record
    PTR`, with a pointer to where the lead wrote what changed. It is refused when the
    block's questions, its stages, what a question holds up or what a stage waits for

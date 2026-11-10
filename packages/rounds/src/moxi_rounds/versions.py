@@ -30,12 +30,18 @@ version gives it:
   stands at `publishable` or `lead-decision` stays there: a later verdict that sends
   it back is recorded and shown and changes no standing;
 - freezing the design again leaves it at `none`, until a pass reads the new version;
+  but a design frozen again with the bytes of the version before it keeps what that
+  version stood at, whatever that was: the standing belongs to the text a pass read,
+  and a text that did not change is no answer to a pass that sent it back. Only the
+  version before counts, so the text of an older version frozen again is a change;
 - freezing it as a change of records only gives the new version what the version
   before stood at then: `publishable` and `lead-decision` are carried, `fold-first`
   becomes `lead-decision` (the freezing is the lead's decision that what the pass
   found were records), and `none` stays `none`;
 - a verdict that finds an earlier version publishable also stands for every later
   version reached from it by changes of records only, whenever it is recorded;
+- a verdict for an earlier version, whatever its word, also stands for every later
+  version reached from it by freezings that left the text as it was;
 - the lead's decision on a thread gives `lead-decision` at the version current then.
 
 A verdict recorded for an earlier version otherwise stays in the record and is not
@@ -236,6 +242,8 @@ def _walk(state: states.State) -> _Walk:
     walk = _Walk(stands={})
     stands = walk.stands
     only: dict[int, bool] = {}
+    # The versions frozen with the bytes of the version before them.
+    same: dict[int, bool] = {}
     digests: dict[int, str | None] = {}
     # The versions that stood verified at some point.
     firm: set[int] = set()
@@ -247,8 +255,15 @@ def _walk(state: states.State) -> _Walk:
     for _number, one in acts:
         if isinstance(one, states.Version):
             before = walk.newest
-            stands[one.n] = (_carried(stands.get(before), one) if one.records_only
-                             else Standing(NONE, one.n))
+            same[one.n] = (before is not None and one.digest is not None
+                           and one.digest == digests[before])
+            if one.records_only:
+                stands[one.n] = _carried(stands.get(before), one)
+            elif same[one.n]:
+                # The text a pass read, or did not, is the text frozen again.
+                stands[one.n] = replace(stands[before], version=one.n)
+            else:
+                stands[one.n] = Standing(NONE, one.n)
             only[one.n] = one.records_only
             digests[one.n] = one.digest
             walk.newest = one.n
@@ -271,9 +286,14 @@ def _walk(state: states.State) -> _Walk:
                 # later is in the record and reopens nothing.
                 continue
             stands[one.design] = Standing(one.verdict or NONE, one.design, one)
+            finds = one.verdict == report_block.PUBLISHABLE
             later = one.design + 1
-            while (one.verdict == report_block.PUBLISHABLE and only.get(later)):
-                stands[later] = Standing(one.verdict, later, one)
+            # The verdict reaches each later version whose text it read, and one
+            # that finds the design publishable each change of records only too.
+            while same.get(later) or (finds and only.get(later)):
+                if not finds and stands[later].word in VERIFIED:
+                    break
+                stands[later] = Standing(one.verdict or NONE, later, one)
                 later += 1
             if one.verdict == report_block.PUBLISHABLE:
                 if stands[walk.newest].verdict is one:
@@ -317,6 +337,17 @@ def rewritten(state: states.State) -> bool:
     """Whether the design's text changed since the last verdict `sent_back` counts: a
     version frozen after it whose digest differs from the version before it."""
     return _walk(state).rewritten
+
+
+def text_unchanged_since(state: states.State, n: int) -> bool:
+    """Whether the current version has the text of version `n`: each version frozen
+    after `n` has the digest of the one before it."""
+    held = None
+    for version in state.versions:
+        if version.n > n and (version.digest is None or version.digest != held):
+            return False
+        held = version.digest
+    return find(state, n) is not None
 
 
 def said(pending: states.Pending) -> str:
@@ -410,7 +441,7 @@ def unchanged(state: states.State, folder: Path | str, name: str) -> Unmet | Non
 
 __all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "declarations",
            "pending_removals", "outstanding", "said", "DESIGN_REPORT", "NONE",
-           "sent_back", "rewritten", "lead_decided",
+           "sent_back", "rewritten", "lead_decided", "text_unchanged_since",
            "LEAD_DECISION", "VERIFIED", "Standing", "design_verdicts", "verified",
            "standing", "stages", "newest", "verdicts",
            "threads", "waiting", "unchanged"]

@@ -217,6 +217,178 @@ def test_a_plain_version_after_a_carried_standing_stands_at_none(folder):
     assert standing(folder) == "none"
 
 
+# -- a design frozen again with its text unchanged ---------------------------------------
+
+def again(folder, **how):
+    """Freeze the design as it is, with no edit since the version before."""
+    frozen = freezing.freeze(ROUND, actor="scout", **how)
+    found = folded(folder)
+    assert found.versions[-1].digest == found.versions[-2].digest
+    return frozen
+
+
+def test_an_unchanged_design_frozen_again_keeps_a_publishable_standing(folder):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+
+    frozen = again(folder)
+
+    assert str(frozen.standing) == standing(folder) == "publishable@v2"
+    assert asked(folder).pass_ is None and asked(folder).instead == ()
+    assert again(folder).version == 3
+    assert standing(folder) == "publishable@v3"
+
+
+def test_an_unchanged_design_frozen_again_keeps_the_leads_decision_on_a_thread(folder):
+    sent_back_twice(folder)
+    decided = decide(folder)
+
+    again(folder)
+
+    found = versions.standing(folded(folder))
+    assert str(found) == "lead-decision@v4"
+    assert found.decision.thread == decided.event["thread"]
+
+
+def test_an_unchanged_design_frozen_again_keeps_a_decision_made_by_a_change_of_records(
+        folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+    records_only(folder)
+
+    again(folder)
+
+    found = versions.standing(folded(folder))
+    assert str(found) == "lead-decision@v3"
+    assert found.fold == 2
+
+
+def test_an_unchanged_design_frozen_again_is_still_sent_back(folder):
+    fold(folder)
+    sent = verdict(folder, pass_="full")
+
+    again(folder)
+
+    found = versions.standing(folded(folder))
+    assert str(found) == "fold-first@v2"
+    assert found.verdict.n == sent.event["n"]
+    # The freezing is no decision of the lead's: the verdict is still the one counted.
+    assert [one.design for one in versions.sent_back(folded(folder))] == [1]
+    assert not versions.lead_decided(folded(folder))
+
+
+def test_no_pass_is_asked_for_over_a_text_that_was_sent_back_and_not_changed(folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+
+    again(folder)
+
+    found = asked(folder)
+    assert (found.pass_, found.since, found.version) == (brake.RECHECK, 1, None)
+    assert found.instead == (f"moxi rounds fold {ROUND}",)
+    assert "not changed since" in found.why
+    fold(folder)
+    found = asked(folder)
+    assert (found.pass_, found.since, found.version) == (brake.RECHECK, 1, 3)
+
+
+def test_an_unchanged_design_frozen_again_with_no_standing_has_none(folder):
+    fold(folder)
+    again(folder)
+    assert standing(folder) == "none"
+
+    verdict(folder, "publishable", pass_="full")
+    fold(folder)
+    again(folder)
+
+    assert standing(folder) == "none"
+
+
+def test_a_fold_run_again_after_it_was_recorded_costs_no_pass(folder):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+    fold(folder)
+    again(folder)
+    assert standing(folder) == "none"
+    assert (asked(folder).since, asked(folder).version) == (1, 3)
+
+    verdict(folder, "publishable", design=2)
+
+    assert standing(folder) == "publishable@v3"
+    assert asked(folder).pass_ is None
+
+
+def test_a_design_frozen_with_the_text_of_an_older_version_starts_at_none(folder):
+    fold(folder)
+    first = (folder / "design.md").read_bytes()
+    verdict(folder, "publishable", pass_="full")
+    fold(folder)
+    (folder / "design.md").write_bytes(first)
+
+    freezing.freeze(ROUND, actor="scout")
+
+    found = folded(folder)
+    assert found.versions[2].digest == found.versions[0].digest
+    assert standing(folder) == "none"
+    verdict(folder, "publishable", design=1)
+    assert standing(folder) == "none"
+
+
+@pytest.mark.parametrize("word", ["publishable", "fold-first"])
+def test_a_verdict_for_a_version_whose_text_is_the_current_one_gives_the_standing(
+        folder, word):
+    fold(folder)
+    again(folder)
+    again(folder)
+
+    recorded = verdict(folder, word, design=1, pass_="full")
+
+    assert str(recorded.standing) == standing(folder) == f"{word}@v3"
+    assert versions.standing(folded(folder)).verdict.design == 1
+
+
+def test_a_verdict_for_an_unchanged_text_does_not_reach_past_a_change_of_it(folder):
+    fold(folder)
+    again(folder)
+    fold(folder)
+
+    verdict(folder, design=1, pass_="full")
+
+    assert standing(folder) == "none"
+
+
+def test_a_verdict_that_sends_back_an_unchanged_text_leaves_a_verified_standing(
+        folder):
+    fold(folder)
+    again(folder)
+    verdict(folder, "publishable", design=2, pass_="full")
+
+    verdict(folder, design=1)
+
+    assert standing(folder) == "publishable@v2"
+    assert versions.sent_back(folded(folder)) == ()
+
+
+def test_a_change_of_records_only_decides_whatever_the_text(folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+
+    again(folder, records_only=True, record=WHY)
+
+    assert standing(folder) == "lead-decision@v2"
+    assert versions.lead_decided(folded(folder))
+    assert versions.sent_back(folded(folder)) == ()
+
+
+def test_a_change_of_records_only_with_the_text_unchanged_and_no_standing_has_none(
+        folder):
+    fold(folder)
+
+    again(folder, records_only=True, record=WHY)
+
+    assert standing(folder) == "none"
+
+
 # -- a change of records only: the verb --------------------------------------------------
 
 def test_a_change_of_records_only_is_one_event_with_its_pointer(folder):
