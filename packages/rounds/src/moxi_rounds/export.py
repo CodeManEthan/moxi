@@ -32,6 +32,7 @@ headed with the time it runs through. That list is no entry and takes no answer.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -41,7 +42,8 @@ from moxi import files
 from . import folders, index, log, questions, shown
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet, Unreadable
+from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, SharedFolder,
+                     Unmet, Unreadable)
 
 #: The view of a round's export that holds its open questions, and the views there are.
 DOCKET = "docket"
@@ -376,11 +378,23 @@ def _read_back_lines(export: Export) -> list[str]:
     return [*lines, ""]
 
 
-def write(export: Export, folder: Path | str) -> tuple[Path, Path]:
+def write(export: Export, folder: Path | str, *, settings=None) -> tuple[Path, Path]:
     """Write the export into `folder` as `questions.md` and `questions.json`, both from
     the one export given, and give the two paths. The folder is made when it is not
-    there. Each file is put in place whole, so a reader never finds half of one."""
+    there. Each file is put in place whole, so a reader never finds half of one.
+
+    A project's rounds folder, and the folder of a round in one, are refused
+    (`Refused`) with nothing written: rounds keeps its own files there, a
+    `questions.md` among them. `settings` is what `settings.load()` gives, read now
+    when left out."""
     folder = Path(folder).expanduser()
+    kept = _kept_there(folder, own.load() if settings is None else settings)
+    if kept is not None:
+        raise Refused([Unmet(
+            f"{folder} is {kept}, where rounds keeps its own files: an export "
+            "written there would replace a file made from the logs, or sit among "
+            "them; name another folder",
+            f"moxi rounds list {export.name} --questions --out ANOTHER-DIR")])
     written = (folder / MARKDOWN_FILE, folder / JSON_FILE)
     try:
         folder.mkdir(parents=True, exist_ok=True)
@@ -391,6 +405,24 @@ def write(export: Export, folder: Path | str) -> tuple[Path, Path]:
         raise RoundsError(f"the export can't be written into {folder}: {error}",
                           "name a folder that can be written with --out DIR") from None
     return written
+
+
+def _kept_there(folder: Path, settings) -> str | None:
+    """What `folder` is to rounds, once every link on the way is followed: the rounds
+    folder of a project, or the folder of a round in one. None for any other folder."""
+    found, failed = folders.homes(settings)
+    # Two projects that reach one folder have no home, and the folder is still theirs.
+    homes = [(one.project, one.folder) for one in found]
+    homes += [(error.project, error.folder) for error in failed
+              if isinstance(error, SharedFolder)]
+    real = Path(os.path.realpath(folder))
+    for project, rounds_folder in homes:
+        theirs = Path(os.path.realpath(rounds_folder))
+        if real == theirs:
+            return f"the rounds folder of the project {project}"
+        if real.parent == theirs and log.exists(log.round_log(real)):
+            return f"the folder of the round {project}/{real.name}"
+    return None
 
 
 __all__ = ["DOCKET", "VIEWS", "MARKDOWN_FILE", "JSON_FILE", "Option", "Entry", "Rows",

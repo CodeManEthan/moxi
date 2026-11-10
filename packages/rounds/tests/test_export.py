@@ -196,6 +196,37 @@ def test_a_folder_that_cant_be_written_is_an_error(rounds, tmp_path, capsys):
     assert "can't be written" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("inside", ["", "a-round", "b-round"])
+def test_out_refuses_a_rounds_folder_and_a_rounds_own_folder(rounds, capsys, inside):
+    ask()
+    ask("proj-a", OTHER)
+    before = everything(rounds)
+    for name in (A, "proj-a"):
+        assert main(["list", name, "--questions", "--out", str(rounds / inside)]) == 3
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "keeps its own files" in captured.err and "another folder" in captured.err
+    assert everything(rounds) == before
+    assert not list(rounds.rglob("questions.json"))
+
+
+def test_out_refuses_the_rounds_folder_of_another_project_reached_by_a_link(
+        rounds, tmp_path, add_project, capsys):
+    add_project("proj-b", notes_root=tmp_path / "other")
+    (tmp_path / "link").symlink_to(tmp_path / "other", target_is_directory=True)
+    ask()
+    assert main(["list", A, "--questions", "--out", str(tmp_path / "link" / "rounds")]) == 3
+    assert "proj-b" in capsys.readouterr().err
+    assert not (tmp_path / "other" / "rounds").exists()
+
+
+def test_out_takes_a_folder_inside_a_rounds_folder_that_is_no_round(rounds, capsys):
+    ask()
+    out = rounds / "exports"
+    assert printed(capsys, A, "--questions", "--out", str(out)).splitlines() == [
+        str(out / "questions.md"), str(out / "questions.json")]
+
+
 def test_the_real_command_lists_the_questions(rounds, capsys):
     ask()
 
