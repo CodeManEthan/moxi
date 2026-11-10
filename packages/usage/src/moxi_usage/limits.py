@@ -39,7 +39,11 @@ Then one row per window, a window being `(harness, limit_id, window_minutes)`:
   unused Codex window reports a reset that moves with the clock, and both cases catch it.
 
 Readings older than `limits.history_days` are pruned here when the last prune is over an
-hour old. Nothing here reads the clock but `limits()` with no `now`.
+hour old. Nothing here reads the clock but `limits()` and `window()` with no `now`.
+
+`window(harness, limit_id, minutes, *, now=None)` reads one window alone: its row, picked
+as `limits()` picks it, and the readings of the row's period. It is a pure read: it opens
+the store only when it exists, and never creates it, prunes, reads a rollout or pulls.
 """
 
 from __future__ import annotations
@@ -195,7 +199,21 @@ class Limits:
                 "notes": list(self.notes)}
 
 
-# --- the entry point ------------------------------------------------------------------
+@dataclass(frozen=True, kw_only=True, slots=True)
+class Window:
+    """`window()`'s answer: one window's `row` at `now` and the readings of the row's
+    period (`period`): how many (`count`), the reading the row is from (`last`) and the
+    period's earliest (`first`), None when that is the row's own. With a row whose
+    reset or duration is unknown there is no period: `count` is 0."""
+
+    now: float
+    row: Row
+    last: Reading
+    first: Reading | None = None
+    count: int = 0
+
+
+# --- the entry points -----------------------------------------------------------------
 
 def limits(*, harness: str | None = None, now: float | None = None, pull: bool = True,
            env: Mapping[str, str] | None = None) -> Limits:
@@ -243,6 +261,60 @@ def limits(*, harness: str | None = None, now: float | None = None, pull: bool =
         after = float(settings["limits.codex_pull_after_s"])
         rows = [_with_note(row, now, after, pulled.reason) for row in rows]
     return Limits(now=now, rows=tuple(rows), pull=pulled, notes=tuple(notes))
+
+
+def window(harness: str, limit_id: str, minutes: int, *, now: float | None = None,
+           env: Mapping[str, str] | None = None) -> Window | None:
+    """One window, `(harness, limit_id, minutes)`, at `now`, from the readings store as
+    it is: the row `limits()` would pick for it and the readings of the row's period.
+
+    None when the store holds no reading of the window under the history cap: no store
+    yet, a store an older usage wrote, or Claude with turns absent, whose rows `limits()`
+    answers `unavailable`. Nothing is written: the store is not created, brought up to
+    date or pruned, no rollout is read and nothing is pulled. Raises ValueError for
+    another harness, `moxi.store.StoreTooNew` for a store a newer usage wrote, and
+    `moxi.config.ConfigError` when usage's config cannot be read.
+    """
+    if harness not in HARNESSES:
+        raise ValueError(f"{harness!r} is not a harness with limits; use claude or codex")
+    from moxi.store import StoreError, StoreTooNew, connect
+
+    from .settings import current
+
+    now = time.time() if now is None else float(now)
+    settings = current(env)
+    if harness == CLAUDE and not _turns_available():
+        return None
+    path = store.path(env)
+    if not path.exists():
+        return None
+    try:
+        conn = connect(path, create=False)
+    except StoreTooNew:
+        raise
+    except StoreError:
+        return None                       # removed between the look and the open
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version > len(store.STEPS):
+            raise StoreTooNew(str(path), version, len(store.STEPS))
+        if version != len(store.STEPS):
+            return None
+        found = [Reading(*row) for row in conn.execute(
+            f"SELECT {', '.join(Reading._fields)} FROM readings WHERE harness = ? AND "
+            "limit_id = ? AND window_minutes = ? AND observed_at >= ?",
+            (harness, limit_id, minutes,
+             store.cutoff(now, float(settings["limits.history_days"]))))]
+    finally:
+        conn.close()
+    if not found:
+        return None
+    row = window_row(harness, found, now=now,
+                     projection_minutes=float(settings["limits.projection_minutes"]))
+    winner = pick(harness, found, now)
+    readings = period(found, winner)
+    first = readings[0] if readings and readings[0] != winner else None
+    return Window(now=now, row=row, last=winner, first=first, count=len(readings))
 
 
 def harness_rows(harness: str, found: list[Reading], *, now: float, days: float,
@@ -611,6 +683,6 @@ def iso(epoch: Any) -> Any:
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-__all__ = ["limits", "Limits", "Row", "Pull", "pick", "row_state", "project", "period",
-           "opened", "label", "dollars", "harness_rows", "window_row", "FRESH", "RESET",
-           "UNAVAILABLE"]
+__all__ = ["limits", "window", "Limits", "Window", "Row", "Pull", "pick", "row_state",
+           "project", "period", "opened", "label", "dollars", "harness_rows", "window_row",
+           "FRESH", "RESET", "UNAVAILABLE"]

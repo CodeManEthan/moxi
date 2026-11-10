@@ -302,6 +302,36 @@ def test_no_duration_or_no_reset_gives_no_start():
     assert row(result, "codex", "7d").as_dict()["opened"] is None
 
 
+# --- one window alone -------------------------------------------------------------------
+
+def test_one_window_is_its_row_and_its_periods_readings_and_nothing_is_written(turns):
+    assert limits.window("codex", "codex", 300, now=NOW) is None
+    assert not readings.path().exists()                       # no store, and none made
+    put(codex(90.0, 300, NOW - HOUR, NOW - 3 * HOUR),          # the window before
+        codex(10.0, 300, NOW + 4 * HOUR, NOW - 50 * MIN),
+        codex(15.0, 300, NOW + 4 * HOUR, NOW - 20 * MIN),
+        codex(30.0, 10080, NOW + DAY, NOW - 20 * MIN, slot="secondary"),
+        codex(1.0, 300, NOW, NOW - 7.97 * DAY))
+    found = limits.window("codex", "codex", 300, now=NOW + 1.1 * HOUR)
+    whole = row(limits.limits(harness="codex", now=NOW + 1.1 * HOUR, pull=False),
+                "codex", "5h")
+    assert count() == 4                                       # limits() pruned one
+    put(codex(1.0, 300, NOW, NOW - 7.97 * DAY))
+    again = limits.window("codex", "codex", 300, now=NOW + 1.1 * HOUR)
+    assert count() == 5 and turns.calls == []                 # window() prunes nothing
+    assert found.row == again.row == whole
+    assert (found.count, found.first.used_percent, found.last.used_percent) == (2, 10.0,
+                                                                                15.0)
+    assert found.row.opened == NOW - HOUR
+    assert limits.window("codex", "codex", 60, now=NOW) is None
+    with pytest.raises(ValueError, match="opencode"):
+        limits.window("opencode", "codex", 300, now=NOW)
+    put(claude(20.0, 300, NOW + HOUR, NOW - MIN))
+    assert limits.window("claude", "plan", 300, now=NOW).first is None
+    turns.available = False
+    assert limits.window("claude", "plan", 300, now=NOW) is None
+
+
 # --- the history cap ------------------------------------------------------------------
 
 def test_limits_prunes_when_the_last_prune_is_over_an_hour_old():

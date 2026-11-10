@@ -208,6 +208,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
     routes = {route["path"]: route for route in exported["routes"]}
     assert {path: (r["kind"], set(r["query"]), r["stream"]) for path, r in routes.items()} == {
         "/api/limits": ("read", set(), False),
+        "/api/window": ("read", {"harness", "limit_id", "minutes"}, False),
         "/api/daily": ("read", {"by", *FILTERS}, False),
         "/api/sessions": ("read", {"top", "skip", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
@@ -223,6 +224,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
     }
     assert not any(route["gateway"] or route["confirmed"] for route in routes.values())
     assert routes["/api/session"]["query"]["session"]["required"]
+    assert all(key["required"] for key in routes["/api/window"]["query"].values())
     assert routes["/api/requests"]["query"]["session"]["required"]
     assert not routes["/api/terms"]["query"]["session"]["required"]
     assert list(routes["/api/events"]["topics"]) == ["limits", "index"]
@@ -260,7 +262,7 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
         "lanes[].root", "lanes[].unreadable[].path", "lanes[].imports_path",
         "total.held_rows[].path", "total.duplicate_rows[].path",
         "total.duplicate_rows[].of_path"}
-    for path in ("/api/limits", "/api/daily", "/api/session", "/api/models", "/api/cost",
+    for path in ("/api/limits", "/api/window", "/api/daily", "/api/session", "/api/models", "/api/cost",
                  "/api/terms", "/api/requests", "/api/prices", "/api/pass", "/api/events"):
         assert marked(path, "path") == set(), path
     assert marked("/api/sessions", "redact") == {"filters[].value", "index.note"}
@@ -1056,6 +1058,198 @@ def test_a_failed_pull_says_why_on_the_topics_codex_rows():
     body = get("/api/limits")                    # the route asked for none, so says nothing
     assert body["pull"] is None
     assert all(row["note"] is None for row in body["rows"])
+
+
+# --- one window opened ----------------------------------------------------------------------
+
+HOUR = 3600.0
+
+
+def codex_window(used: float, ago: float, *, now: float, resets: float | None = None,
+                 minutes: int = 300, session_id: str | None = "thread-1") -> Reading:
+    """A Codex reading taken `ago` seconds before `now`, of a window that resets an hour
+    after `now` unless `resets` says when."""
+    return Reading("codex", "codex", minutes, "primary", used,
+                   now + HOUR if resets is None else resets, now - ago, "rollout", session_id)
+
+
+def codex_session(conn, sid: str, *times: float, input: int = 1000) -> None:
+    source(conn, f"/c/{sid}.jsonl",
+           [request(f"{sid}-{n}", ts, harness="codex", input=input)
+            for n, ts in enumerate(times)],
+           lane="codex", harness="codex", session_id=sid, cwd="/w/app")
+
+
+def test_an_opened_window_sends_its_periods_first_and_last_reading(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 3))
+    now = time.time()
+    put_readings(codex_window(90.0, 6 * HOUR, now=now, resets=now - 4 * HOUR),   # before
+                 codex_window(5.0, 3 * HOUR, now=now), codex_window(20.0, HOUR, now=now),
+                 codex_window(42.0, 60, now=now))
+    before = time.time()
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert set(body) == set(page.OPENED_WINDOW)
+    assert before <= body["now"] <= time.time() and body["today"] == "2026-10-03"
+    assert (body["harness"], body["limit_id"], body["window_minutes"]) == ("codex", "codex",
+                                                                          300)
+    assert (body["resets_at"], body["used_percent"]) == (limits.iso(now + HOUR), 42.0)
+    assert body["opened"] == limits.iso(now - 4 * HOUR)
+    assert body["readings"] == {
+        "count": 3,
+        "first": {"at": limits.iso(now - 3 * HOUR), "used_percent": 5.0},
+        "last": {"at": limits.iso(now - 60), "used_percent": 42.0}}
+    (row,) = [r for r in get("/api/limits")["rows"]
+              if (r["harness"], r["label"]) == ("codex", "5h")]
+    assert (row["opened"], row["resets_at"], row["observed_at"], row["used_percent"]) == (
+        body["opened"], body["resets_at"], body["readings"]["last"]["at"],
+        body["used_percent"])
+
+
+def test_a_window_read_once_has_no_first_reading():
+    now = time.time()
+    put_readings(codex_window(7.0, 60, now=now))
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert body["readings"] == {
+        "count": 1, "first": None,
+        "last": {"at": limits.iso(now - 60), "used_percent": 7.0}}
+    assert body["opened"] == limits.iso(now - 4 * HOUR)
+
+
+def test_a_window_whose_one_reading_shows_no_use_has_no_start_and_no_sessions(seeded):
+    now = time.time()
+    put_readings(codex_window(0.0, 60, now=now))
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert (body["opened"], body["used"], body["readings"]["count"]) == (None, None, 1)
+
+
+def test_an_opened_window_is_refused_with_no_store_and_makes_none():
+    text = refused("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert text == "there is no fresh reading of this window"
+    assert not readings.path().exists()
+
+
+def test_an_opened_window_needs_a_fresh_row(monkeypatch):
+    now = time.time()
+    put_readings(codex_window(80.0, 2 * HOUR, now=now, resets=now - 60),      # has reset
+                 codex_window(30.0, 60, now=now, minutes=10080),
+                 Reading("claude", "plan", 300, "five_hour", 12.0, now + HOUR, now - 60,
+                         "session-usage", "s1"))
+    asked = {"harness": "codex", "limit_id": "codex", "minutes": 300}
+    assert refused("/api/window", **asked) == "there is no fresh reading of this window"
+    assert refused("/api/window", **{**asked, "minutes": 60}).startswith("there is no")
+    assert refused("/api/window", **{**asked, "limit_id": "other"}).startswith("there is no")
+    assert "1 or more" in refused("/api/window", **{**asked, "minutes": 0})
+    assert get("/api/window", **{**asked, "minutes": 10080})["used_percent"] == 30.0
+    claude = {"harness": "claude", "limit_id": "plan", "minutes": 300}
+    assert get("/api/window", **claude)["used_percent"] == 12.0
+    monkeypatch.setattr(limits, "_turns_available", lambda: False)     # as limits() has it
+    assert all(row["state"] == "unavailable" for row in get("/api/limits")["rows"]
+               if row["harness"] == "claude")
+    assert refused("/api/window", **claude) == "there is no fresh reading of this window"
+    for query in ({**asked, "harness": "opencode"}, {"harness": "codex", "minutes": 300},
+                  {"harness": "codex", "limit_id": "codex"}):
+        status, _ = asyncio.run(ask(served(), "/api/window", query))
+        assert status == 400, query
+
+
+def test_an_opened_window_writes_nothing_and_pulls_nothing(pulls):
+    now = time.time()
+    put_readings(codex_window(10.0, 2 * HOUR, now=now))             # stale: a pull is due
+    conn = readings.open_store()
+    try:
+        conn.execute("INSERT INTO readings (harness, limit_id, window_minutes, observed_at,"
+                     " source) VALUES ('codex', 'codex', 300, ?, 'rollout')",
+                     (now - 30 * 86400,))                           # past the history cap
+    finally:
+        conn.close()
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert body["readings"]["count"] == 1 and pulls == []
+    conn = readings.open_store()
+    try:
+        assert readings.last_prune(conn) is None
+        assert readings.last_failed_pull(conn) is None
+        assert conn.execute("SELECT count(*) FROM readings").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_a_scoped_limit_opens_with_its_readings_and_no_sessions(seeded):
+    now = time.time()
+    put_readings(*(Reading("claude", "opus", 10080, "seven_day_opus", used, now + 86400,
+                           now - ago, "session-usage", "s1")
+                   for used, ago in ((3.0, 7200), (4.0, 60))))
+    body = get("/api/window", harness="claude", limit_id="opus", minutes=10080)
+    assert body["opened"] == limits.iso(now - 6 * 86400)
+    assert body["readings"]["count"] == 2 and body["readings"]["first"] is not None
+    assert body["used"] is None
+
+
+def test_a_main_window_lists_the_sessions_that_used_it_since_it_opened(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    now = time.time()
+    opened = now - 4 * HOUR
+    put_readings(codex_window(20.0, 2 * HOUR, now=now), codex_window(42.0, 60, now=now))
+    conn = store.open_index()
+    try:
+        codex_session(conn, "both-sides", opened - HOUR, opened + 60, opened + 120)
+        codex_session(conn, "before", opened - 2 * HOUR, opened - 1)
+        codex_session(conn, "dear", opened + 600, input=50_000)
+        codex_session(conn, "at-the-start", opened, input=20_000)
+        source(conn, "/p/other.jsonl", [request("o1", opened + 60, input=90_000)],
+               session_id="other-harness", cwd="/w/app")
+    finally:
+        conn.close()
+    used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]
+    assert used["since"] == limits.iso(opened)
+    assert [(row["session_id"], row["requests"]) for row in used["rows"]] == [
+        ("dear", 1), ("at-the-start", 1), ("both-sides", 2)]
+    assert all(set(row) == {"harness", "session_id", "requests", "cost"}
+               and row["harness"] == "codex" for row in used["rows"])
+    assert (used["count"], used["requests"], used["complete"]) == (3, 4, True)
+    assert used["cost"] == pytest.approx(sum(row["cost"] for row in used["rows"]))
+    whole = get("/api/sessions", harness="codex")
+    assert whole["count"] == 4 and whole["total"]["requests"] == 7
+
+
+def test_a_window_lists_its_ten_dearest_sessions_under_a_total_of_all(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    now = time.time()
+    put_readings(codex_window(42.0, 60, now=now))
+    conn = store.open_index()
+    try:
+        for n in range(12):
+            codex_session(conn, f"s{n:02d}", now - HOUR + n, input=1000 * (n + 1))
+        codex_session(conn, "unpriced", now - HOUR, input=10)
+        source(conn, "/c/unpriced-2.jsonl",
+               [request("u2", now - HOUR, harness="codex", model="mystery-9")],
+               lane="codex", harness="codex", session_id="unpriced-2", cwd="/w/app")
+    finally:
+        conn.close()
+    used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]
+    assert [row["session_id"] for row in used["rows"]] == [f"s{n:02d}" for n in
+                                                           range(11, 1, -1)]
+    assert (used["count"], used["requests"], used["complete"]) == (14, 14, False)
+    assert used["cost"] > sum(row["cost"] for row in used["rows"])
+
+
+def test_a_window_with_no_index_to_read_says_nothing_of_its_sessions():
+    put_readings(codex_window(42.0, 60, now=time.time()))
+    asked = {"harness": "codex", "limit_id": "codex", "minutes": 300}
+    body = get("/api/window", **asked)
+    assert body["used"] is None and body["opened"] is not None
+    assert not store.index_path().exists()
+    store.open_index().close()
+    assert get("/api/window", **asked)["used"] == {
+        "since": body["opened"], "count": 0, "requests": 0, "cost": 0.0,
+        "complete": True, "rows": []}
+    _set_version(store.INDEX_VERSION - 1)
+    assert get("/api/window", **asked)["used"] is None
+    conn = sqlite3.connect(store.index_path())
+    try:
+        conn.execute(f"PRAGMA user_version = {store.INDEX_VERSION + 1}")
+    finally:
+        conn.close()
+    assert "newer than" in refused("/api/window", **asked)
 
 
 # --- the stream and its limits poller -------------------------------------------------------

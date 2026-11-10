@@ -2,6 +2,8 @@
 
     GET  /api/limits    each plan window now (`limits()`, with no pull), with the
                         server's `now`
+    GET  /api/window    one plan window opened (`harness=&limit_id=&minutes=`): when it
+                        started, its period's readings, and the sessions it was used by
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
     GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
                         how many there are and how many come after, each with its context
@@ -20,15 +22,18 @@
 Each read answers from `moxi_usage.api` and reads the index as it is: no read runs a
 pass, so none waits on the index's lock, and `/api/prices` reads no index at all.
 `/api/limits` makes no Codex pull, so no read waits on another module: the stream's
-poller pulls and publishes the `limits` topic. The one act starts a pass. A report route takes the filters `since` and `until` (`YYYY-MM-DD`,
-both days included), `harness`, `project`, `folder` (a folder's whole path: the files
+poller pulls and publishes the `limits` topic. `/api/window` reads the readings store
+only when it exists, and creates, prunes and pulls nothing. The one act starts a pass.
+
+A report route takes the filters `since` and `until` (`YYYY-MM-DD`, both days included),
+`harness`, `project`, `folder` (a folder's whole path: the files
 whose `cwd` it is, whatever project key they carry), `model` and `utc`; days are cut in
 the page server's local zone, or in UTC with `utc`. Each route declares exactly the query
 keys it reads.
 
-Every report's answer, `/api/status` and `/api/limits` with its topic carry `today`, the
-page server's local date (`YYYY-MM-DD`), so the page words a time's day against the
-server's day and not the browser's.
+Every report's answer, `/api/status`, `/api/window` and `/api/limits` with its topic
+carry `today`, the page server's local date (`YYYY-MM-DD`), so the page words a time's
+day against the server's day and not the browser's.
 
 Where the API's answer holds a map with open keys, the route carries it as a list of
 `{name, value}` rows or leaves it out, so every shape here is fixed. Every value that can
@@ -57,6 +62,10 @@ lb = _ui.api.loopback
 
 #: The harnesses a report can be cut to.
 HARNESSES = ("claude", "codex", "opencode")
+#: The harnesses that have plan windows.
+LIMIT_HARNESSES = ("claude", "codex")
+#: The most sessions `/api/window` lists under a window's total.
+USED_MAX = 10
 #: The most rows `/api/sessions` sends, and how many it sends unless asked.
 TOP_MAX = 200
 TOP_DEFAULT = 200
@@ -411,6 +420,39 @@ LIMITS = {
     "notes": lb.Out("list", items=_SAYS),
 }
 
+#: One reading of a window's period: when it was read (ISO 8601 UTC) and its percent,
+#: null when the reading gave none.
+_READING = {"at": _TEXT, "used_percent": _WHEN}
+#: One window opened: the row `/api/limits` shows for it, when it started, the readings
+#: of its period and the sessions it was used by. Times are ISO 8601 UTC, as a limits
+#: row's are, but `now`. `readings.last` is the reading the row is from and `first` the
+#: period's earliest, null when that is the same one. `used` is this machine's sessions
+#: of the harness with requests since the window opened: how many (`count`), their
+#: requests and cost since then, and the ten dearest; null for a limit that is not the
+#: harness's main one, with a null `opened`, and when there is no index to read.
+OPENED_WINDOW = {
+    "now": _FLOAT,
+    "today": _TEXT,
+    "harness": _TEXT,
+    "limit_id": _TEXT,
+    "window_minutes": _INT,
+    "resets_at": _TEXT,
+    "used_percent": _FLOAT,
+    "opened": _MAYBE,
+    "readings": lb.Out("table", nullable=True, items={
+        "count": _INT,
+        "first": lb.Out("table", nullable=True, items=_READING),
+        "last": lb.Out("table", items=_READING)}),
+    "used": lb.Out("table", nullable=True, items={
+        "since": _TEXT,
+        "count": _INT,
+        "requests": _INT,
+        "cost": _WHEN,
+        "complete": _BOOL,
+        "rows": lb.Out("list", items=lb.Out("table", items={
+            "harness": _TEXT, "session_id": _MAYBE, "requests": _INT, "cost": _WHEN}))}),
+}
+
 #: The index topic: whether a pass started here runs now, the last pass, and its note.
 INDEX_TOPIC = {"running": _BOOL, "last_pass": _WHEN, "note": _MAYBE_SAYS}
 
@@ -418,6 +460,11 @@ PAGE = lb.Page(
     routes=(
         lb.Route("/api/limits", "read", "moxi_usage.pagehandlers:limits",
                  returns={"now": _FLOAT, **LIMITS}),
+        lb.Route("/api/window", "read", "moxi_usage.pagehandlers:window",
+                 query={"harness": lb.Field("enum", values=LIMIT_HARNESSES),
+                        "limit_id": lb.Field("string", max=512),
+                        "minutes": lb.Field("int")},
+                 returns=OPENED_WINDOW),
         lb.Route("/api/daily", "read", "moxi_usage.pagehandlers:daily",
                  query={"by": lb.Field("enum", required=False, values=("day", "month")),
                         **FILTERS},
@@ -461,8 +508,9 @@ PAGE = lb.Page(
 )
 
 __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESSES", "INDEX",
-           "INDEX_TOPIC", "LANE", "LIMITS", "MODELS", "MODEL_ROW", "OVERRIDE", "PAGE",
+           "INDEX_TOPIC", "LANE", "LIMITS", "LIMIT_HARNESSES", "MODELS", "MODEL_ROW",
+           "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
            "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SESSION", "SESSIONS", "SESSION_ROW",
            "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
-           "WINDOW"]
+           "USED_MAX", "WINDOW"]

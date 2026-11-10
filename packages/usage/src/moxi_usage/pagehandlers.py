@@ -3,10 +3,11 @@
 **Reads.** Each read is a plain `def`, run on one of the page server's worker threads,
 and thin over `moxi_usage.api`: it calls `limits()` or `report()`, takes `as_dict()`, and
 cuts the answer to its route's declared shape. It runs no SQL of its own; a session's
-context comes from `moxi_usage.reports.session_contexts`, one read per session sent.
+context comes from `moxi_usage.reports.session_contexts`, one read per session sent, and
+one opened window from `moxi_usage.limits.window`, which writes nothing.
 Every report is read with `fresh=False`, so a read never runs a pass and never waits on
 the index's lock; its `index.note` says it read the index as it is. Each report's answer, the
-status and the limits carry `today`, the page server's local date. Where the API's
+status, the limits and an opened window carry `today`, the page server's local date. Where the API's
 answer holds a map with open keys, the cut turns it into a list of `{name, value}` rows
 (a report's `filters`, a lane's `held_reasons`, the dollar figures `limits.dollars`
 finds in a window's `extra`) or leaves it out (a price's `source`, any lane fact not
@@ -54,8 +55,9 @@ import moxi.store
 from moxi import aio, modules
 
 from . import api, reports, store
+from . import limits as plan
 from .limits import dollars
-from .page import TOP_DEFAULT, WINDOW
+from .page import TOP_DEFAULT, USED_MAX, WINDOW
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -627,6 +629,62 @@ def limits(call: Any) -> dict[str, Any]:
     return {"now": now, **value}
 
 
+def _reading(found: Any) -> dict[str, Any]:
+    return {"at": plan.iso(found.observed_at), "used_percent": _num(found.used_percent)}
+
+
+def _used(harness: str, since: float) -> dict[str, Any] | None:
+    """The sessions of `harness` with requests from `since` on, from the index as it is:
+    how many, their requests and cost from then, and the `USED_MAX` dearest. None when
+    there is no index at this version to read."""
+    try:
+        if not reports.readable():
+            return None
+        answer = api.report("sessions", fresh=False, since=since, harness=harness).as_dict()
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    rows = sorted((_session_row(row) for row in answer["rows"]), key=_by_cost)
+    total = _sums(answer.get("total") or {})
+    return {"since": plan.iso(since), "count": len(rows), "requests": total["requests"],
+            "cost": total["cost"], "complete": total["complete"],
+            "rows": [{"harness": row["harness"], "session_id": row["session_id"],
+                      "requests": row["requests"], "cost": row["cost"]}
+                     for row in rows[:USED_MAX]]}
+
+
+def window(call: Any) -> dict[str, Any]:
+    """`GET /api/window?harness=&limit_id=&minutes=`: one plan window opened. Its row is
+    picked as `/api/limits` picks it, from the readings store as it is: the store is
+    opened only when it exists, and nothing is created, pruned or pulled. A window with
+    no `fresh` row is refused (422), so the answer is the reading its limits row shows.
+    `opened` is the row's; `readings` counts the period's readings, with the row's own
+    as `last` and the earliest as `first`, null when it is the same one; `used` is the
+    sessions of the harness since the window opened, for the harness's main limit with a
+    known `opened`, else null."""
+    harness, limit_id = call.query["harness"], call.query["limit_id"]
+    minutes = call.query["minutes"]
+    if minutes < 1:
+        raise lb.Refused("minutes is a window's duration, 1 or more")
+    try:
+        found = plan.window(harness, limit_id, minutes)
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    if found is None or found.row.state != plan.FRESH:
+        raise lb.Refused("there is no fresh reading of this window")
+    row = found.row
+    main = limit_id == plan.MAIN_LIMIT[harness]
+    return {
+        "now": found.now, "today": _today().isoformat(), "harness": harness,
+        "limit_id": limit_id, "window_minutes": minutes,
+        "resets_at": plan.iso(row.resets_at), "used_percent": float(row.used_percent),
+        "opened": plan.iso(row.opened),
+        "readings": {"count": found.count,
+                     "first": None if found.first is None else _reading(found.first),
+                     "last": _reading(found.last)},
+        "used": _used(harness, row.opened) if main and row.opened is not None else None,
+    }
+
+
 # --- the pass, the topics and the poller ---------------------------------------------------
 
 class _Feed:
@@ -729,4 +787,4 @@ async def events(call: Any) -> Any:
 
 __all__ = ["COST_DAYS", "MATCHES_MAX", "PERIOD", "PRICES_MAX", "TOPICS", "cost", "daily",
            "events", "gather_limits", "limits", "models", "prices", "projects", "requests",
-           "session", "sessions", "start_pass", "status", "terms"]
+           "session", "sessions", "start_pass", "status", "terms", "window"]

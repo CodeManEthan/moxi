@@ -755,6 +755,27 @@ def session_context(conn: sqlite3.Connection, harness: str | None, session_id: s
     return {"tokens": tokens, "window": None if window is UNKNOWN else int(window)}
 
 
+def readable(env: Mapping[str, str] | None = None) -> bool:
+    """True when there is an index at this usage's version, so a report over it is a
+    read and not the empty answer given for no index or an older one. Raises
+    `moxi.store.StoreTooNew` for an index a newer usage wrote, as a report does."""
+    from . import store
+
+    path = store.index_path(env)
+    if not path.exists():
+        return False
+    conn = store.connect(env=env, create=False)
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+    if version > store.INDEX_VERSION:
+        import moxi.store
+
+        raise moxi.store.StoreTooNew(str(path), version, store.INDEX_VERSION)
+    return version == store.INDEX_VERSION
+
+
 def session_contexts(keys: Iterable[tuple[str | None, str]], *,
                      env: Mapping[str, str] | None = None, table: Table | None = None,
                      ) -> dict[tuple[str | None, str], dict[str, Any] | None]:
