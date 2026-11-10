@@ -380,7 +380,9 @@ to where the operator said so, or names an open question of the round. `fold` ch
 the rows as it freezes the version and records the result. A version whose rows fail
 is frozen all the same, and `verify-design` waits for one whose rows pass. A row that
 cites a ruling since replaced or taken back is stale: `next` warns of it, and it holds
-up nothing. The setting is read at each freezing, so turning it on or off reaches a
+up nothing. A standing ruling the round was opened with stands for the ruling as it is
+now: once it is replaced, the ruling that stands in its place is owed the row, and
+once it is taken back it is owed none. The setting is read at each freezing, so turning it on or off reaches a
 round at its next version.
 
 ## Closing

@@ -6,9 +6,11 @@ the round (`C<n>`) or a commitment (`R<n>`), and says what became of it: `carrie
 `amended` or `cut`.
 
 **The trace set** of a round is what its design owes a row: the round's rulings that say
-what is built and that stand, and the standing rulings the round was opened with that
-still stand. A ruling that only changed a record (a skip, a parking and the like) is
-never in it, and neither is one that was replaced or taken back.
+what is built and that stand, and the standing rulings the round was opened with, each
+as it stands now. A ruling the round was opened with that was replaced since is in the
+set as the ruling that stands in its place, and a row that cites the replaced id is
+stale. A ruling that only changed a record (a skip, a parking and the like) is never
+in it, and neither is one that was taken back.
 
 **The check** is run over a version's rows when the version is frozen, where the
 round's project asks for it. It is arithmetic over ids, and a version passes when:
@@ -131,11 +133,15 @@ def recorded(version: states.Version | None) -> Result | None:
 
 def trace_set(state: states.State, register: states.State | None) -> tuple[str, ...]:
     """The ids the round's design owes a row: the standing rulings the round was
-    opened with that still stand, then the round's rulings that say what is built and
-    stand. `register` is the state of the project's log; with None, what stands of the
-    project's rulings is not known and each one the round was opened with is owed."""
-    inherited = [one for one in state.inherits
-                 if register is None or _stands(register, one)]
+    opened with, each as it stands now, then the round's rulings that say what is
+    built and stand. A ruling the round was opened with that was replaced since is
+    owed as the ruling that stands at the end of what replaced it, and one that was
+    taken back, or whose replacement was, is owed nothing. `register` is the state of
+    the project's log; with None, what stands of the project's rulings is not known
+    and each one the round was opened with is owed."""
+    inherited = [one if register is None else _stands_as(register, one)
+                 for one in state.inherits]
+    inherited = [one for one in inherited if one is not None]
     own = [one.id for one in corrections.live(state.rulings)
            if one.kind == ruling.SUBSTANCE and one.id is not None]
     return tuple(dict.fromkeys([*inherited, *own]))
@@ -233,9 +239,14 @@ def _last(state: states.State, register: states.State | None,
     return cited
 
 
-def _stands(register: states.State, ruling_id: str) -> bool:
+def _stands_as(register: states.State, ruling_id: str) -> str | None:
+    """The id a standing ruling stands as now: its own, the id of the ruling that
+    stands in its place, or None when nothing of it stands."""
     found = corrections.find(register, ruling_id)
-    return found is not None and corrections.stands(found)
+    if found is None:
+        return None
+    last = _last(register, register, found)
+    return last.id if corrections.stands(last) else None
 
 
 # -- what a version's check holds up -----------------------------------------------------

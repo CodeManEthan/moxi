@@ -158,15 +158,54 @@ def test_a_standing_ruling_made_from_the_round_is_not_in_its_set(folder):
     assert tracing.trace_set(folded(folder), register(folder)) == ()
 
 
-def test_an_inherited_ruling_corrected_since_leaves_the_set(opened):
+def test_an_inherited_ruling_stands_in_the_set_as_the_ruling_that_replaced_it(opened):
     one = rule(target="proj-a")
     other = rule(target="proj-a", text="Nothing is cached.")
-    folder = opened(one, other)
-    rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
+    kept = rule(target="proj-a", text="Rows are sorted by date.")
+    folder = opened(one, other, kept)
+    second = rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
+    assert tracing.trace_set(folded(folder), register(folder)) == (second, other, kept)
+    third = rule(target="proj-a", text="Times are shown in the zone of the page.",
+                 supersedes=second)
     rule(f"revoke:{other}", target="proj-a")
 
+    # The live end of what replaced it is owed a row; one taken back is owed none.
+    assert tracing.trace_set(folded(folder), register(folder)) == (third, kept)
+    assert tracing.trace_set(folded(folder), None) == (one, other, kept)
+
+
+def test_an_inherited_ruling_whose_replacement_was_taken_back_leaves_the_set(opened):
+    one = rule(target="proj-a")
+    folder = opened(one)
+    later = rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
+    rule(f"revoke:{later}", target="proj-a")
+
     assert tracing.trace_set(folded(folder), register(folder)) == ()
-    assert tracing.trace_set(folded(folder), None) == (one, other)
+
+
+def test_what_replaced_an_inherited_ruling_is_owed_before_the_rounds_own_rulings(opened):
+    one = rule(target="proj-a")
+    folder = opened(one)
+    later = rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
+    own = rule()
+
+    assert tracing.trace_set(folded(folder), register(folder)) == (later, own)
+
+
+def test_a_design_with_no_row_for_what_replaced_an_inherited_ruling_fails(opened):
+    one = rule(target="proj-a")
+    folder = opened(one)
+    later = rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
+
+    fold(folder)
+    assert result(folder) == tracing.Result(missing=(later,))
+    assert not tracing.passes(folded(folder))
+    # A row for the replaced id is stale and names what replaced it, which is owed.
+    fold(folder, row(one))
+    assert result(folder) == tracing.Result(
+        missing=(later,), stale=(tracing.Stale(one, replaced_by=later),))
+    fold(folder, row(later))
+    assert result(folder).passes
 
 
 # -- the check ---------------------------------------------------------------------------
@@ -271,7 +310,7 @@ def test_a_row_that_cites_a_standing_ruling_corrected_since_is_stale(opened):
 
     fold(folder, row(one), row(other))
 
-    assert result(folder) == tracing.Result(stale=(
+    assert result(folder) == tracing.Result(missing=(later,), stale=(
         tracing.Stale(one, replaced_by=later), tracing.Stale(other, revoked_by=taken)))
 
 
