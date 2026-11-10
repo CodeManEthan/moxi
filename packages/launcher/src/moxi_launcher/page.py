@@ -11,6 +11,8 @@
     GET  /api/sessions  the past-sessions list, as `moxi launcher sessions` gives it
     GET  /api/state     a session's state, or the state of every live launch
     GET  /api/runs      runs and their events: one run, one launch's, or the newest
+    GET  /api/places    where this user last launched: a project or a folder each, newest
+                        first, and whether a launch here may name a project
     POST /api/preview   what a launch would start, its refusals, and a ticket to launch it
     POST /api/launch    the launch a ticket was issued for, run as a detached job (202)
     POST /api/resume    a past session resumed: a slot one as a detached job (202), a
@@ -194,6 +196,13 @@ RUN = _table(
 )
 RUNS = {**STANDING, "runs": Out("list", items=RUN)}
 
+#: One place the user launched in: a project's key, or null for a folder, with the folder
+#: and the time of the newest launch there.
+PLACE = _table(project_key=_text(nullable=True), cwd=_text(mark="path"), at=_text())
+#: `projects` is whether a launch here may name a project; `actor` is who the page
+#: server launches as, whose launches the places are.
+PLACES = {**STANDING, "projects": Out("bool"), "actor": _text(),
+          "places": Out("list", items=PLACE)}
 
 def _values_table() -> dict[str, Field]:
     """A launch request's `values`: every row a user may set, of the launcher and of each
@@ -281,6 +290,7 @@ PAGE = lb.Page(
                  query={**_PAGED, "run": Field("string", required=False, max=QUERY_MAX),
                         "request": Field("string", required=False, max=QUERY_MAX)},
                  returns=RUNS),
+        lb.Route("/api/places", "read", _target("read_places"), returns=PLACES),
         lb.Route("/api/preview", "act", _target("preview"), body=REQUEST, returns=PREVIEW),
         lb.Route("/api/launch", "act", _target("launch"),
                  body={**REQUEST, "ticket": Field("string", max=1024)}, returns=LAUNCHED),
@@ -298,6 +308,6 @@ PAGE = lb.Page(
 )
 
 __all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
-           "PAGE", "PAST", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
+           "PAGE", "PAST", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
            "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "STANDING", "STATE",
            "VALUES"]

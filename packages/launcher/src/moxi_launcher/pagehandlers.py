@@ -4,9 +4,9 @@ The reads answer from the launcher's own calls: the catalog (`catalog.offered`'s
 the UI shell's form reads them), the presets file checked (`presets.check`), the launch
 form's values (`presets.layered`), the launch
 log (`store.log`), the runs with their events (`store.runs`, `store.run_events`), the
-past-sessions list (`resume.sessions`) and a session's state (`state.state`, or
-`state.of_launch` for every live launch). Each holds `busy("read")` for its own length
-only.
+past-sessions list (`resume.sessions`), a session's state (`state.state`, or
+`state.of_launch` for every live launch), the places the page server's own actor last
+launched in (`store.places`). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
 and start time its row recorded, or, with no pid, on the endpoint that claimed it. That
@@ -494,6 +494,32 @@ def read_runs(call: Any) -> dict[str, Any]:
                 return _up(runs=[run_entry(conn, run) for run in found])
         except Exception as err:
             return _failed(err, "reading the runs failed", runs=[])
+
+
+# -- /api/places ----------------------------------------------------------------------------
+
+#: The optional module whose keys a launch names with its `project` row.
+PROJECTS = "projects"
+
+
+def places() -> dict[str, Any]:
+    """`/api/places`' answer: who the page server launches as, the places that actor last
+    launched in, newest first, and whether a launch here may name a project."""
+    actor = first.actor()
+    with _store() as conn:
+        found = [] if conn is None else store.places(conn, actor)
+    return _up(projects=_available()(PROJECTS), actor=actor,
+               places=[place._asdict() for place in found])
+
+
+def read_places(call: Any) -> dict[str, Any]:
+    """`GET /api/places`: where this user last launched."""
+    with call.busy("read"):
+        try:
+            return places()
+        except Exception as err:
+            return _failed(err, "reading the places failed", projects=False,
+                           actor=first.actor(), places=[])
 
 
 # -- live launches and their state ------------------------------------------------------------
@@ -1192,12 +1218,13 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER",
+__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "PROJECTS",
+           "REFUSALS", "REGATHER",
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
            "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
            "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
-           "launched", "launches", "live", "live_states", "on_path", "page_key", "preview",
-           "previewed", "read_catalog", "read_form", "read_launches", "read_presets",
-           "read_runs", "read_sessions", "read_state", "refusal", "resumable", "resume",
-           "resumed", "run_entry", "session_state", "spelled", "ticket", "tokens",
-           "unreadable", "verify"]
+           "launched", "launches", "live", "live_states", "on_path", "page_key", "places",
+           "preview", "previewed", "read_catalog", "read_form", "read_launches",
+           "read_places", "read_presets", "read_runs", "read_sessions", "read_state", "refusal", "resumable", "resume", "resumed", "run_entry",
+           "session_state", "spelled", "ticket", "tokens", "unreadable",
+           "verify"]

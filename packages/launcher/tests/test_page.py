@@ -24,7 +24,7 @@ import pytest
 from moxi import modules
 from moxi import proc
 
-from moxi_launcher import catalog, page, pagehandlers, presets, slots, store
+from moxi_launcher import catalog, first, page, pagehandlers, presets, slots, store
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Where the web build writes the page's assets.
@@ -34,7 +34,7 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/preview", "/api/launch", "/api/resume",
+          "/api/state", "/api/runs", "/api/places", "/api/preview", "/api/launch", "/api/resume",
           "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
@@ -599,6 +599,95 @@ def test_runs_by_run_by_launch_and_paged(conn):
 
 def test_no_launch_log_has_no_runs():
     assert get("/api/runs")[1] == {"state": "up", "detail": None, "runs": []}
+
+
+# --- /api/places --------------------------------------------------------------------------
+
+def launched(connection, request_id: str, at: str, **more) -> None:
+    """A launch the page server's own actor made, started in a terminal."""
+    args = {"request_id": request_id, "actor": first.actor(), "harness": "codex",
+            "target": "terminal", "cwd": "/work", "values": {}, "argv": ["codex"],
+            "env": {}, "posture": "operator", "at": at}
+    store.insert(connection, **{**args, **more})
+
+
+@pytest.fixture
+def log():
+    connection = store.connect()
+    yield connection
+    connection.close()
+
+
+def test_places_are_the_actors_own_newest_first_with_the_actor_named(log):
+    launched(log, "a", "2026-01-01T09:00:00.000000Z", cwd="/work/one")
+    launched(log, "b", "2026-01-01T10:00:00.000000Z", cwd="/src/proj-a/docs",
+             project_key="proj-a")
+    launched(log, "c", "2026-01-01T11:00:00.000000Z", cwd="/work/one")
+    launched(log, "d", "2026-01-01T12:00:00.000000Z", cwd="/work/theirs", actor="alice")
+    status, said, _ = get("/api/places")
+    assert (status, said) == (200, {
+        "state": "up", "detail": None, "projects": False, "actor": first.actor(),
+        "places": [
+            {"project_key": None, "cwd": "/work/one", "at": "2026-01-01T11:00:00.000000Z"},
+            {"project_key": "proj-a", "cwd": "/src/proj-a/docs",
+             "at": "2026-01-01T10:00:00.000000Z"}]})
+    assert said["actor"] != "alice"
+
+
+def test_places_leave_out_failed_relaunched_resumed_and_scratch_launches(log):
+    launched(log, "kept", "2026-01-01T09:00:00.000000Z", cwd="/work/kept")
+    launched(log, "failed", "2026-01-01T10:00:00.000000Z", cwd="/work/failed")
+    store.set_state(log, "failed", "failed", reason="exited")
+    launched(log, "again", "2026-01-01T11:00:00.000000Z", cwd="/work/again",
+             relaunch_of="kept")
+    launched(log, "resumed", "2026-01-01T12:00:00.000000Z", cwd="/work/resumed",
+             resume_of="kept", session_id="thread-1")
+    launched(log, "scratch", "2026-01-01T13:00:00.000000Z", cwd="/tmp/scratch-1",
+             values={"scratch": True})
+    assert [p["cwd"] for p in get("/api/places")[1]["places"]] == ["/work/kept"]
+
+
+def test_places_stop_at_five(log):
+    for number in range(7):
+        launched(log, f"r{number}", f"2026-01-01T1{number}:00:00.000000Z",
+                 cwd=f"/work/{number}")
+    assert [p["cwd"] for p in get("/api/places")[1]["places"]] == [
+        f"/work/{number}" for number in (6, 5, 4, 3, 2)]
+
+
+def test_places_say_whether_a_launch_may_name_a_project(monkeypatch):
+    assert get("/api/places")[1]["projects"] is False
+    monkeypatch.setattr(pagehandlers, "_available", lambda: lambda name: name == "projects")
+    assert get("/api/places")[1]["projects"] is True
+
+
+def test_a_launch_made_under_a_comms_name_is_that_names_place(log, monkeypatch):
+    launched(log, "mine", "2026-01-01T09:00:00.000000Z", cwd="/work/mine")
+    launched(log, "theirs", "2026-01-01T10:00:00.000000Z", cwd="/work/theirs",
+             actor="planner")
+    monkeypatch.setenv(first.COMMS_NAME, "planner")
+    said = get("/api/places")[1]
+    assert said["actor"] == "planner"
+    assert [p["cwd"] for p in said["places"]] == ["/work/theirs"]
+
+
+def test_no_launch_log_reads_no_place_and_makes_none():
+    status, said, _ = get("/api/places")
+    assert (status, said) == (200, {"state": "up", "detail": None, "projects": False,
+                                    "actor": first.actor(), "places": []})
+    assert not store.path().exists()
+
+
+def test_a_failed_places_read_says_only_the_class(log, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("/home/someone/private/launcher.db")
+
+    monkeypatch.setattr(store, "places", broken)
+    status, said, raw = get("/api/places")
+    assert status == 200 and said == {
+        "state": "error", "detail": pagehandlers.UNEXPECTED.format("RuntimeError"),
+        "projects": False, "actor": first.actor(), "places": []}
+    assert b"someone" not in raw
 
 
 # --- the announcement, and the launcher without the UI ---------------------------------------
