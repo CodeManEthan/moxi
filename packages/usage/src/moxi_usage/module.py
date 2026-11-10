@@ -1,6 +1,9 @@
 """The announcement of Moxi's usage module, which moxi.modules reads."""
 
-INTERFACES = frozenset({1})
+#: Interface 2 is interface 1 plus `report`'s `folder` filter, the `projects` report by
+#: folder, `saving` on a `terms` total and `opened` on a limits row. A caller that needs
+#: any of those asks for 2; one written against 1 still loads.
+INTERFACES = frozenset({1, 2})
 API = "moxi_usage.api"
 CLI = "moxi_usage.cli:main"
 SUMMARY = ("How much of each plan window is used, how full a session's context is, and "

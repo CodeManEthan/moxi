@@ -16,6 +16,8 @@
     GET  /api/requests  one row per request of a session's agent (`session=ID&agent=ID`)
     GET  /api/prices    the model table's rates: some models (`models=`) or a search (`q=`)
     GET  /api/status    the index: its lanes, held rows and last pass
+    GET  /api/restart-point  the context size past which carrying on with a session of
+                        one model costs more than restarting it (`model=`), from the measure
     GET  /api/cost      today and the six days before it, by day and model
     POST /api/pass      start a pass over the index, unless one is running
     GET  /api/events    the stream: topics `limits` and `index`
@@ -24,7 +26,8 @@ Each read answers from `moxi_usage.api` and reads the index as it is: no read ru
 pass, so none waits on the index's lock, and `/api/prices` reads no index at all.
 `/api/limits` makes no Codex pull, so no read waits on another module: the stream's
 poller pulls and publishes the `limits` topic. `/api/window` reads the readings store
-only when it exists, and creates, prunes and pulls nothing. The one act starts a pass.
+only when it exists, and creates, prunes and pulls nothing. `/api/restart-point` reads
+the measure's file and the model table and writes nothing. The one act starts a pass.
 
 A report route takes the filters `since` and `until` (`YYYY-MM-DD`, both days included),
 `harness`, `project`, `folder` (a folder's whole path: the files
@@ -464,6 +467,13 @@ OPENED_WINDOW = {
             "harness": _TEXT, "session_id": _MAYBE, "requests": _INT, "cost": _WHEN}))}),
 }
 
+#: The restart point of one model's main sessions: `model` is the id the measure keys
+#: its row by (the one asked for with a bracket or date suffix taken off; the one asked
+#: for when it names no model), `tokens` the context size past which carrying on costs
+#: more than restarting, and `reason` why there is none: no measure, no row for the
+#: model, or a price the model table lacks. Exactly one of `tokens` and `reason` is null.
+RESTART_POINT = {"model": _TEXT, "tokens": _MAYBE_INT, "reason": _MAYBE_SAYS}
+
 #: The index topic: whether a pass started here runs now, the last pass, and its note.
 INDEX_TOPIC = {"running": _BOOL, "last_pass": _WHEN, "note": _MAYBE_SAYS}
 
@@ -508,6 +518,8 @@ PAGE = lb.Page(
                         "q": lb.Field("string", required=False, max=200)},
                  returns=PRICES),
         lb.Route("/api/status", "read", "moxi_usage.pagehandlers:status", returns=STATUS),
+        lb.Route("/api/restart-point", "read", "moxi_usage.pagehandlers:restart_point",
+                 query={"model": lb.Field("string", max=512)}, returns=RESTART_POINT),
         lb.Route("/api/cost", "read", "moxi_usage.pagehandlers:cost", returns=COST),
         lb.Route("/api/pass", "act", "moxi_usage.pagehandlers:start_pass",
                  returns={"started": _BOOL, "running": _BOOL}),
@@ -522,6 +534,6 @@ __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESS
            "INDEX_TOPIC", "LANE", "LIMITS", "LIMIT_HARNESSES", "MODELS", "MODEL_ROW",
            "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
-           "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS", "SESSION_ROW",
+           "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS", "SESSION_ROW",
            "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
            "USED_MAX", "WINDOW"]

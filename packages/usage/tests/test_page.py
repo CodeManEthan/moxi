@@ -34,6 +34,9 @@ from moxi_usage.readings import Reading
 from conftest import doc, write_config
 from test_reports import (at, one_session_index, request, requests_index, source,
                           table)
+from test_thresholds import EXACT as MARKS_EXACT
+from test_thresholds import table as marks_table
+from test_thresholds import write_params
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "T" * 43
@@ -218,6 +221,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
         "/api/requests": ("read", {"session", "agent", *FILTERS}, False),
         "/api/prices": ("read", {"models", "providers", "q"}, False),
         "/api/status": ("read", set(), False),
+        "/api/restart-point": ("read", {"model"}, False),
         "/api/cost": ("read", set(), False),
         "/api/pass": ("act", set(), False),
         "/api/events": ("read", set(), True),
@@ -226,6 +230,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
     assert routes["/api/session"]["query"]["session"]["required"]
     assert all(key["required"] for key in routes["/api/window"]["query"].values())
     assert routes["/api/requests"]["query"]["session"]["required"]
+    assert routes["/api/restart-point"]["query"]["model"]["required"]
     assert not routes["/api/terms"]["query"]["session"]["required"]
     assert list(routes["/api/events"]["topics"]) == ["limits", "index"]
     assert routes["/api/pass"]["body"] == {}
@@ -263,8 +268,10 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
         "total.held_rows[].path", "total.duplicate_rows[].path",
         "total.duplicate_rows[].of_path"}
     for path in ("/api/limits", "/api/window", "/api/daily", "/api/session", "/api/models", "/api/cost",
-                 "/api/terms", "/api/requests", "/api/prices", "/api/pass", "/api/events"):
+                 "/api/terms", "/api/requests", "/api/prices", "/api/restart-point",
+                 "/api/pass", "/api/events"):
         assert marked(path, "path") == set(), path
+    assert marked("/api/restart-point", "redact") == {"reason"}
     assert marked("/api/sessions", "redact") == {"filters[].value", "index.note"}
     assert "rows[].title" in marked("/api/session", "redact")
 
@@ -287,6 +294,21 @@ def test_the_announcement_offers_the_page_its_blocks_and_the_ui_extra():
     found = modules.load("usage", interface=1)
     assert found.ok and found.page == module.PAGE
     assert set(found.components) == {"page", "limits", "cost"}
+
+
+def test_usage_offers_interfaces_1_and_2_and_no_other():
+    from moxi_usage import api, module
+
+    assert module.INTERFACES == {1, 2}
+    for interface in (1, 2):
+        found = modules.load("usage", interface=interface)
+        assert found.ok, found.reason
+        assert found.api is api
+    assert not modules.load("usage", interface=3).ok
+    # what interface 2 adds is there to call: the folder filter and projects by folder
+    assert reports.report("projects", by="folder", folder="/w/app", fresh=False).rows == []
+    assert "opened" in limits.Row.__dataclass_fields__
+    assert reports.report("terms", fresh=False).total["saving"] is None
 
 
 #: A `moxi usage` command as the page's sources and the README name one: the verb (or
@@ -1000,6 +1022,61 @@ def test_an_index_from_a_newer_usage_is_a_422_with_its_text():
     for path, query in READS:
         text = refused(path, **query)
         assert f"newer than the {store.INDEX_VERSION} this version knows" in text, path
+
+
+# --- the restart point ------------------------------------------------------------------------
+
+@pytest.fixture
+def priced_marks(monkeypatch):
+    """The model table the thresholds' tests price their measured rows with."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: marks_table())
+
+
+def test_the_restart_point_is_the_first_mark_of_the_models_main_sessions(priced_marks):
+    path = write_params()
+    before = path.read_bytes(), path.stat().st_mtime_ns, sorted(path.parent.iterdir())
+    for model in MARKS_EXACT:
+        assert get("/api/restart-point", model=model) == {
+            "model": model, "tokens": MARKS_EXACT[model]["1x"], "reason": None}
+    # a bracket or date suffix reads the base model's row, and the answer names that row
+    assert get("/api/restart-point", model="claude-opus-5-5[1m]") == {
+        "model": "claude-opus-5-5", "tokens": MARKS_EXACT["claude-opus-5-5"]["1x"],
+        "reason": None}
+    assert (path.read_bytes(), path.stat().st_mtime_ns,
+            sorted(path.parent.iterdir())) == before
+
+
+def test_the_restart_point_is_null_with_its_reason_when_there_is_no_measure(priced_marks):
+    from moxi_usage import thresholds
+
+    body = get("/api/restart-point", model="claude-opus-5-5")
+    assert body["model"] == "claude-opus-5-5" and body["tokens"] is None
+    assert "has not been measured" in body["reason"]
+    # asking wrote nothing: no measure's file, and no folder for one
+    assert not thresholds.params_path().exists()
+    assert not thresholds.params_path().parent.exists()
+
+
+def test_the_restart_point_is_null_with_its_reason_for_a_model_the_measure_lacks(
+        priced_marks):
+    write_params()
+    body = get("/api/restart-point", model="gpt-x")
+    assert body == {"model": "gpt-x", "tokens": None,
+                    "reason": "the restart-point measure has no main row for gpt-x"}
+    # a measure's file that does not read is a reason too, not a refusal
+    body = get("/api/restart-point", model="claude-opus-5")
+    assert body["tokens"] == MARKS_EXACT["claude-opus-5"]["1x"]
+    write_params("not json")
+    body = get("/api/restart-point", model="claude-opus-5")
+    assert body["tokens"] is None and "is not JSON" in body["reason"]
+
+
+def test_the_restart_point_needs_a_model():
+    status, _ = asyncio.run(ask(served(), "/api/restart-point", {}))
+    assert status == 400
+    body = get("/api/restart-point", model="")
+    assert body == {"model": "", "tokens": None,
+                    "reason": "no model is known for the session"}
 
 
 # --- limits ---------------------------------------------------------------------------------

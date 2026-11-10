@@ -4,7 +4,8 @@
 and thin over `moxi_usage.api`: it calls `limits()` or `report()`, takes `as_dict()`, and
 cuts the answer to its route's declared shape. It runs no SQL of its own; a session's
 context comes from `moxi_usage.reports.session_contexts`, one read per session sent, and
-one opened window from `moxi_usage.limits.window`, which writes nothing.
+one opened window from `moxi_usage.limits.window`, which writes nothing. The restart
+point is `threshold()`'s first mark for a model's main sessions.
 Every report is read with `fresh=False`, so a read never runs a pass and never waits on
 the index's lock; its `index.note` says it read the index as it is. Each report's answer, the
 status, the limits and an opened window carry `today`, the page server's local date. Where the API's
@@ -700,6 +701,25 @@ def window(call: Any) -> dict[str, Any]:
     }
 
 
+# --- the restart point -----------------------------------------------------------------------
+
+def restart_point(call: Any) -> dict[str, Any]:
+    """`GET /api/restart-point?model=`: the context size, in tokens, past which carrying
+    on with a main session of `model` costs more than restarting it: the first mark of
+    the measure `moxi usage restart-point --measure` writes. `tokens` is null with the
+    `reason` when it cannot be worked out: there is no measure, the measure has no row
+    for the model, or the model table lacks a price it needs. It reads the measure's
+    file and the model table and writes nothing."""
+    asked = call.query["model"]
+    try:
+        found = api.threshold(asked, "1x", "main")
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    tokens = _int(found.tokens)
+    reason = None if tokens is not None else _str(found.reason) or "no restart point"
+    return {"model": found.model or asked, "tokens": tokens, "reason": reason}
+
+
 # --- the pass, the topics and the poller ---------------------------------------------------
 
 class _Feed:
@@ -802,4 +822,5 @@ async def events(call: Any) -> Any:
 
 __all__ = ["COST_DAYS", "MATCHES_MAX", "PERIOD", "PRICES_MAX", "TOPICS", "cost", "daily",
            "events", "gather_limits", "limits", "models", "prices", "projects", "requests",
-           "session", "sessions", "start_pass", "status", "terms", "window"]
+           "restart_point", "session", "sessions", "start_pass", "status", "terms",
+           "window"]
