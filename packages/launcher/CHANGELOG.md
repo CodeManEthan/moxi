@@ -38,6 +38,15 @@
   `target` row, the command a launch of the form's harness composes there under that
   comms name, or null where such a launch is refused. A catalog field's `modes` are
   matched with it. New `pagehandlers.modes` and `page.FORM_MODE`.
+- A fresh launch records what its own request gave: its values hold `sources`, where
+  each row's value came from (`last` for a typed row the request names in `filled`, a
+  value filled in from an earlier launch), and `filled`. A relaunch or resume records
+  neither, and the launch log takes no new step. A page request's `filled` is signed
+  with its ticket and written to the request file. New `GET /api/last?seat=|project=|cwd=`:
+  the values the newest launch of a seat, else a project, else a folder was asked for
+  beyond its preset and the defaults, without the place, the first turn, where it ran
+  and its name. A launch logged before this records no sources and fills nothing. New
+  `pagehandlers.request_of`, `api.LaunchRequest.filled` and `page.LAST`.
 - New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
   run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
   so a caller on an install without the UI shell can read what is alive.

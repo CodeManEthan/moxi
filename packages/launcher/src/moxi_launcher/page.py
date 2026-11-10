@@ -17,6 +17,9 @@
     GET  /api/targets   where a launch may run now: each slot with whether it is free and
                         which launch took it, whether a new slot can be made, and the
                         choice a launch starts with
+    GET  /api/last      what the newest launch of a seat, a project or a folder was
+                        asked for beyond its preset and the defaults: the values a
+                        new launch there starts filled with
     GET  /api/name      the session name a launch of the form would take from its name
                         template, or from a template being edited, with what saving
                         that template would write
@@ -31,11 +34,14 @@ answer sends is declared here at every depth, so loopback refuses an undeclared 
 in and cuts one going out. A launch request's `values` and `leave_out` are catalog keys
 only: the table is built from the launcher's catalog and both harnesses' when this module
 is imported. A request carries the whole form: each field showing a value in `values`,
-each field shown empty in `leave_out`, since a body holds no null. A map
+each field shown empty in `leave_out`, since a body holds no null; `filled` names the
+fields whose value the page filled in from an earlier launch. A map
 whose keys aren't fixed (a preset's values, an event's detail) goes as rows or as JSON
-text. No answer carries a value from an environment, a launch's recorded environment or
-its brief; a preview's argv and first turn may hold the brief, and are marked `redact`, and
-paths are marked `path`.
+text. No answer carries a value from an environment or a launch's recorded environment. A
+preview's argv and first turn may hold the brief, and are marked `redact`, and paths are
+marked `path`. `/api/last` hands back values an earlier launch was asked with, each
+marked `redact`, and is not open to the gateway; the launch log's own routes carry no
+recorded value and no brief.
 
 The page's assets are what the repository's web build writes from `packages/launcher/web/`
 into this package's `web/` folder: the panel and the three components the announcement
@@ -143,6 +149,15 @@ FORM_ROW = _table(name=_text(), value=_text(nullable=True),
 #: The command a launch of the form's harness composes when it runs in `target`, one of
 #: the names a catalog row's `modes` holds; null where such a launch is refused.
 FORM_MODE = _table(target=_text(), mode=_text(nullable=True))
+#: One value an earlier launch's own request gave, spelled as a preset's value is.
+HANDED = _table(name=_text(), value=_text(nullable=True, mark="redact"),
+                items=Out("list", items=Out("string", mark="redact"), nullable=True))
+#: The newest launch of the key asked for: when it was made, its harness, and each value
+#: its own request gave for a row that may be filled from an earlier launch. `at` and
+#: `harness` are null, and `values` empty, when the key has no such launch.
+LAST = {**STANDING, "at": _text(nullable=True), "harness": _text(nullable=True),
+        "values": Out("list", items=HANDED)}
+
 #: The launch form for one harness: the harness drawn, the value of each row offered for
 #: it, or, when the preset can't be laid for that harness, no rows and the refusal.
 #: `modes` has one entry per value of the `target` row, in the row's order, for a launch
@@ -278,8 +293,8 @@ def _values_table() -> dict[str, Field]:
 VALUES = _values_table()
 
 #: A launch as the page asks for it: at most one preset, the value of each field the form
-#: shows filled, the name of each it shows empty, and whether a posture off its default is
-#: meant.
+#: shows filled, the name of each it shows empty, whether a posture off its default is
+#: meant, and the name of each field whose value was filled in from an earlier launch.
 REQUEST = {
     "seat": Field("string", required=False, max=QUERY_MAX),
     "project_preset": Field("string", required=False, max=QUERY_MAX),
@@ -287,6 +302,8 @@ REQUEST = {
     "leave_out": Field("list", required=False, max=len(VALUES),
                        items=Field("string", max=QUERY_MAX)),
     "off_posture": Field("bool", required=False),
+    "filled": Field("list", required=False, max=len(VALUES),
+                    items=Field("string", max=QUERY_MAX)),
 }
 
 #: What a launch would start. `refused` lists what stops it; `ticket` is issued only when
@@ -311,6 +328,12 @@ ACTED = {"refused": Out("table", items=REFUSAL.items, nullable=True)}
 #: A page launch's refusal; for a launch in a terminal, which the page never runs, the
 #: `moxi launcher run` command to copy too.
 LAUNCHED = {**ACTED, "command": _text(nullable=True, mark="redact")}
+
+#: Whose launches a read is about: a seat's, else a project's, else a folder's. The first
+#: of the three that is given decides.
+_WHOSE = {"seat": Field("string", required=False, max=QUERY_MAX),
+          "project": Field("string", required=False, max=QUERY_MAX),
+          "cwd": Field("string", required=False, max=PATH_MAX)}
 
 _PAGED = {"limit": Field("int", required=False, max=LIMIT_MAX),
           "before": Field("string", required=False, max=QUERY_MAX)}
@@ -345,6 +368,7 @@ PAGE = lb.Page(
                  returns=RUNS),
         lb.Route("/api/places", "read", _target("read_places"), returns=PLACES),
         lb.Route("/api/targets", "read", _target("read_targets"), returns=TARGETS),
+        lb.Route("/api/last", "read", _target("read_last"), query=_WHOSE, returns=LAST),
         lb.Route("/api/name", "read", _target("read_name"),
                  query={**{key: Field("string", required=False, max=QUERY_MAX)
                            for key in ("seat", "project", "model", "identity", "scope",
@@ -371,7 +395,7 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
+__all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW", "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
            "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
            "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE",
            "TARGETS", "TEMPLATE_MAX", "VALUES"]

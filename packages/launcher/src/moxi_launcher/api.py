@@ -32,6 +32,14 @@ minute it shows the launch's own name. The name is written to the launch's value
 Claude Code shows it as the session's display name unless `native_name` is set. A
 replay keeps its row's name.
 
+**A fresh launch records what its request gave.** Beside the rows, its values hold
+`sources`, where each row's value came from as the resolver says it (`shipped`,
+`defaults`, `preset`, `typed`, `left-out`, and `last` for a typed row the request
+names in `filled`: a value the caller filled in from an earlier launch), and `filled`,
+those rows' names. A row the request leaves out that the launch's harness doesn't offer
+is there as `left-out` too. From them the request can be told from what its preset and
+the defaults gave. A replay takes neither, and records neither.
+
 **A request id is a launch's idempotency key.** A request whose id is already in the
 launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set. It
 looks the id up before it resolves or checks anything, so a retry is never refused by
@@ -135,9 +143,10 @@ class LaunchRequest:
     """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
     typed (`typed`, as `catalog.parse(...).values` gives them) and passed on (`extra`),
     `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
-    default whatever `[defaults]` or the preset sets), the caller's directory, and the
-    request id, Claude session id and actor, each minted or read from the environment
-    when left None."""
+    default whatever `[defaults]` or the preset sets), the typed rows whose value the
+    caller filled in from an earlier launch (`filled`; a name that is no typed row counts
+    for nothing), the caller's directory, and the request id, Claude session id and
+    actor, each minted or read from the environment when left None."""
 
     seat: str | None = None
     project_preset: str | None = None
@@ -149,6 +158,7 @@ class LaunchRequest:
     session_id: str | None = None
     actor: str | None = None
     left_out: Sequence[str] = ()
+    filled: Sequence[str] = ()
 
 
 @dataclass(frozen=True)
@@ -270,7 +280,8 @@ def launch(request, *, env: Mapping[str, str] | None = None,
         inserted = store.insert(
             conn, request_id=ids.request_id, actor=_actor(ids, caller),
             harness=composition.harness, target=composition.target,
-            cwd=str(values["cwd"]), values=values, argv=composition.argv,
+            cwd=str(values["cwd"]), values=_recorded(request, resolved, values),
+            argv=composition.argv,
             env=composition.env, posture=str(resolved.posture or ""),
             session_id=session_id, slot=_slot_named(values),
             preset_kind=resolved.preset_kind, preset_name=resolved.preset_name,
@@ -401,10 +412,28 @@ def _live_names(environ: Mapping[str, str] | None) -> frozenset[str]:
         conn.close()
 
 
+#: The source recorded for a typed row whose value the caller filled in from an earlier
+#: launch.
+LAST = "last"
 #: What a replay does not take from the stored values as values: the composer's own
-#: record of the mode and the rows it left out, and `--off-posture`, which goes back on
-#: its own field.
-_NOT_REPLAYED = ("mode", "not_applied", "off_posture")
+#: record of the mode and the rows it left out, `--off-posture`, which goes back on
+#: its own field, and a fresh launch's record of what its request gave.
+_NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled")
+
+
+def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, object]:
+    """The values a launch's row records: `values` as they are for a replay; for a fresh
+    launch, with `sources` and `filled` (see the module's text)."""
+    if getattr(request, "replay", False):
+        return values
+    sources = dict(resolved.sources)
+    for name in getattr(request, "left_out", None) or ():
+        sources.setdefault(str(name), presets.LEFT_OUT)
+    filled = [str(name) for name in dict.fromkeys(getattr(request, "filled", None) or ())
+              if sources.get(str(name)) == presets.TYPED]
+    for name in filled:
+        sources[name] = LAST
+    return {**values, "sources": sources, "filled": filled}
 
 
 #: The option rows a replay sets back to their default, with a warning, when the
@@ -612,8 +641,8 @@ def _with_ids(request, harness: str):
         return dataclasses.replace(request,
                                    request_id=request.request_id or str(uuid.uuid4()),
                                    session_id=session_id)
-    names = ("seat", "project_preset", "typed", "extra", "off_posture", "left_out", "cwd",
-             "actor")
+    names = ("seat", "project_preset", "typed", "extra", "off_posture", "left_out",
+             "filled", "cwd", "actor")
     given = {name: getattr(request, name, None) for name in names}
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
     session_id = getattr(request, "session_id", None)
@@ -723,7 +752,7 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["KINDS", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
+__all__ = ["KINDS", "LAST", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
            "ReplayRequest", "Replayed", "ScratchRoot", "check", "exit_code", "launch",
            "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold"]
