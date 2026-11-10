@@ -4,8 +4,8 @@ import test from "node:test";
 
 import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
 import {
-  asksFirst, CHANGED, changes, dangerNames, findRows, isDanger, offRows, OPTIONS, optionsWord, panelGroups, presetOffLine, RESET,
-  summaryOf, summaryWords, withOption,
+  afterStarted, asksFirst, CHANGED, changes, dangerNames, findRows, isDanger, offRows, OPTIONS, optionsWord, panelGroups,
+  presetOffLine, RESET, summaryOf, summaryWords, turnedOn, withOption,
 } from "../src/options-model.ts";
 import { CONFIRMED, DANGER_SAYS, dangerSentences, launchedValue, launchRequest, offPosture } from "../src/prompt-model.ts";
 
@@ -207,6 +207,37 @@ test("a value that can do harm waits for a second act only when picked by hand o
   // is marked like any other.
   const carried = { permission_mode: "bypassPermissions" };
   assert.equal(panelGroups(FIELDS, carried)[0].subs[0].rows[0].danger, true);
+});
+
+test("a value turned on by hand holds for the launch that starts with it, and is asked for again after", () => {
+  const options = set(FIELDS, { permission_mode: "bypassPermissions", sandbox: "danger-full-access", add_dir: ["/srv/proj-a"],
+                                native_name: "helper-1" });
+  const used = turnedOn(FIELDS, options);
+  assert.deepEqual(used, { permission_mode: "bypassPermissions", sandbox: "danger-full-access" });
+  const after = afterStarted(options, used);
+  assert.deepEqual(after, { add_dir: ["/srv/proj-a"], native_name: "helper-1" });
+  // The line, the count and the colour follow: what is left is plain.
+  assert.deepEqual(changes(FIELDS, after).map((row) => [row.name, row.danger]), [["add_dir", false], ["native_name", false]]);
+  assert.equal(optionsWord(changes(FIELDS, after).length), "Options · 2");
+  assert.equal(panelGroups(FIELDS, after)[0].subs[0].rows[0].danger, false);
+  // The row is back at the form's fill, so picking the value again asks again.
+  assert.equal(asksFirst(MODE, "default", "bypassPermissions"), true);
+  // A row changed since the press stays as it is now.
+  const since = set(FIELDS, { sandbox: "read-only" }, options);
+  assert.deepEqual(afterStarted(since, used), { sandbox: "read-only", add_dir: ["/srv/proj-a"], native_name: "helper-1" });
+  // Nothing turned on lets go of nothing.
+  assert.deepEqual(afterStarted(after, turnedOn(FIELDS, after)), after);
+});
+
+test("a value that can do harm in the form's own fill is never among those turned on by hand", () => {
+  for (const source of ["defaults", "preset"]) {
+    const { fields } = filled({ permission_mode: "bypassPermissions" }, source);
+    assert.deepEqual(turnedOn(fields, {}), {}, source);
+    // Picked again over another value, it is the fill, so the panel holds nothing for it.
+    const back = set(fields, { permission_mode: "bypassPermissions" }, set(fields, { permission_mode: "plan" }));
+    assert.deepEqual(back, {}, source);
+    assert.deepEqual(turnedOn(fields, back), {}, source);
+  }
 });
 
 /** The values each catalog file says can do harm, as `{row: [value, ...]}`. */

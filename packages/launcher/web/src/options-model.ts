@@ -405,6 +405,27 @@ export function asksFirst(field: PanelField, now: FormValue, next: FormValue): b
   return isDanger(field, next) && !same(now, next);
 }
 
+/** The values set in the panel that can do harm, by row. Each was turned on by hand, since
+ * the panel holds no value the form is filled with, and holds for one launch only. */
+export function turnedOn(fields: readonly PanelField[],
+                         options: Readonly<Record<string, FormValue>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const field of fields) {
+    const value = Object.hasOwn(options, field.name) ? options[field.name] : null;
+    if (isDanger(field, value)) out[field.name] = value as string;
+  }
+  return out;
+}
+
+/** The values set in the panel once a launch that had `used` turned on has started: a row
+ * still at the value it launched with is no longer set, so it is back at what the form is
+ * filled with and a pick of the value asks again. A row changed since the press stays. */
+export function afterStarted(options: Readonly<Record<string, FormValue>>,
+                             used: Readonly<Record<string, string>>): Record<string, FormValue> {
+  return Object.fromEntries(Object.entries(options).filter(([name, value]) => !(Object.hasOwn(used, name)
+    && same(value, used[name]))));
+}
+
 // --- off the usual permissions --------------------------------------------------------------
 
 /** What gave a permission row its value: the user in the panel, an earlier launch whose

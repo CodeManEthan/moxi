@@ -47,7 +47,9 @@
 // to what the form is filled with and leaves the box, the place, the chip and the button
 // as they are. A value that can do harm is in the warning colour wherever it is drawn: the
 // row's name and control, the summaries above it, and first on the line under the box.
-// Picked in a row's control it is not set until `Turn on` under it is pressed. A launch
+// Picked in a row's control it is not set until `Turn on` under it is pressed, and it holds
+// for one launch: once a launch with it starts the row is back at the form's fill, and a
+// pick of it asks again. A launch that fails or is refused keeps it. A launch
 // whose permission rows are not all at the user's usual values says so in its request, and
 // each such row is one of those the line under the box names.
 
@@ -56,8 +58,8 @@ import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import {
-  asksFirst, CHANGED, changedValue, changes, DEFAULTS, drawnField, findRows, HIDDEN_FLAG, keptOptions, NO_MATCH, optionsWord,
-  PANEL_WIDTH_PX, panelGroups, RESET, SIDE_EVENT, valueNow, withOption,
+  afterStarted, asksFirst, CHANGED, changedValue, changes, DEFAULTS, drawnField, findRows, HIDDEN_FLAG, keptOptions, NO_MATCH,
+  optionsWord, PANEL_WIDTH_PX, panelGroups, RESET, SIDE_EVENT, turnedOn, valueNow, withOption,
 } from "./options-model.ts";
 import type { Change, PanelField, PanelGroup, PanelRow, PanelSub, Pending, Word } from "./options-model.ts";
 
@@ -265,6 +267,8 @@ export class LauncherPrompt extends LitElement {
   #pressed = 0;
   /** The box's text when the button was pressed. */
   #sent = "";
+  /** The values that can do harm turned on when the button was pressed, by row. */
+  #sentOn: Record<string, string> = {};
   #followTimer: ReturnType<typeof setInterval> | undefined;
   #followSince = 0;
   #stops: (() => void)[] = [];
@@ -712,7 +716,8 @@ export class LauncherPrompt extends LitElement {
 
   /** Under a value that can do harm: what it does and that it holds for this launch only.
    * While the value is held back, `Turn on` sets it and `Cancel` lets it go; once the user
-   * set it the sentences stay. A value the form was filled with says nothing here. */
+   * set it the sentences stay until a launch with it starts. A value the form was filled
+   * with says nothing here. */
   #ask(row: PanelRow, held: string | null) {
     const field = row.field;
     const set = Object.hasOwn(this.options, row.name) && row.danger ? this.options[row.name] : null;
@@ -768,6 +773,7 @@ export class LauncherPrompt extends LitElement {
     const shown = runOf(this.targets, this.picked);
     const body = launchRequest(this.fields, this.#form, this.set, shown);
     this.#sent = this.brief;
+    this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";
     this.flight = PRESSED;
     let said = shown;
@@ -827,12 +833,16 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press. */
+   * its text was changed since the press, and lets go of each value that can do harm it was
+   * launched with, unless its row was changed since the press. */
   #landed(next: Flight): void {
     if (next === this.flight) return;
     this.flight = next;
     if (!following(next)) this.#stopFollow();
-    if (next.started && this.brief === this.#sent) this.brief = "";
+    if (!next.started) return;
+    if (this.brief === this.#sent) this.brief = "";
+    this.options = afterStarted(this.options, this.#sentOn);
+    this.#sentOn = {};
   }
 
   #stopFollow(): void {

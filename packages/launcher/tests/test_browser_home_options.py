@@ -2,8 +2,8 @@
 launcher's real page server: the word that opens it, the panel at the window's right edge
 with Home's column moved aside, its groups and their subgroups, the find field, a row
 changed there reaching the harness's command line, the line under the box that names the
-changed rows with its `Reset`, a value that can do harm turned on and launched, and the
-panel on a narrow page.
+changed rows with its `Reset`, a value that can do harm turned on and launched once, and
+the panel on a narrow page.
 
 The shell runs the fake slots in slots' place and a fake `claude` first on its `PATH`, so
 a launch from Home starts no real session.
@@ -19,6 +19,7 @@ from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
+from moxi_launcher import presets
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(sys.platform == "win32",
@@ -303,7 +304,28 @@ def test_a_changed_row_is_named_by_its_label_under_the_box_and_reset_puts_it_bac
     expect(piece.locator('.said [data-line="started"]')).to_be_visible()
 
 
-def test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag(fake, ui_page, harness):
+def headless(piece) -> None:
+    """The button's menu set to launch in the background."""
+    piece.locator(".more").click()
+    piece.locator('[data-menu="run"] button[data-run="Headless"]').click()
+    expect(piece.locator(".go")).to_have_text("Launch headless")
+
+
+def argv_of(harness, brief: str) -> list[str]:
+    """The command line of the fake harness's run with `brief`, once there is one."""
+    [run] = wait_for(lambda: [run for run in harness.runs() if brief in " ".join(run["argv"])],
+                     10, what="the fake harness's run with the brief")
+    return run["argv"]
+
+
+def press(page, piece) -> dict:
+    """Press the button, and return the body the piece sends to be previewed."""
+    with page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+        piece.locator(".go").click()
+    return json.loads(sent.value.post_data)
+
+
+def test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag_once(fake, ui_page, harness):
     piece = home_at(ui_page, 1400)
     panel = open_options(piece)
     mode = open_mode(panel)
@@ -366,8 +388,94 @@ def test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag
                      10, what="the fake harness's run with the brief")
     argv = run["argv"]
     assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions", argv
-    # The value is still on after the launch, and still named.
-    expect(marks).to_have_text(["Permission mode", "Extra folders"])
+    # It held for that launch only: the row is back at the form's value, the line names the
+    # other row alone, and nothing is in the warning colour.
+    expect(marks).to_have_text(["Extra folders"])
+    kit.assert_colour(marks, "text")
+    expect(piece.locator(".opt")).to_have_text("Options · 1")
+    group(panel, "access").click()
+    panel.locator('button[data-sub="access/Mode"]').click()
+    expect(mode).to_have_value("default")
+    kit.assert_colour(panel.locator('[data-row="permission_mode"] label'), "text")
+    expect(asked).to_have_count(0)
+    # Picked again, it asks again, and is not set until `Turn on`.
+    mode.select_option("bypassPermissions")
+    expect(asked.get_by_role("button", name="Turn on")).to_be_visible()
+    expect(marks).to_have_text(["Extra folders"])
+    body = press(ui_page, piece)
+    assert body["values"]["permission_mode"] == "default" and "off_posture" not in body, body
+    expect(piece.locator('.said [data-line="refused"]')).to_be_visible()
+
+
+def test_a_value_turned_on_stays_on_through_a_launch_that_fails_or_is_refused(fake, ui_page):
+    fake.script(placed=2, slots=kit.free(2, 3), start="refused",
+                refused={"reason": "occupied", "words": "slot 2 was taken a moment ago"})
+    piece = home_at(ui_page, 1400)
+    panel = open_options(piece)
+    mode = open_mode(panel)
+    asked = panel.locator('[data-ask="permission_mode"]')
+    mode.select_option("bypassPermissions")
+    asked.get_by_role("button", name="Turn on").click()
+    marks = changed_line(piece).locator("b")
+    expect(marks).to_have_text(["Permission mode"])
+
+    def still_on() -> None:
+        expect(marks).to_have_text(["Permission mode"])
+        kit.assert_colour(marks, "danger")
+        expect(piece.locator(".opt")).to_have_text("Options · 1")
+        expect(mode).to_have_value("bypassPermissions")
+        kit.assert_colour(mode, "danger")
+        expect(asked.get_by_role("button")).to_have_count(0)
+
+    # The slot is taken as the launch starts, and the launch fails.
+    piece.locator("textarea").fill(BRIEF)
+    body = press(ui_page, piece)
+    assert body["values"]["permission_mode"] == "bypassPermissions" and body["off_posture"] is True, body
+    expect(piece.locator('.said [data-line="failed"]')).to_be_visible()
+    still_on()
+    # In the background with nothing to do, the launch is refused.
+    piece.locator("textarea").fill("")
+    headless(piece)
+    body = press(ui_page, piece)
+    assert body["values"]["permission_mode"] == "bypassPermissions", body
+    expect(piece.locator('.said [data-line="refused"]')).to_be_visible()
+    still_on()
+    # The next launch that starts takes it with nothing asked, and then lets go of it.
+    piece.locator("textarea").fill("say the word again")
+    body = press(ui_page, piece)
+    assert body["values"]["permission_mode"] == "bypassPermissions" and body["off_posture"] is True, body
+    expect(piece.locator('.said [data-line="started"]')).to_be_visible()
+    expect(changed_line(piece)).to_have_count(0)
+    expect(mode).to_have_value("default")
+
+
+def test_a_value_that_can_do_harm_the_form_is_filled_with_stays_after_a_launch(fake, ui_page, ui_shell, harness):
+    file = presets.path(env=ui_shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text('[defaults]\npermission_mode = "bypassPermissions"\n')
+    try:
+        piece = home_at(ui_page, 1400)
+        panel = open_options(piece)
+        mode = open_mode(panel)
+        expect(mode).to_have_value("bypassPermissions")
+        kit.assert_colour(mode, "danger")
+        expect(panel.locator('[data-ask="permission_mode"]')).to_have_count(0)
+        expect(changed_line(piece)).to_have_count(0)
+        headless(piece)
+        for brief in ("say the word filled", "say the word filled again"):
+            piece.locator("textarea").fill(brief)
+            body = press(ui_page, piece)
+            assert body["values"]["permission_mode"] == "bypassPermissions" and "off_posture" not in body, body
+            expect(piece.locator('.said [data-line="started"]')).to_be_visible()
+            argv = argv_of(harness, brief)
+            assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions", argv
+            # The user's own default is not his pick for one launch: it stays, unnamed.
+            expect(mode).to_have_value("bypassPermissions")
+            kit.assert_colour(mode, "danger")
+            expect(changed_line(piece)).to_have_count(0)
+            expect(piece.locator(".opt")).to_have_text("Options")
+    finally:
+        file.unlink()
 
 
 def test_the_warning_colour_is_the_themes_in_light_and_in_dark(fake, ui_contexts):
