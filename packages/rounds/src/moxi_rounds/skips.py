@@ -16,8 +16,10 @@ holds a stage in every flow.
 **A skip of the questions step** for a stage lets that stage past the questions that
 hold it when the skip is recorded, and no other. The ruling lists their ids
 (`covers`); what that list lets past is `holds`' to say. A skip that replaces an
-earlier one lists what holds the stage with the earlier one left out, so nothing the
-first let past holds the stage again by the replacement.
+earlier one lists what holds the stage when it is recorded, read with the earlier one
+left out. It does not keep what the first listed: a question the first let past that
+holds the stage no longer then (one ruled since) is not on the new list, and holds
+the stage again if it is reopened.
 
 `parse` reads an item, `gates` are what the ruling's form runs under the lock and
 `fields` what its event holds beside the item.
