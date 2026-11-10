@@ -197,6 +197,51 @@ reads. The functions take no cache from their caller, and `recent_s` left out is
 setting `list.recent_s`. A compressed Codex rollout is counted, not
 listed.
 
+## Naming sessions by key
+
+`session_facts(keys)` (interface 5) is for a caller that already holds sessions' keys
+from somewhere else, such as a page that ranks sessions by a figure of its own, and
+wants to show each by the name the list shows. `keys` is up to 200 `(harness, session)`
+pairs:
+
+```python
+from moxi import modules
+
+sessions = modules.load("sessions", interface=5).api
+answer = sessions.session_facts([("claude", "0190b000-0000-7000-8000-000000000001"),
+                                 ("codex", "0190c000-0000-7000-8000-000000000002")])
+# {"sessions": [{"harness": "claude", "session": "0190b000-0000-7000-8000-000000000001",
+#                "name": "fix the tests", "folder": "/work/proj-a",
+#                "started": 1793354400.0}],
+#  "roots": []}
+```
+
+`sessions` holds one item for each pair that is a main session of a root, in the order
+asked. `name` is the name a list's row carries, read by the same code: the name typed for
+the session in the harness, never a title the harness made up; it is None for a Codex or
+an OpenCode session. `folder` and `started` come from the first lines of the session's
+record. Each of the three is None where it was not read, so a session whose file cannot
+be read is answered with three Nones.
+
+A pair with no item is no main session of any root: its record is gone, or it is a
+compressed Codex rollout, a subagent, or a Codex thread another thread spawned. `roots`
+holds `{harness, root, reason}` for each harness whose root was not listed whole, as a
+list's `roots` does: with a `reason` when the root could not be listed, with `reason`
+None when some folders or files under it could not be. A pair of such a harness that has
+no item may be in the part that was not listed, so "no item" means "not held" only for a
+harness that is not in `roots`.
+
+It raises ValueError for more than 200 pairs, for a key that is not a pair and for a
+harness that is not one, and never for a session that cannot be read.
+
+It reads each root's listing (and every Codex rollout's first line, once), then, of each
+session it answers, the first lines and one turn, the last; it reads no turn of a Codex
+or an OpenCode session, which have no name. It keeps a name or None for at most 5,000
+sessions in the reading process's memory, for as long as the file's size and mtime
+stand, and no other text of the turn. A session a list has already read is named with
+no further read. A list reads the last turn of a session that was only named, so a row
+loses nothing to this cheaper read.
+
 ## How long transcripts last
 
 sessions reads transcripts where each harness keeps them, so nothing outlives a harness's
@@ -326,11 +371,12 @@ extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
 
 ## Interfaces
 
-`moxi_sessions.api` offers interfaces 2, 3 and 4. Interface 3 is interface 2 plus
+`moxi_sessions.api` offers interfaces 2, 3, 4 and 5. Interface 3 is interface 2 plus
 `retention()` and `Retention`; a module that calls them loads sessions with
 `interface=3`. Interface 4 is interface 3 plus the list's reads: `sessions_list`,
 `sessions_more`, `sessions_newest`, `sessions_folders` and `session_opened`; a module
-that calls them loads sessions with `interface=4`.
+that calls them loads sessions with `interface=4`. Interface 5 is interface 4 plus
+`session_facts`; a module that calls it loads sessions with `interface=5`.
 
 ## License
 
