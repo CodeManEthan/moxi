@@ -178,6 +178,8 @@ export class LauncherPrompt extends LitElement {
    * read failed or left the slots unread, so the next press reads again. */
   #targetsAt = 0;
   #targetsAsked = 0;
+  /** The latest read of the listing asked. */
+  #targetsRead: Promise<void> = Promise.resolve();
   /** Counts presses, so an answer for an earlier launch is dropped. */
   #pressed = 0;
   /** The box's text when the button was pressed. */
@@ -469,14 +471,18 @@ export class LauncherPrompt extends LitElement {
   // --- the button, its menu and the launch ---------------------------------------------------
 
   /** Reads where a launch may run. Only the latest read's answer is kept; one that fails
-   * reads as no slots, unread where slots was there before. */
-  async #readTargets(): Promise<void> {
+   * reads as no slots, unread where slots was there before. Done when the latest read
+   * asked by then has been answered, so a caller never goes on with an older listing. */
+  #readTargets(): Promise<void> {
     const asked = (this.#targetsAsked += 1);
     const at = Date.now();
-    const answer = await api("launcher", "api/targets");
-    if (asked !== this.#targetsAsked) return;
-    this.targets = answer.status === 200 ? parseTargets(answer.data) : afterNoAnswer(this.targets);
-    this.#targetsAt = answer.status === 200 && !this.targets.unread ? at : 0;
+    const read: Promise<void> = api("launcher", "api/targets").then((answer) => {
+      if (asked !== this.#targetsAsked) return this.#targetsRead === read ? undefined : this.#targetsRead;
+      this.targets = answer.status === 200 ? parseTargets(answer.data) : afterNoAnswer(this.targets);
+      this.#targetsAt = answer.status === 200 && !this.targets.unread ? at : 0;
+    });
+    this.#targetsRead = read;
+    return read;
   }
 
   #toggleRun(): void {
