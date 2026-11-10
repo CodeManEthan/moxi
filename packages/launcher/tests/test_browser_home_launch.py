@@ -35,6 +35,8 @@ LAUNCH = "/m/launcher/api/launch"
 LATE = "Not started yet, and it should have been by now. The Launcher page lists it."
 STOPPED = "Stopped watching this launch. The Launcher page lists it."
 COPIED = "Copied. Paste it in your terminal."
+#: The line for a headless launch from an empty box.
+NOTHING_TO_DO = "A headless launch needs something to do. Type what the agent should do, then launch."
 #: A time of day as a browser's locale writes it.
 HOUR = r"\d{1,2}[:.]\d{2}.*"
 
@@ -307,10 +309,10 @@ def test_headless_is_a_choice_and_never_where_a_load_starts(fake, ui_page, ui_sh
     go = piece.locator(".go")
     expect(go).to_have_text("Launch headless")
     expect(go).to_have_attribute("data-target", "headless")
-    # With nothing to do, a session in the background is refused, in the launcher's words.
+    # With nothing to do, a session in the background is refused, in Home's own words.
     go.click()
     refused = said(piece, "refused")
-    expect(refused).to_have_text(re.compile(r"\w.*\. \w"))
+    expect(refused).to_have_text(NOTHING_TO_DO)
     expect(go).to_be_enabled()
     expect(go).to_have_text("Launch headless")
     before = len(fake.starts())
@@ -389,11 +391,11 @@ def test_an_empty_box_sends_no_brief_though_the_defaults_set_one(
     piece = kit.open_home(ui_page)
     box = piece.locator("textarea")
     expect(box).to_have_value("")
-    # In the background: with no brief there is nothing to run, and the launcher says so.
+    # In the background: with no brief there is nothing to run, and the line says so.
     pick_run(piece, "Headless")
     body = press(ui_page, piece)
     assert "brief" not in body["values"] and "brief" in body["leave_out"], body
-    expect(said(piece, "refused")).to_contain_text("needs a brief")
+    expect(said(piece, "refused")).to_have_text(NOTHING_TO_DO)
     expect(said(piece, "started")).to_have_count(0)
     # In a slot: the session starts with no first turn.
     pick_run(piece, "Slot 2")

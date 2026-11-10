@@ -606,8 +606,16 @@ function sentence(problem: string, hint: string): string {
   return hint ? `${said}. ${hint}` : said;
 }
 
-/** What stopped a launch before it ran, in the launcher's words: `<problem>. <hint>`. */
-export function refusalWords(found: { problem: string; hint: string }): string {
+/** Home's own line for a refusal, by its code, where the launcher's words are written for
+ * its command line. `no-brief` is a headless launch from an empty box. */
+export const HOME_REFUSALS: Readonly<Record<string, string>> = {
+  "no-brief": "A headless launch needs something to do. Type what the agent should do, then launch.",
+};
+
+/** What stopped a launch before it ran: Home's line for the refusal's code when it has
+ * one, else the launcher's words, `<problem>. <hint>`. */
+export function refusalWords(found: { code?: string; problem: string; hint: string }): string {
+  if (found.code !== undefined && Object.hasOwn(HOME_REFUSALS, found.code)) return HOME_REFUSALS[found.code];
   return sentence(found.problem, found.hint);
 }
 

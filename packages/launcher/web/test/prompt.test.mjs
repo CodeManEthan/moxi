@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  buttonWords, copied, edited, FIRST_TURN, followed, following, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  buttonWords, copied, edited, FIRST_TURN, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
@@ -545,6 +545,16 @@ test("a refused preview gives the button back with each refusal's problem and hi
   assert.deepEqual(texts(answer.flight), ["the folder /nope is not there. name a folder that exists", "claude is not found"]);
   assert.deepEqual(answer.flight.lines.map((line) => line.name), ["refused", "refused"]);
   assert.equal(answer.flight.started, false);
+});
+
+test("a headless launch from an empty box is refused in Home's own words, others in the launcher's", () => {
+  const empty = { code: "no-brief", row: "brief", problem: "a headless launch needs a brief or a handoff to run",
+                  hint: "give it --brief, --brief-file or --handoff" };
+  const answer = previewed(ok({ ...PREVIEW, ticket: null, refused: [empty, refusal("the folder /nope is not there", "name one")] }));
+  assert.deepEqual(texts(answer.flight), [HOME_REFUSALS["no-brief"], "the folder /nope is not there. name one"]);
+  assert.equal(/--|handoff|brief/.test(HOME_REFUSALS["no-brief"]), false);
+  const sent = launched(ok({ refused: empty, command: null }), { target: "headless" }, []);
+  assert.deepEqual(texts(sent.flight), [HOME_REFUSALS["no-brief"]]);
 });
 
 test("a preview that can't be read ends the launch and says why", () => {
