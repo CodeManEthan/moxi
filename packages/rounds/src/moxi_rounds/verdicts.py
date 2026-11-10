@@ -29,7 +29,8 @@ the thing that grants it.
 
 **Noted, not refused.** One full pass reads a design. A report of a full pass
 recorded after another one is recorded all the same, with the flag
-`brake.EXTRA_FULL_PASS`.
+`brake.EXTRA_FULL_PASS`. A report whose model the `models` setting places in a weaker
+tier than the step names for its pass is recorded with `model_tiers.BELOW_TIER`.
 
 The standing of a design, which its verdicts give, is `versions.standing`.
 """
@@ -41,8 +42,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import (brake, ending, folders, questions, report_block, stages, stepping,
-               versions, write)
+from . import (brake, ending, folders, model_tiers, questions, report_block, stages,
+               stepping, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadBlock, NoLog, NoRound, Problem, Refused, Unmet
@@ -183,7 +184,9 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
             applied, left = applies(state, block.design, name=name)
             fields["applied"] = [_entry(one) for one in applied]
             fields["not_applied"] = [{**_entry(one), "why": why} for one, why in left]
-        noted = brake.flags(state, block.pass_)
+        noted = brake.flags(state, block.pass_) + model_tiers.flags(
+            settings["models"], state.steps, VERIFIES, pass_=block.pass_,
+            model=block.model)
         if noted:
             fields["flags"] = noted
         return write.Entry("verdict.recorded", fields)

@@ -69,7 +69,9 @@ recorded. A verdict that finds its version publishable takes out of the round wh
 that version's block took away; one that sends the design back takes out nothing. The
 design's standing is the newest verdict of its current version, and `none` after a
 design is frozen again. One full pass reads a design; a second report of a full pass
-is recorded with the flag `extra-full-pass`.
+is recorded with the flag `extra-full-pass`. A report whose model is in a weaker tier
+of the `models` setting than its pass is held to is recorded with the flag
+`model-below-tier`.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no

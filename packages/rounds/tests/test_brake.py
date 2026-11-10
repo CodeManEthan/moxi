@@ -494,8 +494,8 @@ def test_the_tier_is_the_one_the_rounds_own_step_names():
     bare = brake.asked(of({"step": "verify-design", "model": "first"}))
 
     assert (named.pass_, named.tier) == (brake.RECHECK, "fourth")
-    # A step that names no tier for a re-check gives none: no other is put in its place.
-    assert (bare.pass_, bare.tier) == (brake.RECHECK, None)
+    # A step that names no tier for a re-check is re-checked at the tier of its full pass.
+    assert (bare.pass_, bare.tier) == (brake.RECHECK, "first")
 
 
 # -- the lead's decision on a thread -----------------------------------------------------

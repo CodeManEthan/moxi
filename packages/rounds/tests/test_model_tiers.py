@@ -1,6 +1,6 @@
 """The note on a report whose model is weaker than the tier its pass is held to: the
-tiers' order is the order the config file writes them in, a model is looked up among
-its own harness's models, and nothing is noted when the question can't be answered."""
+tiers' order is the order the config file writes them in, a model is looked up under
+every harness, and nothing is noted when the question can't be answered."""
 
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ def models(write_config):
     return read
 
 
-def noted(table, model, *, pass_="full", harness="claude", steps=STEPS):
-    return model_tiers.flags(table, steps, STEP, pass_=pass_, harness=harness, model=model)
+def noted(table, model, *, pass_="full", steps=STEPS):
+    return model_tiers.flags(table, steps, STEP, pass_=pass_, model=model)
 
 
 # -- the order ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ def test_a_model_under_two_tiers_is_in_the_strongest_that_lists_it(models):
         second = { claude = "model-shared" }
         third  = { claude = "model-shared" }
     """)
-    assert model_tiers.tier_of(table, "claude", "model-shared") == "second"
+    assert model_tiers.tier_of(table, "model-shared") == "second"
     assert noted(table, "model-shared") == []
     held_to_first = [{"step": STEP, "model": "first"}]
     assert noted(table, "model-shared", steps=held_to_first) == [BELOW_TIER]
@@ -99,7 +99,7 @@ def test_a_report_is_held_to_the_tiers_of_its_own_step(models):
     steps = [{"step": "verify-build", "model": "first"}, *STEPS]
     assert model_tiers.held_to(steps, "verify-build", "full") == "first"
     assert model_tiers.flags(models(STRONGEST_FIRST), steps, "verify-build", pass_="full",
-                             harness="claude", model="model-two") == [BELOW_TIER]
+                             model="model-two") == [BELOW_TIER]
 
 
 def test_the_built_in_flows_name_a_tier_for_each_pass_of_the_step_that_verifies():
@@ -141,20 +141,34 @@ def test_a_step_that_names_no_tier_notes_nothing(models):
 
 # -- the harness -------------------------------------------------------------------------
 
-def test_a_model_is_looked_up_among_its_own_harness_s_models_only(models):
+def test_a_model_is_looked_up_under_every_harness(models):
+    table = models(STRONGEST_FIRST)
+    assert noted(table, "model-three") == [BELOW_TIER]
+    assert noted(table, "model-c") == [BELOW_TIER]
+    assert noted(table, "model-two") == noted(table, "model-b") == []
+
+
+def test_a_model_two_harnesses_list_in_two_tiers_is_in_the_stronger(models):
     table = models("""\
         [models]
         first  = { claude = "model-one", codex = "model-x" }
         second = { claude = "model-two", codex = "model-b" }
         third  = { claude = "model-x", codex = "model-c" }
     """)
-    assert noted(table, "model-x", harness="claude") == [BELOW_TIER]
-    assert noted(table, "model-x", harness="codex") == []
-    assert noted(table, "model-three", harness="other") == []
-    assert noted(table, "model-x", harness=None) == []
+    assert model_tiers.tier_of(table, "model-x") == "first"
+    assert noted(table, "model-x") == []
+    weaker_first = models("""\
+        [models]
+        first  = { claude = "model-one", codex = "model-a" }
+        second = { claude = "model-two", codex = "model-x" }
+        third  = { claude = "model-x", codex = "model-c" }
+    """)
+    assert model_tiers.tier_of(weaker_first, "model-x") == "second"
+    held_to_first = [{"step": STEP, "model": "first"}]
+    assert noted(weaker_first, "model-x", steps=held_to_first) == [BELOW_TIER]
 
 
-def test_a_tier_that_lists_no_model_for_the_harness_is_passed_over(models):
+def test_a_tier_that_lists_the_model_under_no_harness_is_passed_over(models):
     table = models("""\
         [models]
         first  = { codex = "model-a" }

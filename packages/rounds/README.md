@@ -218,7 +218,7 @@ round, so a later edit of the flow does not change a round already open. Changin
 moves no folder: rounds looks in the new place, and the rounds stay where they were until
 you move them.
 
-The file also takes `models`, `worktree_dir`, `defaults.ratify`, `defaults.trace`,
+The file also takes `worktree_dir`, `defaults.ratify`, `defaults.trace`,
 `defaults.check_on`, `defaults.idle_days`, `defaults.dormant_days`,
 `defaults.slice_minutes` and `defaults.sitting_at`, and in a project's table `into`,
 `check`, `finish`, `shared_paths`, `keep_branch`, `lock_ref` and `brief`. They are
@@ -232,6 +232,13 @@ written in is their order, strongest first:
 first  = { claude = "model-one", codex = "model-a" }
 second = { claude = "model-two", codex = "model-b" }
 ```
+
+A report names the model that wrote it. `verdict` looks that name up under every
+harness and places it in the strongest tier that lists it. When that tier is written
+after the one the step names for the pass (`model` for a full pass, `recheck_model`
+for a re-check, or `model` when the step has none), the verdict is recorded with the
+flag `model-below-tier`. The flag is shown with the verdict and refuses nothing. A
+model in no tier gets no flag.
 
 rounds reads no environment variable but the ones that place its directories,
 `MOXI_ROUNDS_HOME` and the rest, and `MOXI_HOME`.

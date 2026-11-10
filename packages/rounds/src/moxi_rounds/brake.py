@@ -5,9 +5,9 @@ bounded by five rules, and the functions here are those rules:
 
 1. **One full pass.** `asked(state)` says which pass is asked for next: a full pass, at
    the tier the verifying step names as `model`, while no report of a full pass is
-   recorded; after one, only re-checks, at the step's `recheck_model`. A second report
-   of a full pass is still recorded, with the flag `EXTRA_FULL_PASS` that `flags`
-   gives; it is refused nothing.
+   recorded; after one, only re-checks, at the step's `recheck_model`, or at its
+   `model` when it names none. A second report of a full pass is still recorded, with
+   the flag `EXTRA_FULL_PASS` that `flags` gives; it is refused nothing.
 2. **Publishable is final.** A design that stands at `publishable` or at the lead's
    decision is asked for no pass. That standing holds for the version the verdict read
    and for every later version reached by changes of records only
@@ -95,10 +95,6 @@ class Asked:
     instead: tuple[str, ...] = ()
 
 
-def _tier(state: states.State, key: str) -> str | None:
-    return model_tiers.step_tier(state.steps, VERIFIES, key)
-
-
 def sent_back(state: states.State) -> bool:
     """Whether the newest verdicts recorded of the design, `SENT_BACK_IN_A_ROW` of
     them, each sent it back."""
@@ -161,8 +157,9 @@ def asked(state: states.State, *, name: str = "ROUND") -> Asked | None:
                      else (*rewrite, decide_it))
     if not had_full_pass(state):
         return Asked(FULL, stands, "no full pass over the design is recorded",
-                     tier=_tier(state, "model"), version=current.n)
-    tier = _tier(state, "recheck_model")
+                     tier=model_tiers.held_to(state.steps, VERIFIES, FULL),
+                     version=current.n)
+    tier = model_tiers.held_to(state.steps, VERIFIES, RECHECK)
     since = versions.verified(state)
     if since == current.n:
         return Asked(RECHECK, stands,

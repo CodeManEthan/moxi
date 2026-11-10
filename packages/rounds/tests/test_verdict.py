@@ -681,3 +681,99 @@ def test_a_round_with_no_frozen_design_is_listed_with_no_standing(folder, capsys
     assert main(["list", "--json"]) == 0
     [listed] = json.loads(capsys.readouterr().out)["rounds"]
     assert listed["standing"] is None
+
+
+# -- a model weaker than the pass's tier -------------------------------------------------
+
+# The built-in flow holds a full pass over a design to `second` and a re-check to `third`.
+TIERS = """\
+    [models]
+    first  = { claude = "model-one", codex = "model-a" }
+    second = { claude = "model-two", codex = "model-b" }
+    third  = { claude = "model-three", codex = "model-c" }
+    fourth = { claude = "model-four", codex = "model-d" }
+"""
+
+
+def passed(folder, model, *, pass_="full", verdict="fold-first"):
+    """Record a report of `model` over the first version, each under its own name."""
+    name = f"report-{len(folded(folder).verdicts) + 1}.md"
+    return record(report(folder, verdict, pass_=pass_, model=model, name=name,
+                         prose=f"What the pass {name} found."))
+
+
+def test_a_report_by_a_model_below_its_pass_s_tier_is_recorded_with_a_flag(
+        folder, write_config):
+    write_config(TIERS)
+    fold(folder, question("Q1"))
+
+    done = passed(folder, "model-three", verdict="publishable")
+
+    assert done.event["flags"] == ["model-below-tier"]
+    assert done.verdict.flags == ("model-below-tier",)
+    assert str(done.standing) == "publishable@v1"
+    assert standing(folder) == "publishable@v1"
+
+
+@pytest.mark.parametrize("model", ["model-two", "model-one", "model-b", "model-unlisted"])
+def test_a_report_by_a_model_at_its_pass_s_tier_or_in_no_tier_has_no_flag(
+        folder, write_config, model):
+    write_config(TIERS)
+    fold(folder, question("Q1"))
+
+    done = passed(folder, model)
+
+    assert "flags" not in done.event and done.verdict.flags == ()
+
+
+def test_a_model_is_placed_whichever_harness_lists_it(folder, write_config):
+    write_config(TIERS)
+    fold(folder, question("Q1"))
+
+    assert passed(folder, "model-c").event["flags"] == ["model-below-tier"]
+
+
+def test_a_recheck_is_held_to_the_step_s_tier_for_one(folder, write_config):
+    write_config(TIERS)
+    fold(folder, question("Q1"))
+    passed(folder, "model-two")
+
+    at_tier = passed(folder, "model-three", pass_="re-check")
+    below = passed(folder, "model-four", pass_="re-check")
+
+    assert "flags" not in at_tier.event
+    assert below.event["flags"] == ["model-below-tier"]
+
+
+def test_no_table_of_tiers_flags_no_model(folder):
+    fold(folder, question("Q1"))
+
+    assert "flags" not in passed(folder, "model-three").event
+
+
+def test_a_second_full_pass_by_a_weaker_model_carries_both_flags(folder, write_config):
+    write_config(TIERS)
+    fold(folder, question("Q1"))
+    passed(folder, "model-two")
+
+    again = passed(folder, "model-three")
+
+    assert again.event["flags"] == ["extra-full-pass", "model-below-tier"]
+    assert again.verdict.flags == ("extra-full-pass", "model-below-tier")
+
+
+def test_the_flag_for_a_weaker_model_is_shown_and_in_the_note(
+        folder, write_config, capsys):
+    write_config(TIERS)
+    fold(folder, question("Q1"))
+    passed(folder, "model-three")
+
+    assert main(["show", ROUND]) == 0
+    shown = capsys.readouterr().out
+    assert main(["show", ROUND, "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    note = (folder / "round-note.md").read_text(encoding="utf-8")
+
+    assert "model model-three   flags: model-below-tier\n" in shown
+    assert data["verdicts"][0]["flags"] == ["model-below-tier"]
+    assert "  - flags: model-below-tier\n" in note
