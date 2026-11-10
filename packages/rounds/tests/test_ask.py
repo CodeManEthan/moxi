@@ -310,7 +310,7 @@ def test_an_open_question_is_in_the_index(rounds):
     asking.ask("proj-a/a-round", SAID, origin="comms:12", actor="scout", at=AT)
     asking.ask("proj-a", SAID, origin="comms:13", actor="scout", at=AT)
 
-    [found] = index.read("proj-a", rounds, "a-round").items
+    [found] = index.read("proj-a", rounds, "a-round").of("question")
     assert (found.kind, found.id, found.body) == (
         "question", "Q1", {"text": SAID, "from": "comms:12", "blocks": "all",
                            "state": "open", "by": "scout", "at": AT})

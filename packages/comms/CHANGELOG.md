@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The connector's status and tools no longer say `offline` while another binding holds
+  its identity: the close of a bind the daemon refused could land after the link had
+  noted the name held, and turned the state to `offline` until the next try. Only the
+  binding's own connection now changes the link's state when it closes.
+
 ## 0.3.0 (2026-11-08)
 
 - Config keys `connector.wait_default` and `connector.wait_max` are now

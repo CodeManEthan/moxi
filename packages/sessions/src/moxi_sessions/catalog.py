@@ -67,6 +67,19 @@ reads again.
 One lock guards what is kept. It is never held while a file or a database is read.
 `Catalog.read_heads(entries)` makes sure the heads of some entries are read;
 `Catalog.read_heads()` does it for every session, one such call at a time.
+
+**A session's name alone.** `Catalog.facts(entry)` reads what names a session, a `Facts`:
+the head's `folder` and `started`, and `name` by the rule `Details.name` states. It is for
+a caller that shows no row: it reads the head and one turn, the last, and no turn before
+it. A Codex or an OpenCode session has no name, so no turn of one is read.
+
+The names it reads are kept apart from the last-turn facts, for at most `NAME_MAX`
+sessions, least recently used dropped, each reused while the file's size and mtime are
+the ones it was read at. What is kept is a name or None and no other text. A kept read is
+served only to a caller that wants no more than it holds: a session's kept last-turn
+facts give its name with no further read, and a kept name is never served as last-turn
+facts, so `details` reads the last turn of a session that was only named and its row
+loses nothing to the cheaper read.
 """
 
 from __future__ import annotations
@@ -109,6 +122,9 @@ PROGRAM_ENTRYPOINT = "sdk"
 #: `Said.who` for a message the person typed, and for the model's.
 YOU = "you"
 AGENT = "agent"
+
+#: How many sessions' names a catalog keeps, apart from their last-turn facts.
+NAME_MAX = 5000
 
 
 # --- what a catalog hands out ---------------------------------------------------------------
@@ -283,6 +299,30 @@ def row_head(listed: Listed) -> Head:
     if header is None:
         return Head()
     return Head(folder=_str(header.cwd), started=_time(header.started))
+
+
+@dataclass(frozen=True)
+class Facts:
+    """What names one session. Each is None where it was not read.
+
+    * `name`: as `Details.name`: the newest `custom` title marker in the last turn, else
+      the head's name; None for Codex and OpenCode.
+    * `folder`, `started`: the head's (`Head`).
+    """
+
+    name: str | None = None
+    folder: str | None = None
+    started: float | None = None
+
+
+def read_name(listed: Listed) -> tuple[bool, str | None]:
+    """Whether the last turn of a Claude transcript was read, and the newest `custom`
+    title marker in it, None when it holds none. One turn is read and none before it."""
+    try:
+        records = window(listed, turns=1).records
+    except (Unreadable, OSError, ValueError):
+        return False, None
+    return True, _name(records)
 
 
 def read_head(listed: Listed, imports: Any = None) -> Head | None:
@@ -487,11 +527,16 @@ class Catalog:
 
     def __init__(self, roots: Mapping[str, str | Path] | None = None, *,
                  clock: Callable[[], float] = time.monotonic,
-                 reuse_s: float = REUSE_S, tail_max: int = TAIL_MAX):
+                 reuse_s: float = REUSE_S, tail_max: int = TAIL_MAX,
+                 name_max: int = NAME_MAX):
         self._roots = dict(roots or {})
         self._clock = clock
         self._reuse_s = reuse_s
         self._tail_max = tail_max
+        # The names read for `facts`, by path: the file's size and mtime, and the name.
+        self._name_max = name_max
+        self._names: OrderedDict[str, tuple[tuple, str | None]] = OrderedDict()
+        self.name_reads = 0              # the last turns read for a name, failed included
         self._lock = threading.Lock()
         self._flights: dict[str, _Flight] = {}
         self._gathered: Gathered | None = None
@@ -685,6 +730,44 @@ class Catalog:
         with self._lock:
             return self._kept_head(entry.listed)[0]
 
+    # -- the name ---------------------------------------------------------------------------
+
+    def _name(self, entry: Entry) -> str | None:
+        """The newest typed name in a Claude session's last turn: from the kept last-turn
+        facts where they stand, else from a kept name, else from one turn read now, which
+        is kept as a name alone. None when there is none or the read failed; a failed
+        read is not kept."""
+        listed, path = entry.listed, entry.path
+        stamp = (listed.size, listed.mtime_ns)
+        with self._lock:
+            tail = self._tails.get((path, ""))
+            if tail is not None and tail[0] == stamp:
+                return tail[1].name
+            kept = self._names.get(path)
+            if kept is not None and kept[0] == stamp:
+                self._names.move_to_end(path)
+                return kept[1]
+        read, name = read_name(listed)
+        with self._lock:
+            self.name_reads += 1
+            if read:
+                self._names[path] = (stamp, name)
+                self._names.move_to_end(path)
+                while len(self._names) > self._name_max:
+                    self._names.popitem(last=False)
+        return name
+
+    def facts(self, entry: Entry) -> Facts:
+        """What names `entry`: its head's folder and start and its name, each read now
+        unless a kept read stands. It reads the head and at most one turn, the last, and
+        keeps a name or None of it (at most `name_max` of them) and no other text. Never
+        raises for a session that cannot be read: a fact that was not read is None."""
+        head = self.head(entry) or Head()
+        name = None
+        if entry.harness == CLAUDE:
+            name = self._name(entry) or head.name
+        return Facts(name=name, folder=head.folder, started=head.started)
+
     # -- the details ------------------------------------------------------------------------
 
     def _tail(self, entry: Entry, program: bool | None) -> Tail | None:
@@ -748,4 +831,4 @@ def reset() -> None:
 __all__ = ["REUSE_S", "TAIL_MAX", "ACTIVITY_BYTES", "PROMPT_TURNS", "YOU", "AGENT",
            "Entry", "Unread", "Gathered", "Head", "Said", "Details", "Tail",
            "Catalog", "shared", "reset", "by_program", "cut", "row_head", "read_head",
-           "read_tail"]
+           "read_tail", "NAME_MAX", "Facts", "read_name"]

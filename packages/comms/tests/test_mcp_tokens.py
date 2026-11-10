@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import itertools
 import logging
 import sqlite3
 
 import pytest
-from conftest import wait_until
+from conftest import WAIT, wait_until
 
 from moxi_comms import bindings, claimfile, wire
 from moxi_comms.client import DaemonClient, DaemonError
@@ -78,10 +79,24 @@ class Session:
         return self.client.mcp_token(token_hash or self.hash)
 
     def drop(self, rig) -> None:
-        """The connection ends; the session's process lives on."""
+        """The connection ends; the session's process lives on. Returns once the daemon
+        has handled the close in full: the release under its lock, and the check of
+        whether the session ended, which runs after the lock. The host lists each closed
+        connection's handling among its releases until it returns. The name leaving
+        `bindings` shows the handling has started; the host adds it to the list in the
+        same step of its loop that started it, so one turn of the loop after that, the
+        list is empty only once the handling is done."""
         self.client.close()
         self.client = None
         assert wait_until(lambda: f"{self.name}@{self.scope}" not in rig.daemon.bindings)
+        host = rig.daemon.host
+        host.run_on_loop(asyncio.sleep(0), timeout=WAIT)
+
+        def released() -> bool:
+            with host._releases_lock:
+                return not host._releases
+
+        assert wait_until(released)
 
     def end(self) -> None:
         """The session ends: its claim file goes, as a clean shutdown removes it."""

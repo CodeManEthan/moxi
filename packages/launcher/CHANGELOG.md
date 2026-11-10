@@ -60,6 +60,9 @@
 - New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
   run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
   so a caller on an install without the UI shell can read what is alive.
+- Home's launch line names the slot the launch takes when the page reads the slots twice
+  at once: a press that reads the slots again waits for the newest read asked, where it
+  used to go on with the old listing when a later read passed its own.
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;
