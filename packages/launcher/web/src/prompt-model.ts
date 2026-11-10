@@ -1,9 +1,9 @@
 // What the launcher's piece on Home shows and sets, worked out with no DOM so the Node
 // tests can drive it. prompt.ts draws it.
 //
-// The piece is a launch form with a few rows drawn: the box is the row `brief` and the line
-// above it is the place (`project` or `cwd`). Every other row keeps the value `/api/form`
-// gives it.
+// The piece is a launch form with a few rows drawn: the box is the row `brief`, the line
+// above it is the place (`project` or `cwd`), and the chip is `harness`, `model` and
+// `effort`. Every other row keeps the value `/api/form` gives it.
 //
 // Whether projects is there is one value, `withProjects`, worked out once when the piece
 // opens. Every project thing hangs on it: the line's face, how a place is drawn and what
@@ -14,7 +14,7 @@
 
 import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
 
-import { shownValue } from "./panel.ts";
+import { HARNESS, leaveOutChoice, shownValue } from "./panel.ts";
 
 type Fields = Record<string, unknown>;
 
@@ -223,6 +223,9 @@ export function placeTime(at: string, now: Date, hour: Clock = HOUR, day: Clock 
   return today ? hour(then) : day(then);
 }
 
+/** The longest folder a row of the menu draws whole, in characters. */
+export const ROW_MAX = 40;
+
 /** One place in the line's menu. */
 export interface PlaceRow extends FolderFace {
   pick: Pick;
@@ -246,7 +249,7 @@ export function placeRows(places: readonly Place[], projects: boolean, pick: Pic
     const key = pickKey(mine);
     if (seen.has(key)) continue;
     seen.add(key);
-    const face = mine.kind === "project" ? { dim: "", name: mine.key } : folderFace(place.cwd);
+    const face = mine.kind === "project" ? { dim: "", name: mine.key } : folderFace(place.cwd, ROW_MAX);
     out.push({ ...face, pick: mine, time: placeTime(place.at, now, hour, day), current: samePick(mine, pick) });
   }
   return out;
@@ -257,7 +260,7 @@ export function placeRows(places: readonly Place[], projects: boolean, pick: Pic
 /**
  * What the piece's form holds, as the launcher's panel reads its own form: every row that
  * takes input with the value `/api/form` filled it with, and over those the rows set here
- * (`set`: the brief and the place). A row this install shows off
+ * (`set`: the brief, the place, the model and the effort). A row this install shows off
  * sends nothing, set or not.
  */
 export function formValues(fields: readonly FieldDescriptor[],
@@ -275,4 +278,78 @@ export function valueOf(fields: readonly FieldDescriptor[], set: Readonly<Record
                         name: string): string {
   const value = formValues(fields.filter((field) => field.name === name), set)[name];
   return typeof value === "string" ? value : "";
+}
+
+// --- the chip ------------------------------------------------------------------------------
+
+/** The harnesses' names, by the row's value. */
+export const HARNESS_NAMES: Readonly<Record<string, string>> = { claude: "Claude Code", codex: "Codex" };
+
+/** A harness as the menu names it; one with no name here is drawn as its value. */
+export function harnessName(value: string): string {
+  return Object.hasOwn(HARNESS_NAMES, value) ? HARNESS_NAMES[value] : value;
+}
+
+/** What the chip says for a model left empty. */
+export const DEFAULT_MODEL = "default model";
+
+/** The chip's face: the harness, the model, and the effort when one is set. `effort` is
+ * null for a harness with no effort row. */
+export function chipFace(harness: string, model: string, effort: string | null): string {
+  return [harness, model || DEFAULT_MODEL, ...(effort ? [effort] : [])].join(" · ");
+}
+
+/** One choice of the chip's menu. An empty `value` is the row's empty state. */
+export interface ChipItem {
+  value: string;
+  label: string;
+  current: boolean;
+}
+
+/** The chip's menu: three lists side by side. */
+export interface ChipMenu {
+  harness: ChipItem[];
+  /** `Default`, then the names the row offers. */
+  model: ChipItem[];
+  /** The model set is none of the list's: a full name typed after `older…`. */
+  typed: string;
+  /** `Default` and the row's levels; null for a harness with no effort row. */
+  effort: ChipItem[] | null;
+}
+
+/** The label of the choice that empties a row. */
+export const DEFAULT_LABEL = "Default";
+
+function choices(field: FieldDescriptor | undefined): string[] {
+  const leave = leaveOutChoice(field);
+  return (field?.values ?? []).filter((value) => value !== "" && value !== leave);
+}
+
+function offered(fields: readonly FieldDescriptor[], name: string): FieldDescriptor | undefined {
+  return fields.find((field) => field.name === name && field.needs_absent !== true);
+}
+
+/** Whether the form's harness has an effort row. */
+export function hasEffort(fields: readonly FieldDescriptor[]): boolean {
+  return offered(fields, "effort") !== undefined;
+}
+
+/**
+ * The chip's menu for the form's fields and the values set now. The harness list is the
+ * row's values under their names. The model list leads with `Default`, the way back to the
+ * empty value; a harness whose model row offers no names has `Default` alone, and the
+ * field after `older…` takes a full name.
+ */
+export function chipMenu(fields: readonly FieldDescriptor[], harness: string, model: string,
+                         effort: string): ChipMenu {
+  const item = (value: string, now: string): ChipItem =>
+    ({ value, label: value === "" ? DEFAULT_LABEL : value, current: value === now });
+  const models = choices(offered(fields, "model"));
+  return {
+    harness: choices(fields.find((field) => field.name === HARNESS))
+      .map((value) => ({ value, label: harnessName(value), current: value === harness })),
+    model: ["", ...models].map((value) => item(value, model)),
+    typed: model !== "" && !models.includes(model) ? model : "",
+    effort: hasEffort(fields) ? ["", ...choices(offered(fields, "effort"))].map((value) => item(value, effort)) : null,
+  };
 }

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm } from "../src/panel.ts";
 import {
-  firstOpen, folderFace, formValues, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
+  chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
 } from "../src/prompt-model.ts";
 
@@ -232,4 +233,79 @@ test("the form's values are each row's filled value with the rows set here over 
   assert.equal(valueOf(fields, { model: null }, "model"), "");
   assert.equal(valueOf(fields, { model: "sonnet" }, "model"), "sonnet");
   assert.equal(valueOf(fields, {}, "effort"), "");
+});
+
+// --- the chip ------------------------------------------------------------------------------
+
+const HARNESS_ROW = field("harness", { type: "enum", default: "claude", values: ["claude", "codex"] });
+const CATALOG = parseCatalog({ state: "up", detail: null, harnesses: [
+  { name: "claude", fields: [HARNESS_ROW, field("model", { default: "", values: ["fable", "opus", "sonnet"] }),
+                             field("effort", { type: "enum", default: "", values: ["low", "medium", "high"] })] },
+  { name: "codex", fields: [HARNESS_ROW, field("model", { default: "" })] },
+] });
+const row = (name, value) => ({ name, value, items: null, source: "shipped", withheld: false });
+/** The fields the piece holds for a harness, filled as `/api/form` answers. */
+const filled = (harness, rows = []) => filledFields(
+  fieldsFor(CATALOG, harness), parseForm({ state: "up", detail: null, harness, rows, refused: null }), NO_PRESET);
+
+test("the chip's face names the harness, the model or that it is the default, and a set effort", () => {
+  assert.equal(chipFace("claude", "", ""), "claude · default model");
+  assert.equal(chipFace("claude", "sonnet", ""), "claude · sonnet");
+  assert.equal(chipFace("claude", "sonnet", "medium"), "claude · sonnet · medium");
+  assert.equal(chipFace("claude", "", "medium"), "claude · default model · medium");
+});
+
+test("a harness with no effort row never shows the third part", () => {
+  assert.equal(hasEffort(filled("claude")), true);
+  assert.equal(hasEffort(filled("codex")), false);
+  assert.equal(chipFace("codex", "gpt-5", null), "codex · gpt-5");
+  assert.equal(chipFace("codex", "", null), "codex · default model");
+  assert.equal(hasEffort([field("effort", { type: "enum", needs_absent: true })]), false);
+});
+
+test("the harnesses are drawn by their names, and one with no name as its value", () => {
+  assert.equal(harnessName("claude"), "Claude Code");
+  assert.equal(harnessName("codex"), "Codex");
+  assert.equal(harnessName("other"), "other");
+  assert.equal(harnessName("constructor"), "constructor");
+});
+
+test("the menu lists the harnesses, the models after Default, and the efforts after Default", () => {
+  const menu = chipMenu(filled("claude"), "claude", "opus", "high");
+  assert.deepEqual(menu.harness, [{ value: "claude", label: "Claude Code", current: true },
+                                  { value: "codex", label: "Codex", current: false }]);
+  assert.deepEqual(menu.model.map((item) => [item.label, item.value, item.current]),
+                   [["Default", "", false], ["fable", "fable", false], ["opus", "opus", true], ["sonnet", "sonnet", false]]);
+  assert.deepEqual(menu.effort.map((item) => [item.label, item.current]),
+                   [["Default", false], ["low", false], ["medium", false], ["high", true]]);
+  assert.equal(menu.typed, "");
+});
+
+test("with the model and the effort empty, Default is the current choice of each", () => {
+  const menu = chipMenu(filled("claude"), "claude", "", "");
+  assert.deepEqual(menu.model.filter((item) => item.current).map((item) => item.label), ["Default"]);
+  assert.deepEqual(menu.effort.filter((item) => item.current).map((item) => item.label), ["Default"]);
+});
+
+test("a full model name typed is none of the list's and is kept as typed", () => {
+  const menu = chipMenu(filled("claude"), "claude", "claude-opus-4-1", "");
+  assert.equal(menu.typed, "claude-opus-4-1");
+  assert.ok(menu.model.every((item) => !item.current));
+});
+
+test("a harness whose model row offers no names has Default alone and no effort list", () => {
+  const menu = chipMenu(filled("codex"), "codex", "", "");
+  assert.deepEqual(menu.model, [{ value: "", label: "Default", current: true }]);
+  assert.equal(menu.effort, null);
+  assert.deepEqual(menu.harness.map((item) => item.current), [false, true]);
+  assert.equal(chipMenu(filled("codex"), "codex", "gpt-5", "").typed, "gpt-5");
+});
+
+test("the chip reads the values the form is filled with until one is set here", () => {
+  const fields = filled("claude", [row("model", "sonnet"), row("effort", "medium")]);
+  const face = (set) => chipFace("claude", valueOf(fields, set, "model"), valueOf(fields, set, "effort"));
+  assert.equal(face({}), "claude · sonnet · medium");
+  assert.equal(face({ model: "opus" }), "claude · opus · medium");
+  assert.equal(face({ model: null, effort: null }), "claude · default model");
+  assert.deepEqual(formValues(fields, { model: null, effort: "high" }), { harness: "claude", model: null, effort: "high" });
 });
