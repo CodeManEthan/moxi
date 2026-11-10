@@ -42,9 +42,9 @@ does not yet build.
   the command that completes it and what it waits for; `next --schema` prints the empty
   data block of a report.
 - A round whose flow has no `build` step closes itself, on the write that leaves every
-  step done or skipped, no question open or parked and no stage in its plan. `show`
-  says what an open round's close waits for, and `list --closed` lists a closed round
-  with when it closed.
+  step done or skipped, no question open or parked and no stage in its plan. The verb
+  whose write closes it says so in its last line. `show` says what an open round's
+  close waits for, and `list --closed` lists a closed round with when it closed.
 - The read API, interface 1: `rounds`, `round`, `waiting`, `questions`.
 - Doctor rows for git, each project's rounds folder, each log and the index.
 - Config: `defaults.dir`, `defaults.flow`, `defaults.trace`, `flows`, `tiers`, `models`
