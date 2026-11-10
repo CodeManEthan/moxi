@@ -3,11 +3,14 @@ the groups a list is cut into, the next rows of a group, the folders, and one se
 opened. Plain functions that return plain data (dicts, lists, numbers, strings, None).
 
 **The filters.** `harness`, `since` (changed at or after it) and `until` (changed before
-it) are tested on a catalog entry and open no file. `folder` (a session whose own head names exactly that folder) and `find` (the
-session's id starts with the text, or the last segment of its folder contains it, without
-regard to case) need every session's head: asking for either reads each head not read
+it) are tested on a catalog entry and open no file. `folder` (a session whose own head
+names that folder) and `find` (the session's id starts with the text, or the last segment
+of its folder contains it, without regard to case) need every session's head: asking for either reads each head not read
 yet, once for the catalog's life. Nothing else reads every head. Every count an answer
 gives is exact for the sessions it stands for.
+
+A folder is compared as written but for the slashes at its end, so `/work/proj-a/` asks
+for `/work/proj-a`; nothing else is folded, and no link is followed.
 
 **The groups.** A list with no `find` is cut into:
 
@@ -129,8 +132,16 @@ def _filters(harness: Any = None, since: Any = None, until: Any = None,
             raise ValueError(f"find is text of {FIND_MIN} characters or more, "
                              f"not {find!r}")
         find = find.strip().lower()
-    return _Filters(harness, _number("since", since), _number("until", until), folder,
-                    find)
+    return _Filters(harness, _number("since", since), _number("until", until),
+                    _folder(folder), find)
+
+
+def _folder(path: str | None) -> str | None:
+    """A folder as it is compared and counted: without the slashes at its end. None for
+    no folder."""
+    if not path:
+        return None
+    return path.rstrip("/") or "/"
 
 
 def _in_time(entry: Entry, f: _Filters) -> bool:
@@ -163,7 +174,7 @@ def _pool(cat: Catalog, gathered: Gathered, f: _Filters, *,
     out = []
     for entry in pool:
         head = cat.kept_head(entry)
-        where = head.folder if head is not None else None
+        where = _folder(head.folder) if head is not None else None
         if by_folder is not None and where != by_folder:
             continue
         if f.find is not None and not _found(entry, where, f.find):
@@ -503,7 +514,8 @@ def list_folders(cat: Catalog | None = None, *, harness: str | None = None,
     """The folders the sessions under the filters ran in: `{folders, more}`.
 
     `folders` is `{folder, count, changed}` per folder, `count` its sessions of both
-    kinds and `changed` the newest change among them, newest first, at most `limit`;
+    kinds and `changed` the newest change among them, newest first, at most `limit`; a
+    folder is named without the slashes at its end, as the `folder` filter compares it;
     `more` is how many folders were left off. A session whose head names no folder is in
     no folder's count. Reads every session's head not read yet.
 
@@ -517,7 +529,7 @@ def list_folders(cat: Catalog | None = None, *, harness: str | None = None,
     newest: dict[str, int] = {}
     for entry in entries:
         head = cat.kept_head(entry)
-        where = head.folder if head is not None else None
+        where = _folder(head.folder) if head is not None else None
         if not where:
             continue
         counts[where] += 1

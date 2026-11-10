@@ -49,7 +49,8 @@ empty text; a time is epoch seconds; each answer starts with `shape`.
 
 The filters, each optional, are the same on `/api/list` and `/api/more`: `harness`;
 `since` (changed at or after it) and `until` (changed before it), epoch seconds as a
-number; `folder`, an absolute path a session's own record names exactly; `find`, text of
+number; `folder`, an absolute path a session's own record names (compared as written, but for
+the slashes at its end); `find`, text of
 2 characters or more that a session's id starts with or the last segment of its folder
 contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,
 `find` and `/api/folders` read the head of every session not read yet, once for the

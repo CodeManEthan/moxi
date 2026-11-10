@@ -142,6 +142,20 @@ def test_a_folder_counts_its_own_sessions_where_two_folders_share_a_directory(ro
     assert listed(roots, folder="/work/proj")["total"] == 0
 
 
+def test_a_folder_is_the_same_folder_with_or_without_a_slash_at_its_end(roots):
+    shared_directory(roots)
+    claude(roots, 9, NOW - 30, cwd="/work/proj-a/")       # a record that wrote the slash
+
+    plain = listed(roots, folder="/work/proj-a")
+    slashed = listed(roots, folder="/work/proj-a/")
+
+    assert plain["total"] == slashed["total"] == 4
+    assert ids(group(slashed, RECENT)["rows"]) == ids(group(plain, RECENT)["rows"])
+    folders = {f["folder"]: f["count"] for f in list_folders(catalog(roots))["folders"]}
+    assert folders == {"/work/proj-a": 4, "/work/proj-b": 1}
+    assert listed(roots, folder="/work/proj-A")["total"] == 0     # nothing else is folded
+
+
 def test_a_harness_filter_leaves_the_harness_counts_as_they_were(roots):
     shared_directory(roots)
 

@@ -174,7 +174,7 @@ from every count; the answer names that harness under `roots` with no reason and
 stderr. A session whose subagents folder could not be listed has no subagent count.
 
 Filters: `harness`, `since` and `until` on the last change, `folder` (the folder the
-session's own record names) and `find` (the start of an id, or part of the folder's last
+session's own record names, with or without a slash at its end) and `find` (the start of an id, or part of the folder's last
 segment). `sessions_more` answers the next rows of a group from the place an answer gave,
 `sessions_newest` the same sessions as one run with no groups (what `moxi sessions list`
 prints), `sessions_folders` the folders with how many sessions each holds, and
