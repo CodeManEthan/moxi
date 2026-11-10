@@ -232,9 +232,9 @@ def _list(args, prog: str) -> int:
             print(f"{prog} list: {unread['harness']}: {where} could not be listed: "
                   f"{unread['reason']}", file=sys.stderr)
         else:
-            print(f"{prog} list: {unread['harness']}: {unread['parts']} folders or "
-                  f"files under {where} could not be listed; their sessions are not "
-                  "counted", file=sys.stderr)
+            print(f"{prog} list: {unread['harness']}: {unread['parts']} of the folders "
+                  f"and files under {where} could not be listed; the sessions in them "
+                  "are not counted", file=sys.stderr)
     for row in rows:
         print("  ".join((_when(row["started"]), _when(row["changed"]), row["harness"],
                          row["name"] or row["folder"] or "-", row["session"])))

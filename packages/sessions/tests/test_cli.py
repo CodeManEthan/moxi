@@ -447,8 +447,8 @@ def test_list_says_how_many_parts_of_a_root_it_could_not_list(listed, capsys):
         unlisted.chmod(0o700)
 
     assert code == 0 and out.splitlines()[0].endswith(sid(1))
-    assert (f"claude: 1 folders or files under {listed / '.claude' / 'projects'} could "
-            "not be listed; their sessions are not counted") in err
+    assert (f"claude: 1 of the folders and files under {listed / '.claude' / 'projects'} "
+            "could not be listed; the sessions in them are not counted") in err
 
 
 def test_list_refuses_arguments_that_are_not_ones(listed, capsys):
