@@ -35,6 +35,18 @@
   their own; the top line names the page. The document's title is `Moxi` while the panel
   holds a message and no page.
 - `ComponentInfo` in `client.js` carries `home_as`, `group` and `order`.
+- `/m/ui/` is now Home: one main spot and a row per module with something to report. A
+  component takes a seat with `home_as` (`"main"` or `"row"`) and `order`; a row component
+  reports its line with a `moxi-home-row` event and Home draws it, puts the rows that need
+  you first and opens a row's component in place. `docs/home.md` has the contract and the
+  `needs` and `order` scales. With no main piece installed the spot says `Nothing needs
+  you.`
+- On the phone every page says `This phone reads only here.`, first under the top line.
+- A block with `home: True` and no `home_as` is on the modules view, at `/m/ui/modules`,
+  and no longer at `/m/ui/`.
+- New component `health`, the shell's own row on Home: whether the doctor's checks pass,
+  from the run the shell keeps. Opened, it lists the checks that fail or warn with their
+  fixes, and `Check again` runs the doctor.
 
 ## 0.2.3 (2026-11-08)
 

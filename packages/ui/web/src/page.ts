@@ -1,7 +1,8 @@
-// <moxi-ui-page>: the shell's own panel. With `route` "" or "modules" it is the modules
-// view: every module's home block, then every installed module with its state, its page
-// and its components, and a Check that shows the doctor's rows for it, then the Gateway
-// section that pairs a phone. With `route` "settings"
+// <moxi-ui-page>: the shell's own panel. With `route` "" it is Home, drawn by
+// <moxi-ui-home>. With `route` "modules" it is the modules view: every module's block
+// that asks for home and has no seat on Home, then every installed module with its state,
+// its page and its components, and a Check that shows the doctor's rows for it, then the
+// Gateway section that pairs a phone. With `route` "settings"
 // (or "settings/<module>" for one module) it is the settings view: a section per module
 // drawn by <moxi-ui-form>, each change written through `moxi config` by the shell.
 //
@@ -18,6 +19,7 @@ import { api, components, gateway, installed, navigate, place, setTheme, subscri
 import type { FieldDescriptor, FormChange, FormElement, ThemeMode } from "/m/ui/client.js";
 
 import "./gateway-desk.ts";
+import "./home.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
 import { doctorRows, homeBlocks, moduleLines, moduleOrder, moduleState } from "./views.ts";
 import type { DoctorRow, ModuleView } from "./views.ts";
@@ -111,7 +113,7 @@ export class UiPage extends LitElement {
   checks = new Map<string, Check>();
   sections: Section[] | null = null;
   settingsError: string | null = null;
-  #view: "modules" | "settings" | "none" = "none";
+  #view: "home" | "modules" | "settings" | "none" = "none";
   #only: string | null = null;
   #stop: (() => void) | null = null;
   #placed = "";
@@ -120,7 +122,9 @@ export class UiPage extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     const route = (this.getAttribute("route") ?? this.route ?? "").replace(/^\/+|\/+$/g, "");
-    if (route === "" || route === "modules") {
+    if (route === "") {
+      this.#view = "home";
+    } else if (route === "modules") {
       this.#view = "modules";
       this.#stop = subscribe("ui", "modules", (data) => { this.modules = data; });
     } else if (route === "settings" || route.startsWith("settings/")) {
@@ -140,6 +144,7 @@ export class UiPage extends LitElement {
   }
 
   render() {
+    if (this.#view === "home") return html`<moxi-ui-home></moxi-ui-home>`;
     if (this.#view === "modules") return this.#modulesView();
     if (this.#view === "settings") return this.#settingsView();
     return html`<h1>Nothing is here</h1>
@@ -221,7 +226,7 @@ export class UiPage extends LitElement {
     this.checks = new Map(this.checks).set(module, result);
   }
 
-  /** Places every home block again when the set of them changes. */
+  /** Places every block again when the set of them changes. */
   async #placeHome(): Promise<void> {
     const home = this.renderRoot.querySelector("#home");
     if (home === null || this.modules === null) return;

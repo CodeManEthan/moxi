@@ -113,6 +113,7 @@ def test_the_document_loads_the_theme_and_the_client_and_holds_no_inline_code():
     assert 'id="moxi-shell"' in text and 'id="moxi-panel"' in text and 'id="moxi-pages-button"' in text
     # The top line: Moxi, the page's name, Settings; the band of pages starts closed.
     assert '<nav id="moxi-pages" class="moxi-pages" aria-label="Pages" hidden></nav>' in text
+    assert 'id="moxi-reads" class="moxi-reads" hidden' in text
     assert 'id="moxi-settings"' in text and "moxi-menu" not in text and "<h1" not in text
     # The page's policy allows scripts and styles from the origin only.
     assert re.search(r"<script(?![^>]*\bsrc=)", text) is None
@@ -207,7 +208,7 @@ def test_the_shells_own_components_are_placed_from_its_build():
     placed, refused = check_components("ui", module.COMPONENTS, page=True, assets=assets)
     assert refused == []
     assert {item["name"]: item["element"] for item in placed} == {
-        "page": "moxi-ui-page", "servers": "moxi-ui-servers"}
+        "page": "moxi-ui-page", "servers": "moxi-ui-servers", "health": "moxi-ui-health"}
     for item in placed:
         text = _built(item["script"])
         # Each imports only the shared client, by its absolute URL, and defines its

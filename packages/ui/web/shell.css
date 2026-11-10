@@ -93,6 +93,15 @@ a:focus-visible, button:focus-visible {
   outline-offset: 2px;
 }
 
+/* On the phone, first under the top line on every page: nothing there acts. */
+.moxi-reads {
+  margin: 0;
+  padding: 22px 34px 0;
+  color: var(--moxi-text-dim);
+  font-size: 13px;
+  line-height: 18px;
+}
+
 .moxi-notice, .moxi-status, .moxi-band {
   margin: 12px 0 0;
   padding: 8px 32px;
@@ -127,6 +136,7 @@ a:focus-visible, button:focus-visible {
   .moxi-pages-group { display: block; }
   .moxi-pages-group + .moxi-pages-group { margin-top: 16px; }
   .moxi-pages a { display: block; line-height: 32px; }
+  .moxi-reads { padding: 22px 18px 0; }
   .moxi-notice, .moxi-status, .moxi-band { padding: 8px 16px; }
   .moxi-panel { padding: 16px; }
 }

@@ -101,6 +101,7 @@ def test_a_used_ticket_url_does_not_sign_in(ui_shell, ui_contexts):
 
 
 def test_the_modules_view_lists_ui_and_fixture_and_check_shows_doctor_rows(ui_page):
+    ui_page.goto("/m/ui/modules")
     view = _modules(ui_page)
     for name in ("ui", "fixture"):
         card = view.locator(f".card[data-module={name}]")
@@ -120,7 +121,8 @@ def test_the_modules_view_lists_ui_and_fixture_and_check_shows_doctor_rows(ui_pa
     expect(rows.first.locator("code").first).not_to_be_empty()
 
 
-def test_the_home_holds_the_servers_block_and_the_fixture_block(ui_page):
+def test_the_modules_view_holds_the_servers_block_and_the_fixture_block(ui_page):
+    ui_page.goto("/m/ui/modules")
     home = _modules(ui_page).locator("#home")
     expect(home.locator("section[data-block='ui.servers'] moxi-ui-servers")).to_be_attached()
     block = home.locator("section[data-block='fixture.block']")
@@ -160,7 +162,7 @@ def test_the_band_opens_the_fixture_panel_in_the_same_document_and_back_returns(
     expect(panel.locator("moxi-fixture-tag")).to_have_text("on the page")
     ui_page.go_back()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/")
-    expect(_modules(ui_page).locator(".card[data-module=fixture]")).to_be_visible()
+    expect(_modules(ui_page).locator("moxi-ui-home .rows")).to_be_visible()
     ui_page.go_forward()
     # The URL first: a failure here is the browser not going forward, and one on the
     # panel below is the shell not showing the entry it went forward to.
@@ -251,10 +253,11 @@ def test_the_top_line_names_the_page_on_every_route(ui_shell, ui_page):
 
 
 def test_the_shells_own_views_carry_no_title_of_their_own(ui_page):
-    for route in ("", "modules"):
-        ui_page.goto(f"/m/ui/{route}")
-        expect(_modules(ui_page).locator(".card[data-module=ui]")).to_be_visible()
-        expect(_modules(ui_page).locator("h1")).to_have_count(0)
+    expect(_modules(ui_page).locator("moxi-ui-home .rows")).to_be_visible()
+    expect(_modules(ui_page).locator("h1")).to_have_count(0)
+    ui_page.goto("/m/ui/modules")
+    expect(_modules(ui_page).locator(".card[data-module=ui]")).to_be_visible()
+    expect(_modules(ui_page).locator("h1")).to_have_count(0)
     ui_page.goto("/m/ui/settings")
     view = _modules(ui_page)
     expect(view.locator("section.card[data-module=fixture]")).to_be_visible(timeout=10_000)
@@ -340,6 +343,11 @@ def test_the_pages_run_under_the_policy_with_no_violation_or_error(ui_shell, ui_
     response = ui_page.goto("/m/ui/")
     policy = response.headers["content-security-policy"]
     assert "require-trusted-types-for 'script'" in policy and "style-src 'self'" in policy
+    expect(_modules(ui_page).locator("moxi-ui-home moxi-ui-health")).to_be_attached()
+    # The line that says a phone only reads is the phone's.
+    expect(ui_page.locator("#moxi-reads")).to_be_hidden()
+    expect(_modules(ui_page).locator("moxi-ui-home moxi-fixture-row-two")).to_be_attached()
+    _pick(ui_page, "ui", "modules")
     expect(_modules(ui_page).locator("#home moxi-fixture-block")).to_be_attached()
     _pick(ui_page, "fixture")
     expect(ui_page.locator("moxi-fixture-page moxi-fixture-tag")).to_have_text("on the page")
@@ -445,7 +453,7 @@ def test_the_gateway_section_shows_the_audit_log_and_each_devices_sign_ins(ui_sh
                     "device": device.id}, signed_in=True)
     writer.close()
     try:
-        ui_page.goto("/m/ui/")
+        ui_page.goto("/m/ui/modules")
         section = _modules(ui_page).locator("moxi-ui-gateway section[data-section=gateway]")
         expect(section.locator(f"li[data-device='{device.id}']")).to_contain_text("Sign-ins:")
         log = section.locator("details.log")

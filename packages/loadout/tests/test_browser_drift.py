@@ -127,7 +127,7 @@ def test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs(folder, u
     # Three skills, each missing for every harness: the block counts each item once.
     items = {(row["scope"], row["kind"], row["name"]) for row in rows}
     assert len(items) == 3 and len(rows) > len(items), rows
-    ui_page.goto("/m/ui/")
+    ui_page.goto("/m/ui/modules")
     block = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift")
     drift = block.locator(".drift")
     expect(drift).to_have_attribute("data-count", "3")
@@ -169,7 +169,7 @@ def test_a_manifest_that_cant_be_read_shows_its_line_and_no_count(folder, ui_pag
 
 
 def test_the_link_on_the_home_opens_the_page_which_it_then_marks(folder, ui_page):
-    ui_page.goto("/m/ui/")
+    ui_page.goto("/m/ui/modules")
     link = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift h2 a")
     expect(link).to_have_text("Loadout")
     expect(link).not_to_have_attribute("aria-current", "page")

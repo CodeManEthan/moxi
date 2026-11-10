@@ -74,6 +74,7 @@ def _in_thread(fn):
 
 def test_a_fixture_act_changes_its_topic_and_its_components_show_it(ui_shell, ui_page):
     n = _count(ui_shell)
+    ui_page.goto("/m/ui/modules")
     block = ui_page.locator("#home moxi-fixture-block").get_by_test_id("count")
     expect(block).to_have_text(f"Count: {n}")
     ui_page.goto("/m/fixture/")
@@ -203,8 +204,9 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
         ui_shells, fixture_site, ui_contexts):
     shell = ui_shells(site=[fixture_site])
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     row = _servers_row(page)
-    # The home's fixture block subscribes to a fixture topic, which starts its server.
+    # The modules view's fixture block subscribes to a fixture topic, which starts its server.
     expect(row.locator(".state")).to_have_text("running")
     expect(row).to_have_class("ok")
     expect(row).to_contain_text(re.compile(r"pid \d+, version 0\.1\.0, over (a private socket|TCP)"))
@@ -228,12 +230,13 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
 
 
 def test_the_servers_block_says_when_no_page_server_has_run(ui_shells, fixture_site, ui_contexts):
-    # Every module with a page has a page server, which the home starts when it places
+    # Every module with a page has a page server, which the shell starts when it places
     # one of its components, so the shell leaves out the fixture and every other one.
     paged = [found.name for found in modules.scan()
              if found.ok and found.page and found.name != "ui"]
     shell = ui_shells(site=[fixture_site], leave_out=["fixture", *paged])
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     block = page.locator("#moxi-panel moxi-ui-servers")
     expect(block).to_contain_text("No page server has run since the shell started.")
 
@@ -267,6 +270,7 @@ def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fi
     shell = ui_shells(site=[fixture_site], failed_for=SHORT_WINDOW)
     fixture_kit.fail_start(shell)
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     row = _servers_row(page)
     session = shell.session()
     # The row shows each failed start only for the short window, between samples of the
@@ -290,6 +294,7 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
     site = fixture_kit.install(tmp_path_factory.mktemp("drain-site"))
     shell = ui_shells(site=[site])
     page = ui_contexts(shell).pages[0]
+    page.goto("/m/ui/modules")
     row = _servers_row(page)
     expect(row.locator(".state")).to_have_text("running")
     old = shell.wait_server("fixture", "running")

@@ -132,6 +132,7 @@ export function boot(deps: ShellDeps): void {
   const settings = root.querySelector("#moxi-settings") as HTMLAnchorElement;
   const panel = root.querySelector("#moxi-panel") as HTMLElement;
   const notice = root.querySelector("#moxi-notice") as HTMLElement;
+  const reads = root.querySelector("#moxi-reads") as HTMLElement;
   const status = root.querySelector("#moxi-status") as HTMLElement;
   let shown = "";
   let seq = 0;
@@ -290,9 +291,12 @@ export function boot(deps: ShellDeps): void {
   deps.onSession((signedIn) => {
     if (deps.gateway) signIn.href = `/signin?n=${freshN()}`;
     notice.hidden = signedIn;
+    reads.hidden = !deps.gateway || !signedIn;
     if (signedIn) void renderPanel();
   });
   settings.hidden = deps.gateway;
+  // The phone's every page says, first under the top line, that it only reads there.
+  reads.hidden = !deps.gateway;
   name(pageName(where(location.pathname), deps.modules()));
   renderBand();
   void renderPanel();

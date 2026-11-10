@@ -47,6 +47,14 @@ each module's page server on the first request for its page.
 `gateway.enabled` (off) and `gateway.port` (8461).
 A change to `port` takes effect once `moxi install ui` rewrites the unit.
 
+## A module on Home
+
+Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A
+module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
+and an `order`; a row component reports its line with a `moxi-home-row` event and Home
+draws it. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
+has the fields, how rows are ordered and opened, and the `needs` and `order` scales.
+
 ## Confirmed acts in a page
 
 An act the user should confirm a second time, such as stopping a service or removing a

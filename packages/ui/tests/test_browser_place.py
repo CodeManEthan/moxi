@@ -80,7 +80,7 @@ def test_a_panel_whose_first_script_fetch_fails_is_placed_on_one_more_try(ui_pag
 def test_a_home_block_whose_first_script_fetch_fails_is_placed_on_one_more_try(ui_page):
     fetched = _fail_first(ui_page.context, "/m/fixture/block.js")
     said = _errors(ui_page)
-    ui_page.reload()
+    ui_page.goto("/m/ui/modules")
     block = ui_page.locator(BLOCK)
     expect(block.locator("moxi-fixture-block").get_by_test_id("count")).to_have_text(
         re.compile(r"^Count: \d+$"))
@@ -102,7 +102,7 @@ def test_a_home_block_whose_script_names_a_failure_shows_its_state_with_no_retry
         failing_shell, ui_contexts):
     page = ui_contexts(failing_shell).pages[0]
     fetches = _fetches(page, "/m/fixture/block.js")
-    page.reload()
+    page.goto("/m/ui/modules")
     block = page.locator(BLOCK)
     expect(block.locator(".warn")).to_have_text("fixture's block could not be shown.",
                                                 timeout=START_MS)

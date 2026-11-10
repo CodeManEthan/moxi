@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ago, doctorRows, failurePanel, homeBlocks, moduleLines, moduleOrder, serverView, serverViews } from "../src/views.ts";
+import { ago, doctorRows, failurePanel, homeBlocks, homeRows, mainPiece, moduleLines, moduleOrder, serverView, serverViews } from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
@@ -84,15 +84,45 @@ test("the modules view: the shell first, present modules, then the rest", () => 
   assert.deepEqual(order.map((item) => item.name), ["ui", "alpha", "zeta", "broken"]);
 });
 
-test("home blocks: each present module's blocks that ask for home, the shell's first", () => {
-  const block = (name, home = true, place = "block") => ({ name, title: name, doc: "", place, home, contract: 1 });
+const block = (name, extra = {}) => ({ name, title: name, doc: "", place: "block", home: true, contract: 1,
+                                      home_as: null, order: null, ...extra });
+
+test("the modules view's blocks: those that ask for home and have no seat on Home, the shell's first", () => {
   const blocks = homeBlocks([
-    mod("fixture", { components: [block("page", false, "page"), block("today"), block("one", true, "inline")] }),
-    mod("ui", { components: [block("page", false, "page"), block("servers")] }),
+    mod("fixture", { components: [block("page", { home: false, place: "page" }), block("today"),
+                                  block("one", { place: "inline" }), block("line", { home_as: "row", order: 100 }),
+                                  block("box", { home_as: "main", order: 10 })] }),
+    mod("ui", { components: [block("page", { home: false, place: "page" }), block("servers")] }),
     mod("gone", { state: "broken", components: [block("x")] }),
   ]);
   assert.deepEqual(blocks.map((item) => `${item.module}.${item.name}`), ["ui.servers", "fixture.today"]);
 });
+
+test("Home's rows: present modules' row components by order, then module and name", () => {
+  const row = (name, order) => block(name, { home_as: "row", order });
+  const rows = homeRows([
+    mod("zeta", { components: [row("b", 100), row("a", 100), block("plain")] }),
+    mod("alpha", { components: [row("late", 900), row("tie", 100), row("unranked", null)] }),
+    mod("gone", { state: "broken", components: [row("x", 1)] }),
+    mod("odd", { components: [block("inline", { home_as: "row", order: 1, place: "inline" }),
+                              block("shy", { home_as: "row", order: 1, home: false })] }),
+  ]);
+  assert.deepEqual(rows.map((item) => `${item.module}.${item.name}:${item.order}`),
+                   ["alpha.tie:100", "zeta.a:100", "zeta.b:100", "alpha.unranked:500", "alpha.late:900"]);
+  assert.equal(rows[0].title, "tie");
+});
+
+test("the main piece: the lowest order among present modules, ties by module name", () => {
+  const main = (name, order) => block(name, { home_as: "main", order });
+  assert.equal(mainPiece([mod("ui", { components: [block("servers")] })]), null);
+  const piece = mainPiece([
+    mod("zeta", { components: [main("box", 10)] }),
+    mod("alpha", { components: [main("box", 10), main("big", 40)] }),
+    mod("gone", { state: "broken", components: [main("first", 1)] }),
+  ]);
+  assert.deepEqual([piece.module, piece.name, piece.order], ["alpha", "box", 10]);
+});
+
 
 test("a module's lines name a failed export and each refused component with its reason", () => {
   const lines = moduleLines(mod("fixture", {

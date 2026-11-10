@@ -122,7 +122,7 @@ def test_a_full_jar_still_signs_in_and_the_sign_in_clears_the_cached_page_and_st
     expect(page.locator("#moxi-shell")).to_be_attached()
     expect(page).not_to_have_title("squatter cached")
     # The full jar rides on every request, and the routes still answer.
-    page.goto("/m/ui/")
+    page.goto("/m/ui/modules")
     expect(page.locator("#moxi-panel > moxi-ui-page .card[data-module=fixture]")).to_be_visible()
     if not cached:
         pytest.skip("the sign-in completed with the full jar and cleared the storage, but this "

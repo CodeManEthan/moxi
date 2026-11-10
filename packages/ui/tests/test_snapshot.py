@@ -461,8 +461,11 @@ def test_the_announcement_declares_the_shell_its_page_and_components():
     assert "win32" in shell["platforms"] and shell["socket"]["setting"] == "port"
     assert found.health == {"shell": "moxi_ui.health:check"} and not found.budgets
     placed, refused = check_components("ui", found.components, page=True,
-                                       assets=["page.js", "servers.js"])
-    assert refused == [] and {c["element"] for c in placed} == {"moxi-ui-page", "moxi-ui-servers"}
+                                       assets=["page.js", "servers.js", "health.js"])
+    assert refused == [] and {c["element"] for c in placed} == {
+        "moxi-ui-page", "moxi-ui-servers", "moxi-ui-health"}
+    health = next(c for c in placed if c["name"] == "health")
+    assert (health["home_as"], health["order"]) == ("row", 900)
     assert {route.path for route in PAGE.routes} >= {"/api/servers", "/api/stop", "/api/modules"}
 
 

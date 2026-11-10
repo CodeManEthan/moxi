@@ -40,7 +40,8 @@ HEALTH = {"shell": "moxi_ui.health:check"}
 DOCTOR = "moxi_ui.doctor:rows"
 #: The shell's own page, which it serves in process; no page server runs for it.
 PAGE = "moxi_ui.page:PAGE"
-#: The modules view: the ui panel and its home block.
+#: The ui panel (Home, the modules view and the settings), the modules view's block, and
+#: Home's Health row, which the shell shows last among the rows that need nothing.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Modules",
              "doc": "Every installed module, its page server and its settings",
@@ -48,4 +49,9 @@ COMPONENTS = {
     "servers": {"script": "servers.js", "title": "Page servers",
                 "doc": "Each module's page server and its state",
                 "contract": 1, "place": "block", "home": True},
+    "health": {"script": "health.js", "title": "Health",
+               "doc": "Whether the doctor's checks pass, and what to run for one that fails",
+               "contract": 1, "place": "block", "home": True, "home_as": "row", "order": 900,
+               "attributes": {"open": {"type": "bool",
+                                       "doc": "set by Home while the row is shown opened"}}},
 }

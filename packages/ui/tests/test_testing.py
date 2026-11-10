@@ -71,7 +71,8 @@ def test_the_test_shell_serves_the_fixture_and_reaches_its_page_server(ui_shell)
     status, view = session.get("/m/ui/api/modules")
     modules = {m["name"]: m for m in view["modules"]}
     assert status == 200 and modules["fixture"]["mounted"]
-    assert {c["name"] for c in modules["fixture"]["components"]} == {"page", "block", "tag"}
+    assert {c["name"] for c in modules["fixture"]["components"]} == {
+        "page", "block", "row-one", "row-two", "tag"}
     assert [r["name"] for r in modules["fixture"]["refused"]] == ["later"]
     before = fixture_kit.acts(ui_shell)
     status, answer = session.post("/m/fixture/api/add", {"by": 2})

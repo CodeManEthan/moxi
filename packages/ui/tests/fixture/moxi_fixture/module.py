@@ -1,9 +1,11 @@
 """The announcement of fixture, the page module the ui module's tests install.
 
-It has a page, a block for the shell's home, an inline component with a required
-attribute, and one component written for a contract the shell doesn't place yet, which
-the modules view lists as refused. Its settings hold every type and a switch table,
-`rows`, whose entry `backup` only the timer below names (no test installs the timer).
+It has a page, a block for the modules view, two rows for the shell's Home that report
+only what a test tells them to, an inline component with a required attribute, and one
+component written for a contract the shell doesn't place yet, which the modules view lists
+as refused. Its settings hold every type and a switch table,
+`rows`, whose entry `backup` only the timer below names (no test installs the timer). Its
+doctor check fails while a test says so.
 """
 
 INTERFACES = frozenset({1})
@@ -18,12 +20,17 @@ SETUP = None
 SEGMENT = None
 TIMERS = {"backup": {"command": "moxi-fixture-backup", "every": "1h", "switch": "rows.backup",
                      "doc": "a backup no test installs"}}
+DOCTOR = "moxi_fixture.doctor:rows"
 PAGE = "moxi_fixture.page:PAGE"
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Fixture", "doc": "The fixture's panel",
              "contract": 1, "place": "page"},
     "block": {"script": "block.js", "title": "Fixture count", "doc": "The fixture's count",
               "contract": 1, "place": "block", "home": True},
+    "row-one": {"script": "row-one.js", "title": "Fixture one", "doc": "A row for Home",
+                "contract": 1, "place": "block", "home": True, "home_as": "row", "order": 100},
+    "row-two": {"script": "row-two.js", "title": "Fixture two", "doc": "A second row for Home",
+                "contract": 1, "place": "block", "home": True, "home_as": "row", "order": 200},
     "tag": {"script": "tag.js", "title": "Fixture tag", "doc": "One label",
             "contract": 1, "place": "inline",
             "attributes": {"label": {"type": "string", "required": True,

@@ -507,8 +507,8 @@ def test_a_reload_while_a_job_runs_follows_it_again_with_every_control_off(
         ui_page.reload()
 
     def away_and_back() -> None:
-        # The shell's home, then back through the drift block's link, in the same document.
-        ui_page.goto("/m/ui/")
+        # The modules view, then back through the drift block's link, in the same document.
+        ui_page.goto("/m/ui/modules")
         ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift h2 a").click()
         expect(ui_page).to_have_url(re.compile(r"/m/loadout/$"))
 

@@ -10,12 +10,30 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parent / "fixture" / "moxi_fixture"
 
 
-def install(site: Path, version: str = "0.1.0") -> Path:
-    """Copy the fixture's package into `site` and write its `.dist-info` beside it."""
+#: What the fixture's doctor row `check` says while it fails, and the fix it gives
+#: (fixture/moxi_fixture/doctor.py).
+CHECK_DETAIL = "The fixture's check was told to fail"
+CHECK_FIX = "moxi fixture mend"
+
+#: What an install with `main` adds to the fixture's announcement: a piece for Home's
+#: main spot.
+MAIN = '''
+COMPONENTS["main"] = {"script": "main.js", "title": "Fixture main", "doc": "Home's main piece",
+                      "contract": 1, "place": "block", "home": True, "home_as": "main",
+                      "order": 50}
+'''
+
+
+def install(site: Path, version: str = "0.1.0", *, main: bool = False) -> Path:
+    """Copy the fixture's package into `site` and write its `.dist-info` beside it. With
+    `main` the copy also announces a piece for Home's main spot."""
     site.mkdir(parents=True, exist_ok=True)
     target = site / "moxi_fixture"
     if not target.exists():
         shutil.copytree(SOURCE, target, ignore=shutil.ignore_patterns("__pycache__"))
+        if main:
+            with (target / "module.py").open("a") as out:
+                out.write(MAIN)
     set_version(site, version)
     return site
 
@@ -36,6 +54,16 @@ def set_version(site: Path, version: str) -> None:
 def fail_start(shell, on: bool = True) -> None:
     """While on, the fixture's page server exits 3 at its start."""
     flag = shell.state_dir("fixture") / "fail-start"
+    if on:
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.write_text("")
+    else:
+        flag.unlink(missing_ok=True)
+
+
+def fail_check(shell, on: bool = True) -> None:
+    """While on, the fixture's doctor row `check` fails."""
+    flag = shell.state_dir("fixture") / "fail-check"
     if on:
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text("")
