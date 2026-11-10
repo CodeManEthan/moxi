@@ -12,8 +12,9 @@ from conftest import write_config
 from moxi_sessions.opencode import Snapshot
 from moxi_sessions.shape import UNKNOWN
 from moxi_sessions.source import (
-    HEAD_LINES, Header, Source, claude_head_name, claude_header, codex_head, codex_header,
-    codex_root, file_header, head_complete, opencode_header, opencode_root, root,
+    HEAD_LINES, Header, Source, claude_head_name, claude_header, claude_named_head,
+    codex_head, codex_header,
+    codex_root, file_header, opencode_header, opencode_root, root,
     root_origin, sidecar_labels, unpack)
 from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
 from moxi_sessions.testing.claude import START
@@ -141,15 +142,19 @@ def test_a_claude_head_with_no_typed_title_has_no_name(tmp_path):
 
 def test_a_head_is_complete_once_the_file_has_outgrown_it(tmp_path):
     t = ClaudeTranscript(tmp_path)
-    for _ in range(HEAD_LINES - 1):
+    for _ in range(HEAD_LINES - 2):
         t.other("attachment")
+    t.title("named in the head")
     t.write()
     with t.path.open("rb") as handle:
-        assert head_complete(handle, t.path.stat().st_size) is False
+        assert claude_named_head(handle, t.path.stat().st_size) == (
+            "named in the head", False)
     t.other("attachment")
+    t.title("named past the head")
     t.flush()
     with t.path.open("rb") as handle:
-        assert head_complete(handle, t.path.stat().st_size) is True
+        assert claude_named_head(handle, t.path.stat().st_size) == (
+            "named in the head", True)
 
 
 def test_a_codex_header_holds_line_ones_facts_and_the_import_marks(tmp_path):

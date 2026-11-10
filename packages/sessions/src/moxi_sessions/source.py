@@ -172,17 +172,6 @@ def _head_entries(handle: BinaryIO, end: int, lines: int = HEAD_LINES):
             yield entry
 
 
-def head_complete(handle: BinaryIO, end: int) -> bool:
-    """True when the head's bounds, not the file's end at `end`, stopped a read of the
-    file's first lines. Lines are only ever appended, so such a head reads the same
-    however the file grows; a head the file's end stopped can gain lines."""
-    count = size = 0
-    for data in _head_lines(handle, end):
-        count += 1
-        size += len(data)
-    return count >= HEAD_LINES or size >= HEAD_BYTES or size < end
-
-
 def sidecar_labels(path: str | Path) -> dict[str, Any]:
     """A Claude subagent file's sidecar labels (`agent-<id>.meta.json` beside it): each
     None where the sidecar is missing, unreadable, or does not say. Never raises."""
@@ -234,20 +223,36 @@ def claude_header(source: Source, handle: BinaryIO, end: int) -> Header:
                   labels=sidecar_labels(source.path) if subagent else None)
 
 
-def claude_head_name(handle: BinaryIO, end: int) -> str | None:
-    """The name a Claude transcript's head gives its session: the newest `custom-title`
-    line among the first lines a header reads, or None when they hold none. A title
-    Claude Code made up itself (`ai-title`) is not a name. A name written only past the
-    head is not found here; it comes as a `title` marker among the records."""
+def claude_named_head(handle: BinaryIO, end: int) -> tuple[str | None, bool]:
+    """One read of the first lines a header reads, for a Claude transcript's name:
+    `(name, complete)`.
+
+    `name` is the name those lines give the session: their newest `custom-title` line,
+    or None when they hold none. A title Claude Code made up itself (`ai-title`) is not a
+    name. A name written only past the head is not found here; it comes as a `title`
+    marker among the records.
+
+    `complete` is true when the head's bounds, not the file's end at `end`, stopped the
+    read. Lines are only ever appended, so a complete head reads the same however the
+    file grows; one the file's end stopped can still gain lines, a name among them."""
     name = None
+    count = size = 0
     for data in _head_lines(handle, end):
+        count += 1
+        size += len(data)
         if b'"custom-title"' not in data:
             continue
         entry = claude.parse_line(data)
         if (entry is not None and entry.get("type") == "custom-title"
                 and isinstance(entry.get("customTitle"), str) and entry["customTitle"]):
             name = entry["customTitle"]
-    return name
+    return name, count >= HEAD_LINES or size >= HEAD_BYTES or size < end
+
+
+def claude_head_name(handle: BinaryIO, end: int) -> str | None:
+    """The name a Claude transcript's head gives its session, or None
+    (`claude_named_head`)."""
+    return claude_named_head(handle, end)[0]
 
 
 #: The `session_meta` facts a Codex header carries in `meta`.
@@ -442,6 +447,6 @@ def root_origin(harness: str) -> RootOrigin:
 
 
 __all__ = ["HEAD_LINES", "HEAD_BYTES", "Source", "Header", "unpack", "sidecar_labels",
-           "file_header", "claude_header", "claude_head_name", "head_complete",
+           "file_header", "claude_header", "claude_head_name", "claude_named_head",
            "codex_header", "codex_head", "opencode_header",
            "codex_root", "opencode_root", "root", "root_origin", "RootOrigin", "ROOT_KEYS"]

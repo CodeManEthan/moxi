@@ -67,8 +67,7 @@ from .errors import Unreadable
 from .find import Listed, Listing, sources
 from .read import window
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN, Marker, Message, Request
-from .source import (claude_head_name, claude_header, codex_head, codex_header,
-                     head_complete)
+from .source import claude_header, claude_named_head, codex_head, codex_header
 
 #: How long a gather's result is reused, in seconds.
 REUSE_S = 2.0
@@ -260,9 +259,8 @@ def read_head(listed: Listed, imports: Any = None) -> Head | None:
             end = st.st_size
             if source.harness == CLAUDE:
                 header = claude_header(source, handle, end)
-                name = claude_head_name(handle, end)
+                name, settled = claude_named_head(handle, end)
                 spawn = None
-                settled = head_complete(handle, end)
             else:
                 head = codex_head(handle, end)
                 header = codex_header(source, head, imports)
