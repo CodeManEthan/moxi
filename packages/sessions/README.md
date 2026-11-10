@@ -184,12 +184,14 @@ harness's command for picking it up again. Claude Code's and OpenCode's commands
 only in the session's folder, so they come with that folder, and no command is given when
 the folder was not read; Codex's runs anywhere and comes with no folder.
 
-A list opens no session to find them all: it lists each root, then reads the first lines
-and the last turn of the sessions it returns. Codex rollouts are the exception: each
-one's first line is read once, since it says whether another thread spawned it. Asking by
-`folder` or `find`, or for the folders, reads every session's first lines once. What was
-read is kept in the reading process's memory for as long as it runs and read again only
-when a file changed; nothing is written to disk. So the page server answers from what it
+A list opens no transcript to find the sessions: it lists each root. To tell the sessions
+a program started from the others, it then reads the first lines of every session that
+changed in the last hour or on one of the seven days it returns, whether a row shows the
+session or not. It reads the last turn of each session its rows show. Every Codex
+rollout's first line is read once, whatever its age, since that line says whether
+another thread spawned it. Asking by `folder` or `find`, or for the folders, reads every
+session's first lines once. What was read is kept in the reading process's memory for as
+long as it runs and read again only when a file changed; nothing is written to disk. So the page server answers from what it
 has read, and a module that calls `sessions_list` from another process pays its own first
 reads. The functions take no cache from their caller, and `recent_s` left out is the
 setting `list.recent_s`. A compressed Codex rollout is counted, not

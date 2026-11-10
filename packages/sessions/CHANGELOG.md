@@ -11,8 +11,10 @@
   and cut into the ones active recently, seven days and the rest), `sessions_more`,
   `sessions_newest`, `sessions_folders` and `session_opened`. Each reads through the
   calling process's own memory and takes no cache from its caller.
-  A list reads each root's listing, then only the sessions it returns, and keeps what it
-  read in memory.
+- What a list reads: each root's listing; the first lines of every session of the days
+  it returns, shown or not, and of every Codex rollout, once each; and the last turn of
+  the rows it returns. Asking by folder or by `find` reads every session's first lines
+  once. What was read is kept in memory, and nothing is written to disk.
 - A list tells a harness that is not on the machine from a root that could not be read.
   A harness whose default root does not exist gives nothing: no count, no reason. A root
   a setting names that does not exist, and any root that exists and cannot be read, is
