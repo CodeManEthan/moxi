@@ -464,12 +464,17 @@ def _target(name: str) -> str:
 
 
 #: What the page server may hold before ui's doctor warns. Measured on Linux (Python
-#: 3.14) with the routes served in process and the server's modules loaded, over a 54 MB
-#: Claude Code transcript with 20 subagents, a 500-turn Codex rollout and a 500-turn
-#: OpenCode session, each window read at 5 and 50 turns and each subagent listing taken
-#: five times: RSS 35 MB before the first read and at most 43 MB after, and 7 open fds.
-#: The budget is about twice that, with room for the listener's own sockets.
-BUDGET = {"rss": "96M", "fds": 32}
+#: 3.14) with the routes served in process and the server's modules loaded: RSS 28 MB
+#: before the first read. Then, in one process: a 54 MB Claude Code transcript with 20
+#: subagents, a 500-turn Codex rollout and a 500-turn OpenCode session, each window read
+#: at 5 and 50 turns and each subagent listing taken five times (at most 43 MB); a list,
+#: a list by folder and the folders over a root of 5,000 small Claude Code sessions, 300
+#: of them changed in the last seven days, and twenty of those sessions opened (47 MB);
+#: every earlier day of that list paged to its end, so the last turn of each of the 5,000
+#: sessions is kept (52 MB). 7 open fds throughout. The budget is about twice that, with
+#: room for the listener's own sockets. A kept last turn holds the session's newest
+#: typed prompt whole, so a root of long prompts holds more than this one did.
+BUDGET = {"rss": "104M", "fds": 32}
 
 PAGE = lb.Page(
     assets="web",

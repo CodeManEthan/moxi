@@ -270,7 +270,7 @@ def test_the_announcement_declares_the_page_and_the_window_block():
 
 
 def test_the_export_carries_the_measured_budget():
-    assert LB.export(ROUTES)["budget"] == {"rss": "96M", "fds": 32} == page.BUDGET
+    assert LB.export(ROUTES)["budget"] == {"rss": "104M", "fds": 32} == page.BUDGET
     assert page.PAGE.budget == ROUTES.budget
 
 
