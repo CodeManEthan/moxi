@@ -1189,14 +1189,85 @@ def test_the_core_runs_setup_in_a_process_of_its_own(rig, tmp_path):
     assert "moxi config set launcher startup.trust_dialog true" in done.stdout
 
 
+# -- the fake's listing ---------------------------------------------------------------------
+
+
+def test_the_fake_lists_the_scripts_slots_in_number_order(rig):
+    assert fake.list_slots() == fake.Listing(True)
+    rig.plan(slots={"10": {"state": "free", "launchable": True},
+                    "2": {"state": "occupied", "launchable": False,
+                          "hold": {"holder": "planner", "until": 5.0},
+                          "last": {"at": 2.0, "label": "x", "meta": {"request_id": "r"}}},
+                    "7": {"state": "occupied", "launchable": False, "created": None}})
+    listing = fake.list_slots()
+    assert listing.ok and listing.why == ""
+    assert [(s.number, s.state, s.launchable) for s in listing.slots] == [
+        (2, "occupied", False), (10, "free", True)]
+    assert listing.slots[0].hold == fake.Hold("planner", 5.0)
+    assert listing.slots[0].last == fake.Last(2.0, "x", {"request_id": "r"})
+    assert [s.number for s in listing.unregistered] == [7]
+    assert listing.slots[0] == fake.show(2)
+
+
+def test_the_fake_says_when_the_slots_cannot_be_read(rig):
+    rig.plan(list="error", slots={"1": {"state": "free", "launchable": True}})
+    listing = fake.list_slots()
+    assert not listing.ok and listing.why and listing.slots == ()
+
+
+def test_a_start_records_the_slot_it_placed_in_the_script(rig, tmp_path):
+    rig.plan(placed=4, slots={"1": {"state": "free", "launchable": True}})
+    meta = {"request_id": "r1"}
+    fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1", meta=meta,
+               create=True)
+    fake.start(1, ["true"], env={}, cwd=str(tmp_path), label="launcher:r2",
+               meta={"request_id": "r2"})
+    written = json.loads((rig.dir / "script.json").read_text())
+    assert written["placed"] == 4
+    assert written["slots"] == {
+        "1": {"state": "occupied", "launchable": False, "label": "launcher:r2",
+              "meta": {"request_id": "r2"}},
+        "4": {"state": "occupied", "launchable": False, "label": "launcher:r1",
+              "meta": meta}}
+
+
+def test_a_start_told_to_wait_places_nothing_until_it_has(rig, tmp_path, monkeypatch):
+    waited = []
+
+    def wait(seconds):
+        waited.append(seconds)
+        assert "slots" not in json.loads((rig.dir / "script.json").read_text())
+
+    monkeypatch.setattr(fake.time, "sleep", wait)
+    rig.plan(start_wait_s=7)
+    fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+               meta={"request_id": "r1"}, create=True)
+    assert waited == [7]
+    assert "1" in json.loads((rig.dir / "script.json").read_text())["slots"]
+
+
+def test_a_slot_one_process_started_in_reads_taken_in_another(rig, tmp_path):
+    fake.start(3, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+               meta={"request_id": "r1"})
+    mine = fake.show(3)
+    assert (mine.state, mine.pane_id, mine.pane_pid) == ("occupied", "%7", 4343)
+    code = ("import json, launcher_fake_slots as fake\n"
+            "print(json.dumps([[s.number, s.state, s.launchable, s.label, s.last.meta, "
+            "s.pane_id] for s in fake.list_slots().slots]))")
+    ran = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         env={**os.environ, "PYTHONPATH": str(TESTS)}, check=True)
+    assert json.loads(ran.stdout) == [
+        [3, "occupied", False, "launcher:r1", {"request_id": "r1"}, None]]
+
+
 # -- the fake against slots as built ----------------------------------------------------------
 
 #: Every name the launcher reads from slots' API module.
-USED = ("supported", "show", "create", "start", "read_screen", "answer_screen",
+USED = ("supported", "list_slots", "show", "create", "start", "read_screen", "answer_screen",
         "SlotsError", "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
         "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS")
 #: The shapes the launcher reads, as the fake gives them.
-SHAPES = ("Support", "Hold", "Last", "Slot", "Placed", "Screen", "Seen", "Answer")
+SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "Seen", "Answer")
 
 
 @pytest.fixture
@@ -1253,7 +1324,8 @@ def test_the_fakes_errors_are_slots_own(real_slots):
 def test_the_fakes_calls_take_slots_own_arguments(real_slots):
     import inspect
 
-    for name in ("supported", "show", "create", "start", "read_screen", "answer_screen"):
+    for name in ("supported", "list_slots", "show", "create", "start", "read_screen",
+                 "answer_screen"):
         mine = inspect.signature(getattr(fake, name)).parameters
         theirs = inspect.signature(getattr(real_slots, name)).parameters
         assert [(p.name, p.kind, p.default) for p in mine.values()] == [
