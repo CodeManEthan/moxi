@@ -140,7 +140,8 @@ def find(file: Path | str, what: str) -> Found:
             None, f"it can't be read: {error.strerror or error}",
             "name a file that is there and that you may read")]) from None
     try:
-        text = raw.decode("utf-8")
+        # A byte-order mark that opens the file is no part of its first line.
+        text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise BadBlock(file, what, [Problem(
             None, "it is not UTF-8 text", "save the file as UTF-8")]) from None

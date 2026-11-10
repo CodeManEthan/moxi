@@ -131,6 +131,33 @@ def test_a_file_with_carriage_returns_is_read_and_its_lines_counted_the_same(wri
     assert found.line_of("size") == 5
 
 
+MARK = "\ufeff".encode("utf-8")
+
+
+@pytest.mark.parametrize("before", [b"", b"---\ntype: report\n---\n\nprose\n\n"])
+def test_a_file_that_starts_with_a_byte_order_mark_reads_as_the_file_without_it(
+        tmp_path, before):
+    body = before + b"```toml rounds\ntitle = \"inside\"\nsize = 1\n```\n"
+    plain, marked = tmp_path / "plain.md", tmp_path / "marked.md"
+    plain.write_bytes(body)
+    marked.write_bytes(MARK + body)
+
+    found, same = datablock.find(marked, WHAT), datablock.find(plain, WHAT)
+
+    assert found.data == same.data == {"title": "inside", "size": 1}
+    assert (found.line, found.line_of("size")) == (same.line, same.line_of("size"))
+    assert found.places == same.places
+    # The digest is of the bytes the file has, mark and all.
+    assert found.sha256 == hashlib.sha256(MARK + body).hexdigest() != same.sha256
+
+
+def test_a_problem_in_a_file_with_a_byte_order_mark_is_on_its_own_line(tmp_path):
+    path = tmp_path / "marked.md"
+    path.write_bytes(MARK + b"```toml rounds\ntitle = inside\n```\n")
+
+    assert refused(path).problems[0].line == 2
+
+
 def test_a_file_with_no_block_is_refused_by_name(write):
     path = write("""
         # A report
