@@ -48,9 +48,14 @@
   warning and error colours. A tool result that failed starts with `Failed` and the
   message Claude Code writes for a request that failed starts with `Error`, each in the
   heavier weight, here and in the window block. A read on its way and a read that failed
-  each say so in words, and a harness whose sessions were not all read has its line under the header.
+  each say so in words. The header's name and facts come from `/api/session`, the read an
+  opened row of the list makes, asked beside the turns: it reads no other session, so
+  on a page server's first open the name is drawn with the turns rather than seconds
+  after them. A transcript says only its own reason for a read that failed; the list's
+  line for a harness whose sessions were not all read is not drawn over it.
 - `/api/list` and `/api/session` carry `home`, the home folder of the account the page
-  server runs as (null when it has none), marked as a path. The page writes a folder
+  server runs as (null when it has none), marked as a path. `/api/session` also carries
+  `today`, the server's local date, as the list does. The page writes a folder
   under it with `~`: the resume line's folder, the path in the Folder menu and the
   directory in `Details`.
 - The README says how to read the page and lists what the page leaves out, each with

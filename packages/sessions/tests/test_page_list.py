@@ -10,6 +10,7 @@ here as a 500. The roots are the ones the test's environment names, written with
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from urllib.parse import quote
@@ -202,7 +203,8 @@ def _in_rows(leaves: set[str]) -> set[str]:
 
 def test_every_string_leaf_is_plain_only_for_an_id_a_key_or_a_word():
     plain = _in_rows(ROW_PLAIN) | {
-        "/api/list today", "/api/list roots[].harness", "/api/list harnesses[].harness",
+        "/api/list today", "/api/session today", "/api/list roots[].harness",
+        "/api/list harnesses[].harness",
         "/api/list groups[].key", "/api/list groups[].before",
         "/api/more group", "/api/more kind", "/api/more before",
         "/api/more groups[].key", "/api/more groups[].before",
@@ -486,6 +488,15 @@ def test_the_list_and_an_opened_session_carry_the_accounts_home_folder(roots, mo
 
     assert read("/api/list")["home"] == "/home/alice"
     assert read("/api/session", f"harness=claude&session={sid(1)}")["home"] == "/home/alice"
+
+
+def test_an_opened_session_carries_the_servers_today_as_the_list_does(roots):
+    seed(roots)
+
+    opened = read("/api/session", f"harness=claude&session={sid(1)}")
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", opened["today"])
+    assert opened["today"] == read("/api/list")["today"]
 
 
 def test_an_account_with_no_home_folder_answers_a_null_home(roots, monkeypatch):

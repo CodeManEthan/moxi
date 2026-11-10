@@ -15,7 +15,9 @@ of either than is sent.
 
 **The home folder.** The list's answer and an opened session's carry `home`, the home
 folder of the account this server runs as (`Path.home()`), so the page can word a folder
-under it with `~`. It is null when the account has no home folder to name.
+under it with `~`. It is null when the account has no home folder to name. An opened
+session's answer also carries `today`, the server's local date, as the list's does, so
+the header over a transcript can say a time's day from that one answer.
 
 **Finding the session.** `find(harness, session)` asks the harness's root as this server's
 environment and sessions' config give it; the page server runs in the browser shell's
@@ -44,6 +46,7 @@ answer fails its declared shape on what a harness wrote.
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -276,16 +279,17 @@ def session(call: Any) -> dict[str, Any]:
     """`GET /api/session?harness=&session=`: one main session's row, its last reply, its
     newest subagents and the command that picks it up again."""
     harness, name = call.query["harness"], call.query["session"]
-    recent_s = _recent_s()
+    recent_s, now = _recent_s(), time.time()
     try:
-        opened = lists.open_session(harness=harness, session=name, recent_s=recent_s)
+        opened = lists.open_session(harness=harness, session=name, recent_s=recent_s,
+                                    now=now)
     except ValueError as exc:
         raise lb.Refused(str(exc)) from None
     if opened is None:
         raise lb.Refused(f"the list holds no {harness} session {name}: a subagent, or a "
                          "thread another thread started, is not in the list")
     out = {"shape": SHAPE, **_row(opened), "reply": cut_message(opened["reply"]),
-           "home": _home()}
+           "today": lists.local_day(now), "home": _home()}
     if opened["subagents"] is not None:
         out["subagents"] = [
             {**sub, "last": None if sub["last"] is None else cut(sub["last"],

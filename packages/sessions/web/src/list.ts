@@ -573,7 +573,8 @@ const count = (n: number, one: string, many: string): string => `${fmtCount(n)} 
  * last segment alone when the start was not read, and `<harness> session` in the
  * folder's place when the folder was not. Never an id, and never a title a harness made.
  */
-export function rowName(row: ListRow, today: string, zone: Zone = LOCAL): { name: string; where: string | null } {
+export function rowName(row: Pick<ListRow, "harness" | "folder" | "name" | "started">, today: string,
+                        zone: Zone = LOCAL): { name: string; where: string | null } {
   const folder = typeof row.folder === "string" && row.folder !== "" ? lastSegment(row.folder) : null;
   if (typeof row.name === "string" && row.name.trim() !== "") return { name: row.name.trim(), where: folder };
   const what = folder ?? `${harnessWords(row.harness)} session`;

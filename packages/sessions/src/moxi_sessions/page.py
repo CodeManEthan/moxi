@@ -136,7 +136,7 @@ being its newest message cut at 300 bytes; null when they could not be listed), 
 listed) and `resume` (`{command, folder}`: the harness's command for picking the session
 up again and the folder to run it in, null where it runs anywhere; `resume` itself is
 null for a harness with no command, and for one whose command must be run in the
-session's folder when that folder was not read) and `home`, as the list's. It says nothing of whether the session
+session's folder when that folder was not read), and `today` and `home`, as the list's. It says nothing of whether the session
 is working. An id that is not a main session's (a subagent's, a spawned Codex thread's,
 an unknown one) is refused.
 
@@ -445,6 +445,7 @@ SESSION = {
     "more": _MAYBE_INT,
     "resume": lb.Out("table", nullable=True,
                      items={"command": _TEXT, "folder": _MAYBE_PATH}),
+    "today": _TEXT,
     "home": _MAYBE_PATH,
 }
 

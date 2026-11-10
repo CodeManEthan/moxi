@@ -18,19 +18,19 @@
 // and `Refresh` on one line; under it the harness, the model and from when to when, with
 // `Details`, which shows and hides the header's other facts. A session the list does not
 // hold (a subagent, a thread another one started) keeps the view's own heading, in the
-// name's place, and its facts in the open. The name and the facts come from `/api/list`, asked for the route's
-// one session when it opens, when its tab is shown again and on `Refresh`, with the turns.
+// name's place, and its facts in the open. The name and the facts come from the answer an
+// opened row of the list reads (`/api/session`), asked for the route's one session when it
+// opens, when its tab is shown again and on `Refresh`, beside the turns.
 //
 // While the turns are on their way the page says so; a session that is not there and a
-// read that fails each show the page server's reason, and a harness whose sessions were
-// not all read has its line under the header, as under the list.
+// read that fails each show the page server's reason, and only that.
 
 import { css, html, nothing } from "lit";
-import { api, gateway, navigate } from "/m/ui/client.js";
+import { api, navigate } from "/m/ui/client.js";
 
 import { Feed } from "./feed.ts";
-import { parseList } from "./list-feed.ts";
-import type { ListAnswer } from "./list-feed.ts";
+import { parseSession } from "./list-feed.ts";
+import type { SessionAnswer } from "./list-feed.ts";
 import { openedStatus } from "./opened.ts";
 import { BASE, VIEW } from "./styles.ts";
 import { detailFields, headPath, headView } from "./transcript.ts";
@@ -58,8 +58,7 @@ const STYLES = [BASE, VIEW, css`
   .crumb a, .crumb button, .vhead button { flex: none; padding: 0; border: 0; border-radius: 0; background: none;
                                            color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
   .crumb button:hover:not(:disabled), .vhead button:hover:not(:disabled) { background: none; }
-  .st.dim, .note { color: var(--moxi-text-dim); }
-  .note { font-size: 13px; line-height: 18px; padding: 12px 2px 0; overflow-wrap: anywhere; }
+  .st.dim { color: var(--moxi-text-dim); }
   section { margin-top: 16px; }
   section[data-part="window"], section[data-state="refused"], section[data-state="failed"] {
     border-left: 1px solid var(--moxi-border); }
@@ -81,8 +80,8 @@ export class SessionsPage extends SessionView {
   route = "";
 
   #loadedFor: string | null = null;
-  /** The list's answer for the one session the route names: its name and its facts. */
-  #head: Feed<ListAnswer> | null = null;
+  /** The opened row's answer for the one session the route names: its name and its facts. */
+  #head: Feed<SessionAnswer> | null = null;
   /** Whether `Details` is open. */
   #details = false;
 
@@ -94,9 +93,9 @@ export class SessionsPage extends SessionView {
     this.#head?.close();
     this.#head = null;
     this.#details = false;
-    // A subagent is not a session of the list, so the list is not asked for it.
-    const path = target !== null && target.agent === null ? headPath(target) : null;
-    if (path !== null) this.#head = new Feed<ListAnswer>(() => api("sessions", path), parseList, () => this.requestUpdate());
+    // A subagent is not a session of the list, so its facts are not asked for.
+    const path = target !== null ? headPath(target) : null;
+    if (path !== null) this.#head = new Feed<SessionAnswer>(() => api("sessions", path), parseSession, () => this.requestUpdate());
     if (target !== null) this.setAttribute("data-view", "session");
     else this.removeAttribute("data-view");
     this.openSession(target);
@@ -161,8 +160,6 @@ export class SessionsPage extends SessionView {
               this.#details = !this.#details;
               this.requestUpdate();
             }}>${head.details}</button>` : nothing}</div>` : nothing}
-        ${head.notices.map((notice) => html`<p class="note" data-line="unread" data-harness=${notice.harness}>${notice.line}${
-          notice.reason !== null && !gateway() ? html`: <span data-line="reason">${notice.reason}</span>` : nothing}</p>`)}
       </div>
       <section data-part="window" data-state=${windowView(feed).state}>
         ${status !== null ? html`<p class=${status.state === "waiting" ? "st dim" : "st"} data-line=${status.state}

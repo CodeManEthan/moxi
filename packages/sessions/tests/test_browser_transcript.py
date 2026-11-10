@@ -6,11 +6,13 @@ worded against the home folder, as the list words the resume line's and the Fold
 menu's; "Earlier" and `Refresh` under the header; a subagent's
 route and a spawned thread's, which keep the view's own heading and facts; the line shown
 while the turns are read, for a session that is not there and for a read that fails; the
-line for a harness whose sessions were not all read; and the 360 px width check.
+name drawn with the turns on a page server's first open, asking for no list; no line for
+a harness whose sessions were not all read; and the 360 px width check.
 
-Two shells, each over roots of its own written with `moxi_sessions.testing`: one whose
-sessions can all be read, and one with a Codex root that cannot be listed and a part of
-Claude Code's that cannot. Every session is timed from the moment the test runs.
+Three shells, each over roots of its own written with `moxi_sessions.testing`: one whose
+sessions can all be read, one with a Codex root that cannot be listed and a part of
+Claude Code's that cannot, and one whose page server has read nothing before the test
+opens a transcript. Every session is timed from the moment the test runs.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ AGENT = "a0190b0000000001"
 TURNS = 7
 WINDOW_API = re.compile(r"/api/window\?")
 LIST_API = re.compile(r"/api/list\?")
+SESSION_API = re.compile(r"/api/session\?")
 #: The second line of the header: the harness's id, the model, and from when to when.
 FACTS = re.compile(r"^claude · claude-model-x · today \d.* to \d.*$")
 
@@ -202,14 +205,14 @@ def test_refresh_reads_the_turns_and_the_header_again(seeded, ui_page, ui_shell)
     was = time.time() - 300
     asked: list[str] = []
     ui_page.on("request", lambda request: asked.append(request.url)
-               if WINDOW_API.search(request.url) or LIST_API.search(request.url) else None)
+               if WINDOW_API.search(request.url) or SESSION_API.search(request.url) else None)
     try:
         named(root, ui_shell.env["HOME"], time.time() - 5, turns=TURNS + 1)
         head(panel).get_by_role("button", name="Refresh").click()
         expect(texts(panel).last).to_have_text(f"turn {TURNS}")
         expect(head(panel).locator('[data-line="name"]')).to_have_text("fix-tooltips")
         assert any(WINDOW_API.search(url) for url in asked)
-        assert any(LIST_API.search(url) and f"find={sid(1)}" in url for url in asked)
+        assert any(SESSION_API.search(url) and f"session={sid(1)}" in url for url in asked)
     finally:
         named(root, ui_shell.env["HOME"], was)
         time.sleep(2.1)
@@ -298,26 +301,57 @@ def test_the_turns_say_they_are_being_read_and_why_a_read_failed(seeded, ui_page
     expect(texts(panel)).to_have_count(5)
 
 
-def test_a_harness_whose_sessions_were_not_all_read_has_its_line_under_the_header(broken_shell, ui_contexts,
-                                                                                  ui_width_check):
+def test_a_transcript_says_only_its_own_reason_when_its_harness_was_not_all_read(broken_shell, ui_contexts,
+                                                                                 ui_width_check):
     page = ui_contexts(broken_shell).pages[0]
-    # A session of a root that could not be listed: the reason the turns give, and the
-    # line the list gives for that harness, with why.
+    # A session of a root that could not be listed: the reason the turns give, and no
+    # line of the list's.
     panel = open_route(page, f"codex/{tid(1)}")
     expect(window(panel)).to_have_attribute("data-state", "refused")
-    expect(window(panel).get_by_role("status")).to_contain_text("Moxi couldn't read the session: ")
-    line = head(panel).locator('[data-line="unread"]')
-    expect(line).to_have_count(1)
-    expect(line).to_contain_text("Moxi couldn't read Codex's sessions: ")
-    expect(line.locator('[data-line="reason"]')).not_to_be_empty()
+    expect(window(panel).get_by_role("status")).to_contain_text(
+        f"Moxi couldn't read the session: no codex session {tid(1)} was found")
+    expect(head(panel).locator('[data-line="heading"]')).to_have_text(f"Codex session {tid(1)}")
+    expect(panel).not_to_contain_text("Moxi couldn't read Codex's sessions")
     ui_width_check(page)
-    # A session that was read, in a harness with a part that was not.
+    # A session that was read, in a harness with a part that was not: named, with no
+    # sentence about the list's counts over it.
     panel = open_route(page, f"claude/{sid(1)}")
     expect(window(panel)).to_have_attribute("data-state", "up")
     expect(head(panel).locator('[data-line="name"]')).to_have_text("fix-tooltips")
-    line = head(panel).locator('[data-line="unread"]')
-    expect(line).to_have_count(1)
-    expect(line).to_have_text("Moxi couldn't read 1 part of Claude Code's sessions; the counts leave them out")
+    expect(texts(panel)).to_have_count(5)
+    expect(panel).not_to_contain_text("the counts leave them out")
+    expect(panel.locator('[data-line="unread"]')).to_have_count(0)
+
+
+@pytest.fixture(scope="module")
+def cold_shell(ui_shells, tmp_path_factory):
+    """A shell over a named session and twenty others, whose page server has answered
+    nothing yet."""
+    shell = ui_shells(**env_of(tmp_path_factory.mktemp("cold")))
+    root = Path(shell.env["CLAUDE_CONFIG_DIR"]) / "projects"
+    now = time.time()
+    named(root, shell.env["HOME"], now - 300)
+    for n in range(20):
+        other = ClaudeTranscript(root, session_id=sid(100 + n), cwd=f"/work/proj-{n}", project=f"-work-proj-{n}",
+                                 start=now - 7200 - n * 60)
+        other.user("Run it.", origin="human")
+        other.assistant("Done.")
+        changed_at(other.write(), now - 3600 - n * 60)
+    return shell
+
+
+def test_a_transcript_opened_cold_is_named_with_its_turns_and_asks_for_no_list(cold_shell, ui_contexts):
+    page = ui_contexts(cold_shell).pages[0]
+    asked: list[str] = []
+    page.on("request", lambda request: asked.append(request.url) if "/api/" in request.url else None)
+    panel = open_route(page, f"claude/{sid(1)}")
+    expect(texts(panel)).to_have_count(5)
+    expect(head(panel).locator('[data-line="name"]')).to_have_text("fix-tooltips", timeout=1000)
+    expect(head(panel).locator('[data-line="where"]')).to_have_text("proj-a")
+    expect(head(panel).locator('[data-line="facts"]')).to_have_text(FACTS)
+    # The name comes from the session's own answer, not from a list of every session.
+    assert any(SESSION_API.search(url) and f"session={sid(1)}" in url for url in asked)
+    assert not any(LIST_API.search(url) for url in asked)
 
 
 def test_the_header_fits_a_phone(seeded, ui_page, ui_width_check):

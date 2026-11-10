@@ -126,6 +126,8 @@ export interface SessionAnswer extends Omit<ListRow, "subagents"> {
   /** The harness's command for picking the session up again, and the folder to run it in
    * (null where it runs anywhere); null for a harness with no command. */
   resume: { command: string; folder: string | null } | null;
+  /** The server's local date, `YYYY-MM-DD`, as the list's. */
+  today: string;
   /** The home folder of the account the page server runs as; null when it has none. */
   home: string | null;
 }
@@ -170,11 +172,13 @@ function isRoot(value: unknown): boolean {
 }
 
 const isShape = (data: unknown): data is Record<string, unknown> => isTable(data) && data.shape === SHAPE;
+/** A local date as the server writes it, `YYYY-MM-DD`. */
+const isDay = (value: unknown): value is string => isText(value) && /^\d{4}-\d{2}-\d{2}$/.test(value);
 
 /** `/api/list`'s value, or null when it isn't one. The server declares the shape, so only
  * what the model reads before drawing is checked. */
 export function parseList(data: unknown): ListAnswer | null {
-  if (!isShape(data) || !isNumber(data.now) || !isText(data.today) || !/^\d{4}-\d{2}-\d{2}$/.test(data.today)) return null;
+  if (!isShape(data) || !isNumber(data.now) || !isDay(data.today)) return null;
   if (!isNumber(data.all) || !isNumber(data.total) || !orNull(data.unreadable, isNumber)) return null;
   if (!isList(data.roots) || !data.roots.every(isRoot)) return null;
   if (!isList(data.harnesses)
@@ -200,7 +204,7 @@ export function parseSession(data: unknown): SessionAnswer | null {
   if (!orNull(data.subagents, (value) => isList(value) && value.every(isTable))) return null;
   if (!orNull(data.more, isNumber)) return null;
   if (!orNull(data.resume, (value) => isTable(value) && isText(value.command) && orNull(value.folder, isText))) return null;
-  if (!orNull(data.home, isText)) return null;
+  if (!orNull(data.home, isText) || !isDay(data.today)) return null;
   return {
     ...(data as unknown as SessionAnswer),
     reply: (data.reply ?? null) as Message | null,

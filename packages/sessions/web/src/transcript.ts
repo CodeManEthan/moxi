@@ -1,25 +1,25 @@
 // What the page draws above one session's transcript, worked out with no DOM, no Lit and
 // no request so the Node tests can read it: the way back to the list and the session's
-// name on one line, the session's facts and `Details` on the next, and a line for a
-// harness whose sessions were not all read.
+// name on one line, and the session's facts and `Details` on the next.
 //
 // The name is the list's (`rowName`), so a session is called the same thing on both
 // routes: a name typed for it, else its folder and when it started. The facts are the
-// opened row's `Session` line. Both come from the list's own answer for the one session
-// the route names (`/api/list` with the session's harness and its id as the text to find),
-// which also carries the day the server calls today, the account's home folder and the
-// harnesses that were not read whole.
+// opened row's `Session` line. Both come from the answer an opened row reads
+// (`/api/session`), asked for the route's one session beside its turns: it carries the
+// session's own row, the day the server calls today and the account's home folder, and
+// it reads no other session's record, so the name is drawn as soon as the turns are.
 //
 // A session the list does not hold has no such answer: a subagent, which is not a session
 // of the list, and a thread or child session another one started. Its route keeps the
 // viewer's own heading and shows the header's facts in the open, as the window block does.
+// A session that is not there is refused the same way, and its turns say why.
 //
 // Every string here goes into the page as text.
 
 import type { WindowAnswer } from "./feed.ts";
-import type { ListAnswer, ListRow } from "./list-feed.ts";
-import { FIND_MAX, FIND_MIN, folderWords, LOCAL, noticeOf, rowName } from "./list.ts";
-import type { Notice, Zone } from "./list.ts";
+import type { SessionAnswer } from "./list-feed.ts";
+import { folderWords, LOCAL, rowName, sessionPath } from "./list.ts";
+import type { Zone } from "./list.ts";
 import { sessionLine } from "./opened.ts";
 import { headerFields, HIDDEN } from "./views.ts";
 import type { FeedState, Field, Target } from "./views.ts";
@@ -29,21 +29,10 @@ export const BACK = "Sessions";
 export const DETAILS = "Details";
 export const REFRESH = "Refresh";
 
-/** `/api/list`'s request for the one session `target` names: its harness, and its id as
- * the text to find. Null for an id the find field would not send. */
+/** The request for the facts of the one session `target` names: the opened row's.
+ * Null for a subagent, which is not a session of the list. */
 export function headPath(target: Target): string | null {
-  const id = target.session;
-  if (id.length < FIND_MIN || id.length > FIND_MAX) return null;
-  return `api/list?${new URLSearchParams({ harness: target.harness, find: id })}`;
-}
-
-/** The list's row for `target`'s session in `answer`; null when the answer holds none. */
-export function headRow(target: Target, answer: ListAnswer | null): ListRow | null {
-  for (const group of answer?.groups ?? []) {
-    const row = (group.rows ?? []).find((one) => one.harness === target.harness && one.session === target.session);
-    if (row !== undefined) return row;
-  }
-  return null;
+  return target.agent === null ? sessionPath(target.harness, target.session) : null;
 }
 
 /** What stands above a transcript. A null is a piece that is not drawn. */
@@ -51,9 +40,9 @@ export interface HeadView {
   /**
    * `lines`: the list holds the session, so its name and facts are drawn and the
    * header's other facts are behind `Details`. `plain`: it does not (a subagent, a
-   * session another one started, a session that is not there) or the list could not be
-   * read, so the viewer's own heading and facts are drawn. `waiting`: the list's answer is
-   * on its way, and neither is drawn yet.
+   * session another one started, a session that is not there) or its facts could not be
+   * read, so the viewer's own heading and facts are drawn. `waiting`: the facts are on
+   * their way, and neither is drawn yet.
    */
   mode: "waiting" | "lines" | "plain";
   /** The link back to the list: its words and the route it goes to. */
@@ -67,21 +56,19 @@ export interface HeadView {
   /** The word that shows and hides the header's other facts. */
   details: string | null;
   refresh: string;
-  /** A line for the session's harness when its sessions were not all read. */
-  notices: Notice[];
   /** The account's home folder, for wording a folder among the details. */
   home: string | null;
 }
 
 /**
- * The header of `target`'s transcript, from the list's answer for that one session.
+ * The header of `target`'s transcript, from the opened row's answer for that one session.
  *
  * The name is never the session's id and never a title its harness made up: it is the
  * name the list gives the row. The second line names the harness by its id and the
  * model, then from the start to the last change, each with its day; a part that was not
  * read is left out.
  */
-export function headView(target: Target, feed: FeedState<ListAnswer> | null, zone: Zone = LOCAL): HeadView {
+export function headView(target: Target, feed: FeedState<SessionAnswer> | null, zone: Zone = LOCAL): HeadView {
   const answer = feed?.value ?? null;
   const view: HeadView = {
     mode: "plain",
@@ -91,7 +78,6 @@ export function headView(target: Target, feed: FeedState<ListAnswer> | null, zon
     facts: null,
     details: null,
     refresh: REFRESH,
-    notices: (answer?.roots ?? []).filter((root) => root.harness === target.harness).map(noticeOf),
     home: answer?.home ?? null,
   };
   if (target.agent !== null || feed === null) return view;
@@ -99,10 +85,9 @@ export function headView(target: Target, feed: FeedState<ListAnswer> | null, zon
     const none = feed.gone || feed.failure !== null || feed.refused !== null;
     return { ...view, mode: none ? "plain" : "waiting" };
   }
-  const row = headRow(target, answer);
-  if (row === null) return view;
-  const { name, where } = rowName(row, answer.today, zone);
-  const line = sessionLine(row, answer.today, zone);
+  if (answer.harness !== target.harness || answer.session !== target.session) return view;
+  const { name, where } = rowName(answer, answer.today, zone);
+  const line = sessionLine(answer, answer.today, zone);
   return {
     ...view,
     mode: "lines",

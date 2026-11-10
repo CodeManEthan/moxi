@@ -21,7 +21,7 @@ const LIST = {
 const SESSION = {
   shape: 1, ...ROW, reply: { at: 1000, text: "Done.", truncated: false },
   subagents: [{ description: "Read the logs", agent_type: "scout", started: 960, last_at: 990, last: "Found it." }],
-  more: 0, resume: { command: "claude --resume s1", folder: "/work/proj-a" }, home: "/home/alice",
+  more: 0, resume: { command: "claude --resume s1", folder: "/work/proj-a" }, today: "2026-11-08", home: "/home/alice",
 };
 
 test("a list answer of shape 1 is read with its three kinds of group", () => {
@@ -93,9 +93,11 @@ test("an opened session is read, with its reply, subagents, count of the rest an
   assert.deepEqual(parseSession({ ...SESSION, resume: { command: "codex resume t1", folder: null } }).resume,
                    { command: "codex resume t1", folder: null });
   for (const over of [{ shape: 2 }, { session: null }, { reply: "Done." }, { subagents: 2 }, { more: "1" },
-                      { resume: { folder: "/work" } }, { prompt: 4 }]) {
+                      { resume: { folder: "/work" } }, { prompt: 4 }, { today: "Nov 8" }, { today: null }]) {
     assert.equal(parseSession({ ...SESSION, ...over }), null, JSON.stringify(over));
   }
+  const { today: _today, ...undated } = SESSION;
+  assert.equal(parseSession(undated), null);
 });
 
 test("the folders are read with their counts and how many were left off", () => {

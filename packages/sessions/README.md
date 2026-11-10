@@ -423,8 +423,8 @@ model and token counts. A result that failed starts with `Failed`, and the messa
 Code writes for a request that failed starts with `Error`, each in heavier text: the page
 marks what went wrong with a word, not a colour. "Earlier" shows the turns before. The page lists the session's
 subagents, and opening one shows its turns the same way. While the turns are read the page
-says so. A session that can't be found or read shows why, and when its harness's sessions
-were not all read the line that says so under the list stands under the header too.
+says so. A session that can't be found or read shows why, and only that: the list's line
+for a harness whose sessions were not all read is not repeated over a transcript.
 
 The page server runs in the shell's environment, so the roots it reads are the ones that
 environment and sessions' settings name, which can differ from your terminal's.
@@ -438,9 +438,9 @@ The list is four reads of the page server: `/api/list` (the counts and the group
 the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 rows of a
 group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
 `/api/list` and `/api/session` also carry `home`, the home folder of the account the page
-server runs as, which is what the page writes as `~`. The header over one session asks
-`/api/list` for that session by its harness and id, which reads every session's first
-lines once, as any `find` does.
+server runs as, which is what the page writes as `~`, and `today`, the server's local date.
+The header over one session asks `/api/session` for that one session beside its turns, so
+it reads no other session's record and the name is drawn with the turns.
 They take the list's filters as query keys and read the setting `list.recent_s` at each
 request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
