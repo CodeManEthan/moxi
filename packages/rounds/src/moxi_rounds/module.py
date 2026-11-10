@@ -23,6 +23,8 @@ SESSION_ENV = {}
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text.
 CONFIG_CHECK = "moxi_rounds.settings:check_text"
+#: The module's own doctor checks: git, each project's rounds folder, each log, the index.
+DOCTOR = "moxi_rounds.doctor:rows"
 SETUP = None
 SEGMENT = None
 #: The one store: a cache of what the rounds' logs say, made by the first write and built

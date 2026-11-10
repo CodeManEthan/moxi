@@ -233,6 +233,13 @@ def rounds(project: str, folder: Path, *, env=None) -> list[Summary]:
     return found
 
 
+def usable(*, env=None) -> bool:
+    """Whether there is an index a read can use: a file of this code's schema that
+    opens. With none, every read answers from the logs. Writes nothing."""
+    with _reading(env) as conn:
+        return conn is not None
+
+
 def disagreements(homes: Iterable[folders.Home], *, env=None) -> list[Disagreement]:
     """Every way the index differs from the logs of the projects `homes`: a log with no
     row, a row whose log has changed since or says something else than the log does, and
@@ -499,4 +506,4 @@ def _drop(conn, project: str, slug: str) -> None:
 
 
 __all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
-           "refresh", "rebuild", "read", "rounds", "disagreements"]
+           "refresh", "rebuild", "read", "rounds", "usable", "disagreements"]
