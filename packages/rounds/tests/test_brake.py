@@ -217,16 +217,6 @@ def test_a_plain_version_after_a_carried_standing_stands_at_none(folder):
     assert standing(folder) == "none"
 
 
-def test_a_verdict_for_a_version_frozen_as_records_only_is_its_standing(folder):
-    fold(folder)
-    verdict(folder, "publishable", pass_="full")
-    records_only(folder)
-
-    verdict(folder, design=2)
-
-    assert standing(folder) == "fold-first@v2"
-
-
 # -- a change of records only: the verb --------------------------------------------------
 
 def test_a_change_of_records_only_is_one_event_with_its_pointer(folder):
@@ -663,6 +653,57 @@ def test_the_count_starts_again_after_a_change_of_records_only_made_the_decision
     assert asked(folder).pass_ == brake.RECHECK
     with pytest.raises(Refused, match="none has since the lead's last decision"):
         decide(folder)
+
+
+def test_a_verdict_that_sends_back_a_publishable_version_leaves_its_standing(
+        folder, capsys):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+
+    late = verdict(folder)
+
+    assert str(late.standing) == "publishable@v1"
+    found = asked(folder)
+    assert (found.pass_, found.instead) == (None, ())
+    assert versions.standing(folded(folder)).verdict.verdict == "publishable"
+    # It is in the record and shown all the same.
+    assert [one.verdict for one in folded(folder).verdicts] == [
+        "publishable", "fold-first"]
+    assert main(["show", ROUND]) == 0
+    assert "fold-first for v1" in capsys.readouterr().out
+    # A change of records only still carries what the version stands at.
+    assert str(records_only(folder).standing) == "publishable@v2"
+
+
+def test_a_verdict_that_sends_back_a_version_the_lead_decided_leaves_its_standing(
+        folder):
+    sent_back_twice(folder)
+    decided = decide(folder)
+
+    assert str(verdict(folder, design=3).standing) == "lead-decision@v3"
+    assert versions.standing(folded(folder)).decision == decided.decision
+    assert asked(folder).pass_ is None
+
+
+def test_a_verdict_that_sends_back_a_change_of_records_the_lead_decided_by_leaves_it(
+        folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+    records_only(folder)
+    assert standing(folder) == "lead-decision@v2"
+
+    assert str(verdict(folder, design=2).standing) == "lead-decision@v2"
+    # The version before was not verified, and a verdict of it is still its standing.
+    verdict(folder, design=1)
+    assert standing(folder) == "lead-decision@v2"
+
+
+def test_a_verdict_that_sends_back_a_version_carried_as_publishable_leaves_it(folder):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+    records_only(folder)
+
+    assert str(verdict(folder, design=2).standing) == "publishable@v2"
 
 
 def test_a_verdict_that_sends_back_a_verified_version_is_not_counted(folder):

@@ -345,7 +345,7 @@ def test_a_design_never_frozen_stands_at_none(folder):
         "none", versions.NONE, None, None)
 
 
-def test_the_standing_is_the_newest_verdict_of_the_current_version(folder):
+def test_the_standing_is_read_from_the_verdicts_of_the_current_version(folder):
     said = []
     fold(folder, question("Q1"))
     said.append(standing(folder))
@@ -367,7 +367,8 @@ def test_the_standing_is_the_newest_verdict_of_the_current_version(folder):
     fold(folder, question("Q1"), prose="What the round builds, said a third way.")
     said.append(standing(folder))
 
-    assert said == ["none", "fold-first@v1", "publishable@v1", "fold-first@v1", "none",
+    # The third report sent back a version that stood at publishable, which stays.
+    assert said == ["none", "fold-first@v1", "publishable@v1", "publishable@v1", "none",
                     "none", "publishable@v2", "none"]
     found = versions.standing(folded(folder))
     assert (found.version, found.verdict) == (3, None)

@@ -26,7 +26,9 @@ current version: `none`, `publishable@v<N>`, `fold-first@v<N>` or `lead-decision
 It is read from the log in order, and the newest of these that speaks of the current
 version gives it:
 
-- a verdict recorded for that version gives its word;
+- a verdict recorded for that version gives its word, except that a version which
+  stands at `publishable` or `lead-decision` stays there: a later verdict that sends
+  it back is recorded and shown and changes no standing;
 - freezing the design again leaves it at `none`, until a pass reads the new version;
 - freezing it as a change of records only gives the new version what the version
   before stood at then: `publishable` and `lead-decision` are carried, `fold-first`
@@ -263,6 +265,11 @@ def _walk(state: states.State) -> _Walk:
             # recorded: it read the version current then, and that version did not
             # stand verified already.
             counts = one.design == walk.newest and one.design not in firm
+            if (one.verdict != report_block.PUBLISHABLE
+                    and stands[one.design].word in VERIFIED):
+                # A version that stands verified stays so: a pass that objects
+                # later is in the record and reopens nothing.
+                continue
             stands[one.design] = Standing(one.verdict or NONE, one.design, one)
             later = one.design + 1
             while (one.verdict == report_block.PUBLISHABLE and only.get(later)):

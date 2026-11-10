@@ -266,7 +266,9 @@ Verification is bounded, so that passes do not feed themselves:
 1. One full pass reads a design. After it, `next` asks only for re-checks, at the
    step's `recheck_model` tier. A second report of a full pass is still recorded, with
    the flag `extra-full-pass`.
-2. `publishable` is final: no further pass is asked for.
+2. `publishable` is final: no further pass is asked for, and a later report that sends
+   the same version back is recorded and shown and changes no standing. The same holds
+   for a version that stands at `lead-decision`.
 3. A design frozen again has no standing until a re-check reads what changed. `next`
    names the two frozen files to compare.
 4. A version that changes records only needs no pass: `fold --records-only --record
