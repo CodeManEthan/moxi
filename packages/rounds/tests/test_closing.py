@@ -29,6 +29,11 @@ FLOWS = """\
     [flows.empty]
     steps = []
 
+    [flows.studied]
+    steps = [ { step = "design", by = "lead" },
+              { step = "verify-design", by = "checker", model = "second" },
+              { step = "retro", by = "worker" } ]
+
     [flows.review]
     steps = [ { step = "design", by = "lead" },
               { step = "retro", by = "worker" } ]
@@ -439,6 +444,39 @@ def test_a_verb_stopped_before_the_close_leaves_it_to_the_next_write(
     run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
 
     assert types(folder)[-1] == "round.closed"
+
+
+def test_a_write_that_appends_nothing_still_makes_a_close_that_stopped_short(
+        folder, monkeypatch, capsys):
+    fold(folder)
+    with monkeypatch.context() as patched:
+        def fails(_state):
+            raise OSError("no room")
+        patched.setattr(closing, "entry", fails)
+        rule("skip:verify-design")
+        run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
+    assert types(folder)[-1] == "ruling.shown" and status(folder) == "open"
+    before = len(events(folder))
+
+    # The ruling is marked as shown already, so this verb has nothing of its own to
+    # record.
+    printed = run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
+
+    assert types(folder)[before:] == ["round.closed"]
+    assert printed.splitlines()[-1] == CLOSED_LINE
+
+
+def test_every_step_of_the_flow_keeps_a_round_open_not_only_the_design_s(
+        opened, capsys):
+    folder = opened("studied")
+    fold(folder)
+
+    verdict(folder)
+
+    assert types(folder)[-1] == "verdict.recorded" and status(folder) == "open"
+    assert waits(folder) == ("step retro, not-built",)
+    rule("skip:retro")
+    assert status(folder) == "closed"
 
 
 # -- a closed round ----------------------------------------------------------------------

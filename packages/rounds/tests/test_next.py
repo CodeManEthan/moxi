@@ -640,6 +640,22 @@ def test_a_ruling_no_row_cites_is_warned_of_for_each_stage_it_holds(opened, caps
         "fix": f"give design.md a row for {made}, then moxi rounds fold {ROUND}"}]
 
 
+def test_a_stage_with_a_build_is_not_warned_of_for_a_ruling_no_row_cites(
+        opened, capsys):
+    folder = opened(config=TRACED)
+    fold(folder, stage("B1"), stage("B2", repo="proj-b"))
+    made = rule()
+    assert [one["text"].split(" until ")[0] for one in warned(capsys, "holds-stage")] \
+        == [f"{made} holds B1", f"{made} holds B2"]
+
+    # A build is handed the rulings as they stand, so its stage is held no longer.
+    log.append(log.round_log(folder), "build.commissioned",
+               {"stage": "B1", "repo": "proj-a", "branch": "branch-b1"}, actor="coder")
+
+    assert [one["text"].split(" until ")[0] for one in warned(capsys, "holds-stage")] \
+        == [f"{made} holds B2"]
+
+
 # -- a later step ------------------------------------------------------------------------
 
 def test_a_step_given_a_row_and_its_lines_is_printed_like_the_others(
