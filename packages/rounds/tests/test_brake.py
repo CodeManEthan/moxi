@@ -329,8 +329,11 @@ def test_a_change_of_records_only_needs_a_pointer_of_a_known_shape(folder):
 
     with pytest.raises(Refused, match="says where the record of the change is"):
         records_only(folder, record=None)
-    with pytest.raises(Refused, match="is not a pointer"):
+    with pytest.raises(Refused) as refused:
         records_only(folder, record="somewhere")
+    assert refused.value.unmet[0].reason.startswith(
+        "'somewhere' is not a pointer to the lead's record of the change; PTR below")
+    assert "operator" not in refused.value.unmet[0].reason
     with pytest.raises(BadArgument, match="only with a version that changes records"):
         fold(folder, record=WHY)
 
@@ -556,8 +559,11 @@ def test_a_decision_on_a_thread_needs_a_pointer_of_a_known_shape(folder):
 
     with pytest.raises(Refused, match="says where the lead wrote why"):
         decide(folder, record=None)
-    with pytest.raises(Refused, match="is not a pointer"):
+    with pytest.raises(Refused) as refused:
         decide(folder, record="somewhere")
+    assert refused.value.unmet[0].reason.startswith(
+        "'somewhere' is not a pointer to where the lead wrote why; PTR below")
+    assert "operator" not in refused.value.unmet[0].reason
 
     assert raw(folder) == before
 

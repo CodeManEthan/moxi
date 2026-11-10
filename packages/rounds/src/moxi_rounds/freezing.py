@@ -402,7 +402,8 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
             return Unmet("a version that changes records only says where the record "
                          f"of the change is; PTR below is one token: {pointers.SHAPES}",
                          as_records)
-        return pointers.unmet(record, as_records)
+        return pointers.unmet(record, as_records,
+                              names="the lead's record of the change")
 
     def changes_records_only(view):
         if not records_only or view.facts.block is None:

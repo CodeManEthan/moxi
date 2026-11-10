@@ -284,7 +284,7 @@ def decide(name: str, thread: str, decision: str, *, record: str | None, actor: 
         if record is None:
             return Unmet("a decision on a thread says where the lead wrote why; PTR "
                          f"below is one token: {pointers.SHAPES}", again)
-        return pointers.unmet(record, again)
+        return pointers.unmet(record, again, names="where the lead wrote why")
 
     def found(view) -> states.Decided | None:
         """This decision as the log already holds it: the same thread and word at
