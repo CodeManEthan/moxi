@@ -61,13 +61,15 @@ TYPES = _types(
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
     # operator's pointer when the question is his own; it is then the origin too.
+    # `options` are the choices it offers, each key with its one line.
     EventType("question.asked",
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
                "options", "prepared"),
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
     # A question changed: its state or what it holds up, with who changed it, and for a
     # change the operator ruled the ruling's id and its pointer; what a parked one waits
-    # for; options added or retired; a prepared answer.
+    # for; `options` added, each key with its one line, and the keys `retired`; a
+    # prepared answer.
     EventType("question.changed",
               ("id", "state", "blocks", "until", "by", "ruling", "record", "options",
                "retired", "prepared"),
@@ -79,10 +81,11 @@ TYPES = _types(
     EventType("stage.changed", ("id", "removed", "after", "verdict", "ruling")),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,
     # the repos and paths or the stages it applies to, its kind (of substance, or an act
-    # on the process) and the item it rules, and the ruling it replaces or takes back.
+    # on the process) and the item it rules, the key of the option an answer chose, and
+    # the ruling it replaces or takes back.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
-               "supersedes", "revokes"),
+               "chose", "supersedes", "revokes"),
               required=("id", "record", "kind")),
     # Rulings were put in front of the operator: their ids, and the pointer to where.
     EventType("ruling.shown", ("ids", "record")),

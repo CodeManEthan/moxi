@@ -2,18 +2,21 @@
 
     moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
-                    [--as NAME]
-    moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--reason TEXT]
-                     [--standing] [--scope SPEC] [--stages LIST] [--until WHAT]
-                     [--as NAME]
+                    [--option K=TEXT]... [--as NAME]
+    moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
+    moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--chose K]
+                     [--reason TEXT] [--standing] [--scope SPEC] [--stages LIST]
+                     [--until WHAT] [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
 `comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
-`narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own. A verb that writes takes `--as NAME`, who is doing it;
-without it that is the user the command runs as.
+`narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
+`ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
+id adds options to it or retires them. A verb that writes takes `--as NAME`, who is
+doing it; without it that is the user the command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
 says what stopped the verb and the command that fixes it, and has written nothing.
@@ -123,6 +126,10 @@ def _declare_rule(verbs) -> None:
                              "without one is refused")
     parser.add_argument("--text", metavar="TEXT",
                         help="the ruling, in a sentence or a few that read on their own")
+    parser.add_argument("--chose", metavar="K",
+                        help="with Q<n>, the key of the option he chose, one the "
+                             "question offers now; with no --text the option's line "
+                             "is the sentence recorded")
     parser.add_argument("--reason", metavar="TEXT", help="why, in short")
     parser.add_argument("--standing", action="store_true",
                         help="record a round's ruling in the project's register")
@@ -146,7 +153,7 @@ def _rule(args, out) -> int:
     ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,
                         text=args.text, reason=args.reason, standing=args.standing,
                         scope=args.scope, stages=args.stages, item=args.item,
-                        until=args.until)
+                        until=args.until, chose=args.chose)
     for line in _recorded(ruled):
         print(line, file=out)
     if ruled.long:
@@ -169,13 +176,18 @@ def _recorded(ruled) -> list[str]:
 def _declare_ask(verbs) -> None:
     said = ("Put a question to the operator: one sentence, with a pointer to where it "
             "came from. On a round it holds up every stage unless --blocks says "
-            "otherwise; on a project, with no round yet, it goes on the project's list.")
+            "otherwise; on a project, with no round yet, it goes on the project's "
+            "list. A question may offer options, two to four, a line each under a "
+            "short key. With the id of a question on record in place of the sentence, "
+            "add options to it or retire them: a key keeps its line, and a retired key "
+            "is never used again.")
     parser = verbs.add_parser("ask", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the question is asked in, <project>/<slug>, or "
                              "a project's key")
-    parser.add_argument("text", metavar="TEXT",
-                        help="the question, one sentence on one line")
+    parser.add_argument("text", metavar="TEXT|ID",
+                        help="the question, one sentence on one line; or the id of a "
+                             "question on record, Q<n> or P<n>, to change its options")
     parser.add_argument("--from", dest="origin", metavar="PTR",
                         help="a pointer to where the question came from, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
@@ -188,17 +200,56 @@ def _declare_ask(verbs) -> None:
     parser.add_argument("--blocks", metavar="LIST|none",
                         help="the stages the question holds up, as B2,B3, or none "
                              "(default: all, every stage the round has or gains)")
+    parser.add_argument("--option", dest="options", metavar="K=TEXT", action="append",
+                        default=[],
+                        help="an option the question offers: a short key and its one "
+                             "line; give it once for each option, two to four in all")
+    parser.add_argument("--retire", metavar="K", action="append", default=[],
+                        help="with an ID, take the option under this key out; to "
+                             "correct a line, retire its key and add the right line "
+                             "under a new one")
     _writes(parser)
 
 
 def _ask(args, out) -> int:
     from . import asking, questions
+    from . import options as choices
 
+    if choices.QUESTION_ID.fullmatch(args.text):
+        return _fill(args, out)
+    if args.retire:
+        raise BadArgument("--retire takes an option out of a question on record",
+                          "name the question by its id in place of a sentence: "
+                          f"{args.prog} ask {args.target} ID --retire K")
     asked = asking.ask(args.target, args.text, actor=_actor(args), origin=args.origin,
-                       record=args.record, blocks=args.blocks)
+                       record=args.record, blocks=args.blocks, options=args.options)
     print(f"{asked.id}: {asked.text}", file=out)
     print(f"blocks: {questions.said(asked.blocks)}   from: {asked.origin}", file=out)
+    for key, line in asked.options:
+        print(f"{key}: {line}", file=out)
     _warn_of(asked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _fill(args, out) -> int:
+    """`ask` with the id of a question on record: change the options it offers."""
+    from . import options as choices
+
+    for flag, given in (("--from", args.origin), ("--record", args.record),
+                        ("--blocks", args.blocks)):
+        if given is not None:
+            raise BadArgument(f"{flag} is given when a question is asked, and "
+                              f"{args.text} is a question on record",
+                              f"leave {flag} out to change its options")
+    filled = choices.fill(args.target, args.text, actor=_actor(args),
+                          options=args.options, retire=args.retire)
+    found = filled.question
+    print(f"{found.id}: {found.text}", file=out)
+    for key, line in found.options:
+        print(f"{key}: {line}", file=out)
+    if found.retired:
+        print(f"retired: {', '.join(found.retired)}", file=out)
+    _warn_of(filled.failed, args.prog, args.verb)
     return codes.OK
 
 

@@ -15,6 +15,9 @@ A question with neither is refused: nothing else can stand in for an origin.
 the stages it names, which the round must have, or none. A project's question holds up
 no stage.
 
+**Options.** A question may be asked with the choices it offers, a line each under a
+short key: two to four, or none. `options` says how they are given and kept.
+
 **Who and when.** The one who runs the verb asked it, at the time it is recorded. Both
 are fields of the question, apart from the event's own, so they stay with it when it is
 later carried to another log.
@@ -22,10 +25,11 @@ later carried to another log.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from . import folders, log, pointers, questions, write
+from . import options as choices
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
@@ -33,8 +37,8 @@ from .errors import BadArgument, NoLog, NoRound, Unmet
 @dataclass(frozen=True)
 class Asked:
     """A question as recorded: its `id`, the `name` of the round or project whose log
-    holds it, its `text`, what it `blocks` and its `origin`, read back from the `event`.
-    `failed` pairs each after-append callback that raised with what it raised."""
+    holds it, its `text`, what it `blocks` and its `origin`, read back from the `event`,
+    and the `options` it offers, each `(key, line)`. `failed` pairs each after-append callback that raised with what it raised."""
 
     id: str
     name: str
@@ -43,10 +47,12 @@ class Asked:
     origin: str
     event: dict
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    options: tuple[tuple[str, str], ...] = ()
 
 
 def ask(target: str, text: str, *, actor: str, origin: str | None = None,
-        record: str | None = None, blocks: str | None = None, settings=None,
+        record: str | None = None, blocks: str | None = None,
+        options: Sequence[str] = (), settings=None,
         wait_s: float = write.WAIT_S, at: str | None = None) -> Asked:
     """Record one question on `target`, a round `<project>/<slug>` or a project's key,
     and return it as recorded.
@@ -58,6 +64,8 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
       own, in place of `origin`.
     - `blocks`: what a round's question holds up, `B2,B3`, `all` or `none`; every stage
       when left out. A project's question takes only `none`.
+    - `options`: the choices the question offers, each `K=TEXT`, a key and its one
+      line: two to four, or none.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the lock; `at`: the event's time.
@@ -65,8 +73,8 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject` or
     `NoFolder` for a project with no rounds folder, `NoRound` for a round that was never
     opened, and `Refused` when the question has no origin, its pointer has no shape a
-    pointer has, or it names a stage the round does not have. A refusal leaves the log
-    as it was.
+    pointer has, it names a stage the round does not have, or it has one option or
+    more than four. A refusal leaves the log as it was.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says what the question is asked of",
@@ -92,6 +100,7 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
         held = questions.NONE
     elif held is None:
         held = questions.ALL
+    offered = choices.parse(options)
 
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
@@ -122,6 +131,12 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
                      f"{questions.stages_said(view.state)}",
                      f"{again} --blocks LIST|{questions.NONE}")
 
+    def offers_two_to_four(view):
+        if not offered:
+            return None
+        return choices.how_many(len(offered), f"{again} --option K=TEXT --option "
+                                              "K=TEXT")
+
     def asked(view, result):
         mine = view.state if slug is not None else view.project_state
         fields = {"id": questions.next_id("Q" if slug is not None else "P", mine),
@@ -130,19 +145,23 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
                   "asked_by": actor, "asked_at": at}
         if record is not None:
             fields["record"] = record
+        if offered:
+            fields["options"] = dict(offered)
         return write.Entry("question.asked", fields,
                            log=write.ROUND if slug is not None else write.PROJECT)
 
     try:
         written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
-                               gates=[has_an_origin, names_stages_of_the_round],
+                               gates=[has_an_origin, names_stages_of_the_round,
+                                      offers_two_to_four],
                                event=asked, wait_s=wait_s, at=at)
     except NoLog:
         # Only a round's log can be missing here: a project's reads as empty.
         raise NoRound(name) from None
     event = written.events[0]
     return Asked(id=event["id"], name=name, text=event["text"], blocks=held,
-                 origin=event["from"], event=event, failed=written.failed)
+                 origin=event["from"], event=event, failed=written.failed,
+                 options=tuple(event.get("options", {}).items()))
 
 
 __all__ = ["Asked", "ask"]

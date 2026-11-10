@@ -28,7 +28,10 @@ the item.
 
 **Questions.** Four items are a question of the round, `Q<n>`, or of the project,
 `P<n>`. The question's id alone is its answer, a ruling of substance whose sentence is
-the answer and which applies to the stages the question held up. `park:Q<n>` sets it
+the answer and which applies to the stages the question held up. An answer may name,
+with `chose`, the key of the option he chose, one the question offers when it is
+answered; it then needs no sentence of its own, and the option's line is the sentence
+recorded. `park:Q<n>` sets it
 aside, until a stage is finished or a round is closed when `until` says so;
 `narrow:Q<n>=LIST` makes it hold up fewer stages, or `none`; `withdraw:Q<n>` takes it
 back. Those three are acts on the process. Each appends the ruling and then the change
@@ -43,6 +46,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from . import folders, pointers, questions, write
+from . import options as choices
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
@@ -71,7 +75,8 @@ class Asked:
     project's `name`, whether the ruling is `standing`, the `text` as given (None when
     there was none), and the `stages` named, parsed (None when none were). `slug` is the
     round's, None for a ruling on a project. `record` is the pointer as given, `until`
-    what a parking waits for, and `scoped` whether a scope was given."""
+    what a parking waits for, `scoped` whether a scope was given, and `chose` the key
+    of the option an answer names."""
 
     name: str
     standing: bool
@@ -81,6 +86,7 @@ class Asked:
     record: str | None = None
     until: str | None = None
     scoped: bool = False
+    chose: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,7 +126,7 @@ class Ruled:
 def rule(target: str, *, actor: str, record: str | None = None, text: str | None = None,
          reason: str | None = None, standing: bool = False, scope: str | None = None,
          stages: str | None = None, item: str | None = None,
-         until: str | None = None, settings=None,
+         until: str | None = None, chose: str | None = None, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Ruled:
     """Record one ruling on `target`, a round `<project>/<slug>` or a project's key, and
     return it as recorded.
@@ -139,6 +145,8 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
       answer, or `park:`, `narrow:` or `withdraw:` and the question.
     - `until`: with `park:`, what the question waits for: a stage of the round, `B2`,
       or another round, `round:<project>/<slug>`.
+    - `chose`: with a question's id, the key of the option he chose. With no `text`
+      the option's line is the sentence recorded.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for each lock; `at`: the event's time.
@@ -146,8 +154,8 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject` or
     `NoFolder` for a project with no rounds folder, `NoRound` for a round that was never
     opened, and `Refused` when a gate does not hold, the pointer's among them: an item
-    that names no question, or a question already ruled or withdrawn. A refusal leaves
-    both logs as they were.
+    that names no question, a question already ruled or withdrawn, or a key the
+    question does not offer. A refusal leaves both logs as they were.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says what the ruling is on",
@@ -167,6 +175,9 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     if until is not None and not (item or "").startswith(_PARK):
         raise BadArgument("--until says what a parked question waits for",
                           f"give it with {_PARK}Q<n>, or leave --until out")
+    if chose is not None and not _QUESTION.fullmatch(item or ""):
+        raise BadArgument("--chose names the option he chose in answer to a question",
+                          "give it with the question's id, Q<n>, or leave --chose out")
     scoped = None if scope is None else parse_scope(scope)
     staged = None if stages is None else parse_stages(stages)
 
@@ -175,9 +186,10 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     name = home.project if slug is None else f"{home.project}/{slug}"
     form = _form(item, Asked(name=name, standing=standing, text=text, stages=staged,
                              slug=slug, record=record, until=until,
-                             scoped=scope is not None))
+                             scoped=scope is not None, chose=chose))
     # The command that records it, with the sentence only where the form has one.
     again = (f"moxi rounds rule {name}{'' if item is None else ' ' + item}"
+             f"{'' if chose is None else ' --chose ' + chose}"
              f"{' --text TEXT' if 'text' in form.fields else ''} "
              f"--record PTR{' --standing' if standing and slug is not None else ''}")
 
@@ -311,17 +323,46 @@ def _answer(item: str, asked: Asked) -> Form | None:
     if not _QUESTION.fullmatch(item):
         return None
     _of_a_question(asked, act=False)
-    if asked.text is None or not asked.text.strip():
+    chose = asked.chose
+    if asked.text is None and chose is None:
         raise BadArgument("an answer needs its sentence",
-                          "say what he answered with --text TEXT")
+                          "say what he answered with --text TEXT, or name the option "
+                          "he chose with --chose K")
+    if asked.text is not None and not asked.text.strip():
+        raise BadArgument("--text says nothing",
+                          "give the sentence" + ("" if chose is None else
+                                                 ", or leave --text out"))
+
+    def offers_what_he_chose(view):
+        question = questions.find(_held(view, asked), item)
+        if question is None or choices.text_of(question, chose) is not None:
+            return None
+        answer = f"moxi rounds rule {asked.name} {item}"
+        if not question.options:
+            return Unmet(f"{item} has no options, so there is no {chose!r} to choose",
+                         f"{answer} --text TEXT --record PTR")
+        gone = ("was retired and is offered no longer" if chose in question.retired
+                else "is not one of its options")
+        return Unmet(f"{chose!r} {gone}; {item}: {choices.said(question)}",
+                     f"{answer} --chose K --record PTR")
 
     def found(view):
-        if asked.standing:
-            return {}
-        return {"stages": questions.stored(questions.find(view.state, item).blocks)}
+        question = questions.find(_held(view, asked), item)
+        fields = {}
+        if asked.text is None:
+            # He chose a line and said no more: the line is what was answered.
+            fields["text"] = choices.text_of(question, chose)
+        if not asked.standing:
+            fields["stages"] = questions.stored(question.blocks)
+        return fields
 
-    return Form(kind=SUBSTANCE, rules=item, fields={"text": asked.text},
-                gates=(_can_be_ruled(item, asked, answer=True),), found=found,
+    fields: dict[str, object] = {} if asked.text is None else {"text": asked.text}
+    gates = [_can_be_ruled(item, asked, answer=True)]
+    if chose is not None:
+        fields["chose"] = chose
+        gates.append(offers_what_he_chose)
+    return Form(kind=SUBSTANCE, rules=item, fields=fields, gates=tuple(gates),
+                found=found,
                 changes=_changes(item, asked, {"state": questions.RULED}))
 
 

@@ -119,7 +119,8 @@ def test_help_says_what_rule_does(capsys):
 
     out = " ".join(capsys.readouterr().out.split())
     for word in ("ROUND|PROJECT", "[ITEM]", "--record PTR", "--text TEXT",
-                 "--reason TEXT", "--standing", "--scope SPEC", "--stages LIST",
+                 "--chose K", "--reason TEXT", "--standing", "--scope SPEC",
+                 "--stages LIST",
                  "--until WHAT", "--as NAME", "comms:<digits>", "park:Q<n>",
                  "narrow:Q<n>=LIST", "withdraw:Q<n>"):
         assert word in out
@@ -897,3 +898,148 @@ def test_work_that_fails_after_the_record_leaves_the_ruling_recorded(
     assert out == f"C1: {SAID}\n"
     assert "warning" in err and "the disk is full" in err
     assert len(rulings(round_log(rounds))) == 1
+
+
+# -- the option an answer chose ----------------------------------------------------------
+
+OPTIONS = ("a=prose yes, parsed rows no", "b=everything", "c=nothing")
+
+
+def offer(target="proj-a/a-round", given=OPTIONS):
+    """Ask a question of `target` that offers the options `given`."""
+    return asking.ask(target, ASKED, origin="comms:11", actor="scout", options=given).id
+
+
+def test_an_answer_names_the_key_he_chose(staged, capsys):
+    offer()
+
+    assert run("proj-a/a-round", "Q1", "--chose", "b", "--as", "planner",
+               text=ANSWER) == 0
+
+    assert last(round_log(staged)) == [
+        {"actor": "planner", "type": "ruling.recorded", "id": "C1", "text": ANSWER,
+         "chose": "b", "stages": "all", "record": "comms:12", "kind": "substance",
+         "rules": "Q1"},
+        {"actor": "planner", "type": "question.changed", "id": "Q1", "state": "ruled",
+         "ruling": "C1", "record": "comms:12"}]
+    found = question(round_log(staged))
+    assert (found.state, found.ruling, found.chose) == ("ruled", "C1", "b")
+    [recorded] = state.fold(log.read(round_log(staged))).rulings
+    assert (recorded.chose, recorded.text) == ("b", ANSWER)
+    assert capsys.readouterr().out == f"C1: {ANSWER}\n"
+
+
+def test_an_answer_that_only_names_a_key_records_the_options_line(staged, capsys):
+    offer()
+
+    assert run("proj-a/a-round", "Q1", "--chose", "a", text=None) == 0
+
+    [recorded] = rulings(round_log(staged))
+    assert (recorded["text"], recorded["chose"]) == ("prose yes, parsed rows no", "a")
+    assert question(round_log(staged)).chose == "a"
+    assert capsys.readouterr().out == "C1: prose yes, parsed rows no\n"
+
+
+def test_an_answer_with_no_key_leaves_none_chosen(staged):
+    offer()
+
+    assert run("proj-a/a-round", "Q1", text=ANSWER) == 0
+
+    assert "chose" not in rulings(round_log(staged))[0]
+    assert question(round_log(staged)).chose is None
+
+
+def test_an_answer_to_a_projects_question_names_the_key_he_chose(staged):
+    offer("proj-a")
+
+    assert run("proj-a", "P1", "--chose", "c", text=None) == 0
+
+    [recorded] = rulings(log.project_log(staged))
+    assert (recorded["id"], recorded["text"], recorded["chose"]) == ("S1", "nothing", "c")
+    assert "stages" not in recorded
+    assert question(log.project_log(staged), "P1").chose == "c"
+
+
+@pytest.mark.parametrize("key, said", [
+    ("d", "'d' is not one of its options; Q1: its options are a, b"),
+    ("c", "'c' was retired and is offered no longer; Q1: its options are a, b"),
+    ("", "'' is not one of its options")])
+@pytest.mark.parametrize("text", [ANSWER, None])
+def test_a_key_the_question_does_not_offer_now_is_refused(staged, capsys, key, said,
+                                                          text):
+    offer()
+    assert main(["ask", "proj-a/a-round", "Q1", "--retire", "c"]) == 0
+    before = logs(staged)
+    capsys.readouterr()
+
+    assert run("proj-a/a-round", "Q1", "--chose", key, text=text) == 3
+
+    out, err = capsys.readouterr()
+    assert out == "" and said in err
+    assert "run: moxi rounds rule proj-a/a-round Q1 --chose K --record PTR" in err
+    assert logs(staged) == before
+
+
+def test_a_key_chosen_of_a_question_with_no_options_is_refused(staged, capsys):
+    ask()
+    before = logs(staged)
+
+    assert run("proj-a/a-round", "Q1", "--chose", "a", text=None) == 3
+
+    err = capsys.readouterr().err
+    assert "Q1 has no options, so there is no 'a' to choose" in err
+    assert "run: moxi rounds rule proj-a/a-round Q1 --text TEXT --record PTR" in err
+    assert logs(staged) == before
+
+
+def test_a_key_added_after_another_was_retired_is_chosen(staged):
+    offer()
+    assert main(["ask", "proj-a/a-round", "Q1", "--retire", "c", "--option",
+                 "d=nothing a person reads"]) == 0
+
+    assert run("proj-a/a-round", "Q1", "--chose", "d", text=None) == 0
+
+    assert rulings(round_log(staged))[0]["text"] == "nothing a person reads"
+
+
+@pytest.mark.parametrize("argv", [[], ["park:Q1"], ["narrow:Q1=none"], ["withdraw:Q1"]])
+def test_only_an_answer_names_a_key(staged, capsys, argv):
+    offer()
+    before = logs(staged)
+
+    assert run("proj-a/a-round", *argv, "--chose", "a") == 2
+
+    assert "--chose names the option he chose in answer to a question" in \
+        capsys.readouterr().err
+    assert logs(staged) == before
+
+
+def test_an_answer_with_a_key_and_an_empty_sentence_is_a_usage_error(staged, capsys):
+    offer()
+
+    assert run("proj-a/a-round", "Q1", "--chose", "a", text="  ") == 2
+
+    assert "--text says nothing" in capsys.readouterr().err
+
+
+def test_an_answer_with_a_key_still_needs_his_pointer(staged, capsys):
+    offer()
+    before = logs(staged)
+
+    assert run("proj-a/a-round", "Q1", "--chose", "a", text=None, record=None) == 3
+
+    assert ("run: moxi rounds rule proj-a/a-round Q1 --chose a --record PTR"
+            in capsys.readouterr().err)
+    assert logs(staged) == before
+
+
+def test_a_second_answer_with_a_key_is_refused_as_any_second_answer(staged, capsys):
+    offer()
+    assert run("proj-a/a-round", "Q1", "--chose", "a", text=None) == 0
+    before = logs(staged)
+
+    assert run("proj-a/a-round", "Q1", "--chose", "b", text=None) == 3
+
+    assert "Q1 is already ruled, by C1" in capsys.readouterr().err
+    assert logs(staged) == before
+    assert question(round_log(staged)).chose == "a"

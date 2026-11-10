@@ -8,7 +8,8 @@ same way, so a log with a later version's events still folds.
 
 The state holds what the round's first event set (its description, its flow's name and
 the steps recorded for it, its parent, and its status), the rulings recorded in the log,
-its questions, each with every change made to it, and the whole history. A log with no
+its questions, each with every change made to it, the options it offers and the key its
+answer chose, and the whole history. A log with no
 opening event, a project's for one, has a status of None; the rulings of a project's log
 are its register, and its questions the project's list.
 """
@@ -48,6 +49,8 @@ class Ruling:
     #: Who recorded it, and when.
     actor: str
     at: str
+    #: The key of the option an answer chose, or None.
+    chose: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,9 @@ class Change:
     #: Who recorded the change, and when.
     actor: str
     at: str
+    #: The options it added, each `(key, line)`, and the keys it retired.
+    options: tuple[tuple[str, str], ...] = ()
+    retired: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,12 @@ class Question:
     ruling: str | None = None
     #: Every change since it was asked, oldest first.
     changes: tuple[Change, ...] = ()
+    #: The options it offers now, each `(key, line)`, in the order they were added.
+    options: tuple[tuple[str, str], ...] = ()
+    #: The keys that were retired, oldest first: offered no longer, never used again.
+    retired: tuple[str, ...] = ()
+    #: The key of the option its answer chose, or None.
+    chose: str | None = None
 
 
 @dataclass
@@ -152,11 +164,29 @@ def _ruling_recorded(state: State, event: dict) -> None:
         stages=tuple(stages) if isinstance(stages, list) else stages,
         # A copy, so the state's scope and the event's never share a dict.
         scope=tuple(copy.deepcopy(event.get("scope") or [])),
-        actor=event["actor"], at=event["at"]))
+        actor=event["actor"], at=event["at"], chose=event.get("chose")))
+    # The key an answer chose is kept in the ruling. The question reads it from its
+    # newest answer, so an answer that names no key leaves none chosen.
+    for place, question in enumerate(state.questions):
+        if question.id is not None and question.id == event.get("rules"):
+            state.questions[place] = replace(question, chose=event.get("chose"))
 
 
 def _blocks(value):
     return tuple(value) if isinstance(value, list) else value
+
+
+def _offered(value, have: tuple[tuple[str, str], ...] = (),
+             retired: tuple[str, ...] = ()) -> tuple[tuple[str, str], ...]:
+    """The options an event adds, each `(key, line)`. A key keeps its text and a
+    retired key is never used again, so one the question has, or retired, adds none."""
+    taken = {key for key, _text in have} | set(retired)
+    added = []
+    for key, text in (value.items() if isinstance(value, dict) else ()):
+        if key not in taken:
+            taken.add(key)
+            added.append((key, text))
+    return tuple(added)
 
 
 def _question_asked(state: State, event: dict) -> None:
@@ -166,7 +196,8 @@ def _question_asked(state: State, event: dict) -> None:
         blocks=_blocks(event.get("blocks", "all")), state=event.get("state"),
         # A question brought here from another log keeps who asked it and when.
         by=event.get("asked_by") or event["actor"],
-        at=event.get("asked_at") or event["at"], record=event.get("record")))
+        at=event.get("asked_at") or event["at"], record=event.get("record"),
+        options=_offered(event.get("options"))))
 
 
 def _question_changed(state: State, event: dict) -> None:
@@ -178,7 +209,13 @@ def _question_changed(state: State, event: dict) -> None:
         return
     change = Change(state=event.get("state"), blocks=_blocks(event.get("blocks")),
                     until=event.get("until"), ruling=event.get("ruling"),
-                    record=event.get("record"), actor=event["actor"], at=event["at"])
+                    record=event.get("record"), actor=event["actor"], at=event["at"],
+                    options=_offered(event.get("options"), question.options,
+                                     question.retired),
+                    # Only a key the question offers is retired, and only once.
+                    retired=tuple(dict.fromkeys(
+                        key for key in event.get("retired") or ()
+                        if any(key == had for had, _text in question.options))))
     state.questions[place] = replace(
         question,
         state=question.state if change.state is None else change.state,
@@ -187,7 +224,10 @@ def _question_changed(state: State, event: dict) -> None:
         # ends it.
         until=question.until if change.state is None else change.until,
         ruling=question.ruling if change.ruling is None else change.ruling,
-        changes=(*question.changes, change))
+        changes=(*question.changes, change),
+        options=tuple(one for one in (*question.options, *change.options)
+                      if one[0] not in change.retired),
+        retired=(*question.retired, *change.retired))
 
 
 #: The handler of each event type. Every type in `events.TYPES` has a row.
