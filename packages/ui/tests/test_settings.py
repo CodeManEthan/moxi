@@ -256,3 +256,200 @@ def test_the_shell_reads_and_writes_settings_and_a_refused_value_is_a_422(site):
         shell.stop()
         thread.join(15)
         shell.close()
+
+
+# --- locked settings ---------------------------------------------------------------------
+
+LOCKED_TEXT = "{} {} is locked for this run of the shell, so it can't be changed from a page"
+
+
+@pytest.mark.parametrize("text, entries", [
+    (None, set()),
+    ("", set()),
+    (" ", set()),
+    (",", set()),
+    ("ui.port", {"ui.port"}),
+    ("ui.port,turns.guards.run", {"ui.port", "turns.guards.run"}),
+    ("ui.port turns.guards.run\tmoxi.log", {"ui.port", "turns.guards.run", "moxi.log"}),
+    (" ui.port ,\n turns ", {"ui.port", "turns"}),
+    ("a,,b,", {"a", "b"}),
+])
+def test_the_locked_list_is_split_at_commas_and_spaces_and_an_empty_piece_is_no_entry(
+        text, entries):
+    assert settings.locked_entries(text) == entries
+
+
+def test_a_doubled_and_a_trailing_comma_lock_no_other_key():
+    locked = settings.locked_entries("a,,b,")
+    assert settings.is_locked("a", "x", locked) and settings.is_locked("b", "x.y", locked)
+    for module, key in (("c", "x"), ("ab", "x"), ("moxi", "a"), ("ui", "port"), ("c", "")):
+        assert not settings.is_locked(module, key, locked)
+
+
+def test_an_entry_locks_its_key_and_the_keys_under_it_and_no_key_that_starts_alike():
+    assert settings.is_locked("ui", "gateway.port", {"ui.gateway.port"})
+    assert not settings.is_locked("ui", "gateway.enabled", {"ui.gateway.port"})
+    for key in ("gateway.port", "gateway.enabled"):
+        assert settings.is_locked("ui", key, {"ui.gateway"})
+    assert not settings.is_locked("ui", "port", {"ui.gateway"})
+    # Only a whole name, or a whole name and a dot, matches.
+    for entry in ("ui.gateway.p", "ui.gate", "u", "ui.gateway.port.x", "UI.gateway.port",
+                  "ui.gateway."):
+        assert not settings.is_locked("ui", "gateway.port", {entry})
+    # A module's name alone locks all of its settings, and no other module's.
+    assert settings.is_locked("turns", "guards.run", {"turns"})
+    assert not settings.is_locked("turnstile", "guards.run", {"turns"})
+    # An entry that names no setting locks nothing.
+    assert not settings.is_locked("ui", "port", {"ui.nosuch", "nosuch.port"})
+    assert not settings.is_locked("ui", "port", ())
+
+
+@pytest.mark.parametrize("write", [{"value": "60"}, {"add": "x"}, {"remove": "x"},
+                                   {"unset": True}], ids=["value", "add", "remove", "unset"])
+def test_each_form_of_write_to_a_locked_key_is_refused_before_any_command_runs(write):
+    for locked, key in (({"ui.idle_s"}, "idle_s"), ({"ui.gateway"}, "gateway.port"),
+                        ({"ui.gateway"}, "gateway.enabled"), ({"ui.jobs"}, "jobs.c"),
+                        ({"ui"}, "port")):
+        run = Run()
+        with pytest.raises(Refused) as refused:
+            settings.change("ui", key, cwd="/rt", env=None, locked=locked, run=run, **write)
+        assert refused.value.text == LOCKED_TEXT.format("ui", key)
+        assert run.calls == []
+
+
+@pytest.mark.parametrize("locked", [(), settings.locked_entries(""), {"ui.gateway.p"},
+                                    {"ui.idle"}, {"ui.idle_s.x"}, {"demo.idle_s"}],
+                         ids=["unset", "empty", "a-longer-name", "a-shorter-name",
+                              "a-key-under-it", "another-module"])
+def test_a_key_no_entry_names_is_written_in_each_form(locked):
+    for write in ({"value": "60"}, {"add": "x"}, {"remove": "x"}, {"unset": True}):
+        run = Run()
+        for key in ("idle_s", "gateway.port"):
+            assert settings.change("ui", key, cwd="/rt", env=None, locked=locked, run=run,
+                                   **write)["ok"]
+        assert [[key for key in ("idle_s", "gateway.port") if key in argv]
+                for argv, _ in run.calls] == [["idle_s"], ["gateway.port"]]
+
+
+def test_the_read_marks_exactly_the_locked_keys_and_entries():
+    table = _switch_table(entries=[
+        {"name": "a", "value": True, "source": "file", "named_by": []},
+        {"name": "b", "value": False, "source": "file", "named_by": []}])
+    run = Run(stdout=json.dumps([*EIGHT, table]).encode())
+
+    def marked(locked):
+        keys = settings.read_section("demo", cwd="/rt", env=None, locked=locked,
+                                     run=run)["keys"]
+        return ({key["name"] for key in keys if key["locked"]},
+                {entry["key"] for key in keys for entry in key["entries"] or ()
+                 if entry["locked"]})
+
+    assert marked(()) == (set(), set())
+    assert marked(settings.locked_entries("")) == (set(), set())
+    assert marked({"demo.count", "demo.nosuch", "other.on"}) == ({"count"}, set())
+    # An entry of a switch table is locked alone, or with its table.
+    assert marked({"demo.jobs.a"}) == (set(), {"jobs.a"})
+    assert marked({"demo.jobs"}) == ({"jobs"}, {"jobs.a", "jobs.b"})
+    assert marked({"demo"}) == ({key["name"] for key in [*EIGHT, table]}, {"jobs.a", "jobs.b"})
+    assert marked({"demo.job", "demo.jobs.", "demo.co"}) == (set(), set())
+    # The mark is part of the declared shapes.
+    assert settings.KEY_SHAPE.items["locked"].type == "bool"
+    assert settings.KEY_SHAPE.items["entries"].items.items["locked"].type == "bool"
+
+
+def test_the_variable_is_one_constant_that_the_module_declares():
+    from moxi_ui import module
+
+    assert settings.LOCKED_ENV == "MOXI_UI_LOCKED_SETTINGS"
+    assert list(module.INTERNAL_ENV) == [settings.LOCKED_ENV]
+
+
+class _Shell:
+    """A real shell over the `site` fixture, with a signed-in session's requests."""
+
+    def __init__(self, site):
+        from moxi_ui.snapshot import ModuleSnapshot
+        from test_snapshot import _serve
+
+        self.shell, self.thread = _serve(snapshot=ModuleSnapshot(
+            cwd=Layout("ui").runtime_dir(), dirs=[str(site)]))
+        session_id, key = self.shell.sessions.store.mint()
+        self.browser = [f"Cookie: moxi-ui={session_id}", f"X-Moxi-Key: {key}",
+                        "Sec-Fetch-Site: same-origin", "Sec-Fetch-Mode: cors",
+                        "Sec-Fetch-Dest: empty"]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.shell.stop()
+        self.thread.join(15)
+        self.shell.close()
+
+    def post(self, what, **body):
+        return _request(self.shell.listeners.port, "POST", f"/m/ui/api/settings/{what}",
+                        self.browser, {"module": "ui", **body})
+
+    def keys(self):
+        status, data = _request(self.shell.listeners.port, "GET",
+                                "/m/ui/api/settings?module=ui", self.browser)
+        assert status == 200
+        return _by_name(data["sections"][0]["keys"])
+
+
+def _history():
+    from moxi.config import HISTORY
+    from moxi.paths import core
+
+    path = core().state_dir() / HISTORY
+    return path.read_bytes() if path.exists() else None
+
+
+def test_both_routes_refuse_a_locked_key_and_leave_the_file_and_the_history_alone(
+        site, monkeypatch):
+    monkeypatch.setenv(settings.LOCKED_ENV, "ui.idle_s,ui.gateway")
+    config = Layout("ui").config_file()
+    with _Shell(site) as shell:
+        # A neighbour of the locked keys saves, before and after the refusals.
+        status, data = shell.post("set", key="port", value="8499")
+        assert status == 200 and data["ok"]
+        file, history = config.read_bytes(), _history()
+        assert b"8499" in file and history
+        for what, body in (("set", {"key": "idle_s", "value": "60"}),
+                           ("set", {"key": "idle_s", "add": "60"}),
+                           ("set", {"key": "idle_s", "remove": "60"}),
+                           ("unset", {"key": "idle_s"}),
+                           ("set", {"key": "gateway.port", "value": "8498"}),
+                           ("set", {"key": "gateway.enabled", "value": "true"}),
+                           ("unset", {"key": "gateway.port"})):
+            status, data = shell.post(what, **body)
+            assert status == 422, (what, body, data)
+            assert data == {"refused": LOCKED_TEXT.format("ui", body["key"])}
+            assert config.read_bytes() == file and _history() == history
+        keys = shell.keys()
+        assert {name for name, key in keys.items() if key["locked"]} == {
+            "idle_s", "gateway.enabled", "gateway.port"}
+        assert keys["idle_s"]["source"] == "default" and keys["port"]["value"] == "8499"
+        status, data = shell.post("unset", key="port")
+        assert status == 200 and data["ok"]
+        assert config.read_bytes() != file and _history() != history
+
+
+@pytest.mark.parametrize("value", [None, "", " , "], ids=["unset", "empty", "separators"])
+def test_with_no_entry_in_the_variable_nothing_is_marked_and_every_write_is_saved(
+        site, monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv(settings.LOCKED_ENV, raising=False)
+    else:
+        monkeypatch.setenv(settings.LOCKED_ENV, value)
+    config = Layout("ui").config_file()
+    with _Shell(site) as shell:
+        assert not any(key["locked"] for key in shell.keys().values())
+        for key, text in (("idle_s", "60"), ("gateway.port", "8498")):
+            status, data = shell.post("set", key=key, value=text)
+            assert status == 200 and data["ok"]
+            assert shell.keys()[key]["value"] == text
+            assert text in config.read_text()
+            status, data = shell.post("unset", key=key)
+            assert status == 200 and data["ok"]
+            assert shell.keys()[key]["source"] == "default"

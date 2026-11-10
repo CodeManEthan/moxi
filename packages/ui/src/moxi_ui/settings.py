@@ -22,6 +22,13 @@ A write that `moxi config` refuses (exit 2 or 3) is a 422 with the command's tex
 a settings file that stays locked (exit 75) is a 409. Exit 1 means the value was written
 and applying the module's units failed: the answer carries the command's lines as a
 warning and the fix `moxi install <module>`.
+
+Whoever starts the shell can name settings its pages may not change for that run, in
+`MOXI_UI_LOCKED_SETTINGS`: full keys, `<module>.<key>`, separated by commas or spaces. An
+entry locks the key it names and every key under it. A write to a locked key is a 422
+before any command is built, and the read marks the key `locked`. Unset or empty, the
+variable locks nothing. It guards these routes only: `moxi config set` typed at a
+keyboard is not refused.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +51,7 @@ from moxi_ui.loopback.api import Conflict, Field, Out, Refused, Route
 __all__ = [
     "CHANGE_SHAPE",
     "CONFIG_TIMEOUT",
+    "LOCKED_ENV",
     "MARK_NEXT_START",
     "MARK_NOW",
     "MARK_SWITCH",
@@ -51,6 +60,8 @@ __all__ = [
     "change",
     "change_argv",
     "descriptor",
+    "is_locked",
+    "locked_entries",
     "logins_of",
     "read_section",
     "section_modules",
@@ -64,6 +75,8 @@ CONFIG_TIMEOUT = 10.0
 #: How many `show` runs one read of the view runs at once.
 READS_AT_ONCE = 2
 BY = "ui"
+#: The variable naming the settings the shell's pages may not change for this run.
+LOCKED_ENV = "MOXI_UI_LOCKED_SETTINGS"
 
 MARK_NOW = "applies now"
 MARK_NEXT_START = "applies at next start"
@@ -89,10 +102,12 @@ _STRINGS = Out("list", items=Out("string"))
 _ENTRY = Out("table", items={
     "name": Out("string"), "key": Out("string"), "value": Out("bool"),
     "source": Out("string"), "named_by": _STRINGS, "mark": Out("string"),
+    "locked": Out("bool"),
 })
 
 #: One key's field descriptor: `moxi.config.Key`'s fields, its value and source, and
-#: what the view adds (the mark, a note, the switch table's entries).
+#: what the view adds (the mark, a note, the switch table's entries, whether the key is
+#: locked for this run).
 KEY_SHAPE = Out("table", items={
     "name": Out("string"), "type": Out("string"), "default": _STRING,
     "doc": Out("string"), "values": Out("list", nullable=True, items=Out("string")),
@@ -101,7 +116,7 @@ KEY_SHAPE = Out("table", items={
     "source": Out("string"), "mark": Out("string"), "note": _STRING,
     "needs_absent": Out("bool"), "switch_table": Out("bool"),
     "entries": Out("list", nullable=True, items=_ENTRY),
-    "declarations": _STRING, "reason": _STRING,
+    "declarations": _STRING, "reason": _STRING, "locked": Out("bool"),
 })
 
 SECTION_SHAPE = Out("table", items={
@@ -116,6 +131,28 @@ CHANGE_SHAPE = {"ok": Out("bool"), "lines": _STRINGS, "warning": _STRING, "fix":
 _MODULE_FIELD = Field("string", max=64)
 _KEY_FIELD = Field("string", max=200)
 _VALUE_FIELD = Field("string", required=False, max=65536)
+
+
+# --- locked keys ------------------------------------------------------------------------
+
+_SEPARATORS = re.compile(r"[,\s]+")
+
+
+def locked_entries(text: str | None) -> frozenset[str]:
+    """The entries of a `MOXI_UI_LOCKED_SETTINGS` value: full keys, `<module>.<key>`,
+    separated by commas or spaces. An empty piece is no entry; None or "" gives none."""
+    return frozenset(piece for piece in _SEPARATORS.split(text or "") if piece)
+
+
+def is_locked(module: str, key: str, locked: Iterable[str]) -> bool:
+    """Whether `locked` holds `<module>.<key>` or an entry it sits under. The text is
+    compared exactly, since `moxi config` takes a setting only by its exact name."""
+    name = f"{module}.{key}"
+    return any(name == entry or name.startswith(f"{entry}.") for entry in locked)
+
+
+def _locked_now() -> frozenset[str]:
+    return locked_entries(os.environ.get(LOCKED_ENV))
 
 
 # --- spelling a value -------------------------------------------------------------------
@@ -223,7 +260,8 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _entries(table: str, items: Any) -> list[dict[str, Any]]:
+def _entries(module: str, table: str, items: Any,
+             locked: Iterable[str]) -> list[dict[str, Any]]:
     entries = []
     for item in items if isinstance(items, list) else ():
         if not isinstance(item, Mapping) or not isinstance(item.get("name"), str):
@@ -237,20 +275,23 @@ def _entries(table: str, items: Any) -> list[dict[str, Any]]:
             "source": item.get("source") if isinstance(item.get("source"), str) else "default",
             "named_by": named_by,
             "mark": MARK_SWITCH if daemon else MARK_NOW,
+            "locked": is_locked(module, f"{table}.{item['name']}", locked),
         })
     return entries
 
 
 def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] = (),
                present: Iterable[str] | None = None, platform: str | None = None,
-               logins: Mapping[str, str | None] | None = None) -> dict[str, Any]:
+               logins: Mapping[str, str | None] | None = None,
+               locked: Iterable[str] = ()) -> dict[str, Any]:
     """One key of `moxi config <module> show --json` as the view's field descriptor.
 
     `switches` are the keys the module's daemons name as their `switch`; `logins` those
     they name in a login-switch `start`, with what starts the daemon now; `present` the
     modules installed and present (None: not known, so no key is marked as needing an
-    absent one)."""
+    absent one); `locked` the entries the shell's pages may not change."""
     platform = platform or sys.platform
+    locked = frozenset(locked)
     name = str(item.get("name"))
     type_ = str(item.get("type"))
     source = item.get("source") if isinstance(item.get("source"), str) else "default"
@@ -276,9 +317,11 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "note": note,
         "needs_absent": needs_absent,
         "switch_table": switch_table,
-        "entries": _entries(name, item.get("entries")) if switch_table else None,
+        "entries": (_entries(module, name, item.get("entries"), locked)
+                    if switch_table else None),
         "declarations": None,
         "reason": None,
+        "locked": is_locked(module, name, locked),
     }
     if switch_table and item.get("declarations") == "unavailable":
         out["declarations"] = "unavailable"
@@ -339,11 +382,12 @@ def _valid_module(module: str) -> bool:
 
 def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
                  listing: Mapping[str, Mapping[str, Any]] | None = None,
-                 platform: str | None = None,
+                 platform: str | None = None, locked: Iterable[str] = (),
                  run: Callable[..., subprocess.CompletedProcess] = proc.run) -> dict[str, Any]:
     """`module`'s section of the view, from `moxi config <module> show --json` run in a
     fresh process. `listing` is `moxi modules --json`'s entries by name, for the
-    daemons' switches and which modules are present. Blocking; never raises."""
+    daemons' switches and which modules are present; `locked` the entries whose keys
+    are marked locked. Blocking; never raises."""
     if not _valid_module(module):
         return _section(module, error=f"{module!r} is not a module name")
     try:
@@ -369,22 +413,26 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     present = ([name for name, entry in listing.items() if entry.get("state") == "present"]
                if listing else None)
     keys = [descriptor(module, item, switches=switches_of(own), present=present,
-                       platform=platform, logins=logins_of(own))
+                       platform=platform, logins=logins_of(own), locked=locked)
             for item in data if isinstance(item, Mapping) and isinstance(item.get("name"), str)]
     return _section(module, keys=keys)
 
 
 def change(module: str, key: str, *, value: str | None = None, add: str | None = None,
            remove: str | None = None, unset: bool = False, cwd: str,
-           env: Mapping[str, str] | None,
+           env: Mapping[str, str] | None, locked: Iterable[str] = (),
            run: Callable[..., subprocess.CompletedProcess] = proc.run) -> dict[str, Any]:
     """One `moxi config set` or `unset` run in a fresh process: the change answer, or
     `Refused` (422: the command's text and fix) or `Conflict` (409: the file is busy, or
-    the run did not end). Blocking."""
+    the run did not end). A key that `locked` holds is refused before a command is built.
+    Every route that writes a setting calls this. Blocking."""
     if not _valid_module(module):
         raise Refused(f"{module!r} is not a module name")
     if not key:
         raise Refused("name the key to change")
+    if is_locked(module, key, locked):
+        raise Refused(f"{module} {key} is locked for this run of the shell, so it can't be "
+                      "changed from a page")
     try:
         argv = change_argv(module, key, value=value, add=add, remove=remove, unset=unset)
     except ValueError as err:
@@ -449,12 +497,13 @@ async def read(call: Any) -> dict[str, Any]:
     module = call.query.get("module")
     modules = [module] if module is not None else section_modules(listed)
     cwd, env = str(shell.layout.runtime_dir()), shell.starters.child_env()
+    locked = _locked_now()
     gate = asyncio.Semaphore(READS_AT_ONCE)
 
     async def one(name: str) -> dict[str, Any]:
         async with gate:
             return await aio.offload(lambda: read_section(name, cwd=cwd, env=env,
-                                                          listing=by_name))
+                                                          listing=by_name, locked=locked))
 
     sections = await asyncio.gather(*(one(name) for name in modules))
     return {"sections": list(sections), "error": error}
@@ -466,7 +515,7 @@ def _change(call: Any, *, unset: bool) -> dict[str, Any]:
     shell = current()
     body = call.body
     return change(body["module"], body["key"], value=body.get("value"), add=body.get("add"),
-                  remove=body.get("remove"), unset=unset,
+                  remove=body.get("remove"), unset=unset, locked=_locked_now(),
                   cwd=str(shell.layout.runtime_dir()), env=shell.starters.child_env())
 
 

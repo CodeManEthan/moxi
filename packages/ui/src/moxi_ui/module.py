@@ -21,7 +21,9 @@ GATED = {}
 #: 30 days by the gateway itself).
 STORES = {"gateway": {"root": "state", "path": "gateway", "kind": "dir", "private": True,
                       "retention": "keep", "rebuildable": False, "lazy": True}}
-INTERNAL_ENV = {}
+#: The one variable of ui's prefix it reads outside moxi.paths and moxi.config, and why.
+INTERNAL_ENV = {"MOXI_UI_LOCKED_SETTINGS": "set by whoever starts the shell, for one run: "
+                                           "the settings its pages may not change"}
 SETTINGS = "settings.toml"
 SETUP = None
 SEGMENT = None

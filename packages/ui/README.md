@@ -47,6 +47,16 @@ each module's page server on the first request for its page.
 `gateway.enabled` (off) and `gateway.port` (8461).
 A change to `port` takes effect once `moxi install ui` rewrites the unit.
 
+**Environment.** ui reads one variable of its own, `MOXI_UI_LOCKED_SETTINGS`, from the
+shell's environment: the settings its pages may not change for that run. Its value is a
+list of full keys, `<module>.<key>` (`ui.gateway.port`, `moxi.<key>` for the core's),
+separated by commas or spaces. An entry locks the key it names and every key under it, so
+`ui.gateway` locks both gateway keys and a module's name alone locks all of its settings.
+The settings view shows a locked field read-only with `Locked for this run of the shell.`,
+and the shell answers a write to one with a 422 before any command runs. Unset or empty,
+it locks nothing. It guards the shell's pages only: `moxi config set` in a terminal and an
+edit of the file still change the key, and the variable holds no value for it.
+
 ## A module on Home
 
 Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A

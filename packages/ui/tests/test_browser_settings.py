@@ -1,7 +1,7 @@
 """The settings view and `<moxi-ui-form>` in a browser: every type, the save path through
 `moxi config` (a saved int, a switch-table entry, a refused value, a typing slip, a
 reset), a file that won't parse, the theme mode and the theme name picking a colour set,
-and the form in submit mode with catalog rows."""
+a key the shell was started with locked, and the form in submit mode with catalog rows."""
 
 from __future__ import annotations
 
@@ -295,6 +295,69 @@ def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root
         for key in ("theme.palette", "theme.mode"):
             status, _ = ui_shell.session().post("/m/ui/api/settings/unset", {"module": "ui", "key": key})
             assert status == 200
+
+
+FORCED = """async (sent) => {
+  const headers = {"Content-Type": "application/json", Accept: "application/json",
+                   "X-Moxi-Key": localStorage.getItem("moxi-ui-key")};
+  const out = [];
+  for (const [what, body] of sent) {
+    const answer = await fetch("/m/ui/api/settings/" + what, {
+      method: "POST", headers, body: JSON.stringify(body), credentials: "same-origin"});
+    out.push([answer.status, await answer.json()]);
+  }
+  return out;
+}"""
+
+
+def test_a_locked_key_is_read_only_and_a_post_sent_past_the_view_is_refused(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site],
+                      env={"MOXI_UI_LOCKED_SETTINGS": "fixture.limit, fixture.rows.backup"})
+    # The lock is on the shell's routes: the command typed at a keyboard still writes.
+    assert shell.moxi("config", "set", "fixture", "limit", "7").returncode == 0
+    page = ui_contexts(shell).pages[0]
+    writes: list[str] = []
+    page.on("request", lambda r: writes.append(r.url) if WRITES.search(r.url) else None)
+    form = _settings(page)
+    line = "Locked for this run of the shell."
+    limit = _field(form, "limit")
+    box = form.locator("input[data-control=limit]")
+    expect(limit).to_have_class(re.compile(r"\boff\b"))
+    expect(box).to_be_disabled()
+    expect(box).to_have_value("7")
+    expect(limit.get_by_role("button", name="Reset to default")).to_be_disabled()
+    expect(limit.locator(".off-line")).to_have_text(line)
+    # A locked entry of a switch table: its toggle is off, with the same line.
+    entry = form.locator(".toggle", has=page.locator("[data-control='rows.backup']"))
+    expect(entry.get_by_role("checkbox")).to_be_disabled()
+    expect(entry.locator(".off-line")).to_have_text(line)
+    expect(form.locator(".off-line", has_text=line)).to_have_count(2)
+    # A neighbouring field saves.
+    workers = form.locator("input[data-control=workers]")
+    expect(workers).to_be_editable()
+    workers.fill("3")
+    workers.press("Tab")
+    expect(_msg(form, "workers")).to_contain_text("workers", timeout=SETTINGS_MS)
+    assert _file(shell) == {"limit": 7, "workers": 3}
+    assert len(writes) == 1
+    # Sent from the page's own context, with the session's cookie and key.
+    refused = {"refused": "fixture limit is locked for this run of the shell, so it can't "
+                          "be changed from a page"}
+    answers = page.evaluate(FORCED, [
+        ["set", {"module": "fixture", "key": "limit", "value": "12"}],
+        ["unset", {"module": "fixture", "key": "limit"}],
+        ["set", {"module": "fixture", "key": "rows.backup", "value": "true"}]])
+    assert answers[:2] == [[422, refused], [422, refused]]
+    assert answers[2][0] == 422 and "fixture rows.backup is locked" in answers[2][1]["refused"]
+    assert _file(shell) == {"limit": 7, "workers": 3}
+    status, data = shell.session().get("/m/ui/api/settings?module=fixture")
+    keys = {key["name"]: key for key in data["sections"][0]["keys"]}
+    assert status == 200 and keys["limit"]["value"] == "7" and keys["limit"]["locked"]
+    assert [key["name"] for key in keys.values() if key["locked"]] == ["limit"]
+    form = _settings(page)
+    expect(form.locator("input[data-control=limit]")).to_have_value("7")
+    expect(form.locator("input[data-control=limit]")).to_be_disabled()
 
 
 CATALOG = [

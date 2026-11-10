@@ -10,6 +10,9 @@ import type { FieldDescriptor, FieldEntry, FormChange, FormValue } from "./clien
 /** The types a field descriptor may have; anything else is drawn as text. */
 export const TYPES = ["bool", "int", "float", "string", "path", "enum", "list", "table"] as const;
 
+/** The line under a field or entry the shell refuses to write for this run. */
+export const LOCKED = "Locked for this run of the shell.";
+
 /** One toggle of a switch table: an entry, written as `<table key>.<entry>`. */
 export interface Toggle {
   key: string;
@@ -19,6 +22,8 @@ export interface Toggle {
   notes: string[];
   /** Whether "reset" is offered: the file names the entry. */
   resettable: boolean;
+  /** Why the toggle is shown off, or null when it takes input. */
+  off: string | null;
 }
 
 export type Control =
@@ -91,6 +96,7 @@ function toggles(field: FieldDescriptor): Toggle[] {
       checked: entry.value === true,
       notes,
       resettable: entry.source === "file",
+      off: entry.locked === true ? LOCKED : null,
     };
   });
 }
@@ -154,7 +160,10 @@ export function plans(fields: readonly FieldDescriptor[], installed: (module: st
       notes.push(line);
     }
     let off: string | null = null;
-    if (field.needs_absent === true) {
+    if (field.locked === true) {
+      off = LOCKED;
+      if (text(field.note)) notes.push(field.note as string);
+    } else if (field.needs_absent === true) {
       off = text(field.note) || `works only with the ${text(field.needs)} module, which is not installed`;
     } else if (typeof field.requires === "string" && field.requires !== "" && !installed(field.requires)) {
       off = `works only with the ${field.requires} module, which is not installed`;
@@ -244,7 +253,8 @@ export function heldOf(plan: Plan): Held {
     case "optional":
       return { kind: "optional", on: c.on, text: c.text };
     case "toggles":
-      return { kind: "toggles", on: Object.fromEntries(c.toggles.map((t) => [t.key, t.checked])) };
+      return { kind: "toggles",
+               on: Object.fromEntries(c.toggles.filter((t) => t.off === null).map((t) => [t.key, t.checked])) };
     default:
       return { kind: "scalar", text: c.text };
   }
@@ -254,7 +264,7 @@ export function heldOf(plan: Plan): Held {
  * The `moxi-submit` values and the problems that stop it. Every offered field that is
  * not off gives a value: a scalar its text (null when empty), a list its items, a
  * switch with an optional value null when off and its text (perhaps "") when on, and a
- * switch table each entry as `<table key>.<entry>`: `true` or `false`.
+ * switch table each entry that is not off as `<table key>.<entry>`: `true` or `false`.
  */
 export function submitted(fields: readonly FieldDescriptor[], held: ReadonlyMap<string, Held>,
                           installed: (module: string) => boolean):

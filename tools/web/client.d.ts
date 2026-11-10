@@ -83,6 +83,8 @@ export interface FieldEntry {
     named_by?: string[];
     /** When a change applies. */
     mark?: string;
+    /** The shell refuses a write to the entry for this run: it is shown off. */
+    locked?: boolean;
 }
 /**
  * One field of `<moxi-ui-form>`, in `moxi.config.Key`'s shape: the settings view gives it
@@ -124,6 +126,8 @@ export interface FieldDescriptor {
      * listed; `reason` then says why. */
     declarations?: string | null;
     reason?: string | null;
+    /** The shell refuses a write to the key for this run: it is shown off, still readable. */
+    locked?: boolean;
     /** A catalog row: may be given more than once (a list control). */
     repeatable?: boolean;
     /** A catalog row: a switch plus an optional value. */

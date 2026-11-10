@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- New environment variable `MOXI_UI_LOCKED_SETTINGS`: a list of full setting keys
+  (`<module>.<key>`, separated by commas or spaces) that the shell's pages may not change
+  for that run. An entry locks its key and every key under it. The settings routes answer
+  a write to one with a 422, the settings read marks each key and switch-table entry with
+  `locked`, and the form shows a locked field off with one line. Unset or empty, nothing
+  is locked.
+- Changed for callers: `moxi_ui.settings.change`, `read_section` and `descriptor` take
+  `locked`, the locked entries; a field descriptor and a switch-table entry carry `locked`.
 - The default theme is now plain: near-white paper or near-black, one text colour, greys
   and one blue accent, with states told in words. The colours until now, calm-workbench
   in light mode and midnight-neon in dark, are the theme `midnight-neon`, unchanged;
