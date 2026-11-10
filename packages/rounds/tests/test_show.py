@@ -119,7 +119,7 @@ def test_the_step_the_round_is_at_is_shown_with_what_it_waits_for(rounds, capsys
     stage(rounds, "B1")
     ask(blocks="B1")
     held = {"reason": f"Q1 holds B1: {SAID}",
-            "fix": f"moxi rounds rule {A} Q1 --record PTR"}
+            "fix": f"moxi rounds rule {A} Q1 --text TEXT --record PTR"}
     assert data(capsys)["step"] == {
         "step": "commission", "stage": "B1", "state": "not-built", "waits": [held],
         "questions": []}

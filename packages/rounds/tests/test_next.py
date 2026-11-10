@@ -203,7 +203,7 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         f"round {ROUND}   flow full   stage B1   step commission   not built in this "
         "version",
         f"waits: Q1 holds B1: {ASKED}",
-        f"  fix: moxi rounds rule {ROUND} Q1 --record PTR"]
+        f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
     do(capsys, said(printed, "then:")[0],
        **{"<your report>": str(report(folder, "fold-first"))})
 
@@ -340,7 +340,25 @@ def test_a_flow_with_no_questions_step_prints_the_hold_on_each_stage(opened, cap
         "",
         f"{head} B2   step commission   not built in this version",
         f"waits: Q1 holds B2: {ASKED}",
-        f"  fix: moxi rounds rule {ROUND} Q1 --record PTR"]
+        f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
+
+
+def test_the_command_printed_for_a_hold_on_a_stage_lifts_it_when_run(opened, capsys):
+    folder = opened("small")
+    fold(folder, question("Q1", blocks='["B1"]', options='{ a = "yes", b = "no" }'),
+         question("Q2", blocks='["B1"]'), stage("B1"))
+
+    printed = [line.strip() for line in lines(capsys)]
+
+    assert said(printed, "fix:") == [
+        f"moxi rounds rule {ROUND} Q1 --chose K --record PTR",
+        f"moxi rounds rule {ROUND} Q2 --text TEXT --record PTR"]
+    shown = run(capsys, "show", ROUND).splitlines()
+    assert said([line.strip() for line in shown], "fix:") == said(printed, "fix:")
+    do(capsys, said(printed, "fix:")[0], K="a", PTR=PTR)
+    do(capsys, said(printed, "fix:")[1], TEXT=SAID, PTR=PTR)
+    assert said(lines(capsys), "waits:") in ([], ["nothing"])
+    assert steps.held_by(_folded(folder), "B1") == ()
 
 
 def test_a_round_that_ended_is_at_no_step(folder, capsys):

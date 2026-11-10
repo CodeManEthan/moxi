@@ -125,11 +125,9 @@ def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
 
 def _docket(found: showing.Shown, step: steps.Step) -> dict:
     asked = {one.id: one for one in found.state.questions}
-    then = []
-    for question_id in step.questions:
-        answer = "--chose K" if asked[question_id].options else "--text TEXT"
-        then.append(f"moxi rounds rule {found.name} {question_id} {answer} --record PTR")
-    return {"export": f"moxi rounds list {found.name} --questions", "then": then}
+    return {"export": f"moxi rounds list {found.name} --questions",
+            "then": [steps.answer(found.name, asked[question_id])
+                     for question_id in step.questions]}
 
 
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`

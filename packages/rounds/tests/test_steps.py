@@ -369,7 +369,7 @@ def test_a_skip_of_the_questions_step_lets_its_stage_past_for_everything_that_as
     folder = opened(flow)
     fold(folder, question("Q1", blocks='["B1", "B2"]'), stage("B1"),
          stage("B2", "proj-b"))
-    held = (f"Q1 holds B1: {ASKED}", f"moxi rounds rule {ROUND} Q1 --record PTR")
+    held = (f"Q1 holds B1: {ASKED}", f"moxi rounds rule {ROUND} Q1 --text TEXT --record PTR")
     before = folded(folder)
     assert [(one.reason, one.fix) for one in steps.held_by(before, "B1", name=ROUND)] \
         == [held]
@@ -385,6 +385,14 @@ def test_a_skip_of_the_questions_step_lets_its_stage_past_for_everything_that_as
         assert steps.one(found, "docket", "B2").questions == ("Q1",)
         # The question is still his to answer: it holds the other stage.
         assert steps.one(found, "docket").state == steps.READY
+
+
+def test_the_command_for_a_hold_chooses_where_the_question_offers_options(folder):
+    fold(folder, question("Q1", options='{ a = "yes", b = "no" }'), question("Q2"),
+         stage("B1"))
+    assert [one.fix for one in steps.held_by(folded(folder), "B1", name=ROUND)] == [
+        f"moxi rounds rule {ROUND} Q1 --chose K --record PTR",
+        f"moxi rounds rule {ROUND} Q2 --text TEXT --record PTR"]
 
 
 def test_a_question_asked_after_the_skip_holds_the_stage_again(folder):
@@ -410,7 +418,7 @@ def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(open
     found = steps.current(folded(folder), name=ROUND)
     assert (found.step, found.stage, found.state) == ("commission", "B1", steps.NOT_BUILT)
     assert [(one.reason, one.fix) for one in found.waits] == [
-        (f"Q1 holds B1: {ASKED}", f"moxi rounds rule {ROUND} Q1 --record PTR")]
+        (f"Q1 holds B1: {ASKED}", f"moxi rounds rule {ROUND} Q1 --text TEXT --record PTR")]
     assert [(one.step, bool(one.waits)) for one in steps.of(folded(folder))
             if one.stage == "B1"] == [
         ("commission", True), ("build", False), ("check", False),

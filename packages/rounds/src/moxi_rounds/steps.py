@@ -185,14 +185,22 @@ ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _d
 
 # -- a hold on a stage -------------------------------------------------------------------
 
+def answer(name: str, question: states.Question) -> str:
+    """The command that records the operator's answer to `question` of the round
+    `name`: he chooses a key where the question offers options, and says a sentence
+    where it offers none. Everything that prints the command for a question asks
+    here, so the line is one that runs once its placeholders are filled."""
+    how = "--chose K" if question.options else "--text TEXT"
+    return f"moxi rounds rule {name} {question.id} {how} --record PTR"
+
+
 def held_by(state: states.State, stage: str, *, name: str = "ROUND",
             closed: Callable[[str], bool] | None = None) -> tuple[Unmet, ...]:
     """What the questions that hold the stage `stage` make it wait for, in the order
     they were asked: each names the question and the command that records the
     operator's answer. Empty when nothing holds the stage."""
     return tuple(
-        Unmet(f"{one.id} holds {stage}: {one.text}",
-              f"moxi rounds rule {name} {one.id} --record PTR")
+        Unmet(f"{one.id} holds {stage}: {one.text}", answer(name, one))
         for one in holds.on_stage(state, stage, closed=closed))
 
 
@@ -314,5 +322,5 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "Asked", "Step", "Row", "ROWS", "held_by", "order", "of",
+           "SETTLED", "HELD", "Asked", "Step", "Row", "ROWS", "answer", "held_by", "order", "of",
            "one", "is_settled", "current", "at", "said"]
