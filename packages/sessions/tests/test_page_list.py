@@ -493,7 +493,7 @@ def test_an_opened_session_carries_its_reply_subagents_and_resume_command(roots)
     assert reply["truncated"] is True and reply["text"].startswith("All fixed. é")
     assert len(reply["text"].encode()) in (page.TEXT_MAX, page.TEXT_MAX - 1)
     assert opened["more"] == 0
-    first, second = opened["subagents"]
+    first, second = sorted(opened["subagents"], key=lambda sub: sub["description"])
     assert first["description"] == "look at 1" and first["agent_type"] == "scout"
     assert first["last"] == "x" * 200 + "é" * 50          # 300 bytes, on a character
     assert second["last"] == "Nothing found."

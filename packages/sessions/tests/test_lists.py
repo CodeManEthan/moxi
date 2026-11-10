@@ -577,7 +577,7 @@ def test_there_is_no_reply_when_a_user_message_is_the_newest(roots):
     assert opened(roots, sid(9)) is None
 
 
-def test_an_opened_session_lists_eight_subagents_and_counts_the_rest(roots):
+def test_an_opened_session_lists_its_eight_newest_subagents_and_counts_the_rest(roots):
     t = ClaudeTranscript(roots[CLAUDE], session_id=sid(1))
     t.user("Look into it.", origin="human")
     starts = {}
@@ -592,18 +592,43 @@ def test_an_opened_session_lists_eight_subagents_and_counts_the_rest(roots):
     quiet.add_raw("not a line")
     t.assistant("Done.")
     t.write()
+    agents = t.path.with_suffix("") / "subagents"
+    # By path the first eight are a00 to a07. By last change: a02 newest, then the quiet
+    # a00, then a11 down to a03; a01 is the oldest.
+    for age, n in enumerate((2, 0, 11, 10, 9, 8, 7, 6, 5, 4, 3, 1)):
+        changed_at(agents / f"agent-a{n:02d}.jsonl", NOW - 60 * age)
 
     row = opened(roots, sid(1))
 
     assert len(row["subagents"]) == SUBAGENTS_MAX and row["more"] == 4
-    assert row["subagents"][0] == {"description": None, "agent_type": None,
+    assert row["subagents"][0] == {"description": "Look at 2", "agent_type": "scout",
+                                   "started": starts[2], "last_at": starts[2] + 2,
+                                   "last": "Found 2."}
+    assert row["subagents"][1] == {"description": None, "agent_type": None,
                                    "started": None, "last_at": None, "last": None}
-    assert row["subagents"][1] == {"description": "Look at 1", "agent_type": "scout",
-                                   "started": starts[1], "last_at": starts[1] + 1,
-                                   "last": "Found 1."}
-    assert row["subagents"][2]["last_at"] == starts[2] + 2
-    assert row["subagents"][2]["last"] == "Found 2."
-    assert row["subagents"] and row["subagents"][7]["description"] == "Look at 7"
+    assert [s["description"] for s in row["subagents"][2:]] == [
+        f"Look at {n}" for n in (11, 10, 9, 8, 7, 6)]
+    assert row["subagents"][2] == {"description": "Look at 11", "agent_type": "scout",
+                                   "started": starts[11], "last_at": starts[11] + 1,
+                                   "last": "Found 11."}
+
+
+def test_an_opencode_session_lists_its_children_newest_change_first(roots):
+    db = OpenCodeDb(roots[OPENCODE].parent)
+    session = db.session(directory="/work/proj-a", at=NOW - 900)
+    session.user("Do the thing.")
+    for n in range(1, 11):
+        # Made oldest first; the lower the number, the later its last change.
+        child = session.child(title=f"child {n}", at=NOW - 800 + n)
+        child.user("look")
+        child.update(at=NOW - 10 * n)
+    db.write()
+
+    row = opened(roots, session.id, OPENCODE)
+
+    assert [s["description"] for s in row["subagents"]] == [
+        f"child {n}" for n in range(1, 9)]
+    assert row["more"] == 2
 
 
 def test_a_codex_and_an_opencode_session_open_with_their_resume_commands(roots):

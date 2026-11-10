@@ -261,7 +261,7 @@ def more(call: Any) -> dict[str, Any]:
 
 def session(call: Any) -> dict[str, Any]:
     """`GET /api/session?harness=&session=`: one main session's row, its last reply, its
-    first subagents and the command that picks it up again."""
+    newest subagents and the command that picks it up again."""
     harness, name = call.query["harness"], call.query["session"]
     recent_s = _recent_s()
     try:

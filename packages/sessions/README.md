@@ -178,7 +178,7 @@ session's own record names) and `find` (the start of an id, or part of the folde
 segment). `sessions_more` answers the next rows of a group from the place an answer gave,
 `sessions_newest` the same sessions as one run with no groups (what `moxi sessions list`
 prints), `sessions_folders` the folders with how many sessions each holds, and
-`session_opened` one session's row with its last reply, its first eight subagents and the
+`session_opened` one session's row with its last reply, the eight subagents that changed last and the
 harness's command for picking it up again. Claude Code's and OpenCode's commands work
 only in the session's folder, so they come with that folder, and no command is given when
 the folder was not read; Codex's runs anywhere and comes with no folder.

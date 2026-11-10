@@ -45,6 +45,7 @@ its hour) leaves `recent` for its day between two calls; the next list places it
 
 from __future__ import annotations
 
+import os
 import time
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -57,7 +58,7 @@ from .errors import Unreadable
 from .find import LISTED, NONE, subagents
 from .read import window
 from .resume import resume
-from .shape import HARNESSES, Message
+from .shape import HARNESSES, OPENCODE, Message
 
 #: How many rows a list carries for `recent`, for a day, and for `found`.
 RECENT_ROWS = 30
@@ -591,6 +592,35 @@ def _subagent(sub: Any) -> dict[str, Any]:
     return out
 
 
+def _newest(entry: Entry, subs: Sequence[Any]) -> list[Any]:
+    """A session's subagents, the one that changed last first: by its file's last
+    change, or an OpenCode child's row's. One whose change could not be read comes after
+    the others; ties and those go by path and id."""
+    changed: dict[str, float] = {}
+    if entry.harness == OPENCODE:
+        from .opencode import Snapshot
+
+        try:
+            with Snapshot(entry.path) as snap:
+                for child in snap.children(entry.session):
+                    if _time(child.row.time_updated) is not None:
+                        changed[child.agent_id] = child.row.time_updated
+        except Unreadable:
+            pass
+    else:
+        for sub in subs:
+            try:
+                changed[sub.agent_id] = os.stat(sub.source.path).st_mtime_ns
+            except OSError:
+                pass
+
+    def place(sub: Any) -> tuple:
+        at = changed.get(sub.agent_id)
+        return (at is None, -(at or 0), sub.source.path, sub.agent_id)
+
+    return sorted(subs, key=place)
+
+
 def open_session(cat: Catalog | None = None, *, harness: str, session: str,
                  recent_s: float, now: float | None = None) -> dict[str, Any] | None:
     """One main session, opened: its row (as a list's), plus
@@ -598,7 +628,8 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
     * `reply`: `{at, text}`, the model's newest message after the newest user message of
       any kind in the session's last turn; None when there is none. It says nothing of
       whether the session is working.
-    * `subagents`: up to 8 of its subagents, in their listing's order, each
+    * `subagents`: up to 8 of its subagents, the ones that changed last (a file's last
+      change, an OpenCode child's row's), newest first, each
       `{description, agent_type, started, last_at, last}`: `started` from the head of its
       record, `last_at` the time of its newest record and `last` the text of its newest
       message. `more` is how many were not listed. Both are None when the session's
@@ -620,7 +651,8 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
     row["reply"] = _reply(entry)
     listing = subagents(entry.listed)
     if listing.state in (LISTED, NONE):
-        row["subagents"] = [_subagent(s) for s in listing.entries[:SUBAGENTS_MAX]]
+        row["subagents"] = [_subagent(s) for s in
+                            _newest(entry, listing.entries)[:SUBAGENTS_MAX]]
         row["more"] = (None if listing.unreadable_parts
                        else max(0, len(listing.entries) - SUBAGENTS_MAX))
     else:

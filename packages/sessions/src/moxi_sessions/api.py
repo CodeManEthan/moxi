@@ -55,7 +55,7 @@ The list of sessions (interface 4; `moxi_sessions.lists` says what each answers)
 * `sessions_folders(cat=None, *, harness=None, since=None, until=None, find=None,
   limit=200)`: the folders those sessions ran in, with how many each holds.
 * `session_opened(cat=None, *, harness, session, recent_s, now=None)`: one session's row
-  with its last reply, its first subagents and the command that picks it up again.
+  with its last reply, its newest subagents and the command that picks it up again.
 * `list_recent_s()`: the setting `list.recent_s`, the `recent_s` a caller with no
   number of its own passes.
 * `Catalog`, what the list reads through and keeps its reads in. With `cat` None each

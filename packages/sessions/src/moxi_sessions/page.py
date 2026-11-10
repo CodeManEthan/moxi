@@ -120,7 +120,7 @@ that changes moves to the front and is in the next `/api/list`.
 
 *`/api/session`* takes `harness` and `session` and answers the row's keys plus `reply`
 (`{at, text, truncated}`: the model's newest message when no user message of any kind
-follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (up to 8, each
+follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (the 8 that changed last, newest first, each
 `{description, agent_type, started, last_at, last}`, `last` being its newest message cut
 at 300 bytes; null when they could not be listed), `more` (how many were not listed; null
 with `subagents`, and when some of them could not be listed) and `resume` (`{command, folder}`: the harness's command for picking the
