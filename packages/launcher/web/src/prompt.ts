@@ -13,7 +13,8 @@
 // (read again each time it opens) and, with projects, places projects' picker under them.
 //
 // The chip reads `/api/catalog` and `/api/form`: its face is the harness, the model and
-// the effort the form is filled with, until one is set in its menu. The menu is three
+// the effort the form is filled with, until one is set in its menu. A read of either that
+// failed is made again when the tab is shown again and when the button's menu opens. The menu is three
 // lists side by side, the harness first; `older…` opens a field for a model's full name.
 // Another harness reads `/api/form` again for it and lets go of the model and the effort
 // set here, which are the first harness's own.
@@ -198,7 +199,9 @@ export class LauncherPrompt extends LitElement {
   #opened = 0;
 
   #shown = (): void => {
-    if (document.visibilityState === "visible") void this.#readTargets();
+    if (document.visibilityState !== "visible") return;
+    void this.#readTargets();
+    this.#readUnread();
   };
 
   #outside = (event: Event): void => {
@@ -288,6 +291,12 @@ export class LauncherPrompt extends LitElement {
     if (this.#form !== null && form.harness !== this.#form.harness) this.chosen = {};
     this.#form = form;
     this.#refill();
+  }
+
+  /** Reads the catalog and the form again, whichever the last read of it left unread. */
+  #readUnread(): void {
+    if (this.#catalog === null || this.#catalog.state === "error") void this.#readCatalog();
+    if (this.#form === null) void this.#readForm("");
   }
 
   #refill(): void {
@@ -472,7 +481,9 @@ export class LauncherPrompt extends LitElement {
 
   #toggleRun(): void {
     this.menu = this.menu === "run" ? "" : "run";
-    if (this.menu === "run") void this.#readTargets();
+    if (this.menu !== "run") return;
+    void this.#readTargets();
+    this.#readUnread();
   }
 
   #pickRun(run: Run): void {

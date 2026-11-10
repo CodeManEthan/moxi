@@ -744,6 +744,35 @@ def test_a_read_that_failed_is_not_a_fresh_reading_so_the_next_press_reads_again
     expect(go).to_have_text("Launch in slot 2")
 
 
+@pytest.mark.parametrize(("read", "again"), [
+    ("form", "the tab is shown again"), ("catalog", "the button's menu opens")])
+def test_a_launch_form_read_that_failed_is_made_again_with_no_reload(fake, ui_page, read, again):
+    failed = []
+
+    def fail_first(route) -> None:
+        if failed:
+            route.continue_()
+        else:
+            failed.append(route.request.url)
+            route.fulfill(status=500, body="")
+
+    ui_page.route(f"**/m/launcher/api/{read}*", fail_first)
+    ui_page.goto("/m/ui/")
+    piece = kit.home_prompt(ui_page)
+    go = piece.locator(".go")
+    expect(go).to_have_text("Launch in slot 2")
+    expect(go).to_be_disabled()
+    assert len(failed) == 1, failed
+    if again == "the tab is shown again":
+        ui_page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    else:
+        open_run(piece)
+        ui_page.keyboard.press("Escape")
+    expect(go).to_be_enabled()
+    expect(piece.locator(".chip")).to_be_visible()
+    expect(said(piece, "unread")).to_have_count(0)
+
+
 # --- a slot the user's defaults pin ---------------------------------------------------------
 
 @pytest.fixture
