@@ -39,8 +39,8 @@ could not be listed has `subagents` None, not 0.
 * From the head of the file (`Head`; an OpenCode session's come from its row): `folder`,
   `started`, `by_program` and, for Claude Code, the name its first lines give.
   `by_program` is True where a Claude head's `entrypoint` was read and starts with `sdk`,
-  and None everywhere else: a session is taken as a person's unless its record says a
-  program started it.
+  and None everywhere else: a session is listed with the ones started in a terminal
+  unless its record says a program started it.
 * From the session's last turn (`window(entry, turns=1)`): `name`, `model`, `activity`
   and `prompt`.
 

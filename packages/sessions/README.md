@@ -150,13 +150,14 @@ shell command that reads a secret file shows its first 160 characters, redacted.
 
 `sessions_list` (interface 4) answers the main sessions of all three roots as plain data,
 for a page or a caller that wants the same list: how many there are before and after its
-filters, how many each harness holds, and the sessions in groups. The first group is the
-sessions a person started that changed in the last hour (the setting `list.recent_s`, in
-seconds); then one group for each of the newest seven calendar days that hold a session,
+filters, how many each harness holds, and the sessions in groups. The main list is the
+sessions started in a terminal. The first group is those that changed in the last hour
+(the setting `list.recent_s`, in seconds); then one group for each of the newest seven calendar days that hold a session,
 in the reading process's time zone; then the rest as a count with its oldest change. A
 session whose record says a program started it (a Claude Code `entrypoint` starting
-`sdk`) is never in the first group: it is counted under its day, apart from the others.
-Where the record does not say, the session is taken as a person's.
+`sdk`) is never in the first group: it is counted under its day, apart from the others,
+and listed when asked for (`kind` `program`; the others are `main`). A session whose
+record does not say how it started is listed with the ones started in a terminal.
 
 A row holds the session's harness, id, path, last change and size, how many subagents it
 has, its folder and start, the name typed for it in the harness (never a title the

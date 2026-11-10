@@ -91,10 +91,13 @@ harness on the machine and nothing failing, `all` is 0 and `roots` is empty.
 The groups, without `find`:
 
 * `{key: "recent", count, rows, before}`: the sessions with `recent` true, the first 30 as
-  rows. Always there, with `count` 0 when it is empty.
+  rows. Always there, with `count` 0 when it is empty. These are sessions started in a
+  terminal: one a program started is in its day, however lately it changed.
 * `{key: "YYYY-MM-DD", count, rows, before, program: {count}}` for each of the newest
   seven local calendar days that hold a session not in `recent`: `count` and `rows` (the
-  first 8) are the sessions not started by a program, `program.count` the ones that were.
+  first 8) are the sessions started in a terminal, `program.count` the ones a program
+  started. A session whose record does not say how it started is listed with the ones
+  started in a terminal.
 * `{key: "earlier", count, oldest, before}`, only when a session is left: `count` of both
   kinds, `oldest` the oldest change among them (null when none has a change time), no
   rows.
@@ -105,13 +108,14 @@ the rows hold the whole group; `earlier`'s is where its first day starts. `total
 sum of every `count` and every `program.count`.
 
 *`/api/more`* takes `group` (`recent`, `found`, a day's key, `undated` or `earlier`),
-`kind` (`person`, the default, or `program`, which only a day has), `before` (a place an
+`kind` (`main`, the default, or `program`, which only a day has), `before` (a place an
 answer gave; left out, the group's start), `now`, and the filters. `now` is the `now` of
 the list answer the page is paging from, so the groups are cut where that list cut them;
 left out, the server's clock is used. It answers one of:
 
 * `recent`, a day, `found`: `{group, kind, rows, before}`, the next 30 rows; `kind` is
-  null for `found`.
+  `main` for the sessions started in a terminal, `program` for the ones a program
+  started, and null for `found`, whose rows are of both.
 * `earlier`: `{groups, before, left}`: the next older days, as many as hold 30 sessions
   between them, each in the list's day shape; `left` is how many sessions remain after
   them. Sessions with no change time come last, as the day `undated`.
@@ -154,7 +158,7 @@ from __future__ import annotations
 
 from moxi import modules
 
-from .lists import PERSON, PROGRAM
+from .lists import MAIN, PROGRAM
 from .shape import HARNESSES
 from .view import TEXT_MAX  # the most of one message's text an answer carries, in bytes
 
@@ -470,7 +474,7 @@ _FILTERS = {
 LIST_QUERY = {**_FILTERS, "folder": lb.Field("string", required=False, max=FOLDER_MAX)}
 MORE_QUERY = {
     "group": lb.Field("string", max=GROUP_MAX),
-    "kind": lb.Field("enum", required=False, values=(PERSON, PROGRAM)),
+    "kind": lb.Field("enum", required=False, values=(MAIN, PROGRAM)),
     "before": lb.Field("string", required=False, max=PLACE_MAX),
     "now": _SECONDS,
     **LIST_QUERY,

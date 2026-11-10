@@ -76,7 +76,8 @@ def changed_at(path, at: float) -> None:
 
 def claude(roots, n: int, at: float, *, program: bool = False, cwd: str = "/work/proj-a",
            project: str = "-work-proj-a", session: str | None = None) -> ClaudeTranscript:
-    """A Claude session that last changed at `at`: a person's, or one a program ran."""
+    """A Claude session that last changed at `at`: one started in a terminal, or one a
+    program ran."""
     t = ClaudeTranscript(roots[CLAUDE], session_id=session or sid(n), cwd=cwd,
                          project=project, entrypoint="sdk-cli" if program else "cli")
     t.user("Do the thing.", origin=None if program else "human")
@@ -260,7 +261,7 @@ def test_find_lists_both_kinds_in_one_group_and_marks_the_recent_rows(roots):
 
 # --- the groups -------------------------------------------------------------------------------
 
-def test_a_day_counts_a_persons_sessions_and_a_programs_apart(roots):
+def test_a_day_counts_the_sessions_started_in_a_terminal_and_a_programs_apart(roots):
     day = utc(2026, 11, 8, 12)
     for n in (1, 2, 3):
         claude(roots, n, day + n)
@@ -350,7 +351,7 @@ def test_recent_past_thirty_rows_gives_the_place_to_go_on_from(roots):
     rest = more_sessions(cat, group=RECENT, before=recent["before"], recent_s=HOUR,
                          now=NOW)
     assert ids(rest["rows"]) == [sid(n) for n in range(31, 36)]
-    assert rest == {"group": RECENT, "kind": "person", "rows": rest["rows"],
+    assert rest == {"group": RECENT, "kind": "main", "rows": rest["rows"],
                     "before": None}
 
 
@@ -537,7 +538,7 @@ def test_a_group_or_kind_that_is_not_one_is_refused(roots):
                 {"group": EARLIER, "kind": "program"}):
         with pytest.raises(ValueError):
             ask(**bad)
-    assert ask(group="2026-11-08") == {"group": "2026-11-08", "kind": "person",
+    assert ask(group="2026-11-08") == {"group": "2026-11-08", "kind": "main",
                                        "rows": [], "before": None}
 
 

@@ -20,16 +20,18 @@ for `/work/proj-a`; nothing else is folded, and no link is followed.
 
 **The groups.** A list with no `find` is cut into:
 
-* `recent`: the sessions a person started that changed within `recent_s` seconds of
-  `now`. A session a program started is not in it, however lately it changed.
+* `recent`: the sessions started in a terminal that changed within `recent_s` seconds
+  of `now`. A session a program started is not in it, however lately it changed.
 * one group per calendar day, for the newest seven days that hold a session not in
-  `recent`. A day's rows are the sessions a person started; the ones a program started
-  are counted beside them and listed only when asked for.
+  `recent`. A day's rows are the sessions started in a terminal; the ones a program
+  started are counted beside them and listed only when asked for.
 * `earlier`: every other session, of either kind, as a count.
 
-A session is a program's only where its head says so (`by_program` is True); one whose
-head does not say, or was not read, is listed as a person's, so a missing fact hides no
-session. A session is in exactly one group of an answer.
+The main list is the sessions started in a terminal. A session is a program's only
+where its head says so (`by_program` is True); one whose record does not say how it
+started, or whose head was not read, is listed with the ones started in a terminal, so a
+missing fact hides no session. A session is in exactly one group of an answer. The two
+kinds of rows are called `main` and `program`.
 
 Days are calendar days in the process's local time zone, so a day the clocks change on,
 of 23 or 25 hours, is one day. A session with no change time (an OpenCode row without
@@ -101,7 +103,7 @@ EARLIER = "earlier"
 UNDATED = "undated"
 
 #: The kinds of a group's rows.
-PERSON = "person"
+MAIN = "main"
 PROGRAM = "program"
 
 BEFORE_IS = ("a `before` is a place in the list as an answer gives it: a session's last "
@@ -276,12 +278,13 @@ def _split_recent(cat: Catalog, entries: Sequence[Entry], cutoff: int
 
 def _split_kinds(cat: Catalog, entries: Sequence[Entry]
                  ) -> tuple[list[Entry], list[Entry]]:
-    """A day's entries as a person's and a program's. Reads their heads."""
+    """A day's entries as the main list's and the ones a program started. Reads their
+    heads."""
     cat.read_heads(entries)
-    person, program = [], []
+    main, program = [], []
     for entry in entries:
-        (program if _program(cat, entry) else person).append(entry)
-    return person, program
+        (program if _program(cat, entry) else main).append(entry)
+    return main, program
 
 
 # --- rows ---------------------------------------------------------------------------------------
@@ -320,9 +323,9 @@ def _page(cat: Catalog, entries: Sequence[Entry], limit: int, cutoff: int
 
 def _day_group(cat: Catalog, key: str, entries: Sequence[Entry], cutoff: int
                ) -> dict[str, Any]:
-    person, program = _split_kinds(cat, entries)
-    rows, before = _page(cat, person, DAY_ROWS, cutoff)
-    return {"key": key, "count": len(person), "rows": rows, "before": before,
+    main, program = _split_kinds(cat, entries)
+    rows, before = _page(cat, main, DAY_ROWS, cutoff)
+    return {"key": key, "count": len(main), "rows": rows, "before": before,
             "program": {"count": len(program)}}
 
 
@@ -379,8 +382,8 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
       `all` is 0 and both are empty.
     * `groups`, in order. With no `find`: `recent` as `{key, count, rows, before}`; each
       day as `{key, count, rows, before, program}`, where `count` and `rows` are the
-      sessions a person started and `program` is `{count}`; then, when any session is
-      left, `earlier` as `{key, count, oldest, before}` with `oldest` the oldest change
+      sessions started in a terminal and `program` is `{count}`; then, when any session
+      is left, `earlier` as `{key, count, oldest, before}` with `oldest` the oldest change
       time in it. With `find`: `found` alone, as `{key, count, rows, before}`. A `before`
       is None when the rows hold the whole group.
 
@@ -389,9 +392,9 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
     session has, None where its subagents folder could not be listed; `activity` is
     `{at, who, text}` or None, its text the first 300 bytes of the message; `prompt` is
     `{at, text, truncated}` or None, its text cut at 64 KiB with `truncated` saying so
-    (the catalog keeps no more of it); and `recent` is true for
-    a session a person started that changed within `recent_s` of `now`. A session with no
-    change time sorts last and is counted in `earlier`.
+    (the catalog keeps no more of it); and `recent` is true for a session not started by
+    a program that changed within `recent_s` of `now`. A session with no change time
+    sorts last and is counted in `earlier`.
 
     Raises ValueError for a filter that is not one."""
     cat = _catalog(cat)
@@ -459,7 +462,7 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
     first session.
 
     * `recent`, a day, `found`: `{group, kind, rows, before}`, the next 30 rows and the
-      place after them, None when none is left. `kind` is `person` (the default) or
+      place after them, None when none is left. `kind` is `main` (the default) or
       `program`; `program` is a day's alone and answers the sessions a program started
       that day. For `found`, whose rows are of both kinds, `kind` is None.
     * `earlier`: `{groups, before, left}`: the next older days, as many as hold 30
@@ -473,8 +476,8 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
     f = _filters(harness, since, until, folder, find)
     if before is not None:
         parse_position(before)
-    if kind is not None and kind not in (PERSON, PROGRAM):
-        raise ValueError(f"kind is {PERSON} or {PROGRAM}, not {kind!r}")
+    if kind is not None and kind not in (MAIN, PROGRAM):
+        raise ValueError(f"kind is {MAIN} or {PROGRAM}, not {kind!r}")
     if not (group in (RECENT, FOUND, EARLIER) or _is_day(group)):
         raise ValueError(f"group is {RECENT}, {FOUND}, {EARLIER}, {UNDATED} or a day as "
                          f"YYYY-MM-DD, not {group!r}")
@@ -491,7 +494,7 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
     recent, rest = _split_recent(cat, entries, cutoff)
     if group == RECENT:
         rows, after = _page(cat, _after(recent, before), MORE_ROWS, cutoff)
-        return {"group": group, "kind": PERSON, "rows": rows, "before": after}
+        return {"group": group, "kind": MAIN, "rows": rows, "before": after}
     if group == EARLIER:
         older = _after(rest, before)
         taken: list[tuple[str, list[Entry]]] = []
@@ -507,9 +510,9 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
         return {"groups": [_day_group(cat, key, es, cutoff) for key, es in taken],
                 "before": position(last) if left and last is not None else None,
                 "left": left}
-    person, program = _split_kinds(cat, [e for e in rest if _day(e) == group])
-    kind = kind or PERSON
-    rows, after = _page(cat, _after(program if kind == PROGRAM else person, before),
+    main, program = _split_kinds(cat, [e for e in rest if _day(e) == group])
+    kind = kind or MAIN
+    rows, after = _page(cat, _after(program if kind == PROGRAM else main, before),
                         MORE_ROWS, cutoff)
     return {"group": group, "kind": kind, "rows": rows, "before": after}
 
@@ -755,7 +758,7 @@ def session_opened(*, harness: str, session: str, recent_s: float | None = None,
 
 __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIONS",
            "NEWEST_ROWS", "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FIND_MIN", "RECENT",
-           "FOUND", "EARLIER", "UNDATED", "PERSON", "PROGRAM", "position",
+           "FOUND", "EARLIER", "UNDATED", "MAIN", "PROGRAM", "position",
            "parse_position", "local_day", "list_sessions", "newest_sessions",
            "more_sessions", "list_folders", "open_session", "sessions_list",
            "sessions_more", "sessions_newest", "sessions_folders", "session_opened"]

@@ -88,8 +88,8 @@ LONG = 70_000        # more bytes than one message is sent with
 def seed(roots) -> dict:
     """A root of every kind of session the list meets, timed from now:
 
-    * a person's Claude session ten minutes old, named, with a prompt and a reply each
-      longer than an answer carries and two subagents;
+    * a Claude session started in a terminal, ten minutes old, named, with a prompt and
+      a reply each longer than an answer carries and two subagents;
     * a program's Claude session twenty minutes old;
     * a Claude session whose record says nothing, two days old;
     * a Codex session a day old, and a compressed rollout beside it;
@@ -161,7 +161,7 @@ def test_the_list_routes_are_reads_and_none_is_the_gateways():
                                                 "find"}
     assert set(found["/api/session"]["query"]) == {"harness", "session"}
     assert set(found["/api/folders"]["query"]) == {"harness", "since", "until", "find"}
-    assert found["/api/more"]["query"]["kind"]["values"] == ["person", "program"]
+    assert found["/api/more"]["query"]["kind"]["values"] == ["main", "program"]
 
 
 def _leaves(shape: dict, at: str, marked: str | None = None):
@@ -434,9 +434,9 @@ def test_more_pages_a_day_by_kind_and_earlier_by_whole_days(roots):
     assert program["rows"][0]["by_program"] is True and program["before"] is None
     assert program["rows"][0]["prompt"] is None
 
-    person = read("/api/more", f"group={with_program['key']}&{now}")
-    assert person["kind"] == "person"
-    assert [r["session"] for r in person["rows"]] == [r["session"]
+    main = read("/api/more", f"group={with_program['key']}&{now}")
+    assert main["kind"] == "main"
+    assert [r["session"] for r in main["rows"]] == [r["session"]
                                                       for r in with_program["rows"]]
 
     earlier = group(listed, "earlier")
