@@ -15,6 +15,10 @@ there. A bare question is written out bare.
 **A round's export** is its docket: every question of the round that reads as open,
 whatever else is set, and after them the parked ones, which are not put to him.
 
+**A round that has ended** has an empty docket, and its export says how it ended. A
+question whose record still reads as open or parked there (a correction made after the
+end can leave one so) is listed apart, as waiting for a new round, and is no entry.
+
 **A project's export** holds every open and every parked question on the project's list
 and in each open round of the project, each entry naming its holder. `waiting` gives
 those rows, and is the one function anything that lists what waits in a project takes
@@ -76,7 +80,7 @@ class Entry:
     origin: str | None
     #: What it holds up: `"all"`, `"none"`, or stage ids.
     blocks: str | tuple[str, ...] | None
-    #: `open` or `parked`, as it reads now.
+    #: `open` or `parked`, as it reads now; `left` for one of a round that has ended.
     state: str
     #: Who asked it, and when.
     by: str | None
@@ -89,6 +93,8 @@ class Entry:
     #: The record it was moved here from, and what it held up there, or None.
     moved_from: str | None = None
     held: str | tuple[str, ...] | None = None
+    #: What the record of a `left` question reads as, `open` or `parked`, or None.
+    left_as: str | None = None
 
     def data(self) -> dict:
         """The entry as data: the fields every question has, then each further one only
@@ -97,6 +103,8 @@ class Entry:
                 "from": self.origin,
                 "blocks": None if self.blocks is None else questions.stored(self.blocks),
                 "state": self.state, "by": self.by, "at": self.at}
+        if self.left_as is not None:
+            data["left_as"] = self.left_as
         if self.until is not None:
             data["until"] = self.until
         if self.options:
@@ -113,10 +121,14 @@ class Entry:
 class Rows:
     """Question rows: the `entries`, the open ones first and the parked ones after, each
     group in the order of its logs; and the error of each round whose log could not be
-    read, whose questions are therefore not among them."""
+    read, whose questions are therefore not among them. The rows of one round that has
+    ended are none: `ended` says how it ended, as the index keeps it, and `left` holds
+    its questions whose records still read as open or parked."""
 
     entries: tuple[Entry, ...]
     unreadable: tuple[Unreadable, ...] = ()
+    ended: Mapping | None = None
+    left: tuple[Entry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -124,7 +136,9 @@ class Export:
     """One export: `name` is the round or the project it is of, `round` the round's name
     or None for a project's, `view` the view of a round's export or None, `computed`
     the second it was computed in, and `read_back` the project's list of rulings not
-    yet shown. `unreadable` says, a line each, which logs could not be read."""
+    yet shown. `unreadable` says, a line each, which logs could not be read. For a
+    round that has ended, `ended` says how (`how`, `by`, `record`, `at`) and `left`
+    holds its questions that wait for a new round, which are no entries."""
 
     name: str
     project: str
@@ -134,6 +148,8 @@ class Export:
     entries: tuple[Entry, ...]
     read_back: shown.ReadBack
     unreadable: tuple[str, ...] = ()
+    ended: Mapping | None = None
+    left: tuple[Entry, ...] = ()
 
     @property
     def open(self) -> tuple[Entry, ...]:
@@ -149,6 +165,8 @@ class Export:
         return {"of": self.name, "project": self.project, "round": self.round,
                 "view": self.view, "computed": self.computed,
                 "entries": [entry.data() for entry in self.entries],
+                "ended": None if self.ended is None else dict(self.ended),
+                "left": [entry.data() for entry in self.left],
                 "unreadable": list(self.unreadable),
                 "read_back": read_back_data(back)}
 
@@ -190,7 +208,9 @@ ENTRIES: dict[str, Callable[[str, index.Item, Callable[[str], bool]], Entry]] = 
 
 def _entries(summary: index.Summary, closed: Callable[[str], bool]) -> list[Entry]:
     """The rows one log gives: its items of the kinds in `ENTRIES` that read as open or
-    parked, in the log's order."""
+    parked, in the log's order. In a round that has ended each is `LEFT`, which
+    `_ordered` keeps out of every listing of what waits."""
+    ended = summary.slug is not None and summary.ended is not None
     found = []
     for item in summary.items:
         make = ENTRIES.get(item.kind)
@@ -202,7 +222,9 @@ def _entries(summary: index.Summary, closed: Callable[[str], bool]) -> list[Entr
             # word of what it waited for.
             entry = replace(entry, until=None)
         if entry.state in (questions.OPEN, questions.PARKED):
-            found.append(entry)
+            reads = questions.shown_as(entry.state, ended=ended)
+            found.append(entry if reads == entry.state
+                         else replace(entry, state=reads, left_as=entry.state))
     return found
 
 
@@ -245,7 +267,8 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
 
 def of_round(home: folders.Home, slug: str, *, settings=None, env=None) -> Rows:
     """The question rows of one round: every question of it that reads as open, then
-    the parked ones. Raises `NoRound` for a round that was never opened and `Unreadable`
+    the parked ones; none of a round that has ended, whose `ended` and `left` are
+    given in their place. Raises `NoRound` for a round that was never opened and `Unreadable`
     for one whose log can't be read. It writes nothing."""
     try:
         summary = index.read(home.project, home.folder, slug, env=env)
@@ -254,7 +277,9 @@ def of_round(home: folders.Home, slug: str, *, settings=None, env=None) -> Rows:
     if summary.unreadable is not None:
         raise summary.unreadable
     closed = _closed(own.load() if settings is None else settings)
-    return Rows(_ordered(_entries(summary, closed)))
+    found = _entries(summary, closed)
+    return Rows(_ordered(found), ended=summary.ended,
+                left=tuple(entry for entry in found if entry.state == questions.LEFT))
 
 
 # -- the export --------------------------------------------------------------------------
@@ -301,7 +326,8 @@ def questions_of(name: str, *, view: str | None = None, settings=None,
                   project=home.project,
                   round=None if slug is None else f"{home.project}/{slug}",
                   view=None if slug is None else DOCKET, computed=now,
-                  entries=rows.entries, read_back=back, unreadable=unreadable)
+                  entries=rows.entries, read_back=back, unreadable=unreadable,
+                  ended=rows.ended, left=rows.left)
 
 
 # -- the two forms -----------------------------------------------------------------------
@@ -313,16 +339,28 @@ def as_json(export: Export) -> str:
 
 def as_markdown(export: Export) -> str:
     """The export as plain markdown, ending in a line break: the open questions, the
-    parked ones under their own heading, the logs that could not be read when there
+    parked ones under their own heading, those of a round that has ended under
+    theirs, the logs that could not be read when there
     are any, and last the rulings not yet shown."""
     opened, parked = export.open, export.parked
     what = f"{export.view}, computed" if export.view else "computed"
     lines = [f"# Questions of {export.name}", "",
-             f"{what} {export.computed}: {len(opened)} open, {len(parked)} parked", "",
-             "## Open", ""]
+             f"{what} {export.computed}: {len(opened)} open, {len(parked)} parked", ""]
+    if export.ended is not None:
+        ended = export.ended
+        lines += [f"This round has ended: {ended.get('how')} by {ended.get('by')} at "
+                  f"{ended.get('at')}, record {ended.get('record')}. Nothing of it is "
+                  "put to the operator.", ""]
+    lines += ["## Open", ""]
     lines += _group(opened, "No question is open.")
     lines += ["## Parked: not put to the operator", ""]
     lines += _group(parked, "No question is parked.")
+    if export.left:
+        lines += ["## Waiting for a new round: not put to the operator", "",
+                  "The round ended, and a ruling of each was replaced or taken back "
+                  "since. None waits on this round; one that is still to be answered "
+                  "is asked again in a new round.", ""]
+        lines += _group(export.left, "")
     if export.unreadable:
         lines += ["## Logs that can't be read", "",
                   "What these hold is not in this export.", ""]
@@ -341,7 +379,9 @@ def _entry_lines(entry: Entry) -> list[str]:
     lines = [f"### {entry.holder} {entry.id}: {entry.text}", "",
              f"- from: {entry.origin}",
              f"- blocks: {questions.said(entry.blocks)}",
-             f"- state: {entry.state}",
+             f"- state: {questions.called(entry.state)}"
+             + ("" if entry.left_as is None
+                else f" (reads as {entry.left_as}, and the round has ended)"),
              f"- by: {entry.by}",
              f"- at: {entry.at}"]
     if entry.until is not None:

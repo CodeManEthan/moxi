@@ -40,6 +40,11 @@ WITHDRAWN = "withdrawn"
 #: question that is still asked: the record it became, in the other log, has one of
 #: the four.
 MOVED = "moved"
+#: What a question is shown as when its record reads as open or parked in a round that
+#: has ended. No log records it: a correction made after the end can leave a question
+#: so, and nothing reopens the round or moves the question. It waits on nobody there;
+#: asked again in a new round, it does.
+LEFT = "left"
 
 #: What `blocks` holds for a question that holds up every stage, and for one that holds
 #: up none.
@@ -202,6 +207,18 @@ def current(question: states.Question, state: states.State, *,
     return OPEN if reached(question, state, closed=closed) else question.state
 
 
+def shown_as(reads: str | None, *, ended: bool) -> str | None:
+    """The state a question is shown as, given the state it reads as now and whether
+    its round has ended: `LEFT` for one that reads as open or parked in a round that
+    has, so that no listing gives it as waiting on the operator."""
+    return LEFT if ended and reads in (OPEN, PARKED) else reads
+
+
+def called(state: str | None) -> str:
+    """What a state is called where questions are counted or headed."""
+    return "waiting for a new round" if state == LEFT else str(state)
+
+
 # -- what the index keeps ----------------------------------------------------------------
 
 def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
@@ -252,8 +269,8 @@ def listed(body: Mapping, *, closed: Callable[[str], bool] | None = None) -> str
     return OPEN if came else PARKED
 
 
-__all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "MOVED", "ALL", "NONE", "ROUND_ID",
+__all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "MOVED", "LEFT", "ALL", "NONE", "ROUND_ID",
            "PROJECT_ID", "STAGE", "UNTIL_ROUND", "UNSTAGE", "find", "next_id",
            "parse_blocks", "said", "stored", "holds_every", "recorded_stages",
            "finished_stages", "left_stages", "unrecorded", "stages_said", "is_closed",
-           "reached", "current", "waiting", "listed"]
+           "reached", "current", "shown_as", "called", "waiting", "listed"]

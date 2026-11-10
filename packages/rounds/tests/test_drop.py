@@ -519,6 +519,71 @@ def test_a_correction_on_a_dropped_round_is_recorded_and_reopens_nothing(
     assert [one["holder"] for one in waiting["open"] + waiting["parked"]] == ["proj-a"]
 
 
+def test_a_question_a_correction_leaves_unanswered_in_an_ended_round_waits_nowhere(
+        rounds, capsys):
+    dropped_with_a_ruling_and_a_question(rounds)
+    assert main(["rule", A, "revoke:C1", "--record", "comms:43"]) == 0
+    capsys.readouterr()
+    before = logs(rounds)
+    # The record is as the correction left it: nothing reopened it or moved it.
+    assert [(one.id, one.state) for one in held(round_log(rounds)).questions] == [
+        ("Q1", "open"), ("Q2", "withdrawn")]
+
+    assert main(["show", A]) == 0
+    out = capsys.readouterr().out
+    assert "\nended: dropped by operator at " in out
+    assert "\nquestions: 1 waiting for a new round, 1 withdrawn\n" in out
+    assert "state: waiting for a new round" in out and "state: open" not in out
+    assert "reads as open, and the round has ended" in out
+    assert main(["show", A, "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["ended"]["how"] == "dropped"
+    assert [(one["id"], one["state"], one.get("left_as"))
+            for one in shown["questions"]] == [("Q1", "left", "open"),
+                                               ("Q2", "withdrawn", None)]
+
+    assert main(["list", A, "--questions"]) == 0
+    out = capsys.readouterr().out
+    assert ": 0 open, 0 parked\n" in out
+    assert "This round has ended: dropped by operator at " in out
+    docket, _heading, left = out.partition(
+        "## Waiting for a new round: not put to the operator\n")
+    assert "No question is open." in docket and "Q1" not in docket
+    assert f"### {A} Q1: {SAID}" in left
+    assert "- state: waiting for a new round (reads as open, and the round has ended)" \
+        in left
+    assert main(["list", A, "--questions", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["entries"] == [] and listed["ended"]["how"] == "dropped"
+    assert [(one["id"], one["state"], one["left_as"]) for one in listed["left"]] == [
+        ("Q1", "left", "open")]
+
+    assert main(["list", "proj-a", "--closed", "--json"]) == 0
+    counts = json.loads(capsys.readouterr().out)["rounds"][0]["counts"]
+    assert (counts["open"], counts["parked"]) == (0, 0)
+    assert main(["list", "proj-a", "--questions", "--json"]) == 0
+    of_project = json.loads(capsys.readouterr().out)
+    assert [one["holder"] for one in of_project["entries"]] == ["proj-a"]
+    assert of_project["ended"] is None and of_project["left"] == []
+
+    note = (rounds / "a-round" / "round-note.md").read_text(encoding="utf-8")
+    assert "### Waiting for a new round\n" in note and "### Open" not in note
+    assert "1 waiting for a new round, 1 withdrawn" in note
+    assert logs(rounds) == before
+
+
+def test_an_open_round_shows_no_question_as_waiting_for_a_new_round(rounds, capsys):
+    ask(SAID)
+
+    assert main(["show", A, "--json"]) == 0
+    assert [one["state"] for one in json.loads(capsys.readouterr().out)["questions"]] \
+        == ["open"]
+    assert main(["list", A, "--questions", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [one["state"] for one in listed["entries"]] == ["open"]
+    assert listed["ended"] is None and listed["left"] == []
+
+
 def test_a_dropped_round_is_dropped_whatever_is_recorded_on_it_later(rounds):
     drop()
     rule(target=A, standing=True, text=RULED)

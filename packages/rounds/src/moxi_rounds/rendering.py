@@ -52,7 +52,8 @@ RULINGS_FILE = "rulings.md"
 QUESTIONS_FILE = "questions.md"
 
 #: The order the states of a question are listed in.
-_STATES = (asked.OPEN, asked.PARKED, asked.RULED, asked.WITHDRAWN, asked.MOVED)
+_STATES = (asked.OPEN, asked.PARKED, asked.LEFT, asked.RULED, asked.WITHDRAWN,
+           asked.MOVED)
 
 #: A header value that reads as itself with no quotes around it.
 _PLAIN = re.compile(r"[A-Za-z][A-Za-z0-9._-]*")
@@ -151,16 +152,18 @@ def _questions_by_state(listed: list, heading: str) -> list[str]:
         one["state"] for one in listed if one["state"] not in _STATES)]
     groups = {state: [one for one in listed if one["state"] == state]
               for state in found}
-    lines = [", ".join(f"{len(group)} {state}" for state, group in groups.items()
-                       if group) or "No question."]
+    lines = [", ".join(f"{len(group)} {asked.called(state)}"
+                       for state, group in groups.items() if group) or "No question."]
     for state, group in groups.items():
         if not group:
             continue
-        lines += ["", f"{heading} {str(state).capitalize()}", ""]
+        lines += ["", f"{heading} {asked.called(state).capitalize()}", ""]
         for one in group:
             lines += _item(f"{one['id']}: {one['text']}")
             said = [f"from: {one['from']}", f"blocks: {_listed(one['blocks'])}",
                     f"by: {one['by']}", f"at: {one['at']}"]
+            if "left_as" in one:
+                said.append(f"reads as {one['left_as']}, and the round has ended")
             if "recorded" in one:
                 said.append(f"recorded as {one['recorded']} until {one.get('until')}, "
                             "which has come")

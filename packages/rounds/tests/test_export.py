@@ -159,7 +159,7 @@ def test_the_export_says_what_it_is_of_and_when_it_was_computed(rounds):
         "of": "proj-a", "project": "proj-a", "round": None, "view": None,
         "computed": NOW}
     assert list(of_round) == ["of", "project", "round", "view", "computed", "entries",
-                              "unreadable", "read_back"]
+                              "ended", "left", "unreadable", "read_back"]
 
 
 def test_out_with_json_writes_the_two_files_and_prints_their_paths(
@@ -505,9 +505,10 @@ def test_a_projects_export_holds_no_question_of_a_round_that_was_dropped(
     assert found.entries[1].moved_from == f"{B}:Q1"
     assert f"### {B} " not in printed(capsys, "proj-a", "--questions")
     assert export.waiting(folders.home("proj-a")).entries == found.entries
-    # The round's own export is still what its log says.
-    assert named(entry.data() for entry in export.questions_of(B).entries) == [
-        (B, "Q2", "open")]
+    # The round's own export has it off the docket, as waiting for a new round.
+    of_round = export.questions_of(B)
+    assert of_round.entries == () and of_round.ended["how"] == "dropped"
+    assert named(entry.data() for entry in of_round.left) == [(B, "Q2", "left")]
 
 
 def test_a_projects_export_is_the_rows_waiting_in_the_project(rounds):

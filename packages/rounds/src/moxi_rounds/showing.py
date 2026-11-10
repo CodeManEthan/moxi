@@ -10,6 +10,11 @@ recorded for it; then its records, a section for each kind: its questions by sta
 each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
 
+A round that has ended is shown with how it ended. A question whose record still reads
+as open or parked there (a correction made after the end can leave one so) is shown as
+waiting for a new round, apart from the open and the parked ones: it is put to nobody
+on a round that has ended.
+
 A round whose log can't be read is shown as that, with the file and the line, and with
 nothing else: not as an empty round, and not as it was when last read. While the log
 is known to have changed outside this machine, the round is shown with a line that
@@ -38,8 +43,8 @@ from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
 
 #: The order the states of a question are shown in.
-_STATES = (questions.OPEN, questions.PARKED, questions.RULED, questions.WITHDRAWN,
-           questions.MOVED)
+_STATES = (questions.OPEN, questions.PARKED, questions.LEFT, questions.RULED,
+           questions.WITHDRAWN, questions.MOVED)
 
 
 @dataclass(frozen=True)
@@ -133,10 +138,14 @@ def _questions(found: Shown) -> list:
     listed = []
     for question in found.state.questions:
         reads = questions.current(question, found.state, closed=found.closed)
+        state = questions.shown_as(reads, ended=found.state.ended is not None)
         data = {"id": question.id, "text": question.text, "from": question.origin,
                 "blocks": (None if question.blocks is None
                            else questions.stored(question.blocks)),
-                "state": reads, "by": question.by, "at": question.at}
+                "state": state, "by": question.by, "at": question.at}
+        if state != reads:
+            # What its record reads as, in a round that has ended.
+            data["left_as"] = reads
         if reads != question.state:
             # A parked question whose wait is over reads as open; what the log
             # recorded is kept beside it.
@@ -159,12 +168,16 @@ def _question_lines(listed: list) -> list[str]:
         one["state"] for one in listed if one["state"] not in _STATES)]
     count = {state: sum(one["state"] == state for one in listed)
              for state in states_found}
-    lines = ["questions: " + (", ".join(f"{number} {state}" for state, number in
-                                        count.items() if number) or "none")]
+    lines = ["questions: " + (", ".join(f"{number} {questions.called(state)}"
+                                        for state, number in count.items() if number)
+                              or "none")]
     for state in states_found:
         for one in (one for one in listed if one["state"] == state):
             said = [f"from: {one['from']}", f"blocks: {_blocks(one['blocks'])}",
-                    f"state: {state}", f"by: {one['by']}", f"at: {one['at']}"]
+                    f"state: {questions.called(state)}", f"by: {one['by']}",
+                    f"at: {one['at']}"]
+            if "left_as" in one:
+                said.append(f"reads as {one['left_as']}, and the round has ended")
             if "recorded" in one:
                 said.append(f"recorded as {one['recorded']} until {one.get('until')}, "
                             "which has come")

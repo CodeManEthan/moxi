@@ -184,3 +184,17 @@ def test_a_stage_left_the_plan_when_a_change_removed_it_or_a_ruling_took_it_out(
     assert questions.left_stages(found) == {"B1", "B3"}
     assert questions.left_stages(state.State()) == frozenset()
     assert questions.recorded_stages(found) == ("B1", "B2", "B3", "B4")
+
+
+@pytest.mark.parametrize("reads, ended, shown", [
+    ("open", False, "open"), ("parked", False, "parked"),
+    ("open", True, "left"), ("parked", True, "left"),
+    ("ruled", True, "ruled"), ("withdrawn", True, "withdrawn"), ("moved", True, "moved")])
+def test_a_question_that_waits_is_shown_as_left_once_its_round_has_ended(
+        reads, ended, shown):
+    assert questions.shown_as(reads, ended=ended) == shown
+
+
+def test_a_left_question_is_called_waiting_for_a_new_round():
+    assert questions.called("left") == "waiting for a new round"
+    assert questions.called("open") == "open"
