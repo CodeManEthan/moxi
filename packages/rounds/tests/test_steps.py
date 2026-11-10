@@ -319,6 +319,50 @@ def test_a_skip_taken_back_leaves_the_step_as_it_was(folder):
     assert step(folder, "verify-design").state == steps.READY
 
 
+@pytest.mark.parametrize("item, name, stage_id", [
+    ("skip:retro", "retro", None),
+    ("skip:ratify", "ratify", None),
+    ("skip:check:B1", "check", "B1"),
+    ("skip:verify-build:B1", "verify-build", "B1"),
+])
+def test_a_skip_of_a_step_whose_row_is_not_built_is_read_all_the_same(
+        folder, item, name, stage_id):
+    fold(folder, stage("B1"), stage("B2"))
+    assert step(folder, name, stage_id).state == steps.NOT_BUILT
+
+    rule(item)
+
+    found = step(folder, name, stage_id)
+    assert (found.state, found.stage, found.settled) == (steps.SKIPPED, stage_id, True)
+    assert found.entry == step(folder, name, "B2").entry
+    assert steps.is_settled(folded(folder), name, stage_id)
+    assert [(one.stage, one.state) for one in steps.of(folded(folder))
+            if one.step == name] == (
+        [(None, steps.SKIPPED)] if stage_id is None
+        else [("B1", steps.SKIPPED), ("B2", steps.NOT_BUILT)])
+
+    rule("revoke:C1")
+
+    assert step(folder, name, stage_id).state == steps.NOT_BUILT
+
+
+def test_a_skip_is_read_before_the_row_of_its_step_is_asked(folder, monkeypatch):
+    fold(folder, stage("B1"))
+    rule("skip:retro")
+
+    def never_asked(state, about):
+        raise AssertionError("the row of a skipped step was asked")
+
+    monkeypatch.setitem(steps.ROWS, "retro", never_asked)
+    monkeypatch.setitem(steps.ROWS, "check", lambda state, about: steps.Step(
+        "check", steps.READY, stage=about.stage))
+
+    assert step(folder, "retro").state == steps.SKIPPED
+    assert step(folder, "check", "B1").state == steps.READY
+    rule("skip:check:B1")
+    assert step(folder, "check", "B1").state == steps.SKIPPED
+
+
 @pytest.mark.parametrize("flow", ["full", "small"])
 def test_a_skip_of_the_questions_step_lets_its_stage_past_for_everything_that_asks(
         opened, flow):

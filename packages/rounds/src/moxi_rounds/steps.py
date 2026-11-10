@@ -9,7 +9,8 @@ are the same answer, and a skip that lets one of them past lets all of them past
 **The states.** A step is `NOT_DUE` (nothing asks for it yet), `WAITING` (it can't be
 done until what its `waits` name is met; each names what is waited for and the command
 that meets it), `READY` (it can be done now), `DONE` or `SKIPPED`. A step whose row is
-not in `ROWS` reads `NOT_BUILT`: nothing is known of it, and nothing reads it as done.
+not in `ROWS` reads `NOT_BUILT` unless it is skipped: nothing is known of it, and
+nothing reads it as done.
 
 **The order.** The steps a flow lists, in its order, with the ones it has without
 listing them put beside the step each comes with: the questions step after the step that
@@ -23,8 +24,14 @@ round's state and an `Asked` (the round's name for the commands it prints, the s
 for a step of one stage, and how to tell whether another round is closed) and returns a
 `Step`. A step is added by adding its row; nothing else changes.
 
+**A skip.** A skip that stands is read here, before any row and whether or not the step
+has one: the step reads `SKIPPED`, so a row never asks about its own skip and a step
+whose row is not built is passed like any other. The questions step is the one
+exception: a skip of it for a stage lets the stage past the questions it lists and no
+other, so its row says when the stage reads as skipped.
+
 - `design`: done once a version is frozen; ready until then.
-- `verify-design`: skipped by a skip that stands; done while the design's standing at
+- `verify-design`: done while the design's standing at
   its current version is one that counts as verified. It waits for a frozen version,
   for that version to pass the check of its trace rows where the check was asked for,
   and for whatever must happen before a pass can read the design. `Step.asked` says
@@ -137,8 +144,6 @@ def _design(state: states.State, about: Asked) -> Step:
 
 
 def _verify_design(state: states.State, about: Asked) -> Step:
-    if skips.is_skipped(state, VERIFIES):
-        return Step(VERIFIES, SKIPPED)
     asked = brake.asked(state, name=about.name)
     if versions.standing(state).word in versions.VERIFIED:
         return Step(VERIFIES, DONE, asked=asked)
@@ -173,7 +178,8 @@ def _docket(state: states.State, about: Asked) -> Step:
     return Step(QUESTIONS, READY if asked else DONE, questions=asked)
 
 
-#: The function that says each step's state. A step with no row reads `NOT_BUILT`.
+#: The function that says each step's state. A step with no row reads `NOT_BUILT`,
+#: and a skipped step is read before its row is asked.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket}
 
 
@@ -212,6 +218,10 @@ def _is_of_a_stage(step: str) -> bool:
 
 
 def _read(state: states.State, step: str, entry: Mapping | None, about: Asked) -> Step:
+    # The questions step's own row reads its skip: such a skip lets a stage past the
+    # questions it lists, and the stage is held again by one asked afterwards.
+    if step != QUESTIONS and skips.is_skipped(state, step, about.stage):
+        return Step(step, SKIPPED, stage=about.stage, entry=entry)
     row = ROWS.get(step)
     if row is not None:
         return dataclasses.replace(row(state, about), entry=entry)

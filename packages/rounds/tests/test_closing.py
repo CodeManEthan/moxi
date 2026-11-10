@@ -25,6 +25,10 @@ FLOWS = """\
 
     [flows.sketch]
     steps = [ { step = "design", by = "lead" } ]
+
+    [flows.review]
+    steps = [ { step = "design", by = "lead" },
+              { step = "retro", by = "worker" } ]
     """
 
 
@@ -199,6 +203,65 @@ def test_a_skip_recorded_before_the_design_closes_on_the_freezing(folder):
     fold(folder)
 
     assert types(folder)[-2:] == ["design.frozen", "round.closed"]
+
+
+def test_a_round_whose_flow_ends_in_a_retro_closes_on_the_skip_of_it(opened):
+    folder = opened("review")
+    fold(folder)
+    assert status(folder) == "open"
+    assert waits(folder) == ("step retro, not-built",)
+
+    rule("skip:retro")
+
+    assert types(folder)[-2:] == ["ruling.recorded", "round.closed"]
+    assert status(folder) == "closed"
+
+
+def test_a_retro_skipped_before_the_design_closes_on_the_freezing(opened):
+    folder = opened("review")
+    rule("skip:retro")
+    assert waits(folder) == ("step design, ready",)
+
+    fold(folder)
+
+    assert types(folder)[-2:] == ["design.frozen", "round.closed"]
+
+
+def test_a_skipped_retro_reads_the_same_in_every_place_that_shows_it(opened, capsys):
+    folder = opened("review")
+    fold(folder, question("Q1", blocks='"none"'))
+    before = run(capsys, "show", ROUND)
+    assert "step: retro, not-built\n" in before
+    assert "close waits for: step retro, not-built; question Q1, open\n" in before
+    assert run(capsys, "next", ROUND).splitlines()[0] == (
+        f"round {ROUND}   flow review   step retro   not built in this version")
+
+    rule("skip:retro")
+
+    shown = run(capsys, "show", ROUND)
+    assert not [line for line in shown.splitlines() if line.startswith("step: ")]
+    assert "skipped: retro, by C1" in shown
+    assert "close waits for: question Q1, open\n" in shown
+    assert "not-built" not in shown
+    assert run(capsys, "next", ROUND).splitlines()[:2] == [
+        f"round {ROUND}   flow review   step none: every step of the flow is done or "
+        "skipped",
+        "close waits for: question Q1, open"]
+    assert waits(folder) == ("question Q1, open",)
+    assert api.round(ROUND)["step"] is None
+
+
+def test_a_skip_of_the_retro_taken_back_keeps_the_round_open_again(opened, capsys):
+    folder = opened("review")
+    fold(folder, question("Q1", blocks='"none"'))
+    rule("skip:retro")
+
+    rule("revoke:C1")
+
+    assert waits(folder) == ("step retro, not-built", "question Q1, open")
+    assert "step: retro, not-built\n" in run(capsys, "show", ROUND)
+    rule("Q1", text="They do.")
+    assert status(folder) == "open"
 
 
 def test_a_flow_that_is_a_design_alone_closes_on_its_freezing(opened):
