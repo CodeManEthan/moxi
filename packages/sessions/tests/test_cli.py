@@ -435,6 +435,22 @@ def test_list_names_a_default_root_that_exists_and_cannot_be_read(listed, capsys
     assert f"codex: {sessions} could not be listed" in err
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder without permission")
+def test_list_says_how_many_parts_of_a_root_it_could_not_list(listed, capsys):
+    claude_session(listed, 1, time.time() - HOUR)
+    unlisted = listed / ".claude" / "projects" / "-work-proj-c"
+    unlisted.mkdir()
+    unlisted.chmod(0)
+    try:
+        code, out, err = run(capsys, "list")
+    finally:
+        unlisted.chmod(0o700)
+
+    assert code == 0 and out.splitlines()[0].endswith(sid(1))
+    assert (f"claude: 1 folders or files under {listed / '.claude' / 'projects'} could "
+            "not be listed; their sessions are not counted") in err
+
+
 def test_list_refuses_arguments_that_are_not_ones(listed, capsys):
     for argv, said in ((("--since", "soon"), "is not a time"),
                        (("--folder", "proj-a"), "absolute path"),

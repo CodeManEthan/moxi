@@ -330,8 +330,8 @@ def _counted(cat: Catalog, f: _Filters, now: float
     return {
         "now": now, "today": local_day(now), "all": len(gathered.entries),
         "total": len(entries), "unreadable": gathered.unreadable,
-        "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason}
-                  for r in gathered.roots],
+        "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason,
+                   "parts": r.parts} for r in gathered.roots],
         "harnesses": [{"harness": h, "count": counts[h]} for h in gathered.listed],
     }, entries
 
@@ -349,7 +349,12 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
     * `all`, the sessions before the filters, and `total`, the ones after them; both
       count sessions of both kinds.
     * `unreadable`, the compressed Codex rollouts left out, None when Codex's root was
-      not listed; `roots`, a `{harness, root, reason}` per root that could not be listed.
+      not listed.
+    * `roots`: `{harness, root, reason, parts}` per harness whose root was not read
+      whole. `reason` says why a root could not be listed, and `parts` is then None.
+      For a root that was listed, `reason` is None and `parts` is how many folders and
+      files under it could not be listed: their sessions are in no count of the answer,
+      so `all`, `total` and that harness's count are short by them.
     * `harnesses`: `{harness, count}` for each harness whose root was listed, counted
       under every filter but the harness. A harness that is not on the machine (its root
       is the default one and does not exist) is in neither `roots` nor `harnesses`; one
@@ -363,7 +368,8 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
       is None when the rows hold the whole group.
 
     A row is `{harness, session, path, changed, size, subagents, folder, started,
-    by_program, name, model, activity, prompt, recent}`: `activity` is
+    by_program, name, model, activity, prompt, recent}`: `subagents` is how many the
+    session has, None where its subagents folder could not be listed; `activity` is
     `{at, who, text}` or None, `prompt` is `{at, text}` or None, and `recent` is true for
     a session a person started that changed within `recent_s` of `now`. A session with no
     change time sorts last and is counted in `earlier`.
@@ -595,7 +601,8 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
       `{description, agent_type, started, last_at, last}`: `started` from the head of its
       record, `last_at` the time of its newest record and `last` the text of its newest
       message. `more` is how many were not listed. Both are None when the session's
-      subagents could not be listed.
+      subagents could not be listed; `more` alone is None when some of them could not
+      be, since how many there are is then not known.
     * `resume`: `{command, folder}`, the harness's command for picking the session up
       again and where to run it; None for a harness with none.
 
@@ -611,7 +618,8 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
     listing = subagents(entry.listed)
     if listing.state in (LISTED, NONE):
         row["subagents"] = [_subagent(s) for s in listing.entries[:SUBAGENTS_MAX]]
-        row["more"] = max(0, len(listing.entries) - SUBAGENTS_MAX)
+        row["more"] = (None if listing.unreadable_parts
+                       else max(0, len(listing.entries) - SUBAGENTS_MAX))
     else:
         row["subagents"] = None
         row["more"] = None

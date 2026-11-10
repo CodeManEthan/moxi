@@ -25,7 +25,8 @@ then each session's line is followed by the newest thing said in it, on one line
 secrets module is installed; with `--text` and no secrets it says so once, on stderr.
 `--json` prints the list as one JSON object: the counts, the roots that could not be
 listed, and `rows`, whose `activity` and `prompt` carry their `text` only with `--text`.
-A root that could not be listed is named on stderr, and the other roots are listed. A
+A root that could not be listed is named on stderr, and the other roots are listed; so
+is a root with folders or files under it that could not be listed, with how many. A
 harness that is not on the machine (its root is the default one and does not exist) is
 not a failure: nothing is printed for it.
 
@@ -225,10 +226,15 @@ def _list(args, prog: str) -> int:
         print(json.dumps(document(**answer, limit=args.limit, text=args.text,
                                   redacted=redact is not None, rows=rows), indent=2))
         return 0
-    for failure in answer["roots"]:
-        where = failure["root"] or "its root"
-        print(f"{prog} list: {failure['harness']}: {where} could not be listed: "
-              f"{failure['reason']}", file=sys.stderr)
+    for unread in answer["roots"]:
+        where = unread["root"] or "its root"
+        if unread["reason"] is not None:
+            print(f"{prog} list: {unread['harness']}: {where} could not be listed: "
+                  f"{unread['reason']}", file=sys.stderr)
+        else:
+            print(f"{prog} list: {unread['harness']}: {unread['parts']} folders or "
+                  f"files under {where} could not be listed; their sessions are not "
+                  "counted", file=sys.stderr)
     for row in rows:
         print("  ".join((_when(row["started"]), _when(row["changed"]), row["harness"],
                          row["name"] or row["folder"] or "-", row["session"])))

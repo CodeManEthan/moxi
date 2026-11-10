@@ -336,6 +336,32 @@ def test_a_default_root_that_exists_and_cannot_be_read_is_named(roots):
     assert [h["harness"] for h in answer["harnesses"]] == ["claude", "codex"]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lists a folder without permission")
+def test_parts_that_could_not_be_listed_are_said_and_a_count_not_read_is_null(roots):
+    now = time.time()
+    claude(roots, 1, now - 600)
+    hidden = claude(roots, 2, now - 700, project="-work-proj-b")
+    agents = hidden.path.parent / sid(3) / "subagents"
+    agents.mkdir(parents=True)
+    claude(roots, 3, now - 800, project="-work-proj-b")
+    unlisted = roots["claude"] / "-work-proj-c"
+    unlisted.mkdir()
+    unlisted.chmod(0)
+    agents.chmod(0)
+    try:
+        answer = read("/api/list")
+        opened = read("/api/session", f"harness=claude&session={sid(3)}")
+    finally:
+        unlisted.chmod(0o700)
+        agents.chmod(0o700)
+
+    assert answer["roots"] == [{"harness": "claude", "root": str(roots["claude"]),
+                                "reason": None, "parts": 2}]
+    found = rows(answer)
+    assert found[sid(3)]["subagents"] is None and found[sid(1)]["subagents"] == 0
+    assert opened["subagents"] is None and opened["more"] is None
+
+
 def test_a_config_that_cannot_be_read_is_refused_with_the_reason(roots, own_config):
     write_config(own_config, "[list\n")
 

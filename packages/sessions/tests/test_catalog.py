@@ -11,8 +11,8 @@ import time
 import pytest
 
 from moxi_sessions import catalog as catalog_module
-from moxi_sessions.catalog import (ACTIVITY_BYTES, Catalog, Details, Said, by_program, cut,
-                                   reset, shared)
+from moxi_sessions.catalog import (ACTIVITY_BYTES, Catalog, Details, Said, Unread,
+                                   by_program, cut, reset, shared)
 from moxi_sessions.errors import Unreadable
 from moxi_sessions.shape import CLAUDE, CODEX, OPENCODE, UNKNOWN
 from moxi_sessions.source import HEAD_LINES
@@ -292,6 +292,84 @@ def test_a_default_root_without_permission_is_a_failure(home):
 
     failure, = gathered.roots
     assert failure.harness == CODEX and "unreadable" in failure.reason
+
+
+not_root = pytest.mark.skipif(os.geteuid() == 0,
+                              reason="root lists a folder without permission")
+
+
+@pytest.fixture
+def locked():
+    """`locked(path)` takes every permission off a folder or file until the test ends."""
+    taken = []
+
+    def lock(path):
+        taken.append((path, path.stat().st_mode))
+        path.chmod(0)
+
+    yield lock
+    for path, mode in reversed(taken):
+        path.chmod(mode)
+
+
+@not_root
+def test_a_project_folder_that_cannot_be_listed_is_counted_as_an_unread_part(roots,
+                                                                             locked):
+    seen = transcript(roots, 1)
+    seen.user()
+    seen.write()
+    hidden = transcript(roots, 2, project="-work-proj-b")
+    hidden.user()
+    locked(hidden.write().parent)
+
+    gathered = Catalog(roots).gather()
+
+    assert [e.session for e in gathered.entries] == [sid(1)]
+    assert gathered.roots == (Unread(CLAUDE, str(roots[CLAUDE]), None, 1),)
+    assert CLAUDE in gathered.listed
+
+
+@not_root
+def test_a_session_whose_subagents_folder_cannot_be_listed_has_no_count(roots, locked):
+    one = transcript(roots, 1)
+    one.user()
+    sub = one.subagent("a0190b0000000001")
+    sub.user("look")
+    path = one.write()
+    two = transcript(roots, 2)
+    two.user()
+    two.write()
+    locked(path.with_suffix("") / "subagents")
+
+    gathered = Catalog(roots).gather()
+    entries = {e.session: e for e in gathered.entries}
+
+    assert entries[sid(1)].subagents is None and entries[sid(2)].subagents == 0
+    assert gathered.roots == (Unread(CLAUDE, str(roots[CLAUDE]), None, 1),)
+
+
+@not_root
+def test_a_codex_day_that_cannot_be_listed_is_counted_as_an_unread_part(roots, locked):
+    r = rollout(roots, 1)
+    r.user("Do the thing.")
+    locked(r.write().parent)
+
+    gathered = Catalog(roots).gather()
+
+    assert gathered.entries == () and gathered.unreadable == 0
+    assert gathered.roots == (Unread(CODEX, str(roots[CODEX]), None, 1),)
+
+
+@not_root
+def test_a_rollout_that_cannot_be_opened_is_listed_and_counted_as_unread(roots, locked):
+    r = rollout(roots, 1)
+    r.user("Do the thing.")
+    locked(r.write())
+
+    gathered = Catalog(roots).gather()
+
+    assert [e.session for e in gathered.entries] == [tid(1)]
+    assert gathered.roots == (Unread(CODEX, str(roots[CODEX]), None, 1),)
 
 
 def test_a_gather_is_reused_for_two_seconds(roots):

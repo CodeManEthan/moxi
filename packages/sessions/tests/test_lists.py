@@ -723,3 +723,76 @@ def test_a_root_that_failed_has_no_count_and_no_zero(roots, tmp_path):
     assert answer["harnesses"] == [{"harness": CLAUDE, "count": 1},
                                    {"harness": OPENCODE, "count": 0}]
     assert answer["unreadable"] is None
+
+
+not_root = pytest.mark.skipif(os.geteuid() == 0,
+                              reason="root lists a folder without permission")
+
+
+@pytest.fixture
+def locked():
+    """`locked(path)` takes every permission off a folder until the test ends."""
+    taken = []
+
+    def lock(path):
+        taken.append((path, path.stat().st_mode))
+        path.chmod(0)
+
+    yield lock
+    for path, mode in reversed(taken):
+        path.chmod(mode)
+
+
+@not_root
+def test_a_part_that_could_not_be_listed_is_said_beside_the_counts(roots, locked):
+    claude(roots, 1, NOW - 60)
+    hidden = claude(roots, 2, NOW - 120, project="-work-proj-b")
+    locked(hidden.path.parent)
+
+    answer = list_sessions(Catalog(roots), recent_s=HOUR, now=NOW)
+
+    assert answer["all"] == 1
+    assert answer["roots"] == [{"harness": CLAUDE, "root": str(roots[CLAUDE]),
+                                "reason": None, "parts": 1}]
+    assert answer["harnesses"][0] == {"harness": CLAUDE, "count": 1}
+
+
+def test_a_root_that_failed_has_a_reason_and_no_number_of_parts(roots, tmp_path):
+    roots[CODEX] = tmp_path / "nowhere"
+
+    failed, = list_sessions(Catalog(roots), recent_s=HOUR, now=NOW)["roots"]
+
+    assert failed["harness"] == CODEX and failed["reason"] and failed["parts"] is None
+
+
+@not_root
+def test_a_row_whose_subagents_folder_cannot_be_listed_has_no_count(roots, locked):
+    t = ClaudeTranscript(roots[CLAUDE], session_id=sid(1), cwd="/work/proj-a")
+    t.user("Do the thing.", origin="human")
+    t.subagent("a0190b0000000001").user("look")
+    changed_at(t.write(), NOW - 60)
+    locked(t.path.with_suffix("") / "subagents")
+    cat = Catalog(roots)
+
+    row, = group(list_sessions(cat, recent_s=HOUR, now=NOW), RECENT)["rows"]
+    opened = open_session(cat, harness=CLAUDE, session=sid(1), recent_s=HOUR, now=NOW)
+
+    assert row["subagents"] is None
+    assert opened["subagents"] is None and opened["more"] is None
+
+
+@not_root
+def test_an_opened_session_with_an_unlisted_part_does_not_count_what_is_left(roots,
+                                                                             locked):
+    t = ClaudeTranscript(roots[CLAUDE], session_id=sid(1), cwd="/work/proj-a")
+    t.user("Do the thing.", origin="human")
+    t.subagent("a0190b0000000001").user("look")
+    changed_at(t.write(), NOW - 60)
+    workflows = t.path.with_suffix("") / "subagents" / "workflows"
+    workflows.mkdir()
+    locked(workflows)
+
+    opened = open_session(Catalog(roots), harness=CLAUDE, session=sid(1), recent_s=HOUR,
+                          now=NOW)
+
+    assert len(opened["subagents"]) == 1 and opened["more"] is None

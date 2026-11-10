@@ -23,8 +23,15 @@ apart. A harness whose root nobody named (the harness's default, or the one the
 environment gives) and which does not exist is absent: the harness is not on the machine,
 so it gives no entries and no failure. A root somebody named (a key of sessions' config,
 or a root handed to the catalog) that does not exist, and any root that exists and cannot
-be listed, is a `RootFailure` with the reason; the other roots still answer.
+be listed, is an `Unread` with the reason; the other roots still answer.
 `Gathered.listed` names the harnesses whose root was listed.
+
+**A root listed in part.** A folder or a file under a listed root that could not be listed
+loses its sessions, so the counts are no longer of every session. The gather says so: that
+harness has an `Unread` with no reason and `parts`, how many such folders and files there
+were. For Codex a rollout whose head could not be opened is one of them: it is listed, but
+whether a thread spawned it is not known. A Claude Code session whose subagents folder
+could not be listed has `subagents` None, not 0.
 
 **The details.** `Catalog.details(entry)` reads what a row shows of one session, a
 `Details`. A fact that was not read is None; nothing is filled in for it.
@@ -108,7 +115,8 @@ class Entry:
     * `changed_ns`: its last change in epoch nanoseconds: the file's mtime, or an OpenCode
       row's `time_updated`; None where the row has none. `changed` is the same in seconds.
     * `size`: the file's size when it was listed; None for an OpenCode session.
-    * `subagents`: how many subagent files, child rows or spawned threads it has.
+    * `subagents`: how many subagent files, child rows or spawned threads it has; None
+      for a Claude Code session whose subagents folder could not be listed.
     * `listed`: the listing entry itself, which `window` and the other reads take.
     """
 
@@ -117,7 +125,7 @@ class Entry:
     path: str
     changed_ns: int | None
     size: int | None
-    subagents: int
+    subagents: int | None
     listed: Listed = field(compare=False, repr=False)
 
     @property
@@ -132,26 +140,32 @@ class Entry:
 
 
 @dataclass(frozen=True)
-class RootFailure:
-    """A harness whose root could not be listed, with the root (None when the config
-    that names it could not be read) and the reason. A harness that is not on the machine
-    has none."""
+class Unread:
+    """What of a harness's root a gather did not read. A harness that is not on the
+    machine has none, and neither has one whose root was listed whole.
+
+    * `root`: the root; None when the config that names it could not be read.
+    * `reason`: why the root could not be listed; None when it was listed.
+    * `parts`: how many folders and files under a listed root could not be listed, so the
+      harness's counts leave their sessions out; None when the root was not listed.
+    """
 
     harness: str
     root: str | None
-    reason: str
+    reason: str | None
+    parts: int | None = None
 
 
 @dataclass(frozen=True)
 class Gathered:
     """One gather: `entries` in the list's order; `roots`, the roots that could not be
-    listed; `listed`, the harnesses whose root was listed (a harness in neither is not on
+    listed or were listed in part; `listed`, the harnesses whose root was listed (a harness in neither is not on
     the machine); `unreadable`, the number of compressed Codex rollouts left out, None
     when Codex's root was not listed; and `at`, the catalog's clock when the gather
     ended."""
 
     entries: tuple[Entry, ...]
-    roots: tuple[RootFailure, ...] = ()
+    roots: tuple[Unread, ...] = ()
     listed: tuple[str, ...] = ()
     unreadable: int | None = None
     at: float = 0.0
@@ -388,7 +402,8 @@ def _absent(path: Path) -> bool:
     return False
 
 
-def _entry(listed: Listed, subagents: int, changed_ns: int | None = None) -> Entry:
+def _entry(listed: Listed, subagents: int | None, changed_ns: int | None = None
+           ) -> Entry:
     """A listing entry as a main session; a file's change time is its mtime."""
     source = listed.source
     return Entry(harness=source.harness, session=source.session_id or "",
@@ -397,9 +412,26 @@ def _entry(listed: Listed, subagents: int, changed_ns: int | None = None) -> Ent
                  size=listed.size, subagents=subagents, listed=listed)
 
 
+def _unlisted(listing: Listing) -> int:
+    """How many folders and files under a listed root could not be listed. One inside a
+    folder that could not be listed itself is that folder's, and is not counted again."""
+    paths = {path for path, _ in listing.unreadable}
+    return sum(1 for path in paths
+               if not any(path.startswith(f"{other}/") for other in paths))
+
+
 def _claude_entries(listing: Listing) -> list[Entry]:
     agents = Counter(e.source.session_id for e in listing if e.kind == "subagent")
-    return [_entry(e, agents[e.source.session_id]) for e in listing if e.kind == "main"]
+    # A part under `<project>/<session>/subagents` that could not be listed leaves that
+    # session's count unknown.
+    unknown = set()
+    for path, _ in listing.unreadable:
+        parts = path.split("/")
+        if len(parts) >= 3 and parts[2] == "subagents":
+            unknown.add(parts[1])
+    return [_entry(e, None if e.source.session_id in unknown
+                   else agents[e.source.session_id])
+            for e in listing if e.kind == "main"]
 
 
 def _opencode_entries(listing: Listing) -> list[Entry]:
@@ -503,7 +535,7 @@ class Catalog:
 
     def _gather(self) -> Gathered:
         entries: list[Entry] = []
-        failures: list[RootFailure] = []
+        unread: list[Unread] = []
         listed: list[str] = []
         unreadable = None
         for harness in HARNESSES:
@@ -513,24 +545,29 @@ class Catalog:
                 try:
                     origin = root_origin(harness)
                 except ConfigError as exc:
-                    failures.append(RootFailure(harness, None, str(exc)))
+                    unread.append(Unread(harness, None, str(exc)))
                     continue
                 root, named = origin.path, origin.configured
             if not named and _absent(root):
                 continue                 # the harness is not on this machine
             listing = sources(harness, root=root, heads=False)
             if not listing.ok:
-                failures.append(RootFailure(harness, listing.root,
-                                            listing.reason or "could not be listed"))
+                unread.append(Unread(harness, listing.root,
+                                     listing.reason or "could not be listed"))
                 continue
             listed.append(harness)
+            parts = _unlisted(listing)
             if harness == CLAUDE:
                 entries += _claude_entries(listing)
             elif harness == OPENCODE:
                 entries += _opencode_entries(listing)
             else:
                 unreadable = sum(1 for e in listing if e.compressed)
-                entries += self._codex_entries(listing)
+                found, unopened = self._codex_entries(listing)
+                entries += found
+                parts += unopened
+            if parts:
+                unread.append(Unread(harness, listing.root, None, parts))
         entries.sort(key=lambda e: e.order)
         seen: set[tuple[str, str]] = set()
         kept = []
@@ -539,13 +576,15 @@ class Catalog:
             if (entry.harness, entry.session) not in seen:
                 seen.add((entry.harness, entry.session))
                 kept.append(entry)
-        result = Gathered(tuple(kept), tuple(failures), tuple(listed), unreadable,
+        result = Gathered(tuple(kept), tuple(unread), tuple(listed), unreadable,
                           self._clock())
         with self._lock:
             self._gathered = result
         return result
 
-    def _codex_entries(self, listing: Listing) -> list[Entry]:
+    def _codex_entries(self, listing: Listing) -> tuple[list[Entry], int]:
+        """The main threads of a Codex listing, and how many rollouts' heads could not
+        be opened."""
         rollouts = [e for e in listing if not e.compressed]
         heads = self._read_heads(rollouts, listing.imports)
         spawned: Counter[str] = Counter()
@@ -556,7 +595,8 @@ class Catalog:
                 mains.append(listed)
             elif isinstance(spawn.parent_thread_id, str):
                 spawned[spawn.parent_thread_id] += 1
-        return [_entry(e, spawned[e.source.session_id]) for e in mains]
+        return ([_entry(e, spawned[e.source.session_id]) for e in mains],
+                sum(1 for head in heads if head is None))
 
     # -- the heads ------------------------------------------------------------------------
 
@@ -679,6 +719,6 @@ def reset() -> None:
 
 
 __all__ = ["REUSE_S", "TAIL_MAX", "ACTIVITY_BYTES", "PROMPT_TURNS", "YOU", "AGENT",
-           "Entry", "RootFailure", "Gathered", "Head", "Said", "Details", "Tail",
+           "Entry", "Unread", "Gathered", "Head", "Said", "Details", "Tail",
            "Catalog", "shared", "reset", "by_program", "cut", "row_head", "read_head",
            "read_tail"]

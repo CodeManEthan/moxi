@@ -56,7 +56,8 @@ contains, without regard to case. `/api/folders` takes them all but `folder`. `f
 server's life; no other request does.
 
 *A row* (`LIST_ROW`): `harness`, `session`, `path`, `changed` (the last change, null for
-an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (how many),
+an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (how many;
+null where the session's subagents folder could not be listed),
 `folder`, `started`, `by_program` (true where the record says a program started the
 session, else null), `name` (one typed for the session in the harness, else null),
 `model`, `activity` (`{at, who, text}`: the newest thing said, `who` being `you`, `agent`
@@ -68,10 +69,16 @@ session not started by a program that changed within the setting `list.recent_s`
 *`/api/list`*: `now` (the time the answer was cut at), `today` (the server's local date,
 `YYYY-MM-DD`), `all` (the sessions before the filters) and `total` (after them), both of
 both kinds; `unreadable` (compressed Codex rollouts left out, null when Codex's root was
-not listed); `roots` (`{harness, root, reason}` per root that could not be listed, `root`
-null when the config naming it could not be read); `harnesses` (`{harness, count}` for
-each harness whose root was listed, under every filter but `harness`); and `groups`, in
-order.
+not listed); `roots` (`{harness, root, reason, parts}` per harness whose root was not
+read whole, below); `harnesses` (`{harness, count}` for each harness whose root was
+listed, under every filter but `harness`); and `groups`, in order.
+
+An item of `roots` is one of two. For a root that could not be listed, `reason` says why
+and `parts` is null; `root` is null when the config naming it could not be read. For a
+root that was listed but holds folders or files that could not be, `reason` is null and
+`parts` is how many: their sessions are in no count, so `all`, `total` and that harness's
+count are short by them, and the item is how the answer says its counts are not of every
+session.
 
 A harness that is not on the machine is told apart from one that could not be read. A
 harness whose root is its default one (no key of sessions' config names it) and does not
@@ -116,7 +123,7 @@ that changes moves to the front and is in the next `/api/list`.
 follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (up to 8, each
 `{description, agent_type, started, last_at, last}`, `last` being its newest message cut
 at 300 bytes; null when they could not be listed), `more` (how many were not listed; null
-with `subagents`) and `resume` (`{command, folder}`: the harness's command for picking the
+with `subagents`, and when some of them could not be listed) and `resume` (`{command, folder}`: the harness's command for picking the
 session up again and the folder to run it in, null where it runs anywhere; null for a
 harness with none). It says nothing of whether the session is working. An id that is not
 a main session's (a subagent's, a spawned Codex thread's, an unknown one) is refused.
@@ -352,7 +359,7 @@ _ROW = {
     "path": _PATH,
     "changed": _MAYBE_FLOAT,
     "size": _MAYBE_INT,
-    "subagents": _INT,
+    "subagents": _MAYBE_INT,
     "folder": _MAYBE_PATH,
     "started": _MAYBE_FLOAT,
     "by_program": _MAYBE_BOOL,
@@ -388,7 +395,8 @@ LIST = {
     "total": _INT,
     "unreadable": _MAYBE_INT,
     "roots": lb.Out("list", items=lb.Out("table", items={
-        "harness": _TEXT, "root": _MAYBE_PATH, "reason": _SAYS})),
+        "harness": _TEXT, "root": _MAYBE_PATH, "reason": _MAYBE_SAYS,
+        "parts": _MAYBE_INT})),
     "harnesses": lb.Out("list", items=lb.Out("table", items={
         "harness": _TEXT, "count": _INT})),
     "groups": _GROUPS,

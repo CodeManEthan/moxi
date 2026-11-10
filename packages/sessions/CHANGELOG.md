@@ -15,7 +15,10 @@
 - A list tells a harness that is not on the machine from a root that could not be read.
   A harness whose default root does not exist gives nothing: no count, no reason. A root
   a setting names that does not exist, and any root that exists and cannot be read, is
-  named with its reason, and no count is given for that harness.
+  named with its reason, and no count is given for that harness. A root listed in part
+  is named with how many folders and files under it could not be listed, since its counts
+  leave their sessions out; a session whose subagents folder could not be listed has no
+  subagent count.
 - `Header` has `started`, when the session's record begins, and a Codex header's `meta`
   holds line 1's `timestamp`.
 - New setting `list.recent_s` (3600): how many seconds after its last change a session

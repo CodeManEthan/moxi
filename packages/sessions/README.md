@@ -167,7 +167,11 @@ A harness that is not on the machine is not a failure. When a harness's root is 
 default one and does not exist, the list holds nothing for that harness: no count and no
 reason. When a root you set (`claude.projects`, `codex.sessions`, `opencode.database`)
 does not exist, or any root exists and cannot be read, the answer names it under `roots`
-with the reason, gives no count for that harness, and still lists the others.
+with the reason, gives no count for that harness, and still lists the others. When a
+root was listed but a folder or a file under it could not be, its sessions are missing
+from every count; the answer names that harness under `roots` with no reason and with
+`parts`, how many such folders and files there were, and `moxi sessions list` says so on
+stderr. A session whose subagents folder could not be listed has no subagent count.
 
 Filters: `harness`, `since` and `until` on the last change, `folder` (the folder the
 session's own record names) and `find` (the start of an id, or part of the folder's last
