@@ -285,11 +285,23 @@ def test_no_pass_is_asked_for_over_a_text_that_was_sent_back_and_not_changed(fol
 
     found = asked(folder)
     assert (found.pass_, found.since, found.version) == (brake.RECHECK, 1, None)
-    assert found.instead == (f"moxi rounds fold {ROUND}",)
+    assert found.instead == ("change design.md to answer what the pass found",
+                             f"moxi rounds fold {ROUND}")
     assert "not changed since" in found.why
+    # Freezing the same text once more is asked the same again.
+    again(folder)
+    assert asked(folder).instead == found.instead
     fold(folder)
     found = asked(folder)
-    assert (found.pass_, found.since, found.version) == (brake.RECHECK, 1, 3)
+    assert (found.pass_, found.since, found.version) == (brake.RECHECK, 1, 4)
+    assert found.instead == ()
+
+
+def test_a_design_sent_back_and_not_frozen_since_is_asked_for_the_fold_alone(folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+
+    assert asked(folder).instead == (f"moxi rounds fold {ROUND}",)
 
 
 def test_an_unchanged_design_frozen_again_with_no_standing_has_none(folder):

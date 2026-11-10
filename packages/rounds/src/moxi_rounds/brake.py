@@ -177,7 +177,9 @@ def asked(state: states.State, *, name: str = "ROUND") -> Asked | None:
         return Asked(RECHECK, stands,
                      f"v{since} was sent back and the design's text was not changed "
                      "since: a re-check reads what changed", tier=tier, since=since,
-                     instead=(fold,))
+                     # Freezing the same text again would only ask this again.
+                     instead=(f"change {versions.DESIGN_FILE} to answer what the "
+                              "pass found", fold))
     return Asked(RECHECK, stands,
                  f"the design changed since v{since}, the last version a pass read",
                  tier=tier, version=current.n, since=since)

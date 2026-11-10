@@ -445,6 +445,24 @@ def test_a_built_step_that_waits_never_says_it_waits_for_nothing(
     assert said(lines(capsys), "waits:") == []
 
 
+def test_a_text_sent_back_and_frozen_again_unchanged_is_told_to_change_it_first(
+        folder, capsys):
+    fold(folder)
+    verdict(folder)
+    freezing.freeze(ROUND, actor="scout")
+
+    printed = lines(capsys)
+
+    assert printed[1:] == [
+        "pass:  re-check: v1 was sent back and the design's text was not changed "
+        "since: a re-check reads what changed",
+        "do:    change design.md to answer what the pass found",
+        f"do:    moxi rounds fold {ROUND}"]
+    design(folder)
+    do(capsys, said(printed, "do:")[1])
+    assert said(lines(capsys), "pass:")[0].startswith("re-check of v3: the design changed")
+
+
 # -- the data ----------------------------------------------------------------------------
 
 def test_the_data_holds_each_group_and_each_warning(opened, capsys):
