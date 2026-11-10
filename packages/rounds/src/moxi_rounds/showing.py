@@ -5,8 +5,8 @@ the round's row of the index up to its log when it can, unless it is told to lea
 the index as it is. What it gives is printed as
 lines (`as_text`) or as data (`as_json`), both from the same reading.
 
-A round is shown with what it is for, its status, its flow's name and the steps
-recorded for it; then its records, a section for each kind: its questions by state,
+A round is shown with what it is for, its status, the name of the flow it follows now
+and the steps recorded for it, and the skips that stand; then its records, a section for each kind: its questions by state,
 each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
 
@@ -37,7 +37,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, index, log, questions, shown
+from . import folders, index, log, questions, shown, skips
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -254,12 +254,21 @@ def _history(found: Shown) -> list:
     return list(found.state.history)
 
 
+def history_of(event: dict) -> str | None:
+    """What an event of the history is of, in a word or a few: the id it gave or
+    names, its stage, or for a change of flow the flow left and the one taken up."""
+    of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
+    if event.get("type") == "flow.changed":
+        of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
+    return of if isinstance(of, str) and of else None
+
+
 def _history_lines(events: list) -> list[str]:
     lines = [f"history: {len(events)} event{'' if len(events) == 1 else 's'}"]
     for event in events:
-        of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
+        of = history_of(event)
         lines.append(f"  {event.get('n')}  {event.get('at')}  {event.get('actor')}  "
-                     f"{event.get('type')}{f'  {of}' if isinstance(of, str) and of else ''}")
+                     f"{event.get('type')}{f'  {of}' if of else ''}")
     return lines
 
 
@@ -286,8 +295,34 @@ def _head(found: Shown) -> dict:
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "flow": state.flow, "steps": state.steps,
+            "skips": _skips(state),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
+
+
+def _skips(state: states.State) -> list[dict]:
+    """The skips that stand: the ruling, the step, its stage for a step of one stage,
+    the pointer and when; a skip of the questions step with the questions it lets its
+    stage past now, and the ones it listed and lets past no longer."""
+    listed = []
+    for skip in skips.live(state):
+        one = {"id": skip.id, "step": skip.step, "stage": skip.stage,
+               "record": skip.record, "at": skip.at}
+        if skip.step == skips.QUESTIONS:
+            one.update(covers=list(skip.covers), let_go=list(skip.let_go))
+        listed.append(one)
+    return listed
+
+
+def skip_line(one: dict) -> str:
+    """A skip that stands, in a line: `check for B2, by C3 (record comms:12)`, and
+    for the questions step what it lets its stage past."""
+    line = f"{skips.said(one['step'], one['stage'])}, by {one['id']}"
+    if "covers" in one:
+        line += f", past {', '.join(one['covers']) or 'no question'}"
+        if one["let_go"]:
+            line += f" and no longer past {', '.join(one['let_go'])}"
+    return f"{line} (record {one['record']})"
 
 
 def _ended(state: states.State) -> dict | None:
@@ -337,6 +372,7 @@ def as_text(found: Shown) -> str:
     lines = [f"round {found.name}   {shown_as['status']}   flow {shown_as['flow']} "
              f"({steps})",
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
+    lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")
     if shown_as["ended"] is not None:
@@ -352,4 +388,4 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line"]
+           "ended_line", "skip_line", "history_of"]

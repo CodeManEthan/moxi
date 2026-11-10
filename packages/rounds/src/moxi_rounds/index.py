@@ -8,8 +8,8 @@ loses no record, and `rebuild` makes the same rows from the logs again. Three ta
             slug for a project's own log), the file, its length and SHA-256 as last seen
             here and when that was, whether it could be read, and since when it has been
             known to have changed outside this machine
-    rounds  one row per round: its folder, its status, its flow's name, and how it
-            ended once it has
+    rounds  one row per round: its folder, its status, the name of the flow it
+            follows now, and how it ended once it has
     items   what each log holds open, one row per item, by kind
 
 **Who writes it.** Every write to a log updates that log's rows before the lock is let go
@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 6
+DERIVED = 7
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is

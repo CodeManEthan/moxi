@@ -44,8 +44,9 @@ TYPES = _types(
     EventType("round.opened",
               ("description", "flow", "steps", "parent", "inherits", "record"),
               required=("description", "flow", "steps")),
-    # The round moved to another flow: the name it had, the new name and its steps, who
-    # moved it, and the ruling when it was the operator's.
+    # The round moved to another flow: the name it had, the new name and its steps, and
+    # who moved it. The operator's move is his ruling, and that ruling's own event
+    # holds the same three.
     EventType("flow.changed", ("was", "flow", "steps", "by", "ruling")),
     # A design version was frozen: its number and digest, whether only records changed
     # and the pointer that says so, the trace result, and the declarations it added.
@@ -93,12 +94,14 @@ TYPES = _types(
     # (`blocks`), each only when the ruling changes it; a move of the question to
     # another log names the record it became there, `moved_to`. A skip of the questions
     # step for a stage lists the questions it lets that stage past, `covers`. A ruling
+    # of the round's flow holds the name the flow had (`was`), the new name (`flow`)
+    # and its `steps`, and is the whole of the move. A ruling
     # that replaces an earlier one names it in `supersedes`, and one that takes an
     # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes", "moved_to"),
+               "revokes", "moved_to", "was", "flow", "steps"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
     # to where he was shown them.

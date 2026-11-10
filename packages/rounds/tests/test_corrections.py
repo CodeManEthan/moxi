@@ -618,13 +618,13 @@ def test_a_ruling_of_a_kind_nothing_here_knows_is_neither_taken_back_nor_replace
         rounds):
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "skip:check:B2"}, actor="planner")
+                "rules": "credit:B2"}, actor="planner")
     before = logs(rounds)
 
-    with pytest.raises(Refused, match="C1 rules skip:check:B2, and nothing here says "
+    with pytest.raises(Refused, match="C1 rules credit:B2, and nothing here says "
                                       "how such a ruling is taken back"):
         revoke("C1")
-    with pytest.raises(Refused, match="a ruling of skip:check:B2 is not ruled a "
+    with pytest.raises(Refused, match="a ruling of credit:B2 is not ruled a "
                                       "second time"):
         rule(text=SAID, supersedes="C1")
     assert logs(rounds) == before
@@ -762,24 +762,27 @@ def test_a_ruling_that_corrects_nothing_is_refused_on_a_round_that_has_ended(
     ("narrow:Q1=B1,B2", "a narrowing", "narrow:Q1"),
     ("narrow:Q1=none", "a narrowing", "narrow:Q1"),
     ("withdraw:P3", "a withdrawal", "withdraw:P3"), ("move:Q1", "a move", "move:Q1"),
-    ("revoke:C1", "a taking back", "revoke:C1")])
+    ("revoke:C1", "a taking back", "revoke:C1"),
+    ("skip:retro", "a skip", "skip:retro"),
+    ("skip:docket:B2", "a skip", "skip:docket:B2"),
+    ("flow:full", "a change of flow", "flow:full")])
 def test_each_ruling_has_its_kind_and_the_thing_it_rules(rules, name, item):
     assert corrections.kind_of(rules).name == name
     assert corrections.item_of(rules) == item
 
 
-@pytest.mark.parametrize("rules", ["skip:docket:B2", "B2.M1=accept", "flow:full", ""])
+@pytest.mark.parametrize("rules", ["credit:B2", "B2.M1=accept", "skip-action:B2=pr", ""])
 def test_a_ruling_of_no_kind_in_the_table_has_none(rules):
     assert corrections.kind_of(rules) is None and corrections.item_of(rules) is None
 
 
 def test_a_kind_added_to_the_table_is_taken_back_and_replaced(rounds, monkeypatch):
-    skip = corrections.Kind("a skip", lambda rules: rules if (rules or "").startswith(
-        "skip:") else None, undo=lambda ruling: {})
-    monkeypatch.setattr(corrections, "KINDS", (*corrections.KINDS, skip))
+    credit = corrections.Kind("a credit", lambda rules: rules if (
+        rules or "").startswith("credit:") else None, undo=lambda ruling: {})
+    monkeypatch.setattr(corrections, "KINDS", (*corrections.KINDS, credit))
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "skip:check:B2"}, actor="planner")
+                "rules": "credit:B2"}, actor="planner")
 
     revoke("C1")
 

@@ -68,7 +68,7 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
 def round(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
     `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
-    `register_unreadable`) and its records (`questions`, `rulings`, `history`).
+    `skips`, `register_unreadable`) and its records (`questions`, `rulings`, `history`).
 
     A round whose log can't be read is `{"name", "project", "slug", "folder",
     "notice", "unreadable": {"file", "line", "problem", "reason", "fix"}}` and nothing

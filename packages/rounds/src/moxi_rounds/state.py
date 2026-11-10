@@ -22,6 +22,15 @@ the earlier ruling stays in the rulings, marked with the id of the one that repl
 or took it back, and each question it changed reads as its other changes leave it
 (`without`).
 
+A round follows the flow its log recorded last: the one it was opened with, until an
+event moves it to another, which holds the new name and its steps. That event is the
+lead's move, or the operator's ruling of the flow, which is one event like any ruling.
+
+A skip of the questions step for a stage lists the questions it lets the stage past.
+One of them that is later made to hold up fewer stages, that stage not among them, is
+let past no longer: the ruling is marked with it (`Ruling.let_go`), so when the
+question is widened onto the stage again it holds the stage like any other.
+
 A round that was dropped is `DROPPED` from that event on, and the event is the whole of
 the drop in the round's log: it says who dropped the round, and where each question
 that was open or parked went, which the fold applies to the question as a change. A log
@@ -95,6 +104,9 @@ class Ruling:
     question: str | None = None
     #: The ids of the questions a skip of the questions step lets its stage past.
     covers: tuple[str, ...] = ()
+    #: The ones among them it lets past no longer: each was made to hold up fewer
+    #: stages after the skip, the skip's stage not among them.
+    let_go: tuple[str, ...] = ()
     #: The earlier ruling this one replaces, and the one it takes back, or None.
     supersedes: str | None = None
     revokes: str | None = None
@@ -228,6 +240,15 @@ def _round_opened(state: State, event: dict) -> None:
     state.status = OPEN
 
 
+def _flow_changed(state: State, event: dict) -> None:
+    """The round follows the flow the event names, with the steps it holds, from then
+    on. An event that holds no name or no steps moves the round nowhere."""
+    if isinstance(event.get("flow"), str) and isinstance(event.get("steps"), list):
+        state.flow = event["flow"]
+        # A copy, as at the opening.
+        state.steps = copy.deepcopy(event["steps"])
+
+
 def _round_dropped(state: State, event: dict) -> None:
     """The round is dropped, and each question the event names is where it says: on
     the project's list under the id given, or withdrawn. Nothing else is written for
@@ -261,6 +282,9 @@ def _ruling_recorded(state: State, event: dict) -> None:
     # it, so a verb stopped after this event has left the question ruled.
     if event.get("question") is not None:
         _change(state, event, question_id=event["question"], ruling=event.get("id"))
+    # His ruling of the flow is the whole of the move, as the lead's event is of his.
+    if (event.get("rules") or "").startswith(_FLOW):
+        _flow_changed(state, event)
     # The key an answer chose is kept in the ruling. The question reads it from its
     # newest answer, so an answer that names no key leaves none chosen.
     for place, question in enumerate(state.questions):
@@ -308,6 +332,7 @@ def _corrected(state: State, event: dict) -> None:
                        and ruling.revoked_by is None]
             state.questions[place] = replace(
                 without(state, question), chose=answers[-1] if answers else None)
+            _let_go(state, state.questions[place])
 
 
 def without(state: State, question: Question, rulings: Iterable[str] = ()) -> Question:
@@ -360,6 +385,27 @@ def _widest(one, other):
 
 #: What `blocks` holds for a question that holds up every stage.
 _ALL = "all"
+
+#: What starts the item of a ruling that moves the round to another flow; the flow's
+#: name follows.
+_FLOW = "flow:"
+#: What starts the item of a ruling that skips the questions step for one stage; the
+#: stage's id follows.
+_SKIP_QUESTIONS = "skip:docket:"
+
+
+def _let_go(state: State, question: Question) -> None:
+    """Mark each skip of the questions step that lists `question` and whose stage the
+    question, as it now reads, does not hold up: the skip lets that stage past it no
+    longer. A mark stays, so a question widened onto the stage again holds it."""
+    for place, ruling in enumerate(state.rulings):
+        rules = ruling.rules or ""
+        if (not rules.startswith(_SKIP_QUESTIONS) or question.id not in ruling.covers
+                or question.id in ruling.let_go or question.blocks == _ALL):
+            continue
+        if (isinstance(question.blocks, str) or
+                rules[len(_SKIP_QUESTIONS):] not in (question.blocks or ())):
+            state.rulings[place] = replace(ruling, let_go=(*ruling.let_go, question.id))
 
 
 def _blocks(value):
@@ -431,12 +477,14 @@ def _change(state: State, event: dict, *, question_id: str | None,
         options=tuple(one for one in (*question.options, *change.options)
                       if one[0] not in change.retired),
         retired=(*question.retired, *change.retired))
+    if change.blocks is not None:
+        _let_go(state, state.questions[place])
 
 
 #: The handler of each event type. Every type in `events.TYPES` has a row.
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
-    "flow.changed": _kept,
+    "flow.changed": _flow_changed,
     "design.frozen": _kept,
     "verdict.recorded": _kept,
     "question.asked": _question_asked,

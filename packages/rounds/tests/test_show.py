@@ -89,13 +89,13 @@ history: 1 event
 """
     found = data(capsys, B)
     assert list(found) == ["name", "project", "slug", "folder", "notice", "status",
-                           "ended", "description", "parent", "flow", "steps",
+                           "ended", "description", "parent", "flow", "steps", "skips",
                            "register_unreadable", "questions", "rulings", "history"]
-    assert {key: found[key] for key in list(found)[:12]} == {
+    assert {key: found[key] for key in list(found)[:13]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",
         "ended": None, "description": "a placeholder round", "parent": None, "flow": "fix",
-        "steps": steps, "register_unreadable": None}
+        "steps": steps, "skips": [], "register_unreadable": None}
     assert found["questions"] == found["rulings"] == []
     assert found["history"] == log.read(log.round_log(rounds / "b-round"))
 

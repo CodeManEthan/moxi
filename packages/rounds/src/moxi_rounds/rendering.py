@@ -1,7 +1,8 @@
 """The generated files: what the logs say, written out as markdown for people and
 agents to read beside the logs.
 
-    <rounds folder>/<slug>/round-note.md   one round: its flow, its questions by state,
+    <rounds folder>/<slug>/round-note.md   one round: the flow it follows now and the
+                                           skips that stand, its questions by state,
                                            its rulings and its history
     <rounds folder>/rulings.md             the project's register: its standing rulings
     <rounds folder>/questions.md           the questions on the project's own list
@@ -184,7 +185,12 @@ def _flow(shown_as: dict) -> list[str]:
     steps = ", ".join(str(step.get("step")) for step in shown_as["steps"]) or "no steps"
     # The step the round is at goes here, after the flow's steps, once a function
     # says what step a round is at.
-    return [f"{shown_as['flow']}: {steps}"]
+    lines = [f"{shown_as['flow']}: {steps}"]
+    if shown_as["skips"]:
+        lines.append("")
+    for one in shown_as["skips"]:
+        lines += _item(f"skipped: {showing.skip_line(one)}")
+    return lines
 
 
 def _questions(shown_as: dict) -> list[str]:
@@ -272,8 +278,8 @@ def _history(shown_as: dict) -> list[str]:
     events = shown_as["history"]
     lines = [f"{len(events)} event{'' if len(events) == 1 else 's'}, oldest first.", ""]
     for event in events:
-        of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
-        named = f" {of}" if isinstance(of, str) and of else ""
+        of = showing.history_of(event)
+        named = f" {of}" if of else ""
         lines.append(f"{event.get('n')}. {event.get('at')} {event.get('actor')} "
                      f"{event.get('type')}{named}")
     return lines

@@ -11,6 +11,7 @@
                      [--until WHAT] [--supersedes C<n>|S<n>] [--as NAME]
     moxi rounds rule PROJECT readback=TIME --record PTR [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
+    moxi rounds mark ROUND --flow NAME [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
@@ -26,6 +27,13 @@ where the operator said something, or to where a question came from. It is
 `comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
+`skip:STEP`, or `skip:STEP:B<n>` for a step of one stage, says a step is not done; a
+skip of the questions step, `skip:docket:B<n>`, lets that stage past the questions that
+hold it then, and a question asked or widened onto the stage later holds it. A round
+follows the flow its log recorded, whatever the config says since. `mark --flow NAME`
+moves it up: to a later tier that has every step it follows, or to the config's
+current steps of its own flow when those have every step it follows. Any other move is
+the operator's, `flow:NAME`, and a change of flow is corrected by another.
 A ruling is corrected by a later one: `--supersedes` names the earlier ruling of the
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
@@ -179,6 +187,8 @@ def _declare_rule(verbs) -> None:
             "an ITEM it rules a question: answers it, parks it, narrows what it holds "
             "up, or withdraws it. A later ruling corrects an earlier one: with "
             "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back. "
+            "The ITEM skip:STEP says a step is not done, and flow:NAME moves the "
+            "round to another flow. "
             "The ruling is printed as it was recorded, to show him. On a project, "
             "the ITEM readback=TIME records that he read the list of rulings not yet "
             "shown to him through TIME.")
@@ -192,7 +202,12 @@ def _declare_rule(verbs) -> None:
                              "narrow:Q<n>=LIST or narrow:Q<n>=none, the stages it "
                              "holds up from then on; withdraw:Q<n>; or revoke:C<n> "
                              "(revoke:S<n> on a project), which takes that ruling back "
-                             "and puts nothing in its place; or, on a project, "
+                             "and puts nothing in its place; skip:STEP for a "
+                             "step of the round (verify-design, ratify, retro) or "
+                             "skip:STEP:B<n> for a step of one stage (docket, "
+                             "check, verify-build, a step of your own); flow:NAME, "
+                             "the flow the round follows from then on; or, on a "
+                             "project, "
                              "readback=TIME, the time the list of rulings he read "
                              "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
@@ -264,6 +279,16 @@ def _recorded(ruled) -> list[str]:
                         "and is not itself shown to him"]
     if ruled.answers is not None:
         lines.append(f"in answer to {ruled.answers[0]}: {ruled.answers[1]}")
+    if "covers" in ruled.event:
+        stage = ruled.event["rules"].rpartition(":")[2]
+        past = ", ".join(ruled.event["covers"]) or "no question, since none holds it"
+        lines.append(f"it lets {stage} past {past}; a question asked later, or made "
+                     f"to hold up {stage} later, holds it")
+    if "steps" in ruled.event:
+        steps = ", ".join(str(step.get("step")) for step in ruled.event["steps"])
+        lines.append(f"{ruled.name} follows the flow {ruled.event['flow']} "
+                     f"({steps or 'no steps'}) from now on; it followed "
+                     f"{ruled.event.get('was')}")
     return [*lines,
             'show him this under "Recorded as" in your next message, then:',
             f"  moxi rounds mark {ruled.holder} {ruled.id} --shown --record "
@@ -422,18 +447,19 @@ def _carry(args, out) -> int:
 
 def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
-            "question of a round hold up more stages, reopen a parked one, or say "
-            "that rulings were shown to the operator as recorded, with a pointer to "
-            "where.")
+            "question of a round hold up more stages, reopen a parked one, move a "
+            "round up to a heavier flow, or say that rulings were shown to the "
+            "operator as recorded, with a pointer to where.")
     parser = verbs.add_parser("mark", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round, <project>/<slug>; with --shown, the round "
                              "that holds the rulings, or the project's key for "
                              "rulings of its register")
-    parser.add_argument("id", metavar="ID",
+    parser.add_argument("id", metavar="ID", nargs="?",
                         help="what is marked: a question, Q<n>; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
-                             "several separated by commas")
+                             "several separated by commas; left out with --flow, "
+                             "which marks the round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -441,6 +467,12 @@ def _declare_mark(verbs) -> None:
                            "only the operator narrows it (rule narrow:Q<n>=LIST)")
     form.add_argument("--reopen", action="store_true",
                       help="make a parked question open again")
+    form.add_argument("--flow", metavar="NAME",
+                      help="move the round up to this flow: one later in the tiers "
+                           "that has every step the round follows, or the round's "
+                           "own flow, to take the steps the config has for it now "
+                           "when they have every step it follows; any other move "
+                           "is the operator's (rule flow:NAME)")
     form.add_argument("--shown", action="store_true",
                       help="the rulings were put in front of the operator as "
                            "recorded; needs --record")
@@ -456,6 +488,11 @@ def _declare_mark(verbs) -> None:
 def _mark(args, out) -> int:
     from . import marking, questions
 
+    if args.flow is not None:
+        return _mark_flow(args, out)
+    if args.id is None:
+        raise BadArgument("nothing says what is marked",
+                          "name the question, Q<n>, or with --shown the rulings")
     if args.shown:
         return _mark_shown(args, out)
     if args.record is not None:
@@ -470,6 +507,24 @@ def _mark(args, out) -> int:
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
     _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_flow(args, out) -> int:
+    """`mark --flow`: move a round up to a heavier flow, which is the lead's to do."""
+    from . import stepping
+
+    if args.id is not None:
+        raise BadArgument("--flow moves the round itself and names nothing in it",
+                          f"leave {args.id} out: {args.prog} mark ROUND --flow NAME")
+    if args.record is not None:
+        raise BadArgument("--record is a pointer to the operator's word, and a step "
+                          "up is the lead's and carries none", "leave --record out")
+    stepped = stepping.step_up(args.target, args.flow, actor=_actor(args))
+    steps = ", ".join(str(step.get("step")) for step in stepped.steps) or "no steps"
+    print(f"{stepped.name}   flow {stepped.flow} ({steps})   was: {stepped.was}",
+          file=out)
+    _warn_of(stepped.failed, args.prog, args.verb)
     return codes.OK
 
 
