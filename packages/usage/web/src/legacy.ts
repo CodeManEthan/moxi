@@ -1,10 +1,8 @@
 // <moxi-usage-legacy .address=... .filters=... .open=...>: the views the page had before
 // its frame was redrawn, kept mounted under the page's chart until each has its place in
 // the new page. It draws the view that serves the page's address (`legacyRoute`): the
-// sessions table, one session with its main agent's requests charted or a subagent's,
-// or the cost terms (the class split, the
-// Reconcile table and the rates) for Token kinds and Prices. For any other address it
-// draws nothing. A link here opens its piece through the page, which writes the address.
+// sessions table, or one session with its main agent's requests charted or a subagent's.
+// For any other address it draws nothing. A link here opens its piece through the page, which writes the address.
 // Every view reads under the page's range and filters, which the page passes in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
 // line, the chart, the index's state and "Read new sessions" are the page's.
 
@@ -12,9 +10,9 @@ import { css, html, LitElement, nothing, svg } from "lit";
 import type { TemplateResult } from "lit";
 import { api, subscribe } from "/m/ui/client.js";
 
-import { Feed, parseIndexEvent, parsePrices, parseReport } from "./feed.ts";
+import { Feed, parseIndexEvent, parseReport } from "./feed.ts";
 import type {
-  AgentRow, Prices, Report, RequestRow, RequestsTotal, SessionRow,
+  AgentRow, Report, RequestRow, RequestsTotal, SessionRow,
   TermsRow, TermsTotal,
 } from "./feed.ts";
 import { addressPath, NOTHING_OPEN, sessionAddress, SESSIONS } from "./address-model.ts";
@@ -22,9 +20,9 @@ import type { Address } from "./address-model.ts";
 import { BASE, flag, SERIES } from "./parts.ts";
 import {
   agents, agentTreemap, cellLabel, contextChart, costText, filterKeys, flags, fmtCost, fmtMoment,
-  fmtTokens, layerLine, legacyRoute, localDay, MARGIN, NO_FILTERS, overrideLine, parseRoute, pricesPath,
-  RATE_FIELDS, rateAsks, rateLine, readout, reconcileLines, REQUEST_CLASSES,
-  requestNotes, requestRules, requestsChart, requestsPath, reportState, searchPath, seriesClass,
+  fmtTokens, legacyRoute, localDay, MARGIN, NO_FILTERS, parseRoute,
+  readout, reconcileLines, REQUEST_CLASSES,
+  requestNotes, requestRules, requestsChart, requestsPath, reportState, seriesClass,
   sessionTermsPath, splitBars, splitKeys, splitLabel, classIndex, TERM_CLASSES,
   tickText, viewPath,
 } from "./views.ts";
@@ -34,7 +32,6 @@ const TAG = "moxi-usage-legacy";
 const REQUESTS_HEIGHT = 200;
 const SPLIT_HEIGHT = 16;
 const TREEMAP_HEIGHT = 300;
-const SEARCH_MS = 200;
 
 // The request charts' measure outlives one placement of the page.
 let requestMeasure: RequestMeasure = "tokens";
@@ -61,9 +58,9 @@ const STYLES = [BASE, SERIES, css`
   th { color: var(--moxi-text-dim); font-weight: normal; white-space: nowrap; }
   td.wrap { overflow-wrap: anywhere; min-width: 8em; }
   @media (max-width: 640px) { .wide { display: none; } }
-  /* Reconcile and Rates keep every column on a phone and scroll inside their wrapper; the
-     Model column stays in view, opaque over the cells that scroll under it. */
-  table:is([data-part="reconcile"], [data-part="rate-lines"]) :is(th, td):first-child {
+  /* Reconcile keeps every column on a phone and scrolls inside its wrapper; the Model
+     column stays in view, opaque over the cells that scroll under it. */
+  table[data-part="reconcile"] :is(th, td):first-child {
     position: sticky; left: 0; z-index: 1; background: var(--moxi-bg); }
   a.link { color: var(--moxi-accent); }
   svg { display: block; width: 100%; height: auto; margin-bottom: var(--moxi-gap); }
@@ -86,9 +83,6 @@ const STYLES = [BASE, SERIES, css`
   .split svg { margin: 0; }
   tr[data-line="subtotal"] td { font-weight: 600; }
   tr[data-line="total"] td { font-weight: 600; border-top: 2px solid var(--moxi-border-strong); }
-  details > summary { cursor: pointer; font-weight: 600; margin: var(--moxi-gap) 0; }
-  input[type="search"] { font: inherit; max-width: 100%; padding: 3px 6px; border: 1px solid var(--moxi-border-strong);
-                         border-radius: var(--moxi-radius); background: var(--moxi-bg); color: var(--moxi-text); }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 var(--moxi-gap); font-size: var(--moxi-font-size-sm); }
   .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; }
   .totals { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: var(--moxi-gap); }
@@ -124,11 +118,6 @@ export class UsageLegacy extends LitElement {
   /** The session view's requests and cost terms. */
   #requests: Feed<Report<RequestRow, RequestsTotal>> | null = null;
   #sessionTerms: Feed<Report<TermsRow, TermsTotal>> | null = null;
-  /** The Rates section's models, opened with the section, and its search. */
-  #rates: Feed<Prices> | null = null;
-  #search: Feed<Prices> | null = null;
-  #searchText = "";
-  #searchTimer: ReturnType<typeof setTimeout> | undefined;
   /** The request the charts' readout shows. */
   #hover: number | null = null;
   #stops: (() => void)[] = [];
@@ -152,7 +141,6 @@ export class UsageLegacy extends LitElement {
     this.#view?.close();
     this.#view = null;
     this.#closeExtras();
-    clearTimeout(this.#searchTimer);
     this.#loadedFor = null;
     for (const stop of this.#stops) stop();
     this.#stops = [];
@@ -195,9 +183,8 @@ export class UsageLegacy extends LitElement {
   }
 
   #closeExtras(): void {
-    for (const feed of [this.#requests, this.#sessionTerms, this.#rates, this.#search]) feed?.close();
-    this.#requests = this.#sessionTerms = this.#rates = this.#search = null;
-    this.#searchText = "";
+    for (const feed of [this.#requests, this.#sessionTerms]) feed?.close();
+    this.#requests = this.#sessionTerms = null;
     this.#hover = null;
   }
 
@@ -271,7 +258,6 @@ export class UsageLegacy extends LitElement {
     switch (route.view) {
       case "sessions": return this.#sessions(report as Report<SessionRow>);
       case "session": return this.#session(report as Report<AgentRow>, route);
-      case "terms": return this.#termsView(report as Report<TermsRow, TermsTotal>);
       default: return nothing;
     }
   }
@@ -382,82 +368,6 @@ export class UsageLegacy extends LitElement {
         </tr>`)}</tbody>
     </table></div>
     <p class="dim small">The terms on each line add up to its cost.</p>`;
-  }
-
-  #termsView(report: Report<TermsRow, TermsTotal>) {
-    return html`
-      <h2>Cost by class</h2>
-      ${this.#splitBars(report.rows)}
-      <h2>Reconcile</h2>
-      ${this.#reconcile(report)}
-      ${this.#ratesSection(report)}`;
-  }
-
-  /** The Rates section: closed until opened, then the rates of the models the Reconcile
-   * lines priced, a search over the whole model table, your `[[model]]` rows and the
-   * table's layers. */
-  #ratesSection(report: Report<TermsRow, TermsTotal>) {
-    const { asks, more } = rateAsks(report.rows);
-    const toggle = (event: Event) => {
-      const open = (event.target as HTMLDetailsElement).open;
-      if (open && this.#rates === null && asks.length) {
-        const path = pricesPath(asks);
-        this.#rates = new Feed<Prices>(() => api("usage", path), parsePrices, () => this.requestUpdate());
-        void this.#rates.refresh();
-      }
-    };
-    const search = (event: Event) => {
-      const text = (event.target as HTMLInputElement).value.trim();
-      clearTimeout(this.#searchTimer);
-      this.#searchTimer = setTimeout(() => {
-        this.#searchText = text;
-        this.#search?.close();
-        this.#search = null;
-        if (text.length >= 2) {
-          const path = searchPath(text);
-          this.#search = new Feed<Prices>(() => api("usage", path), parsePrices, () => this.requestUpdate());
-          void this.#search.refresh();
-        }
-        this.requestUpdate();
-      }, SEARCH_MS);
-    };
-    const feed = this.#searchText.length >= 2 ? this.#search : this.#rates;
-    const value = feed?.value ?? null;
-    return html`<details data-part="rates" @toggle=${toggle}>
-      <summary>Rates</summary>
-      <p><label>Search the model table <input type="search" aria-label="Search the model table" @input=${search}></label></p>
-      ${feed === null ? html`<p class="dim small">${asks.length ? "Reading…" : "No model here has a rate to show."}</p>`
-        : feed.value === null ? html`<p class=${feed.loading ? "dim" : "problem"}>${feed.loading ? "Reading…" : `The rates can't be read: ${feed.refused ?? feed.failure?.why}.`}</p>`
-        : this.#rateTable(feed.value)}
-      ${feed === this.#search && value && value.matched > value.models.length
-        ? html`<p class="dim small" data-part="more">${value.matched - value.models.length} more</p>` : nothing}
-      ${feed === this.#rates && more ? html`<p class="dim small">${more} more models in these lines aren't listed; search for one.</p>` : nothing}
-      ${value ? html`
-        <h3>Your [[model]] rows</h3>
-        ${value.overrides.length ? html`<ul data-part="overrides">${value.overrides.map((row) => html`<li>${overrideLine(row)}</li>`)}</ul>`
-          : html`<p class="dim small">None: every price comes from the model table.</p>`}
-        <p class="dim small" data-part="layers">${layerLine(value)}</p>
-        ${value.problems.map((problem) => html`<p class="dim small">skipped: ${problem}</p>`)}` : nothing}
-    </details>`;
-  }
-
-  #rateTable(prices: Prices) {
-    const lines = prices.models.map(rateLine);
-    if (!lines.length) return html`<p class="dim small">No model matches.</p>`;
-    return html`<div class="scroll"><table data-part="rate-lines">
-      <thead><tr><th>Model</th>${RATE_FIELDS.map(([, label]) => html`<th class="num">${label}</th>`)}
-        <th class="num">Window</th><th>Tiers</th><th>Period</th><th>Where from</th></tr></thead>
-      <tbody>${lines.map((line) => html`
-        <tr data-rate=${line.model} data-provider=${line.provider ?? ""}>
-          <td class="wrap"><code>${line.model}</code>${line.provider ? html`<div class="dim small">${line.provider}</div>` : nothing}
-            ${line.known ? nothing : html`<div class="dim small">not in the model table</div>`}</td>
-          ${line.cells.map((cell) => html`<td class="num">${cell.text}${cell.mark ? html`<div class="dim small">${cell.mark}</div>` : nothing}</td>`)}
-          <td class="num">${line.window}</td>
-          <td class="wrap small">${line.tiers.map((tier) => html`<div>${tier}</div>`)}</td>
-          <td class="small">${line.period}</td>
-          <td class="wrap small">${line.from}</td>
-        </tr>`)}</tbody>
-    </table></div>`;
   }
 
   /** The rules both request charts draw, and the hover columns over them. */

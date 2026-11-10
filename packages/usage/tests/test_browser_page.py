@@ -5,9 +5,11 @@ the contract check on the page and its two blocks (the cost block saying how old
 is), each view drawn over a small index and fitting a phone, a session opened under its
 row's harness, the command with no index, a read over a stale index that runs no pass,
 and "Read new sessions" bringing new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
-the session view's request and context charts and their readout, a subagent's charts, the
-cost terms view's Total against its group lines, the Rates section and its search, and Reconcile and Rates keeping every
-column on a phone, scrolling in their wrappers with the Model column in view.
+the session view's request and context charts and their readout, a subagent's charts, and
+the Token kinds and Prices sections: the classes with a tier's part and what caching saved,
+the price table, `Check against a bill` with its Total against its group lines, `Details`
+and `Find a model`, the two tables keeping every column on a phone, scrolling in their
+wrappers with the Model column in view.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
 the shell's own environment, so they sit under the shell's home where its page servers
@@ -360,39 +362,55 @@ def context_chart(panel):
     return panel.locator("section[data-part=view] svg[data-chart=context]")
 
 
-def reconcile(panel):
-    return panel.locator("section[data-part=view] table[data-part=reconcile]").first
+def prices_of(panel):
+    return panel.locator("section[data-group=prices]")
 
 
-def test_the_page_keeps_the_contract_on_the_cost_terms_view(charted, charted_page,
-                                                             ui_component_check):
+def open_prices(page, part: str | None = None):
+    """The page at Prices, opened, with `part` (an act's words) opened under the table."""
+    panel = open_view(page, "prices")
+    prices = prices_of(panel)
+    expect(prices.locator("[data-part=price-table]")).to_be_visible()
+    if part is not None:
+        prices.get_by_role("button", name=part).click()
+    return prices
+
+
+def bill(prices):
+    return prices.locator("table[data-part=bill-lines]")
+
+
+def test_the_page_keeps_the_contract_on_the_prices_section(charted, charted_page,
+                                                            ui_component_check):
     check = ui_component_check(charted_page, "usage", "page", {"route": "prices"},
                                tokens=("text",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/terms?" in url for url in check.requests), check.requests
 
 
-#: What shows on the cost terms and session views once their reports have drawn.
+#: What shows on the prices section and the session view once their reads have drawn.
 CHARTED_VIEWS = {
-    "prices": "section[data-part=view] tr[data-line=total]",
+    "prices": "section[data-group=prices] [data-part=price-table]",
     f"sessions/claude/{CHARTED}": "section[data-part=view] svg[data-chart=requests] g[data-n]",
 }
 
 
-@pytest.mark.parametrize("route", list(CHARTED_VIEWS), ids=["terms", "session"])
-def test_the_cost_terms_and_session_views_fit_a_phone(charted, charted_page, ui_width_check,
-                                                      route):
+@pytest.mark.parametrize("route", list(CHARTED_VIEWS), ids=["prices", "session"])
+def test_the_prices_section_and_session_view_fit_a_phone(charted, charted_page, ui_width_check,
+                                                         route):
     ui_width_check(charted_page, module="usage", route=route)
     panel = panel_of(charted_page)
     expect(panel.locator(CHARTED_VIEWS[route]).first).to_be_visible()
     ui_width_check(charted_page)
 
 
-def test_the_rates_section_fits_a_phone_when_open(charted, charted_page, ui_width_check):
+@pytest.mark.parametrize("part", ["Details", "Check against a bill", "Find a model"])
+def test_each_act_under_the_price_table_fits_a_phone_when_open(charted, charted_page,
+                                                               ui_width_check, part):
     ui_width_check(charted_page, module="usage", route="prices")
-    rates = panel_of(charted_page).locator("section[data-part=view] details[data-part=rates]")
-    rates.locator("summary").click()
-    expect(rates.locator("tr[data-rate]")).to_have_count(2)
+    prices = prices_of(panel_of(charted_page))
+    prices.get_by_role("button", name=part).click()
+    expect(prices.get_by_role("button", name=part)).to_have_attribute("aria-expanded", "true")
     ui_width_check(charted_page)
 
 
@@ -418,8 +436,8 @@ SCROLLED = """(table) => {
   };
 }"""
 
-RECONCILE_HEADERS = ["Model", "Priced by", "fresh input", "cache read", "cache write 5m",
-                     "cache write 1h", "output", "Cost"]
+BILL_HEADERS = ["Model", "Priced by", "fresh input", "cache read", "cache write 5m",
+                "cache write 1h", "output", "Cost"]
 RATE_HEADERS = ["Model", "Input", "Output", "Cache read", "Write 5m", "Write 1h", "Window",
                 "Tiers", "Period", "Where from"]
 
@@ -441,21 +459,21 @@ def scrolled_on_a_phone(table, headers: list[str]) -> None:
         assert alpha and float(alpha.group("a") or 1) == 1, seen
 
 
-def test_reconcile_and_rates_keep_every_column_on_a_phone_and_scroll_with_model_in_view(
+def test_the_bill_and_the_rates_keep_every_column_on_a_phone_and_scroll_with_model_in_view(
         charted, charted_page, ui_width_check):
     ui_width_check(charted_page, module="usage", route="prices")
-    panel = panel_of(charted_page)
-    view = panel.locator("section[data-part=view]")
-    table = reconcile(panel)
+    prices = prices_of(panel_of(charted_page))
+    prices.get_by_role("button", name="Check against a bill").click()
+    table = bill(prices)
     expect(table.locator("tr[data-line=total]")).to_be_visible()
-    for header in RECONCILE_HEADERS:
+    for header in BILL_HEADERS:
         expect(table.locator("thead th", has_text=header).first).to_be_visible()
-    scrolled_on_a_phone(table, RECONCILE_HEADERS)
+    scrolled_on_a_phone(table, BILL_HEADERS)
 
-    rates = view.locator("details[data-part=rates]")
-    rates.locator("summary").click()
+    prices.get_by_role("button", name="Details").click()
+    rates = prices.locator("[data-part=details] table[data-part=rate-lines]")
     expect(rates.locator("tr[data-rate]")).to_have_count(2)
-    scrolled_on_a_phone(rates.locator("table[data-part=rate-lines]"), RATE_HEADERS)
+    scrolled_on_a_phone(rates, RATE_HEADERS)
     ui_width_check(charted_page)
 
 
@@ -529,9 +547,8 @@ def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charte
         SUBAGENT_MODEL)
 
 
-def test_the_cost_terms_total_is_its_group_lines(charted, charted_page):
-    panel = open_view(charted_page, "prices")
-    table = reconcile(panel)
+def test_the_bills_total_is_its_group_lines(charted, charted_page):
+    table = bill(open_prices(charted_page, "Check against a bill"))
     total = table.locator("tr[data-line=total] td[data-cost]")
     expect(total).to_have_count(1)
     expect(table.locator("tr[data-line=subtotal]")).to_have_count(1)
@@ -548,26 +565,96 @@ def test_the_cost_terms_total_is_its_group_lines(charted, charted_page):
     assert sum(groups) + subtotal != pytest.approx(shown, abs=1e-9)
 
 
-def test_rates_list_every_reconcile_model_and_a_search_finds_a_seeded_row(
-        charted, charted_page):
-    panel = open_view(charted_page, "prices")
-    expect(reconcile(panel).locator("tr[data-line=total]")).to_be_visible()
-    rates = panel.locator("section[data-part=view] details[data-part=rates]")
-    expect(rates.locator("tr[data-rate]")).to_have_count(0)
-    rates.locator("summary").click()
-    lines = rates.locator("tr[data-rate]")
+def test_details_list_every_model_priced_and_where_its_prices_came_from(charted, charted_page):
+    prices = open_prices(charted_page)
+    details = prices.locator("[data-part=details]")
+    expect(details).to_have_count(0)
+    prices.get_by_role("button", name="Details").click()
+    lines = details.locator("tr[data-rate]")
     expect(lines).to_have_count(2)
     assert sorted(lines.evaluate_all("rows => rows.map((row) => row.dataset.rate)")) == sorted(
         [MODEL, SUBAGENT_MODEL])
-    sonnet = rates.locator(f'tr[data-rate="{MODEL}"]')
+    sonnet = details.locator(f'tr[data-rate="{MODEL}"]')
     expect(sonnet).to_contain_text("your config")
     expect(sonnet).to_contain_text("fast (speed fast)")
-    overrides = rates.locator("[data-part=overrides] li")
+    overrides = details.locator("[data-part=overrides] li")
     expect(overrides).to_have_count(2)
     expect(overrides.filter(has_text=SEEDED_ID)).to_contain_text("a row of my own")
-    expect(rates.locator("[data-part=layers]")).to_contain_text("model table in effect")
+    expect(details.locator("[data-part=layers]")).to_contain_text("model table in effect")
+    # One act is open at a time, and a second press closes it.
+    prices.get_by_role("button", name="Check against a bill").click()
+    expect(details).to_have_count(0)
+    expect(bill(prices).locator("tr[data-line=total]")).to_be_visible()
+    prices.get_by_role("button", name="Check against a bill").click()
+    expect(bill(prices)).to_have_count(0)
 
-    rates.get_by_role("searchbox", name="Search the model table").fill("seeded-model")
-    expect(rates.locator(f'tr[data-rate="{SEEDED_ID}"]')).to_be_visible()
-    expect(lines).to_have_count(1)
-    expect(rates.locator("[data-part=more]")).to_have_count(0)
+
+def test_find_a_model_searches_the_whole_table_and_finds_a_seeded_row(charted, charted_page):
+    prices = open_prices(charted_page, "Find a model")
+    found = prices.locator("[data-part=find]")
+    found.get_by_role("searchbox", name="Find a model").fill("seeded-model")
+    expect(found.locator(f'tr[data-rate="{SEEDED_ID}"]')).to_be_visible()
+    expect(found.locator("tr[data-rate]")).to_have_count(1)
+    expect(found.locator("[data-part=more]")).to_have_count(0)
+    found.get_by_role("searchbox", name="Find a model").fill("no-such-model-anywhere")
+    expect(found.locator("[data-part=no-match]")).to_have_text("No model matches.")
+
+
+def test_prices_closed_counts_the_priced_models_and_dates_the_table(charted, charted_page):
+    prices = prices_of(open_view(charted_page))
+    expect(prices.locator("[data-part=closed]")).to_have_text(
+        "2 models, all priced · a local price table, not billing data")
+    count = prices.locator("[data-part=count]")
+    expect(count).to_have_text(re.compile(r"^updated [A-Z][a-z]{2} \d{1,2}(, \d{4})?$"))
+    count.click()
+    expect(charted_page).to_have_url(f"{charted.url}/m/usage/prices")
+    expect(count).to_have_text("Close")
+
+
+def test_prices_opened_lists_each_models_price_per_million_and_three_acts(charted, charted_page):
+    prices = open_prices(charted_page)
+    table = prices.locator("[data-part=price-table]")
+    expect(table.get_by_role("columnheader")).to_have_text(
+        ["$ per million tokens", "input", "output", "cache write", "cache read"])
+    rows = table.locator("[data-price]")
+    expect(rows).to_have_count(2)
+    # The `[[model]]` row priced input at 4 and output at 20 per million.
+    sonnet = table.locator(f'[data-price^="{MODEL}|"]').get_by_role("cell")
+    expect(sonnet.nth(1)).to_have_text("4.00")
+    expect(sonnet.nth(2)).to_have_text("20.00")
+    expect(prices.locator("[data-part=paragraph]")).to_contain_text(
+        "Every figure on this page is tokens from your transcripts times these prices.")
+    for act in ("Find a model", "Check against a bill", "Details"):
+        expect(prices.get_by_role("button", name=act)).to_have_attribute("aria-expanded", "false")
+
+
+def kinds_of(panel):
+    return panel.locator("section[data-group=kinds]")
+
+
+def test_token_kinds_closed_says_the_input_read_from_cache_and_opens_its_classes(
+        charted, charted_page):
+    kinds = kinds_of(open_view(charted_page))
+    expect(kinds.locator("[data-part=closed]")).to_have_text(
+        re.compile(r"^\d+% of input read from cache · cache reads \$\d+\.\d\d, output \$\d+\.\d\d$"))
+    count = kinds.locator("[data-part=count]")
+    expect(count).to_have_text(re.compile(r"tokens$"))
+    count.click()
+    expect(charted_page).to_have_url(f"{charted.url}/m/usage/kinds")
+    rows = kinds.locator("[data-part=rows] .tr2")
+    expect(rows).to_have_count(4)
+    names = rows.locator(".nm").evaluate_all("cells => cells.map((cell) => cell.textContent.split('·')[0].trim())")
+    assert sorted(names) == ["Cache reads", "Cache writes", "Fresh input", "Output"], names
+    for row in rows.all():
+        expect(row).to_contain_text(re.compile(r"tokens\s*(at least )?\$\d"))
+    # The sixth request ran on the `[[model]]` row's fast tier.
+    expect(kinds.locator("[data-row=output]")).to_contain_text(re.compile(r"· \$\d+\.\d\d at fast prices"))
+
+
+def test_token_kinds_says_what_caching_saved_as_an_estimate(charted, charted_page):
+    kinds = kinds_of(open_view(charted_page, "kinds"))
+    expect(kinds.locator("[data-part=saving]")).to_have_text(re.compile(
+        r"^[\d.]+[kM]? of [\d.]+[kM]? input tokens were read from cache\. With no cache, at the same prices, "
+        r"those reads would have cost \$[\d.]+ as fresh input; they cost \$[\d.]+(, and cache writes .*)?, "
+        r"so caching (saved about \$[\d.]+|cost about \$[\d.]+ more than it saved)\. An estimate\.$"))
+

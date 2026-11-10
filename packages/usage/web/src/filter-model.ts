@@ -119,6 +119,12 @@ export function modelsSectionPath(state: PageState, today: string): string {
   return withQuery("api/models", stateKeys(state, today));
 }
 
+/** The cost terms of the range under every filter, by model: Token kinds' classes and
+ * saving, the models Prices lists and the bill's lines. */
+export function termsSectionPath(state: PageState, today: string): string {
+  return withQuery("api/terms", [["by", "model"], ...stateKeys(state, today)]);
+}
+
 // --- the line -----------------------------------------------------------------------------
 
 /** One entry of a menu. */

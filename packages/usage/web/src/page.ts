@@ -37,6 +37,10 @@
 //     section[data-group=projects|folders]  the dearest projects (or folders), and opened
 //                                  each with its share and cost, a row filtering Sessions
 //     section[data-group=models]   the dearest models, and opened each with share and cost
+//     section[data-group=kinds]    the input read from cache and the dearest classes, and
+//                                  opened the four classes and what caching saved
+//     section[data-group=prices]   how many models are priced and the table's date, and
+//                                  opened their prices and the acts that open under them
 //   moxi-usage-legacy           the views the page had before, each serving its section's
 //                               address until the section has its place under the filter line
 //   div[data-part=foot]         when the sessions were last read, the files, the act
@@ -64,11 +68,15 @@ import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
 import { rangeDays, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
-import { Feed, parseIndexEvent, parseLimits, parseReport, parseStatus, parseWindow, passOutcome } from "./feed.ts";
-import type { DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, ProjectRow, Report, Status } from "./feed.ts";
+import {
+  Feed, parseIndexEvent, parseLimits, parsePrices, parseReport, parseStatus, parseWindow, passOutcome,
+} from "./feed.ts";
+import type {
+  DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, Prices, ProjectRow, Report, Status, TermsRow, TermsTotal,
+} from "./feed.ts";
 import {
   allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
-  modelsSectionPath, placesPath, placesSectionPath, watchState,
+  modelsSectionPath, placesPath, placesSectionPath, termsSectionPath, watchState,
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
 import {
@@ -77,10 +85,14 @@ import {
 import type { Cost, Foot, FootLine, Nothing, OtherRead } from "./frame-model.ts";
 import "./legacy.ts";
 import type { LimitGroup, LimitRow, Warning } from "./limits-model.ts";
-import { NO_FILTERS } from "./views.ts";
+import { fmtCost, layerLine, NO_FILTERS, overrideLine, RATE_FIELDS, rateLine, reconcileLines, searchPath, TERM_CLASSES } from "./views.ts";
 import type { Filters } from "./views.ts";
 import { CLOSE, HIDE_TABLE, modelsSection, placesSection, SECTION_LABELS, TABLE as SECTION_TABLE } from "./sections-model.ts";
 import type { Section, SectionKey, SentencePart } from "./sections-model.ts";
+import {
+  BILL, DETAILS, FIND, KINDS_LABEL, PRICE_HEADS, PRICES_LABEL, pricesFor, pricesLeft, pricesSection, kindsSection,
+} from "./terms-model.ts";
+import type { Kinds, PricesModel, PricesPart } from "./terms-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
 import type { OpenedLimit } from "./window-model.ts";
 
@@ -88,6 +100,10 @@ const TAG = "moxi-usage-page";
 const TICK_MS = 15_000;
 /** The thin line beside a percent, in px: its length and its height. */
 const METER = { width: 96, height: 9 };
+/** How long a search of the model table waits for the typing to stop, in ms. */
+const SEARCH_MS = 200;
+/** The fewest characters a search of the model table takes. */
+const SEARCH_MIN = 2;
 
 // When this document last asked for a pass as a page opened, in epoch seconds.
 let askedAt = 0;
@@ -218,6 +234,26 @@ const STYLES = css`
   .rows p a { color: var(--moxi-text); }
   .rows p.acts { padding-top: 0; }
   .rows .act { color: var(--moxi-text-dim); }
+  .acts .act + .act { margin-left: 18px; }
+  .one .d { color: var(--moxi-text-dim); }
+  .tr2.p5 { grid-template-columns: minmax(0, 1fr) 74px 74px 86px 82px; font-size: var(--moxi-font-size-sm); }
+  .tr2.th { color: var(--moxi-text-dim); align-items: end; }
+  .tr2.th span { white-space: normal; }
+  .tbl .d { color: var(--moxi-text-dim); }
+  .tbl td.wrap { min-width: 8em; white-space: normal; overflow-wrap: anywhere; }
+  .tbl tr[data-line="subtotal"] td, .tbl tr[data-line="total"] td { font-weight: 600; }
+  /* The bill and the rates keep every column and scroll inside their wrapper; the Model
+     column stays in view, opaque over the cells that scroll under it. */
+  .tbl.bill :is(th, td):first-child { position: sticky; left: 0; z-index: 1; padding-right: 12px;
+                                      background: var(--moxi-bg); }
+  .under { padding: 2px 0 6px; }
+  .under .sub { color: var(--moxi-text); padding-bottom: 0; }
+  .under ul { margin: 0; padding: 0 0 6px 18px; font-size: var(--moxi-font-size-sm); line-height: 18px;
+              color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .find { display: flex; gap: 8px; align-items: baseline; padding: 4px 0 6px; font-size: var(--moxi-font-size-sm);
+          color: var(--moxi-text-dim); }
+  .find input { min-width: 0; flex: 1; max-width: 260px; font: inherit; color: var(--moxi-text); padding: 2px 6px;
+                border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius); background: var(--moxi-bg); }
   .grps + .nothing .quietline { padding-top: 56px; }
   .first { font-size: 14px; line-height: 1.6; color: var(--moxi-text-dim); text-align: center; }
   .first p { max-width: 520px; margin: 0 auto; }
@@ -246,6 +282,7 @@ const STYLES = css`
     .menu { max-width: calc(100% - 4px); }
     .menu button.it { grid-template-columns: 20px 1fr auto; }
     .tr2 { grid-template-columns: minmax(0, 1fr) 64px minmax(64px, auto); }
+    .tr2.p5 { grid-template-columns: minmax(0, 1fr) 48px 52px 84px 52px; }
     .capl, .note { display: block; }
     .capl span, .note span { display: block; }
     .quietline { padding-top: 56px; white-space: normal; }
@@ -263,6 +300,8 @@ export class UsagePage extends LitElement {
     custom: { state: true },
     asTable: { state: true },
     sectionTable: { state: true },
+    pricesPart: { state: true },
+    searchText: { state: true },
     width: { state: true },
   };
 
@@ -278,6 +317,10 @@ export class UsagePage extends LitElement {
   asTable = false;
   /** The opened section whose table is shown under its rows. */
   sectionTable: SectionKey | null = null;
+  /** What is open under the price table. */
+  pricesPart: PricesPart | null = null;
+  /** What `Find a model` searches for. */
+  searchText = "";
   /** The element's own width, in px. */
   width = 680;
 
@@ -300,6 +343,15 @@ export class UsagePage extends LitElement {
    * theirs is set. */
   #placesSection: Feed<Report<ProjectRow>> | null = null;
   #modelsSection: Feed<Report<ModelRow>> | null = null;
+  /** Token kinds' and Prices' cost terms, under every filter, and the price table's rates
+   * of their models, read once the terms have answered. */
+  #terms: Feed<Report<TermsRow, TermsTotal>> | null = null;
+  #prices: Feed<Prices> | null = null;
+  #pricesPath: string | null = null;
+  /** `Find a model`'s search, and the text it was asked with. */
+  #search: Feed<Prices> | null = null;
+  #searched = "";
+  #searchTimer: ReturnType<typeof setTimeout> | undefined;
   /** What is open: the piece the address names. */
   #at: Address = NOTHING_OPEN;
   /** The opened limit row's read, with the window it reads and the reading it was last
@@ -397,6 +449,7 @@ export class UsagePage extends LitElement {
     if (sameAddress(next, this.#at)) return;
     refusedWindow = null;
     this.sectionTable = null;
+    this.#closePart();
     this.#setAt(next);
     this.requestUpdate();
   }
@@ -466,13 +519,15 @@ export class UsagePage extends LitElement {
   /** Every read under the filter line that is open, each once. */
   #belowFeeds(): { close(): void; refresh(): Promise<void> }[] {
     return [...new Set([this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
-                        this.#modelsSection])].filter((feed) => feed !== null);
+                        this.#modelsSection, this.#terms, this.#prices])].filter((feed) => feed !== null);
   }
 
   #closeBelow(): void {
     for (const feed of this.#belowFeeds()) feed.close();
     this.#chart = this.#figures = this.#allTime = this.#places = this.#models = null;
-    this.#placesSection = this.#modelsSection = null;
+    this.#placesSection = this.#modelsSection = this.#terms = this.#prices = null;
+    this.#pricesPath = null;
+    this.#closePart();
     this.#asked = this.#askedAllTime = null;
   }
 
@@ -500,12 +555,12 @@ export class UsagePage extends LitElement {
     const paths = { chart: chartPath(state, today), figures: figuresPath(state, today),
                     places: placesPath(state, today, this.#folders()), models: modelsPath(state, today),
                     placesSection: placesSectionPath(state, today, this.#folders()),
-                    modelsSection: modelsSectionPath(state, today) };
+                    modelsSection: modelsSectionPath(state, today), terms: termsSectionPath(state, today) };
     const asked = JSON.stringify(paths);
     if (asked !== this.#asked) {
       this.#asked = asked;
       const allTime = this.#allTime;
-      for (const feed of this.#belowFeeds()) if (feed !== allTime) feed.close();
+      for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
@@ -515,7 +570,17 @@ export class UsagePage extends LitElement {
         : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update);
       this.#modelsSection = paths.modelsSection === paths.models ? this.#models
         : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update);
-      for (const feed of this.#belowFeeds()) if (feed !== allTime) void feed.refresh();
+      this.#terms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update);
+      for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) void feed.refresh();
+    }
+    // The price table is read for the models the terms answer holds, again when they change.
+    const terms = this.#terms?.value ?? null;
+    const pricesPath = terms === null ? null : pricesFor(terms);
+    if (pricesPath !== null && pricesPath !== this.#pricesPath) {
+      this.#pricesPath = pricesPath;
+      this.#prices?.close();
+      this.#prices = new Feed<Prices>(() => api("usage", pricesPath), parsePrices, update);
+      void this.#prices.refresh();
     }
     // All time's figure is asked when the Range menu first opens, and again under new filters.
     const allTime = allTimePath(state);
@@ -587,6 +652,8 @@ export class UsagePage extends LitElement {
       other(this.#folders() ? "The Folders section" : "The Projects section", this.#placesSection);
     }
     if (this.#modelsSection !== this.#models) other("The Models section", this.#modelsSection);
+    other("Token kinds and Prices", this.#terms);
+    if (this.#prices !== null) others.push({ what: "The price table", read: this.#prices, report: false });
     const windowRead = this.#window ?? refusedWindow;
     if (windowRead !== null) others.push({ what: "The opened limit", read: windowRead, report: false });
     const at = this.#at;
@@ -613,6 +680,8 @@ export class UsagePage extends LitElement {
       this.#section(this.#folders() ? "folders" : "projects", this.#placesSection,
                     placesSection(this.#placesSection?.value ?? null, this.#folders())),
       this.#section("models", this.#modelsSection, modelsSection(this.#modelsSection?.value ?? null)),
+      this.#kinds(kindsSection(this.#terms?.value ?? null)),
+      this.#pricesGroup(pricesSection(this.#terms?.value ?? null, this.#prices?.value ?? null, today)),
     ].filter((drawn) => drawn !== nothing);
     const days = rangeDays(state.range, today);
     // A session's address names its harness, and its view is read under it.
@@ -879,6 +948,180 @@ export class UsagePage extends LitElement {
         </div>` : nothing}
       </div>
     </section>`;
+  }
+
+  /** A section's name and its closed row: the answer, and the count that opens it, which
+   * reads `Close` while it is open. */
+  #head(key: "kinds" | "prices", label: string, closed: unknown, count: string, open: boolean) {
+    const target = open ? NOTHING_OPEN : { piece: key } as Address;
+    return html`<div class="gk">${label}</div>
+      <div class="one"><span data-part="closed">${closed}</span><a class="t" data-part="count"
+        href=${addressPath(target)} aria-expanded=${String(open)}
+        @click=${(event: MouseEvent) => this.#follow(event, target)}>${open ? CLOSE : count}</a></div>`;
+  }
+
+  /** An opened section whose read is still out. */
+  #sectionReading(key: "kinds" | "prices", label: string, feed: Feed<unknown> | null) {
+    if (this.#at.piece !== key || feed === null || feed.value !== null || !feed.loading) return nothing;
+    return html`<section class="grp is-open" data-group=${key}>
+      <div class="gk">${label}</div>
+      <div class="gl"><p class="none" data-part="reading">${READING}</p></div>
+    </section>`;
+  }
+
+  /** Token kinds: the input read from cache and the dearest classes; opened, the four
+   * classes with their tokens and cost, then what caching saved. */
+  #kinds(model: Kinds | null) {
+    if (model === null) return this.#sectionReading("kinds", KINDS_LABEL, this.#terms);
+    const open = this.#at.piece === "kinds";
+    const closed = html`${model.lead ?? nothing}${model.lead !== null && model.dearest !== null ? " " : nothing}${
+      model.dearest === null ? nothing : html`<span class="d">${model.lead === null ? "" : "· "}${model.dearest}</span>`}`;
+    return html`<section class=${open ? "grp is-open" : "grp"} data-group="kinds">
+      ${this.#head("kinds", model.label, closed, model.count, open)}
+      ${open ? html`<div class="rows" data-part="rows">${model.rows.map((row) => html`<div class="tr2" data-row=${row.key}>
+          <span class="nm">${row.name}${row.note === null ? nothing : html` <span class="d">· ${row.note}</span>`}</span>
+          <span class="n d">${row.tokens}</span><span class="n" title=${row.why ?? nothing}>${row.cost}</span></div>`)}
+        ${model.saving === null ? nothing : html`<p data-part="saving">${model.saving}</p>`}
+      </div>` : nothing}
+    </section>`;
+  }
+
+  /** Prices: how many of the range's models are priced and the table's date; opened, their
+   * prices, the paragraph, and the three acts, each opening in place under the table. */
+  #pricesGroup(model: PricesModel | null) {
+    // The closed row waits for the table's date as well, unless that read has failed.
+    const prices = this.#prices;
+    if (model === null || (prices !== null && prices.value === null && prices.loading)) {
+      return this.#sectionReading("prices", PRICES_LABEL, model === null ? this.#terms : prices);
+    }
+    const open = this.#at.piece === "prices";
+    const closed = html`${model.closed} <span class="d">· ${model.note}</span>`;
+    const part = this.pricesPart;
+    const act = (key: PricesPart, label: string) => html`<button type="button" class="act" data-act=${key}
+      aria-expanded=${String(part === key)} @click=${() => this.#togglePart(key)}>${label}</button>`;
+    return html`<section class=${open ? "grp is-open" : "grp"} data-group="prices">
+      ${this.#head("prices", model.label, closed, model.count, open)}
+      ${open ? html`<div class="rows" data-part="rows">
+        ${model.rows === null ? nothing : html`<div class="pt" role="table" aria-label="Prices per million tokens" data-part="price-table">
+          <div class="tr2 p5 th" role="row">${PRICE_HEADS.map((head, i) =>
+            html`<span role="columnheader" class=${i ? "n" : ""}>${head}</span>`)}</div>
+          ${model.rows.map((row) => html`<div class="tr2 p5" role="row" data-price=${row.key}>
+            <span class="nm" role="cell">${row.name}</span>${row.cells.map((cell) => html`<span class="n" role="cell">${cell}</span>`)}</div>`)}
+        </div>`}
+        ${model.unpriced === null ? nothing : html`<p data-part="unpriced">${model.unpriced}</p>`}
+        <p data-part="paragraph">${model.paragraph}</p>
+        <p class="acts">${act("find", FIND)}${act("bill", BILL)}${act("details", DETAILS)}</p>
+        ${part === "find" ? this.#find() : part === "bill" ? this.#bill() : part === "details" ? this.#details() : nothing}
+      </div>` : nothing}
+    </section>`;
+  }
+
+  #togglePart(key: PricesPart): void {
+    const next = this.pricesPart === key ? null : key;
+    this.#closePart();
+    this.pricesPart = next;
+  }
+
+  /** Closes what is open under the price table, and its search. */
+  #closePart(): void {
+    clearTimeout(this.#searchTimer);
+    this.#search?.close();
+    this.#search = null;
+    this.#searched = "";
+    this.searchText = "";
+    this.pricesPart = null;
+  }
+
+  /** `Find a model`: a search of the whole model table, its matches as the details' table. */
+  #find() {
+    const type = (event: Event) => {
+      const text = (event.target as HTMLInputElement).value.trim();
+      this.searchText = text;
+      clearTimeout(this.#searchTimer);
+      this.#searchTimer = setTimeout(() => {
+        if (text === this.#searched) return;
+        this.#searched = text;
+        this.#search?.close();
+        this.#search = null;
+        if (text.length >= SEARCH_MIN) {
+          const path = searchPath(text);
+          this.#search = new Feed<Prices>(() => api("usage", path), parsePrices, () => this.requestUpdate());
+          void this.#search.refresh();
+        }
+        this.requestUpdate();
+      }, SEARCH_MS);
+    };
+    const feed = this.#search;
+    const found = feed?.value ?? null;
+    return html`<div class="under" data-part="find">
+      <label class="find">${FIND} <input type="search" aria-label=${FIND} .value=${this.searchText} @input=${type}></label>
+      ${feed === null ? nothing
+        : found === null ? html`<p class="d">${feed.loading ? READING : `The model table can't be read: ${feed.refused ?? feed.failure?.why}.`}</p>`
+        : found.models.length === 0 ? html`<p class="d" data-part="no-match">No model matches.</p>`
+        : html`${this.#rateTable(found)}${found.matched > found.models.length
+          ? html`<p class="d" data-part="more">${(found.matched - found.models.length).toLocaleString("en-US")} more</p>` : nothing}`}
+    </div>`;
+  }
+
+  /** `Check against a bill`: a line per price group with each class's dollars, a subtotal
+   * under a model of two or more, and the total. */
+  #bill() {
+    const report = this.#terms?.value ?? null;
+    if (report === null) return nothing;
+    const lines = reconcileLines(report);
+    const flagged = lines.some((line) => line.flags.length > 0);
+    return html`<div class="under" data-part="bill">
+      <div class="scroll"><table class="tbl bill" data-part="bill-lines">
+        <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="n">${label}</th>`)}<th class="n">Cost</th>${
+          flagged ? html`<th>Not whole</th>` : nothing}</tr></thead>
+        <tbody>${lines.map((line) => html`<tr data-line=${line.kind} data-model=${line.model}>
+          <td>${line.model}</td><td class="wrap">${line.pricedBy}</td>
+          ${line.cells.map((cell) => html`<td class="n" data-class=${cell.cls} title=${cell.title}>${cell.text}</td>`)}
+          <td class="n" data-cost=${line.cost === null ? "" : String(line.cost)}>${line.cost === null ? "no price" : fmtCost(line.cost)}</td>
+          ${flagged ? html`<td class="wrap">${line.flags.join("; ")}</td>` : nothing}
+        </tr>`)}</tbody>
+      </table></div>
+      <p>The terms on each line add up to its cost. Point at a figure for its tokens times its price.</p>
+    </div>`;
+  }
+
+  /** `Details`: each listed model's prices with where they came from, its window, tiers
+   * and period; your `[[model]]` rows, the table's layers and the rows it skipped. */
+  #details() {
+    const prices = this.#prices?.value ?? null;
+    const report = this.#terms?.value ?? null;
+    if (prices === null || report === null) return nothing;
+    const left = pricesLeft(report);
+    return html`<div class="under" data-part="details">
+      ${prices.models.length ? this.#rateTable(prices) : nothing}
+      ${left ? html`<p>${left.toLocaleString("en-US")} more models of the range aren't listed; find one by name.</p>` : nothing}
+      <p class="sub">Your [[model]] rows</p>
+      ${prices.overrides.length ? html`<ul data-part="overrides">${prices.overrides.map((row) => html`<li>${overrideLine(row)}</li>`)}</ul>`
+        : html`<p>None: every price comes from the model table.</p>`}
+      <p data-part="layers">${layerLine(prices)}${prices.layers.length > 1
+        ? `; layers ${prices.layers.map((layer) => `${layer.layer} ${layer.rows.toLocaleString("en-US")} rows${layer.date ? ` of ${layer.date}` : ""}`).join(", ")}`
+        : ""}</p>
+      ${prices.problems.map((problem) => html`<p data-part="skipped">skipped: ${problem}</p>`)}
+    </div>`;
+  }
+
+  /** The models' rates in full: each price, marked where a provider default or your
+   * config gave it, the window, tiers, period and source. */
+  #rateTable(prices: Prices) {
+    return html`<div class="scroll"><table class="tbl bill" data-part="rate-lines">
+      <thead><tr><th>Model</th>${RATE_FIELDS.map(([, label]) => html`<th class="n">${label}</th>`)}
+        <th class="n">Window</th><th>Tiers</th><th>Period</th><th>Where from</th></tr></thead>
+      <tbody>${prices.models.map(rateLine).map((line) => html`
+        <tr data-rate=${line.model} data-provider=${line.provider ?? ""}>
+          <td>${line.model}${line.provider ? html`<div class="d">${line.provider}</div>` : nothing}
+            ${line.known ? nothing : html`<div class="d">not in the model table</div>`}</td>
+          ${line.cells.map((cell) => html`<td class="n">${cell.text}${cell.mark ? html`<div class="d">${cell.mark}</div>` : nothing}</td>`)}
+          <td class="n">${line.window}</td>
+          <td class="wrap">${line.tiers.map((tier) => html`<div>${tier}</div>`)}</td>
+          <td>${line.period}</td>
+          <td class="wrap">${line.from}</td>
+        </tr>`)}</tbody>
+    </table></div>`;
   }
 
   #part(part: SentencePart) {

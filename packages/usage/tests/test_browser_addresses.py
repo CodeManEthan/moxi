@@ -145,6 +145,10 @@ def view(panel, name: str):
     return panel.locator(f"section[data-part=view][data-view={name}]")
 
 
+def price_table(panel):
+    return panel.locator("section[data-group=prices] [data-part=price-table]")
+
+
 def path_of(page) -> str:
     return page.evaluate("location.pathname + location.search + location.hash")
 
@@ -172,8 +176,8 @@ SECTIONS = {
     # Projects is installed, so the section's other name is rewritten to this one.
     "folders": ("projects", "section[data-group=projects] [data-part=rows] .tr2"),
     "models": ("models", f'section[data-group=models] [data-part=rows] [data-row="{MODEL}"]'),
-    "kinds": ("kinds", "section[data-view=terms] tr[data-line=total]"),
-    "prices": ("prices", "section[data-view=terms] tr[data-line=total]"),
+    "kinds": ("kinds", "section[data-group=kinds] [data-part=rows] [data-row=cache_read]"),
+    "prices": ("prices", f'section[data-group=prices] [data-part=price-table] [data-price^="{MODEL}|"]'),
 }
 
 
@@ -248,11 +252,11 @@ def test_opening_and_closing_rewrite_the_address_and_add_no_history_entry(seeded
     # A section takes the row's place.
     panel.locator("[data-group=cost]").get_by_role("link", name="Prices").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/prices")
-    expect(view(panel, "terms")).to_be_visible()
+    expect(price_table(panel)).to_be_visible()
     expect(opened(panel)).to_have_count(0)
     # And a row takes the section's.
     limit(panel, OPUS).click()
-    expect(view(panel, "terms")).to_have_count(0)
+    expect(price_table(panel)).to_have_count(0)
     limit(panel, OPUS).get_by_text("Close").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/")
     expect(opened(panel)).to_have_count(0)
@@ -284,10 +288,10 @@ def test_a_reload_lands_on_the_piece_that_was_open(seeded, page):
     expect(limit(panel, FIVE)).to_have_attribute("aria-expanded", "true")
     expect(opened(panel).locator("[data-opened=window]")).to_be_visible()
     panel.locator("[data-group=cost]").get_by_role("link", name="Prices").click()
-    expect(view(panel, "terms")).to_be_visible()
+    expect(price_table(panel)).to_be_visible()
     page.reload()
     panel = panel_of(page)
-    expect(view(panel, "terms")).to_be_visible()
+    expect(price_table(panel)).to_be_visible()
     assert path_of(page) == "/m/usage/prices"
 
 
@@ -501,10 +505,15 @@ def test_an_opened_limit_row_fits_a_phone(seeded, page, ui_width_check):
     assert box["x"] >= 0 and box["x"] + box["width"] <= 360
 
 
-@pytest.mark.parametrize("route", ["sessions", "prices", f"sessions/claude/{FIRST}"],
-                         ids=["sessions", "prices", "session"])
+@pytest.mark.parametrize("route", ["sessions", f"sessions/claude/{FIRST}"], ids=["sessions", "session"])
 def test_a_sections_address_fits_a_phone(seeded, page, ui_width_check, route):
     ui_width_check(page, module="usage", route=route)
     expect(panel_of(page).locator("section[data-part=view]")).to_be_visible()
+    ui_width_check(page)
+
+
+def test_the_prices_address_fits_a_phone(seeded, page, ui_width_check):
+    ui_width_check(page, module="usage", route="prices")
+    expect(price_table(panel_of(page))).to_be_visible()
     ui_width_check(page)
 
