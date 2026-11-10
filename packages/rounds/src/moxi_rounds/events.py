@@ -59,15 +59,19 @@ TYPES = _types(
               ("kind", "pass", "verdict", "design", "stage", "head", "merge_base", "step",
                "model", "by", "report", "sha256", "findings", "waits", "decisions")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
-    # who asked it and when, which outlive a move to another log.
+    # who asked it and when, which outlive a move to another log. `record` is the
+    # operator's pointer when the question is his own; it is then the origin too.
     EventType("question.asked",
-              ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "options",
-               "prepared")),
-    # A question changed: its state or what it holds up, with who changed it and the
-    # pointer; options added or retired; a prepared answer.
+              ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
+               "options", "prepared"),
+              required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
+    # A question changed: its state or what it holds up, with who changed it, and for a
+    # change the operator ruled the ruling's id and its pointer; what a parked one waits
+    # for; options added or retired; a prepared answer.
     EventType("question.changed",
-              ("id", "state", "blocks", "until", "by", "record", "options", "retired",
-               "prepared")),
+              ("id", "state", "blocks", "until", "by", "ruling", "record", "options",
+               "retired", "prepared"),
+              required=("id",)),
     # A stage joined the plan: its id, the repo and branch it builds on or the child
     # round it stands for, the stages it comes after, and its slices.
     EventType("stage.declared", ("id", "repo", "branch", "round", "after", "slices")),

@@ -95,7 +95,8 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 
 
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
-                          - {"round.opened", "ruling.recorded"})
+                          - {"round.opened", "ruling.recorded", "question.asked",
+                             "question.changed"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -141,6 +142,92 @@ def test_a_projects_rulings_are_its_register_with_each_entrys_scope():
     assert found.rulings[0].stages is None
     assert found.rulings[0].scope[1] == {"repo": "proj-b"}
     assert entry["scope"][0] == {"repo": "proj-a", "path": "packages/ui/**"}
+
+
+def asked(n, **more):
+    fields = {"id": "Q1", "text": "Is it so?", "from": "comms:12", "blocks": "all",
+              "state": "open", "asked_by": "planner", "asked_at": AT, **more}
+    return event(n, "question.asked", **fields)
+
+
+def test_a_question_is_added_to_the_questions_and_changes_nothing_else():
+    before = state.fold([opened()])
+    second = {**asked(3, id="Q2", blocks=["B1", "B2"], record="comms:13",
+                      asked_by="scout", asked_at="2025-12-31T00:00:00Z"),
+              "actor": "curator", "at": "2026-01-03T00:00:00Z"}
+    second["from"] = "comms:13"
+
+    after = state.fold([opened(), asked(2), second])
+
+    assert after.questions == [
+        state.Question(id="Q1", text="Is it so?", origin="comms:12", blocks="all",
+                       state="open", by="planner", at=AT),
+        state.Question(id="Q2", text="Is it so?", origin="comms:13", blocks=("B1", "B2"),
+                       state="open", by="scout", at="2025-12-31T00:00:00Z",
+                       record="comms:13")]
+    assert dataclasses.replace(after, questions=[], history=before.history) == before
+
+
+def test_a_question_that_does_not_say_what_it_holds_up_holds_up_every_stage():
+    bare = event(2, "question.asked", id="Q1", text="Is it so?")
+
+    [found] = state.fold([opened(), bare]).questions
+
+    assert found.blocks == "all"
+    assert (found.by, found.at) == ("planner", AT)
+
+
+def test_a_question_keeps_every_change_made_to_it_in_order():
+    parked = {**event(3, "question.changed", id="Q1", state="parked", until="B2",
+                      ruling="C1", record="comms:13"), "at": "2026-01-03T00:00:00Z"}
+    widened = {**event(4, "question.changed", id="Q1", blocks="all"), "actor": "scout"}
+    reopened = event(5, "question.changed", id="Q1", state="open")
+    ruled = event(6, "question.changed", id="Q1", state="ruled", ruling="C2",
+                  record="comms:14")
+    log_events = [opened(), asked(2, blocks=["B1"]), parked, widened, reopened, ruled]
+
+    def after(count):
+        [found] = state.fold(log_events[:count]).questions
+        return found
+
+    assert (after(3).state, after(3).until, after(3).ruling) == ("parked", "B2", "C1")
+    assert (after(4).state, after(4).until, after(4).blocks) == ("parked", "B2", "all")
+    assert (after(5).state, after(5).until, after(5).ruling) == ("open", None, "C1")
+    assert (after(6).state, after(6).blocks, after(6).ruling) == ("ruled", "all", "C2")
+    assert after(6).changes == (
+        state.Change(state="parked", blocks=None, until="B2", ruling="C1",
+                     record="comms:13", actor="planner", at="2026-01-03T00:00:00Z"),
+        state.Change(state=None, blocks="all", until=None, ruling=None, record=None,
+                     actor="scout", at=AT),
+        state.Change(state="open", blocks=None, until=None, ruling=None, record=None,
+                     actor="planner", at=AT),
+        state.Change(state="ruled", blocks=None, until=None, ruling="C2",
+                     record="comms:14", actor="planner", at=AT))
+    assert (after(6).by, after(6).at, after(6).origin) == ("planner", AT, "comms:12")
+
+
+def test_a_change_touches_only_the_question_it_names():
+    before = state.fold([opened(), asked(2), asked(3, id="Q2")])
+
+    after = state.fold([opened(), asked(2), asked(3, id="Q2"),
+                        event(4, "question.changed", id="Q2", state="withdrawn",
+                              ruling="C1", record="comms:13"),
+                        event(5, "question.changed", id="Q9", state="ruled")])
+
+    assert after.questions[0] == before.questions[0]
+    assert [found.state for found in after.questions] == ["open", "withdrawn"]
+    assert dataclasses.replace(after, questions=before.questions,
+                               history=before.history) == before
+
+
+def test_a_projects_questions_are_its_list():
+    found = state.fold([event(1, "question.asked", id="P1", text="Is it so?",
+                              blocks="none", state="open", asked_by="scout",
+                              asked_at=AT, **{"from": "comms:12"})])
+
+    assert found.status is None
+    assert [(one.id, one.blocks, one.by) for one in found.questions] == [
+        ("P1", "none", "scout")]
 
 
 def test_a_type_this_code_does_not_know_changes_only_the_history():

@@ -1,12 +1,18 @@
 """`moxi rounds`: the rounds command.
 
     moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
-    moxi rounds rule ROUND|PROJECT --record PTR --text TEXT [--reason TEXT] [--standing]
-                     [--scope SPEC] [--stages LIST] [--as NAME]
+    moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
+                    [--as NAME]
+    moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--reason TEXT]
+                     [--standing] [--scope SPEC] [--stages LIST] [--until WHAT]
+                     [--as NAME]
+    moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
 
-`ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer to where
-the operator said something: `comms:<digits>`, `<session>@<UTC time>`, an `https://` URL
-or `file:<path>#<anchor>`. A verb that writes takes `--as NAME`, who is doing it;
+`ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
+where the operator said something, or to where a question came from. It is
+`comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
+`ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
+`narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own. A verb that writes takes `--as NAME`, who is doing it;
 without it that is the user the command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
@@ -98,11 +104,18 @@ def _open(args, out) -> int:
 def _declare_rule(verbs) -> None:
     said = ("Record a ruling of the operator's: one plain sentence, with a pointer to "
             "where he said it. On a round it is the round's own; with --standing, or on "
-            "a project, it goes in the project's register and outlasts the round.")
+            "a project, it goes in the project's register and outlasts the round. With "
+            "an ITEM it rules a question: answers it, parks it, narrows what it holds "
+            "up, or withdraws it.")
     parser = verbs.add_parser("rule", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the ruling is on, <project>/<slug>, or a "
                              "project's key for a standing ruling with no round")
+    parser.add_argument("item", metavar="ITEM", nargs="?",
+                        help="what is ruled, when it is a question: Q<n> (P<n> on a "
+                             "project) for its answer, given with --text; park:Q<n>; "
+                             "narrow:Q<n>=LIST or narrow:Q<n>=none, the stages it "
+                             "holds up from then on; withdraw:Q<n>")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
@@ -119,6 +132,11 @@ def _declare_rule(verbs) -> None:
     parser.add_argument("--stages", metavar="LIST",
                         help="the stages a round's ruling applies to, as B2,B3 "
                              "(default: every stage)")
+    parser.add_argument("--until", metavar="WHAT",
+                        help="with park:Q<n>, what the question waits for: a stage "
+                             "of the round, B<n>, or another round, "
+                             "round:<project>/<slug>; it reads as open again once "
+                             "that stage is finished or that round is closed")
     _writes(parser)
 
 
@@ -127,7 +145,8 @@ def _rule(args, out) -> int:
 
     ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,
                         text=args.text, reason=args.reason, standing=args.standing,
-                        scope=args.scope, stages=args.stages)
+                        scope=args.scope, stages=args.stages, item=args.item,
+                        until=args.until)
     for line in _recorded(ruled):
         print(line, file=out)
     if ruled.long:
@@ -140,17 +159,90 @@ def _rule(args, out) -> int:
 
 def _recorded(ruled) -> list[str]:
     """What is printed for a ruling just recorded: its id and its sentence, as the log
-    now holds it. What the one who recorded it does next with the sentence goes here."""
-    return [f"{ruled.id}: {ruled.text}"]
+    now holds it, or what it rules when it has no sentence. What the one who recorded
+    it does next with the sentence goes here."""
+    return [f"{ruled.id}: {ruled.event['rules'] if ruled.text is None else ruled.text}"]
+
+
+# -- ask ---------------------------------------------------------------------------------
+
+def _declare_ask(verbs) -> None:
+    said = ("Put a question to the operator: one sentence, with a pointer to where it "
+            "came from. On a round it holds up every stage unless --blocks says "
+            "otherwise; on a project, with no round yet, it goes on the project's list.")
+    parser = verbs.add_parser("ask", help=said, description=said)
+    parser.add_argument("target", metavar="ROUND|PROJECT",
+                        help="the round the question is asked in, <project>/<slug>, or "
+                             "a project's key")
+    parser.add_argument("text", metavar="TEXT",
+                        help="the question, one sentence on one line")
+    parser.add_argument("--from", dest="origin", metavar="PTR",
+                        help="a pointer to where the question came from, one token: "
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
+                             "file:<path in the round's folder>#<anchor>, as "
+                             "file:design.md#<anchor> for a section of the design; a "
+                             "question with no origin is refused")
+    parser.add_argument("--record", metavar="PTR",
+                        help="in place of --from, for a question that is the "
+                             "operator's own: a pointer to where he asked it")
+    parser.add_argument("--blocks", metavar="LIST|none",
+                        help="the stages the question holds up, as B2,B3, or none "
+                             "(default: all, every stage the round has or gains)")
+    _writes(parser)
+
+
+def _ask(args, out) -> int:
+    from . import asking, questions
+
+    asked = asking.ask(args.target, args.text, actor=_actor(args), origin=args.origin,
+                       record=args.record, blocks=args.blocks)
+    print(f"{asked.id}: {asked.text}", file=out)
+    print(f"blocks: {questions.said(asked.blocks)}   from: {asked.origin}", file=out)
+    _warn_of(asked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+# -- mark --------------------------------------------------------------------------------
+
+def _declare_mark(verbs) -> None:
+    said = ("Change a record of a round in a way anyone may: make a question hold up "
+            "more stages, or reopen a parked one.")
+    parser = verbs.add_parser("mark", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
+    parser.add_argument("id", metavar="ID", help="what is marked: a question, Q<n>")
+    form = parser.add_mutually_exclusive_group(required=True)
+    form.add_argument("--blocks", metavar="LIST|all",
+                      help="the stages the question holds up from now on, as B2,B3, "
+                           "or all; it must hold up every stage it did before, since "
+                           "only the operator narrows it (rule narrow:Q<n>=LIST)")
+    form.add_argument("--reopen", action="store_true",
+                      help="make a parked question open again")
+    _writes(parser)
+
+
+def _mark(args, out) -> int:
+    from . import marking, questions
+
+    if args.reopen:
+        marked = marking.reopen(args.round, args.id, actor=_actor(args))
+    else:
+        marked = marking.widen(args.round, args.id, args.blocks, actor=_actor(args))
+    found = marked.question
+    print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
+          file=out)
+    _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
 
 
 # -- the command -------------------------------------------------------------------------
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
-_DECLARE: tuple[Callable, ...] = (_declare_open, _declare_rule)
+_DECLARE: tuple[Callable, ...] = (_declare_open, _declare_ask, _declare_rule,
+                                  _declare_mark)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
-_VERBS: dict[str, Callable] = {"open": _open, "rule": _rule}
+_VERBS: dict[str, Callable] = {"open": _open, "ask": _ask, "rule": _rule,
+                               "mark": _mark}
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:

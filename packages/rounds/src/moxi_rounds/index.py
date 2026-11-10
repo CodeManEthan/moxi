@@ -48,7 +48,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, log, paths, state
+from . import folders, log, paths, questions, state
 from .errors import NoLog, Unreadable
 
 #: The schema, one step per version of it (`moxi.store.migrate`). A step is never
@@ -87,12 +87,13 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 1
+DERIVED = 2
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
-#: `(id, body)` pairs, the body a JSON-ready mapping. Empty until a kind of record that
-#: can be open is built.
-ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {}
+#: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
+#: recorded as open or parked.
+ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
+    "question": questions.waiting}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""

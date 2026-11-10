@@ -1,0 +1,202 @@
+"""Questions: what a question record says, read from a log's state.
+
+A question is one sentence put to the operator. Its record is six things: an id (`Q<n>`
+in a round's log, `P<n>` in a project's), the sentence, where it came from, what it holds
+up (`blocks`), its state, and who asked it and when. The fold keeps each as a
+`state.Question`; this module reads them.
+
+**State.** `OPEN`, `PARKED`, `RULED` or `WITHDRAWN`. The log records a parking with what
+the question waits for, when it waits for something: a stage, or another round. Nothing
+is written when that is reached, so the recorded state stays `parked`; `current` gives
+the state as it reads now, which is `open` again once the stage is finished or the round
+is closed.
+
+**What it holds up.** `ALL` (every stage the round has or later gains), `NONE` (no
+stage), or a tuple of stage ids. A question that did not say is `ALL`. A project's
+question is `NONE`. `holds_every(new, old)` is the test of a widening and, with its
+arguments swapped, of a narrowing.
+
+Nothing here decides whether a question stops a step: that reads `current` and
+`Question.blocks`, and belongs to whatever asks.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable, Iterator, Mapping
+
+from . import folders, log
+from . import state as states
+from .errors import BadArgument, RoundsError
+
+#: The four states of a question.
+OPEN = "open"
+PARKED = "parked"
+RULED = "ruled"
+WITHDRAWN = "withdrawn"
+
+#: What `blocks` holds for a question that holds up every stage, and for one that holds
+#: up none.
+ALL = "all"
+NONE = "none"
+
+#: The id of a round's question, and of a project's.
+ROUND_ID = re.compile(r"Q([1-9][0-9]*)")
+PROJECT_ID = re.compile(r"P([1-9][0-9]*)")
+
+#: A stage's id.
+STAGE = re.compile(r"B[1-9][0-9]*")
+
+#: What starts the name of the round a parked question waits for.
+UNTIL_ROUND = "round:"
+
+Blocks = str | tuple[str, ...]
+
+
+def find(state: states.State, question_id: str) -> states.Question | None:
+    """The question of `state` with that id, or None."""
+    for question in state.questions:
+        if question.id == question_id:
+            return question
+    return None
+
+
+def next_id(letter: str, state: states.State) -> str:
+    """The next id of a log's questions, `letter` being `Q` for a round's and `P` for a
+    project's: one past the highest the log holds, so an id is never given twice."""
+    numbered = re.compile(rf"{letter}([1-9][0-9]*)")
+    numbers = [int(found.group(1)) for found in
+               (numbered.fullmatch(question.id or "") for question in state.questions)
+               if found]
+    return f"{letter}{max(numbers, default=0) + 1}"
+
+
+# -- what a question holds up ------------------------------------------------------------
+
+def parse_blocks(text: str, option: str = "--blocks") -> Blocks:
+    """What `text` says a question holds up: `ALL`, `NONE`, or the stage ids of `B2,B3`
+    in the order given. `option` is what the value was given with, for the error. Raises
+    `BadArgument` for an empty list, an id that is not `B<n>`, or one named twice."""
+    if text in (ALL, NONE):
+        return text
+    ids = tuple(part.strip() for part in text.split(","))
+    wrong = [one for one in ids if not STAGE.fullmatch(one)]
+    if wrong or len(set(ids)) != len(ids):
+        problem = (f"{wrong[0]!r} is not a stage's id" if wrong else
+                   "a stage is named twice")
+        raise BadArgument(f"{option} {text!r} can't be read: {problem}",
+                          f"name stages as B<n>, separated by commas, or say {ALL} or "
+                          f"{NONE}")
+    return ids
+
+
+def said(blocks: Blocks | None) -> str:
+    """`blocks` as it is typed and printed: `all`, `none`, or `B2,B3`."""
+    return blocks if isinstance(blocks, str) else ",".join(blocks or ())
+
+
+def stored(blocks: Blocks) -> str | list[str]:
+    """`blocks` as an event holds it."""
+    return blocks if isinstance(blocks, str) else list(blocks)
+
+
+def holds_every(new: Blocks | None, old: Blocks | None) -> bool:
+    """Whether `new` holds up every stage `old` does. `ALL` covers stages the round has
+    not gained yet, so no list holds every stage `ALL` does."""
+    if old == NONE or new == ALL:
+        return True
+    if old == ALL or new == NONE or old is None or new is None:
+        return False
+    return set(old) <= set(new)
+
+
+# -- what a round's log says of its stages -----------------------------------------------
+# The two readers below take what they need from the history. They are the one place
+# that says which stages a round has and which are finished, for the code here.
+
+def recorded_stages(state: states.State) -> tuple[str, ...]:
+    """The ids of the stages the round's log declared, in the order it declared them."""
+    return tuple(dict.fromkeys(
+        event["id"] for event in state.history
+        if event["type"] == "stage.declared" and isinstance(event.get("id"), str)))
+
+
+def finished_stages(state: states.State) -> frozenset[str]:
+    """The ids of the stages whose finish the round's log records as done."""
+    return frozenset(event["stage"] for event in state.history
+                     if event["type"] == "finish.done"
+                     and isinstance(event.get("stage"), str))
+
+
+def unrecorded(blocks: Blocks | None, state: states.State) -> tuple[str, ...]:
+    """The stage ids `blocks` names that are not recorded stages of the round."""
+    if blocks is None or isinstance(blocks, str):
+        return ()
+    have = recorded_stages(state)
+    return tuple(one for one in blocks if one not in have)
+
+
+def stages_said(state: states.State) -> str:
+    """The round's stages in words, for a refusal."""
+    have = recorded_stages(state)
+    return f"its stages are {', '.join(have)}" if have else "it has no stage yet"
+
+
+# -- the state as it reads now -----------------------------------------------------------
+
+def is_closed(name: str, settings=None) -> bool:
+    """Whether the round `name` is closed: its log holds its closing. A round that can't
+    be found or read is not."""
+    try:
+        project, slug = folders.split(name)
+        home = folders.home(project, settings)
+        events = log.read(log.round_log(home.round_folder(slug)))
+    except RoundsError:
+        return False
+    return any(event["type"] == "round.closed" for event in events)
+
+
+def reached(question: states.Question, state: states.State, *,
+            closed: Callable[[str], bool] | None = None) -> bool:
+    """Whether what a parked question waits for has come: the stage is finished, or the
+    round is closed. `state` is the state of the log that holds the question, and
+    `closed` answers whether a round, by name, is closed (`is_closed` when left out).
+    False for a question that waits for nothing."""
+    until = question.until
+    if question.state != PARKED or not until:
+        return False
+    if until.startswith(UNTIL_ROUND):
+        return bool((closed or is_closed)(until[len(UNTIL_ROUND):]))
+    return until in finished_stages(state)
+
+
+def current(question: states.Question, state: states.State, *,
+            closed: Callable[[str], bool] | None = None) -> str | None:
+    """The question's state as it reads now: the recorded one, except that a parked
+    question reads `OPEN` once what it waits for has come. The arguments are `reached`'s.
+    """
+    return OPEN if reached(question, state, closed=closed) else question.state
+
+
+# -- what the index keeps ----------------------------------------------------------------
+
+def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
+    """The questions of `state` that are recorded as open or parked, each as `(id, body)`
+    for the index. The body holds the record as the log leaves it: a parked question's
+    state is the recorded one with what it waits for, and whoever lists it reads whether
+    that has come."""
+    for question in state.questions:
+        if question.state not in (OPEN, PARKED) or question.id is None:
+            continue
+        body = {"text": question.text, "from": question.origin,
+                "blocks": None if question.blocks is None else stored(question.blocks),
+                "state": question.state, "by": question.by, "at": question.at}
+        if question.until is not None:
+            body["until"] = question.until
+        yield question.id, body
+
+
+__all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "ALL", "NONE", "ROUND_ID",
+           "PROJECT_ID", "STAGE", "UNTIL_ROUND", "find", "next_id", "parse_blocks",
+           "said", "stored", "holds_every", "recorded_stages", "finished_stages",
+           "unrecorded", "stages_said", "is_closed", "reached", "current", "waiting"]
