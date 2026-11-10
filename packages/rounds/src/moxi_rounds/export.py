@@ -148,12 +148,17 @@ class Export:
                 "view": self.view, "computed": self.computed,
                 "entries": [entry.data() for entry in self.entries],
                 "unreadable": list(self.unreadable),
-                "read_back": {
-                    "through": back.through,
-                    "rows": [{"holder": row.holder, "id": row.id, "text": row.text,
-                              "rules": row.rules, "record": row.record,
-                              "supersedes": row.supersedes, "revokes": row.revokes,
-                              "at": row.at} for row in back.rows]}}
+                "read_back": read_back_data(back)}
+
+
+def read_back_data(back: shown.ReadBack) -> dict:
+    """A project's list of rulings not yet shown, as data: the time it runs through
+    and its rows, oldest first."""
+    return {"through": back.through,
+            "rows": [{"holder": row.holder, "id": row.id, "text": row.text,
+                      "rules": row.rules, "record": row.record,
+                      "supersedes": row.supersedes, "revokes": row.revokes,
+                      "at": row.at} for row in back.rows]}
 
 
 # -- the rows ----------------------------------------------------------------------------
@@ -206,6 +211,13 @@ def _ordered(entries: list[Entry]) -> tuple[Entry, ...]:
 
 def _closed(settings) -> Callable[[str], bool]:
     return lambda name: questions.is_closed(name, settings)
+
+
+def of_log(summary: index.Summary, *, settings=None) -> tuple[Entry, ...]:
+    """The question rows one log gives, as the index answers for it: those that read
+    as open, then the parked ones. For a count of what one round holds."""
+    return _ordered(_entries(summary, _closed(own.load() if settings is None
+                                              else settings)))
 
 
 def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
@@ -382,5 +394,5 @@ def write(export: Export, folder: Path | str) -> tuple[Path, Path]:
 
 
 __all__ = ["DOCKET", "VIEWS", "MARKDOWN_FILE", "JSON_FILE", "Option", "Entry", "Rows",
-           "Export", "ENTRIES", "waiting", "of_round", "questions_of", "as_json",
-           "as_markdown", "write"]
+           "Export", "ENTRIES", "read_back_data", "of_log", "waiting", "of_round",
+           "questions_of", "as_json", "as_markdown", "write"]

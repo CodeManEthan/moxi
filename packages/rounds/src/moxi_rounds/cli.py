@@ -13,6 +13,9 @@
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
+    moxi rounds show ROUND [--json]
+    moxi rounds list [PROJECT] [--closed] [--json]
+    moxi rounds list [PROJECT] --waiting [--json]
     moxi rounds list ROUND --questions [--view docket] [--json] [--out DIR]
     moxi rounds list PROJECT --questions [--json] [--out DIR]
 
@@ -37,8 +40,14 @@ list of stages for a question that came from a round. `list --questions` writes 
 the questions that wait on the operator, of one round or of one project with its open
 rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
 data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
-It records nothing. A verb that writes takes `--as NAME`, who is doing it; without it
-that is the user the command runs as.
+`show` shows one round: what it is for, its flow, its questions by state, its rulings
+and whether each was shown to him, and its history. `list` with no flag lists the open
+rounds, each with its flow and its counts, and with `--closed` the rounds that have
+ended; `list --waiting` lists what waits on the operator, the open and the parked
+questions and the rulings not yet shown to him. Each is of every project, or of the
+one named, and `--json` gives it as data. `show` and `list` record nothing. A verb
+that writes takes `--as NAME`, who is doing it; without it that is the user the
+command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
 says what stopped the verb and the command that fixes it, and has written nothing.
@@ -432,32 +441,87 @@ def _mark_shown(args, out) -> int:
     return codes.OK
 
 
+# -- show --------------------------------------------------------------------------------
+
+def _declare_show(verbs) -> None:
+    said = ("Show one round: what it is for, its status, its flow and the steps "
+            "recorded for it, its questions by state, its rulings with whether each "
+            "was shown to the operator, and its history. Nothing is recorded. A "
+            "project's rounds are listed with list.")
+    parser = verbs.add_parser("show", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
+    parser.add_argument("--json", dest="as_json", action="store_true",
+                        help="print the round as data, not as lines")
+
+
+def _show(args, out) -> int:
+    from . import showing
+
+    found = showing.show(args.round)
+    out.write(showing.as_json(found) if args.as_json else showing.as_text(found))
+    return codes.OK
+
+
 # -- list --------------------------------------------------------------------------------
 
 def _declare_list(verbs) -> None:
-    said = ("Write out the questions that wait on the operator, of one round or of one "
-            "project: the open ones, each with what it is recorded with and the "
-            "options it offers, then the parked ones, which are not put to him, then "
-            "the rulings not yet shown to him. A round's are its own; a project's are "
-            "those on its list and in each of its open rounds. Nothing is recorded, "
-            "and each answer is recorded with rule.")
+    said = ("List rounds, or what waits on the operator. With no option: the open "
+            "rounds of every project, or of the one named, each with its flow and how "
+            "many questions it has open and parked and how many of its rulings were "
+            "not yet shown to him; with --closed, the rounds that have ended. With "
+            "--waiting: every open question, every parked one, and the rulings not "
+            "yet shown to him. With --questions: the questions of one round or one "
+            "project written out, the open ones, then the parked ones, then the "
+            "rulings not yet shown. Nothing is recorded.")
     parser = verbs.add_parser("list", help=said, description=said)
     parser.add_argument("name", metavar="ROUND|PROJECT", nargs="?",
-                        help="the round, <project>/<slug>, or a project's key")
-    parser.add_argument("--questions", action="store_true", required=True,
+                        help="a project's key, to keep the listing to that project; "
+                             "with --questions, the project or the round, "
+                             "<project>/<slug>, whose questions are listed")
+    parser.add_argument("--waiting", action="store_true",
+                        help="list what waits on the operator")
+    parser.add_argument("--closed", action="store_true",
+                        help="list the rounds that have ended, not the open ones")
+    parser.add_argument("--questions", action="store_true",
                         help="list the questions of the round or the project")
     parser.add_argument("--view", metavar="docket", choices=("docket",),
-                        help="for a round, which of its questions: docket, every "
-                             "open one and after them the parked ones (the default); "
-                             "a project's questions have no view")
+                        help="with --questions, for a round, which of its questions: "
+                             "docket, every open one and after them the parked ones "
+                             "(the default); a project's questions have no view")
     parser.add_argument("--json", dest="as_json", action="store_true",
-                        help="print the same entries as data, not as markdown")
+                        help="print the same rows as data")
     parser.add_argument("--out", metavar="DIR",
-                        help="write both forms into this folder, as questions.md and "
-                             "questions.json, and print the two paths")
+                        help="with --questions, write both forms into this folder, as "
+                             "questions.md and questions.json, and print the two paths")
 
 
 def _list(args, out) -> int:
+    from . import listing
+
+    kinds = [flag for flag, given in (("--waiting", args.waiting),
+                                      ("--closed", args.closed),
+                                      ("--questions", args.questions)) if given]
+    if len(kinds) > 1:
+        raise BadArgument(f"{' and '.join(kinds)} are each a listing of their own",
+                          "give one of them")
+    if args.questions:
+        return _list_questions(args, out)
+    for flag, given in (("--view", args.view), ("--out", args.out)):
+        if given is not None:
+            raise BadArgument(f"{flag} is for the questions of one round or one "
+                              "project", f"add --questions, or leave {flag} out")
+    if args.waiting:
+        found = listing.waiting(args.name)
+        as_text = listing.waiting_as_text
+    else:
+        found = listing.rounds(args.name, ended=args.closed)
+        as_text = listing.rounds_as_text
+    out.write(listing.as_json(found) if args.as_json else as_text(found))
+    return codes.OK
+
+
+def _list_questions(args, out) -> int:
+    """`list --questions`: the questions of one round or one project, written out."""
     from . import export
 
     found = export.questions_of(args.name, view=args.view)
@@ -473,11 +537,11 @@ def _list(args, out) -> int:
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_ask, _declare_rule,
-                                  _declare_mark, _declare_list)
+                                  _declare_mark, _declare_show, _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "ask": _ask, "rule": _rule,
-                               "mark": _mark, "list": _list}
+                               "mark": _mark, "show": _show, "list": _list}
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:

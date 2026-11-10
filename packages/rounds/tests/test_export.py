@@ -568,7 +568,7 @@ def test_questions_with_no_round_or_project_named_is_refused(rounds, capsys):
 
 
 @pytest.mark.parametrize("argv", [
-    [A], [], [A, "--questions", "--view", "ratify"], [A, "--questions", "--view"],
+    [A, "--questions", "--view", "ratify"], [A, "--questions", "--view"],
     [A, "--questions", "--out"], ["proj-a/A-Round", "--questions"]])
 def test_a_listing_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
     assert main(["list", *argv]) == 2
