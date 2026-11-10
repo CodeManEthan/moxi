@@ -4,7 +4,8 @@
 
 - New environment variable `MOXI_UI_LOCKED_SETTINGS`: a list of full setting keys
   (`<module>.<key>`, separated by commas or spaces) that the shell's pages may not change
-  for that run. An entry locks its key and every key under it. The settings routes answer
+  for that run. An entry locks its key and every key under it, and a write to a key
+  above it (the table that holds a locked entry) is refused as well. The settings routes answer
   a write to one with a 422, the settings read marks each key and switch-table entry with
   `locked`, and the form shows a locked field off with one line. Unset or empty, nothing
   is locked.

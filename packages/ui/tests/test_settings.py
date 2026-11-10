@@ -293,8 +293,8 @@ def test_an_entry_locks_its_key_and_the_keys_under_it_and_no_key_that_starts_ali
         assert settings.is_locked("ui", key, {"ui.gateway"})
     assert not settings.is_locked("ui", "port", {"ui.gateway"})
     # Only a whole name, or a whole name and a dot, matches.
-    for entry in ("ui.gateway.p", "ui.gate", "u", "ui.gateway.port.x", "UI.gateway.port",
-                  "ui.gateway."):
+    for entry in ("ui.gateway.p", "ui.gate", "u", "UI.gateway.port", "ui.gateway.",
+                  "ui.gateway.portal.x"):
         assert not settings.is_locked("ui", "gateway.port", {entry})
     # A module's name alone locks all of its settings, and no other module's.
     assert settings.is_locked("turns", "guards.run", {"turns"})
@@ -317,10 +317,41 @@ def test_each_form_of_write_to_a_locked_key_is_refused_before_any_command_runs(w
         assert run.calls == []
 
 
+def test_an_entry_locks_the_keys_above_it_and_no_key_beside_it():
+    locked = {"services.adopted.zz"}
+    assert settings.is_locked("services", "adopted", locked)
+    assert settings.is_locked("services", "adopted.zz", locked)
+    # A key beside the locked one, and one that shares letters without a dot.
+    for key in ("adopted.yy", "adopted.z", "adopt", "adopted_too", "adopte", "other"):
+        assert not settings.is_locked("services", key, locked)
+    assert not settings.is_locked("service", "adopted", locked)
+    # Every key above it, however deep the entry sits.
+    assert settings.is_locked("ui", "gateway", {"ui.gateway.port.extra"})
+    assert settings.is_locked("ui", "gateway.port", {"ui.gateway.port.extra"})
+    assert not settings.is_locked("ui", "gateway.enabled", {"ui.gateway.port.extra"})
+
+
+@pytest.mark.parametrize("write", [{"value": "{zz = true}"}, {"add": "x"}, {"remove": "x"},
+                                   {"unset": True}], ids=["value", "add", "remove", "unset"])
+def test_each_form_of_write_to_a_key_that_holds_a_locked_entry_is_refused(write):
+    locked = {"services.adopted.zz"}
+    run = Run()
+    with pytest.raises(Refused) as refused:
+        settings.change("services", "adopted", cwd="/rt", env=None, locked=locked, run=run,
+                        **write)
+    # The refusal names the key the write named.
+    assert refused.value.text == LOCKED_TEXT.format("services", "adopted")
+    assert run.calls == []
+    for key in ("adopted.yy", "adopt", "adopted_too"):
+        assert settings.change("services", key, cwd="/rt", env=None, locked=locked, run=run,
+                               **write)["ok"]
+    assert len(run.calls) == 3
+
+
 @pytest.mark.parametrize("locked", [(), settings.locked_entries(""), {"ui.gateway.p"},
-                                    {"ui.idle"}, {"ui.idle_s.x"}, {"demo.idle_s"}],
+                                    {"ui.idle"}, {"ui.idle_sx.x"}, {"demo.idle_s"}],
                          ids=["unset", "empty", "a-longer-name", "a-shorter-name",
-                              "a-key-under-it", "another-module"])
+                              "a-key-under-a-longer-name", "another-module"])
 def test_a_key_no_entry_names_is_written_in_each_form(locked):
     for write in ({"value": "60"}, {"add": "x"}, {"remove": "x"}, {"unset": True}):
         run = Run()
@@ -347,11 +378,13 @@ def test_the_read_marks_exactly_the_locked_keys_and_entries():
     assert marked(()) == (set(), set())
     assert marked(settings.locked_entries("")) == (set(), set())
     assert marked({"demo.count", "demo.nosuch", "other.on"}) == ({"count"}, set())
-    # An entry of a switch table is locked alone, or with its table.
-    assert marked({"demo.jobs.a"}) == (set(), {"jobs.a"})
+    # An entry of a switch table locked alone: its table is marked too, for the controls
+    # that write the whole table, and the entry beside it is not.
+    assert marked({"demo.jobs.a"}) == ({"jobs"}, {"jobs.a"})
+    assert marked({"demo.extra.a"}) == ({"extra"}, set())
     assert marked({"demo.jobs"}) == ({"jobs"}, {"jobs.a", "jobs.b"})
     assert marked({"demo"}) == ({key["name"] for key in [*EIGHT, table]}, {"jobs.a", "jobs.b"})
-    assert marked({"demo.job", "demo.jobs.", "demo.co"}) == (set(), set())
+    assert marked({"demo.job", "demo.jobsx.a", "demo.co"}) == (set(), set())
     # The mark is part of the declared shapes.
     assert settings.KEY_SHAPE.items["locked"].type == "bool"
     assert settings.KEY_SHAPE.items["entries"].items.items["locked"].type == "bool"
@@ -433,6 +466,37 @@ def test_both_routes_refuse_a_locked_key_and_leave_the_file_and_the_history_alon
         status, data = shell.post("unset", key="port")
         assert status == 200 and data["ok"]
         assert config.read_bytes() != file and _history() != history
+
+
+def test_both_routes_refuse_a_write_to_a_key_that_holds_a_locked_entry(site, monkeypatch):
+    monkeypatch.delenv(settings.LOCKED_ENV, raising=False)
+    config = Layout("ui").config_file()
+    with _Shell(site) as shell:
+        status, data = shell.post("set", key="gateway.port", value="8498")
+        assert status == 200 and data["ok"]
+        monkeypatch.setenv(settings.LOCKED_ENV, "ui.gateway.port")
+        file, history = config.read_bytes(), _history()
+        for what, body in (("set", {"key": "gateway", "value": "{port = 8497}"}),
+                           ("set", {"key": "gateway", "add": "x"}),
+                           ("set", {"key": "gateway", "remove": "x"}),
+                           ("unset", {"key": "gateway"})):
+            status, data = shell.post(what, **body)
+            assert status == 422, (what, body, data)
+            assert data == {"refused": LOCKED_TEXT.format("ui", "gateway")}
+            assert config.read_bytes() == file and _history() == history
+        # The locked entry keeps its value, and the key beside it saves.
+        status, data = shell.post("set", key="gateway.enabled", value="true")
+        assert status == 200 and data["ok"]
+        keys = shell.keys()
+        assert keys["gateway.port"]["value"] == "8498" and keys["gateway.port"]["locked"]
+        assert keys["gateway.enabled"]["value"] == "true"
+        assert not keys["gateway.enabled"]["locked"]
+        # A key that only shares letters with the locked one is not locked.
+        monkeypatch.setenv(settings.LOCKED_ENV, "ui.idle_sx.x,ui.por.t")
+        for key, text in (("idle_s", "60"), ("port", "8499")):
+            status, data = shell.post("set", key=key, value=text)
+            assert status == 200 and data["ok"]
+        assert not any(key["locked"] for key in shell.keys().values())
 
 
 @pytest.mark.parametrize("value", [None, "", " , "], ids=["unset", "empty", "separators"])

@@ -25,9 +25,10 @@ warning and the fix `moxi install <module>`.
 
 Whoever starts the shell can name settings its pages may not change for that run, in
 `MOXI_UI_LOCKED_SETTINGS`: full keys, `<module>.<key>`, separated by commas or spaces. An
-entry locks the key it names and every key under it. A write to a locked key is a 422
-before any command is built, and the read marks the key `locked`. Unset or empty, the
-variable locks nothing. It guards these routes only: `moxi config set` typed at a
+entry locks the key it names and every key under it, and a key above it too: a write to
+a table would replace the entry it holds. A write to a locked key is a 422 before any
+command is built, and the read marks the key `locked`. Unset or empty, the variable locks
+nothing. It guards these routes only: `moxi config set` typed at a
 keyboard is not refused.
 """
 
@@ -145,10 +146,12 @@ def locked_entries(text: str | None) -> frozenset[str]:
 
 
 def is_locked(module: str, key: str, locked: Iterable[str]) -> bool:
-    """Whether `locked` holds `<module>.<key>` or an entry it sits under. The text is
+    """Whether `locked` holds `<module>.<key>`, an entry it sits under, or an entry that
+    sits under it: a write to a table would replace a locked entry of it. The text is
     compared exactly, since `moxi config` takes a setting only by its exact name."""
     name = f"{module}.{key}"
-    return any(name == entry or name.startswith(f"{entry}.") for entry in locked)
+    return any(name == entry or name.startswith(f"{entry}.") or entry.startswith(f"{name}.")
+               for entry in locked)
 
 
 def _locked_now() -> frozenset[str]:
@@ -424,7 +427,8 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
            run: Callable[..., subprocess.CompletedProcess] = proc.run) -> dict[str, Any]:
     """One `moxi config set` or `unset` run in a fresh process: the change answer, or
     `Refused` (422: the command's text and fix) or `Conflict` (409: the file is busy, or
-    the run did not end). A key that `locked` holds is refused before a command is built.
+    the run did not end). A key that `locked` holds, or that holds a locked key, is refused
+    before a command is built.
     Every route that writes a setting calls this. Blocking."""
     if not _valid_module(module):
         raise Refused(f"{module!r} is not a module name")

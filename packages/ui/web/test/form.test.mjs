@@ -118,6 +118,14 @@ test("a locked entry's toggle is off, and the others of its table are not", () =
   assert.deepEqual(plan.control.toggles.map((t) => [t.key, t.off, t.checked, t.resettable]), [
     ["rows.alpha", LOCKED, true, true], ["rows.beta", null, false, true]]);
   assert.deepEqual(submitted([table], new Map(), all).values, { "rows.beta": "false" });
+  // A table marked locked for the entry it holds keeps its other entries open.
+  const holds = { ...table, locked: true };
+  assert.equal(plans([holds], all)[0].off, null);
+  assert.deepEqual(plans([holds], all)[0].control.toggles.map((t) => t.off), [LOCKED, null]);
+  assert.deepEqual(submitted([holds], new Map(), all).values, { "rows.beta": "false" });
+  // A table that is no switch table is one control over the whole table: off.
+  const box = { name: "extra", type: "table", value: "{a = 1}", source: "file", locked: true };
+  assert.equal(plans([box], all)[0].off, LOCKED);
   // A locked table is off as a whole.
   const whole = { ...table, locked: true, entries: table.entries.map((entry) => ({ ...entry, locked: true })) };
   assert.equal(plans([whole], all)[0].off, LOCKED);

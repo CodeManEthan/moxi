@@ -160,7 +160,10 @@ export function plans(fields: readonly FieldDescriptor[], installed: (module: st
       notes.push(line);
     }
     let off: string | null = null;
-    if (field.locked === true) {
+    // A switch table marked locked may only hold a locked entry: it has no control that
+    // writes the whole table, so it is off only when no entry of it can be written.
+    const open = switchTable && Array.isArray(field.entries) && field.entries.some((entry) => entry?.locked !== true);
+    if (field.locked === true && !open) {
       off = LOCKED;
       if (text(field.note)) notes.push(field.note as string);
     } else if (field.needs_absent === true) {

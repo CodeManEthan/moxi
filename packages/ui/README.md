@@ -52,6 +52,8 @@ shell's environment: the settings its pages may not change for that run. Its val
 list of full keys, `<module>.<key>` (`ui.gateway.port`, `moxi.<key>` for the core's),
 separated by commas or spaces. An entry locks the key it names and every key under it, so
 `ui.gateway` locks both gateway keys and a module's name alone locks all of its settings.
+A key above a locked one is refused too, since writing a table would replace the entry it
+holds; the other entries of that table can still be changed.
 The settings view shows a locked field read-only with `Locked for this run of the shell.`,
 and the shell answers a write to one with a 422 before any command runs. Unset or empty,
 it locks nothing. It guards the shell's pages only: `moxi config set` in a terminal and an

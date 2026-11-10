@@ -316,6 +316,7 @@ def test_a_locked_key_is_read_only_and_a_post_sent_past_the_view_is_refused(
                       env={"MOXI_UI_LOCKED_SETTINGS": "fixture.limit, fixture.rows.backup"})
     # The lock is on the shell's routes: the command typed at a keyboard still writes.
     assert shell.moxi("config", "set", "fixture", "limit", "7").returncode == 0
+    assert shell.moxi("config", "set", "fixture", "rows.spare", "false").returncode == 0
     page = ui_contexts(shell).pages[0]
     writes: list[str] = []
     page.on("request", lambda r: writes.append(r.url) if WRITES.search(r.url) else None)
@@ -333,28 +334,46 @@ def test_a_locked_key_is_read_only_and_a_post_sent_past_the_view_is_refused(
     expect(entry.get_by_role("checkbox")).to_be_disabled()
     expect(entry.locator(".off-line")).to_have_text(line)
     expect(form.locator(".off-line", has_text=line)).to_have_count(2)
+    # The table that holds it is not off: the entry beside the locked one is written.
+    expect(_field(form, "rows")).not_to_have_class(re.compile(r"\boff\b"))
+    spare = form.locator("input[type=checkbox][data-control='rows.spare']")
+    expect(spare).to_be_enabled()
+    spare.check()
+    expect(_msg(form, "rows.spare")).not_to_be_empty(timeout=SETTINGS_MS)
+    held = {"limit": 7, "rows": {"spare": True}}
+    assert _file(shell) == held
+    form = _settings(page)
     # A neighbouring field saves.
     workers = form.locator("input[data-control=workers]")
     expect(workers).to_be_editable()
     workers.fill("3")
     workers.press("Tab")
     expect(_msg(form, "workers")).to_contain_text("workers", timeout=SETTINGS_MS)
-    assert _file(shell) == {"limit": 7, "workers": 3}
-    assert len(writes) == 1
+    held["workers"] = 3
+    assert _file(shell) == held
+    assert len(writes) == 2
     # Sent from the page's own context, with the session's cookie and key.
     refused = {"refused": "fixture limit is locked for this run of the shell, so it can't "
                           "be changed from a page"}
     answers = page.evaluate(FORCED, [
         ["set", {"module": "fixture", "key": "limit", "value": "12"}],
         ["unset", {"module": "fixture", "key": "limit"}],
-        ["set", {"module": "fixture", "key": "rows.backup", "value": "true"}]])
+        ["set", {"module": "fixture", "key": "rows.backup", "value": "true"}],
+        # The table's own key: a write to it would replace the locked entry.
+        ["set", {"module": "fixture", "key": "rows", "value": "{backup = true}"}],
+        ["set", {"module": "fixture", "key": "rows", "add": "backup"}],
+        ["set", {"module": "fixture", "key": "rows", "remove": "backup"}],
+        ["unset", {"module": "fixture", "key": "rows"}]])
     assert answers[:2] == [[422, refused], [422, refused]]
     assert answers[2][0] == 422 and "fixture rows.backup is locked" in answers[2][1]["refused"]
-    assert _file(shell) == {"limit": 7, "workers": 3}
+    assert answers[3:] == [[422, {"refused": refused["refused"].replace("limit", "rows")}]] * 4
+    assert _file(shell) == held
     status, data = shell.session().get("/m/ui/api/settings?module=fixture")
     keys = {key["name"]: key for key in data["sections"][0]["keys"]}
     assert status == 200 and keys["limit"]["value"] == "7" and keys["limit"]["locked"]
-    assert [key["name"] for key in keys.values() if key["locked"]] == ["limit"]
+    assert {key["name"] for key in keys.values() if key["locked"]} == {"limit", "rows"}
+    assert {entry["key"]: entry["locked"] for entry in keys["rows"]["entries"]} == {
+        "rows.backup": True, "rows.spare": False}
     form = _settings(page)
     expect(form.locator("input[data-control=limit]")).to_have_value("7")
     expect(form.locator("input[data-control=limit]")).to_be_disabled()
