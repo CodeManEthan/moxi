@@ -5,7 +5,8 @@ first eight; the line for the sessions a program started, shown, hidden and abse
 `Earlier`; each filter and `Clear`; the find field by folder and by id; a list read again
 when its tab is shown; the line for compressed Codex sessions; the empty and the
 filtered-empty state; the line for a harness whose sessions could not be read; a route
-the page has no view for; and the 360 px width check.
+the page has no view for; the 360 px width check, and the filter line wrapped at 360 px
+with no line starting with a separator.
 
 Three shells, each over roots of its own written with `moxi_sessions.testing`: one with
 sessions of every kind, one with none, and one whose Codex root cannot be listed. Every
@@ -484,6 +485,42 @@ def test_the_list_fits_a_phone(seeded, ui_page, ui_width_check):
     filter_button(view, "harness").click()
     view.locator('[data-menu="harness"]').get_by_role("menuitemradio", name="Claude Code").click()
     expect(count_line(view)).to_have_text(f"{CLAUDE} of {ALL} sessions")
+    ui_width_check(ui_page)
+
+
+#: The filter line's pieces as they are drawn, each `[line top, left, text]` with the
+#: separators' text `·`, for the ones that are shown.
+FILTER_PIECES = """(line) => [...line.querySelectorAll(
+    ':scope .fs > .f > .k, :scope .fs > .f > .anchor > button, :scope .fs > .f > button, :scope .fs > .f > .sep')]
+  .filter((piece) => piece.checkVisibility({ visibilityProperty: true }))
+  .map((piece) => { const box = piece.getBoundingClientRect();
+                    return [Math.round(box.top + box.height / 2), box.left, piece.textContent.trim()]; })"""
+
+
+def filter_lines(view) -> list[list[str]]:
+    """The filter line's shown pieces, one list per drawn line, left to right."""
+    lines: dict[int, list[tuple[float, str]]] = {}
+    for middle, left, text in view.locator('[data-part="filters"]').evaluate(FILTER_PIECES):
+        at = next((top for top in lines if abs(top - middle) < 8), middle)
+        lines.setdefault(at, []).append((left, text))
+    return [[text for _, text in sorted(pieces)] for _, pieces in sorted(lines.items())]
+
+
+def test_a_wrapped_filter_line_starts_no_line_with_a_separator(seeded, ui_page, ui_width_check):
+    ui_width_check(ui_page, module="sessions")
+    view = ui_page.locator(LIST)
+    expect(count_line(view)).to_have_text(f"{ALL} sessions")
+    for setting in ("none", "Codex"):
+        if setting != "none":
+            filter_button(view, "harness").click()
+            view.locator('[data-menu="harness"]').get_by_role("menuitemradio", name=setting).click()
+            expect(view.get_by_role("button", name="Clear")).to_be_visible()
+        lines = filter_lines(view)
+        assert len(lines) > 1, lines
+        for line in lines:
+            assert line[0] != "·" and line[-1] != "·", lines
+        # Every filter still has its separator between it and the next on its line.
+        assert [piece for line in lines for piece in line].count("·") >= 1, lines
     ui_width_check(ui_page)
 
 

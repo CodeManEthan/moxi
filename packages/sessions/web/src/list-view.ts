@@ -70,6 +70,9 @@ const STYLES = css`
   .filt .f { display: inline-flex; align-items: baseline; white-space: nowrap; }
   .filt .k { margin-right: 8px; }
   .filt .sep { margin: 0 12px; }
+  /* A separator ends the filter before it, so a wrapped line never starts with one; the
+     one that ends a line is hidden, keeping its place so no filter moves up a line. */
+  .filt .f[data-end] > .sep { visibility: hidden; }
   .filt button.set { color: var(--moxi-text); }
   .filt .v { margin-left: 6px; font-size: 15px; line-height: 0; position: relative; top: 1px; color: var(--moxi-text-dim); }
   .filt .n { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -183,6 +186,9 @@ export class SessionsList extends LitElement {
   #shown = (): void => {
     if (document.visibilityState === "visible") this.#readList();
   };
+  /** The filter line's filters, watched so a wrap is found when the width changes. */
+  #watched: HTMLElement | null = null;
+  #lines = new ResizeObserver(() => this.#markLineEnds());
   #pressed = (event: Event): void => {
     if (this.#menu === null) return;
     const inside = event.composedPath().some((node) => node instanceof Element && node.classList.contains("anchor"));
@@ -200,6 +206,8 @@ export class SessionsList extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.#lines.disconnect();
+    this.#watched = null;
     this.#feed?.close();
     this.#folders?.close();
     this.#feed = this.#folders = null;
@@ -435,6 +443,27 @@ export class SessionsList extends LitElement {
     </div>`;
   }
 
+  protected updated(): void {
+    const filters = this.renderRoot.querySelector<HTMLElement>(".filt .fs");
+    if (filters !== this.#watched) {
+      this.#lines.disconnect();
+      if (filters !== null) this.#lines.observe(filters);
+      this.#watched = filters;
+    }
+    this.#markLineEnds();
+  }
+
+  /** Marks each filter that ends a line of the filter line, so its separator is hidden.
+   * A filter ends a line when the next one starts lower, or when it is the last. Hiding
+   * keeps the separator's place, so marking moves nothing and the marks hold. */
+  #markLineEnds(): void {
+    const items = [...(this.#watched?.querySelectorAll<HTMLElement>(":scope > .f") ?? [])];
+    items.forEach((item, at) => {
+      const next = items[at + 1];
+      item.toggleAttribute("data-end", next === undefined || next.offsetTop >= item.offsetTop + item.offsetHeight);
+    });
+  }
+
   render() {
     const feed = this.#feed;
     const status = feed !== null ? statusLine(feed) : null;
@@ -476,14 +505,15 @@ export class SessionsList extends LitElement {
         if (event.key === "Escape" && this.#menu !== null) this.#openMenu(null);
       }}>
       <span class="fs">
-        ${line.filters.map((filter, at) => html`<span class="f">${at > 0 ? html`<span class="sep">·</span>` : nothing
-          }<span class="k">${filter.label}</span><span class="anchor" data-filter=${filter.key}>
+        ${line.filters.map((filter, at) => html`<span class="f"><span class="k">${filter.label}</span><span class="anchor"
+            data-filter=${filter.key}>
             <button type="button" class=${filter.set ? "set" : ""} data-action="filter" aria-haspopup="true"
               aria-label=${`${filter.label}: ${filter.value}`} aria-expanded=${this.#menu === filter.key ? "true" : "false"}
               @click=${() => this.#openMenu(this.#menu === filter.key ? null : filter.key)}>${filter.value}<span
               class="v" aria-hidden="true">▾</span></button>
-            ${this.#menu === filter.key ? this.#menuOf(filter.key) : nothing}</span></span>`)}
-        ${line.clear !== null ? html`<span class="f"><span class="sep">·</span><button type="button" data-action="clear"
+            ${this.#menu === filter.key ? this.#menuOf(filter.key) : nothing}</span>${
+            at < line.filters.length - 1 || line.clear !== null ? html`<span class="sep">·</span>` : nothing}</span>`)}
+        ${line.clear !== null ? html`<span class="f"><button type="button" data-action="clear"
           @click=${() => this.#pick({ folder: null, harness: null, when: { kind: "any" } })}>${line.clear}</button></span>` : nothing}
       </span>
       ${count !== null ? html`<span class="n" data-line="count">${count}</span>` : nothing}
