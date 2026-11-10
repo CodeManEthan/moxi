@@ -3,13 +3,22 @@
 ## 0.2.8 (2026-11-10)
 
 - A list row's `prompt` is the newest message in the whole session that the record marks
-  as typed by a person, and nothing else. It was looked for in the last five turns only;
-  now the session is read backward from its end until one is met, once for each state
-  of its file, and what was found is kept in memory. A session with no such message has
-  no `prompt`. Codex and OpenCode rows have none: sessions reads no typed mark from
-  their records (the README says what Codex would need).
-- `moxi_sessions.catalog`: `PROMPT_TURNS` is gone; `TYPED`, `read_prompt`,
-  `reads_prompt` and `Catalog.prompt_reads` are new.
+  as typed by a person, and nothing else. It was looked for in the last five turns only.
+  A session with no such message has no `prompt`. Codex and OpenCode rows have none:
+  sessions reads no typed mark from their records (the README says what Codex would
+  need).
+- The read for it: a session is read from its start once, whatever its size, and where
+  that read ended is kept in memory. An unchanged file is not read again, and a file
+  that grew is read from the kept place only, so a list over long sessions that are
+  being written pays for their new lines and not for their length. A file that shrank,
+  was written again or was replaced is read from its start. A last line with no newline
+  yet is not read until it has one. The README states what is kept and the two changes
+  to a file this read does not see.
+- `moxi_sessions.catalog`: `PROMPT_TURNS` is gone, and `Tail` no longer has `prompt`.
+  New: `TYPED`, `WINDOW`, `Kept`, `PromptRead`, `read_prompt`, `reads_prompt` and the
+  counters `Catalog.prompt_reads`, `prompt_whole` and `prompt_bytes`.
+  `moxi_sessions.claude` has `may_be_typed`, which tells from a line's bytes whether
+  it can hold a typed message.
 
 ## 0.2.7 (2026-11-10)
 

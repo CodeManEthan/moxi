@@ -49,10 +49,11 @@ the last turn of each row it returns. Codex heads are read by the catalog's gath
 **A row's prompt.** `prompt` is the newest message of the whole session that its record
 marks as typed by a person, and None where the session holds none: a reply, a message
 the record marks as injected and a message with no mark are never a prompt. For it a
-Claude Code session that no program started, and that a row shows, is read backward from
-its end until such a message is met, once for each state of its file; the catalog keeps
-what it found, so a list reads no unchanged file again. A Codex and an OpenCode row's
-`prompt` is None: their records carry no mark sessions reads.
+Claude Code session that no program started, and that a row shows, is read from its
+start once; the catalog keeps where that read ended, so a list reads no unchanged file
+again and reads only the new lines of one that grew (`catalog`, "The prompt's read",
+which also states the two changes to a file that read does not see). A Codex and an
+OpenCode row's `prompt` is None: their records carry no mark sessions reads.
 
 **Positions.** A `before` is a place in the list's order: an entry's last change in
 nanoseconds, its harness and its id, joined by colons. Asking for more after one answers

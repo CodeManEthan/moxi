@@ -172,6 +172,37 @@ mark, such as a slash command. A session with no marked message has no `prompt`;
 machine where most sessions are started and fed by other programs, most rows have none.
 A session a program started has none either.
 
+For the prompt, a Claude Code session a row shows is read from its start once,
+whatever its size. What that read keeps, in memory, is the file's device, inode, size
+and modification time, the place just after the last complete line it read, a SHA-256 of
+the 4,096 bytes before that place, and the prompt. From then on:
+
+- A file whose device, inode, size and modification time are the kept ones is not read.
+- A file that grew is read from the kept place only, as long as the 4,096 bytes before
+  it are still the ones that were hashed. The last typed message in the new lines is the
+  prompt; when they hold none, the kept prompt stands.
+- Any other file is read from its start again: one that shrank, one written again or
+  replaced by another file of the same name, one shorter than 4,096 bytes.
+
+A last line with no newline yet is not read for the prompt until its newline is
+written, so a message can show as the newest thing said a moment before it shows as the
+prompt. The prompts of at most 5,000 files are kept, the least recently used dropped
+first. A read that fails gives no prompt for that answer, keeps nothing new, and is
+made again for the next.
+
+So the prompt a row carries is the one a read of the whole file would give, with two
+limits:
+
+- A file written again so that its device, inode, size and modification time are all as
+  before is taken as unchanged and is not read. The last turn's facts have the same
+  limit.
+- A change that keeps the file's length and touches only bytes more than 4,096 before
+  the kept place is not seen: the lines after that place are read, and the kept prompt
+  stands.
+
+Claude Code writes a session by adding lines at the end of its file, which is neither
+of them.
+
 **Left out.** Codex rows have no `prompt`. A Codex rollout does say which messages were
 submitted as a person's text (the `user.text` item kind), but sessions does not read
 that kind as a typed mark, so it cannot say a Codex message was typed. To give Codex
@@ -202,11 +233,7 @@ the folder was not read; Codex's runs anywhere and comes with no folder.
 A list opens no transcript to find the sessions: it lists each root. To tell the sessions
 a program started from the others, it then reads the first lines of every session that
 changed in the last hour or on one of the seven days it returns, whether a row shows the
-session or not. It reads the last turn of each session its rows show, and for the
-prompt it reads a Claude Code session backward from its end until it meets a typed
-message, to the start when there is none. That read is made once for each state of the
-file: an unchanged session is not read again, and one that changed is read through again
-the next time a row shows it. Every Codex
+session or not. It reads the last turn of each session its rows show. Every Codex
 rollout's first line is read once, whatever its age, since that line says whether
 another thread spawned it. Asking by `folder` or `find`, or for the folders, reads every
 session's first lines once. What was read is kept in the reading process's memory for as
