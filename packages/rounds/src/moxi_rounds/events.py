@@ -47,7 +47,7 @@ TYPES = _types(
     # The round moved to another flow: the name it had, the new name and its steps, and
     # who moved it. The operator's move is his ruling, and that ruling's own event
     # holds the same three.
-    EventType("flow.changed", ("was", "flow", "steps", "by", "ruling")),
+    EventType("flow.changed", ("was", "flow", "steps", "by")),
     # A design version was frozen: its number and digest, whether only records changed
     # and the pointer that says so, the trace result, what the design's block declared
     # (`declared`), what of that was new to the record and is added by this event
@@ -95,12 +95,11 @@ TYPES = _types(
     # round it stands for, the stages it comes after, and its slices.
     EventType("stage.declared",
               ("id", "repo", "branch", "round", "after", "slices", "why")),
-    # A stage changed: it waits for more stages (`after`, the ones added), it waits for
-    # fewer (`gone`, the ones taken off) or it left the plan (`removed`). A mark writes
-    # the first. The operator's ruling that does one of the other two is its own
-    # event, and so is a verdict that applies one: neither writes this event.
-    EventType("stage.changed", ("id", "removed", "after", "gone", "verdict", "ruling"),
-              required=("id",)),
+    # A stage changed: it waits for more stages (`after`, the ones added), which a
+    # mark writes. A stage waits for fewer, or leaves the plan, by the operator's
+    # ruling or by a verdict that applies it, and each of those is its own event:
+    # this one says neither.
+    EventType("stage.changed", ("id", "after"), required=("id",)),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,
     # the repos and paths or the stages it applies to, its kind (of substance, or an act
     # on the process) and the item it rules, the key of the option an answer chose, and

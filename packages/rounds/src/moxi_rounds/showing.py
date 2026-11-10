@@ -266,13 +266,9 @@ def history_of(event: dict) -> str | None:
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
     if event.get("type") == "stage.changed" and isinstance(of, str):
-        more, gone = event.get("after"), event.get("gone")
-        if event.get("removed") is True:
-            of += ", left the plan"
+        more = event.get("after")
         if isinstance(more, list) and more:
             of += f", also after {', '.join(map(str, more))}"
-        if isinstance(gone, list) and gone:
-            of += f", no longer after {', '.join(map(str, gone))}"
     if event.get("type") == "design.frozen":
         of = f"v{event.get('version')}"
     if event.get("type") == "thread.decided":

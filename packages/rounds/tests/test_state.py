@@ -818,25 +818,26 @@ def declared(n, stage_id, after=()):
                  branch=f"branch-{stage_id.lower()}", after=list(after))
 
 
-def test_a_change_to_a_stage_adds_to_what_it_waits_for_and_takes_off():
+def test_a_change_to_a_stage_adds_to_what_it_waits_for_and_takes_nothing_off():
     start = [opened(), declared(2, "B1"), declared(3, "B2"),
              declared(4, "B3", after=["B1"])]
     more = event(5, "stage.changed", id="B3", after=["B2", "B1"])
-    fewer = event(6, "stage.changed", id="B3", gone=["B1"], verdict="a verdict")
+    fewer = event(6, "stage.changed", id="B3", gone=["B1"], removed=True)
 
     before = state.fold(start)
     added = state.fold([*start, more])
     taken = state.fold([*start, more, fewer])
 
     assert [one.after for one in added.stages] == [(), (), ("B1", "B2")]
-    assert [one.after for one in taken.stages] == [(), (), ("B2",)]
+    # Only a ruling or a verdict takes a wait off, or a stage out of the plan.
+    assert taken.stages == added.stages
     assert added.stages[:2] == before.stages[:2]
     assert dataclasses.replace(added.stages[2], after=("B1",)) == before.stages[2]
 
 
 def test_a_stage_that_left_keeps_its_record():
     start = [opened(), declared(2, "B1"), declared(3, "B2", after=["B1"])]
-    left = event(4, "stage.changed", id="B1", removed=True, verdict="a verdict")
+    left = event(4, "ruling.recorded", id="C1", kind="process", rules="unstage:B1")
 
     assert state.fold([*start, left]).stages == state.fold(start).stages
 

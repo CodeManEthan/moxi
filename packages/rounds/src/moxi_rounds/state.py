@@ -700,10 +700,9 @@ def _waits(state: State, stage_id, *, more: tuple[str, ...] = (),
 
 
 def _stage_changed(state: State, event: dict) -> None:
-    """A stage waits for more stages, or for fewer. A stage that left the plan keeps
-    its record: `questions.left_stages` says which did, from the history."""
-    _waits(state, event.get("id"), more=_ids(event.get("after")),
-           gone=_ids(event.get("gone")))
+    """A stage waits for more stages. Nothing else of a stage is read from this
+    event: a stage waits for fewer, or leaves the plan, by a ruling or a verdict."""
+    _waits(state, event.get("id"), more=_ids(event.get("after")))
 
 
 def _design_frozen(state: State, event: dict) -> None:

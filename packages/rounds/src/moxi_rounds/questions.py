@@ -147,15 +147,11 @@ def finished_stages(state: states.State) -> frozenset[str]:
 
 
 def left_stages(state: states.State) -> frozenset[str]:
-    """The ids of the stages that left the round's plan: each one a change to the stage
-    records as removed, each one a verdict took out when it applied what a design's
-    block left out, and each one a ruling takes out. A stage that left does not come
-    back."""
-    removed = {event["id"] for event in state.history
-               if event["type"] == "stage.changed" and event.get("removed") is True
-               and isinstance(event.get("id"), str)}
-    removed |= {one.id for verdict in state.verdicts for one in verdict.applied
-                if one.what == states.STAGE}
+    """The ids of the stages that left the round's plan: each one a verdict took out
+    when it applied what a design's block left out, and each one a ruling takes out.
+    Nothing else takes a stage out, and a stage that left does not come back."""
+    removed = {one.id for verdict in state.verdicts for one in verdict.applied
+               if one.what == states.STAGE}
     ruled_out = {ruling.rules[len(UNSTAGE):] for ruling in state.rulings
                  if (ruling.rules or "").startswith(UNSTAGE)
                  and STAGE.fullmatch(ruling.rules[len(UNSTAGE):])}

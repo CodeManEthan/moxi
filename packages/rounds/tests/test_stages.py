@@ -823,7 +823,8 @@ def test_neither_ruling_of_a_stage_is_taken_back_or_ruled_again(rules, name):
 
 
 def test_the_history_says_what_changed_of_a_stage():
-    assert showing.history_of({"type": "stage.changed", "id": "B1",
-                               "removed": True}) == "B1, left the plan"
     assert showing.history_of({"type": "stage.changed", "id": "B2",
-                               "gone": ["B1"]}) == "B2, no longer after B1"
+                               "after": ["B1"]}) == "B2, also after B1"
+    # A mark adds waits and nothing else, so nothing else is read from its event.
+    assert showing.history_of({"type": "stage.changed", "id": "B1", "removed": True,
+                               "gone": ["B2"]}) == "B1"
