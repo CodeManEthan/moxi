@@ -34,7 +34,7 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/places", "/api/preview", "/api/launch", "/api/resume",
+          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/preview", "/api/launch", "/api/resume",
           "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
@@ -687,6 +687,159 @@ def test_a_failed_places_read_says_only_the_class(log, monkeypatch):
     assert status == 200 and said == {
         "state": "error", "detail": pagehandlers.UNEXPECTED.format("RuntimeError"),
         "projects": False, "actor": first.actor(), "places": []}
+    assert b"someone" not in raw
+
+
+# --- /api/targets -------------------------------------------------------------------------
+
+TERMINAL = {"state": "up", "detail": None, "slots": [], "new_slot": False,
+            "default": {"target": "terminal", "slot": None}}
+
+
+@pytest.fixture
+def fake_slots(tmp_path, monkeypatch):
+    """The fake slots behind the launcher's seam, read as installed; `fake_slots(...)`
+    scripts it, and `fake_slots.calls(name)` lists the calls it got."""
+    import launcher_fake_slots as fake
+
+    directory = tmp_path / "fake-slots"
+    directory.mkdir()
+    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(directory))
+    installed(monkeypatch, "slots")
+    fake.reset()
+
+    def plan(**keys):
+        (directory / "script.json").write_text(json.dumps(keys))
+
+    plan.calls = lambda name=None: fake.calls(directory, name)
+    plan.fake = fake
+    return plan
+
+
+def targets_answer() -> dict:
+    status, said, _ = get("/api/targets")
+    assert status == 200 and said["state"] == "up" and said["detail"] is None
+    return said
+
+
+def test_targets_list_each_slot_in_number_order_with_its_state_and_hold(fake_slots):
+    fake_slots(slots={
+        "4": {"state": "missing", "launchable": False},
+        "3": {"state": "free", "launchable": False,
+              "hold": {"holder": "planner", "until": 1900000000.5}},
+        "2": {"state": "ended", "launchable": True},
+        "1": {"state": "occupied", "launchable": False},
+        "10": {"state": "free", "launchable": True}})
+    said = targets_answer()
+
+    def slot(number, state, launchable, holder=None, until=None):
+        return {"number": number, "state": state, "launchable": launchable,
+                "holder": holder, "until": until, "taken_by": None}
+
+    assert said["slots"] == [
+        slot(1, "occupied", False), slot(2, "ended", True),
+        slot(3, "free", False, "planner", 1900000000.5), slot(4, "missing", False),
+        slot(10, "free", True)]
+    assert said["new_slot"] is True
+    assert said["default"] == {"target": "slot", "slot": 2}
+
+
+def test_the_default_is_a_new_slot_when_none_is_launchable_or_there_is_none(fake_slots):
+    fake_slots(slots={"1": {"state": "occupied", "launchable": False},
+                      "2": {"state": "free", "launchable": False,
+                            "hold": {"holder": "planner", "until": 1900000000.0}}})
+    said = targets_answer()
+    assert said["new_slot"] is True and said["default"] == {"target": "slot", "slot": None}
+    fake_slots()
+    assert targets_answer() == {"state": "up", "detail": None, "slots": [], "new_slot": True,
+                                "default": {"target": "slot", "slot": None}}
+
+
+def test_a_session_with_no_registry_row_is_not_listed(fake_slots):
+    fake_slots(slots={"1": {"state": "free", "launchable": True},
+                      "2": {"state": "occupied", "launchable": False, "created": None}})
+    assert [s["number"] for s in targets_answer()["slots"]] == [1]
+
+
+def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
+    launched(log, "named", "2026-01-01T09:00:00.000000Z", identity="planner",
+             cwd="/src/proj-a")
+    launched(log, "bare", "2026-01-01T10:30:00.000000Z", cwd="/src/proj-b")
+    at = store.parse_time("2026-01-01T10:30:00.000000Z").astimezone()
+
+    def taken(request_id, state="occupied"):
+        return {"state": state, "launchable": state != "occupied",
+                "last": {"at": 1.0, "label": f"launcher:{request_id}",
+                         "meta": {"request_id": request_id}}}
+
+    fake_slots(slots={"1": taken("named"), "2": taken("bare"), "3": taken("unknown"),
+                      "4": {"state": "occupied", "launchable": False},
+                      "5": taken("named", state="ended"),
+                      "6": {"state": "occupied", "launchable": False,
+                            "last": {"at": 1.0, "label": "by hand", "meta": None}}})
+    by = {s["number"]: s["taken_by"] for s in targets_answer()["slots"]}
+    assert by == {1: {"request_id": "named", "label": "planner"},
+                  2: {"request_id": "bare", "label": f"proj-b {at:%H:%M}"},
+                  3: None, 4: None, 5: None, 6: None}
+
+
+def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, tmp_path):
+    launched(log, "r1", "2026-01-01T09:00:00.000000Z", identity="coder")
+    fake_slots(slots={"1": {"state": "free", "launchable": True}})
+    fake_slots.fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+                          meta={"request_id": "r1"}, create=True)
+    said = targets_answer()
+    assert said["slots"] == [{"number": 1, "state": "occupied", "launchable": False,
+                              "holder": None, "until": None,
+                              "taken_by": {"request_id": "r1", "label": "coder"}}]
+    assert said["default"] == {"target": "slot", "slot": None}
+
+
+def test_slots_that_cannot_be_read_offer_no_slot_and_the_terminal(fake_slots):
+    fake_slots(list="error", slots={"1": {"state": "free", "launchable": True}})
+    assert targets_answer() == TERMINAL
+
+
+def test_slots_that_cannot_run_here_offer_no_slot_and_the_terminal(fake_slots):
+    fake_slots(supported={"ok": False, "why": "no tmux"},
+               slots={"1": {"state": "free", "launchable": True}})
+    assert targets_answer() == TERMINAL
+    assert fake_slots.calls("list_slots") == []
+
+
+def test_without_slots_the_default_is_the_terminal_and_slots_is_not_asked(fake_slots,
+                                                                         monkeypatch):
+    fake_slots(slots={"1": {"state": "free", "launchable": True}})
+    monkeypatch.setattr(pagehandlers, "_available", lambda: lambda name: False)
+    assert targets_answer() == TERMINAL
+    assert fake_slots.calls() == []
+
+
+def test_slots_installed_but_not_loadable_offers_the_terminal(monkeypatch):
+    installed(monkeypatch, "slots")
+    monkeypatch.setattr(slots, "api", lambda: None)
+    assert targets_answer() == TERMINAL
+
+
+def test_headless_is_never_the_default(fake_slots, monkeypatch):
+    for plan in ({}, {"slots": {"1": {"state": "free", "launchable": True}}},
+                 {"list": "error"}, {"supported": {"ok": False}}):
+        fake_slots(**plan)
+        assert targets_answer()["default"]["target"] in ("slot", "terminal")
+    monkeypatch.setattr(pagehandlers, "_available", lambda: lambda name: False)
+    assert targets_answer()["default"]["target"] == "terminal"
+
+
+def test_a_failed_targets_read_says_only_the_class(fake_slots, monkeypatch):
+    def broken():
+        raise RuntimeError("/home/someone/private/registry.json")
+
+    monkeypatch.setattr(fake_slots.fake, "list_slots", broken)
+    status, said, raw = get("/api/targets")
+    assert status == 200 and said == {
+        **TERMINAL, "state": "error",
+        "detail": pagehandlers.UNEXPECTED.format("RuntimeError")}
     assert b"someone" not in raw
 
 

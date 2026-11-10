@@ -6,7 +6,8 @@ form's values (`presets.layered`), the launch
 log (`store.log`), the runs with their events (`store.runs`, `store.run_events`), the
 past-sessions list (`resume.sessions`), a session's state (`state.state`, or
 `state.of_launch` for every live launch), the places the page server's own actor last
-launched in (`store.places`). Each holds `busy("read")` for its own length only.
+launched in (`store.places`) and where a launch may run now (slots' `list_slots`, joined
+with the launch log). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
 and start time its row recorded, or, with no pid, on the endpoint that claimed it. That
@@ -520,6 +521,64 @@ def read_places(call: Any) -> dict[str, Any]:
         except Exception as err:
             return _failed(err, "reading the places failed", projects=False,
                            actor=first.actor(), places=[])
+
+
+# -- /api/targets ---------------------------------------------------------------------------
+
+#: The choice a launch starts with where no slot can be used: the command to copy.
+NO_SLOTS = {"target": "terminal", "slot": None}
+
+
+def _taken_label(row: store.LaunchRow) -> str:
+    """What a taken slot is called: its launch's identity, else the name of the folder it
+    runs in and the time it started, on this machine's clock."""
+    if row.identity:
+        return row.identity
+    started = store.parse_time(row.created_at).astimezone()
+    return f"{Path(row.cwd).name or row.cwd} {started:%H:%M}"
+
+
+def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None:
+    """The launch that occupies `slot`: the request id slots keeps for its last start,
+    when the launch log holds that launch."""
+    meta = slot.last.meta if slot.state == "occupied" and slot.last is not None else None
+    request_id = meta.get("request_id") if isinstance(meta, Mapping) else None
+    if conn is None or not isinstance(request_id, str):
+        return None
+    row = store.get(conn, request_id)
+    return None if row is None else {"request_id": request_id, "label": _taken_label(row)}
+
+
+def targets_now() -> dict[str, Any]:
+    """`/api/targets`' answer. Where slots is installed, loads and can run, each
+    registered slot in number order, and a default that names the lowest launchable one,
+    or none when a launch would take a new slot. Where it is not, or the slots can't be
+    read, no slot and the terminal as the default. Headless is never the default."""
+    none = _up(slots=[], new_slot=False, default=dict(NO_SLOTS))
+    api = slots.api() if _available()(slots.MODULE) else None
+    if api is None or not api.supported().ok:
+        return none
+    listing = api.list_slots()
+    if not listing.ok:
+        return none
+    listed = sorted(listing.slots, key=lambda slot: slot.number)
+    with _store() as conn:
+        rows = [{"number": slot.number, "state": slot.state, "launchable": slot.launchable,
+                 "holder": slot.hold.holder if slot.hold else None,
+                 "until": slot.hold.until if slot.hold else None,
+                 "taken_by": _taken_by(conn, slot)} for slot in listed]
+    free = next((slot.number for slot in listed if slot.launchable), None)
+    return _up(slots=rows, new_slot=True, default={"target": "slot", "slot": free})
+
+
+def read_targets(call: Any) -> dict[str, Any]:
+    """`GET /api/targets`: where a launch may run now."""
+    with call.busy("read"):
+        try:
+            return targets_now()
+        except Exception as err:
+            return _failed(err, "reading where a launch may run failed", slots=[],
+                           new_slot=False, default=dict(NO_SLOTS))
 
 
 # -- live launches and their state ------------------------------------------------------------
@@ -1218,13 +1277,14 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "PROJECTS",
+__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "NO_SLOTS", "PROJECTS",
            "REFUSALS", "REGATHER",
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
            "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
            "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
            "launched", "launches", "live", "live_states", "on_path", "page_key", "places",
            "preview", "previewed", "read_catalog", "read_form", "read_launches",
-           "read_places", "read_presets", "read_runs", "read_sessions", "read_state", "refusal", "resumable", "resume", "resumed", "run_entry",
-           "session_state", "spelled", "ticket", "tokens", "unreadable",
+           "read_places", "read_presets", "read_runs", "read_sessions", "read_state",
+           "read_targets", "refusal", "resumable", "resume", "resumed", "run_entry",
+           "session_state", "spelled", "targets_now", "ticket", "tokens", "unreadable",
            "verify"]
