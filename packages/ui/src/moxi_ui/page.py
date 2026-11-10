@@ -4,6 +4,9 @@
     POST /m/ui/api/stop      stop the shell
     GET  /m/ui/api/modules   the modules view's value (also the topic `ui.modules`)
     GET  /m/ui/api/doctor    `moxi doctor [module] --json`'s rows, run in a fresh process
+    GET  /m/ui/api/checks    the kept doctor run (also the topic `ui.checks`); it starts
+                             one in the background when none is kept or the kept one is old
+    POST /m/ui/api/checks/run  start a kept run now, unless one is going
 
 `servers` and `stop` take the runtime file's token and nothing a browser sends (`moxi ui
 status` and `stop`, and the doctor, call them); the others take the session's cookie and
@@ -39,6 +42,7 @@ from . import settings as _settings
 from .gateway import desk as _desk
 
 __all__ = [
+    "CHECKS_SHAPE",
     "DOCTOR_AT_ONCE",
     "DOCTOR_TIMEOUT",
     "GATEWAY_ROUTES",
@@ -48,6 +52,7 @@ __all__ = [
     "SERVERS_SHAPE",
     "SETTINGS_ROUTES",
     "current",
+    "doctor_answer",
     "doctor_argv",
     "run_doctor",
     "serving",
@@ -142,6 +147,16 @@ MODULES_SHAPE = {"at": _STRING, "error": Out("string", nullable=True, mark="reda
 _ROW = Out("table", items={"module": Out("string"), "name": Out("string"),
                            "state": Out("string"), "detail": Out("string"), "fix": _STRING})
 DOCTOR_SHAPE = {"rows": Out("list", items=_ROW), "error": _STRING}
+
+_REDACTED = Out("string", nullable=True, mark="redact")
+_KEPT_ROW = Out("table", items={"module": Out("string"), "name": Out("string"),
+                                "state": Out("string"), "detail": _REDACTED,
+                                "fix": _REDACTED})
+#: The kept doctor run: `/m/ui/api/checks`, its run act and the topic `ui.checks`. `at` is
+#: when the kept run ended, None while none is kept. A row's `detail` and `fix` and the
+#: run's `error` may hold a path, so the gateway sends each as null.
+CHECKS_SHAPE = {"at": _STRING, "running": Out("bool"), "rows": Out("list", items=_KEPT_ROW),
+                "error": _REDACTED}
 
 
 # --- the handlers -----------------------------------------------------------------------
@@ -276,10 +291,16 @@ async def doctor(call: Any) -> dict[str, Any]:
     shell's `/servers` back, and a Check that held one could leave that call none."""
     from moxi.names import is_module_name
 
-    shell = current()
     module = call.query.get("module")
     if module is not None and not is_module_name(module):
         return {"rows": [], "error": "not a module name"}
+    return await doctor_answer(current(), module)
+
+
+async def doctor_answer(shell: Any, module: str | None = None) -> dict[str, Any]:
+    """`shell`'s `moxi doctor [module] --json` run to its end, as the doctor route
+    answers: `{"rows": [...], "error": <why there are none, or None>}`. It waits its turn
+    among `DOCTOR_AT_ONCE` and is killed past `DOCTOR_TIMEOUT`."""
     async with _turn():
         try:
             code, out = await run_doctor(doctor_argv(module), timeout=DOCTOR_TIMEOUT,
@@ -306,6 +327,17 @@ async def doctor(call: Any) -> dict[str, Any]:
     return {"rows": rows, "error": None}
 
 
+async def checks(call: Any) -> dict[str, Any]:
+    """The kept doctor run. When none is kept or the kept one is old, a run starts in the
+    background and the answer, sent at once, says `running`."""
+    return current().checks.ask()
+
+
+async def checks_run(call: Any) -> dict[str, Any]:
+    """Start a kept run now unless one is going; the answer says `running`."""
+    return current().checks.run_now()
+
+
 # --- the page ---------------------------------------------------------------------------
 
 #: The shell's own routes.
@@ -315,6 +347,8 @@ ROUTES = (
     Route("/api/modules", "read", f"{_HERE}:modules", returns=MODULES_SHAPE, gateway=True),
     Route("/api/doctor", "read", f"{_HERE}:doctor",
           query={"module": Field("string", required=False, max=64)}, returns=DOCTOR_SHAPE),
+    Route("/api/checks", "read", f"{_HERE}:checks", returns=CHECKS_SHAPE, gateway=True),
+    Route("/api/checks/run", "act", f"{_HERE}:checks_run", returns=CHECKS_SHAPE),
 )
 
 #: The settings view's routes, declared by `settings.py`.

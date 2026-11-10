@@ -20,7 +20,8 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     such as `["--idle-s", "0.5"]`), `leave_out` (installed modules the shell's snapshot
     leaves out, such as `["cache"]`), `failed_for` (the seconds a page server's failed
     start answers with its failure, 10 unless given, for a test that waits out several),
-    `port` (the port it binds, 0 for one the system picks) or `env` (variables added to
+    `checks` (True lets the shell run the doctor for its kept run, which a test shell
+    otherwise never starts), `port` (the port it binds, 0 for one the system picks) or `env` (variables added to
     the shell's environment, which its page servers inherit, such as
     `{"GIT_CONFIG_NOSYSTEM": "1"}`; not one that keeps the shell under its home). No
     setting or variable reaches these.
