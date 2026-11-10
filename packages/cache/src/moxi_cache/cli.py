@@ -29,6 +29,13 @@ load, in this environment, and reads the records and the timer log; it starts no
 process is learning into it, the Claude projects root, whether a watcher is keeping
 clock records, the watcher's unit and its state, and the timer's subscriptions with the
 refused ones. It exits 1 when something there stops reads.
+
+doctor's watcher line leads with how the watcher stands by `records.watching`, the rule
+cache's page shows it by, when the watcher has written its reading: running and listed
+(with no record, that no live Claude Code session has one), running but not listing
+Claude's sessions since a time, or stopped at a time; then how the records stand. With no
+reading, a watcher older than the reading's file, the line judges by the records alone,
+and says no watcher is running when there is none.
 """
 
 from __future__ import annotations
@@ -394,9 +401,18 @@ def _timer_lines() -> list[str]:
     return out
 
 
+def _when(t: float, now: float) -> str:
+    """A local time to the second, with its date when that is not today's."""
+    when = time.localtime(t)
+    if time.strftime("%Y-%m-%d", when) != time.strftime("%Y-%m-%d", time.localtime(now)):
+        return time.strftime("%Y-%m-%d %H:%M:%S", when)
+    return time.strftime("%H:%M:%S", when)
+
+
 def _watcher_line(now: float | None = None) -> str:
-    """How the watcher's records stand: none, fresh, or standing still. Each record is
-    judged stale by its own `stale_after`, as the segment judges it."""
+    """How the watcher stands and how its records stand. Each record is judged stale by
+    its own `stale_after`, as the segment judges it. With the watcher's reading the line
+    leads with `records.watching`'s outcome; without one it judges by the records alone."""
     directory = records.record_dir()
     found = []
     try:
@@ -407,18 +423,46 @@ def _watcher_line(now: float | None = None) -> str:
                     found.append(record)
     except OSError:
         pass
-    if not found:
-        return (f"no clock records under {directory}: no watcher is running, so there is "
-                "no status line segment and no timer")
     now = time.time() if now is None else now
+    reading = records.reading()
+    if reading is None:
+        if not found:
+            return (f"no clock records under {directory}: no watcher is running, so there "
+                    "is no status line segment and no timer")
+        return _records_words(found, directory, now, stopped=None)
+    state = records.watching(reading, found, now)
+    if state.outcome == records.FRESH:
+        lead = None
+    elif state.outcome == records.NOT_READING:
+        lead = ("the watcher is running but "
+                + (f"has not listed Claude's sessions since {_when(state.at, now)}"
+                   if state.at is not None else "has never listed Claude's sessions")
+                + "; its log says why")
+    else:
+        lead = f"the watcher stopped at {_when(state.last, now)}"
+    if not found:
+        if lead is None:
+            return "the watcher is running; no live Claude Code session, so no clock record"
+        return f"{lead}; no clock records under {directory}"
+    words = _records_words(found, directory, now, stopped=state.outcome == records.STOPPED)
+    return words if lead is None else f"{lead}; {words}"
+
+
+def _records_words(found: list[dict], directory, now: float, *, stopped: bool | None) -> str:
+    """How the records stand. `stopped` is whether the watcher stopped, by its reading,
+    which the line has led with; None with no reading, when every judged record standing
+    still is what says it stopped."""
     newest = max(r["seen_at"] for r in found)
     words = f"{len(found)} clock record(s) under {directory}, newest seen {now - newest:.0f}s ago"
     judged = [(r, records.thresholds(r)) for r in found]
     older = sum(1 for _, t in judged if t is None)
     stale = sum(1 for r, t in judged if t is not None and now - r["seen_at"] > t[1])
+    every = stale and stale == len(found) - older
     notes = []
-    if stale and stale == len(found) - older:
+    if every and stopped is None:
         notes.append("the watcher has stopped, so the segment shows dim and no timer runs")
+    elif every and stopped:
+        notes.append("their segment shows dim and no timer runs")
     elif stale:
         notes.append(f"{stale} of them not rewritten within their own stale_after, so "
                      "their segment shows dim")

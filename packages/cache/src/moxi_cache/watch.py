@@ -22,7 +22,12 @@ At each tick (`watch.tick_s`, 10 s by default):
    seconds, from the config as read at this tick, so a config change reaches every record
    within one tick (`records`). The tick that sets `stale_after` is the one the watcher
    then waits, so a fresh record never shows dim.
-4. It runs the timer's work for the tick (`timer`) over the records it wrote.
+4. After every tick, whatever it wrote, it replaces its reading, `RUNTIME/cache/watch.json`
+   (`records`), through `moxi.files.atomic_write`: `tick_at` is this tick, and `listed_at`
+   moves to it only at a tick that held the live list and was not halted, one with no live
+   session included. A write that fails is logged once per change and the tick goes on.
+   The reading is not under `clock/`, so no listing of the records sees it.
+5. It runs the timer's work for the tick (`timer`) over the records it wrote.
 
 A session id is used in a path only after the reader's own check (`records.record_path`):
 an id it refuses, such as one holding `/` or `..`, gets no record and one log line.
@@ -30,7 +35,9 @@ an id it refuses, such as one holding `/` or `..`, gets no record and one log li
 A shape of `claude agents --json` it does not know stops its writes, with one log line
 naming the shape, until the shape is one it knows again; the records then stand still and
 show dim. When the list cannot be read at all (no `claude`, an exit, a timeout), the tick
-writes nothing and the next tick asks again. Each log line is written once per change of
+writes no record and the next tick asks again. Either way the reading's `tick_at` moves
+and its `listed_at` stands still, so a reader can tell a watcher that runs and cannot list
+from one that stopped. Each log line is written once per change of
 what it says. Codex and OpenCode sessions get no records.
 
 The watcher runs in the foreground (`moxi cache watch`, or this script), or as a unit of
@@ -53,6 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from moxi.config import Config, ConfigError
+from moxi.files import atomic_write
 from moxi_sessions.api import find
 
 from . import api, records
@@ -219,8 +227,10 @@ def write_record(directory: Path, record: dict) -> Path:
 class Watcher:
     """The watcher's state and its tick. Every outside effect can be replaced for tests:
     `agents` (the live list), `read` (the clock), `now`, `projects_root` (where
-    transcripts are found), `directory` (where records go) and `sessions` (the folder
-    whose changes ask for the list again).
+    transcripts are found), `directory` (where records go), `sessions` (the folder whose
+    changes ask for the list again) and `reading` (the reading's file; by default
+    `watch.json` beside `directory`, which is `records.reading_path()` for the default
+    directory).
 
     `warn_before` and `stale_after` are what the next tick writes into every record;
     `run` sets them from the config before each tick. They start at the keys' defaults."""
@@ -229,13 +239,16 @@ class Watcher:
                  read: Callable[..., Clock] = api.read,
                  now: Callable[[], float] = time.time,
                  projects_root: Callable[[], str] | None = None,
-                 directory: Path | None = None, sessions: Path | None = None):
+                 directory: Path | None = None, sessions: Path | None = None,
+                 reading: Path | None = None):
         self.agents = agents
         self.read = read
         self.now = now
         self.projects_root = projects_root or (lambda: api.projects_root(None))
         self.directory = records.record_dir() if directory is None else Path(directory)
         self.sessions = sessions_dir() if sessions is None else Path(sessions)
+        self.reading = (self.directory.parent / records.READING_NAME if reading is None
+                        else Path(reading))
         self.warn_before = default("segment.warn_before_s")
         self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick_s"))
         self.ticks = 0
@@ -244,6 +257,8 @@ class Watcher:
         #: not know.
         self.current: dict[str, dict] | None = None
         self.tick_at: float | None = None
+        #: The newest tick that held the live list and was not halted; None until one.
+        self.listed_at: float | None = None
         self.live: list[Live] | None = None
         self.seen: dict[str, Seen] = {}
         self._stamp = None
@@ -265,7 +280,13 @@ class Watcher:
     # -- the tick ------------------------------------------------------------------------
 
     def tick(self) -> list[Live]:
-        """One tick. Returns the live sessions it wrote records for."""
+        """One tick, then the reading. Returns the live sessions it wrote records for."""
+        try:
+            return self._tick()
+        finally:
+            self._write_reading()
+
+    def _tick(self) -> list[Live]:
         now = self.tick_at = self.now()
         self.current = None
         stamp = sessions_stamp(self.sessions)
@@ -290,7 +311,21 @@ class Watcher:
             except OSError as e:
                 self.say("write", f"cannot write the clock record of {live.session}: {e}")
         self.current = current
+        self.listed_at = now
         return list(self.live)
+
+    def _write_reading(self) -> None:
+        """Replace the reading whole with this tick's. Nothing to write before a first
+        tick time."""
+        if self.tick_at is None:
+            return
+        doc = {"v": records.READING_VERSION, "pid": os.getpid(), "tick_at": self.tick_at,
+               "listed_at": self.listed_at, "stale_after": self.stale_after}
+        try:
+            atomic_write(self.reading, json.dumps(doc) + "\n")
+            self.say("reading", None)
+        except OSError as e:
+            self.say("reading", f"cannot write the watcher's reading {self.reading}: {e}")
 
     def _refresh(self) -> bool:
         """Ask for the live list. False when this tick writes nothing."""
