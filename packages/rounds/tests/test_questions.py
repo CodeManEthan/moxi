@@ -170,13 +170,16 @@ def test_the_index_keeps_the_questions_recorded_as_open_or_parked():
                 "state": "parked", "by": "planner", "at": AT, "until": "B2"})]
 
 
-def test_a_stage_left_the_plan_when_a_change_removed_it_or_a_ruling_took_it_out():
+def test_a_stage_left_the_plan_when_a_verdict_or_a_ruling_took_it_out():
     found = state.fold([
         event(1, "stage.declared", id="B1"), event(2, "stage.declared", id="B2"),
         event(3, "stage.declared", id="B3"), event(4, "stage.declared", id="B4"),
-        event(5, "stage.changed", id="B1", removed=True),
-        # A stage that only lost a wait is still in the plan.
-        event(6, "stage.changed", id="B2", after=[]),
+        event(5, "verdict.recorded", kind="design", verdict="publishable", design=1,
+              applied=[{"what": "stage", "id": "B1"},
+                       {"what": "after", "id": "B2", "gone": ["B4"]}],
+              not_applied=[{"what": "stage", "id": "B4", "why": "it has a build"}]),
+        # A change to a stage takes none out, whatever else the event holds.
+        event(6, "stage.changed", id="B2", after=[], removed=True, gone=["B1"]),
         event(7, "ruling.recorded", id="C1", kind="process", rules="unstage:B3"),
         event(8, "ruling.recorded", id="C2", kind="process", rules="skip:docket:B4"),
         event(9, "ruling.recorded", id="C3", kind="substance", text="a ruling")])

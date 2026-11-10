@@ -586,8 +586,9 @@ def test_a_stage_that_left_the_plan_counts_as_one_that_is_done(rounds):
     ask(A, "B1,B2,B3")
     park(A, "Q1")
     finish(rounds, "B1")
-    log.append(round_log(rounds), "stage.changed", {"id": "B2", "removed": True},
-               actor="planner")
+    log.append(round_log(rounds), "verdict.recorded",
+               {"kind": "design", "verdict": "publishable", "design": 1,
+                "applied": [{"what": "stage", "id": "B2"}]}, actor="critic")
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C9", "record": "comms:13", "kind": "process",
                 "rules": "unstage:B3"}, actor="planner")

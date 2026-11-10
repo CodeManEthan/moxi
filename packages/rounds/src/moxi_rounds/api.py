@@ -47,10 +47,11 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
     ones, with `"closed"` the ones that have ended.
 
     Gives `{"computed", "project", "ended", "rounds", "unreadable", "no_folder"}`.
-    Each of `rounds` is `{"name", "project", "folder", "status", "flow", "counts",
-    "ended"}`, or for a round whose log can't be read `{"name", "project", "folder",
-    "unreadable": {"reason", "fix"}}`; such a round is in both listings, since nothing
-    says which it belongs in. `unreadable` names each project whose own log can't be
+    Each of `rounds` is `{"name", "project", "folder", "status", "flow", "step",
+    "counts", "standing", "ended"}`, where `step` is the step the round is at as
+    `{"step", "stage", "state"}`, or None for a round at no step. A round whose log
+    can't be read is `{"name", "project", "folder", "unreadable": {"reason", "fix"}}`;
+    such a round is in both listings, since nothing says which it belongs in. `unreadable` names each project whose own log can't be
     read, and `no_folder` each project whose rounds folder can't be worked out.
 
     Raises `BadArgument` for any other `status`, `Refused` when `project` names a
@@ -60,15 +61,16 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
         raise BadArgument(f"{status!r} is no listing of rounds",
                           f'say status="{_OPEN}" for the open rounds or '
                           f'status="{_CLOSED}" for the ones that have ended')
-    # What step each round is at joins the rows where the listing builds them, once a
-    # function says it; nothing is added here.
     return listing.rounds(project, ended=status == _CLOSED, refresh=False).data()
 
 
 def round(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
     `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
-    `register_unreadable`) and its records (`questions`, `rulings`, `history`).
+    `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
+    `register_unreadable`) and its records (`questions`, `rulings`, `verdicts`,
+    `history`). `close` is None for a round that has ended; for an open one it
+    is `{"waits"}`, what its close waits for, a line each.
 
     A round whose log can't be read is `{"name", "project", "slug", "folder",
     "notice", "unreadable": {"file", "line", "problem", "reason", "fix"}}` and nothing

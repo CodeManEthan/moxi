@@ -3,10 +3,13 @@ from then on, who it is recorded as done by, and each thing it refuses."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from moxi import cli
 
-from moxi_rounds import flows, folders, index, log, opening, paths, state, write
+from moxi_rounds import (flows, folders, index, log, opening, paths, ruling, state,
+                         write)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, BadName, NoLog, Refused
 
@@ -401,12 +404,125 @@ def test_an_opening_with_no_description_is_a_usage_error(rounds, capsys):
         opening.open_round("proj-a/a-round", description="", actor="planner")
 
 
-@pytest.mark.parametrize("flag", [["--parent", "proj-a/b-round"], ["--inherits", "S1"]])
-def test_open_takes_no_parent_and_no_inherited_rulings(rounds, capsys, flag):
-    assert run("proj-a/a-round", *flag) == 2
+def test_open_takes_no_parent(rounds, capsys):
+    assert run("proj-a/a-round", "--parent", "proj-a/b-round") == 2
 
     assert "unrecognized arguments" in capsys.readouterr().err
     assert not rounds.exists()
+
+
+# -- the standing rulings a round starts from --------------------------------------------
+
+def standing(text="Times are shown in the reader's zone.", **more):
+    """Record a standing ruling of `proj-a` and return its id."""
+    return ruling.rule("proj-a", actor="planner", record="comms:1234567", text=text,
+                       **more).id
+
+
+def test_a_round_keeps_the_standing_rulings_it_starts_from(rounds, capsys):
+    standing(), standing("Rows are sorted by name."), standing("Nothing is cached.")
+
+    assert run("proj-a/a-round", "--inherits", "S3,S1") == 0
+
+    opened = log.read(log.round_log(rounds / "a-round"))[0]
+    assert opened["inherits"] == ["S3", "S1"]
+    assert folded(rounds / "a-round").inherits == ["S3", "S1"]
+    assert capsys.readouterr().out.splitlines()[2] == "inherits: S3, S1"
+
+
+def test_a_round_opened_with_none_starts_from_no_standing_ruling(rounds):
+    standing()
+
+    assert run("proj-a/a-round") == 0
+
+    assert "inherits" not in log.read(log.round_log(rounds / "a-round"))[0]
+    assert folded(rounds / "a-round").inherits == []
+
+
+def test_a_standing_ruling_named_twice_is_kept_once(rounds):
+    standing()
+
+    opened = opening.open_round("proj-a/a-round", description="a round",
+                                actor="planner", inherits=["S1", "S1"])
+
+    assert opened.inherits == ("S1",) and opened.event["inherits"] == ["S1"]
+
+
+def refused(rounds, *inherits) -> list[str]:
+    """Open `a-round` from `inherits`, which is refused: the reasons, with nothing
+    left behind."""
+    with pytest.raises(Refused) as stop:
+        opening.open_round("proj-a/a-round", description="a round", actor="planner",
+                           inherits=inherits)
+    assert not (rounds / "a-round").exists()
+    assert all(one.fix == "moxi rounds open proj-a/a-round --description TEXT "
+                          "--inherits LIST" for one in stop.value.unmet)
+    return [one.reason for one in stop.value.unmet]
+
+
+def test_a_standing_ruling_the_project_does_not_hold_is_not_inherited(rounds):
+    standing()
+
+    assert [why.partition(";")[0] for why in refused(rounds, "S1", "S2")] == [
+        "proj-a has no standing ruling S2"]
+
+
+def test_a_standing_ruling_that_was_replaced_is_not_inherited(rounds):
+    standing()
+    standing("Times are shown in UTC.", supersedes="S1")
+
+    assert [why.partition(";")[0] for why in refused(rounds, "S1")] == [
+        "S1 was replaced by S2, which is the ruling that stands in its place"]
+    assert opening.open_round("proj-a/a-round", description="a round", actor="planner",
+                              inherits=["S2"]).inherits == ("S2",)
+
+
+def test_a_standing_ruling_that_was_taken_back_is_not_inherited(rounds):
+    standing()
+    ruling.rule("proj-a", actor="planner", record="comms:1234568", item="revoke:S1")
+
+    assert [why.partition(";")[0] for why in refused(rounds, "S1", "S2")] == [
+        "S1 was taken back, by S2, so no round starts from it",
+        "S2 changed a record and says nothing of what is built, so no round starts "
+        "from it"]
+
+
+@pytest.mark.parametrize("named", ["C1", "s1", "S0", "Q1", "S1x"])
+def test_an_id_that_is_no_standing_rulings_is_not_inherited(rounds, named):
+    standing()
+
+    assert [why.partition(";")[0] for why in refused(rounds, named)] == [
+        f"{named!r} is not the id of a standing ruling, S<n>"]
+
+
+def test_every_id_that_cant_be_inherited_is_named_at_once(rounds, capsys):
+    standing()
+
+    assert run("proj-a/a-round", "--inherits", "S4,S1,S9") == 3
+
+    err = capsys.readouterr().err
+    assert "no standing ruling S4" in err and "no standing ruling S9" in err
+    assert not (rounds / "a-round").exists()
+
+
+def test_an_empty_list_of_inherited_rulings_is_a_usage_error(rounds, capsys):
+    assert run("proj-a/a-round", "--inherits", ",") == 2
+
+    assert "--inherits names no ruling" in capsys.readouterr().err
+    assert not rounds.exists()
+
+
+def test_the_rulings_a_round_starts_from_are_shown_and_in_its_note(rounds, capsys):
+    standing(), standing("Rows are sorted by name.")
+    assert run("proj-a/a-round", "--inherits", "S1,S2") == 0
+    capsys.readouterr()
+
+    assert main(["show", "proj-a/a-round"]) == 0
+    assert "inherits: S1, S2" in capsys.readouterr().out.splitlines()
+    assert main(["show", "proj-a/a-round", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["inherits"] == ["S1", "S2"]
+    note = (rounds / "a-round" / "round-note.md").read_text(encoding="utf-8")
+    assert "- starts from the standing rulings S1, S2" in note.splitlines()
 
 
 def test_a_config_that_cant_be_read_is_a_bad_setting(rounds, write_config, capsys):

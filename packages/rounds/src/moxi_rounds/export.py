@@ -348,9 +348,12 @@ def as_markdown(export: Export) -> str:
              f"{what} {export.computed}: {len(opened)} open, {len(parked)} parked", ""]
     if export.ended is not None:
         ended = export.ended
-        lines += [f"This round has ended: {ended.get('how')} by {ended.get('by')} at "
-                  f"{ended.get('at')}, record {ended.get('record')}. Nothing of it is "
-                  "put to the operator.", ""]
+        how = f"{ended.get('how')} at {ended.get('at')}"
+        if ended.get("how") != states.CLOSED:
+            how = (f"{ended.get('how')} by {ended.get('by')} at {ended.get('at')}, "
+                   f"record {ended.get('record')}")
+        lines += [f"This round has ended: {how}. Nothing of it is put to the "
+                  "operator.", ""]
     lines += ["## Open", ""]
     lines += _group(opened, "No question is open.")
     lines += ["## Parked: not put to the operator", ""]

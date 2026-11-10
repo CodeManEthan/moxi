@@ -44,14 +44,16 @@ def test_an_opening_under_a_parent_sets_the_parent():
     assert state.fold([opened(parent="proj-a/program")]).parent == "proj-a/program"
 
 
-def test_an_opening_changes_only_those_five_fields_and_the_history():
+def test_an_opening_changes_only_those_six_fields_and_the_history():
     first = opened(parent="proj-a/program", inherits=["S1"], record="comms:12")
 
     changed = {field.name for field in dataclasses.fields(state.State)
                if getattr(state.fold([first]), field.name) != getattr(state.State(),
                                                                        field.name)}
 
-    assert changed == {"description", "flow", "steps", "parent", "status", "history"}
+    assert changed == {"description", "flow", "steps", "parent", "inherits", "status",
+                       "history"}
+    assert state.fold([first]).inherits == ["S1"]
 
 
 def test_the_history_is_every_event_in_order():
@@ -96,7 +98,10 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
-                             "question.changed", "ruling.shown", "round.dropped"})
+                             "question.changed", "ruling.shown", "round.dropped",
+                             "round.closed", "flow.changed", "design.frozen", "stage.declared",
+                             "stage.changed", "verdict.recorded",
+                             "thread.decided"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -142,6 +147,26 @@ def test_a_drop_that_names_no_question_ends_the_round_and_changes_none():
 
     assert (after.status, after.ended.by, after.ended.questions) == ("dropped", None, ())
     assert state.fold([opened()]).ended is None
+
+
+def test_a_closing_ends_the_round_as_closed_and_changes_nothing_else():
+    before = state.fold([opened()])
+    closing = event(2, "round.closed")
+
+    after = state.fold([opened(), closing])
+
+    assert after.status == state.CLOSED
+    assert after.ended == state.Ended(how="closed", by=None, record=None,
+                                      actor=closing["actor"], at=closing["at"])
+    assert dataclasses.replace(after, status=before.status, ended=None,
+                               history=before.history) == before
+
+
+def test_a_round_stays_as_it_first_ended():
+    dropped = state.fold([opened(), event(2, "round.dropped", by="lead"),
+                          event(3, "round.closed")])
+
+    assert (dropped.status, dropped.ended.how) == ("dropped", "dropped")
 
 
 def test_a_ruling_is_added_to_the_rulings_and_changes_nothing_else():
@@ -579,3 +604,324 @@ def test_a_mark_outlasts_the_replacing_and_the_taking_back_of_its_ruling():
             for one in found.rulings] == [
         ("C1", "comms:20", "C2", None), ("C2", None, None, "C3"),
         ("C3", None, None, None)]
+
+
+# -- the flow a round follows, and the skips that stand ----------------------------------
+
+LATER = [*STEPS, {"step": "retro", "by": "helper"}]
+
+
+def test_a_change_of_flow_sets_the_flow_and_its_steps_and_nothing_else():
+    before = state.fold([opened()])
+    moved = event(2, "flow.changed", was="fix", flow="small", steps=LATER, by="lead")
+
+    after = state.fold([opened(), moved])
+    after.steps.append({"step": "one more"})
+
+    assert (after.flow, after.steps[:-1]) == ("small", LATER)
+    assert moved["steps"] == LATER
+    assert dataclasses.replace(after, flow="fix", steps=before.steps,
+                               history=before.history) == before
+
+
+@pytest.mark.parametrize("fields", [{}, {"flow": "small"}, {"steps": LATER},
+                                    {"flow": 3, "steps": LATER},
+                                    {"flow": "small", "steps": "retro"}])
+def test_a_change_of_flow_with_no_name_or_no_steps_moves_the_round_nowhere(fields):
+    found = state.fold([opened(), event(2, "flow.changed", **fields)])
+
+    assert (found.flow, found.steps) == ("fix", STEPS)
+
+
+def test_a_ruling_of_the_flow_moves_the_round_as_the_leads_change_does():
+    ruled = event(2, "ruling.recorded", id="C1", kind="process", rules="flow:small",
+                  record="comms:12", was="fix", flow="small", steps=LATER)
+
+    found = state.fold([opened(), ruled])
+
+    assert (found.flow, found.steps) == ("small", LATER)
+    assert [one.rules for one in found.rulings] == ["flow:small"]
+
+
+def skip_of_the_questions_step(n, ruling_id, **more):
+    return event(n, "ruling.recorded", id=ruling_id, kind="process",
+                 rules="skip:docket:B1", record="comms:13", **more)
+
+
+def test_a_skip_taken_back_is_marked_with_the_ruling_that_took_it_back():
+    skipped = skip_of_the_questions_step(3, "C1", covers=["Q1"])
+    taken_back = event(4, "ruling.recorded", id="C2", kind="process",
+                       rules="revoke:C1", revokes="C1", record="comms:14")
+    before = state.fold([opened(), asked(2, blocks=["B1"]), skipped])
+
+    after = state.fold([opened(), asked(2, blocks=["B1"]), skipped, taken_back])
+
+    assert (before.rulings[0].revoked_by, before.rulings[0].covers) == (None, ("Q1",))
+    assert [(one.id, one.revoked_by, one.covers, one.let_go)
+            for one in after.rulings] == [("C1", "C2", ("Q1",), ()),
+                                          ("C2", None, (), ())]
+    assert after.questions == before.questions
+
+
+def test_a_skip_lets_go_of_a_listed_question_narrowed_off_its_stage_for_good():
+    start = [opened(), asked(2, blocks=["B1", "B2"]), asked(3, id="Q2", blocks=["B1"]),
+             skip_of_the_questions_step(4, "C1", covers=["Q1", "Q2"])]
+    narrowed = ruled_as(5, "C2", rules="narrow:Q1=B2", blocks=["B2"], record="comms:14")
+    widened = {**event(6, "question.changed", id="Q1", blocks=["B1", "B2"]),
+               "actor": "scout"}
+
+    before = state.fold(start)
+    after = state.fold([*start, narrowed])
+    again = state.fold([*start, narrowed, widened])
+
+    assert before.rulings[0].let_go == ()
+    assert after.rulings[0].let_go == ("Q1",)
+    assert after.rulings[0].covers == ("Q1", "Q2")
+    assert again.rulings[0].let_go == ("Q1",)
+    assert again.questions[0].blocks == ("B1", "B2")
+
+
+def test_a_skip_keeps_a_listed_question_that_still_holds_its_stage():
+    start = [opened(), asked(2, blocks=["B1", "B2"]),
+             skip_of_the_questions_step(3, "C1", covers=["Q1"])]
+    narrowed = ruled_as(4, "C2", rules="narrow:Q1=B1", blocks=["B1"], record="comms:14")
+    widened = {**event(5, "question.changed", id="Q1", blocks="all"), "actor": "scout"}
+
+    found = state.fold([*start, narrowed, widened])
+
+    assert found.rulings[0].let_go == ()
+
+
+# -- stages and frozen versions ----------------------------------------------------------
+
+def test_a_declared_stage_joins_the_plan_and_changes_nothing_else():
+    before = state.fold([opened()])
+    build = event(2, "stage.declared", id="B1", repo="proj-a", branch="branch-b1",
+                  after=[], slices=[{"id": "1a", "what": "a piece", "minutes": 40}])
+    child = {**event(3, "stage.declared", id="B2", round="proj-a/a-child",
+                     after=["B1"]), "actor": "scout"}
+
+    after = state.fold([opened(), build, child, event(4, "stage.declared", id="B1",
+                                                      repo="proj-b", branch="other")])
+
+    assert after.stages == [
+        state.Stage(id="B1", repo="proj-a", branch="branch-b1", round=None, after=(),
+                    slices=({"id": "1a", "what": "a piece", "minutes": 40},), why=None,
+                    version=None, actor="planner", at=AT),
+        state.Stage(id="B2", repo=None, branch=None, round="proj-a/a-child",
+                    after=("B1",), slices=(), why=None, version=None, actor="scout",
+                    at=AT)]
+    assert dataclasses.replace(after, stages=[], history=before.history) == before
+
+
+def test_a_stage_declared_with_no_id_declares_none():
+    assert state.fold([opened(), event(2, "stage.declared", repo="proj-a")]).stages == []
+
+
+DECLARED = {
+    "question": [{"id": "Q1", "text": "Is it so?", "blocks": ["B1"],
+                  "options": {"a": "one", "b": "two"}},
+                 {"id": "Q2", "text": "Is it not?", "blocks": "all"}],
+    "stage": [{"id": "B1", "repo": "proj-a", "branch": "branch-b1", "after": [],
+               "why": "it lands alone",
+               "slices": [{"id": "1a", "what": "a piece", "minutes": 40}]},
+              {"id": "B2", "round": "proj-a/a-child", "after": ["B1"]}],
+    "trace": [], "commitment": []}
+
+
+def frozen(n, version, **more):
+    fields = {"version": version, "digest": "0" * 64, "records_only": False,
+              "declared": copy.deepcopy(DECLARED), "added": {}, "pending": [], **more}
+    return {**event(n, "design.frozen", **fields), "actor": "scout",
+            "at": "2026-01-03T00:00:00Z"}
+
+
+def test_a_frozen_version_adds_what_it_says_is_new_and_is_the_whole_of_the_freezing():
+    first = frozen(2, 1, added={"questions": ["Q1", "Q2"], "stages": ["B1", "B2"]})
+    before = state.fold([opened()])
+
+    after = state.fold([opened(), first])
+
+    who = {"by": "scout", "at": "2026-01-03T00:00:00Z"}
+    assert after.questions == [
+        state.Question(id="Q1", text="Is it so?", origin="file:versions/design-v1.md#Q1",
+                       blocks=("B1",), state="open",
+                       options=(("a", "one"), ("b", "two")), **who),
+        state.Question(id="Q2", text="Is it not?", origin="file:versions/design-v1.md#Q2",
+                       blocks="all", state="open", **who)]
+    assert [(one.id, one.repo, one.branch, one.round, one.after, one.why, one.version,
+             one.actor) for one in after.stages] == [
+        ("B1", "proj-a", "branch-b1", None, (), "it lands alone", 1, "scout"),
+        ("B2", None, None, "proj-a/a-child", ("B1",), None, 1, "scout")]
+    assert after.stages[0].slices == ({"id": "1a", "what": "a piece", "minutes": 40},)
+    assert after.versions == [state.Version(
+        n=1, digest="0" * 64, records_only=False, record=None, trace=None,
+        declared=DECLARED, pending=(), actor="scout", at="2026-01-03T00:00:00Z",
+        event=2)]
+    assert dataclasses.replace(after, questions=[], stages=[], versions=[],
+                               history=before.history) == before
+    assert first["declared"] == DECLARED
+
+
+def test_a_frozen_version_adds_nothing_its_event_does_not_say_is_new():
+    found = state.fold([opened(), frozen(2, 1)])
+
+    assert (found.questions, found.stages) == ([], [])
+    assert [one.n for one in found.versions] == [1]
+
+
+def test_a_later_version_widens_a_hold_adds_a_wait_and_changes_options():
+    first = frozen(2, 1, added={"questions": ["Q1", "Q2"], "stages": ["B1", "B2"]})
+    second = frozen(3, 2, added={
+        "after": {"B1": ["B2"]}, "blocks": {"Q1": ["B1", "B2"]},
+        "options": {"Q1": {"options": {"c": "three"}, "retired": ["a"]}}})
+
+    found = state.fold([opened(), first, second])
+
+    assert found.stages[0].after == ("B2",)
+    assert found.questions[0].blocks == ("B1", "B2")
+    assert found.questions[0].options == (("b", "two"), ("c", "three"))
+    assert found.questions[0].retired == ("a",)
+    assert [change.ruling for change in found.questions[0].changes] == [None, None]
+    assert found.questions[1] == state.fold([opened(), first]).questions[1]
+
+
+def test_what_a_version_took_away_is_kept_with_it_and_changes_nothing():
+    first = frozen(2, 1, added={"questions": ["Q1", "Q2"], "stages": ["B1", "B2"]})
+    second = frozen(3, 2, pending=[
+        {"what": "question", "id": "Q2"}, {"what": "stage", "id": "B2"},
+        {"what": "after", "id": "B2", "gone": ["B1"]},
+        {"what": "blocks", "id": "Q1", "blocks": "none"},
+        {"what": "blocks", "id": "Q2", "blocks": ["B1"]}])
+    before = state.fold([opened(), first])
+
+    after = state.fold([opened(), first, second])
+
+    assert after.versions[1].pending == (
+        state.Pending("question", "Q2"), state.Pending("stage", "B2"),
+        state.Pending("after", "B2", gone=("B1",)),
+        state.Pending("blocks", "Q1", blocks="none"),
+        state.Pending("blocks", "Q2", blocks=("B1",)))
+    assert (after.questions, after.stages) == (before.questions, before.stages)
+
+
+def test_a_frozen_event_that_numbers_no_version_freezes_none():
+    found = state.fold([opened(), event(2, "design.frozen", digest="0" * 64,
+                                        added={"stages": ["B1"]},
+                                        declared=copy.deepcopy(DECLARED))])
+
+    assert (found.versions, found.stages) == ([], [])
+
+
+def declared(n, stage_id, after=()):
+    return event(n, "stage.declared", id=stage_id, repo="proj-a",
+                 branch=f"branch-{stage_id.lower()}", after=list(after))
+
+
+def test_a_change_to_a_stage_adds_to_what_it_waits_for_and_takes_nothing_off():
+    start = [opened(), declared(2, "B1"), declared(3, "B2"),
+             declared(4, "B3", after=["B1"])]
+    more = event(5, "stage.changed", id="B3", after=["B2", "B1"])
+    fewer = event(6, "stage.changed", id="B3", gone=["B1"], removed=True)
+
+    before = state.fold(start)
+    added = state.fold([*start, more])
+    taken = state.fold([*start, more, fewer])
+
+    assert [one.after for one in added.stages] == [(), (), ("B1", "B2")]
+    # Only a ruling or a verdict takes a wait off, or a stage out of the plan.
+    assert taken.stages == added.stages
+    assert added.stages[:2] == before.stages[:2]
+    assert dataclasses.replace(added.stages[2], after=("B1",)) == before.stages[2]
+
+
+def test_a_stage_that_left_keeps_its_record():
+    start = [opened(), declared(2, "B1"), declared(3, "B2", after=["B1"])]
+    left = event(4, "ruling.recorded", id="C1", kind="process", rules="unstage:B1")
+
+    assert state.fold([*start, left]).stages == state.fold(start).stages
+
+
+def test_a_change_to_a_stage_the_log_never_declared_changes_no_stage():
+    start = [opened(), declared(2, "B1")]
+    odd = [event(3, "stage.changed", id="B9", after=["B1"]),
+           event(4, "stage.changed", after=["B1"]),
+           event(5, "stage.changed", id="B1", after="B2", gone=7)]
+
+    assert state.fold([*start, *odd]).stages == state.fold(start).stages
+
+
+def test_a_ruling_that_takes_a_wait_off_a_stage_is_the_whole_of_that_change():
+    start = [opened(), declared(2, "B1"), declared(3, "B2"),
+             declared(4, "B3", after=["B1", "B2"])]
+    ruled = event(5, "ruling.recorded", id="C1", kind="process", record="comms:12",
+                  rules="unafter:B3=B1")
+    none = event(6, "ruling.recorded", id="C2", kind="process", record="comms:12",
+                 rules="unafter:B9=B1")
+
+    found = state.fold([*start, ruled, none])
+
+    assert [one.after for one in found.stages] == [(), (), ("B2",)]
+    assert [one.rules for one in found.rulings] == ["unafter:B3=B1", "unafter:B9=B1"]
+
+
+def verdict(n, **more):
+    fields = {"kind": "design", "pass": "full", "verdict": "publishable", "design": 1,
+              "model": "a-model", "by": "critic", "report": "report.md",
+              "sha256": "0" * 64, "findings": [], **more}
+    return event(n, "verdict.recorded", **fields)
+
+
+def test_a_verdict_joins_the_verdicts_and_changes_nothing_else():
+    start = [opened(), asked(2), declared(3, "B1")]
+    found = {"id": "L1", "severity": "minor", "state": "open", "text": "a slip"}
+    later = verdict(4, verdict="fold-first", findings=[found], flags=["a-flag"])
+
+    before, after = state.fold(start), state.fold([*start, later])
+
+    assert after.verdicts == [state.Verdict(
+        n=4, kind="design", pass_="full", verdict="fold-first", design=1,
+        model="a-model", by="critic", report="report.md", sha256="0" * 64,
+        findings=(found,), flags=("a-flag",), applied=(), not_applied=(),
+        actor="planner", at=AT)]
+    assert dataclasses.replace(after, verdicts=[], history=before.history) == before
+    # The state's finding and the event's never share a dict.
+    assert after.verdicts[0].findings[0] is not found
+
+
+def test_a_verdict_takes_out_what_its_event_says_it_applies_and_nothing_more():
+    start = [opened(), asked(2), asked(3, id="Q2"), declared(4, "B1"), declared(5, "B2"),
+             declared(6, "B3", after=["B1", "B2"])]
+    later = verdict(7, applied=[
+        {"what": "question", "id": "Q1"}, {"what": "blocks", "id": "Q2", "blocks": ["B2"]},
+        {"what": "after", "id": "B3", "gone": ["B1"]}, {"what": "stage", "id": "B1"},
+        {"what": "question", "id": "Q9"}, {"what": "after", "id": "B9", "gone": ["B1"]},
+        {"what": "question"}, "not an entry"],
+        not_applied=[{"what": "stage", "id": "B2", "why": "it has an open build"}])
+
+    before, after = state.fold(start), state.fold([*start, later])
+
+    assert [(one.id, one.state, one.blocks) for one in after.questions] == [
+        ("Q1", "withdrawn", "all"), ("Q2", "open", ("B2",))]
+    assert [one.after for one in after.stages] == [(), (), ("B2",)]
+    # A stage that left keeps its record.
+    assert [one.id for one in after.stages] == [one.id for one in before.stages]
+    assert after.verdicts[0].not_applied == (
+        (state.Pending("stage", "B2"), "it has an open build"),)
+    assert [one.what for one in after.verdicts[0].applied] == [
+        "question", "blocks", "after", "stage", "question", "after"]
+    assert after.rulings == before.rulings and after.versions == before.versions
+
+
+def test_a_decision_on_a_thread_joins_the_threads_with_the_version_it_was_made_at():
+    start = [opened(), frozen(2, 1), frozen(3, 2)]
+    later = event(4, "thread.decided", thread="the-holds", decision="close",
+                  record="file:notes.md#why")
+
+    before, after = state.fold(start), state.fold([*start, later])
+
+    assert after.threads == [state.Decided(
+        n=4, thread="the-holds", decision="close", record="file:notes.md#why",
+        version=2, actor="planner", at=AT)]
+    assert dataclasses.replace(after, threads=[], history=before.history) == before
+    assert state.fold([opened(), {**later, "n": 2}]).threads[0].version is None
