@@ -12,12 +12,15 @@ import random
 import pytest
 
 from moxi_sessions import catalog as catalog_module
+from moxi_sessions import claude
 from moxi_sessions.catalog import WINDOW, Catalog, Kept, Said, read_prompt
 from moxi_sessions.errors import Unreadable
 from moxi_sessions.read import BACK_LIMIT, records
 from moxi_sessions.shape import CLAUDE, Message
 from moxi_sessions.testing import ClaudeTranscript
 from moxi_sessions.testing.claude import START
+
+from test_injected import CLAUDE_ORIGINS
 
 
 def sid(n: int) -> str:
@@ -674,3 +677,204 @@ def test_the_kept_prompt_is_the_whole_reads_through_a_long_run_of_changes(roots,
 
     assert len(seen) == 7
     assert cat.prompt_whole < cat.prompt_reads       # some reads were from the offset
+
+
+# --- the bytes looked at before a line is decoded -----------------------------------------
+#
+# The read decodes a line only when its bytes say it can hold a typed message. The rule:
+# that look never changes what the read finds. Whatever the decode reads as typed, in
+# any writing JSON allows for the same record, the look lets through.
+
+def marked_lines(roots) -> list[dict]:
+    """A line for each case the typed mark is decided by: every origin kind, an unknown
+    kind, an origin with no kind, no origin, the composed flags, the fixed wrappers and
+    interrupt lines, the model's reply, a tool's result."""
+    t = transcript(roots, 9)
+    for kind, _choice in CLAUDE_ORIGINS:
+        t.user(f"sent by {kind}", origin=kind)
+    t.user("an unknown sender", origin="satellite")
+    t.add({"type": "user", "sessionId": t.session_id, "timestamp": "2026-11-01T10:00:00.000Z",
+           "origin": {}, "message": {"role": "user", "content": "an origin with no kind"}})
+    t.user("no origin at all")
+    t.user("typed, then marked as added", origin="human", isMeta=True)
+    t.user("typed, the flag false", origin="human", isMeta=False)
+    t.user("a summary", isCompactSummary=True)
+    t.user("relayed", origin="channel", isMeta=True)
+    for tag in claude.WRAPPER_TAGS:
+        t.user(f"{tag}out", origin="human")
+        t.user(f"{tag}out")
+    for fixed in claude.INTERRUPT_LINES:
+        t.user(fixed)
+    t.user('it says {"origin": {"kind": "human"}} in its text', origin="peer")
+    t.user("typed: café ☃ \x1b[0m \U0001f600 \"origin\" \\u0061", origin="human")
+    request = t.request()
+    request.text("A reply.")
+    t.tool_result(request.tool_use("Bash", {"command": "ls"}), "ok")
+    return [json.loads(line) for line in t.text().splitlines()]
+
+
+def reorder(value, how):
+    """`value` with the keys of every object in it put in the order `how` gives."""
+    if isinstance(value, dict):
+        return {key: reorder(value[key], how) for key in how(list(value))}
+    if isinstance(value, list):
+        return [reorder(item, how) for item in value]
+    return value
+
+
+def escaped(line: bytes, word: str, which) -> bytes:
+    """`line` with the characters of the quoted `word` at the places `which` gives
+    written as `\\uXXXX` escapes, as JSON allows for any character of a string."""
+    spelt = "".join(f"\\u{ord(char):04x}" if which(n) else char for n, char in enumerate(word))
+    return line.replace(json.dumps(word).encode(), f'"{spelt}"'.encode())
+
+
+def scrambled(value, rng: random.Random) -> str:
+    """One of the texts JSON allows for `value`: keys in any order, blanks around every
+    token, any character of a string as an escape in either case of hex."""
+    blank = lambda: rng.choice(["", "", " ", "  ", "\t"])
+    if isinstance(value, dict):
+        keys = list(value)
+        rng.shuffle(keys)
+        inner = ",".join(f"{blank()}{scrambled(key, rng)}{blank()}:{blank()}"
+                         f"{scrambled(value[key], rng)}{blank()}" for key in keys)
+        return "{" + inner + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(f"{blank()}{scrambled(item, rng)}{blank()}" for item in value) + "]"
+    if isinstance(value, str):
+        rate = rng.choice([0.0, 0.0, 0.15, 1.0])
+        out = []
+        for char in value:
+            plain = json.dumps(char, ensure_ascii=rng.random() < 0.5)[1:-1]
+            if rng.random() < rate and ord(char) < 0x10000:
+                code = f"{ord(char):04x}"
+                plain = "\\u" + (code.upper() if rng.random() < 0.5 else code)
+            out.append(plain)
+        return '"' + "".join(out) + '"'
+    return json.dumps(value)
+
+
+def writings(entry: dict) -> dict[str, bytes]:
+    """The same record written in each way named, one line each."""
+    plain = json.dumps(entry).encode()
+    back = reorder(entry, lambda keys: keys[::-1])
+    out = {
+        "as the builder writes it": plain,
+        "with no blanks": json.dumps(entry, separators=(",", ":")).encode(),
+        "blanks after the colons": json.dumps(entry, separators=(",", ":   ")).encode(),
+        "blanks around colons and commas": json.dumps(entry, separators=(" , ", " : ")).encode(),
+        "tabs after the colons": json.dumps(entry, separators=(",", ":\t")).encode(),
+        "keys in the opposite order": json.dumps(back).encode(),
+        "keys sorted": json.dumps(entry, sort_keys=True).encode(),
+        "keys opposite, blanks after colons":
+            json.dumps(back, separators=(", ", ":  ")).encode(),
+        "text not escaped": json.dumps(entry, ensure_ascii=False).encode(),
+        "blanks around the line": b" \t" + plain + b" \r",
+        "a byte order mark first": b"\xef\xbb\xbf" + plain,
+        "the key's first letter escaped": escaped(plain, "origin", lambda n: n == 0),
+        "the key's last letter escaped": escaped(plain, "origin", lambda n: n == 5),
+        "the key escaped whole": escaped(plain, "origin", lambda n: True),
+        "one letter of the key escaped in capitals":
+            escaped(plain, "origin", lambda n: n == 0).replace(b"\\u006f", b"\\u006F"),
+        "one letter of the kind escaped in capitals":
+            escaped(plain, "human", lambda n: n == 2).replace(b"\\u006d", b"\\u006D"),
+        "the kind's first letter escaped": escaped(plain, "human", lambda n: n == 0),
+        "the kind's middle letter escaped": escaped(plain, "human", lambda n: n == 2),
+        "the kind escaped whole": escaped(plain, "human", lambda n: True),
+        "key and kind escaped": escaped(escaped(plain, "origin", lambda n: n % 2 == 0),
+                                        "human", lambda n: n % 2 == 1),
+        "in UTF-16, low byte first": json.dumps(entry).encode("utf-16-le"),
+        "in UTF-16, high byte first": json.dumps(entry).encode("utf-16-be"),
+        "in UTF-16 with its mark": json.dumps(entry).encode("utf-16"),
+        "in UTF-32": json.dumps(entry).encode("utf-32-le"),
+    }
+    rng = random.Random(json.dumps(entry, sort_keys=True))
+    for n in range(40):
+        out[f"scrambled {n}"] = scrambled(entry, rng).encode()
+    return out
+
+
+def listed_of(roots, n: int = 1):
+    transcript(roots, n).write()
+    cat = Catalog(roots, reuse_s=0)
+    return entry_of(cat, n).listed
+
+
+def decoded(raw: bytes, listed, monkeypatch) -> Said | None:
+    """What the decode alone finds in a line, with the look at its bytes taken away."""
+    with monkeypatch.context() as patch:
+        patch.setattr(claude, "may_be_typed", lambda raw: True)
+        return catalog_module._typed(raw, listed)
+
+
+def test_the_look_at_a_lines_bytes_hides_no_message_the_decode_reads_as_typed(
+        roots, monkeypatch):
+    listed = listed_of(roots)
+    entries = marked_lines(roots)
+    typed = passed_by = 0
+    for entry in entries:
+        want = decoded(json.dumps(entry).encode(), listed, monkeypatch)
+        for name, raw in writings(entry).items():
+            assert json.loads(raw) == entry, name            # the same record, each time
+            found = decoded(raw, listed, monkeypatch)
+            assert found == want, name
+            assert catalog_module._typed(raw, listed) == found, (name, entry)
+            if found is not None:
+                assert claude.may_be_typed(raw), name
+                typed += 1
+            elif not claude.may_be_typed(raw):
+                passed_by += 1
+    # The typed lines are the human ones no flag marks as added, in every writing.
+    human = [e for e in entries if e.get("origin") == {"kind": "human"} and not e.get("isMeta")]
+    assert len(human) == 3 + len(claude.WRAPPER_TAGS)
+    assert typed == len(human) * len(writings(human[0]))
+    # And the look still spares the decode of lines with no typed message.
+    assert passed_by > 100
+
+
+def test_the_look_passes_by_a_plain_line_with_no_typed_origin(roots):
+    others = [entry for entry in marked_lines(roots) if entry.get("origin") != {"kind": "human"}]
+    assert len(others) > 15
+    for entry in others:
+        for form in (json.dumps(entry), json.dumps(entry, separators=(",", ":")),
+                     json.dumps(entry, ensure_ascii=False)):
+            assert not claude.may_be_typed(form.encode()), entry
+    # A control character's escape is not one of the letters', so it costs no decode.
+    assert not claude.may_be_typed(json.dumps({"origin": {"kind": "peer"}, "text": "\x1b[0m"}).encode())
+
+
+TYPED_ENTRY = {"type": "user", "timestamp": "2026-11-01T12:00:00.000Z", "promptId": "prompt-typed",
+               "message": {"role": "user", "content": "typed last"},
+               "origin": {"kind": "human"}}
+
+
+@pytest.mark.parametrize("name", list(writings(TYPED_ENTRY)))
+def test_a_typed_record_becomes_the_prompt_however_it_is_written(roots, monkeypatch, name):
+    raw = writings(TYPED_ENTRY)[name]
+    assert b"\n" not in raw
+
+    # Read whole: the line is the file's last typed message.
+    t = transcript(roots)
+    t.user("typed first", origin="human")
+    filler(t)
+    path = t.write()
+    cat = Catalog(roots, reuse_s=0)
+    assert prompt(cat).text == "typed first"
+    with open(path, "ab") as handle:
+        handle.write(raw + b"\n")
+    later(path)
+    fresh = Catalog(roots, reuse_s=0)
+    found = prompt(fresh)
+    assert found.text == "typed last"
+    assert found.at is not None
+    assert (fresh.prompt_reads, fresh.prompt_whole) == (1, 1)
+
+    # Read from the kept offset: the first catalog saw the file before the line.
+    before = cat.prompt_whole
+    assert prompt(cat).text == "typed last"
+    assert cat.prompt_whole == before
+
+    # With the look taken away the read finds the same.
+    with monkeypatch.context() as patch:
+        patch.setattr(claude, "may_be_typed", lambda raw: True)
+        assert read_prompt(entry_of(fresh).listed).kept.prompt == found

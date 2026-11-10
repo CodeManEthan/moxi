@@ -18,7 +18,9 @@
   New: `TYPED`, `WINDOW`, `Kept`, `PromptRead`, `read_prompt`, `reads_prompt` and the
   counters `Catalog.prompt_reads`, `prompt_whole` and `prompt_bytes`.
   `moxi_sessions.claude` has `may_be_typed`, which tells from a line's bytes whether
-  it can hold a typed message.
+  it can hold a typed message. It says no for no line the decode would read as typed:
+  a line that writes the key or the kind with an escape, or is in UTF-16 or UTF-32, is
+  left to the decode.
 
 ## 0.2.7 (2026-11-10)
 
