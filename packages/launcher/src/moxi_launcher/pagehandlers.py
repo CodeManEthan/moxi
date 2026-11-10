@@ -49,8 +49,11 @@ one place a setting locked for a run of the shell is refused.
 (`request_of`): the values its own request gave, apart from what its preset and the
 defaults gave, in the shape a launch request has. `/api/last` hands the newest launch's
 back for the form to start filled with, without the rows a launch never takes from an
-earlier one (the place, the first turn, where it runs, the name). The launches are
-those of the seat the query names, else of its project, else of its folder, and a
+earlier one (the place, the first turn, where it runs, the name). `/api/recents` lists
+the newest three launches that asked for different requests, and `/api/recent` resolves
+one's request with where the page would run it now, as `/api/preview` does but with no
+ticket, so what the page shows of a recent is what running it again runs. The launches
+are those of the seat the query names, else of its project, else of its folder, and a
 project's or a folder's never include a seat's.
 
 **A launch from the page** goes in two steps. The request carries the whole form: each
@@ -1385,6 +1388,28 @@ def on_path(composition: Any) -> dict[str, Any] | None:
     return None
 
 
+def _previewing(body: Mapping[str, Any], request_id: str):
+    """The page's `body` as a launch under `request_id`: the request and its command's
+    words, its resolved values, its composition, and the refusals `api.check` finds.
+    Raises a refusal the request, the resolver or the composer meets."""
+    request, words = launch_request(body, request_id)
+    resolved = job.placed(request)
+    composition = api.preview(request)
+    checked = [_refusal(found) for found in api.check(request)]
+    return request, words, resolved, composition, checked
+
+
+def _refusals(checked: list[dict[str, Any]], composition: Any) -> list[dict[str, Any]]:
+    """`checked`, then the PATH's refusal of a launch that is not in a terminal, each
+    once."""
+    terminal = composition.target == "terminal"
+    refused: list[dict[str, Any]] = []
+    for found in [*checked, None if terminal else on_path(composition)]:
+        if found is not None and found not in refused:
+            refused.append(found)
+    return refused
+
+
 def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
     """What `/api/preview` answers for the page's `body`: what the launch would start,
     the rows it leaves out, every refusal `check` finds, and, when there is none and the
@@ -1392,17 +1417,11 @@ def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
     copy instead."""
     request_id = str(uuid.uuid4())
     try:
-        request, words = launch_request(body, request_id)
-        job.placed(request)
-        composition = api.preview(request)
-        checked = [_refusal(found) for found in api.check(request)]
+        request, words, _, composition, checked = _previewing(body, request_id)
     except REFUSALS as error:
         return _previewed(refused=[_refusal(error)])
     terminal = composition.target == "terminal"
-    refused: list[dict[str, Any]] = []
-    for found in [*checked, None if terminal else on_path(composition)]:
-        if found is not None and found not in refused:
-            refused.append(found)
+    refused = _refusals(checked, composition)
     issued, expires_at = (None, None) if refused or terminal else ticket(body, request_id)
     return _previewed(
         refused=refused, harness=composition.harness, mode=composition.mode,
@@ -1429,6 +1448,140 @@ def preview(call: Any) -> dict[str, Any]:
             return previewed(call.body)
         except Exception as err:
             return _previewed(refused=[_unexpected(err, "previewing a launch failed")])
+
+
+# -- /api/recents and /api/recent ---------------------------------------------------------
+
+#: How many earlier launches `/api/recents` lists.
+RECENTS_MAX = 3
+#: The longest `head` of a recent, in characters.
+HEAD_MAX = 26
+#: Why `/api/recent` can't run a launch again that is no recent.
+NO_RECENT = ("launch {} is not one of your launches that can be run again: it failed, was "
+             "a relaunch, a resume or a scratch launch, or was made by an older launcher")
+NO_RECENT_HINT = "run again one of the launches the page lists"
+
+
+def head(row: store.LaunchRow) -> str:
+    """What a recent is called: the first whole words of its brief within `HEAD_MAX`
+    characters (a longer first word cut there), else its model and effort, else its
+    harness."""
+    words = (row.brief or "").split()
+    if words:
+        said = words[0][:HEAD_MAX]
+        for word in words[1:]:
+            if len(said) + 1 + len(word) > HEAD_MAX:
+                break
+            said += " " + word
+        return said
+    named = (spelled(row.values.get(name)) for name in ("model", "effort"))
+    return " · ".join(name for name in named if name) or row.harness
+
+
+def recents(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/recents`' answer: the launches of the seat, project or folder asked for that
+    can be run again, newest first, a launch whose `request_of` equals a newer one's left
+    out, at most `RECENTS_MAX`; none when no key is asked."""
+    key = whose(query)
+    if key is None:
+        return _up(recents=[])
+    with _store() as conn:
+        found = launches_of(conn, *key)
+    available = _available()
+    listed: list[dict[str, Any]] = []
+    asked: list[dict[str, Any]] = []
+    for row in found:
+        handed = request_of(row, available)
+        if handed in asked:
+            continue
+        asked.append(handed)
+        listed.append({"request_id": row.request_id, "at": row.created_at, "head": head(row),
+                       "target": row.target, "slot": row.slot})
+        if len(listed) == RECENTS_MAX:
+            break
+    return _up(recents=listed)
+
+
+def read_recents(call: Any) -> dict[str, Any]:
+    """`GET /api/recents`: the launches of a seat, a project or a folder that can be run
+    again."""
+    with call.busy("read"):
+        try:
+            return recents(call.query)
+        except Exception as err:
+            return _failed(err, "reading the recent launches failed", recents=[])
+
+
+def _not_again(refused: dict[str, Any]) -> dict[str, Any]:
+    return _up(request=None, shows=None, refused=refused)
+
+
+def danger(harness: str, values: Mapping[str, object]) -> list[str]:
+    """The rows of a `harness` launch whose value is one of the row's `danger` values."""
+    named = []
+    for name, value in values.items():
+        row = catalog.row(harness, name)
+        if row is not None and spelled(value) in row.danger:
+            named.append(name)
+    return named
+
+
+def recent(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/recent`'s answer for the launch `request`: its `request_of` with the
+    query's `target`, and its `slot` (left out when none is given), resolved as
+    `/api/preview` resolves a body, with no ticket. `shows` is what that resolution
+    runs; `request.off_posture` is true exactly when a posture row of it is off its
+    default, each named in `shows.off_posture`. A launch that is no recent of this user
+    (`made_again`), and a request the launcher refuses now, is answered `refused`."""
+    request_id = query["request"]
+    with _store() as conn:
+        row = None if conn is None else store.get(conn, request_id)
+    if row is None or not made_again(row, first.actor()):
+        return _not_again({"code": "no-recent", "row": None,
+                           "problem": NO_RECENT.format(request_id), "hint": NO_RECENT_HINT})
+    available = _available()
+    handed = request_of(row, available)
+    values = {**handed["values"], "target": query["target"]}
+    leave_out = list(handed["leave_out"])
+    if query.get("slot"):
+        values["slot"] = query["slot"]
+    else:
+        leave_out.append("slot")
+    asked = {**handed, "values": values, "leave_out": leave_out}
+    try:
+        # Resolved with the posture allowed, to name the rows off it.
+        request, _, resolved, composition, checked = _previewing(
+            body_of({**asked, "off_posture": True}), str(uuid.uuid4()))
+        defaults = presets.layered(request, available=available).defaults
+    except REFUSALS as error:
+        return _not_again(_refusal(error))
+    refused = _refusals(checked, composition)
+    if refused:
+        return _not_again(refused[0])
+    off = presets.off_posture_rows(resolved.harness, resolved.values, resolved.sources,
+                                   defaults)
+    return _up(
+        request={"seat": handed["seat"], "project_preset": handed["project_preset"],
+                 "values": handed_rows(values), "leave_out": leave_out,
+                 "off_posture": bool(off)},
+        shows={"harness": resolved.harness, "model": spelled(resolved.values.get("model")),
+               "effort": spelled(resolved.values.get("effort")),
+               "prompt": composition.brief or None, "cwd": resolved.cwd,
+               "project_key": resolved.project_key, "off_posture": off,
+               "danger": danger(resolved.harness, resolved.values),
+               "not_offered": handed["not_offered"]},
+        refused=None)
+
+
+def read_recent(call: Any) -> dict[str, Any]:
+    """`GET /api/recent`: an earlier launch's request, resolved as running it again now
+    would resolve it, or why it can't run again."""
+    with call.busy("read"):
+        try:
+            return recent(call.query)
+        except Exception as err:
+            return _failed(err, "reading a recent launch failed", request=None, shows=None,
+                           refused=None)
 
 
 # -- /api/launch ----------------------------------------------------------------------------
@@ -1584,14 +1737,14 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_CUT", "GIVEN", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "NO_SLOTS", "PROJECTS",
-           "REFUSALS", "REGATHER",
+__all__ = ["EVENT_CUT", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",
+           "NO_SLOTS", "PROJECTS", "RECENTS_MAX", "REFUSALS", "REGATHER",
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED", "WHOSE",
-           "WITHHELD", "alive", "body_of", "canonical", "events", "field", "fields", "form", "form_rows",
-           "gather_launches", "gather_sessions", "handed_rows", "last", "launch", "launch_request", "launch_row",
+           "WITHHELD", "alive", "body_of", "canonical", "danger", "events", "field", "fields", "form", "form_rows",
+           "gather_launches", "gather_sessions", "handed_rows", "head", "last", "launch", "launch_request", "launch_row",
            "launched", "launches", "launches_of", "live", "live_states", "made_again", "modes", "name_now", "on_path", "page_key",
            "places", "preview", "previewed", "read_catalog", "read_form", "read_last", "read_launches",
-           "read_name", "read_places", "read_presets", "read_runs", "read_sessions", "read_state",
-           "read_targets", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry",
+           "read_name", "read_places", "read_presets", "read_recent", "read_recents", "read_runs", "read_sessions", "read_state",
+           "read_targets", "recent", "recents", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry",
            "session_state", "spelled", "spelled_table", "targets_now", "ticket", "tokens", "unreadable",
            "verify", "whose"]

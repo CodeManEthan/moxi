@@ -34,8 +34,8 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/name",
-          "/api/preview", "/api/launch", "/api/resume",
+          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/recents",
+          "/api/recent", "/api/name", "/api/preview", "/api/launch", "/api/resume",
           "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.

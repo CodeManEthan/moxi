@@ -1232,16 +1232,29 @@ def _home_path(home: str, what: str, problems: list | None) -> str | None:
     return None
 
 
+def off_posture_rows(harness: str, values: Mapping[str, object],
+                     sources: Mapping[str, str],
+                     defaults: Mapping[str, object]) -> list[str]:
+    """The posture rows of a `harness` launch whose value, from the preset, typed or left
+    out, differs from its effective default: `defaults`' value (`Layered.defaults`), else
+    the shipped one. A launch without `off_posture` is refused on the first."""
+    return [row.name for row in catalog.load(harness)
+            if row.posture and row.name in values
+            and sources[row.name] in (PRESET, TYPED, LEFT_OUT)
+            and values[row.name] != _posture_default(row, defaults)]
+
+
+def _posture_default(row, defaults: Mapping[str, object]):
+    return _checked(row, defaults[row.name]) if row.name in defaults else row.default
+
+
 def _check_posture_rows(harness, values, sources, defaults, off_posture) -> None:
-    for row in catalog.load(harness):
-        if not row.posture or row.name not in values:
-            continue
-        if sources[row.name] not in (PRESET, TYPED, LEFT_OUT):
-            continue
-        default = (_checked(row, defaults[row.name]) if row.name in defaults
-                   else row.default)
-        if values[row.name] != default and not off_posture:
-            raise OffPosture(row.name, values[row.name], default, sources[row.name])
+    if off_posture:
+        return
+    for name in off_posture_rows(harness, values, sources, defaults)[:1]:
+        raise OffPosture(name, values[name],
+                         _posture_default(catalog.load(harness)[name], defaults),
+                         sources[name])
 
 
 def _checked(row, value):
@@ -1273,6 +1286,7 @@ __all__ = [
     "Problem", "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved",
     "UnknownPreset", "UnknownProject", "WARNING", "check", "comms_api", "comms_bind_wait",
     "comms_codex", "comms_codex_resume", "comms_ends_on_bind_timeout", "harness_of",
-    "layered", "mode_of", "needed", "path", "project_agents", "projects_api", "read",
+    "layered", "mode_of", "needed", "off_posture_rows", "path", "project_agents",
+    "projects_api", "read",
     "resolve", "roles", "schema",
 ]

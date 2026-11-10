@@ -1,7 +1,8 @@
 """What a launch records of its own request, and what the page hands back from it: the
 `sources` and `filled` a fresh launch's values hold, `filled` through the ticket and the
-request file, `request_of` resolving again to the launch it was read from, and
-`/api/last` keyed by a seat, a project or a folder. Every launch read here is made by
+request file, `request_of` resolving again to the launch it was read from, `/api/last`
+and `/api/recents` keyed by a seat, a project or a folder, and `/api/recent` resolving
+one recent as running it again would. Every launch read here is made by
 the launch itself, through the page's request and the resolver, in a terminal whose exec
 is stood in for."""
 
@@ -20,7 +21,8 @@ from test_page import get, post, write_presets
 
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, first, job, pagehandlers, presets, slots, store, targets
+from moxi_launcher import (api, catalog, first, job, page, pagehandlers, presets, slots, store,
+                           targets)
 from moxi_launcher.api import ReplayRequest
 
 BRIEF = "Read the design and start the build."
@@ -446,3 +448,229 @@ def test_the_last_launch_is_the_seats_else_the_projects_else_the_folders(world):
     assert newest(seat="planner", project="proj-a", cwd=root) == "planner"
     assert last(seat="nobody", project="proj-a")["values"] == []
     assert newest(project="proj-a", cwd=str(world.work)) == "bare"
+
+
+# --- /api/recents ---------------------------------------------------------------------------
+
+def recents(**query) -> list[dict]:
+    status, said, _ = get("/api/recents", urlencode(query))
+    assert status == 200 and said["state"] == "up", said
+    return said["recents"]
+
+
+def listed(**query) -> list[str]:
+    return [one["request_id"] for one in recents(**query)]
+
+
+def test_recents_are_the_newest_three_requests_each_once(world):
+    work = str(world.work)
+    launch({"values": {"cwd": work, "model": "opus"}}, "r1")
+    launch({"values": {"cwd": work, "model": "sonnet"}}, "r2")
+    # The same request again: it heads the list in the older one's place.
+    launch({"values": {"cwd": work, "model": "opus"}}, "r3")
+    launch({"values": {"cwd": work, "brief": BRIEF, "effort": "high"}}, "r4")
+    assert listed(cwd=work) == ["r4", "r3", "r2"]
+    launch({"values": {"cwd": work, "model": "fable", "effort": "low"}}, "r5")
+    said = recents(cwd=work)
+    assert [one["request_id"] for one in said] == ["r5", "r4", "r3"]
+    assert said[0] == {"request_id": "r5", "at": stored("r5").created_at,
+                       "head": "fable · low", "target": "terminal", "slot": None}
+    assert [one["head"] for one in said[1:]] == ["Read the design and start", "opus"]
+
+
+def test_a_recents_head_is_whole_words_of_its_brief_else_its_model_else_its_harness(world):
+    work = str(world.work)
+    launch({"values": {"cwd": work, "brief": "x" * 40}}, "long")
+    launch({"values": {"cwd": work, "brief": "  Fix\nthe   build  "}}, "spaced")
+    launch({"values": {"cwd": work, "effort": "max"}}, "effort")
+    launch({"values": {"cwd": work, "add_dir": [str(world.added)]}}, "bare")
+    heads = {one["request_id"]: one["head"] for one in recents(cwd=work)}
+    assert heads == {"bare": "claude", "effort": "max", "spaced": "Fix the build"}
+    assert pagehandlers.head(stored("long")) == "x" * pagehandlers.HEAD_MAX
+
+
+def test_recents_list_only_launches_this_user_made_afresh_that_ran(world, monkeypatch):
+    work = str(world.work)
+    launch({"values": {"cwd": work, "model": "opus"}}, "fresh")
+    api.launch(ReplayRequest(stored("fresh"), relaunch_of="fresh", request_id="relaunch"))
+    with monkeypatch.context() as ended:
+        ended.setattr(store, "_running", lambda row, at, starting_s: None)
+        api.launch(ReplayRequest(stored("fresh"), resume_of="fresh", request_id="resume"))
+    launch({"values": {"cwd": work, "model": "sonnet"}}, "theirs", actor="bob")
+    with monkeypatch.context() as broken:
+        def no_files(*args, **kw):
+            raise OSError(28, "No space left on device")
+
+        broken.setattr(api, "_make_files", no_files)
+        assert launch({"values": {"cwd": work, "model": "fable"}}, "failed").state == "failed"
+    launch({"values": {"scratch": "true", "model": "fable"}}, "scratch")
+    with monkeypatch.context() as older:
+        older.setattr(api, "_recorded", lambda request, resolved, values: values)
+        launch({"values": {"cwd": work, "effort": "low"}}, "older")
+    assert {r.request_id for r in _log()} == {"fresh", "relaunch", "resume", "theirs",
+                                               "failed", "scratch", "older"}
+    assert listed(cwd=work) == ["fresh"]
+    # None of the others is run again either.
+    for rid in ("relaunch", "resume", "theirs", "failed", "scratch", "older", "nothing"):
+        said = recent(request=rid, target="terminal")
+        assert said["refused"]["code"] == "no-recent", rid
+        assert said["request"] is None and said["shows"] is None
+
+
+def test_recents_are_the_seats_else_the_projects_else_the_folders(world):
+    root = str(world.root)
+    launch({"seat": "planner", "values": {"model": "sonnet"}}, "planner")
+    launch({"seat": "coder", "values": {"sandbox": "danger-full-access"},
+            "off_posture": True}, "coder")
+    launch({"project_preset": "proj-a", "values": {"effort": "low"}}, "project")
+    launch({"values": {"cwd": root, "model": "fable"}}, "bare")
+    assert listed(seat="planner") == ["planner"] and listed(seat="coder") == ["coder"]
+    assert listed(project="proj-a") == ["bare", "project"]
+    assert listed(cwd=root) == ["bare", "project"] == listed(cwd=root + "/")
+    assert listed(seat="planner", project="proj-a", cwd=root) == ["planner"]
+    assert listed(project="proj-a", cwd=str(world.work)) == ["bare", "project"]
+    assert listed(seat="nobody", project="proj-a") == [] and listed() == []
+
+
+# --- /api/recent ----------------------------------------------------------------------------
+
+def recent(**query) -> dict:
+    status, said, _ = get("/api/recent", urlencode(query))
+    assert status == 200 and said["state"] == "up", said
+    return said
+
+
+def body_from(asked: dict) -> dict:
+    """`/api/recent`'s `request` as the page posts it: its values as a table."""
+    body = {"values": {v["name"]: v["items"] if v["items"] is not None else v["value"]
+                       for v in asked["values"]},
+            "leave_out": asked["leave_out"], "off_posture": asked["off_posture"]}
+    for key in ("seat", "project_preset"):
+        if asked[key]:
+            body[key] = asked[key]
+    return body
+
+
+def edit_presets(old: str, new: str) -> None:
+    text = presets.path().read_text()
+    assert old in text
+    write_presets(text.replace(old, new))
+
+
+def test_a_recent_shows_what_its_request_resolves_to_now(world):
+    launch({"project_preset": "proj-a", "values": {"effort": "high", "brief": BRIEF}}, "r1")
+    os.chdir(world.elsewhere)
+    said = recent(request="r1", target="terminal")
+    assert said["refused"] is None
+    asked = said["request"]
+    assert asked["project_preset"] == "proj-a" and asked["seat"] is None
+    assert body_from(asked) == {
+        "project_preset": "proj-a", "leave_out": ["slot"], "off_posture": False,
+        "values": {"effort": "high", "brief": BRIEF, "target": "terminal"}}
+    # The page's preview of that request resolves to what the recent shows.
+    status, previewed = post("/api/preview", body_from(asked))
+    assert status == 200 and previewed["refused"] == [], previewed
+    assert previewed["target"] == "terminal" and previewed["command"]
+    request, _ = pagehandlers.launch_request(body_from(asked), "again")
+    resolved, composition = presets.resolve(request), api.preview(request)
+    assert said["shows"] == {
+        "harness": previewed["harness"], "model": resolved.values["model"],
+        "effort": resolved.values["effort"], "prompt": composition.brief,
+        "cwd": resolved.cwd, "project_key": resolved.project_key,
+        "off_posture": [], "danger": [], "not_offered": []}
+    assert said["shows"]["model"] == "opus" and said["shows"]["effort"] == "high"
+    assert said["shows"]["prompt"] == BRIEF and said["shows"]["cwd"] == str(world.root)
+    # A preset's value is given again by the preset as it is now.
+    edit_presets('model = "opus"', 'model = "sonnet"')
+    assert recent(request="r1", target="terminal")["shows"]["model"] == "sonnet"
+
+
+def test_a_recent_whose_preset_is_gone_is_refused(world):
+    launch({"project_preset": "proj-a", "values": {"effort": "high"}}, "r1")
+    edit_presets("[project.proj-a]", "[project.proj-b]")
+    said = recent(request="r1", target="terminal")
+    assert said["request"] is None and said["shows"] is None
+    assert said["refused"]["code"] == "no-preset" and said["refused"]["problem"]
+
+
+def test_a_recents_off_posture_names_the_rows_the_resolver_refuses(world):
+    launch({"values": {"harness": "codex", "cwd": str(world.work),
+                       "sandbox": "danger-full-access", "approval": "never"},
+            "off_posture": True}, "r1")
+    said = recent(request="r1", target="terminal")
+    assert said["shows"]["off_posture"] == ["sandbox", "approval"]
+    assert said["shows"]["danger"] == ["sandbox"] and said["request"]["off_posture"] is True
+    body = body_from(said["request"])
+    request, _ = pagehandlers.launch_request({**body, "off_posture": False}, "again")
+    with pytest.raises(presets.OffPosture) as refused:
+        presets.resolve(request)
+    assert refused.value.row == "sandbox"
+    request, _ = pagehandlers.launch_request(body, "again")
+    assert presets.resolve(request).values["sandbox"] == "danger-full-access"
+    # Defaults that hold the same posture leave nothing off it; the danger stays named.
+    edit_presets("[seat.planner]", '[defaults]\nsandbox = "danger-full-access"\n'
+                                   'approval = "never"\n\n[seat.planner]')
+    said = recent(request="r1", target="terminal")
+    assert said["shows"]["off_posture"] == [] and said["request"]["off_posture"] is False
+    assert said["shows"]["danger"] == ["sandbox"]
+
+
+def test_a_recent_names_a_posture_its_preset_now_sets_off_the_default(world):
+    launch({"project_preset": "proj-a", "values": {"effort": "high"}}, "r1")
+    edit_presets('model = "opus"', 'model = "opus"\npermission_mode = "plan"')
+    said = recent(request="r1", target="terminal")
+    assert said["shows"]["off_posture"] == ["permission_mode"]
+    assert said["request"]["off_posture"] is True and said["shows"]["danger"] == []
+    request, _ = pagehandlers.launch_request(
+        {**body_from(said["request"]), "off_posture": False}, "again")
+    with pytest.raises(presets.OffPosture) as refused:
+        presets.resolve(request)
+    assert refused.value.row == "permission_mode"
+
+
+def test_the_posture_rows_off_their_default_are_the_resolvers_own():
+    harness = "codex"
+    values = {"sandbox": "danger-full-access", "approval": "never"}
+    sources = {"sandbox": presets.TYPED, "approval": presets.PRESET}
+    assert presets.off_posture_rows(harness, values, sources, {}) == ["sandbox", "approval"]
+    assert presets.off_posture_rows(harness, values, sources,
+                                    {"sandbox": "danger-full-access"}) == ["approval"]
+    # A value [defaults] itself gives is never off it.
+    shipped = {"sandbox": presets.DEFAULTS, "approval": presets.SHIPPED}
+    assert presets.off_posture_rows(harness, values, shipped, {}) == []
+
+
+def test_a_recent_runs_where_the_page_would_run_it_now(world):
+    launch({"values": {"cwd": str(world.work), "model": "opus", "brief": BRIEF}}, "r1")
+    said = recent(request="r1", target="headless")
+    assert said["refused"] is None, said["refused"]
+    values = {v["name"]: v["value"] for v in said["request"]["values"]}
+    assert values == {"model": "opus", "cwd": str(world.work), "brief": BRIEF,
+                      "target": "headless"}
+    assert said["request"]["leave_out"] == ["slot"]
+    # Without slots a slot launch is refused, as its preview would be.
+    said = recent(request="r1", target="slot", slot="2")
+    assert said["request"] is None and said["refused"]["code"]
+    status, previewed = post("/api/preview", {"values": {
+        "cwd": str(world.work), "model": "opus", "brief": BRIEF, "target": "slot",
+        "slot": "2"}})
+    assert status == 200 and previewed["refused"][0] == said["refused"]
+
+
+def test_a_recent_names_a_row_this_install_no_longer_offers(world, installed):
+    installed.add("usage")
+    launch({"values": {"cwd": str(world.work), "warn_at": "1.5x"}}, "r1")
+    assert recent(request="r1", target="terminal")["shows"]["not_offered"] == []
+    installed.discard("usage")
+    said = recent(request="r1", target="terminal")
+    assert said["shows"]["not_offered"] == ["warn_at"]
+    assert "warn_at" not in {v["name"] for v in said["request"]["values"]}
+
+
+def test_the_recent_routes_mark_the_brief_and_every_handed_back_value():
+    routes = {route.path: route.returns for route in page.PAGE.routes}
+    assert routes["/api/recents"]["recents"].items.items["head"].mark == "redact"
+    asked = routes["/api/recent"]["request"].items
+    assert asked["values"].items.items["value"].mark == "redact"
+    shows = routes["/api/recent"]["shows"].items
+    assert shows["prompt"].mark == "redact" and shows["cwd"].mark == "path"

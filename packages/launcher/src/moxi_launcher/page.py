@@ -20,6 +20,10 @@
     GET  /api/last      what the newest launch of a seat, a project or a folder was
                         asked for beyond its preset and the defaults: the values a
                         new launch there starts filled with
+    GET  /api/recents   the launches of a seat, a project or a folder that can be run
+                        again, newest first, one for each request
+    GET  /api/recent    one of those launches' request, resolved as a launch of it would
+                        be now: what it would run, or why it can't run again
     GET  /api/name      the session name a launch of the form would take from its name
                         template, or from a template being edited, with what saving
                         that template would write
@@ -39,9 +43,10 @@ fields whose value the page filled in from an earlier launch. A map
 whose keys aren't fixed (a preset's values, an event's detail) goes as rows or as JSON
 text. No answer carries a value from an environment or a launch's recorded environment. A
 preview's argv and first turn may hold the brief, and are marked `redact`, and paths are
-marked `path`. `/api/last` hands back values an earlier launch was asked with, each
-marked `redact`, and is not open to the gateway; the launch log's own routes carry no
-recorded value and no brief.
+marked `path`. `/api/last` and `/api/recent` hand back values an earlier launch was asked
+with, and `/api/recents` and `/api/recent` the start of its brief and the brief, each
+marked `redact`; none of the three is open to the gateway. The launch log's own routes
+carry no recorded value and no brief.
 
 The page's assets are what the repository's web build writes from `packages/launcher/web/`
 into this package's `web/` folder: the panel and the three components the announcement
@@ -157,6 +162,30 @@ HANDED = _table(name=_text(), value=_text(nullable=True, mark="redact"),
 #: `harness` are null, and `values` empty, when the key has no such launch.
 LAST = {**STANDING, "at": _text(nullable=True), "harness": _text(nullable=True),
         "values": Out("list", items=HANDED)}
+
+#: An earlier launch that can be run again: `head` is the start of its brief, else its
+#: model and effort, else its harness; `target` and `slot` say where it ran.
+RECENT_LAUNCH = _table(request_id=_text(), at=_text(), head=_text(mark="redact"),
+                       target=_text(), slot=_text(nullable=True))
+RECENTS = {**STANDING, "recents": Out("list", items=RECENT_LAUNCH)}
+#: The request an earlier launch was made with, for the place a launch takes now: a
+#: body of `/api/preview`, its `values` spelled as rows.
+RECENT_REQUEST = _table(nullable=True, seat=_text(nullable=True),
+                        project_preset=_text(nullable=True),
+                        values=Out("list", items=HANDED), leave_out=_texts(),
+                        off_posture=Out("bool"))
+#: What that request runs now: its harness, model and effort, the brief it reads, where
+#: it starts, and the rows of it off their posture default, holding a danger value, and
+#: left out because this install no longer offers them.
+RECENT_SHOWS = _table(nullable=True, harness=_text(), model=_text(nullable=True),
+                      effort=_text(nullable=True), prompt=_text(nullable=True, mark="redact"),
+                      cwd=_text(nullable=True, mark="path"),
+                      project_key=_text(nullable=True), off_posture=_texts(),
+                      danger=_texts(), not_offered=_texts())
+#: One earlier launch run again: `request` and `shows`, or, when it can't run again,
+#: both null and `refused`.
+RECENT = {**STANDING, "request": RECENT_REQUEST, "shows": RECENT_SHOWS,
+          "refused": Out("table", items=REFUSAL.items, nullable=True)}
 
 #: The launch form for one harness: the harness drawn, the value of each row offered for
 #: it, or, when the preset can't be laid for that harness, no rows and the refusal.
@@ -369,6 +398,13 @@ PAGE = lb.Page(
         lb.Route("/api/places", "read", _target("read_places"), returns=PLACES),
         lb.Route("/api/targets", "read", _target("read_targets"), returns=TARGETS),
         lb.Route("/api/last", "read", _target("read_last"), query=_WHOSE, returns=LAST),
+        lb.Route("/api/recents", "read", _target("read_recents"), query=_WHOSE,
+                 returns=RECENTS),
+        lb.Route("/api/recent", "read", _target("read_recent"),
+                 query={"request": Field("string", max=QUERY_MAX),
+                        "target": Field("enum", values=catalog.launcher()["target"].values),
+                        "slot": Field("string", required=False, max=QUERY_MAX)},
+                 returns=RECENT),
         lb.Route("/api/name", "read", _target("read_name"),
                  query={**{key: Field("string", required=False, max=QUERY_MAX)
                            for key in ("seat", "project", "model", "identity", "scope",
@@ -396,6 +432,7 @@ PAGE = lb.Page(
 )
 
 __all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW", "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
-           "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
+           "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "RECENT", "RECENTS", "RECENT_LAUNCH",
+           "RECENT_REQUEST", "RECENT_SHOWS", "REFUSAL", "REQUEST", "RUN",
            "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE",
            "TARGETS", "TEMPLATE_MAX", "VALUES"]

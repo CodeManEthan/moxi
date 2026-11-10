@@ -47,6 +47,16 @@
   beyond its preset and the defaults, without the place, the first turn, where it ran
   and its name. A launch logged before this records no sources and fills nothing. New
   `pagehandlers.request_of`, `api.LaunchRequest.filled` and `page.LAST`.
+- New `GET /api/recents?seat=|project=|cwd=`: the newest three launches of a seat, else
+  a project, else a folder that asked for different requests, each with the start of
+  its brief (else its model and effort, else its harness) and where it ran. New `GET
+  /api/recent?request=&target=&slot=`: that launch's request with where the page would
+  run it now, resolved as `/api/preview` resolves a launch but with no ticket, and what
+  it would run: harness, model, effort, brief, folder and project, the posture rows off
+  your default, the rows holding a danger value, and the rows this install no longer
+  offers. A launch that can't run again (its preset deleted, a value that no longer
+  fits) is answered `refused`. New `presets.off_posture_rows`, the comparison the
+  resolver's posture check refuses on, and `page.RECENTS`, `page.RECENT`.
 - New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
   run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
   so a caller on an install without the UI shell can read what is alive.
