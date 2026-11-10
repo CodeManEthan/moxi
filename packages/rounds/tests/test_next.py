@@ -408,10 +408,37 @@ def test_a_tier_the_setting_gives_one_model_is_printed_with_it(opened, capsys):
     assert lines(capsys)[0].endswith("by lead, tier second (model-two)")
 
 
-def test_a_tier_with_no_model_or_more_than_one_is_printed_alone(opened, capsys):
+def test_a_tier_with_a_model_for_each_harness_is_printed_with_every_one(
+        opened, capsys):
     opened(config=TWO_HARNESSES)
 
+    assert lines(capsys)[0].endswith(
+        "by lead, tier second (claude: model-two, codex: model-b)")
+    found = json.loads(run(capsys, "next", ROUND, "--json"))
+    assert found["groups"][0]["model"] == "claude: model-two, codex: model-b"
+
+
+def test_a_tier_the_setting_does_not_name_is_printed_alone(opened, capsys):
+    opened(config="""\
+        [models]
+        first = { claude = "model-one" }
+        """)
+
     assert lines(capsys)[0].endswith("by lead, tier second")
+    assert json.loads(run(capsys, "next", ROUND, "--json"))["groups"][0]["model"] is None
+
+
+def test_the_tier_of_each_pass_is_printed_with_its_models(opened, capsys):
+    folder = opened(config=TWO_HARNESSES)
+    fold(folder, stage("B1"))
+    assert lines(capsys)[0].endswith(
+        "by checker, tier second (claude: model-two, codex: model-b)")
+    verdict(folder)
+    fold(folder, stage("B1"))
+
+    # A re-check is held to the step's other tier, and its models are the ones named.
+    assert lines(capsys)[0].endswith(
+        "by checker, tier third (claude: model-three, codex: model-c)")
 
 
 @pytest.mark.parametrize("models, tier, expected", [
@@ -420,12 +447,21 @@ def test_a_tier_with_no_model_or_more_than_one_is_printed_alone(opened, capsys):
     ({"second": {"claude": "model-two"}}, "third", None),
     ({"second": {"claude": "model-two"}}, None, None),
     ({"second": {"claude": "model-two", "codex": "model-two"}}, "second", "model-two"),
-    ({"second": {"claude": "model-two", "codex": "model-b"}}, "second", None),
+    ({"second": {"claude": "model-two", "codex": "model-b"}}, "second",
+     "claude: model-two, codex: model-b"),
+    # The harnesses are printed in the order the table writes them.
+    ({"second": {"codex": "model-b", "claude": "model-two"}}, "second",
+     "codex: model-b, claude: model-two"),
+    ({"second": {"claude": "model-two", "codex": "model-b", "other": "model-two"}},
+     "second", "claude: model-two, codex: model-b, other: model-two"),
+    # A harness that names no model is left out.
+    ({"second": {"claude": "model-two", "codex": ""}}, "second", "model-two"),
+    ({"second": {"claude": "", "codex": 7}}, "second", None),
     ({"second": "model-two"}, "second", "model-two"),
     ({"second": {}}, "second", None),
     ("no table", "second", None),
 ])
-def test_the_model_of_a_tier_is_the_one_name_the_table_gives_it(models, tier, expected):
+def test_the_model_of_a_tier_is_what_the_table_names_for_it(models, tier, expected):
     assert next_step.model_of(models, tier) == expected
 
 

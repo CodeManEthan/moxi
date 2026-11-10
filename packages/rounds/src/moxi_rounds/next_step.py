@@ -23,9 +23,12 @@ holds on its stage. **A later step's lines** are a row of `LINES`: the step's na
 a function `(found, step) -> dict` that gives the group's `reads`, `write` and `then`,
 and any key of its own; the head of the group and its waits are filled in for it.
 
-A tier's model is the name the `models` setting gives the tier. A tier that names
-more than one model, one for each harness, is printed as the tier alone: nothing
-recorded says which harness the step runs under.
+A tier's model is what the `models` setting names for the tier, as `model_of` gives
+it: the one name where the tier has one harness or every harness names the same
+model, else every harness with its model in the order the setting writes them, since
+nothing recorded says which harness the step runs under. A tier the setting does not
+name is printed alone. This holds wherever a tier is printed: a step's own, and the
+tier a re-check is held to.
 """
 
 from __future__ import annotations
@@ -72,15 +75,20 @@ def schema(kind: str) -> str:
 # -- the model of a tier -----------------------------------------------------------------
 
 def model_of(models, tier: str | None) -> str | None:
-    """The model the table `models` names for `tier`, or None when it names none, or
-    more than one."""
+    """What the table `models` names for `tier`, as it is printed beside the tier:
+    the one model's name when the tier has one harness or each harness names the same
+    model, else `harness: model` for every harness, in the order the table writes
+    them. None when the table names no model for the tier."""
     named = models.get(tier) if isinstance(models, dict) and tier else None
     if isinstance(named, str):
         return named or None
     if not isinstance(named, dict):
         return None
-    names = {name for name in named.values() if isinstance(name, str) and name}
-    return names.pop() if len(names) == 1 else None
+    each = [(harness, name) for harness, name in named.items()
+            if isinstance(name, str) and name]
+    if len({name for _harness, name in each}) <= 1:
+        return each[0][1] if each else None
+    return ", ".join(f"{harness}: {name}" for harness, name in each)
 
 
 # -- each step's lines -------------------------------------------------------------------

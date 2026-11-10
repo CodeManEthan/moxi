@@ -172,8 +172,8 @@ waits: nothing
 ```
 
 `by` and the tier are the step's entry in the flow, and `reads` lists what the entry
-says to read first. The model's name is printed beside the tier when the `models`
-setting gives that tier one name. A step that waits prints what it waits for and the
+says to read first. The model's name is printed beside the tier as the `models`
+setting gives it: the one name, or each harness with its model where they differ. A step that waits prints what it waits for and the
 command that meets it. After the step come warnings, which hold up nothing: a design
 edited since it was frozen, a ruling not yet shown to the operator, a trace row gone
 stale. `next` records nothing, and `next --json` gives the same as data.
@@ -504,8 +504,11 @@ The file also takes `worktree_dir`, `defaults.ratify`, `defaults.check_on`,
 checked when the file is read, and nothing in this version acts on them.
 
 `models` maps each tier a step names to a model per harness. The order the tiers are
-written in is their order, strongest first. `next` prints a tier's model beside it when
-the tier names one model:
+written in is their order, strongest first. `next` prints beside a tier every
+harness's model in the order written, as `tier second (claude: model-two, codex:
+model-b)`; the bare name, `tier second (model-two)`, when the tier has one harness or
+all its harnesses name the same model; and the tier alone when the table has no entry
+for it:
 
 ```toml
 [models]
