@@ -97,7 +97,7 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
                              "question.changed", "ruling.shown", "round.dropped",
-                             "flow.changed"})
+                             "flow.changed", "design.frozen", "stage.declared"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -666,3 +666,123 @@ def test_a_skip_keeps_a_listed_question_that_still_holds_its_stage():
     found = state.fold([*start, narrowed, widened])
 
     assert found.rulings[0].let_go == ()
+
+
+# -- stages and frozen versions ----------------------------------------------------------
+
+def test_a_declared_stage_joins_the_plan_and_changes_nothing_else():
+    before = state.fold([opened()])
+    build = event(2, "stage.declared", id="B1", repo="proj-a", branch="branch-b1",
+                  after=[], slices=[{"id": "1a", "what": "a piece", "minutes": 40}])
+    child = {**event(3, "stage.declared", id="B2", round="proj-a/a-child",
+                     after=["B1"]), "actor": "scout"}
+
+    after = state.fold([opened(), build, child, event(4, "stage.declared", id="B1",
+                                                      repo="proj-b", branch="other")])
+
+    assert after.stages == [
+        state.Stage(id="B1", repo="proj-a", branch="branch-b1", round=None, after=(),
+                    slices=({"id": "1a", "what": "a piece", "minutes": 40},), why=None,
+                    version=None, actor="planner", at=AT),
+        state.Stage(id="B2", repo=None, branch=None, round="proj-a/a-child",
+                    after=("B1",), slices=(), why=None, version=None, actor="scout",
+                    at=AT)]
+    assert dataclasses.replace(after, stages=[], history=before.history) == before
+
+
+def test_a_stage_declared_with_no_id_declares_none():
+    assert state.fold([opened(), event(2, "stage.declared", repo="proj-a")]).stages == []
+
+
+DECLARED = {
+    "question": [{"id": "Q1", "text": "Is it so?", "blocks": ["B1"],
+                  "options": {"a": "one", "b": "two"}},
+                 {"id": "Q2", "text": "Is it not?", "blocks": "all"}],
+    "stage": [{"id": "B1", "repo": "proj-a", "branch": "branch-b1", "after": [],
+               "why": "it lands alone",
+               "slices": [{"id": "1a", "what": "a piece", "minutes": 40}]},
+              {"id": "B2", "round": "proj-a/a-child", "after": ["B1"]}],
+    "trace": [], "commitment": []}
+
+
+def frozen(n, version, **more):
+    fields = {"version": version, "digest": "0" * 64, "records_only": False,
+              "declared": copy.deepcopy(DECLARED), "added": {}, "pending": [], **more}
+    return {**event(n, "design.frozen", **fields), "actor": "scout",
+            "at": "2026-01-03T00:00:00Z"}
+
+
+def test_a_frozen_version_adds_what_it_says_is_new_and_is_the_whole_of_the_freezing():
+    first = frozen(2, 1, added={"questions": ["Q1", "Q2"], "stages": ["B1", "B2"]})
+    before = state.fold([opened()])
+
+    after = state.fold([opened(), first])
+
+    who = {"by": "scout", "at": "2026-01-03T00:00:00Z"}
+    assert after.questions == [
+        state.Question(id="Q1", text="Is it so?", origin="file:versions/design-v1.md#Q1",
+                       blocks=("B1",), state="open",
+                       options=(("a", "one"), ("b", "two")), **who),
+        state.Question(id="Q2", text="Is it not?", origin="file:versions/design-v1.md#Q2",
+                       blocks="all", state="open", **who)]
+    assert [(one.id, one.repo, one.branch, one.round, one.after, one.why, one.version,
+             one.actor) for one in after.stages] == [
+        ("B1", "proj-a", "branch-b1", None, (), "it lands alone", 1, "scout"),
+        ("B2", None, None, "proj-a/a-child", ("B1",), None, 1, "scout")]
+    assert after.stages[0].slices == ({"id": "1a", "what": "a piece", "minutes": 40},)
+    assert after.versions == [state.Version(
+        n=1, digest="0" * 64, records_only=False, record=None, trace=None,
+        declared=DECLARED, pending=(), actor="scout", at="2026-01-03T00:00:00Z")]
+    assert dataclasses.replace(after, questions=[], stages=[], versions=[],
+                               history=before.history) == before
+    assert first["declared"] == DECLARED
+
+
+def test_a_frozen_version_adds_nothing_its_event_does_not_say_is_new():
+    found = state.fold([opened(), frozen(2, 1)])
+
+    assert (found.questions, found.stages) == ([], [])
+    assert [one.n for one in found.versions] == [1]
+
+
+def test_a_later_version_widens_a_hold_adds_a_wait_and_changes_options():
+    first = frozen(2, 1, added={"questions": ["Q1", "Q2"], "stages": ["B1", "B2"]})
+    second = frozen(3, 2, added={
+        "after": {"B1": ["B2"]}, "blocks": {"Q1": ["B1", "B2"]},
+        "options": {"Q1": {"options": {"c": "three"}, "retired": ["a"]}}})
+
+    found = state.fold([opened(), first, second])
+
+    assert found.stages[0].after == ("B2",)
+    assert found.questions[0].blocks == ("B1", "B2")
+    assert found.questions[0].options == (("b", "two"), ("c", "three"))
+    assert found.questions[0].retired == ("a",)
+    assert [change.ruling for change in found.questions[0].changes] == [None, None]
+    assert found.questions[1] == state.fold([opened(), first]).questions[1]
+
+
+def test_what_a_version_took_away_is_kept_with_it_and_changes_nothing():
+    first = frozen(2, 1, added={"questions": ["Q1", "Q2"], "stages": ["B1", "B2"]})
+    second = frozen(3, 2, pending=[
+        {"what": "question", "id": "Q2"}, {"what": "stage", "id": "B2"},
+        {"what": "after", "id": "B2", "gone": ["B1"]},
+        {"what": "blocks", "id": "Q1", "blocks": "none"},
+        {"what": "blocks", "id": "Q2", "blocks": ["B1"]}])
+    before = state.fold([opened(), first])
+
+    after = state.fold([opened(), first, second])
+
+    assert after.versions[1].pending == (
+        state.Pending("question", "Q2"), state.Pending("stage", "B2"),
+        state.Pending("after", "B2", gone=("B1",)),
+        state.Pending("blocks", "Q1", blocks="none"),
+        state.Pending("blocks", "Q2", blocks=("B1",)))
+    assert (after.questions, after.stages) == (before.questions, before.stages)
+
+
+def test_a_frozen_event_that_numbers_no_version_freezes_none():
+    found = state.fold([opened(), event(2, "design.frozen", digest="0" * 64,
+                                        added={"stages": ["B1"]},
+                                        declared=copy.deepcopy(DECLARED))])
+
+    assert (found.versions, found.stages) == ([], [])

@@ -1,9 +1,10 @@
 """The generated files: what the logs say, written out as markdown for people and
 agents to read beside the logs.
 
-    <rounds folder>/<slug>/round-note.md   one round: the flow it follows now and the
-                                           skips that stand, its questions by state,
-                                           its rulings and its history
+    <rounds folder>/<slug>/round-note.md   one round: the flow it follows now, the
+                                           skips that stand, its design's newest
+                                           version and its stages, its questions by
+                                           state, its rulings and its history
     <rounds folder>/rulings.md             the project's register: its standing rulings
     <rounds folder>/questions.md           the questions on the project's own list
 
@@ -190,6 +191,12 @@ def _flow(shown_as: dict) -> list[str]:
         lines.append("")
     for one in shown_as["skips"]:
         lines += _item(f"skipped: {showing.skip_line(one)}")
+    planned = [*showing.version_lines(shown_as["versions"]),
+               *(f"stage {showing.stage_line(one)}" for one in shown_as["stages"])]
+    if planned:
+        lines.append("")
+    for line in planned:
+        lines += _item(line)
     return lines
 
 

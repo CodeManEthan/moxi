@@ -6,8 +6,9 @@ the index as it is. What it gives is printed as
 lines (`as_text`) or as data (`as_json`), both from the same reading.
 
 A round is shown with what it is for, its status, the name of the flow it follows now
-and the steps recorded for it, and the skips that stand; then its records, a section for each kind: its questions by state,
-each with who asked it and when; its own rulings, each with its pointer and whether
+and the steps recorded for it, the skips that stand, the newest frozen version of its
+design with what that version took away, and its stages; then its records, a section
+for each kind: its questions by state, each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
 
 A round that has ended is shown with how it ended. A question whose record still reads
@@ -37,7 +38,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, index, log, questions, shown, skips
+from . import folders, index, log, questions, shown, skips, versions
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -260,6 +261,8 @@ def history_of(event: dict) -> str | None:
     of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
+    if event.get("type") == "design.frozen":
+        of = f"v{event.get('version')}"
     return of if isinstance(of, str) and of else None
 
 
@@ -295,9 +298,67 @@ def _head(found: Shown) -> dict:
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "flow": state.flow, "steps": state.steps,
-            "skips": _skips(state),
+            "skips": _skips(state), "stages": _stages(state),
+            "versions": _versions(state),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
+
+
+def _stages(state: states.State) -> list[dict]:
+    """The stages the round declared: what each builds on or the round it stands for,
+    what it waits for, its slices, the design version that first carried it, and
+    whether it is finished or left the plan."""
+    finished, left = questions.finished_stages(state), questions.left_stages(state)
+    return [{"id": stage.id, "repo": stage.repo, "branch": stage.branch,
+             "round": stage.round, "after": list(stage.after),
+             "slices": [dict(piece) for piece in stage.slices], "why": stage.why,
+             "version": stage.version, "by": stage.actor, "at": stage.at,
+             "finished": stage.id in finished, "left": stage.id in left}
+            for stage in state.stages]
+
+
+def stage_line(one: dict) -> str:
+    """A stage in a line: `B1: proj-a on rounds-core, after B2; 3 slices`."""
+    what = (f"the round {one['round']}" if one["round"] is not None else
+            f"{one['repo']} on {one['branch']}")
+    line = f"{one['id']}: {what}"
+    if one["after"]:
+        line += f", after {', '.join(one['after'])}"
+    if one["slices"]:
+        count = len(one["slices"])
+        line += f"; {count} slice{'' if count == 1 else 's'}"
+    if one["left"]:
+        line += "; left the plan"
+    elif one["finished"]:
+        line += "; finished"
+    return line
+
+
+def _versions(state: states.State) -> list[dict]:
+    """The design's frozen versions, oldest first: each one's number and digest, who
+    froze it and when, whether as a change of records only, what its trace check
+    found, and what it took away, which waits."""
+    return [{"version": version.n, "digest": version.digest, "by": version.actor,
+             "at": version.at, "records_only": version.records_only,
+             "record": version.record, "trace": version.trace,
+             "pending": [{"what": one.what, "id": one.id, "gone": list(one.gone),
+                          "blocks": (one.blocks if one.blocks is None
+                                     else questions.stored(one.blocks)),
+                          "said": versions.said(one)} for one in version.pending]}
+            for version in state.versions]
+
+
+def version_lines(listed: list[dict]) -> list[str]:
+    """The design's versions in lines: the newest with its digest and what it took
+    away, and how many came before it."""
+    if not listed:
+        return []
+    newest = listed[-1]
+    lines = [f"design: v{newest['version']}, frozen {newest['at']} by {newest['by']}, "
+             f"sha256 {newest['digest']}"]
+    lines += [f"pending in v{newest['version']}: {one['said']}"
+              for one in newest["pending"]]
+    return lines
 
 
 def _skips(state: states.State) -> list[dict]:
@@ -373,6 +434,8 @@ def as_text(found: Shown) -> str:
              f"({steps})",
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
     lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
+    lines += version_lines(shown_as["versions"])
+    lines += [f"stage {stage_line(one)}" for one in shown_as["stages"]]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")
     if shown_as["ended"] is not None:
@@ -388,4 +451,4 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "history_of"]
+           "ended_line", "skip_line", "stage_line", "version_lines", "history_of"]

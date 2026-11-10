@@ -49,7 +49,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, log, paths, questions, readback, state
+from . import folders, log, paths, questions, readback, state, versions
 from .errors import NoLog, Unreadable
 
 #: The schema, one step per version of it (`moxi.store.migrate`). A step is never
@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 7
+DERIVED = 8
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -100,9 +100,15 @@ DERIVED = 7
 QUESTION = "question"
 RULING = "ruling"
 READ_BACK = "read-back"
+#: A round's plan is here too: each stage it has, the current version of its design,
+#: and what that version took away, which waits for a verdict or a ruling.
+STAGE = "stage"
+VERSION = "version"
+PENDING = "pending"
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
-    READ_BACK: readback.read_backs}
+    READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
+    PENDING: versions.waiting}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""
@@ -507,5 +513,6 @@ def _drop(conn, project: str, slug: str) -> None:
         conn.execute(f"DELETE FROM {table} WHERE project = ? AND slug = ?", (project, slug))
 
 
-__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
+__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION",
+           "PENDING", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
            "refresh", "rebuild", "read", "rounds", "usable", "disagreements"]

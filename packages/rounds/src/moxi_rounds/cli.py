@@ -1,6 +1,7 @@
 """`moxi rounds`: the rounds command.
 
     moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
+    moxi rounds fold ROUND [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
@@ -42,6 +43,11 @@ operator, and `mark --shown` records, with a pointer to the message, session or 
 that showed him, that he saw it; a ruling is named by the round or project that holds
 it and its id. On a project, the item `readback=TIME` is his own word that he read the
 list of rulings not yet shown through `TIME`, the time that list was headed with.
+`fold` freezes the round's design: it copies `design.md` in the round's folder to
+`versions/design-v<N>.md` and records that version with what the design's data block
+declares. A question, a stage, a stage another waits for and a wider hold are added to
+the round at once; what the block takes away is recorded as pending and changes
+nothing until a verdict or the operator's ruling applies it.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
@@ -543,6 +549,64 @@ def _mark_shown(args, out) -> int:
     return codes.OK
 
 
+# -- fold --------------------------------------------------------------------------------
+
+def _declare_fold(verbs) -> None:
+    said = ("Freeze the round's design as its next version: copy design.md to "
+            "versions/design-v<N>.md and record the version with what its data block "
+            "declares. What the block adds is added at once; what it takes away "
+            "waits for a verdict or the operator's ruling.")
+    parser = verbs.add_parser("fold", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND",
+                        help="the round's name, <project>/<slug>")
+    _writes(parser)
+
+
+def _fold(args, out) -> int:
+    from . import freezing
+
+    frozen = freezing.freeze(args.round, actor=_actor(args))
+    print(f"froze the design of {frozen.name} as v{frozen.version}", file=out)
+    print(f"file: {frozen.file}", file=out)
+    print(f"sha256: {frozen.digest}", file=out)
+    for line in _frozen(frozen.plan):
+        print(line, file=out)
+    _warn_of(frozen.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _frozen(plan) -> list[str]:
+    """What a freezing prints of what it did to the record: what it added, what waits,
+    and what of the block it left as the record has it."""
+    from . import versions
+
+    added = plan.added
+    lines = [f"added: {what} {', '.join(added[key])}"
+             for key, what in (("questions", "questions"), ("stages", "stages"))
+             if added.get(key)]
+    lines += [f"added: {stage} now waits for {', '.join(more)} too"
+              for stage, more in added.get("after", {}).items()]
+    lines += [f"added: {question} now holds up "
+              f"{blocks if isinstance(blocks, str) else ', '.join(blocks)}"
+              for question, blocks in added.get("blocks", {}).items()]
+    for question, change in added.get("options", {}).items():
+        parts = []
+        if change.get("options"):
+            parts.append(f"gains {', '.join(change['options'])}")
+        if change.get("retired"):
+            parts.append(f"retires {', '.join(change['retired'])}")
+        lines.append(f"options: {question} {' and '.join(parts)}")
+    lines += [f"pending: {versions.said(one)}" for one in plan.pending]
+    if plan.pending:
+        lines.append("what is pending changes nothing until a verdict finds this "
+                     "version publishable or the operator rules it")
+    lines += [f"not used: the key {key} of {question} was retired and is never used "
+              "again" for question, key in plan.refused]
+    lines += [f"kept: {question} keeps the sentence on record, which is not the "
+              "block's" for question in plan.reworded]
+    return lines
+
+
 # -- drop --------------------------------------------------------------------------------
 
 def _declare_drop(verbs) -> None:
@@ -692,12 +756,13 @@ def _list_questions(args, out) -> int:
 # -- the command -------------------------------------------------------------------------
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
-_DECLARE: tuple[Callable, ...] = (_declare_open, _declare_ask, _declare_rule,
+_DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_ask,
+                                  _declare_rule,
                                   _declare_mark, _declare_drop, _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
-_VERBS: dict[str, Callable] = {"open": _open, "ask": _ask, "rule": _rule,
+_VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "show": _show,
                                "list": _list}
 

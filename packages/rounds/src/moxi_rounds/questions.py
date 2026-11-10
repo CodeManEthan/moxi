@@ -126,15 +126,14 @@ def holds_every(new: Blocks | None, old: Blocks | None) -> bool:
 
 
 # -- what a round's log says of its stages -----------------------------------------------
-# The readers below take what they need from the history and the rulings. They are the
-# one place that says which stages a round has, which are finished and which left the
-# plan.
+# The readers below take what they need from the stages the log declared (each by an
+# event of its own or by the frozen design version that first carried it), the history
+# and the rulings. They are the one place that says which stages a round has, which are
+# finished and which left the plan.
 
 def recorded_stages(state: states.State) -> tuple[str, ...]:
     """The ids of the stages the round's log declared, in the order it declared them."""
-    return tuple(dict.fromkeys(
-        event["id"] for event in state.history
-        if event["type"] == "stage.declared" and isinstance(event.get("id"), str)))
+    return tuple(stage.id for stage in state.stages)
 
 
 def finished_stages(state: states.State) -> frozenset[str]:

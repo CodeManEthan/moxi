@@ -49,9 +49,14 @@ TYPES = _types(
     # holds the same three.
     EventType("flow.changed", ("was", "flow", "steps", "by", "ruling")),
     # A design version was frozen: its number and digest, whether only records changed
-    # and the pointer that says so, the trace result, and the declarations it added.
+    # and the pointer that says so, the trace result, what the design's block declared
+    # (`declared`), what of that was new to the record and is added by this event
+    # (`added`), and what the block took away, which waits for a verdict or a ruling
+    # (`pending`).
     EventType("design.frozen",
-              ("version", "digest", "records_only", "record", "trace", "added")),
+              ("version", "digest", "records_only", "record", "trace", "declared",
+               "added", "pending"),
+              required=("version", "digest")),
     # A report's verdict: what kind of report and pass, the verdict word, what it read
     # (a design version, or a stage with its head and merge-base), the user step it is
     # for, the model and author, the report file and its digest, and what its block
@@ -82,7 +87,8 @@ TYPES = _types(
               required=("id",)),
     # A stage joined the plan: its id, the repo and branch it builds on or the child
     # round it stands for, the stages it comes after, and its slices.
-    EventType("stage.declared", ("id", "repo", "branch", "round", "after", "slices")),
+    EventType("stage.declared",
+              ("id", "repo", "branch", "round", "after", "slices", "why")),
     # A stage left the plan or lost a wait, with the verdict or ruling that allowed it.
     EventType("stage.changed", ("id", "removed", "after", "verdict", "ruling")),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,

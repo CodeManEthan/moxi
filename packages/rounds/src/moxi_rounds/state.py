@@ -31,6 +31,13 @@ One of them that is later made to hold up fewer stages, that stage not among the
 let past no longer: the ruling is marked with it (`Ruling.let_go`), so when the
 question is widened onto the stage again it holds the stage like any other.
 
+A stage is in the plan from the event that declared it: its own, or the freezing of a
+design version whose block first carried it. A frozen version is one event, and it is
+the whole of what the freezing did: it holds the version's number and digest, what the
+design's block declared, and what of that was new to the record, which the fold adds
+from it (a question, a stage, a stage another must follow, a wider hold, options).
+What the block took away is kept with the version as pending and changes nothing.
+
 A round that was dropped is `DROPPED` from that event on, and the event is the whole of
 the drop in the round's log: it says who dropped the round, and where each question
 that was open or parked went, which the fold applies to the question as a change. A log
@@ -192,6 +199,75 @@ class Question:
     moved_to: str | None = None
 
 
+@dataclass(frozen=True)
+class Stage:
+    """A stage of the round's plan: a build in `repo` on `branch`, or the round `round`
+    in place of one; the other two are None."""
+
+    id: str
+    repo: str | None
+    branch: str | None
+    round: str | None
+    #: The stages that must be finished before this one starts.
+    after: tuple[str, ...]
+    #: Each worker's piece of it, as `{"id", "what", "minutes"}`.
+    slices: tuple[dict, ...]
+    #: Why it lands on its own, where it said.
+    why: str | None
+    #: The design version that first carried it, None for one declared on its own.
+    version: int | None
+    #: Who declared it and when.
+    actor: str
+    at: str
+
+
+@dataclass(frozen=True)
+class Pending:
+    """Something a design version's block took away, which stands in the record until
+    a verdict or a ruling applies it. `what` is `QUESTION` (the question `id` is gone
+    from the block), `STAGE` (the stage is gone), `AFTER` (the stage waits for fewer:
+    `gone` are the ones left out) or `BLOCKS` (the question holds up fewer: `blocks`
+    is what the block says it holds up)."""
+
+    what: str
+    id: str
+    gone: tuple[str, ...] = ()
+    blocks: str | tuple[str, ...] | None = None
+
+
+#: Where a version is frozen, from the round's folder: `n` is its number.
+FROZEN_FILE = "versions/design-v{n}.md"
+
+#: What a `Pending` is of.
+QUESTION = "question"
+STAGE = "stage"
+AFTER = "after"
+BLOCKS = "blocks"
+
+
+@dataclass(frozen=True)
+class Version:
+    """A frozen version of the design."""
+
+    #: Its number, from 1.
+    n: int
+    #: The SHA-256 of the frozen file.
+    digest: str | None
+    #: Whether it was frozen as a change of records only, and the pointer that says so.
+    records_only: bool
+    record: str | None
+    #: What the trace check found when it was frozen, None when it was not run.
+    trace: object
+    #: What the design's block declared, as the event holds it: `question`, `stage`,
+    #: `trace` and `commitment`, each a list.
+    declared: dict
+    #: What it took away, which stands until a verdict or a ruling applies it.
+    pending: tuple[Pending, ...]
+    #: Who froze it and when.
+    actor: str
+    at: str
+
+
 @dataclass
 class State:
     """What a log says, as of its last event."""
@@ -214,6 +290,10 @@ class State:
     #: The questions the log holds, in the order they were asked. A project's are
     #: its list.
     questions: list[Question] = field(default_factory=list)
+    #: The stages the log declared, in the order it declared them.
+    stages: list[Stage] = field(default_factory=list)
+    #: The design versions frozen, oldest first.
+    versions: list[Version] = field(default_factory=list)
     #: Every event, oldest first.
     history: list[dict] = field(default_factory=list)
 
@@ -481,15 +561,87 @@ def _change(state: State, event: dict, *, question_id: str | None,
         _let_go(state, state.questions[place])
 
 
+def _ids(value) -> tuple[str, ...]:
+    return tuple(one for one in value if isinstance(one, str)) if isinstance(
+        value, list) else ()
+
+
+def _stage_declared(state: State, event: dict, *, version: int | None = None) -> None:
+    """The stage the event names joins the plan. An id is declared once: a second
+    declaration of it changes nothing."""
+    stage_id = event.get("id")
+    if not isinstance(stage_id, str) or any(one.id == stage_id for one in state.stages):
+        return
+    slices = event.get("slices", event.get("slice"))
+    state.stages.append(Stage(
+        id=stage_id, repo=event.get("repo"), branch=event.get("branch"),
+        round=event.get("round"), after=_ids(event.get("after")),
+        slices=tuple(copy.deepcopy(slices)) if isinstance(slices, list) else (),
+        why=event.get("why") or None, version=version,
+        actor=event["actor"], at=event["at"]))
+
+
+def _design_frozen(state: State, event: dict) -> None:
+    """A version of the design is frozen, and what its block added to the record is
+    added: the event is the whole of the freezing, so nothing else is written for it
+    and a verb stopped after this event has left the version whole."""
+    declared = event.get("declared")
+    declared = copy.deepcopy(declared) if isinstance(declared, dict) else {}
+    added = event.get("added")
+    added = added if isinstance(added, dict) else {}
+    version = event.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        # An event that numbers no version froze none.
+        return
+    who = {"actor": event["actor"], "at": event["at"]}
+    state.versions.append(Version(
+        n=version, digest=event.get("digest"),
+        records_only=event.get("records_only") is True, record=event.get("record"),
+        trace=copy.deepcopy(event.get("trace")), declared=declared,
+        pending=tuple(
+            Pending(what=one.get("what"), id=one.get("id"), gone=_ids(one.get("gone")),
+                    blocks=_blocks(one.get("blocks")))
+            for one in event.get("pending") or () if isinstance(one, dict)),
+        **who))
+    said = {kind: {one.get("id"): one for one in declared.get(kind) or ()
+                   if isinstance(one, dict)} for kind in (QUESTION, STAGE)}
+    for stage_id in _ids(added.get("stages")):
+        if stage_id in said[STAGE]:
+            _stage_declared(state, {**said[STAGE][stage_id], **who}, version=version)
+    for question_id in _ids(added.get("questions")):
+        one = said[QUESTION].get(question_id)
+        if one is None or any(had.id == question_id for had in state.questions):
+            continue
+        # A question a design declares was asked by the freezing that first carried
+        # it: that version is where it came from, and the freezing says who and when.
+        _question_asked(state, {
+            "id": question_id, "text": one.get("text"),
+            "from": f"file:{FROZEN_FILE.format(n=version)}#{question_id}",
+            "blocks": one.get("blocks", _ALL), "state": OPEN,
+            "options": one.get("options"), **who})
+    for stage_id, more in (added.get("after") or {}).items():
+        for place, stage in enumerate(state.stages):
+            if stage.id == stage_id:
+                state.stages[place] = replace(stage, after=tuple(dict.fromkeys(
+                    (*stage.after, *_ids(more)))))
+    for question_id, blocks in (added.get("blocks") or {}).items():
+        _change(state, {"blocks": blocks, **who}, question_id=question_id, ruling=None)
+    for question_id, change in (added.get("options") or {}).items():
+        if isinstance(change, dict):
+            _change(state, {"options": change.get("options"),
+                            "retired": change.get("retired"), **who},
+                    question_id=question_id, ruling=None)
+
+
 #: The handler of each event type. Every type in `events.TYPES` has a row.
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
     "flow.changed": _flow_changed,
-    "design.frozen": _kept,
+    "design.frozen": _design_frozen,
     "verdict.recorded": _kept,
     "question.asked": _question_asked,
     "question.changed": _question_changed,
-    "stage.declared": _kept,
+    "stage.declared": _stage_declared,
     "stage.changed": _kept,
     "ruling.recorded": _ruling_recorded,
     "ruling.shown": _ruling_shown,
@@ -508,5 +660,6 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.closed": _kept,
 }
 
-__all__ = ["OPEN", "DROPPED", "Ended", "Ruling", "Change", "Question", "State", "fold",
+__all__ = ["OPEN", "DROPPED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS", "Ended", "Ruling",
+           "Change", "Question", "Stage", "Pending", "Version", "State", "fold",
            "without"]
