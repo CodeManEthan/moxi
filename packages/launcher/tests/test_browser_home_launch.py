@@ -562,16 +562,16 @@ def test_a_slot_and_target_the_defaults_pin_never_place_a_launch_from_home(
 
 def test_a_launch_that_stays_starting_gives_the_button_back_and_is_followed_until_it_starts(
         ui_shells, ui_contexts, tmp_path_factory, on_path):
-    from moxi_ui.testing.shell import TestShell
-
     # A row reads as late once it has been starting for the two waits together: none here.
+    # The shell keeps its Moxi files under `moxi` in its home.
     home = tmp_path_factory.mktemp("late-shell")
-    config = TestShell(home).config_file("launcher")
-    config.parent.mkdir(parents=True, exist_ok=True)
+    config = home / "moxi" / "config" / "launcher" / "config.toml"
+    config.parent.mkdir(parents=True)
     config.write_text("[ready]\nwait_s = 0\n\n[first]\nwait_s = 0\n")
     fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
     fake.script(placed=2, slots=kit.free(2), start_wait_s=4)
     shell = ui_shells(home=home, **fake.options())
+    assert shell.config_file("launcher") == config
     page = ui_contexts(shell).pages[0]
     piece = kit.open_home(page)
     go = piece.locator(".go")
