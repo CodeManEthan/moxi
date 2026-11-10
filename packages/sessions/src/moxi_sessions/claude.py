@@ -351,6 +351,11 @@ ORIGIN_KINDS: Mapping[str, bool] = {
 #: The booleans Claude Code writes on a line it added or summarised itself. Either makes
 #: the message injected, whatever its origin says.
 COMPOSED_FLAGS = ("isMeta", "isCompactSummary")
+#: The bytes a line holds when its message is marked as typed by the person at the
+#: prompt: the `origin` key, and a kind `ORIGIN_KINDS` gives false for.
+TYPED_KEY = b'"origin"'
+TYPED_KINDS = tuple(json.dumps(kind).encode() for kind, injected in ORIGIN_KINDS.items()
+                    if injected is False)
 #: The fixed wrappers Claude Code writes around text it composed: a user message with no
 #: origin that opens with one of these tags is injected. With an origin, the origin
 #: decides alone.
@@ -605,6 +610,17 @@ def _injected(entry: dict, role: str, text: str, synthetic: bool) -> Any:
     if text.lstrip().startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
         return True
     return UNKNOWN
+
+
+def may_be_typed(raw: bytes) -> bool:
+    """Whether a raw line can hold a message the record marks as typed by the person at
+    the prompt (`Message.injected` is false on a user message), told from its bytes with
+    no decode. False means it holds none; true means only that the decode has to say.
+
+    A typed message's line has an `origin` whose kind `ORIGIN_KINDS` gives false for.
+    Claude Code writes keys and kinds as plain text, never with escapes, so a line
+    without those bytes has no such origin."""
+    return TYPED_KEY in raw and any(kind in raw for kind in TYPED_KINDS)
 
 
 def _content_records(entry: dict, message: dict, role: str, common: dict,

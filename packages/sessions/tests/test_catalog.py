@@ -590,7 +590,7 @@ def test_a_kept_prompt_is_no_longer_than_a_caller_is_sent(roots):
 
     assert prompt.truncated is True
     assert prompt.text == "é" * (TEXT_MAX // 2)
-    (_, kept), = cat._tails.values()
+    kept, = cat._prompts.values()
     assert len(kept.prompt.text.encode()) == TEXT_MAX
 
     short = transcript(roots, 2)
@@ -718,7 +718,7 @@ def test_a_codex_session_is_not_read_for_a_prompt(roots, monkeypatch):
     r.user("typed, the rollout's kinds say", kinds=["user.text"])
     r.assistant("Did it.")
     r.write()
-    monkeypatch.setattr(catalog_module, "records_back", refused)
+    monkeypatch.setattr(catalog_module, "read_prompt", refused)
     cat = Catalog(roots)
 
     found = cat.details(only(cat))
@@ -732,7 +732,7 @@ def test_an_opencode_session_is_not_read_for_a_prompt(roots, monkeypatch):
     session = db.session()
     session.user("hello")
     db.write()
-    monkeypatch.setattr(catalog_module, "records_back", refused)
+    monkeypatch.setattr(catalog_module, "read_prompt", refused)
     cat = Catalog(roots)
 
     found = cat.details(only(cat))
@@ -741,26 +741,12 @@ def test_an_opencode_session_is_not_read_for_a_prompt(roots, monkeypatch):
     assert (cat.tail_reads, cat.prompt_reads) == (1, 0)
 
 
-def refused(source, **kw):
-    raise AssertionError("the session was read through for a prompt")
-
-
-def test_a_file_longer_than_the_read_limit_has_no_prompt_from_beyond_it(roots,
-                                                                         monkeypatch):
-    t = transcript(roots)
-    t.user("typed long ago", origin="human")
-    for n in range(20):
-        t.user(f"notice {n} " + "x" * 500, origin="task-notification")
-    t.write()
-    real = catalog_module.records_back
-    monkeypatch.setattr(catalog_module, "records_back",
-                        lambda source, **kw: real(source, block=1024, limit=4096, **kw))
-
-    assert details(roots).prompt is None
+def refused(listed, kept=None):
+    raise AssertionError("the session was read for a prompt")
 
 
 def test_a_program_session_has_no_prompt_no_speaker_and_reads_one_turn(roots, monkeypatch):
-    monkeypatch.setattr(catalog_module, "records_back", refused)
+    monkeypatch.setattr(catalog_module, "read_prompt", refused)
     t = transcript(roots, entrypoint="sdk-py")
     t.user("typed, the record says", origin="human")
     t.assistant()
@@ -832,61 +818,25 @@ def test_an_unchanged_session_is_read_once_and_a_changed_one_again(roots):
     assert cat.tail_reads == 2
 
 
-def test_a_session_is_read_through_for_its_prompt_once_for_each_state_of_its_file(
-        roots, monkeypatch):
-    t = transcript(roots)
-    t.user("the first prompt", origin="human")
-    t.assistant("A reply.")
-    t.write()
-    reads = []
-    real = catalog_module.records_back
-
-    def counted(source, **kw):
-        reads.append(source.size)
-        return real(source, **kw)
-
-    monkeypatch.setattr(catalog_module, "records_back", counted)
-    clock = Clock()
-    cat = Catalog(roots, clock=clock)
-
-    assert cat.details(only(cat)).prompt.text == "the first prompt"
-    for _ in range(3):
-        clock.now += 5                               # a new gather, the same file
-        assert cat.details(only(cat)).prompt.text == "the first prompt"
-    assert len(reads) == 1 and cat.prompt_reads == 1
-
-    t.user("a notice", origin="task-notification")
-    t.flush()
-    clock.now += 5
-    assert cat.details(only(cat)).prompt.text == "the first prompt"
-    assert len(reads) == 2                           # the file changed: read again
-
-    t.user("the second prompt", origin="human")
-    t.flush()
-    clock.now += 5
-    assert cat.details(only(cat)).prompt == Said(START + 3, "you", "the second prompt")
-    clock.now += 5
-    cat.details(only(cat))
-    assert len(reads) == 3 and cat.prompt_reads == 3
-    assert reads == sorted(set(reads))               # each read was of a longer file
-
-
-def test_a_failed_read_for_the_prompt_gives_nulls_and_is_tried_again(roots, monkeypatch):
+def test_a_failed_read_for_the_prompt_gives_no_prompt_and_is_tried_again(roots,
+                                                                         monkeypatch):
     t = transcript(roots, cwd="/work/proj-a")
     t.user("one", origin="human")
     t.write()
     cat = Catalog(roots)
-    real = catalog_module.records_back
+    real = catalog_module.read_prompt
 
-    def broken(source, **kw):
+    def broken(listed, kept=None):
         raise Unreadable("the file cannot be read")
 
-    monkeypatch.setattr(catalog_module, "records_back", broken)
-    assert cat.details(only(cat)) == Details(folder="/work/proj-a", started=START)
+    monkeypatch.setattr(catalog_module, "read_prompt", broken)
+    failed = cat.details(only(cat))
+    assert failed.prompt is None
+    assert failed.activity == Said(START, "you", "one")      # the row still shows
 
-    monkeypatch.setattr(catalog_module, "records_back", real)
+    monkeypatch.setattr(catalog_module, "read_prompt", real)
     assert cat.details(only(cat)).prompt.text == "one"
-    assert (cat.tail_reads, cat.prompt_reads) == (2, 2)
+    assert (cat.tail_reads, cat.prompt_reads) == (1, 2)
 
 
 def test_an_unchanged_opencode_session_is_read_once_and_a_changed_one_again(roots):
@@ -923,7 +873,8 @@ def test_a_failed_last_turn_read_gives_nulls_and_is_tried_again(roots, monkeypat
 
     monkeypatch.setattr(catalog_module, "window", broken)
     failed = cat.details(only(cat))
-    assert failed == Details(folder="/work/proj-a", started=START)
+    assert failed == Details(folder="/work/proj-a", started=START,
+                             prompt=Said(START, "you", "one"))
 
     monkeypatch.setattr(catalog_module, "window", real)
     assert cat.details(only(cat)).activity.text == "one"

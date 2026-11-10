@@ -43,25 +43,48 @@ could not be listed has `subagents` None, not 0.
   unless its record says a program started it.
 * From the session's last turn (`window(entry, turns=1)`): `name`, `model` and
   `activity`.
-* From the whole session, read backward from its end (`records_back`) until one is met:
-  `prompt`, the newest message the record marks as typed by a person. A reply, a message
-  the record marks as injected and a message with no mark are none of them a prompt, so
-  a session that holds no marked message has `prompt` None. Only a Claude Code record
-  carries a mark sessions reads (`TYPED`): a Codex or an OpenCode session is not read
-  for one and has `prompt` None. Neither is a session a program started.
+* From the whole session (`read_prompt`): `prompt`, the last message in the file's
+  order that the record marks as typed by a person. A reply, a message the record marks
+  as injected and a message with no mark are none of them a prompt, so a session that
+  holds no marked message has `prompt` None. Only a Claude Code record carries a mark
+  sessions reads (`TYPED`): a Codex or an OpenCode session is not read for one and has
+  `prompt` None. Neither is a session a program started.
 
-A read that fails leaves None where it would have filled and is not kept, so the next call
-reads again.
+A read that fails leaves None where it would have filled and keeps nothing new, so the
+next call reads again.
+
+**The prompt's read.** The file, for this read, is its bytes up to its last newline: a
+last line still being written is not read until its newline is there. The first read of
+a file streams it from its start, whatever its size, and keeps a `Kept`: the file's
+device, inode, size and mtime as the opened file gave them, the offset just after the
+last complete line, the SHA-256 of the `WINDOW` bytes before that offset, and the
+prompt. After that:
+
+* A file whose device, inode, size and mtime are the kept ones is not read.
+* A file that changed is read from the kept offset when it is the same device and
+  inode, is at least as long as the offset, the offset is `WINDOW` or more, and the
+  `WINDOW` bytes before the offset still have the kept digest. The last typed message
+  among the new complete lines is the prompt; with none, the kept one stands.
+* Anything else is read from the start again: a file that shrank below the offset, one
+  written again or replaced so that those bytes differ, an offset under `WINDOW`.
+
+So the kept prompt is what reading the whole file gives, with two limits. A file written
+again with the same device, inode, size and mtime is not seen to have changed, as for the
+last-turn facts. And a change that keeps the file's length and touches only bytes before
+the `WINDOW` bytes ahead of the kept offset is not seen. The harness writes a record by
+adding lines at its end, which is neither.
 
 **What is kept.** A catalog keeps what it read for as long as it lives, in memory only:
 
-* The last-turn facts and the prompt of at most `TAIL_MAX` sessions, least recently
-  used dropped. No text among them is longer than a caller is sent: the newest thing
-  said is cut to `ACTIVITY_BYTES` bytes and the prompt to `TEXT_MAX`. A file's are
-  reused while its size and mtime are the ones they were read at, an OpenCode session's
-  while its `time_updated` is. So a session is read through for its prompt once for each
-  state of its file: an unchanged file is not read again, and a changed one is read
-  through again from its end.
+* The last-turn facts of at most `TAIL_MAX` sessions, least recently used dropped. A
+  file's are reused while its size and mtime are the ones they were read at, an OpenCode
+  session's while its `time_updated` is. The newest thing said is cut to
+  `ACTIVITY_BYTES` bytes.
+* The prompt's `Kept` of at most `TAIL_MAX` files, by path, least recently used dropped;
+  a dropped file is read from its start the next time. A kept prompt is cut to
+  `TEXT_MAX`, the most a caller is sent. A `Kept` is replaced whole, so its parts are
+  always of one read; a read that ends after a later one of the same file has been kept
+  does not replace it.
 * Each file's head facts, by path, device and inode. A head is read again when the file
   has grown and the earlier read left a fact open: one that ended at the file's end,
   where later lines can still add a folder, a start, an entrypoint or a name, or a Codex
@@ -79,6 +102,7 @@ One lock guards what is kept. It is never held while a file or a database is rea
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import time
@@ -93,7 +117,7 @@ from moxi.config import ConfigError
 from . import claude
 from .errors import Unreadable
 from .find import Listed, Listing, sources
-from .read import records_back, window
+from .read import window
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN, Marker, Message, Request
 from .view import TEXT_MAX
 from .source import (claude_header, claude_named_head, codex_head, codex_header,
@@ -107,6 +131,10 @@ TAIL_MAX = 5000
 
 #: The most bytes of a message `Details.activity` carries.
 ACTIVITY_BYTES = 300
+
+#: How many bytes before a kept offset are hashed, to tell that the file up to the
+#: offset is still the one that was read. A kept offset smaller than this is not used.
+WINDOW = 4096
 
 #: The harnesses whose record carries a mark sessions reads as "a person typed this
 #: message" (`Message.injected` is false on a user message). The others' sessions are
@@ -246,11 +274,11 @@ class Details:
     * `prompt`: the newest user message of the whole session that the record marks as
       typed by a person (`Message.injected` is false), with `who` `you`, its text cut to
       `TEXT_MAX` bytes with `truncated` set: the most a caller is sent of it, so no more
-      is kept. Nothing else is a prompt: not a reply, not a message the record marks as
+      is kept. Newest is last in the file's order, whatever the lines' times say.
+      Nothing else is a prompt: not a reply, not a message the record marks as
       injected, not one it leaves unmarked. None for a session that holds no such
       message; for a Codex or an OpenCode session, whose record carries no mark sessions
-      reads; for a session a program started; and for a file longer than the backward
-      read's limit whose part within the limit holds none.
+      reads; and for a session a program started.
     """
 
     folder: str | None = None
@@ -327,14 +355,13 @@ def read_head(listed: Listed, imports: Any = None) -> Head | None:
 @dataclass(frozen=True)
 class Tail:
     """What a session's last turn says, `name` (the newest `custom` title marker),
-    `model` and `activity`, and the whole session's `prompt`, each as in `Details`, read
-    for a session whose `by_program` was `program`."""
+    `model` and `activity`, each as in `Details`, read for a session whose `by_program`
+    was `program`."""
 
     program: bool | None = None
     name: str | None = None
     model: str | None = None
     activity: Said | None = None
-    prompt: Said | None = None
 
 
 def _spoken(record: Any) -> bool:
@@ -385,39 +412,134 @@ def _activity(records: Sequence[Any], program: bool | None) -> Said | None:
     return None
 
 
+def read_tail(listed: Listed, program: bool | None = None) -> Tail | None:
+    """The last-turn facts of a session whose `by_program` is `program`; None when the
+    read failed."""
+    try:
+        records = window(listed, turns=1).records
+    except (Unreadable, OSError, ValueError):
+        return None
+    return Tail(program=program,
+                name=_name(records) if listed.source.harness == CLAUDE else None,
+                model=_model(records), activity=_activity(records, program))
+
+
+# --- the prompt ------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Kept:
+    """What one read of a file for its prompt found, all of it as of that read.
+
+    * `dev`, `ino`, `size`, `mtime_ns`: the file, from the handle the read opened.
+    * `offset`: the byte just after the last complete line read. The bytes of the file
+      past its last newline are not read.
+    * `digest`: the SHA-256 of the `WINDOW` bytes before `offset`; None when `offset` is
+      smaller than `WINDOW`.
+    * `prompt`: the last typed message in the file up to `offset`, None when there is
+      none.
+    """
+
+    dev: int
+    ino: int
+    size: int
+    mtime_ns: int
+    offset: int
+    digest: bytes | None
+    prompt: Said | None
+
+    @property
+    def stamp(self) -> tuple[int, int, int, int]:
+        """What tells that the file is the one this read saw."""
+        return (self.dev, self.ino, self.size, self.mtime_ns)
+
+
+@dataclass(frozen=True)
+class PromptRead:
+    """One call of `read_prompt`: `kept`, what the file's prompt is now; `whole`,
+    whether the file was read from its start; `taken`, how many bytes of complete lines
+    were read through. A call that found the file as it was kept gives that `Kept`
+    itself, with `whole` false and `taken` 0."""
+
+    kept: Kept
+    whole: bool
+    taken: int
+
+
 def reads_prompt(harness: str, program: bool | None) -> bool:
     """Whether a session of `harness` whose `by_program` is `program` is read for a
     prompt: its record carries a typed mark, and no program started it."""
     return harness in TYPED and program is not True
 
 
-def read_prompt(listed: Listed) -> Said | None:
-    """The newest message of the whole session that its record marks as typed by a
-    person; None when it holds none. The session is read backward from its end, and the
-    read stops at the first such message. A file longer than the backward read's limit
-    is read that far: None when that part holds none. Raises Unreadable when the session
-    cannot be read."""
-    with records_back(listed, kinds="message") as back:
-        for record in back:
-            if _spoken(record) and record.role == "user" and record.injected is False:
-                text = cut(record.text, TEXT_MAX)
-                return Said(_time(record.time), YOU, text, text != record.text)
-    return None
-
-
-def read_tail(listed: Listed, program: bool | None = None) -> Tail | None:
-    """The last-turn facts and the prompt of a session whose `by_program` is `program`;
-    None when a read of it failed."""
-    try:
-        records = window(listed, turns=1).records
-        prompt = None
-        if reads_prompt(listed.source.harness, program):
-            prompt = read_prompt(listed)
-    except (Unreadable, OSError, ValueError):
+def _typed(raw: bytes, listed: Listed) -> Said | None:
+    """The message of one line that its record marks as typed by a person, else None."""
+    if not claude.may_be_typed(raw):
         return None
-    return Tail(program=program,
-                name=_name(records) if listed.source.harness == CLAUDE else None,
-                model=_model(records), activity=_activity(records, program), prompt=prompt)
+    source = listed.source
+    _request, records, _turn = claude.line_records(
+        raw, at={"line": None, "offset": None}, session_id=source.session_id,
+        agent_id=source.agent_id)
+    said = None
+    for record in records:
+        if _spoken(record) and record.role == "user" and record.injected is False:
+            text = cut(record.text, TEXT_MAX)
+            said = Said(_time(record.time), YOU, text, text != record.text)
+    return said
+
+
+def read_prompt(listed: Listed, kept: Kept | None = None) -> PromptRead:
+    """The prompt of a Claude Code transcript: the last message, in the file's order,
+    that its record marks as typed by a person, among the file's complete lines.
+
+    With no `kept`, the file is streamed from its start to its last newline, whatever
+    its size. With the `Kept` of an earlier read of the same path, the file is not read
+    when its device, inode, size and mtime are the kept ones, and is read from the kept
+    offset when it is the same device and inode, at least as long as the offset, the
+    offset is `WINDOW` or more, and the `WINDOW` bytes before the offset have the kept
+    digest: the kept prompt then stands unless a later line holds a typed message. In
+    every other case the file is read from its start.
+
+    The file's identity, its length and its bytes all come from the one handle opened
+    here, and the read stops at the length that handle gave, not at the listing's.
+    Raises Unreadable when the file cannot be opened or read, or ends before that
+    length; nothing is returned of a read that failed part-way."""
+    source = listed.source
+    try:
+        with open(source.path, "rb") as handle:
+            st = os.fstat(handle.fileno())
+            end = st.st_size
+            if kept is not None and kept.stamp == (st.st_dev, st.st_ino, end,
+                                                   st.st_mtime_ns):
+                return PromptRead(kept, False, 0)
+            offset, prompt, before = 0, None, b""
+            if (kept is not None and kept.offset >= WINDOW and kept.offset <= end
+                    and (kept.dev, kept.ino) == (st.st_dev, st.st_ino)):
+                handle.seek(kept.offset - WINDOW)
+                held = handle.read(WINDOW)
+                if (len(held) == WINDOW
+                        and hashlib.sha256(held).digest() == kept.digest):
+                    offset, prompt, before = kept.offset, kept.prompt, held
+            start = offset
+            handle.seek(start)
+            while offset < end:
+                line = handle.readline(end - offset)
+                if not line.endswith(b"\n"):
+                    if len(line) < end - offset:
+                        raise Unreadable(f"{source.path} ended before its size")
+                    break                        # the last line is still being written
+                offset += len(line)
+                # `before` stays the last `WINDOW` bytes ahead of `offset`, from the
+                # bytes this read took, so the digest is of the same moment as the rest.
+                before = (line if len(line) >= WINDOW else before + line)[-WINDOW:]
+                said = _typed(line, listed)
+                if said is not None:
+                    prompt = said
+    except OSError as exc:
+        raise Unreadable(
+            f"{source.path} cannot be read ({exc.strerror or exc})") from exc
+    digest = hashlib.sha256(before).digest() if offset >= WINDOW else None
+    return PromptRead(Kept(st.st_dev, st.st_ino, end, st.st_mtime_ns, offset, digest,
+                           prompt), start == 0, offset - start)
 
 
 # --- the entries -----------------------------------------------------------------------------
@@ -501,8 +623,11 @@ class Catalog:
     does not exist is a failure, as a configured one is. A page server keeps one
     catalog for its life (`shared()`); a test makes its own. `clock` is the time a
     gather's reuse is measured on. `head_reads` and `tail_reads` count the heads and the
-    last turns the catalog has read, failed reads included; `prompt_reads` counts the
-    sessions read through for a prompt, which is part of a last turn's read.
+    last turns the catalog has read, failed reads included. For the prompt,
+    `prompt_reads` counts the reads of a file that was not found as it was kept, failed
+    ones included; `prompt_whole` those of them that read the file from its start; and
+    `prompt_bytes` the bytes of complete lines they read through. `tail_max` bounds the
+    last-turn facts kept and, separately, the prompts' kept reads.
     """
 
     def __init__(self, roots: Mapping[str, str | Path] | None = None, *,
@@ -517,9 +642,12 @@ class Catalog:
         self._gathered: Gathered | None = None
         self._heads: dict[str, Head] = {}
         self._tails: OrderedDict[tuple[str, str], tuple[tuple, Tail]] = OrderedDict()
+        self._prompts: OrderedDict[str, Kept] = OrderedDict()
         self.head_reads = 0
         self.tail_reads = 0
         self.prompt_reads = 0
+        self.prompt_whole = 0
+        self.prompt_bytes = 0
 
     # -- one call at a time -------------------------------------------------------------
 
@@ -722,7 +850,6 @@ class Catalog:
         tail = read_tail(listed, program)
         with self._lock:
             self.tail_reads += 1
-            self.prompt_reads += reads_prompt(entry.harness, program)
             if tail is not None:
                 self._tails[key] = (stamp, tail)
                 self._tails.move_to_end(key)
@@ -730,16 +857,55 @@ class Catalog:
                     self._tails.popitem(last=False)
         return tail
 
+    def _prompt(self, entry: Entry, program: bool | None) -> Said | None:
+        """The entry's prompt: the kept one where the file is as it was kept, else what
+        a read now gives, which is then kept. None when the session is not read for one
+        or the read failed; a failed read leaves what was kept as it was."""
+        if not reads_prompt(entry.harness, program):
+            return None
+        listed, path = entry.listed, entry.path
+        with self._lock:
+            kept = self._prompts.get(path)
+            if kept is not None:
+                self._prompts.move_to_end(path)
+                if kept.stamp == (listed.dev, listed.ino, listed.size, listed.mtime_ns):
+                    return kept.prompt
+        try:
+            read = read_prompt(listed, kept)
+        except (Unreadable, OSError, ValueError):
+            with self._lock:
+                self.prompt_reads += 1
+            return None
+        found = read.kept
+        if found is kept:
+            return found.prompt                  # the file is as it was kept
+        with self._lock:
+            self.prompt_reads += 1
+            self.prompt_whole += read.whole
+            self.prompt_bytes += read.taken
+            now = self._prompts.get(path)
+            # A read of the same file that began after this one may have been kept
+            # meanwhile: it got further, and this one does not replace it.
+            if not (now is not None and now is not kept
+                    and (now.dev, now.ino) == (found.dev, found.ino)
+                    and now.offset > found.offset):
+                self._prompts[path] = found
+                self._prompts.move_to_end(path)
+                while len(self._prompts) > self._tail_max:
+                    self._prompts.popitem(last=False)
+        return found.prompt
+
     def details(self, entry: Entry) -> Details:
         """What a row shows of `entry`: its head facts, its last turn's and its prompt,
-        each read now unless a kept read stands. Never raises for a session that cannot be read: a
-        fact that was not read is None."""
+        each read now unless a kept read stands. Never raises for a session that cannot
+        be read: a fact that was not read is None."""
         head = self.head(entry) or Head()
         tail = self._tail(entry, head.by_program) or Tail()
         return Details(folder=head.folder, started=head.started,
                        by_program=head.by_program,
                        name=(tail.name or head.name) if entry.harness == CLAUDE else None,
-                       model=tail.model, activity=tail.activity, prompt=tail.prompt)
+                       model=tail.model, activity=tail.activity,
+                       prompt=self._prompt(entry, head.by_program))
 
 
 # --- the process's catalog ------------------------------------------------------------------
@@ -767,7 +933,7 @@ def reset() -> None:
         _shared = None
 
 
-__all__ = ["REUSE_S", "TAIL_MAX", "ACTIVITY_BYTES", "TYPED", "YOU", "AGENT",
-           "Entry", "Unread", "Gathered", "Head", "Said", "Details", "Tail",
-           "Catalog", "shared", "reset", "by_program", "cut", "row_head", "read_head",
-           "reads_prompt", "read_prompt", "read_tail"]
+__all__ = ["REUSE_S", "TAIL_MAX", "ACTIVITY_BYTES", "WINDOW", "TYPED", "YOU", "AGENT",
+           "Entry", "Unread", "Gathered", "Head", "Said", "Details", "Tail", "Kept",
+           "PromptRead", "Catalog", "shared", "reset", "by_program", "cut", "row_head",
+           "read_head", "reads_prompt", "read_prompt", "read_tail"]
