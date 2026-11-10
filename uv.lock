@@ -1304,7 +1304,7 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.7"
+version = "0.2.8"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
