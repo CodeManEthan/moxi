@@ -17,6 +17,13 @@ not a request, a stream or a busy hold, so it never delays the server's idle exi
 survives every exception: a failed gather is logged once per class and the next period
 gathers again.
 
+`names` and `session` read the clock records for their keys and ask sessions, which cache
+requires, in this process. `names` asks `session_facts` for every record's
+`(harness, session)`, at most `FACTS_MAX` keys a call, and answers one item per record in
+the records' order; `session` asks `session_opened` for the one session's model and sends
+nothing else of what it read. A raise in either is logged once per class: `names` then
+answers `state` `error` with no sessions, and `session` a null model.
+
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
 
@@ -28,9 +35,11 @@ import logging
 import math
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from moxi import modules
+from moxi_sessions import api as sessions
 
 from . import api, records
 from .page import READING, ROW
@@ -48,6 +57,10 @@ TOPIC = "clocks"
 KEYS = tuple(ROW.items)
 #: The keys of the reading, in the order `page.READING` declares them.
 READING_KEYS = tuple(READING.items)
+#: The most keys one call of sessions' `session_facts` takes.
+FACTS_MAX = 200
+#: The harnesses sessions names and opens; a record of any other is not asked about.
+SESSION_HARNESSES = ("claude", "codex", "opencode")
 
 log = logging.getLogger("moxi.cache.page")
 
@@ -55,10 +68,12 @@ _logged: set[type] = set()
 _logged_lock = threading.Lock()
 
 
-def _log_once(err: BaseException, what: str) -> None:
+def _log_once(err: BaseException, what: str, route: str | None = None) -> None:
+    # The clocks read and its poller share one set of classes; each other route has its own.
+    key = type(err) if route is None else (route, type(err))
     with _logged_lock:
-        first = type(err) not in _logged
-        _logged.add(type(err))
+        first = key not in _logged
+        _logged.add(key)
     if first:
         log.error("%s (%s)", what, type(err).__name__, exc_info=err)
 
@@ -165,4 +180,84 @@ def _feed() -> _Feed:
     return _current
 
 
-__all__ = ["KEYS", "PERIOD", "READING_KEYS", "TOPIC", "clocks", "events", "gather"]
+def _home() -> str | None:
+    """The account's home folder, or None when it cannot be found."""
+    try:
+        return str(Path.home())
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _when(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return float(value) if math.isfinite(value) else None
+    except OverflowError:
+        return None
+
+
+def _facts(keys: list[tuple[str, str]]) -> tuple[dict, set[str]]:
+    """What sessions names each key by, asked `FACTS_MAX` keys at a time, and the
+    harnesses whose root was not listed whole."""
+    found: dict[tuple[str, str], dict] = {}
+    unlisted: set[str] = set()
+    for start in range(0, len(keys), FACTS_MAX):
+        answer = sessions.session_facts(keys[start:start + FACTS_MAX])
+        for item in answer["sessions"]:
+            found[(item["harness"], item["session"])] = item
+        unlisted.update(root["harness"] for root in answer["roots"])
+    return found, unlisted
+
+
+def names(call: Any) -> dict[str, Any]:
+    """`GET /api/names`: one item per clock record, in the records' order, with what
+    sessions names it by. A failure is a 200 with `state` `error` and no sessions."""
+    today, home = _today(), _home()
+    try:
+        found = [(record["harness"], record["session"]) for record in api.clock_records()]
+        asked = [key for key in found if key[0] in SESSION_HARNESSES]
+        facts, unlisted = _facts(asked)
+    except Exception as err:
+        _log_once(err, "naming the sessions with a clock record failed", "names")
+        return {"state": "error", "today": today, "home": home, "sessions": []}
+    out = []
+    for harness, session in found:
+        item = facts.get((harness, session))
+        if item is not None:
+            known: bool | None = True
+        elif harness in SESSION_HARNESSES and harness not in unlisted:
+            known = False
+        else:
+            known = None
+        item = item or {}
+        out.append({"session": session, "harness": harness,
+                    "name": _text(item.get("name")), "folder": _text(item.get("folder")),
+                    "started": _when(item.get("started")), "known": known})
+    return {"state": "up", "today": today, "home": home, "sessions": out}
+
+
+def session(call: Any) -> dict[str, Any]:
+    """`GET /api/session?session=`: the model of the session with that clock record. Null
+    with no such record, a session sessions does not hold, and a raise."""
+    wanted = call.query["session"]
+    try:
+        harness = next((record["harness"] for record in api.clock_records()
+                        if record["session"] == wanted), None)
+        if harness not in SESSION_HARNESSES:
+            return {"model": None}
+        opened = sessions.session_opened(harness=harness, session=wanted)
+    except Exception as err:
+        _log_once(err, "reading the model of a session with a clock record failed",
+                  "session")
+        return {"model": None}
+    model = opened.get("model") if isinstance(opened, dict) else None
+    return {"model": model if isinstance(model, str) and model else None}
+
+
+__all__ = ["FACTS_MAX", "KEYS", "PERIOD", "READING_KEYS", "SESSION_HARNESSES", "TOPIC",
+           "clocks", "events", "gather", "names", "session"]

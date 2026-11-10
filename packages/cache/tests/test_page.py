@@ -136,7 +136,7 @@ def scope(path: str, query: bytes = b"") -> dict:
     }
 
 
-async def get(app, path: str) -> tuple[int, dict | None]:
+async def get(app, path: str, query: bytes = b"") -> tuple[int, dict | None]:
     sent = {"status": 0, "body": b""}
     asked = [False]
 
@@ -152,7 +152,7 @@ async def get(app, path: str) -> tuple[int, dict | None]:
         elif message["type"] == "http.response.body":
             sent["body"] += message.get("body", b"")
 
-    await app(scope(path), receive, send)
+    await app(scope(path, query), receive, send)
     return sent["status"], json.loads(sent["body"]) if sent["body"] else None
 
 
@@ -216,10 +216,13 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_two_reads_none_for_the_gateway():
+ROUTES = ["/api/clocks", "/api/events", "/api/names", "/api/session"]
+
+
+def test_the_page_declares_four_reads_none_for_the_gateway():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
-    assert list(routes) == ["/api/clocks", "/api/events"]
+    assert list(routes) == ROUTES
     assert all(r["kind"] == "read" and not r["gateway"] for r in routes.values())
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["clocks"]
     assert exported["budget"] == {"rss": "120M", "fds": 64}
@@ -228,7 +231,7 @@ def test_the_page_declares_two_reads_none_for_the_gateway():
 
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
-    assert [route["path"] for route in exported["routes"]] == ["/api/clocks", "/api/events"]
+    assert [route["path"] for route in exported["routes"]] == ROUTES
     assert exported["assets"] == ["build-stamp.txt", "chip.js", "page.js"]
 
 
@@ -652,3 +655,205 @@ def test_the_page_states_its_group_and_order_among_the_pages():
 
     page_decl = module.COMPONENTS["page"]
     assert (page_decl["group"], page_decl["order"]) == ("daily", 50)
+
+
+# --- /api/names and /api/session ------------------------------------------------------------
+
+C = "cccccccc-3333-4333-8333-333333333333"
+#: What the page server sends for a session sessions does not name.
+UNNAMED = {"name": None, "folder": None, "started": None}
+
+
+class StandIn:
+    """sessions as `pagehandlers` calls it, answering from what a test gives it and keeping
+    every call's keys."""
+
+    def __init__(self, facts=None, roots=(), opened=None, fails=None):
+        self.facts, self.roots, self.opened, self.fails = facts or {}, list(roots), opened, fails
+        self.calls: list[list[tuple[str, str]]] = []
+        self.asked: list[dict] = []
+
+    def session_facts(self, keys):
+        keys = list(keys)
+        self.calls.append(keys)
+        if self.fails is not None:
+            raise self.fails
+        return {"sessions": [{"harness": h, "session": s, **self.facts[(h, s)]}
+                             for h, s in keys if (h, s) in self.facts],
+                "roots": self.roots}
+
+    def session_opened(self, *, harness, session):
+        self.asked.append({"harness": harness, "session": session})
+        if self.fails is not None:
+            raise self.fails
+        return self.opened
+
+
+def stand_in(monkeypatch, **kw) -> StandIn:
+    found = StandIn(**kw)
+    monkeypatch.setattr(pagehandlers, "sessions", found)
+    return found
+
+
+def test_names_and_the_model_come_from_sessions_own_reads():
+    """Real transcripts read through sessions: a typed name, a session named by its head
+    alone, and a record sessions does not hold; then the opened row's model."""
+    from moxi_sessions.api import testing
+
+    projects = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects"
+    started = 1793354400.0
+    typed = testing.ClaudeTranscript(projects, session_id=A, cwd="/work/kestrel-web",
+                                     project="-work-kestrel-web", start=started)
+    typed.user("Do the thing.", origin="human")
+    typed.title("orders-skeleton")
+    typed.assistant("Done.", model="claude-model-a")
+    typed.write()
+    head = testing.ClaudeTranscript(projects, session_id=B, cwd="/work/orbit-cli",
+                                    project="-work-orbit-cli", start=started + 60)
+    head.user("Look at this.", origin="human")
+    head.assistant("Done.")
+    head.write()
+    for session in (A, B, C):
+        put(record(session))
+    status, body = run(get(served(), "/api/names"))
+    assert status == 200
+    assert (body["state"], body["today"], body["home"]) == ("up", TODAY, str(Path.home()))
+    assert body["sessions"] == [
+        {"session": A, "harness": "claude", "name": "orders-skeleton",
+         "folder": "/work/kestrel-web", "started": started, "known": True},
+        {"session": B, "harness": "claude", "name": None, "folder": "/work/orbit-cli",
+         "started": started + 60, "known": True},
+        {"session": C, "harness": "claude", **UNNAMED, "known": False},
+    ]
+    assert conforms(body, lb_table(page.NAMES))
+    assert run(get(served(), "/api/session", b"session=" + A.encode())) == (
+        200, {"model": "claude-model-a"})
+    # a record sessions does not hold, and a session with no record
+    assert run(get(served(), "/api/session", b"session=" + C.encode())) == (200, {"model": None})
+    assert run(get(served(), "/api/session", b"session=nothing-here")) == (200, {"model": None})
+
+
+def test_a_root_not_listed_whole_leaves_its_sessions_unknown(monkeypatch):
+    found = stand_in(monkeypatch,
+                     facts={("claude", A): {"name": "n", "folder": "/f", "started": 5}},
+                     roots=[{"harness": "claude", "root": "/x/projects", "reason": None}])
+    put(record(A))
+    put(record(B))
+    body = run(get(served(), "/api/names"))[1]
+    assert [item["known"] for item in body["sessions"]] == [True, None]
+    assert body["sessions"][1] == {"session": B, "harness": "claude", **UNNAMED, "known": None}
+    assert found.calls == [[("claude", A), ("claude", B)]]
+    assert "/x/projects" not in json.dumps(body)
+
+
+def test_a_harness_sessions_does_not_name_is_not_asked(monkeypatch):
+    found = stand_in(monkeypatch)
+    put(record(A, harness="other-harness"))
+    put(record(B))
+    body = run(get(served(), "/api/names"))[1]
+    assert [(item["harness"], item["known"]) for item in body["sessions"]] == [
+        ("other-harness", None), ("claude", False)]
+    assert found.calls == [[("claude", B)]]
+    assert run(get(served(), "/api/session", b"session=" + A.encode()))[1] == {"model": None}
+    assert found.asked == []
+
+
+def test_a_names_read_that_raises_is_up_to_the_page_as_error(monkeypatch, caplog):
+    stand_in(monkeypatch, fails=PermissionError(13, "Permission denied: '/x/y'"))
+    put(record(A))
+    with caplog.at_level(logging.ERROR, logger="moxi.cache.page"):
+        status, body = run(get(served(), "/api/names"))
+        again = run(get(served(), "/api/names"))[1]
+    assert status == 200 and again == body
+    assert body == {"state": "error", "today": TODAY, "home": str(Path.home()), "sessions": []}
+    assert "/x/y" not in json.dumps(body)
+    assert len([r for r in caplog.records if r.exc_info and r.exc_info[0] is PermissionError]) == 1
+    assert conforms(body, lb_table(page.NAMES))
+
+
+def test_a_failed_listing_of_the_records_names_nothing(monkeypatch):
+    def fail():
+        raise RuntimeError("at /x/y")
+
+    found = stand_in(monkeypatch)
+    monkeypatch.setattr(api, "clock_records", fail)
+    assert run(get(served(), "/api/names"))[1]["state"] == "error"
+    assert run(get(served(), "/api/session", b"session=" + A.encode()))[1] == {"model": None}
+    assert found.calls == [] and found.asked == []
+
+
+def test_names_asks_at_most_200_keys_a_call_and_keeps_the_records_order(monkeypatch):
+    sessions = [f"s{n:04d}" for n in range(401)]
+    facts = {("claude", s): {"name": f"name {s}", "folder": None, "started": None}
+             for s in sessions[::2]}
+    found = stand_in(monkeypatch, facts=facts)
+    for session in sessions:
+        put(record(session))
+    body = run(get(served(), "/api/names"))[1]
+    assert [len(keys) for keys in found.calls] == [200, 200, 1]
+    assert [key for keys in found.calls for key in keys] == [("claude", s) for s in sessions]
+    assert [item["session"] for item in body["sessions"]] == sessions
+    assert [item["known"] for item in body["sessions"][:4]] == [True, False, True, False]
+    assert body["sessions"][2]["name"] == "name s0002"
+    assert conforms(body, lb_table(page.NAMES))
+
+
+def test_names_carries_the_date_and_a_value_sessions_gives_that_is_not_its_type(monkeypatch):
+    stand_in(monkeypatch,
+             facts={("claude", A): {"name": 7, "folder": ["/f"], "started": float("inf")}})
+    put(record(A))
+    monkeypatch.setattr(pagehandlers, "_today", lambda: "2027-01-16")
+    body = run(get(served(), "/api/names"))[1]
+    assert body["today"] == "2027-01-16"
+    assert body["sessions"] == [{"session": A, "harness": "claude", **UNNAMED, "known": True}]
+
+
+def test_with_no_record_names_is_up_and_empty_and_asks_nothing(monkeypatch):
+    found = stand_in(monkeypatch)
+    assert run(get(served(), "/api/names"))[1] == {"state": "up", "today": TODAY,
+                                                   "home": str(Path.home()), "sessions": []}
+    assert found.calls == []
+
+
+def test_the_model_read_sends_the_model_alone(monkeypatch, caplog):
+    found = stand_in(monkeypatch, opened={"model": "claude-model-b", "reply": {"text": "secret"},
+                                          "subagents": [], "folder": "/x/y"})
+    put(record(A))
+    status, body = run(get(served(), "/api/session", b"session=" + A.encode()))
+    assert (status, body) == (200, {"model": "claude-model-b"})
+    assert found.asked == [{"harness": "claude", "session": A}]
+    for opened in (None, {"model": None}, {"model": ""}, {"model": 3}):
+        found.opened = opened
+        assert run(get(served(), "/api/session", b"session=" + A.encode()))[1] == {"model": None}
+    found.fails = OSError("at /x/y")
+    with caplog.at_level(logging.ERROR, logger="moxi.cache.page"):
+        assert run(get(served(), "/api/session", b"session=" + A.encode())) == (
+            200, {"model": None})
+        assert run(get(served(), "/api/session", b"session=" + A.encode()))[1] == {"model": None}
+    assert len([r for r in caplog.records if r.exc_info and r.exc_info[0] is OSError]) == 1
+    assert conforms(body, lb_table(page.SESSION))
+
+
+def test_the_model_read_needs_its_session():
+    assert run(get(served(), "/api/session"))[0] == 400
+    assert run(get(served(), "/api/session", b"session=" + b"x" * (page.ID_MAX + 1)))[0] == 400
+
+
+def marks(shape, path: str = "") -> dict[str, str]:
+    """Every mark in a declared shape, by where it sits: `sessions[].folder`."""
+    found = {path: shape.mark} if shape.mark else {}
+    if shape.type == "table":
+        for key, item in shape.items.items():
+            found.update(marks(item, f"{path}.{key}" if path else key))
+    elif shape.type == "list":
+        found.update(marks(shape.items, f"{path}[]"))
+    return found
+
+
+def test_the_names_mark_the_name_redact_and_each_folder_path():
+    assert marks(lb_table(page.NAMES)) == {
+        "home": "path", "sessions[].name": "redact", "sessions[].folder": "path"}
+    assert marks(lb_table(page.SESSION)) == {}
+    assert marks(lb_table({"now": None, **page.CLOCKS})) == {}
+    exported = {route["path"]: route for route in loopback().export(page.PAGE)["routes"]}
+    assert exported["/api/names"]["returns"]["home"]["mark"] == "path"

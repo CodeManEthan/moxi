@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.5 (unreleased)
+
+- The watcher writes its reading, `watch.json` beside the clock records, after every
+  tick: when it last ticked, when it last listed Claude Code's live sessions (null until
+  it has) and the records' `stale_after`. The file stays when the watcher stops.
+- `moxi cache doctor`'s watcher line leads with what the reading says: the watcher is
+  reading, running but not listing Claude's sessions since a time, or stopped at a time.
+  With no reading file the line is as before.
+- The page server's `/api/clocks` and its topic carry the watcher's reading and the
+  server's local date (`today`); the topic publishes when the date changes.
+- Two new reads on the page server, neither the gateway's. `GET /api/names` names every
+  session with a clock record, in the records' order, through sessions'
+  `session_facts`: its typed name, folder and start, and whether sessions holds it, with
+  the server's date and the account's home folder. `GET /api/session?session=` sends the
+  model of one session with a clock record, through sessions' `session_opened`, and
+  nothing else it read. A read that raises answers `error` or a null model, and is
+  logged once per class.
+- cache needs moxi-sessions 0.2.8 or later, for `session_facts`.
+
 ## 0.1.4 (2026-11-08)
 
 - Config keys `claude.ttl_seconds`, `watch.tick` and `segment.warn_before` are now
