@@ -36,6 +36,8 @@ The script's keys, each with its default:
 - `respawn`: as `start`, for `respawn`, which names its slot and reuses its run pane;
   `refused` raises `Refused` from `refused` (`live-pane`, `missing`, `held`).
 - `placed`: the slot a start that names none takes (1).
+- `start_wait_s`: the seconds `start` waits before it places anything (0), so a launch's
+  row stays `spawning` that long.
 - `exec`: `started`, `failed` or `unconfirmed`, with `exec_line` and `dead_status`
   (null while the pane lives).
 - `run`: true to really run the command, detached, with the env and cwd it was given; its
@@ -58,6 +60,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -369,6 +372,7 @@ def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) ->
     if how == "try-again":
         raise TryAgain("the slots lock was not had in 10 s")
     _raise(how, "new-window")
+    time.sleep(plan.get("start_wait_s", 0))
     number = slot if slot is not None else plan.get("placed", 1)
     pid = plan.get("pane_pid", 4343)
     if plan.get("run"):

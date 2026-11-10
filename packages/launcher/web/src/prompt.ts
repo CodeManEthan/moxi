@@ -17,18 +17,35 @@
 // lists side by side, the harness first; `older…` opens a field for a model's full name.
 // Another harness reads `/api/form` again for it and lets go of the model and the effort
 // set here, which are the first harness's own.
+//
+// The button names the act and where it runs: `Launch in slot 2`, `Launch in a new slot`,
+// `Copy command`, `Launch headless`. Its caret opens the choices `/api/targets` gives. The
+// choice starts at that read's default each time the piece is drawn. The listing is read
+// when the piece connects, when the menu opens, on every event of the topic `launches`,
+// when the tab is shown again, and before a press when the last read is over five seconds
+// old.
+//
+// A press sends the whole form to `/api/preview` and, with its ticket, to `/api/launch`,
+// as the launcher's panel does, then reads the 202's status path until the launch's row
+// has started or failed. The button is off from the press to the first end; every end
+// leaves a line under the box and gives the button back. A launch in the user's terminal
+// is never run here: its command is copied. The lines stay until the next press or an
+// edit of the box.
 
 import { css, html, LitElement, nothing } from "lit";
-import { api, components, place } from "/m/ui/client.js";
-import type { FieldDescriptor, FormValue } from "/m/ui/client.js";
+import { api, components, place, subscribe } from "/m/ui/client.js";
+import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
 
-import { fieldsFor, filledFields, formPath, NO_PRESET, parseCatalog, parseForm } from "./panel.ts";
+import {
+  fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
+} from "./panel.ts";
 import type { Catalog, Form } from "./panel.ts";
 import {
-  chipFace, chipMenu, hasEffort, openWhere, parsePlaces, pickValues, placed, placeRows, typedFolder, valueOf,
-  whereFace,
+  buttonWords, chipFace, chipMenu, copied, edited, followed, following, hasEffort, IDLE, inFlight, launched,
+  launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
+  runOf, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
-import type { ChipItem, Pick, Place, PlaceRow } from "./prompt-model.ts";
+import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
 
 const TAG = "moxi-launcher-prompt";
 /** The event projects' picker sends its host on a choice, with `{key}`. */
@@ -83,7 +100,23 @@ const STYLES = css`
   .left { display: flex; gap: 8px; align-items: center; min-width: 0; }
   .go { padding: 9px 16px; border: 0; border-radius: 7px; background: var(--moxi-accent);
         color: var(--moxi-on-accent); font: 600 14px/1 var(--moxi-font-sans); }
-  .go:disabled { cursor: default; opacity: 0.6; }
+  .go:disabled, .more:disabled { cursor: default; opacity: 0.6; }
+  .split { position: relative; display: inline-flex; flex: none; }
+  .split .anchor { position: static; display: inline-flex; margin-left: 1px; }
+  .split .go { border-radius: 7px 0 0 7px; white-space: nowrap; }
+  .more { padding: 9px 10px; border: 0; border-radius: 0 7px 7px 0; background: var(--moxi-accent);
+          color: var(--moxi-on-accent); font: 600 14px/1 var(--moxi-font-sans); }
+  .more span { position: relative; top: 1px; font-size: 15px; line-height: 0; }
+  .menu.run { left: auto; right: 0; width: 440px; max-width: calc(100vw - 49px); padding: 6px 0; }
+  .run .row { grid-template-columns: 20px 112px 1fr; }
+  .run .row .d { min-width: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .run .row.taken { color: var(--moxi-text-dim); cursor: default; }
+  .run .row.taken:hover { background: none; }
+  .run hr { margin: 6px 0; border: 0; border-top: 1px solid var(--moxi-border); }
+  .said { margin: 10px 2px 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+  .said p { margin: 0; }
+  .said .dim { color: var(--moxi-text-dim); }
+  .said code { display: block; margin-top: 4px; font: 13px/1.5 var(--moxi-font-mono); user-select: all; }
   :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
   textarea:focus-visible, .find:focus-visible { outline: 0; }
   [hidden] { display: none; }
@@ -93,6 +126,7 @@ const STYLES = css`
     textarea { min-height: 64px; }
     .boxrow { flex-wrap: wrap; justify-content: flex-end; row-gap: 10px; }
     .left { flex: 1 0 100%; }
+    .run .row { grid-template-columns: 20px 96px 1fr; }
   }
 `;
 
@@ -108,6 +142,10 @@ export class LauncherPrompt extends LitElement {
     fields: { state: true },
     chosen: { state: true },
     older: { state: true },
+    targets: { state: true },
+    picked: { state: true },
+    flight: { state: true },
+    unread: { state: true },
   };
 
   /** The box's text. */
@@ -115,8 +153,9 @@ export class LauncherPrompt extends LitElement {
   /** Where the launch starts; null until the places are read. */
   pick: Pick | null = null;
   places: Place[] = [];
-  /** The menu that is open: the line's (`where`), the chip's (`chip`), or none. */
-  menu: "" | "where" | "chip" = "";
+  /** The menu that is open: the line's (`where`), the chip's (`chip`), the button's
+   * (`run`), or none. */
+  menu: "" | "where" | "chip" | "run" = "";
   /** A typed folder path the menu did not take. */
   typed = "";
   /** The form's fields for the harness, filled from `/api/form`; empty until both are read. */
@@ -125,6 +164,24 @@ export class LauncherPrompt extends LitElement {
   chosen: Record<string, FormValue> = {};
   /** The field for a model's full name is open. */
   older = false;
+  /** Where a launch may run, as last read; null until the first read answers. */
+  targets: Targets | null = null;
+  /** The choice made in the button's menu; null is the listing's default. */
+  picked: Run | null = null;
+  /** The launch the button started, and the lines under the box. */
+  flight: Flight = IDLE;
+  /** Why the launch form could not be read, when it could not. */
+  unread = "";
+  /** When the listing was last read, by the page's clock. */
+  #targetsAt = 0;
+  #targetsAsked = 0;
+  /** Counts presses, so an answer for an earlier launch is dropped. */
+  #pressed = 0;
+  /** The box's text when the button was pressed. */
+  #sent = "";
+  #followTimer: ReturnType<typeof setInterval> | undefined;
+  #followSince = 0;
+  #stops: (() => void)[] = [];
   #catalog: Catalog | null = null;
   #form: Form | null = null;
   /** Counts `/api/form` reads, so only the latest one's answer is drawn. */
@@ -139,6 +196,10 @@ export class LauncherPrompt extends LitElement {
   #picker = document.createElement("div");
   #pickerPlaced = false;
   #opened = 0;
+
+  #shown = (): void => {
+    if (document.visibilityState === "visible") void this.#readTargets();
+  };
 
   #outside = (event: Event): void => {
     const open = this.renderRoot.querySelector(".anchor.open");
@@ -158,16 +219,25 @@ export class LauncherPrompt extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     document.addEventListener("pointerdown", this.#outside);
+    document.addEventListener("visibilitychange", this.#shown);
+    // Every launch through the launcher writes the log, and may take or free a slot.
+    this.#stops.push(subscribe("launcher", "launches", () => void this.#readTargets()));
     void this.#open();
     void this.#readCatalog();
     void this.#readForm("");
+    void this.#readTargets();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener("pointerdown", this.#outside);
+    document.removeEventListener("visibilitychange", this.#shown);
+    for (const stop of this.#stops.splice(0)) stop();
     this.#opened += 1;
     this.#asked += 1;
+    this.#targetsAsked += 1;
+    this.#pressed += 1;
+    this.#stopFollow();
   }
 
   protected firstUpdated(): void {
@@ -200,6 +270,7 @@ export class LauncherPrompt extends LitElement {
     const answer = await api("launcher", "api/catalog");
     if (mine !== this.#opened) return;
     this.#catalog = answer.status === 200 ? parseCatalog(answer.data) : null;
+    if (this.#catalog === null || this.#catalog.state === "error") this.unread = unreadWhy(answer, this.#catalog);
     this.#refill();
   }
 
@@ -210,7 +281,10 @@ export class LauncherPrompt extends LitElement {
     const answer = await api("launcher", formPath(NO_PRESET, harness));
     if (asked !== this.#asked) return;
     const form = answer.status === 200 ? parseForm(answer.data) : null;
-    if (form === null || form.state === "error") return;
+    if (form === null || form.state === "error") {
+      if (this.#form === null) this.unread = unreadWhy(answer, form);
+      return;
+    }
     if (this.#form !== null && form.harness !== this.#form.harness) this.chosen = {};
     this.#form = form;
     this.#refill();
@@ -218,6 +292,7 @@ export class LauncherPrompt extends LitElement {
 
   #refill(): void {
     if (this.#form === null) return;
+    if (this.#catalog !== null && this.#catalog.state === "up") this.unread = "";
     this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, NO_PRESET);
     // A brief the user's defaults give is shown in the box until he types his own.
     if (!this.#typed && this.brief === "") this.brief = valueOf(this.fields, {}, "brief");
@@ -313,12 +388,10 @@ export class LauncherPrompt extends LitElement {
       <div class="box">
         <textarea aria-label="What should the agent do?" placeholder="What should the agent do?"
           .value=${this.brief}
-          @input=${(event: Event) => {
-            this.#typed = true;
-            this.brief = (event.target as HTMLTextAreaElement).value;
-          }}></textarea>
+          @input=${(event: Event) => this.#edit((event.target as HTMLTextAreaElement).value)}></textarea>
         <div class="boxrow"><div class="left">${this.#chip()}</div>${this.#button()}</div>
       </div>
+      ${this.#said()}
     </div>`;
   }
 
@@ -386,10 +459,179 @@ export class LauncherPrompt extends LitElement {
     </div>`;
   }
 
-  /** The button's place, at the right of the box's last line. It starts nothing yet. */
-  #button() {
-    return html`<span class="split"><button type="button" class="go" disabled>Launch</button></span>`;
+  // --- the button, its menu and the launch ---------------------------------------------------
+
+  /** Reads where a launch may run. Only the latest read's answer is kept; one that fails
+   * reads as no slots. */
+  async #readTargets(): Promise<void> {
+    const asked = (this.#targetsAsked += 1);
+    const answer = await api("launcher", "api/targets");
+    if (asked !== this.#targetsAsked) return;
+    this.targets = parseTargets(answer.status === 200 ? answer.data : null);
+    this.#targetsAt = Date.now();
   }
+
+  #toggleRun(): void {
+    this.menu = this.menu === "run" ? "" : "run";
+    if (this.menu === "run") void this.#readTargets();
+  }
+
+  #pickRun(run: Run): void {
+    this.picked = run;
+    this.menu = "";
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".go")?.focus());
+  }
+
+  /** Whether the button can start a launch: a place, a form and a listing are there. */
+  get #able(): boolean {
+    return this.ready && this.fields.length > 0 && this.targets !== null;
+  }
+
+  /** The press: the preview, then the launch with its ticket or the command copied. */
+  async #press(): Promise<void> {
+    if (inFlight(this.flight) || !this.#able || this.targets === null) return;
+    const mine = (this.#pressed += 1);
+    this.#stopFollow();
+    // What the button says at the press is what is sent, whatever a later read says.
+    const shown = runOf(this.targets, this.picked);
+    const body = launchRequest(this.fields, this.#form, this.set, shown);
+    this.#sent = this.brief;
+    this.menu = "";
+    this.flight = PRESSED;
+    let said = shown;
+    if (Date.now() - this.#targetsAt > TARGETS_FRESH_MS) {
+      await this.#readTargets();
+      if (mine !== this.#pressed) return;
+      // A slot the launch does not ask for is named by the newest read.
+      const now = runOf(this.targets, this.picked);
+      if (shown.target === "slot" && !shown.named && now.target === "slot" && !now.named) said = now;
+    }
+    const answer = previewed(await api("launcher", "api/preview", body));
+    if (mine !== this.#pressed) return;
+    if (answer.next === "end") {
+      this.flight = answer.flight;
+      return;
+    }
+    if (answer.next === "copy") {
+      await this.#copy(mine, answer.command, answer.notes);
+      return;
+    }
+    const sent = launched(await api("launcher", "api/launch", { ...body, ticket: answer.ticket }), said,
+                          answer.notes);
+    if (mine !== this.#pressed) return;
+    if (sent.copy !== null) {
+      await this.#copy(mine, sent.copy, answer.notes);
+      return;
+    }
+    this.flight = sent.flight;
+    if (following(this.flight)) this.#follow(mine);
+  }
+
+  async #copy(mine: number, command: string, notes: Line[]): Promise<void> {
+    let done = true;
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      done = false;
+    }
+    if (mine === this.#pressed) this.flight = copied(command, done, notes);
+  }
+
+  /** Reads the launch's status path now and then on a timer, until it ends. */
+  #follow(mine: number): void {
+    this.#followSince = Date.now();
+    void this.#check(mine);
+    this.#followTimer = setInterval(() => {
+      if (Date.now() - this.#followSince > FOLLOW_FOR_MS) this.#landed(stopped(this.flight));
+      else void this.#check(mine);
+    }, FOLLOW_MS);
+  }
+
+  async #check(mine: number): Promise<void> {
+    const status = this.flight.status;
+    if (status === null || !following(this.flight)) return;
+    const answer = await api("launcher", status.path);
+    if (mine === this.#pressed) this.#landed(followed(this.flight, answer));
+  }
+
+  /** Takes the followed launch's next state. A launch that started empties the box, unless
+   * its text was changed since the press. */
+  #landed(next: Flight): void {
+    if (next === this.flight) return;
+    this.flight = next;
+    if (!following(next)) this.#stopFollow();
+    if (next.started && this.brief === this.#sent) {
+      this.brief = "";
+      this.#typed = true;
+    }
+  }
+
+  #stopFollow(): void {
+    clearInterval(this.#followTimer);
+    this.#followTimer = undefined;
+  }
+
+  /** An edit of the box. The lines of a launch that has ended go with it. */
+  #edit(text: string): void {
+    this.#typed = true;
+    this.brief = text;
+    const next = edited(this.flight);
+    if (next !== this.flight) {
+      this.flight = next;
+      this.#stopFollow();
+      this.#pressed += 1;
+    }
+  }
+
+  /** The split button at the right of the box's last line: the act, and a caret that opens
+   * where it runs. Until the listing is read it says `Launch` and is off. */
+  #button() {
+    const busy = inFlight(this.flight);
+    const run = this.targets === null ? null : runOf(this.targets, this.picked);
+    const open = this.menu === "run" && this.targets !== null && run !== null;
+    return html`<span class="split"><button type="button" class="go" data-target=${run?.target ?? nothing}
+        ?disabled=${busy || !this.#able} @click=${() => void this.#press()}>${
+        busy ? STARTING : run === null ? "Launch" : buttonWords(run)}</button><span
+      class=${open ? "anchor open" : "anchor"}><button type="button" class="more" aria-label="Where it runs"
+        aria-haspopup="true" aria-expanded=${open ? "true" : "false"} ?disabled=${busy || this.targets === null}
+        @click=${this.#toggleRun}><span aria-hidden="true">▾</span></button>${
+        open ? this.#runMenu(this.targets as Targets, run as Run) : nothing}</span></span>`;
+  }
+
+  #runMenu(targets: Targets, run: Run) {
+    const menu = runMenu(targets, run);
+    return html`<div class="menu run" data-menu="run">
+      ${menu.slots.map((row) => this.#runRow(row))}
+      ${menu.slots.length > 0 ? html`<hr>` : nothing}
+      ${menu.others.map((row) => this.#runRow(row))}
+    </div>`;
+  }
+
+  #runRow(row: RunRow) {
+    const inner = html`<span aria-hidden="true">${row.current ? "✓" : ""}</span><span>${row.lead}</span><span
+      class="d">${row.words}</span>`;
+    const pick = row.run;
+    if (pick === null) return html`<div class="row taken" data-run=${row.lead}>${inner}</div>`;
+    return html`<button type="button" class="row" data-run=${row.lead}
+      data-current=${row.current ? "true" : "false"} @click=${() => this.#pickRun(pick)}>${inner}</button>`;
+  }
+
+  /** The lines under the box: the launch's, or why the launch form can't be read. */
+  #said() {
+    const lines: Line[] = [...this.flight.lines, ...this.flight.notes];
+    return html`<div class="said" role="status">${
+      lines.length === 0 && this.unread !== ""
+        ? html`<p data-line="unread">The launch form can't be read: ${this.unread}.</p>` : nothing}${
+      lines.map((line) => html`<p class=${line.tone} data-line=${line.name}>${line.text}</p>${
+        line.command === undefined ? nothing : html`<code data-line="command">${line.command}</code>`}`)}</div>`;
+  }
+}
+
+/** Why a read of the launch form gave nothing to draw. */
+function unreadWhy(answer: ApiResult, read: { detail: string | null } | null): string {
+  if (answer.status === 0) return "no answer from the shell";
+  if (answer.status !== 200) return `the launcher's page server answered ${answer.status}`;
+  return read?.detail ?? "the launcher's page server sent something else";
 }
 
 if (!customElements.get(TAG)) customElements.define(TAG, LauncherPrompt);

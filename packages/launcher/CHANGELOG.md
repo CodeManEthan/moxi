@@ -4,8 +4,12 @@
 
 - The launcher offers a piece for Home's main spot in the browser UI shell: a box to say
   what the agent should do, the line above it that picks the project or folder the
-  session starts in, and a chip that picks the harness, the model and the effort. New
-  component `prompt` (`<moxi-launcher-prompt>`).
+  session starts in, a chip that picks the harness, the model and the effort, and a
+  button that starts the session. The button names where the launch runs (the lowest
+  free slot, a new slot, or the command to copy where no slot can be used) and its caret
+  opens the other choices; a launch from Home runs where the button says, whatever
+  `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
+  went. New component `prompt` (`<moxi-launcher-prompt>`).
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;

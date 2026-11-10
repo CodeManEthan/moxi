@@ -1231,6 +1231,21 @@ def test_a_start_records_the_slot_it_placed_in_the_script(rig, tmp_path):
               "meta": meta}}
 
 
+def test_a_start_told_to_wait_places_nothing_until_it_has(rig, tmp_path, monkeypatch):
+    waited = []
+
+    def wait(seconds):
+        waited.append(seconds)
+        assert "slots" not in json.loads((rig.dir / "script.json").read_text())
+
+    monkeypatch.setattr(fake.time, "sleep", wait)
+    rig.plan(start_wait_s=7)
+    fake.start(None, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
+               meta={"request_id": "r1"}, create=True)
+    assert waited == [7]
+    assert "1" in json.loads((rig.dir / "script.json").read_text())["slots"]
+
+
 def test_a_slot_one_process_started_in_reads_taken_in_another(rig, tmp_path):
     fake.start(3, ["true"], env={}, cwd=str(tmp_path), label="launcher:r1",
                meta={"request_id": "r1"})

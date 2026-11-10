@@ -10,11 +10,18 @@
 // a pick of it sets, the list of all projects and the first open. While it is false a
 // place is always a folder and nothing names a project.
 //
+// The button says where the launch runs and nothing else decides it: the request always
+// carries `target`, and `slot` only for a slot picked by its number. A launch in the slot
+// the button names by default sends no slot, so the launcher takes the lowest free one when
+// it starts, and a number that went stale between two reads can only mislabel the button.
+//
 // Every string here goes into the page as text.
 
 import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
 
-import { HARNESS, leaveOutChoice, shownValue } from "./panel.ts";
+import type { LaunchRow } from "./feed.ts";
+import { followedOf, HARNESS, launchBody, leaveOutChoice, NO_PRESET, outcomeOf, parsePreview, requestOf, shownValue } from "./panel.ts";
+import type { Form, LaunchBody, Preview, Status } from "./panel.ts";
 
 type Fields = Record<string, unknown>;
 
@@ -363,4 +370,347 @@ export function chipMenu(fields: readonly FieldDescriptor[], harness: string, mo
     typed: model !== "" && !models.includes(model) ? model : "",
     effort: hasEffort(fields) ? ["", ...choices(offered(fields, "effort"))].map((value) => item(value, effort)) : null,
   };
+}
+
+// --- where it runs -------------------------------------------------------------------------
+
+/** One slot of `/api/targets`. `taken` is what the session in it is called, when the launch
+ * log knows it; `holder` and `until` (seconds since the epoch) are a live hold's. */
+export interface Slot {
+  number: number;
+  state: string;
+  launchable: boolean;
+  holder: string | null;
+  until: number | null;
+  taken: string | null;
+}
+
+/** Where a launch runs: a slot (by number, or a new one with `slot` null), the user's own
+ * terminal, or the background. `named` says the user picked that slot by its number, so
+ * the launch asks for it; a slot that is only the default is not asked for. */
+export type Run =
+  | { target: "slot"; slot: number | null; named: boolean }
+  | { target: "terminal" }
+  | { target: "headless" };
+
+/** The value of `/api/targets`: the slots in number order, and the choice a launch starts
+ * with. */
+export interface Targets {
+  slots: Slot[];
+  default: Run;
+}
+
+/** What the button offers when the slots can't be used or read: no slot, and the command
+ * to copy as the choice. */
+export const NO_TARGETS: Targets = { slots: [], default: { target: "terminal" } };
+
+/** `/api/targets`' value. Anything that isn't one, or says the read failed, reads as no
+ * slots. The default is a slot only where the answer says a new one can be made. */
+export function parseTargets(data: unknown): Targets {
+  if (!isTable(data) || data.state !== "up" || !Array.isArray(data.slots)) return NO_TARGETS;
+  const slots: Slot[] = [];
+  for (const row of data.slots) {
+    if (!isTable(row) || typeof row.number !== "number" || !Number.isInteger(row.number)) continue;
+    slots.push({
+      number: row.number, state: typeof row.state === "string" ? row.state : "",
+      launchable: row.launchable === true,
+      holder: typeof row.holder === "string" && row.holder !== "" ? row.holder : null,
+      until: typeof row.until === "number" ? row.until : null,
+      taken: isTable(row.taken_by) && typeof row.taken_by.label === "string" ? row.taken_by.label : null,
+    });
+  }
+  slots.sort((a, b) => a.number - b.number);
+  const first = isTable(data.default) ? data.default : {};
+  if (first.target !== "slot" || data.new_slot !== true) return { slots, default: { target: "terminal" } };
+  const free = slots.find((slot) => slot.launchable && slot.number === first.slot);
+  return { slots, default: { target: "slot", slot: free ? free.number : null, named: false } };
+}
+
+function sameRun(a: Run, b: Run): boolean {
+  return a.target === b.target && (a.target !== "slot" || (b.target === "slot" && a.slot === b.slot));
+}
+
+/** Where the launch runs now: the user's pick while the listing still offers it, else the
+ * default. With no pick (null) it is always the default, so nothing carries over. */
+export function runOf(targets: Targets, picked: Run | null): Run {
+  if (picked === null) return targets.default;
+  if (picked.target !== "slot") return picked;
+  return targets.slots.some((slot) => slot.number === picked.slot && slot.launchable) ? picked : targets.default;
+}
+
+/** The button's words: the act and where it runs. */
+export function buttonWords(run: Run): string {
+  if (run.target === "terminal") return "Copy command";
+  if (run.target === "headless") return "Launch headless";
+  return run.slot === null ? "Launch in a new slot" : `Launch in slot ${run.slot}`;
+}
+
+/** One row of the button's menu. `run` is what a pick of it sets, null for a slot that
+ * can't be launched in now. */
+export interface RunRow {
+  lead: string;
+  words: string;
+  run: Run | null;
+  current: boolean;
+}
+
+/** The button's menu: the slots, then the choices that need none. */
+export interface RunMenu {
+  slots: RunRow[];
+  others: RunRow[];
+}
+
+/** What a slot's row says: `free`, `taken · <label>`, `held for <holder> until <time>` or
+ * `not running`. */
+export function slotWords(slot: Slot, hour: Clock = HOUR): string {
+  if (slot.state === "occupied") return slot.taken === null ? "taken" : `taken · ${slot.taken}`;
+  if (slot.state === "missing") return "not running";
+  if (slot.holder !== null) {
+    return `held for ${slot.holder}${slot.until === null ? "" : ` until ${hour(new Date(slot.until * 1000))}`}`;
+  }
+  return slot.launchable ? "free" : "not free";
+}
+
+/**
+ * The menu for the listing and the choice made now. Each slot in number order, clickable
+ * while it can be launched in. `A new slot` is offered only while no slot is free: a
+ * launch that names no slot takes the lowest free one, so with one free the row would
+ * not do what it says. Then the terminal and the background, which need no slot.
+ */
+export function runMenu(targets: Targets, run: Run, hour: Clock = HOUR): RunMenu {
+  const slots: RunRow[] = targets.slots.map((slot) => ({
+    lead: `Slot ${slot.number}`, words: slotWords(slot, hour),
+    run: slot.launchable ? { target: "slot", slot: slot.number, named: true } : null,
+    current: run.target === "slot" && run.slot === slot.number,
+  }));
+  if (targets.default.target === "slot" && targets.default.slot === null) {
+    slots.push({ lead: "A new slot", words: "", run: targets.default, current: sameRun(run, targets.default) });
+  }
+  return { slots, others: [
+    { lead: "Your terminal", words: "copies the command for you to paste", run: { target: "terminal" },
+      current: run.target === "terminal" },
+    { lead: "Headless", words: "no terminal, runs in the background", run: { target: "headless" },
+      current: run.target === "headless" },
+  ] };
+}
+
+/** How old a read of `/api/targets` may be when the button is pressed, in milliseconds. */
+export const TARGETS_FRESH_MS = 5000;
+
+// --- the request ---------------------------------------------------------------------------
+
+/** The rows the button sets, which no line under the box names. */
+export const PLACED = ["target", "slot"] as const;
+
+/**
+ * The launch as `/api/preview` and `/api/launch` take it: the whole form, as the launcher's
+ * panel sends its own, with where it runs set from `run` alone. `target` always has its
+ * value; `slot` has one only for a slot picked by its number, and is otherwise left out
+ * where the form has the row. A text `/api/form` withheld and the piece does not draw is
+ * kept as the layers give it, unless the box replaces it.
+ */
+export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
+                              set: Readonly<Record<string, FormValue>>, run: Run): LaunchBody {
+  const values = formValues(fields, set);
+  const slotted = "slot" in values;
+  for (const name of PLACED) delete values[name];
+  const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
+  const request = requestOf(fields, values, withheld, withheld);
+  request.values.target = run.target;
+  if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);
+  else if (slotted) request.leave_out.push("slot");
+  return launchBody(NO_PRESET, request, false);
+}
+
+// --- the launch, and the lines under the box -----------------------------------------------
+
+/** One line under the box. `name` says which line it is, for the page to mark it; `dim`
+ * is a note, `problem` what stopped the launch. `command` is a command drawn under the
+ * line for the user to copy by hand. */
+export interface Line {
+  name: "starting" | "started" | "failed" | "refused" | "used" | "late" | "stopped" | "copied" | "not-copied"
+    | "warning" | "left-out";
+  tone: "plain" | "dim" | "problem";
+  text: string;
+  command?: string;
+}
+
+/**
+ * A launch from the button, from the press to its end.
+ * - `idle`: nothing under way; the button is back, with the lines of the last launch.
+ * - `pressed`: the preview or the launch is being asked; the button is off.
+ * - `starting`: a job runs the launch and its row is followed; the button is off.
+ * - `late`: the row should have started by now; the button is back and the row is still
+ *   followed, so a later start or failure replaces the line.
+ */
+export interface Flight {
+  phase: "idle" | "pressed" | "starting" | "late";
+  lines: Line[];
+  /** The preview's notes, drawn dim under the lines. */
+  notes: Line[];
+  /** The status path followed while `starting` or `late`. */
+  status: Status | null;
+  /** The launch started, so the box is to be emptied. */
+  started: boolean;
+}
+
+export const IDLE: Flight = { phase: "idle", lines: [], notes: [], status: null, started: false };
+
+/** The press: the button goes off and the last launch's lines go. */
+export const PRESSED: Flight = { ...IDLE, phase: "pressed" };
+
+/** What the button shows while a launch is under way. */
+export const STARTING = "Starting…";
+
+/** Whether the button is off: from a press to the first end of its launch. */
+export function inFlight(flight: Flight): boolean {
+  return flight.phase === "pressed" || flight.phase === "starting";
+}
+
+/** Whether the launch's row is still read. */
+export function following(flight: Flight): boolean {
+  return flight.status !== null && (flight.phase === "starting" || flight.phase === "late");
+}
+
+function ended(lines: Line[], notes: Line[] = []): Flight {
+  return { ...IDLE, lines, notes };
+}
+
+function sentence(problem: string, hint: string): string {
+  const said = problem.replace(/[.\s]+$/, "");
+  return hint ? `${said}. ${hint}` : said;
+}
+
+/** What stopped a launch before it ran, in the launcher's words: `<problem>. <hint>`. */
+export function refusalWords(found: { problem: string; hint: string }): string {
+  return sentence(found.problem, found.hint);
+}
+
+export const FAILED = "The launch failed: ";
+
+function failed(reason: string, notes: Line[] = []): Flight {
+  return ended([{ name: "failed", tone: "problem", text: `${FAILED}${reason}` }], notes);
+}
+
+/** The preview's notes: each warning, and the rows the launch leaves out. The rows the
+ * button sets are never named, since the button already says where the launch runs. */
+export function notesOf(preview: Preview): Line[] {
+  const left = preview.left_out.filter((name) => !(PLACED as readonly string[]).includes(name));
+  return [
+    ...preview.warnings.map((text): Line => ({ name: "warning", tone: "dim", text })),
+    ...(left.length ? [{ name: "left-out", tone: "dim", text: `Left out: ${left.join(", ")}` } as Line] : []),
+  ];
+}
+
+/** What a preview's answer asks for next: the launch with its ticket, the command copied,
+ * or nothing, with the lines that say why. */
+export type Previewed =
+  | { next: "launch"; ticket: string; notes: Line[] }
+  | { next: "copy"; command: string; notes: Line[] }
+  | { next: "end"; flight: Flight };
+
+function unanswered(result: ApiResult): string {
+  if (result.status === 0) return "no answer from the shell";
+  const said = isTable(result.data) && typeof result.data.error === "string" ? `: ${result.data.error}` : "";
+  return `the launcher's page server answered ${result.status}${said}`;
+}
+
+/** Reads `/api/preview`'s answer. A refused preview ends the launch with each refusal. */
+export function previewed(result: ApiResult): Previewed {
+  const preview = result.status === 200 ? parsePreview(result.data) : null;
+  if (preview === null) return { next: "end", flight: failed(unanswered(result)) };
+  if (preview.refused.length > 0) {
+    return { next: "end",
+             flight: ended(preview.refused.map((found) => ({ name: "refused", tone: "problem", text: refusalWords(found) }))) };
+  }
+  const notes = notesOf(preview);
+  if (preview.command !== null) return { next: "copy", command: preview.command, notes };
+  if (preview.ticket !== null) return { next: "launch", ticket: preview.ticket, notes };
+  return { next: "end", flight: failed("the launcher's page server gave no ticket to launch with", notes) };
+}
+
+export const COPIED = "Copied. Paste it in your terminal.";
+export const NOT_COPIED = "The browser did not let this page copy. Copy the command from here and paste it in your terminal:";
+
+/** The end of a launch in the user's terminal: the command is copied, or shown to copy. */
+export function copied(command: string, done: boolean, notes: Line[]): Flight {
+  return ended([done ? { name: "copied", tone: "plain", text: COPIED }
+    : { name: "not-copied", tone: "plain", text: NOT_COPIED, command }], notes);
+}
+
+/** The line while a job starts the launch: the slot when the button named one. */
+export function startingWords(run: Run): string {
+  return run.target === "slot" && run.slot !== null ? `Starting in slot ${run.slot}…` : STARTING;
+}
+
+/**
+ * Reads `/api/launch`'s answer for a launch sent with `run`. 202 starts the follow. A
+ * refusal ends it with the refusal's words, a ticket used already with the answer's own
+ * text, and a terminal launch's answer with its command to copy (`copy`).
+ */
+export function launched(result: ApiResult, run: Run, notes: Line[]):
+    { flight: Flight; copy: string | null } {
+  const outcome = outcomeOf(result);
+  switch (outcome.kind) {
+    case "started":
+      return { copy: null, flight: { phase: "starting", lines: [{ name: "starting", tone: "plain", text: startingWords(run) }], notes,
+                                     status: outcome.status, started: false } };
+    case "refused":
+      if (outcome.command !== null) return { copy: outcome.command, flight: PRESSED };
+      return { copy: null, flight: ended([{ name: "refused", tone: "problem", text: refusalWords(outcome.refusal) }], notes) };
+    case "command":
+      return { copy: outcome.command, flight: PRESSED };
+    case "used":
+      return { copy: null, flight: ended([{ name: "used", tone: "problem", text: outcome.text }], notes) };
+    default:
+      return { copy: null, flight: failed(outcome.text, notes) };
+  }
+}
+
+/** The launch states that mean the session started. */
+export const LAUNCHED: readonly string[] = ["started", "ready", "sending", "first-sent"];
+
+export const LATE = "Not started yet, and it should have been by now. The Launcher page lists it.";
+export const STOPPED = "Stopped watching this launch. The Launcher page lists it.";
+
+/** `Started in slot 2 · 19:06`, or `Started headless · 19:06`, from what the row records. */
+export function startedWords(row: LaunchRow, hour: Clock = HOUR): string {
+  const then = new Date(row.created_at);
+  const at = Number.isNaN(then.getTime()) ? "" : ` · ${hour(then)}`;
+  const where = row.target === "slot" ? (row.slot ? ` in slot ${row.slot}` : " in a slot")
+    : row.target === "headless" ? " headless" : "";
+  return `Started${where}${at}`;
+}
+
+/**
+ * A followed launch after one read of its status path. A row that started ends the launch
+ * and empties the box; a failed row, or a refusal met before the row was written, ends it
+ * with the reason. A row that reads stale while it is still starting gives the button back
+ * and is followed on. No row yet, or a read that failed, changes nothing.
+ */
+export function followed(flight: Flight, result: ApiResult, hour: Clock = HOUR): Flight {
+  if (!following(flight)) return flight;
+  const read = followedOf(result);
+  if (read.kind === "refused") return failed(refusalWords(read.refusal), flight.notes);
+  if (read.kind !== "row") return flight;
+  const row = read.row;
+  if (LAUNCHED.includes(row.state)) {
+    return { ...ended([{ name: "started", tone: "plain", text: startedWords(row, hour) }], flight.notes), started: true };
+  }
+  if (row.state === "failed") return failed(row.reason || "the launcher gave no reason", flight.notes);
+  if (row.stale === true && flight.phase === "starting") {
+    return { ...flight, phase: "late", lines: [{ name: "late", tone: "plain", text: LATE }] };
+  }
+  return flight;
+}
+
+/** The end of the follow: the row never came, or never left its first state. */
+export function stopped(flight: Flight): Flight {
+  return following(flight) ? ended([{ name: "stopped", tone: "plain", text: STOPPED }], flight.notes) : flight;
+}
+
+/** An edit of the box: the lines of a launch that has ended go, and a late launch is no
+ * longer followed. The lines of a launch still starting stay. */
+export function edited(flight: Flight): Flight {
+  return inFlight(flight) ? flight : IDLE;
 }
