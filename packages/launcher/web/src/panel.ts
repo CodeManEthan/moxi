@@ -593,9 +593,9 @@ export function outcomeOf(result: ApiResult): Outcome {
 }
 
 /** Where a started launch or resume stands, read from its status path. `why` is the
- * sentence recorded for a failed row, null where none was. */
+ * sentence recorded for a failed row, null or absent where none was read. */
 export type Followed =
-  | { kind: "row"; row: LaunchRow; why: string | null }
+  | { kind: "row"; row: LaunchRow; why?: string | null }
   | { kind: "refused"; refusal: Refusal }
   | { kind: "waiting" }
   | { kind: "failed"; text: string };
