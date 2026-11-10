@@ -106,7 +106,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
         "rules", help="what a committer in a repo must know",
         description="Print the commit rules of the repo at PATH, or of the one you are in: "
                     "the trailers it refuses, the text its commit messages may not hold, "
-                    "and its own rule lines. A repo with none says so.", epilog=note)
+                    "its own rule lines, and last, where the commit-proof piece is "
+                    "registered, the Commit-Check line for what is staged in that work "
+                    "tree. A repo with none says so.", epilog=note)
     ru.add_argument("path", nargs="?", metavar="PATH")
 
     cm = verbs.add_parser(
