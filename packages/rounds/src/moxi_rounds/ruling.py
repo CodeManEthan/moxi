@@ -18,7 +18,7 @@ process (`PROCESS`) changes a record: a skip, a park, a withdrawal and the like.
 is a field of the event. A plain ruling, a sentence that rules no item, is of substance.
 
 **What it applies to.** A round's plain ruling applies to every stage of the round
-(`EVERY_STAGE`), or to the stages it names. A standing ruling may name a scope: repos, as
+(`EVERY_STAGE`), or to the stages it names, each a stage the round has. A standing ruling may name a scope: repos, as
 project keys, each with a path glob or without.
 
 **Forms.** What is ruled is a `Form`: the kind, the item, the form's own event fields and
@@ -203,7 +203,8 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
 
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject` or
     `NoFolder` for a project with no rounds folder, `NoRound` for a round that was never
-    opened, and `Refused` when a gate does not hold, the pointer's among them: an item
+    opened, and `Refused` when a gate does not hold, the pointer's among them: a stage named that
+    the round does not have, an item
     that names no question, a question already ruled or withdrawn, a key the
     question does not offer, a second ruling of a thing that does not name the first,
     a correction of a ruling that is of the other log, that the log does not hold,
@@ -311,8 +312,6 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
         return write.Entry("ruling.recorded", fields,
                            log=write.PROJECT if standing else write.ROUND)
 
-    # Whether a stage named here is a stage of the round is a gate for this list, once
-    # the round's state holds its stages.
     try:
         written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
                                gates=[has_a_pointer, *gates], event=recorded,
@@ -341,7 +340,17 @@ def _plain(asked: Asked) -> Form:
     fields: dict[str, object] = {"text": asked.text}
     if not asked.standing:
         fields["stages"] = EVERY_STAGE if asked.stages is None else list(asked.stages)
-    return Form(kind=SUBSTANCE, fields=fields)
+
+    def names_stages_of_the_round(view):
+        missing = questions.unrecorded(asked.stages, view.state)
+        if not missing:
+            return None
+        return Unmet(f"{', '.join(missing)} is not a stage of {asked.name}: "
+                     f"{questions.stages_said(view.state)}",
+                     f"moxi rounds rule {asked.name} --text TEXT --record PTR "
+                     "[--stages LIST]")
+
+    return Form(kind=SUBSTANCE, fields=fields, gates=(names_stages_of_the_round,))
 
 
 # -- the forms that rule a question ------------------------------------------------------

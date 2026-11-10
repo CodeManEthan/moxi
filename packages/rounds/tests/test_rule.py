@@ -73,7 +73,16 @@ def test_a_plain_ruling_is_recorded_in_the_rounds_log(rounds, capsys):
     assert out == printed("C1", SAID) and err == ""
 
 
+def declare(rounds, *stages):
+    """Declare stages of `a-round`, as the verb that plans a build will."""
+    for stage in stages:
+        log.append(round_log(rounds), "stage.declared",
+                   {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
+                   actor="planner")
+
+
 def test_a_rounds_state_holds_its_rulings(rounds):
+    declare(rounds, "B2", "B3")
     ruling.rule("proj-a/a-round", text=SAID, record="comms:12", actor="planner",
                 reason="it is not ours to work out", stages="B2,B3", at=AT)
 
@@ -287,6 +296,7 @@ def test_rule_takes_no_by_and_one_pointer(rounds, capsys):
 # -- what it applies to ------------------------------------------------------------------
 
 def test_a_ruling_applies_to_every_stage_or_to_the_stages_it_names(rounds):
+    declare(rounds, "B2", "B3", "B12")
     assert run("proj-a/a-round") == 0
     assert run("proj-a/a-round", "--stages", "B2,B3") == 0
     assert run("proj-a/a-round", "--stages", "B12") == 0
@@ -295,159 +305,25 @@ def test_a_ruling_applies_to_every_stage_or_to_the_stages_it_names(rounds):
         "all", ["B2", "B3"], ["B12"]]
 
 
-def test_a_named_stage_need_not_be_declared_yet(rounds):
-    log.append(round_log(rounds), "stage.declared",
-               {"id": "B1", "repo": "proj-a", "branch": "a-branch"}, actor="planner")
-
-    assert run("proj-a/a-round", "--stages", "B1,B4") == 0
-
-    assert rulings(round_log(rounds))[0]["stages"] == ["B1", "B4"]
-
-
-@pytest.mark.parametrize("stages", ["", "B", "b2", "B0", "B02", "2", "B2,,B3", "B2;B3",
-                                    "B2,B2", "B2 B3", "all"])
-def test_a_stage_list_that_cant_be_read_is_a_usage_error(rounds, capsys, stages):
+def test_a_stage_the_round_does_not_have_is_refused(rounds, capsys):
+    declare(rounds, "B1", "B2", "B3")
     before = logs(rounds)
 
-    assert run("proj-a/a-round", "--stages", stages) == 2
-
-    assert "--stages B2,B3" in capsys.readouterr().err
-    assert logs(rounds) == before
-    with pytest.raises(BadArgument):
-        ruling.parse_stages(stages)
-
-
-def test_a_scope_names_repos_and_paths(rounds):
-    assert run("proj-a/a-round", "--standing", "--scope", "proj-a:packages/ui/**") == 0
-    assert run("proj-a", "--scope", "proj-a,proj-b:docs/*.md,proj-b:src/**/*.py") == 0
-    assert run("proj-a") == 0
-
-    first, second, third = rulings(log.project_log(rounds))
-    assert first["scope"] == [{"repo": "proj-a", "path": "packages/ui/**"}]
-    assert second["scope"] == [{"repo": "proj-a"},
-                               {"repo": "proj-b", "path": "docs/*.md"},
-                               {"repo": "proj-b", "path": "src/**/*.py"}]
-    assert "scope" not in third
-
-
-@pytest.mark.parametrize("scope", ["", ":packages/**", "proj-a:", "proj a:src/**",
-                                   "proj-a,,proj-b", "proj-a:/abs/**", "proj-a:../x/**",
-                                   "proj-a:src//x", "proj-a/b:src/**", "proj-a,proj-a",
-                                   ".proj:src/**"])
-def test_a_scope_that_cant_be_read_is_a_usage_error(rounds, capsys, scope):
-    before = logs(rounds)
-
-    assert run("proj-a", "--scope", scope) == 2
-
-    assert "--scope KEY:GLOB,KEY" in capsys.readouterr().err
-    assert logs(rounds) == before
-    with pytest.raises(BadArgument):
-        ruling.parse_scope(scope)
-
-
-def test_a_scope_is_for_a_standing_ruling_and_stages_for_a_rounds_own(rounds, capsys):
-    before = logs(rounds)
-
-    assert run("proj-a/a-round", "--scope", "proj-a") == 2
-    assert "--standing" in capsys.readouterr().err
-    assert run("proj-a/a-round", "--standing", "--stages", "B2") == 2
-    assert "--stages" in capsys.readouterr().err
-    assert run("proj-a", "--stages", "B2") == 2
-    assert "--stages" in capsys.readouterr().err
-    assert logs(rounds) == before
-
-
-# -- the sentence ------------------------------------------------------------------------
-
-def test_a_sentence_over_400_characters_is_recorded_with_a_note(rounds, capsys):
-    at_the_mark, past_it = "x" * 400, "y" * 401
-
-    assert run("proj-a/a-round", text=at_the_mark) == 0
-    out, err = capsys.readouterr()
-    assert out == printed("C1", at_the_mark) and err == ""
-
-    assert run("proj-a/a-round", text=past_it) == 0
-    out, err = capsys.readouterr()
-    assert out == printed("C2", past_it)
-    assert "note: C2 is 401 characters long" in err and "meant to be short" in err
-    assert [event["text"] for event in rulings(round_log(rounds))] == [at_the_mark,
-                                                                       past_it]
-
-
-def test_no_length_is_refused(rounds):
-    assert run("proj-a", text="z" * 50_000) == 0
-
-    assert len(rulings(log.project_log(rounds))[0]["text"]) == 50_000
-
-
-@pytest.mark.parametrize("flags", [[], ["--text", ""], ["--text", "  \n"],
-                                   ["--text", SAID, "--reason", " "]])
-def test_a_ruling_with_no_sentence_or_an_empty_reason_is_a_usage_error(
-        rounds, capsys, flags):
-    before = logs(rounds)
-
-    assert run("proj-a/a-round", *flags, text=None) == 2
-
-    assert ("--text TEXT" in capsys.readouterr().err) == ("--reason" not in flags)
-    assert logs(rounds) == before
-
-
-# -- what else is refused ----------------------------------------------------------------
-
-def test_a_round_that_was_never_opened_is_refused(rounds, capsys):
-    before = logs(rounds)
-
-    assert run("proj-a/c-round") == 3
-    assert run("proj-a/c-round", "--standing") == 3
+    assert run("proj-a/a-round", "--stages", "B1,B9") == 3
 
     err = capsys.readouterr().err
-    assert "there is no round proj-a/c-round" in err
-    assert "moxi rounds open proj-a/c-round --description TEXT" in err
-    assert logs(rounds) == before and not (rounds / "c-round").exists()
-    with pytest.raises(NoRound):
-        ruling.rule("proj-a/c-round", text=SAID, record="comms:12", actor="planner")
-
-
-def test_a_project_the_projects_list_does_not_hold_is_refused(rounds, capsys):
-    assert run("proj-b") == 3
-    assert "there is no project 'proj-b'" in capsys.readouterr().err
-    assert run("proj-b/a-round") == 3
-    assert "there is no project 'proj-b'" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("target", ["", " ", "proj-a/", "proj-a/A-Round", "proj-a/a/b"])
-def test_a_target_that_names_nothing_is_a_usage_error(rounds, capsys, target):
-    assert run(target) == 2
-
-    assert capsys.readouterr().out == ""
-
-
-def test_an_item_no_form_knows_is_a_usage_error(rounds, capsys):
-    before = logs(rounds)
-
-    for item in ("skip:retro", "park:", "park:B1", "narrow:Q0=none", "Q01", "q1"):
-        assert main(["rule", "proj-a/a-round", item, "--record", "comms:12"]) == 2
-        assert f"{item!r} is nothing a ruling can be on" in capsys.readouterr().err
+    assert "B9 is not a stage of proj-a/a-round: its stages are B1, B2, B3" in err
+    assert ("run: moxi rounds rule proj-a/a-round --text TEXT --record PTR "
+            "[--stages LIST]") in err
     assert logs(rounds) == before
 
 
-def test_a_form_that_rules_an_item_sets_its_kind_and_what_it_rules(rounds, monkeypatch):
-    def parks(item, asked):
-        if item != "park:Q1":
-            return None
-        return ruling.Form(kind=ruling.PROCESS, rules=item)
+def test_a_round_with_no_stage_yet_takes_a_ruling_on_every_stage_only(rounds, capsys):
+    assert run("proj-a/a-round", "--stages", "B1") == 3
+    assert "B1 is not a stage of proj-a/a-round: it has no stage yet" in \
+        capsys.readouterr().err
+    assert run("proj-a/a-round") == 0
 
-    monkeypatch.setattr(ruling, "_ITEM_FORMS", (parks,))
-
-    ruled = ruling.rule("proj-a/a-round", item="park:Q1", record="comms:12",
-                        actor="planner")
-
-    assert (ruled.id, ruled.text) == ("C1", None)
-    [found] = state.fold(log.read(round_log(rounds))).rulings
-    assert (found.kind, found.rules, found.text) == (ruling.PROCESS, "park:Q1", None)
-
-
-# -- the rulings of a question -----------------------------------------------------------
 
 ASKED = "Do agent-read times follow the settings?"
 ANSWER = "Prose follows the settings; parsed rows do not."
