@@ -165,6 +165,15 @@ def _same(one, other) -> bool:
     return set(one) == set(other)
 
 
+def _taken_off(have, asked, known) -> tuple[str, ...]:
+    """The stages a block's entry takes off a hold: of the ones the hold `have` covers
+    among the stages `known` now, those the entry `asked` does not name."""
+    held = dict.fromkeys(known) if have == questions.ALL else (
+        () if isinstance(have, str) else have)
+    keeps = () if isinstance(asked, str) else asked
+    return tuple(one for one in held if one not in keeps)
+
+
 def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
     """What freezing `block` would do to the round whose log folded to `state`."""
     problems: list[Problem] = []
@@ -241,8 +250,10 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
                     wider = tuple(dict.fromkeys((*have.blocks, *asked.blocks)))
                     if set(wider) != set(have.blocks):
                         add("blocks", asked.id, list(wider))
-                pending.append(states.Pending(states.BLOCKS, asked.id,
-                                              blocks=asked.blocks))
+                pending.append(states.Pending(
+                    states.BLOCKS, asked.id, blocks=asked.blocks,
+                    gone=_taken_off(have.blocks, asked.blocks,
+                                    (*recorded, *(stage.id for stage in block.stages)))))
         if asked.options is not None:
             _options(asked, have, add, problems, refused)
     carried = {one.get("id") for version in state.versions

@@ -319,9 +319,9 @@ def test_what_a_block_takes_away_is_pending_and_changes_nothing(folder):
     frozen = fold()
 
     took = (state.Pending("after", "B3", gone=("B2",)), state.Pending("stage", "B2"),
-            state.Pending("blocks", "Q1", blocks=("B2",)),
-            state.Pending("blocks", "Q3", blocks=("B1",)),
-            state.Pending("blocks", "Q4", blocks="none"),
+            state.Pending("blocks", "Q1", gone=("B1",), blocks=("B2",)),
+            state.Pending("blocks", "Q3", gone=("B2", "B3"), blocks=("B1",)),
+            state.Pending("blocks", "Q4", gone=("B1",), blocks="none"),
             state.Pending("question", "Q2"))
     assert frozen.plan.pending == took
     assert frozen.plan.added == {}
@@ -332,9 +332,9 @@ def test_what_a_block_takes_away_is_pending_and_changes_nothing(folder):
     assert versions.pending_removals(after, 3) == ()
     assert last(folder)["pending"] == [
         {"what": "after", "id": "B3", "gone": ["B2"]}, {"what": "stage", "id": "B2"},
-        {"what": "blocks", "id": "Q1", "blocks": ["B2"]},
-        {"what": "blocks", "id": "Q3", "blocks": ["B1"]},
-        {"what": "blocks", "id": "Q4", "blocks": "none"},
+        {"what": "blocks", "id": "Q1", "gone": ["B1"], "blocks": ["B2"]},
+        {"what": "blocks", "id": "Q3", "gone": ["B2", "B3"], "blocks": ["B1"]},
+        {"what": "blocks", "id": "Q4", "gone": ["B1"], "blocks": "none"},
         {"what": "question", "id": "Q2"}]
     assert [one.id for one in holds.on_stage(after, "B1")] == ["Q1", "Q2", "Q3", "Q4"]
 
@@ -365,7 +365,8 @@ def test_a_hold_moved_from_one_stage_to_another_gains_the_new_and_keeps_the_old(
     frozen = fold()
 
     assert frozen.plan.added == {"blocks": {"Q1": ["B1", "B2"]}}
-    assert frozen.plan.pending == (state.Pending("blocks", "Q1", blocks=("B2",)),)
+    assert frozen.plan.pending == (
+        state.Pending("blocks", "Q1", gone=("B1",), blocks=("B2",)),)
     assert folded(folder).questions[0].blocks == ("B1", "B2")
 
 

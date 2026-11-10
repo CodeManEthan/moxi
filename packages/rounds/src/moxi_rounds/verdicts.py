@@ -21,9 +21,14 @@ The same file with other content, or a copy of it that was edited, is a new repo
 
 **What a publishable verdict applies.** What a version's block took away waits with
 that version. A verdict that finds the version publishable takes out of the record
-what of it still stands: a question still asked is withdrawn, a question holds up
-what the block says, a stage with no build leaves the plan, a stage waits for fewer.
-A stage whose build is open or finished stays, and the verdict names it. A verdict
+what of it still stands: a question still asked is withdrawn, a hold loses the
+stages the block took off it, a stage with no build leaves the plan, a stage waits
+for fewer. A stage whose build is open or finished stays, and the verdict names it.
+Only the stages the version took off a hold leave it, so a stage the hold gained
+since stays held. Where a later version is the current one, the verdict applies only
+what that version's block still makes: a question or a stage it declares again, a
+wait it has again and a hold it widened again are left, and the verdict names each
+with the reason. A verdict
 that sends the design back applies nothing: the pass that objects to a removal is not
 the thing that grants it.
 
@@ -39,7 +44,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import (brake, ending, folders, model_tiers, questions, report_block, stages,
@@ -78,16 +83,67 @@ def applies(state: states.State, n: int, *, name: str = "the round"
             ) -> tuple[tuple[states.Pending, ...], tuple[tuple[states.Pending, str], ...]]:
     """What a verdict that finds version `n` publishable takes out of the record as it
     is now, and what it leaves, each with the reason: of what the version took away
-    and still stands, everything but a stage that can't leave the plan."""
+    and still stands, everything but what the current version's block put back and a
+    stage that can't leave the plan."""
     applied, left = [], []
     for one in versions.outstanding(state, n):
-        why = (stages.cannot_leave(state, one.id, name=name)
-               if one.what == states.STAGE else None)
+        kept, back, why = _still_made(state, one, n)
+        if back is not None:
+            left.append((back, why))
+        if kept is None:
+            continue
+        why = (stages.cannot_leave(state, kept.id, name=name)
+               if kept.what == states.STAGE else None)
         if why is None:
-            applied.append(one)
+            applied.append(kept)
         else:
-            left.append((one, why))
+            left.append((kept, why))
     return tuple(applied), tuple(left)
+
+
+def _still_made(state: states.State, one: states.Pending, n: int
+                ) -> tuple[states.Pending | None, states.Pending | None, str]:
+    """`one`, which version `n` took away, as the part of it the current version's
+    block still makes, the part that block put back, and why that part is left. The
+    pass read version `n`: what the design has declared again since is not what it
+    found publishable."""
+    now = versions.current(state)
+    if now is None or now.n == n:
+        return one, None, ""
+    said = {kind: {entry.get("id"): entry for entry in now.declared.get(kind) or ()}
+            for kind in (states.QUESTION, states.STAGE)}
+    since = f"version {now.n} of the design"
+    stays = f"a pass that read version {n} does not take out what the design says now"
+    if one.what == states.QUESTION:
+        if one.id in said[states.QUESTION]:
+            return None, one, f"{since} asks {one.id} again, and {stays}"
+    elif one.what == states.STAGE:
+        if one.id in said[states.STAGE]:
+            return None, one, f"{since} plans {one.id} again, and {stays}"
+    elif one.what == states.AFTER:
+        waits = (said[states.STAGE].get(one.id) or {}).get("after") or ()
+        back = tuple(stage for stage in one.gone if stage in waits)
+        if back:
+            rest = tuple(stage for stage in one.gone if stage not in waits)
+            return (replace(one, gone=rest) if rest else None, replace(one, gone=back),
+                    f"{since} has {one.id} wait for {', '.join(back)} again, and "
+                    f"{stays}")
+    else:
+        asked = said[states.QUESTION].get(one.id)
+        then = next((entry for entry in
+                     versions.declarations(state, n).get(states.QUESTION) or ()
+                     if entry.get("id") == one.id), None)
+        if asked is not None and then is not None and not questions.holds_every(
+                _hold(then), _hold(asked)):
+            return None, one, (f"{since} has {one.id} hold up more than version {n} "
+                               f"did, and {stays}")
+    return one, None, ""
+
+
+def _hold(entry: dict) -> str | tuple[str, ...]:
+    """What a block's entry for a question says it holds up."""
+    blocks = entry.get("blocks", questions.ALL)
+    return blocks if isinstance(blocks, str) else tuple(blocks)
 
 
 def _entry(one: states.Pending) -> dict:

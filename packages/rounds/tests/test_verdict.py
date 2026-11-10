@@ -408,7 +408,7 @@ def test_a_publishable_verdict_applies_what_its_version_took_away(folder):
     assert done.event["applied"] == [
         {"what": "after", "id": "B3", "gone": ["B1"]},
         {"what": "stage", "id": "B4"},
-        {"what": "blocks", "id": "Q2", "blocks": ["B2"]},
+        {"what": "blocks", "id": "Q2", "gone": ["B1", "B3", "B4"], "blocks": ["B2"]},
         {"what": "question", "id": "Q1"}]
     assert done.event["not_applied"] == []
     after = folded(folder)
@@ -530,6 +530,135 @@ def test_a_verdict_for_an_earlier_version_applies_what_that_version_took_away(fo
     assert len(done.event["applied"]) == 4
     assert str(done.standing) == "none"
     assert versions.outstanding(folded(folder), 3) == ()
+
+
+def test_a_verdict_for_an_earlier_version_leaves_what_the_design_declares_again(
+        folder, capsys):
+    whole = (question("Q1"), question("Q2"), stage("B1"), stage("B2"))
+    fold(folder, *whole)
+    fold(folder, question("Q1"), stage("B1"))
+    fold(folder, *whole, prose="What the round builds, with both back.")
+
+    assert main(["verdict", ROUND, str(report(folder, design=2)), "--as", "critic"]) == 0
+
+    event = events(folder)[-1]
+    assert event["applied"] == []
+    assert event["not_applied"] == [
+        {"what": "stage", "id": "B2",
+         "why": "version 3 of the design plans B2 again, and a pass that read version "
+                "2 does not take out what the design says now"},
+        {"what": "question", "id": "Q2",
+         "why": "version 3 of the design asks Q2 again, and a pass that read version "
+                "2 does not take out what the design says now"}]
+    assert "not applied: the question Q2 is gone from the block: version 3" in (
+        capsys.readouterr().out)
+    after = folded(folder)
+    assert stages.state_of(after, "B2") == stages.PLANNED
+    assert questions.find(after, "Q2").state == questions.OPEN
+    # The design as it is can be frozen again, and a pass of it has nothing to undo.
+    fold(folder, *whole, prose="What the round builds, said once more.")
+    done = record(report(folder, design=4, pass_="re-check", name="again.md"))
+    assert str(done.standing) == "publishable@v4"
+    assert done.event["applied"] == [] and done.event["not_applied"] == []
+
+
+def test_a_verdict_for_an_earlier_version_leaves_a_wait_the_design_has_again(folder):
+    fold(folder, stage("B1"), stage("B2"), stage("B3", after='["B1", "B2"]'))
+    fold(folder, stage("B1"), stage("B2"), stage("B3"))
+    fold(folder, stage("B1"), stage("B2"), stage("B3", after='["B2"]'))
+
+    done = record(report(folder, design=2))
+
+    assert done.event["applied"] == [{"what": "after", "id": "B3", "gone": ["B1"]}]
+    [left] = done.event["not_applied"]
+    assert (left["what"], left["id"], left["gone"]) == ("after", "B3", ["B2"])
+    assert "version 3 of the design has B3 wait for B2 again" in left["why"]
+    assert stages.find(folded(folder), "B3").after == ("B2",)
+
+
+@pytest.mark.parametrize("now, applied", [
+    ('["B1"]', True),           # as narrow as the version the pass read
+    ('"none"', True),           # narrower still
+    ('["B1", "B3"]', False),    # another stage held: not as narrow
+    ('["B1", "B2"]', False)])   # the stage taken off is held again
+def test_a_verdict_for_an_earlier_version_narrows_a_hold_only_while_the_design_still_does(
+        folder, now, applied):
+    plan = (stage("B1"), stage("B2"), stage("B3"))
+    fold(folder, question("Q1", blocks='["B1", "B2"]'), *plan)
+    fold(folder, question("Q1", blocks='["B1"]'), *plan)
+    fold(folder, question("Q1", blocks=now), *plan, prose="What the round builds now.")
+
+    done = record(report(folder, design=2))
+
+    if applied:
+        assert done.event["applied"] == [
+            {"what": "blocks", "id": "Q1", "gone": ["B2"], "blocks": ["B1"]}]
+        assert done.event["not_applied"] == []
+        assert questions.find(folded(folder), "Q1").blocks == ("B1",)
+    else:
+        assert done.event["applied"] == []
+        [left] = done.event["not_applied"]
+        assert (left["what"], left["id"]) == ("blocks", "Q1")
+        assert "version 3 of the design has Q1 hold up more than version 2 did" in (
+            left["why"])
+        assert "B2" in questions.find(folded(folder), "Q1").blocks
+
+
+def test_a_verdict_leaves_a_question_gone_from_the_current_block_as_narrow(folder):
+    plan = (stage("B1"), stage("B2"))
+    fold(folder, question("Q1", blocks='["B1", "B2"]'), *plan)
+    fold(folder, question("Q1", blocks='["B1"]'), *plan)
+    fold(folder, *plan)
+
+    done = record(report(folder, design=2))
+
+    assert done.event["applied"] == [
+        {"what": "blocks", "id": "Q1", "gone": ["B2"], "blocks": ["B1"]}]
+    assert questions.find(folded(folder), "Q1").state == questions.OPEN
+
+
+def test_a_narrowing_takes_off_only_the_stages_its_version_took_off(folder, capsys):
+    plan = (stage("B1"), stage("B2"), stage("B3"))
+    fold(folder, question("Q1", blocks='["B1", "B2"]'), *plan)
+    frozen = fold(folder, question("Q1", blocks='["B1"]'), *plan)
+    assert frozen.plan.pending == (
+        state.Pending("blocks", "Q1", gone=("B2",), blocks=("B1",)),)
+    assert main(["mark", ROUND, "Q1", "--blocks", "B1,B2,B3"]) == 0
+
+    done = record(report(folder, design=2))
+
+    assert done.event["applied"] == [
+        {"what": "blocks", "id": "Q1", "gone": ["B2"], "blocks": ["B1", "B3"]}]
+    assert questions.find(folded(folder), "Q1").blocks == ("B1", "B3")
+    assert versions.outstanding(folded(folder), 2) == ()
+
+
+def test_a_narrowing_of_a_hold_on_every_stage_leaves_a_stage_the_round_gained_since(
+        folder):
+    fold(folder, question("Q1"), stage("B1"), stage("B2"))
+    frozen = fold(folder, question("Q1", blocks='["B1"]'), stage("B1"), stage("B2"))
+    assert frozen.plan.pending[0].gone == ("B2",)
+    fold(folder, question("Q1", blocks='["B1"]'), stage("B1"), stage("B2"), stage("B3"))
+
+    done = record(report(folder, design=2))
+
+    assert done.event["applied"] == [
+        {"what": "blocks", "id": "Q1", "gone": ["B2"], "blocks": ["B1", "B3"]}]
+    # The version that carries the new stage takes it off when a pass reads it.
+    again = record(report(folder, design=3, pass_="re-check", name="again.md"))
+    assert again.event["applied"] == [
+        {"what": "blocks", "id": "Q1", "gone": ["B3"], "blocks": ["B1"]}]
+
+
+def test_a_narrowing_to_no_stage_leaves_the_hold_at_none(folder):
+    fold(folder, question("Q1"), stage("B1"), stage("B2"))
+    fold(folder, question("Q1", blocks='"none"'), stage("B1"), stage("B2"))
+
+    done = record(report(folder, design=2))
+
+    assert done.event["applied"] == [
+        {"what": "blocks", "id": "Q1", "gone": ["B1", "B2"], "blocks": "none"}]
+    assert questions.find(folded(folder), "Q1").blocks == "none"
 
 
 def test_a_second_publishable_verdict_has_nothing_left_to_apply(folder):

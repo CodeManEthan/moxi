@@ -106,8 +106,9 @@ def pending_removals(state: states.State, n: int) -> tuple[states.Pending, ...]:
 def outstanding(state: states.State, n: int) -> tuple[states.Pending, ...]:
     """What version `n` took away that would still change the record as it is now: a
     question still asked, a stage still in the plan, the stages a stage still waits
-    for, and a hold that is still wider than the block's. The rest was applied
-    already, by a verdict or a ruling, or was overtaken (a question since ruled)."""
+    for, and the stages a hold still covers of the ones the block took off it,
+    with the hold that taking them off leaves. The rest was applied already, by a
+    verdict or a ruling, or was overtaken (a question since ruled)."""
     asked = (questions.OPEN, questions.PARKED)
     left = questions.left_stages(state) | questions.finished_stages(state)
     found = []
@@ -117,10 +118,10 @@ def outstanding(state: states.State, n: int) -> tuple[states.Pending, ...]:
             if question is not None and question.state in asked:
                 found.append(one)
         elif one.what == states.BLOCKS:
-            if (question is not None and question.state in asked
-                    and one.blocks is not None
-                    and not questions.holds_every(one.blocks, question.blocks)):
-                found.append(one)
+            if question is not None and question.state in asked:
+                narrowed = _narrowed(state, question.blocks, one.gone)
+                if narrowed is not None:
+                    found.append(replace(one, gone=narrowed[0], blocks=narrowed[1]))
         elif one.what == states.STAGE:
             if one.id in questions.recorded_stages(state) and one.id not in left:
                 found.append(one)
@@ -131,6 +132,21 @@ def outstanding(state: states.State, n: int) -> tuple[states.Pending, ...]:
             if still:
                 found.append(states.Pending(states.AFTER, one.id, gone=still))
     return tuple(found)
+
+
+def _narrowed(state: states.State, holds, gone: tuple[str, ...]
+              ) -> tuple[tuple[str, ...], str | tuple[str, ...]] | None:
+    """What taking the stages `gone` off the hold `holds` leaves: the ones of them it
+    still covers and the hold without them, or None when it would not change. Only
+    the stages named leave, so a stage the hold gained since stays held; a hold on
+    every stage becomes a list of the round's stages less the ones taken off."""
+    everything = holds == questions.ALL
+    held = (questions.recorded_stages(state) if everything
+            else () if isinstance(holds, str) or holds is None else holds)
+    still = tuple(one for one in gone if one in held)
+    if not still and not everything:
+        return None
+    return still, tuple(one for one in held if one not in gone) or questions.NONE
 
 
 # -- the standing ------------------------------------------------------------------------

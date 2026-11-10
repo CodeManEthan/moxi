@@ -62,8 +62,9 @@ TYPES = _types(
     # for, the model and author, the report file and its digest, and what its block
     # listed. A design report's verdict that finds its version publishable is also the
     # whole of what it applies: `applied` lists what that version's block took away
-    # and this event takes out of the record, each as the freezing held it, and
-    # `not_applied` the ones it leaves, each with `why`. `flags` are what is noted of
+    # and this event takes out of the record (for a hold, `gone` are the stages taken
+    # off it and `blocks` the hold that leaves), and `not_applied` the ones it leaves,
+    # each with `why`. `flags` are what is noted of
     # the report and refuses nothing.
     EventType("verdict.recorded",
               ("kind", "pass", "verdict", "design", "stage", "head", "merge_base", "step",

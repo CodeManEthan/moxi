@@ -238,7 +238,9 @@ class Pending:
     a verdict or a ruling applies it. `what` is `QUESTION` (the question `id` is gone
     from the block), `STAGE` (the stage is gone), `AFTER` (the stage waits for fewer:
     `gone` are the ones left out) or `BLOCKS` (the question holds up fewer: `blocks`
-    is what the block says it holds up)."""
+    is what the block says it holds up, `gone` the stages that takes off the hold as
+    it was then). In what a verdict applied, a `BLOCKS` entry's `blocks` is the hold
+    it left: the hold as it was, less `gone`."""
 
     what: str
     id: str
