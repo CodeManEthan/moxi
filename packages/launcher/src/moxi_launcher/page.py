@@ -87,6 +87,12 @@ REFUSAL = _table(code=_text(), row=_text(nullable=True), problem=_text(), hint=_
 #: One catalog row as the UI shell's form reads it. `default` and `value_items` are the
 #: shipped default spelled as the command line spells it; `flag` is the launcher's option.
 #: A row this install doesn't offer is `needs_absent`, with `note` saying why.
+#: `group`, `sub` and `label` say where the launch options draw the row and what they call
+#: it; `danger` lists its values that can hurt; `carry` is false for a row never filled
+#: from an earlier launch; `modes` names the commands the row composes into, none for a
+#: launcher row. `shown` is false for a row to leave undrawn here: one this install
+#: doesn't offer, or one drawn only with a module that is absent. `typed` is false for a
+#: row that takes only its listed values here, the module its typed values need absent.
 FIELD = _table(
     name=_text(), type=_text(), doc=_text(),
     default=_text(nullable=True),
@@ -100,6 +106,9 @@ FIELD = _table(
     requires=_text(nullable=True),
     needs_absent=Out("bool"),
     note=_text(nullable=True),
+    group=_text(nullable=True), sub=_text(nullable=True), label=_text(),
+    danger=_texts(), carry=Out("bool"), modes=_texts(),
+    shown=Out("bool"), typed=Out("bool"),
 )
 
 CATALOG = {**STANDING,

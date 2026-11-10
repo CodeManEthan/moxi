@@ -230,7 +230,8 @@ def _offered_values(row: catalog.Row, available: Callable[[str], bool],
 
 
 def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> dict[str, Any]:
-    """One catalog row as the UI shell's form reads it, for a `harness` launch."""
+    """One catalog row as the UI shell's form reads it, for a `harness` launch. A row
+    whose catalog entry has no `label` is called by its name, the underscores as spaces."""
     why = row.unoffered(available, harness)
     values, notes = _offered_values(row, available, harness)
     default, items = _value_of(row, row.default)
@@ -245,6 +246,11 @@ def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> d
         "requires": row.requires if isinstance(row.requires, str) else None,
         "needs_absent": why is not None,
         "note": why[0] if why is not None else ("; ".join(notes) or None),
+        "group": row.group, "sub": row.sub,
+        "label": row.label or row.name.replace("_", " ").capitalize(),
+        "danger": list(row.danger), "carry": row.carry, "modes": list(row.modes),
+        "shown": why is None and all(available(module) for module in row.shown_with),
+        "typed": row.typed_with is None or available(row.typed_with),
     }
 
 
