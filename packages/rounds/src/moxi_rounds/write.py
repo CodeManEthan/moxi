@@ -239,7 +239,10 @@ def _read(where: Where, facts: Callable[[Where], object] | None, *, opens: bool)
         round_events = []
     else:
         try:
-            round_events = log.read(where.round_log)
+            # The verb that opens a round reads whatever is there, and its own gate
+            # refuses a folder that holds a log; every other verb reads a round.
+            read = log.read if opens else log.read_round
+            round_events = read(where.round_log)
         except NoLog:
             if not opens:
                 raise

@@ -315,3 +315,38 @@ def test_bytes_already_read_parse_to_the_events_a_read_of_the_file_gives(tmp_pat
     with pytest.raises(Unreadable) as caught:
         log.parse(path, data[:-1])
     assert (caught.value.file, caught.value.line) == (path, 2)
+
+
+# -- a round's log starts with its opening -----------------------------------------------
+
+def test_a_rounds_log_that_starts_with_its_opening_is_read_as_any_log(path):
+    log.append(path, "round.opened", {"description": "a placeholder round",
+                                      "flow": "fix", "steps": []}, actor="planner")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, actor="pilot")
+
+    assert log.read_round(path) == log.read(path)
+    assert log.parse_round(path, path.read_bytes()) == log.read(path)
+
+
+def test_an_empty_rounds_log_is_unreadable_and_an_empty_log_of_another_kind_is_not(path):
+    path.write_bytes(b"")
+
+    assert log.read(path) == []
+    with pytest.raises(Unreadable) as caught:
+        log.read_round(path)
+    assert (caught.value.file, caught.value.line) == (path, 1)
+    assert "is empty" in caught.value.reason and "remove the file" in caught.value.fix
+
+
+def test_a_rounds_log_that_starts_with_another_event_is_unreadable(path):
+    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, actor="pilot")
+
+    with pytest.raises(Unreadable) as caught:
+        log.read_round(path)
+    assert (caught.value.file, caught.value.line) == (path, 1)
+    assert "finish.done" in caught.value.reason and "round.opened" in caught.value.reason
+
+
+def test_a_rounds_log_that_is_not_there_is_no_log(path):
+    with pytest.raises(NoLog):
+        log.read_round(path)

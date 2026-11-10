@@ -174,7 +174,7 @@ def is_closed(name: str, settings=None) -> bool:
     try:
         project, slug = folders.split(name)
         home = folders.home(project, settings)
-        events = log.read(log.round_log(home.round_folder(slug)))
+        events = log.read_round(log.round_log(home.round_folder(slug)))
     except RoundsError:
         return False
     return any(event["type"] == "round.closed" for event in events)

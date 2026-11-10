@@ -220,6 +220,44 @@ def test_a_round_that_cant_be_read_is_listed_as_unreadable(rounds, capsys):
     assert [one["name"] for one in data(capsys, "--closed")["rounds"]] == [A]
 
 
+#: What a round's log may hold in place of the event that opened it: nothing, and an
+#: event of another kind.
+NOT_OPENED = [b"", b'{"v":1,"n":1,"at":"2026-01-02T03:04:05Z","actor":"pilot",'
+                   b'"type":"finish.done","stage":"B1","tip":"' + b"1" * 40 + b'"}\n']
+
+
+def unopened(rounds, content, slug="c-round"):
+    """A round's folder whose log holds `content` and opened no round. Returns the
+    log."""
+    (rounds / slug).mkdir(parents=True)
+    file = log.round_log(rounds / slug)
+    file.write_bytes(content)
+    return file
+
+
+@pytest.mark.parametrize("content", NOT_OPENED)
+def test_a_log_that_opened_no_round_is_listed_as_unreadable_and_not_as_a_round(
+        rounds, capsys, content):
+    ask("proj-a")
+    file = unopened(rounds, content)
+    name = "proj-a/c-round"
+
+    for flags in ([], ["--closed"]):
+        lines = [line for line in printed(capsys, *flags).splitlines()
+                 if line.startswith(name)]
+        assert len(lines) == 1 and lines[0].startswith(
+            f"{name}   unreadable: {file} line 1 ")
+        row = next(one for one in data(capsys, *flags)["rounds"] if one["name"] == name)
+        assert set(row) == {"name", "project", "folder", "unreadable"}
+        assert "remove the file" in row["unreadable"]["fix"]
+    assert any(str(file) in line for line in data(capsys, "--waiting")["unreadable"])
+    assert any(str(file) in line
+               for line in data(capsys, "proj-a", "--questions")["unreadable"])
+    assert main(["list", name, "--questions"]) == 3
+    captured = capsys.readouterr()
+    assert captured.out == "" and f"{file} line 1 " in captured.err
+
+
 def test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known(
         rounds, capsys):
     ask()

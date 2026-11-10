@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 5
+DERIVED = 6
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -313,7 +313,9 @@ def _derive(project: str, slug: str, path: Path,
     read as a log."""
     digest = hashlib.sha256(data).hexdigest()
     try:
-        folded = state.fold(log.parse(path, data))
+        # A round's log is read as a round's: one that opens no round is unreadable.
+        parse = log.parse if slug == _PROJECT else log.parse_round
+        folded = state.fold(parse(path, data))
     except Unreadable as error:
         return _Row(project, slug, str(path), len(data), digest, readable=False), error
     items = tuple(Item(kind, item_id, _plain(body))

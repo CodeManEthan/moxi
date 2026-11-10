@@ -323,6 +323,26 @@ def test_a_projects_own_log_is_read_like_a_rounds(home, monkeypatch):
 
 # -- a log that can't be read ------------------------------------------------------------
 
+@pytest.mark.parametrize("content", [b"", b'{"v":1,"n":1,"at":"2026-01-02T03:04:05Z",'
+                                          b'"actor":"pilot","type":"repair"}\n'])
+def test_a_log_that_opened_no_round_is_unreadable_and_no_round_with_no_status(
+        home, content):
+    home.round_folder("a-round").mkdir(parents=True)
+    file = log.round_log(home.round_folder("a-round"))
+    file.write_bytes(content)
+
+    for found in (index.read("proj-a", home.folder, "a-round"),
+                  index.refresh("proj-a", home.folder, "a-round"),
+                  index.read("proj-a", home.folder, "a-round"),
+                  index.rounds("proj-a", home.folder)[0]):
+        assert isinstance(found.unreadable, Unreadable)
+        assert (found.unreadable.file, found.unreadable.line) == (file, 1)
+    assert [row[5] for row in rows()["logs"]] == [0]
+    # A project's own log opens no round, and is read as it always was.
+    log.project_log(home.folder).write_bytes(content)
+    assert index.read("proj-a", home.folder).unreadable is None
+
+
 def test_an_unreadable_log_is_shown_as_unreadable_and_not_as_an_empty_round(home):
     at = open_round(home)
     with at.round_log.open("ab") as file:

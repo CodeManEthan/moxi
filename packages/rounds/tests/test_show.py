@@ -321,6 +321,51 @@ def test_a_round_that_cant_be_read_is_shown_as_unreadable_with_file_and_line(
     assert found["unreadable"]["reason"] and found["unreadable"]["fix"]
 
 
+#: What a round's log may hold in place of the event that opened it: nothing, and an
+#: event of another kind.
+NOT_OPENED = [b"", b'{"v":1,"n":1,"at":"2026-01-02T03:04:05Z","actor":"pilot",'
+                   b'"type":"finish.done","stage":"B1","tip":"' + b"1" * 40 + b'"}\n']
+
+
+def unopened(rounds, content, slug="c-round"):
+    """A round's folder whose log holds `content` and opened no round. Returns the
+    log."""
+    (rounds / slug).mkdir(parents=True)
+    file = log.round_log(rounds / slug)
+    file.write_bytes(content)
+    return file
+
+
+@pytest.mark.parametrize("content", NOT_OPENED)
+def test_a_log_that_opened_no_round_is_shown_as_unreadable_and_not_as_a_round(
+        rounds, capsys, content):
+    file = unopened(rounds, content)
+    name = "proj-a/c-round"
+
+    out = printed(capsys, name)
+    assert out.startswith(f"round {name}   unreadable\nfolder: {rounds / 'c-round'}\n"
+                          f"{file} line 1 ")
+    assert "None" not in out and "description" not in out
+    assert "remove the file" in out and "restore this file" in out
+    found = data(capsys, name)
+    assert set(found) == {"name", "project", "slug", "folder", "notice", "unreadable"}
+    assert (found["unreadable"]["file"], found["unreadable"]["line"]) == (str(file), 1)
+
+
+@pytest.mark.parametrize("content", NOT_OPENED)
+def test_no_verb_writes_to_a_log_that_opened_no_round(rounds, capsys, content):
+    file = unopened(rounds, content)
+
+    assert main(["ask", "proj-a/c-round", SAID, "--from", "comms:11",
+                 "--as", "scout"]) == 3
+    assert f"{file} line 1 " in capsys.readouterr().err
+    assert main(["open", "proj-a/c-round", "--description", "a placeholder round",
+                 "--as", "planner"]) == 3
+    assert "already there" in capsys.readouterr().err
+    assert file.read_bytes() == content
+    assert sorted(path.name for path in file.parent.iterdir()) == ["round.jsonl"]
+
+
 def test_a_round_whose_numbers_skip_one_is_shown_as_unreadable(rounds, capsys):
     file = log.round_log(rounds / "a-round")
     first = file.read_bytes()

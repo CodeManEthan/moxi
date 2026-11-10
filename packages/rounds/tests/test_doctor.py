@@ -260,6 +260,18 @@ def test_every_log_that_cant_be_read_has_a_row_of_its_own(rounds):
     assert found[f"log {A}"].state == found[f"log {B}"].state == "fail"
 
 
+@pytest.mark.parametrize("content", [b"", b'{"v":1,"n":1,"at":"2026-01-02T03:04:05Z",'
+                                          b'"actor":"pilot","type":"repair"}\n'])
+def test_a_log_that_opened_no_round_has_a_failing_row_with_the_way_out(rounds, content):
+    (rounds / "c-round").mkdir()
+    file = log.round_log(rounds / "c-round")
+    file.write_bytes(content)
+
+    row = by_name()["log proj-a/c-round"]
+    assert row.state == "fail" and row.detail.startswith(f"{file} line 1 ")
+    assert "remove the file" in row.fix and "restore this file" in row.fix
+
+
 def test_a_log_is_named_the_same_with_no_index(rounds):
     spoil(log.round_log(rounds / "a-round"))
     with_index = by_name()[f"log {A}"]

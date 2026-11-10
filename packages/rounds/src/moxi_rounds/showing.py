@@ -92,7 +92,7 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
         if summary.unreadable is not None:
             return Shown(**found, unreadable=summary.unreadable)
         # The whole state is the log's; the index answers only the summary of it.
-        state = states.fold(log.read(log.round_log(home.round_folder(slug))))
+        state = states.fold(log.read_round(log.round_log(home.round_folder(slug))))
     except NoLog:
         raise NoRound(found["name"]) from None
     except Unreadable as error:

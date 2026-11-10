@@ -153,7 +153,7 @@ def _logs(home: folders.Home):
     logs, unreadable = [(home.project, project_state)], []
     for slug in folders.slugs(home.folder):
         try:
-            events = log.read(log.round_log(home.round_folder(slug)))
+            events = log.read_round(log.round_log(home.round_folder(slug)))
         except NoLog:
             continue
         except Unreadable as error:

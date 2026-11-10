@@ -249,6 +249,27 @@ def test_a_round_that_cant_be_read_is_returned_as_unreadable(rounds, capsys):
     assert len(of_project["unreadable"]) == 1 and file in of_project["unreadable"][0]
 
 
+@pytest.mark.parametrize("content", [b"", b'{"v":1,"n":1,"at":"2026-01-02T03:04:05Z",'
+                                          b'"actor":"pilot","type":"repair"}\n'])
+def test_a_log_that_opened_no_round_is_returned_as_unreadable(rounds, content):
+    (rounds / "e-round").mkdir()
+    file = log.round_log(rounds / "e-round")
+    file.write_bytes(content)
+    name = "proj-a/e-round"
+
+    one = api.round(name)
+    assert set(one) == {"name", "project", "slug", "folder", "notice", "unreadable"}
+    assert (one["unreadable"]["file"], one["unreadable"]["line"]) == (str(file), 1)
+    for status in ("open", "closed"):
+        row = next(row for row in api.rounds(status=status)["rounds"]
+                   if row["name"] == name)
+        assert set(row) == {"name", "project", "folder", "unreadable"}
+    assert any(str(file) in line for line in api.waiting()["unreadable"])
+    assert any(str(file) in line for line in api.questions("proj-a")["unreadable"])
+    with pytest.raises(errors.Unreadable):
+        api.questions(name)
+
+
 def test_the_questions_of_a_round_that_cant_be_read_are_refused_as_its_command_is(
         rounds, capsys):
     spoil(rounds)

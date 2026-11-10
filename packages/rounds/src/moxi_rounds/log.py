@@ -11,6 +11,11 @@ when it ends in a newline, parses as a JSON object, holds the five envelope keys
 types, and its `n` is the line before's plus one (1 for the first). Nothing is skipped and
 nothing is read up to the bad line: a log is read whole or not at all.
 
+A round's log starts with the event that opened the round. `read_round` and
+`parse_round` read one as `read` and `parse` do, and give `Unreadable` for a file whose
+first event is another, or that holds no event at all: such a file says a round is
+there and nothing of what it is, so it is not read as a round with nothing in it.
+
 `append(path, name, fields, actor=...)` writes one event with the next `n`. The file is
 only ever appended to, as one file of any size. The caller holds the log's lock: two
 appends that both read the log before either writes would give one `n` twice.
@@ -32,6 +37,12 @@ from .errors import NoLog, TooNew, Unreadable
 ROUND_LOG = "round.jsonl"
 #: The name of a project's log in the project's rounds folder.
 PROJECT_LOG = "project.jsonl"
+#: The type of the event a round's log starts with.
+OPENED = "round.opened"
+#: The way out for a round's log that does not start with it.
+NOT_OPENED_FIX = ("restore this file whole from git or a backup; or, when no round was "
+                  "opened here, remove the file, and the folder is free for a round "
+                  "to be opened in")
 
 
 def round_log(folder: Path) -> Path:
@@ -80,6 +91,33 @@ def parse(path: Path, data: bytes) -> list[dict]:
     if tail:
         raise Unreadable(path, len(lines) + 1,
                          "ends without a newline (a line that was cut short)")
+    return found
+
+
+def read_round(path: Path) -> list[dict]:
+    """Every event of the round's log `path`, oldest first. Raises `NoLog` when the file
+    does not exist, and `Unreadable` as `read` does and for a log that does not start
+    with the event that opened the round."""
+    path = Path(path)
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        raise NoLog(path) from None
+    return parse_round(path, data)
+
+
+def parse_round(path: Path, data: bytes) -> list[dict]:
+    """The events in `data`, the whole content of the round's log `path`, as
+    `read_round` gives them."""
+    found = parse(path, data)
+    if not found:
+        raise Unreadable(path, 1, "is not there: the file is empty, and a round's log "
+                                  f"starts with the event that opened the round ({OPENED})",
+                         NOT_OPENED_FIX)
+    if found[0]["type"] != OPENED:
+        raise Unreadable(path, 1, f"is a {found[0]['type']} event, and a round's log "
+                                  f"starts with the event that opened the round ({OPENED})",
+                         NOT_OPENED_FIX)
     return found
 
 
@@ -137,5 +175,6 @@ def append(path: Path, name: str, fields: Mapping[str, object], *, actor: str,
     return event
 
 
-__all__ = ["ROUND_LOG", "PROJECT_LOG", "round_log", "project_log", "exists", "stamp",
-           "read", "parse", "append"]
+__all__ = ["ROUND_LOG", "PROJECT_LOG", "OPENED", "NOT_OPENED_FIX", "round_log",
+           "project_log", "exists", "stamp", "read", "parse", "read_round", "parse_round",
+           "append"]
