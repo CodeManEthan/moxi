@@ -10,7 +10,8 @@ launched in (`store.places`) and where a launch may run now (slots' `list_slots`
 with the launch log). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
-and start time its row recorded, or, with no pid, on the endpoint that claimed it. That
+and start time its row recorded, or, with no pid, on the endpoint that claimed it
+(`live.alive` and `live.live`, which this module imports and offers under its own name). That
 costs one store read and one look at a process per row, and asks turns nothing, so the
 `sessions` topic can gather it every few seconds; the past-sessions list, which asks turns
 about each entry, is read only when the page asks for it. A live launch whose state can't
@@ -116,6 +117,7 @@ from . import (api, catalog, first, job, presets, relaunch, settings, slots, sta
                targets)
 from . import resume as resuming
 from .compose import common
+from .live import alive, live
 from .page import LAUNCH, LIMIT, RUN
 from .resume import sessions as past_sessions
 
@@ -228,7 +230,8 @@ def _offered_values(row: catalog.Row, available: Callable[[str], bool],
 
 
 def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> dict[str, Any]:
-    """One catalog row as the UI shell's form reads it, for a `harness` launch."""
+    """One catalog row as the UI shell's form reads it, for a `harness` launch. A row
+    whose catalog entry has no `label` is called by its name, the underscores as spaces."""
     why = row.unoffered(available, harness)
     values, notes = _offered_values(row, available, harness)
     default, items = _value_of(row, row.default)
@@ -243,6 +246,11 @@ def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> d
         "requires": row.requires if isinstance(row.requires, str) else None,
         "needs_absent": why is not None,
         "note": why[0] if why is not None else ("; ".join(notes) or None),
+        "group": row.group, "sub": row.sub,
+        "label": row.label or row.name.replace("_", " ").capitalize(),
+        "danger": list(row.danger), "carry": row.carry, "modes": list(row.modes),
+        "shown": why is None and all(available(module) for module in row.shown_with),
+        "typed": row.typed_with is None or available(row.typed_with),
     }
 
 
@@ -613,32 +621,6 @@ def read_targets(call: Any) -> dict[str, Any]:
 
 
 # -- live launches and their state ------------------------------------------------------------
-
-
-def alive(row: store.LaunchRow) -> bool:
-    """Whether the process of the launch `row` runs now: `moxi.proc.alive` on the pid and
-    start time it recorded (with no start time, whether any process has that pid), or,
-    for a row that recorded no pid, on the endpoint that claimed it. An endpoint that
-    can't be read is not alive."""
-    if row.pid:
-        if row.pid_started is None:
-            return proc.identity(row.pid) is not None
-        return proc.alive(proc.ProcId(row.pid, row.pid_started))
-    parsed = store.parse_endpoint(row.endpoint) if row.endpoint else None
-    return parsed is not None and not store.endpoint_gone(row.endpoint or "")
-
-
-def live(conn: sqlite3.Connection) -> list[store.LaunchRow]:
-    """The live launches, newest first: each not `failed` whose process runs now, with
-    `newest_session_id` the id it was last known by. One store read and one look at a
-    process per row; turns is not asked."""
-    found = []
-    for row in store.running(conn):
-        if alive(row):
-            known = store.session_ids(conn, row.request_id)
-            found.append(replace(row, newest_session_id=known[-1][0] if known
-                                 else row.session_id))
-    return found
 
 
 def _readable(found: state.SessionState) -> dict[str, Any]:

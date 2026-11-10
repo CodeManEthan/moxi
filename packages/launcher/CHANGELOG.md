@@ -10,6 +10,19 @@
   opens the other choices; a launch from Home runs where the button says, whatever
   `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
   went. New component `prompt` (`<moxi-launcher-prompt>`).
+- A catalog row takes seven new optional fields, read by the browser's launch options:
+  `group` and `sub` (where the row is drawn), `label` (its name in plain words),
+  `danger` (its values that can hurt), `carry` (false for a row never filled from an
+  earlier launch), `shown_with` (modules the row is drawn only with; no launch rule) and
+  `typed_with` (the module a row with listed values needs to take a typed one). Every
+  row a user may set has its label, and its group unless another control sets it. New
+  `catalog.GROUPS` and `catalog.PANEL_FIELDS`. `GET /api/catalog` sends each field's
+  `group`, `sub`, `label`, `danger`, `carry` and `modes` (the commands the row composes
+  into), and `shown` and `typed`, which say whether this install draws the row and
+  whether it takes a typed value.
+- New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
+  run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
+  so a caller on an install without the UI shell can read what is alive.
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;

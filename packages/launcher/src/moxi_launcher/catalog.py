@@ -171,7 +171,13 @@ KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
 OWN_FIELDS = ("flag", "aliases", "repeatable", "optional_value", "variadic", "modes",
               "items", "owned", "posture", "since", "hidden", "requires", "condition",
               "when", "offered_with")
-FIELDS = KEY_FIELDS + OWN_FIELDS
+#: What the browser's launch options read of a row: where it is drawn, what it is called,
+#: which of its values can hurt, and what it needs to be drawn or typed.
+PANEL_FIELDS = ("group", "sub", "label", "danger", "carry", "shown_with", "typed_with")
+FIELDS = KEY_FIELDS + OWN_FIELDS + PANEL_FIELDS
+#: The groups a row is drawn in, in the order they are drawn. A `model` row is drawn with
+#: the harness and the model, not among the options.
+GROUPS = ("model", "access", "tools", "seat", "runs-in", "lifecycle", "config")
 #: The fields of one value's table under `when`.
 WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")
 #: The harnesses whose sessions cache's timer asks about: it keeps clock records for
@@ -412,7 +418,8 @@ class When:
 @dataclass(frozen=True)
 class Row:
     """One catalog row. `harness` is None for a launcher row. `requires` is one module's
-    name, or a tuple of several, all needed (`required` is always the tuple)."""
+    name, or a tuple of several, all needed (`required` is always the tuple). `shown_with`
+    is always a tuple, empty when the row names none."""
 
     name: str
     harness: str | None
@@ -437,6 +444,13 @@ class Row:
     condition: str | None = None
     when: Mapping[str, When] = field(default_factory=lambda: MappingProxyType({}))
     offered_with: str | None = None
+    group: str | None = None
+    sub: str | None = None
+    label: str | None = None
+    danger: tuple[str, ...] = ()
+    carry: bool = True
+    shown_with: tuple[str, ...] = ()
+    typed_with: str | None = None
 
     @property
     def required(self) -> tuple[str, ...]:
@@ -809,12 +823,14 @@ def _row(name, spec, harness, source) -> Row:
             raise bad("is offered_with itself")
     if flags["owned"] and flags["posture"]:
         raise bad("is both owned and a posture row")
+    panel = _panel(spec, kind, values, bad)
 
     built = Row(name=name, harness=None if harness == LAUNCHER else harness, type=kind,
                 default=default, doc=doc, values=values, env=env, retired=retired,
                 flag=flag, aliases=tuple(aliases), modes=modes, items=items,
                 since=since, requires=requires, condition=condition,
-                when=MappingProxyType(when), offered_with=offered_with, **flags)
+                when=MappingProxyType(when), offered_with=offered_with, **panel,
+                **flags)
     if retired is None:
         try:
             checked = (built.check(default) if not (kind == "path" and default == "")
@@ -826,19 +842,58 @@ def _row(name, spec, harness, source) -> Row:
     return built
 
 
-def _requires(raw, bad) -> str | tuple[str, ...] | None:
-    """A row's (or a value's) `requires`: one module's name, or a list of distinct ones."""
+def _requires(raw, bad, what: str = "requires") -> str | tuple[str, ...] | None:
+    """A row's (or a value's) `requires`, or a row's `shown_with`, named by `what`: one
+    module's name, or a list of distinct ones."""
     if raw is None:
         return None
     if isinstance(raw, str):
         if not names.is_module_name(raw):
-            raise bad(f"has requires {raw!r}, which is not a module name")
+            raise bad(f"has {what} {raw!r}, which is not a module name")
         return raw
     if (not _str_list(raw) or not raw or len(set(raw)) != len(raw)
             or not all(names.is_module_name(m) for m in raw)):
-        raise bad(f"has requires {raw!r}, which is not a module name or a list of distinct "
+        raise bad(f"has {what} {raw!r}, which is not a module name or a list of distinct "
                   "module names")
     return raw[0] if len(raw) == 1 else tuple(raw)
+
+
+def _panel(spec, kind, values, bad) -> dict:
+    """A row's `PANEL_FIELDS`, checked, as `Row` holds them."""
+    group, sub = spec.get("group"), spec.get("sub")
+    if group is not None and group not in GROUPS:
+        raise bad(f"has group {group!r}; the groups are {', '.join(GROUPS)}")
+    for f in ("sub", "label"):
+        text = spec.get(f)
+        if text is not None and (not isinstance(text, str) or not text.strip()
+                                 or "\n" in text):
+            raise bad(f"has {f} {text!r}, which is not one line of words")
+    if sub is not None and group is None:
+        raise bad("has a sub but no group")
+    danger = spec.get("danger", [])
+    if not _str_list(danger) or len(set(danger)) != len(danger) or (
+            "danger" in spec and not danger):
+        raise bad(f"has danger {danger!r}, which is not a list of distinct strings")
+    if kind not in ("enum", "string"):
+        if danger:
+            raise bad("has danger, which only an enum or a string row takes")
+    elif values is not None and set(danger) - set(values):
+        raise bad(f"has danger {danger!r}, which names a value outside its values")
+    carry = spec.get("carry", True)
+    if not isinstance(carry, bool):
+        raise bad(f"has carry {carry!r}, not a bool")
+    shown_with = _requires(spec.get("shown_with"), bad, "shown_with")
+    typed_with = spec.get("typed_with")
+    if typed_with is not None:
+        if not isinstance(typed_with, str) or not names.is_module_name(typed_with):
+            raise bad(f"has typed_with {typed_with!r}, which is not a module name")
+        if kind != "string" or values is None:
+            raise bad("has typed_with, which only a string row with values takes")
+    return {"group": group, "sub": sub, "label": spec.get("label"),
+            "danger": tuple(danger), "carry": carry,
+            "shown_with": () if shown_with is None else
+            (shown_with,) if isinstance(shown_with, str) else shown_with,
+            "typed_with": typed_with}
 
 
 def _condition(raw, bad) -> str | None:
