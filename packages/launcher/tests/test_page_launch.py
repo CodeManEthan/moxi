@@ -690,7 +690,7 @@ def _presets_names(module) -> set[str]:
 
 def test_no_route_or_handler_names_a_writer_of_the_presets_file():
     readers = {"read", "check", "layered", "harness_of", "Request", "Presets", "Preset",
-               "Layered", "ERROR", "DEFAULTS", "PRESET", "TWO_SPELLINGS"}
+               "Layered", "ERROR", "DEFAULTS", "PRESET", "TWO_SPELLINGS", "mode_of"}
     for module in (page, pagehandlers):
         text = Path(module.__file__).read_text(encoding="utf-8")
         assert "presets.toml" not in text and "presets.path" not in text, module.__name__
