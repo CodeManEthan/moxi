@@ -432,14 +432,20 @@ def test_no_options_call_changes_a_questions_state_or_what_it_holds_up(
     question_id = "Q1" if "/" in target else "P1"
     before = held(rounds, target)
     slug = "a-round" if "/" in target else None
-    row = index.read("proj-a", rounds, slug).items
+    def row():
+        """The question as the index keeps it, the options it offers aside."""
+        return [(item.id, {key: value for key, value in item.body.items()
+                           if key != "options"})
+                for item in index.read("proj-a", rounds, slug).items]
+
+    kept = row()
 
     for argv in (["--option", A, "--option", B], ["--option", C],
                  ["--retire", "a", "--option", D], ["--retire", "b", "--option", "e=x"],
                  ["--option", C]):
         assert fill(*argv, target=target, question_id=question_id) == 0
         assert held(rounds, target) == before
-        assert index.read("proj-a", rounds, slug).items == row
+        assert row() == kept
 
     found = question(rounds, target)
     assert found.state == "open" and questions.current(found, state.State()) == "open"

@@ -13,6 +13,8 @@
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
+    moxi rounds list ROUND --questions [--view docket] [--json] [--out DIR]
+    moxi rounds list PROJECT --questions [--json] [--out DIR]
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
@@ -31,8 +33,12 @@ list of rulings not yet shown through `TIME`, the time that list was headed with
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
 operator's pointer goes with a move that ends what the question holds up, and with a
-list of stages for a question that came from a round. A verb that writes takes `--as NAME`, who is
-doing it; without it that is the user the command runs as.
+list of stages for a question that came from a round. `list --questions` writes out
+the questions that wait on the operator, of one round or of one project with its open
+rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
+data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
+It records nothing. A verb that writes takes `--as NAME`, who is doing it; without it
+that is the user the command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
 says what stopped the verb and the command that fixes it, and has written nothing.
@@ -426,15 +432,52 @@ def _mark_shown(args, out) -> int:
     return codes.OK
 
 
+# -- list --------------------------------------------------------------------------------
+
+def _declare_list(verbs) -> None:
+    said = ("Write out the questions that wait on the operator, of one round or of one "
+            "project: the open ones, each with what it is recorded with and the "
+            "options it offers, then the parked ones, which are not put to him, then "
+            "the rulings not yet shown to him. A round's are its own; a project's are "
+            "those on its list and in each of its open rounds. Nothing is recorded, "
+            "and each answer is recorded with rule.")
+    parser = verbs.add_parser("list", help=said, description=said)
+    parser.add_argument("name", metavar="ROUND|PROJECT", nargs="?",
+                        help="the round, <project>/<slug>, or a project's key")
+    parser.add_argument("--questions", action="store_true", required=True,
+                        help="list the questions of the round or the project")
+    parser.add_argument("--view", metavar="docket", choices=("docket",),
+                        help="for a round, which of its questions: docket, every "
+                             "open one and after them the parked ones (the default); "
+                             "a project's questions have no view")
+    parser.add_argument("--json", dest="as_json", action="store_true",
+                        help="print the same entries as data, not as markdown")
+    parser.add_argument("--out", metavar="DIR",
+                        help="write both forms into this folder, as questions.md and "
+                             "questions.json, and print the two paths")
+
+
+def _list(args, out) -> int:
+    from . import export
+
+    found = export.questions_of(args.name, view=args.view)
+    if args.out is not None:
+        for path in export.write(found, args.out):
+            print(path, file=out)
+    else:
+        out.write(export.as_json(found) if args.as_json else export.as_markdown(found))
+    return codes.OK
+
+
 # -- the command -------------------------------------------------------------------------
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_ask, _declare_rule,
-                                  _declare_mark)
+                                  _declare_mark, _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "ask": _ask, "rule": _rule,
-                               "mark": _mark}
+                               "mark": _mark, "list": _list}
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:

@@ -206,9 +206,16 @@ def current(question: states.Question, state: states.State, *,
 
 def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
     """The questions of `state` that are recorded as open or parked, each as `(id, body)`
-    for the index. The body holds the record as the log leaves it: a parked question's
-    state is the recorded one with what it waits for, and whoever lists it reads whether
-    that has come."""
+    for the index. The body holds the record as the log leaves it, at the depth it has:
+    the sentence, where it came from, what it holds up, the recorded state, who asked it
+    and when; then, each only when the question has it, what a parked one waits for,
+    the options it offers now as `{"key", "text"}` in the order they were added, and
+    the record it was moved here from with what it held up there.
+
+    A parked question's state is the recorded one. When it waits for a stage of its own
+    round and that stage is finished, the body says `reached`; whether another round it
+    waits for is closed is not in this log, so whoever lists the row reads that
+    (`listed`)."""
     for question in state.questions:
         if question.state not in (OPEN, PARKED) or question.id is None:
             continue
@@ -217,11 +224,36 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
                 "state": question.state, "by": question.by, "at": question.at}
         if question.until is not None:
             body["until"] = question.until
+            if (not question.until.startswith(UNTIL_ROUND)
+                    and reached(question, state)):
+                body["reached"] = True
+        if question.options:
+            body["options"] = [{"key": key, "text": line}
+                               for key, line in question.options]
+        if question.moved_from is not None:
+            body["moved_from"] = question.moved_from
+        if question.held is not None:
+            body["held"] = stored(question.held)
         yield question.id, body
+
+
+def listed(body: Mapping, *, closed: Callable[[str], bool] | None = None) -> str | None:
+    """The state a question reads as now, from the body the index keeps for it: what
+    `current` gives from the question and its log. A parked question reads `OPEN` once
+    the stage it waits for is finished, which the body says, or the round it waits for
+    is closed, which `closed` answers by the round's name (`is_closed` when left out)."""
+    until = body.get("until")
+    if body.get("state") != PARKED or not until:
+        return body.get("state")
+    if until.startswith(UNTIL_ROUND):
+        came = bool((closed or is_closed)(until[len(UNTIL_ROUND):]))
+    else:
+        came = body.get("reached") is True
+    return OPEN if came else PARKED
 
 
 __all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "MOVED", "ALL", "NONE", "ROUND_ID",
            "PROJECT_ID", "STAGE", "UNTIL_ROUND", "UNSTAGE", "find", "next_id",
            "parse_blocks", "said", "stored", "holds_every", "recorded_stages",
            "finished_stages", "left_stages", "unrecorded", "stages_said", "is_closed",
-           "reached", "current", "waiting"]
+           "reached", "current", "waiting", "listed"]
