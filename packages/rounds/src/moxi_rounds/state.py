@@ -14,6 +14,9 @@ own record names the question and says what it becomes, and the fold changes the
 question from it. A question that was moved to another log stays in this one as moved,
 naming the record it became; the one that arrived names the record it was.
 
+A ruling is marked shown by an event that names it with the pointer to where the
+operator was shown it; the mark stays whatever is recorded later.
+
 A ruling may replace an earlier one or take it back, and names it. Nothing is rewritten:
 the earlier ruling stays in the rulings, marked with the id of the one that replaced it
 or took it back, and each question it changed reads as its other changes leave it
@@ -70,6 +73,10 @@ class Ruling:
     #: while it stands. A ruling with either is read by nothing but a listing.
     replaced_by: str | None = None
     revoked_by: str | None = None
+    #: The pointer to where the operator was shown it, from the first mark that named
+    #: it, or None while no mark has. His read-back of the project's list also makes a
+    #: ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
+    shown: str | None = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +218,18 @@ def _ruling_recorded(state: State, event: dict) -> None:
         if question.id is not None and question.id == event.get("rules"):
             state.questions[place] = replace(question, chose=event.get("chose"))
     _corrected(state, event)
+
+
+def _ruling_shown(state: State, event: dict) -> None:
+    """Mark each ruling the event names as shown, where its pointer says. Only a
+    pointer makes a mark, a mark is never taken off, and the first one is the one
+    kept."""
+    ids, record = event.get("ids"), event.get("record")
+    if not isinstance(ids, list) or not isinstance(record, str) or not record:
+        return
+    for place, ruling in enumerate(state.rulings):
+        if ruling.id in ids and ruling.shown is None:
+            state.rulings[place] = replace(ruling, shown=record)
 
 
 def _corrected(state: State, event: dict) -> None:
@@ -376,7 +395,7 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "stage.declared": _kept,
     "stage.changed": _kept,
     "ruling.recorded": _ruling_recorded,
-    "ruling.shown": _kept,
+    "ruling.shown": _ruling_shown,
     "build.commissioned": _kept,
     "check.ran": _kept,
     "finding.marked": _kept,

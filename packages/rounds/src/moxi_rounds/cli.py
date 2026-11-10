@@ -9,7 +9,10 @@
     moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--chose K]
                      [--reason TEXT] [--standing] [--scope SPEC] [--stages LIST]
                      [--until WHAT] [--supersedes C<n>|S<n>] [--as NAME]
+    moxi rounds rule PROJECT readback=TIME --record PTR [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
+    moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
+    moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
 where the operator said something, or to where a question came from. It is
@@ -19,6 +22,11 @@ where the operator said something, or to where a question came from. It is
 A ruling is corrected by a later one: `--supersedes` names the earlier ruling of the
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
+`rule` prints each ruling as it was recorded, for whoever recorded it to show the
+operator, and `mark --shown` records, with a pointer to the message, session or page
+that showed him, that he saw it; a ruling is named by the round or project that holds
+it and its id. On a project, the item `readback=TIME` is his own word that he read the
+list of rulings not yet shown through `TIME`, the time that list was headed with.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
@@ -118,7 +126,10 @@ def _declare_rule(verbs) -> None:
             "a project, it goes in the project's register and outlasts the round. With "
             "an ITEM it rules a question: answers it, parks it, narrows what it holds "
             "up, or withdraws it. A later ruling corrects an earlier one: with "
-            "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back.")
+            "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back. "
+            "The ruling is printed as it was recorded, to show him. On a project, "
+            "the ITEM readback=TIME records that he read the list of rulings not yet "
+            "shown to him through TIME.")
     parser = verbs.add_parser("rule", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the ruling is on, <project>/<slug>, or a "
@@ -129,7 +140,9 @@ def _declare_rule(verbs) -> None:
                              "narrow:Q<n>=LIST or narrow:Q<n>=none, the stages it "
                              "holds up from then on; withdraw:Q<n>; or revoke:C<n> "
                              "(revoke:S<n> on a project), which takes that ruling back "
-                             "and puts nothing in its place")
+                             "and puts nothing in its place; or, on a project, "
+                             "readback=TIME, the time the list of rulings he read "
+                             "was shown through, as 2026-01-02T03:04:05Z")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
@@ -186,10 +199,23 @@ def _rule(args, out) -> int:
 
 
 def _recorded(ruled) -> list[str]:
-    """What is printed for a ruling just recorded: its id and its sentence, as the log
-    now holds it, or what it rules when it has no sentence. What the one who recorded
-    it does next with the sentence goes here."""
-    return [f"{ruled.id}: {ruled.event['rules'] if ruled.text is None else ruled.text}"]
+    """What is printed for a ruling just recorded: its id and its sentence, exactly as
+    the log now holds it, or what it rules when it has no sentence; the sentence of
+    the question it answers; and what whoever recorded it does next, which is to show
+    him the sentence and then mark the ruling as shown. A read-back is his own word
+    and is not shown to him."""
+    lines = [f"Recorded as {ruled.id}: "
+             f"{ruled.event['rules'] if ruled.text is None else ruled.text}"]
+    if ruled.read_back is not None:
+        return [*lines, f"it covers every ruling of {ruled.holder} recorded at or "
+                        f"before {ruled.read_back}; a read-back is his own word, "
+                        "and is not itself shown to him"]
+    if ruled.answers is not None:
+        lines.append(f"in answer to {ruled.answers[0]}: {ruled.answers[1]}")
+    return [*lines,
+            'show him this under "Recorded as" in your next message, then:',
+            f"  moxi rounds mark {ruled.holder} {ruled.id} --shown --record "
+            "<pointer to that message>"]
 
 
 # -- ask ---------------------------------------------------------------------------------
@@ -333,11 +359,19 @@ def _carry(args, out) -> int:
 # -- mark --------------------------------------------------------------------------------
 
 def _declare_mark(verbs) -> None:
-    said = ("Change a record of a round in a way anyone may: make a question hold up "
-            "more stages, or reopen a parked one.")
+    said = ("Change a record in a way that is not the operator's ruling: make a "
+            "question of a round hold up more stages, reopen a parked one, or say "
+            "that rulings were shown to the operator as recorded, with a pointer to "
+            "where.")
     parser = verbs.add_parser("mark", help=said, description=said)
-    parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
-    parser.add_argument("id", metavar="ID", help="what is marked: a question, Q<n>")
+    parser.add_argument("target", metavar="ROUND|PROJECT",
+                        help="the round, <project>/<slug>; with --shown, the round "
+                             "that holds the rulings, or the project's key for "
+                             "rulings of its register")
+    parser.add_argument("id", metavar="ID",
+                        help="what is marked: a question, Q<n>; with --shown, the "
+                             "rulings, C<n> of a round or S<n> of a project, "
+                             "several separated by commas")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -345,19 +379,49 @@ def _declare_mark(verbs) -> None:
                            "only the operator narrows it (rule narrow:Q<n>=LIST)")
     form.add_argument("--reopen", action="store_true",
                       help="make a parked question open again")
+    form.add_argument("--shown", action="store_true",
+                      help="the rulings were put in front of the operator as "
+                           "recorded; needs --record")
+    parser.add_argument("--record", metavar="PTR",
+                        help="with --shown, a pointer to where he was shown them, one "
+                             "token: comms:<digits> for the message, <session>@<UTC "
+                             "time>, or the https:// URL of a page that listed them; "
+                             "never a file, the pointer of one of the rulings, or a "
+                             "message from before one of them was said")
     _writes(parser)
 
 
 def _mark(args, out) -> int:
     from . import marking, questions
 
+    if args.shown:
+        return _mark_shown(args, out)
+    if args.record is not None:
+        raise BadArgument("--record is the pointer to where rulings were shown, and "
+                          "a change to a question that anyone may make carries none",
+                          "leave --record out")
     if args.reopen:
-        marked = marking.reopen(args.round, args.id, actor=_actor(args))
+        marked = marking.reopen(args.target, args.id, actor=_actor(args))
     else:
-        marked = marking.widen(args.round, args.id, args.blocks, actor=_actor(args))
+        marked = marking.widen(args.target, args.id, args.blocks, actor=_actor(args))
     found = marked.question
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
+    _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_shown(args, out) -> int:
+    """`mark --shown`: say that rulings were shown to the operator, and where."""
+    from . import shown
+
+    marked = shown.mark(args.target, args.id, actor=_actor(args), record=args.record)
+    if marked.marked:
+        print(f"{marked.name} {', '.join(marked.marked)}: shown   record: "
+              f"{marked.record}", file=out)
+    if marked.already:
+        print(f"{marked.name} {', '.join(marked.already)}: shown already; nothing is "
+              f"written{' for it' if marked.marked else ''}", file=out)
     _warn_of(marked.failed, args.prog, args.verb)
     return codes.OK
 

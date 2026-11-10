@@ -35,6 +35,16 @@ def run(target, *argv, text=SAID, record="comms:12"):
     return main(["rule", target, *said, *pointer, *argv])
 
 
+def printed(ruling_id, said, holder="proj-a/a-round", *, question=None):
+    """What `rule` prints for one ruling: the sentence as recorded, the question it
+    answers, and how whoever recorded it says the operator was shown it."""
+    answers = "" if question is None else f"in answer to {question[0]}: {question[1]}\n"
+    return (f"Recorded as {ruling_id}: {said}\n{answers}"
+            'show him this under "Recorded as" in your next message, then:\n'
+            f"  moxi rounds mark {holder} {ruling_id} --shown --record "
+            "<pointer to that message>\n")
+
+
 def round_log(rounds, slug="a-round"):
     return log.round_log(rounds / slug)
 
@@ -60,7 +70,7 @@ def test_a_plain_ruling_is_recorded_in_the_rounds_log(rounds, capsys):
         "record": "comms:12", "kind": "substance", "stages": "all"}
     assert not log.exists(log.project_log(rounds))
     out, err = capsys.readouterr()
-    assert out == f"C1: {SAID}\n" and err == ""
+    assert out == printed("C1", SAID) and err == ""
 
 
 def test_a_rounds_state_holds_its_rulings(rounds):
@@ -77,7 +87,7 @@ def test_the_real_command_records_a_ruling(rounds, capsys):
     assert cli.main(["rounds", "rule", "proj-a/a-round", "--text", SAID, "--record",
                      "comms:12"]) == 0
 
-    assert capsys.readouterr().out == f"C1: {SAID}\n"
+    assert capsys.readouterr().out == printed("C1", SAID)
 
 
 def test_the_sentence_is_printed_as_recorded_byte_for_byte(rounds, capsys):
@@ -87,7 +97,7 @@ def test_the_sentence_is_printed_as_recorded_byte_for_byte(rounds, capsys):
 
     [event] = rulings(round_log(rounds))
     assert event["text"] == said
-    assert capsys.readouterr().out == f"C1: {said}\n"
+    assert capsys.readouterr().out == printed("C1", said)
 
 
 def test_a_reason_is_kept_and_left_out_when_none_is_given(rounds):
@@ -139,7 +149,7 @@ def test_a_standing_ruling_from_a_round_goes_in_the_projects_register(rounds, ca
         "actor": "planner", "type": "ruling.recorded", "id": "S1", "text": SAID,
         "record": "comms:12", "kind": "substance"}
     assert round_log(rounds).read_bytes() == before
-    assert capsys.readouterr().out == f"S1: {SAID}\n"
+    assert capsys.readouterr().out == printed("S1", SAID, "proj-a")
 
 
 def test_a_ruling_on_a_project_is_standing_with_no_round(rounds, capsys):
@@ -147,7 +157,9 @@ def test_a_ruling_on_a_project_is_standing_with_no_round(rounds, capsys):
     assert run("PROJ-A", "--standing", text="Named again, with the flag.") == 0
 
     assert [event["id"] for event in rulings(log.project_log(rounds))] == ["S1", "S2"]
-    assert capsys.readouterr().out == f"S1: {SAID}\nS2: Named again, with the flag.\n"
+    assert capsys.readouterr().out == (
+        printed("S1", SAID, "proj-a")
+        + printed("S2", "Named again, with the flag.", "proj-a"))
     assert rulings(round_log(rounds)) == []
     assert not write.round_lock("proj-a", "a-round").read_bytes()
 
@@ -196,7 +208,9 @@ def test_ids_count_for_each_round_and_for_the_project_on_their_own(rounds, capsy
                                                                                 "C2"]
     assert [event["id"] for event in rulings(log.project_log(rounds))] == ["S1", "S2",
                                                                            "S3"]
-    assert [line.split(":")[0] for line in capsys.readouterr().out.splitlines()] == [
+    assert [line.split(":")[0].split()[-1]
+            for line in capsys.readouterr().out.splitlines()
+            if line.startswith("Recorded as ")] == [
         "C1", "C2", "C1", "S1", "S2", "S3", "C3", "C2"]
 
 
@@ -350,11 +364,11 @@ def test_a_sentence_over_400_characters_is_recorded_with_a_note(rounds, capsys):
 
     assert run("proj-a/a-round", text=at_the_mark) == 0
     out, err = capsys.readouterr()
-    assert out == f"C1: {at_the_mark}\n" and err == ""
+    assert out == printed("C1", at_the_mark) and err == ""
 
     assert run("proj-a/a-round", text=past_it) == 0
     out, err = capsys.readouterr()
-    assert out == f"C2: {past_it}\n"
+    assert out == printed("C2", past_it)
     assert "note: C2 is 401 characters long" in err and "meant to be short" in err
     assert [event["text"] for event in rulings(round_log(rounds))] == [at_the_mark,
                                                                        past_it]
@@ -481,7 +495,7 @@ def test_an_answer_is_a_ruling_of_substance_on_the_stages_the_question_held_up(
     found = question(round_log(staged))
     assert (found.state, found.ruling) == ("ruled", "C1")
     assert found.blocks == ("all" if blocks is None else questions.parse_blocks(blocks))
-    assert capsys.readouterr().out == f"C1: {ANSWER}\n"
+    assert capsys.readouterr().out == printed("C1", ANSWER, question=("Q1", ASKED))
 
 
 def test_an_answer_needs_its_sentence_and_his_pointer(staged, capsys):
@@ -552,7 +566,7 @@ def test_a_parking_is_an_act_on_the_process_and_needs_no_sentence(staged, capsys
         "state": "parked", "record": "comms:12", "kind": "process", "rules": "park:Q1"}
     found = question(round_log(staged))
     assert (found.state, found.until, found.blocks) == ("parked", None, ("B1",))
-    assert capsys.readouterr().out == "C1: park:Q1\n"
+    assert capsys.readouterr().out == printed("C1", "park:Q1")
 
 
 def test_a_sentence_given_with_an_act_is_kept(staged, capsys):
@@ -561,7 +575,7 @@ def test_a_sentence_given_with_an_act_is_kept(staged, capsys):
     assert run("proj-a/a-round", "withdraw:Q1", text="It no longer matters.") == 0
 
     assert log.read(round_log(staged))[-1]["text"] == "It no longer matters."
-    assert capsys.readouterr().out == "C1: It no longer matters.\n"
+    assert capsys.readouterr().out == printed("C1", "It no longer matters.")
     assert run("proj-a/a-round", "park:Q1", text="  ") == 2
 
 
@@ -778,7 +792,8 @@ def test_an_answer_to_a_projects_question_goes_in_the_projects_log(staged, capsy
         "rules": "P1"}
     assert round_log(staged).read_bytes() == before
     assert question(log.project_log(staged), "P1").state == "ruled"
-    assert capsys.readouterr().out == f"S1: {ANSWER}\n"
+    assert capsys.readouterr().out == printed("S1", ANSWER, "proj-a",
+                                              question=("P1", ASKED))
 
 
 def test_a_projects_question_is_parked_until_a_round_and_withdrawn(staged, capsys):
@@ -891,7 +906,7 @@ def test_work_that_fails_after_the_record_leaves_the_ruling_recorded(
     assert run("proj-a/a-round") == 0
 
     out, err = capsys.readouterr()
-    assert out == f"C1: {SAID}\n"
+    assert out == printed("C1", SAID)
     assert "warning" in err and "the disk is full" in err
     assert len(rulings(round_log(rounds))) == 1
 
@@ -993,7 +1008,7 @@ def test_an_answer_names_the_key_he_chose(staged, capsys):
     assert (found.state, found.ruling, found.chose) == ("ruled", "C1", "b")
     [recorded] = state.fold(log.read(round_log(staged))).rulings
     assert (recorded.chose, recorded.text) == ("b", ANSWER)
-    assert capsys.readouterr().out == f"C1: {ANSWER}\n"
+    assert capsys.readouterr().out == printed("C1", ANSWER, question=("Q1", ASKED))
 
 
 def test_an_answer_that_only_names_a_key_records_the_options_line(staged, capsys):
@@ -1004,7 +1019,8 @@ def test_an_answer_that_only_names_a_key_records_the_options_line(staged, capsys
     [recorded] = rulings(round_log(staged))
     assert (recorded["text"], recorded["chose"]) == ("prose yes, parsed rows no", "a")
     assert question(round_log(staged)).chose == "a"
-    assert capsys.readouterr().out == "C1: prose yes, parsed rows no\n"
+    assert capsys.readouterr().out == printed("C1", "prose yes, parsed rows no",
+                                              question=("Q1", ASKED))
 
 
 def test_an_answer_with_no_key_leaves_none_chosen(staged):

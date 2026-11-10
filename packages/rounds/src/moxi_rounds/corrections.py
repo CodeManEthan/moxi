@@ -49,6 +49,9 @@ MOVE = "move:"
 PARK = "park:"
 NARROW = "narrow:"
 WITHDRAW = "withdraw:"
+#: What starts the item of a read-back, the operator's word that he read the list of
+#: rulings not yet shown to him; the time he read it through follows.
+READBACK = "readback="
 
 #: The thing a ruling that stands on its own rules: any such ruling may replace another.
 ALONE = ""
@@ -133,6 +136,15 @@ def _rule_it_again(ruling: states.Ruling, state: states.State, name: str) -> Unm
         "--record PTR")
 
 
+def _read_back_again(ruling: states.Ruling, state: states.State, name: str) -> Unmet:
+    return Unmet(
+        f"{ruling.id} is his word that he read the list of rulings through "
+        f"{(ruling.rules or '')[len(READBACK):]}, and a read-back is neither taken "
+        "back nor replaced: each one is a ruling of its own, and the newest covers "
+        "every one before it",
+        f"moxi rounds rule {name} {READBACK}TIME --record PTR")
+
+
 #: Every kind of ruling that is corrected, or refused with its way back. The first
 #: whose `item` knows a ruling's item is the ruling's kind.
 KINDS: tuple[Kind, ...] = (
@@ -146,6 +158,8 @@ KINDS: tuple[Kind, ...] = (
     Kind("a withdrawal", _starts(WITHDRAW), undo=_names_its_question),
     Kind("a move", _starts(MOVE), instead=_move_it_back, again=False),
     Kind("a taking back", _starts(REVOKE), instead=_rule_it_again, again=False),
+    Kind("a read-back", _starts(READBACK, upto="="), instead=_read_back_again,
+         again=False),
 )
 
 
@@ -307,6 +321,6 @@ def _said(rules: str | None) -> str:
     return "stands on its own" if rules is None else f"rules {rules}"
 
 
-__all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "ALONE", "ID", "Kind",
+__all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "ALONE", "ID", "Kind",
            "KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",
            "ended", "can_be_taken_back", "taking_back", "replaces"]

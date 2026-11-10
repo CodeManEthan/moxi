@@ -100,8 +100,9 @@ TYPES = _types(
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
                "revokes", "moved_to"),
               required=("id", "record", "kind")),
-    # Rulings were put in front of the operator: their ids, and the pointer to where.
-    EventType("ruling.shown", ("ids", "record")),
+    # Rulings of this log were put in front of the operator: their ids, and the pointer
+    # to where he was shown them.
+    EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
     # is headed for, its worktree and scratch folder, its builder, and the go pointer.
     EventType("build.commissioned",

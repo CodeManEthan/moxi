@@ -52,6 +52,14 @@ project) takes a ruling back and puts nothing in its place: an answered question
 open again, and a parked, narrowed or withdrawn one reads as its other changes leave
 it. Both rulings stay in the log. A correction recorded on a round that was closed or
 dropped is recorded and reopens nothing.
+
+**Shown.** A ruling is recorded by someone else than the operator, so what is returned
+holds the sentence as the appended event has it, and the sentence of the question it
+answers, for whoever recorded it to put in front of him; `shown` has the mark that says
+he saw it. `readback=TIME`, on a project, is his word that he read the project's list
+of rulings not yet shown through `TIME`. Each read-back is a ruling of its own, an act
+on the process: any number is recorded, the same time included, none names an earlier
+one, and none is taken back.
 """
 
 from __future__ import annotations
@@ -60,7 +68,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
-from . import corrections, folders, pointers, questions, write
+from . import corrections, folders, log, pointers, questions, shown, write
 from . import options as choices
 from . import settings as own
 from . import state as states
@@ -93,7 +101,8 @@ class Asked:
     round's, None for a ruling on a project. `record` is the pointer as given, `until`
     what a parking waits for, `scoped` whether a scope was given, `chose` the key
     of the option an answer names, and `supersedes` the id of the ruling this one
-    replaces."""
+    replaces. `at` is the time the ruling is recorded at, when the call fixed one
+    before taking the lock; None when the append stamps it."""
 
     name: str
     standing: bool
@@ -105,6 +114,7 @@ class Asked:
     scoped: bool = False
     chose: str | None = None
     supersedes: str | None = None
+    at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -125,12 +135,13 @@ class Form:
 
 @dataclass(frozen=True)
 class Ruled:
-    """A ruling as recorded: its `id`, the `name` of the round or project whose log
-    holds it, whether it is `standing`, its `text` read back from the event, and the
+    """A ruling as recorded: its `id`, the `name` of the round or project it was
+    recorded on, whether it is `standing`, its `text` read back from the event, and the
     `event` itself. `long` says the text is past `LONG` characters. `ended` is how the
     round had ended, `closed` or `dropped`, when the ruling corrects one of its own:
-    the correction is recorded and the round stays as it ended. `failed` pairs each
-    after-append callback that raised with what it raised."""
+    the correction is recorded and the round stays as it ended. `answers` is the
+    question an answer is to, as `(id, sentence)`, None for a ruling that answers
+    none. `failed` pairs each after-append callback that raised with what it raised."""
 
     id: str
     name: str
@@ -139,7 +150,21 @@ class Ruled:
     event: dict
     long: bool = False
     ended: str | None = None
+    answers: tuple[str, str | None] | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
+
+    @property
+    def holder(self) -> str:
+        """The round or project whose log holds the ruling, which with its id names
+        it: the project for a standing ruling, wherever it was recorded from."""
+        return self.name.partition("/")[0] if self.standing else self.name
+
+    @property
+    def read_back(self) -> str | None:
+        """The time a read-back says the list was read through; None for any other
+        ruling. A read-back is his own word and is never itself shown to him."""
+        rules = self.event.get("rules") or ""
+        return rules[len(shown.READBACK):] if rules.startswith(shown.READBACK) else None
 
 
 def rule(target: str, *, actor: str, record: str | None = None, text: str | None = None,
@@ -163,7 +188,8 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
       when left out.
     - `item`: what is ruled, or None for a plain ruling: a question's id for its
       answer; `park:`, `narrow:` or `withdraw:` and the question; or `revoke:` and
-      the id of a ruling, to take that ruling back.
+      the id of a ruling, to take that ruling back; on a project, `readback=` and a
+      time, his word that he read the list of rulings not yet shown through then.
     - `until`: with `park:`, what the question waits for: a stage of the round, `B2`,
       or another round, `round:<project>/<slug>`.
     - `chose`: with a question's id, the key of the option he chose. With no `text`
@@ -179,8 +205,9 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     opened, and `Refused` when a gate does not hold, the pointer's among them: an item
     that names no question, a question already ruled or withdrawn, a key the
     question does not offer, a second ruling of a thing that does not name the first,
-    or a correction of a ruling that the log does not hold, that no longer stands, or
-    that rules another thing. A refusal leaves both logs as they were.
+    a correction of a ruling that the log does not hold, that no longer stands, or
+    that rules another thing, or a read-back through a time that is no ruling's or is
+    not yet past. A refusal leaves both logs as they were.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says what the ruling is on",
@@ -217,6 +244,10 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
                            "S<n>")
     scoped = None if scope is None else parse_scope(scope)
     staged = None if stages is None else parse_stages(stages)
+    if at is None and (item or "").startswith(shown.READBACK):
+        # A read-back is held to a time before the second it is recorded in, so that
+        # second is fixed here, where the gate and the event both read it.
+        at = log.stamp()
 
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
@@ -224,7 +255,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     form = _form(item, Asked(name=name, standing=standing, text=text, stages=staged,
                              slug=slug, record=record, until=until,
                              scoped=scope is not None, chose=chose,
-                             supersedes=supersedes))
+                             supersedes=supersedes, at=at))
     # The command that records it, with the sentence only where the form has one.
     again = (f"moxi rounds rule {name}{'' if item is None else ' ' + item}"
              f"{'' if chose is None else ' --chose ' + chose}"
@@ -237,6 +268,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
             supersedes, form.rules, name=name, again=again,
             held=lambda view: view.project_state if standing else view.state))
     ended: list[str | None] = [None]
+    answers: list[tuple[str, str | None] | None] = [None]
 
     def has_a_pointer(view):
         if record is None:
@@ -258,6 +290,11 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
             fields["scope"] = scoped
         if supersedes is not None:
             fields["supersedes"] = supersedes
+        if _QUESTION.fullmatch(form.rules or ""):
+            # The question as he was asked it goes with its answer to whoever shows
+            # him the sentence recorded.
+            asked_as = questions.find(held, form.rules)
+            answers[0] = None if asked_as is None else (asked_as.id, asked_as.text)
         if corrects and not standing:
             # Recorded all the same: it changes what is read, and reopens nothing.
             ended[0] = corrections.ended(view.state)
@@ -278,7 +315,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     said = event.get("text")
     return Ruled(id=event["id"], name=name, standing=standing, text=said, event=event,
                  long=said is not None and len(said) > LONG, ended=ended[0],
-                 failed=written.failed)
+                 answers=answers[0], failed=written.failed)
 
 
 def _whose(ruling_id: str) -> str:
@@ -576,10 +613,43 @@ def _revoke(item: str, asked: Asked) -> Form | None:
                                                            ruling_id))
 
 
+# -- his word that he read the list -------------------------------------------------------
+
+def _readback(item: str, asked: Asked) -> Form | None:
+    """A read-back: the operator's word that he read the project's list of rulings not
+    yet shown through a time. An act on the process, and a ruling of its own each
+    time: it names no earlier one."""
+    if not item.startswith(shown.READBACK):
+        return None
+    time = item[len(shown.READBACK):]
+    project = asked.name.partition("/")[0]
+    if asked.slug is not None:
+        raise BadArgument("a read-back is of a project's whole list, its rounds' "
+                          "rulings and its register's together",
+                          f"record it on the project: moxi rounds rule {project} "
+                          f"{shown.READBACK}TIME --record PTR")
+    if not shown.TIME.fullmatch(time):
+        raise BadArgument(f"{time!r} is not a time a list is shown through",
+                          "give the time the list he read was headed with, as "
+                          f"{shown.READBACK}2026-01-02T03:04:05Z")
+    if asked.supersedes is not None:
+        raise BadArgument("a read-back replaces none before it: each is a ruling of "
+                          "its own, and the newest covers every earlier one",
+                          "leave --supersedes out")
+    if asked.scoped:
+        raise BadArgument("--scope is for a ruling that says what is built",
+                          "leave --scope out")
+    if asked.text is not None and not asked.text.strip():
+        raise BadArgument("--text says nothing", "give the sentence, or leave --text "
+                                                 "out")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=(shown.ends_a_list(time, name=asked.name, at=asked.at),))
+
+
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
-    _answer, _park, _narrow, _withdraw, _revoke)
+    _answer, _park, _narrow, _withdraw, _revoke, _readback)
 
 
 def _form(item: str | None, asked: Asked) -> Form:

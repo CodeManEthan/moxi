@@ -96,7 +96,7 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
-                             "question.changed"})
+                             "question.changed", "ruling.shown"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -491,3 +491,57 @@ def test_a_question_read_without_a_ruling_is_as_if_that_ruling_was_never_made():
     assert state.without(found, question, ["C2"]).state == "open"
     assert state.without(found, question, ["C1", "C2"]).ruling is None
     assert found.questions == [question]
+
+
+# -- rulings marked as shown -------------------------------------------------------------
+
+def test_a_mark_makes_the_rulings_it_names_shown_and_changes_nothing_else():
+    recorded = [opened(),
+                event(2, "ruling.recorded", id="C1", kind="substance", text="One."),
+                event(3, "ruling.recorded", id="C2", kind="substance", text="Two."),
+                event(4, "ruling.recorded", id="C3", kind="substance", text="Three.")]
+    before = state.fold(recorded)
+    mark = event(5, "ruling.shown", ids=["C1", "C3", "C9"], record="comms:20")
+
+    after = state.fold([*recorded, mark])
+
+    assert [one.shown for one in after.rulings] == ["comms:20", None, "comms:20"]
+    assert [dataclasses.replace(one, shown=None) for one in after.rulings] == (
+        before.rulings)
+    assert dataclasses.replace(after, rulings=before.rulings,
+                               history=before.history) == before
+
+
+def test_the_first_mark_of_a_ruling_is_the_one_kept():
+    found = state.fold([
+        opened(), event(2, "ruling.recorded", id="C1", kind="substance", text="One."),
+        event(3, "ruling.shown", ids=["C1"], record="comms:20"),
+        event(4, "ruling.shown", ids=["C1"], record="comms:30")])
+
+    assert found.rulings[0].shown == "comms:20"
+
+
+@pytest.mark.parametrize("fields", [
+    {"ids": ["C1"]}, {"ids": ["C1"], "record": ""}, {"ids": ["C1"], "record": 20},
+    {"record": "comms:20"}, {"ids": "C1", "record": "comms:20"}])
+def test_only_a_pointer_and_a_list_of_ids_make_a_mark(fields):
+    found = state.fold([
+        opened(), event(2, "ruling.recorded", id="C1", kind="substance", text="One."),
+        event(3, "ruling.shown", **fields)])
+
+    assert found.rulings[0].shown is None
+
+
+def test_a_mark_outlasts_the_replacing_and_the_taking_back_of_its_ruling():
+    found = state.fold([
+        opened(), event(2, "ruling.recorded", id="C1", kind="substance", text="One."),
+        event(3, "ruling.shown", ids=["C1"], record="comms:20"),
+        event(4, "ruling.recorded", id="C2", kind="substance", text="Two.",
+              supersedes="C1"),
+        event(5, "ruling.recorded", id="C3", kind="process", rules="revoke:C2",
+              revokes="C2")])
+
+    assert [(one.id, one.shown, one.replaced_by, one.revoked_by)
+            for one in found.rulings] == [
+        ("C1", "comms:20", "C2", None), ("C2", None, None, "C3"),
+        ("C3", None, None, None)]

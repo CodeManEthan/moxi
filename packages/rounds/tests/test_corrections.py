@@ -35,6 +35,16 @@ def rounds(tmp_path, add_project, capsys):
     return found
 
 
+def printed(ruling_id, said, holder="proj-a/a-round", *, question=None):
+    """What `rule` prints for one ruling: the sentence as recorded, the question it
+    answers, and how whoever recorded it says the operator was shown it."""
+    answers = "" if question is None else f"in answer to {question[0]}: {question[1]}\n"
+    return (f"Recorded as {ruling_id}: {said}\n{answers}"
+            'show him this under "Recorded as" in your next message, then:\n'
+            f"  moxi rounds mark {holder} {ruling_id} --shown --record "
+            "<pointer to that message>\n")
+
+
 def round_log(rounds):
     return log.round_log(rounds / "a-round")
 
@@ -133,7 +143,7 @@ def test_an_answer_taken_back_leaves_the_question_open_and_holding_its_stages(
         "actor": "planner", "type": "ruling.recorded", "id": "C2", "question": "Q1",
         "state": "open", "revokes": "C1", "record": "comms:13", "kind": "process",
         "rules": "revoke:C1"}
-    assert capsys.readouterr().out == "C2: revoke:C1\n"
+    assert capsys.readouterr().out == printed("C2", "revoke:C1")
     assert marks(rounds) == [("C1", None, "C2"), ("C2", None, None)]
     found = question(rounds)
     assert (found.state, found.chose, found.ruling) == ("open", None, "C2")
@@ -699,7 +709,7 @@ def test_a_correction_on_a_round_that_has_ended_is_recorded_and_reopens_nothing(
 
     assert main(["rule", ROUND, "revoke:C1", "--record", "comms:13"]) == 0
     out, err = capsys.readouterr()
-    assert out == "C3: revoke:C1\n"
+    assert out == printed("C3", "revoke:C1")
     assert (f"note: proj-a/a-round was {how} and stays as it ended; C3 is recorded, "
             "and what follows from it is new work, in a new round") in err
     assert main(["rule", ROUND, "--text", "Shown there.", "--record", "comms:13",
