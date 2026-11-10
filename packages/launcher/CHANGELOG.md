@@ -10,6 +10,16 @@
   opens the other choices; a launch from Home runs where the button says, whatever
   `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
   went. New component `prompt` (`<moxi-launcher-prompt>`).
+- Home's launch piece has `Options` beside the chip: a panel at the window's right edge
+  with a find field and the launch form's other rows in the catalog's groups, each group
+  saying while closed which of its values differ from the defaults. Each row changed
+  there is named on a `Changed` line under the box and counted on the word
+  (`Options · 2`); `Reset` puts every changed row back and leaves the box, the place, the chip and
+  where the launch runs. A value that can do harm is in the theme's `danger` colour
+  wherever it is drawn. Picked by hand it is set only after `Turn on` under it, and it
+  holds for the one launch that starts with it. A request from Home carries
+  `off_posture: true` when a permission row it sends or leaves out is off the user's
+  usual value, so such a launch is not refused for it.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
