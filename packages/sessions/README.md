@@ -118,7 +118,7 @@ way), and it adds four commands:
   `--text` is given; then the newest thing said in each session follows its line, cut at
   300 bytes. A root that can't be listed is named on stderr and the others are listed.
 - `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]`
-  prints part of one session, the way the page below shows it: the last five turns, or
+  prints part of one session, the way the page below shows a transcript: the last five turns, or
   `--turns` of them (at most 50); with `--around TIME` (ISO 8601 such as
   `2026-11-06T14:03:22Z`, a time with no zone read as local time, or epoch seconds) the
   turns around that time; with `--all` the whole session. Each line starts with its time
@@ -375,7 +375,8 @@ A row is named by the name typed for the session in its harness, with its folder
 it; without one, by the folder and when it started. Its second line is the newest message
 a person typed in the session, with its time and `You:`, and `2 subagents` before it when
 there are any. A session with no such message, and every Codex and OpenCode session, is
-one line. Most rows are one line.
+one line. One-line rows are expected: on the machine this was built on, 50 of the 133
+rows of a week's sessions started in a terminal had a second line.
 
 Above the list, the find field takes a session id or the start of one, or part of a
 folder's name, from two characters on, and its matches replace the groups. Under it are
@@ -451,6 +452,37 @@ The page only reads. It sends no tool call's input and no tool's output, and sen
 when you ask it to, and the list as said above; the page server runs nothing in the
 background. Without the extra, nothing of
 sessions changes.
+
+**Left out.** The page shows what sessions reads from the harnesses' own records and
+nothing else. A piece whose fact sessions does not read is not drawn: no empty place, no
+zero and no greyed control stands in for it. What is left out, and what each needs:
+
+- A second line on Codex rows: sessions would need to read the rollout's `user.text` item
+  kind as the mark of a typed message (see "Listing sessions"). A second line on OpenCode
+  rows: OpenCode's record has no such mark to read.
+- An address for the list's filters, its find and how far it was paged, so that they are
+  kept across a visit to a transcript and another page can link to the list already
+  narrowed. Today the address names the list or one session and nothing more.
+- Find over names and typed prompts: it needs an index of them in sessions, which is a
+  store with what was typed in it. Find takes an id or a folder's name.
+- Running sessions as a group of their own, with the slot and the template each was
+  started from, the effort on the `Session` line, and `Resume` that starts the session
+  from the page: they need the launcher's read of what it launched.
+- A running session's state (working, how many subagents and shells are busy, a line for
+  trouble, the turn that is open) and a session that waits for an answer: they need
+  turns to say them by session.
+- A Project filter in place of Folder, and the project beside a row's name: they need the
+  projects module to answer many folders' projects in one read.
+- Whether a session's cache is warm or cold and until when, with a way to keep it warm:
+  it needs the cache module's state by session.
+- Cost, the number of prompts and the context's size, on a row or on a transcript: they
+  need the usage module's figures by session.
+- Mail counts, such as one message held for a session: they need comms' count of mail
+  held by name.
+- A time zone and a clock of your choice for the page's times: it needs a setting in the
+  core. Times are written as the shell writes them.
+- The phone: the shell's phone view does not offer this page. It needs sessions' reads
+  opened to the phone.
 
 ## Install
 

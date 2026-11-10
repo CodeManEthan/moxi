@@ -53,6 +53,8 @@
   server runs as (null when it has none), marked as a path. The page writes a folder
   under it with `~`: the resume line's folder, the path in the Folder menu and the
   directory in `Details`.
+- The README says how to read the page and lists what the page leaves out, each with
+  what it needs.
 
 ## 0.2.8 (2026-11-10)
 
