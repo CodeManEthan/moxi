@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Home moves its column aside for a main piece's side panel. The piece dispatches a
+  bubbling, composed `moxi-home-side` event with `detail: {width}`, the width in px of a
+  panel it draws fixed to the window's right edge, and from 1100 px of window Home puts
+  its column's centre at the centre of the window less that width. A width of `0`, or
+  the piece leaving the spot, puts the column back; under 1100 px the column stays and
+  the panel lies over the page. `docs/home.md` has the contract.
 - New environment variable `MOXI_UI_LOCKED_SETTINGS`: a list of full setting keys
   (`<module>.<key>`, separated by commas or spaces) that the shell's pages may not change
   for that run. An entry locks its key and every key under it, and a write to a key

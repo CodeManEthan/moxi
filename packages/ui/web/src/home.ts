@@ -7,6 +7,12 @@
 // is loading it says nothing. The phone gets no spot at all: its Home is the rows, under
 // the shell's line that says the phone only reads.
 //
+// A main piece that shows a side panel at the window's right edge says how wide it is with
+// a `moxi-home-side` event, and Home moves its column to the centre of what the panel
+// leaves, in a window wide enough for both. Home moves it with a margin only: a transform,
+// a filter or `contain` here would make Home, not the window, the box a piece's
+// `position: fixed` panel is placed in.
+//
 // A row component (`home_as: "row"`) is placed in a host that stays hidden, as soon as the
 // modules list names it. It reports its line with a `moxi-home-row` event and Home draws
 // the row, so every row looks the same: the component's title, the parts of the fact, the
@@ -15,12 +21,12 @@
 // shows its component's host under it. A component whose script does not load shows
 // nothing here.
 
-import { css, html, LitElement, nothing } from "lit";
+import { css, html, LitElement, nothing, unsafeCSS } from "lit";
 import type { PropertyValues } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { components, gateway, installed, navigate, place, subscribe } from "/m/ui/client.js";
 
-import { anyNeeds, readReport, rowMode, rowOpen, shownRows } from "./home-model.ts";
+import { anyNeeds, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "./home-model.ts";
 import type { RowReport } from "./home-model.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
 import { homeRows, mainPiece } from "./views.ts";
@@ -29,6 +35,10 @@ import type { HomeSeat, ModuleView } from "./views.ts";
 const TAG = "moxi-ui-home";
 /** The event a row component reports its line with. */
 const REPORT = "moxi-home-row";
+/** The event the main piece says its side panel's width with. */
+const SIDE = "moxi-home-side";
+/** Holds the column's left margin while a side panel is shown. */
+const SIDE_MARGIN = "--moxi-home-side-margin";
 
 /** One row component on Home. */
 interface Row extends HomeSeat {
@@ -75,6 +85,9 @@ export class UiHome extends LitElement {
     .seat { padding: 0 2px 7px 98px; border-bottom: 1px solid var(--moxi-border); }
     :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: -2px; }
     [hidden] { display: none; }
+    @media (min-width: ${unsafeCSS(SIDE_FROM_PX)}px) {
+      :host { margin-left: var(${unsafeCSS(SIDE_MARGIN)}, auto); }
+    }
     @media (max-width: 720px) {
       :host { padding-top: 0; }
       .spot { margin-top: 10px; }
@@ -105,6 +118,20 @@ export class UiHome extends LitElement {
   #wanted = "";
   #placing = 0;
   #stop: (() => void) | null = null;
+  /** The piece in the spot whose side panel the column stands beside. */
+  #sider: Node | null = null;
+
+  constructor() {
+    super();
+    this.#spot.addEventListener(SIDE, (event) => {
+      event.stopPropagation();
+      this.#side(event.target as Node, readSide((event as CustomEvent).detail));
+    });
+    // A piece that leaves the spot takes its panel with it.
+    new MutationObserver(() => {
+      if (this.#sider !== null && !this.#spot.contains(this.#sider)) this.#side(null, 0);
+    }).observe(this.#spot, { childList: true, subtree: true });
+  }
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -175,6 +202,14 @@ export class UiHome extends LitElement {
     row.clicked = !row.clicked;
     this.#show(row);
     this.requestUpdate();
+  }
+
+  /** Moves the column beside a side panel `width` px wide, or back with 0. The page's
+   * policy allows no style attribute, so the margin is set on the style object. */
+  #side(from: Node | null, width: number): void {
+    this.#sider = width > 0 ? from : null;
+    if (width > 0) this.style.setProperty(SIDE_MARGIN, sideMargin(width));
+    else this.style.removeProperty(SIDE_MARGIN);
   }
 
   async #seatMain(piece: HomeSeat | null): Promise<void> {
