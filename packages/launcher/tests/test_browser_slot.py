@@ -1,6 +1,7 @@
-"""A past slot session resumed from the launcher's page, in a browser, through a real shell
-whose page server runs the resume on real slots: the resume button, the job it starts,
-and the new launch's row arriving by push.
+"""Real slots in a browser, through a real shell whose page server launches on them: a
+past slot session resumed from the launcher's page (the resume button, the job it starts,
+and the new launch's row arriving by push), and a launch from the box on Home, which
+starts the fake harness in a slot and names that slot under the box.
 
 slots runs on a tmux server of its own. The test shell's `MOXI_HOME` is under its own
 temporary home, slots' socket follows `MOXI_HOME`, and the server is started here on that
@@ -11,15 +12,11 @@ Skipped where slots is not installed or tmux 3.2 or later is not on `PATH`.
 from __future__ import annotations
 
 import importlib.util
-import os
 import re
 import shutil
-import signal
-import subprocess
 import sys
 
 import pytest
-from moxi import paths
 from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
@@ -31,17 +28,6 @@ pytestmark = [pytest.mark.browser,
               pytest.mark.skipif(importlib.util.find_spec("moxi_slots") is None,
                                  reason="slots is not installed"),
               pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not on PATH")]
-
-#: The oldest tmux slots runs on.
-TMUX_FLOOR = (3, 2)
-#: What the shell's environment runs to set slots up and say where its socket is.
-SETUP = """
-import sys
-from moxi import config, paths
-config.set("slots", "tmux", sys.argv[1], by="launcher browser test")
-config.set("slots", "tmux_conf", sys.argv[2], by="launcher browser test")
-print(paths.socket_path("slots", "tmux"))
-"""
 
 
 @pytest.fixture(scope="module")
@@ -58,46 +44,9 @@ def ui_shell_options(harness):
 
 @pytest.fixture(scope="module")
 def own_slots(ui_shell):
-    """slots' server on the shell's own socket, started as the supervisor would start it
-    (tmux's absolute path recorded, `tmux_conf` /dev/null), and stopped after with its
-    tmux server. Yields the socket."""
-    found = shutil.which("tmux")
-    said = subprocess.run([found, "-V"], capture_output=True, text=True, timeout=5).stdout
-    version = re.search(r"(\d+)\.(\d+)", said)
-    if version is None or tuple(map(int, version.groups())) < TMUX_FLOOR:
-        pytest.skip(f"tmux on PATH is {said.strip()!r}, below 3.2")
-    env = dict(ui_shell.env)
-    tmux = os.path.abspath(found)
-    socket = subprocess.run([sys.executable, "-c", SETUP, tmux, os.devnull], env=env,
-                            capture_output=True, text=True, check=True,
-                            timeout=30).stdout.strip()
-    assert socket.startswith(env["MOXI_HOME"]) or "/moxi-" in socket, socket
-    log_path = ui_shell.home / "slots-server.log"
-    with open(log_path, "wb") as log:
-        server = subprocess.Popen([str(paths.script("moxi-slots-server"))], env=env,
-                                  stdin=subprocess.DEVNULL, stdout=log,
-                                  stderr=subprocess.STDOUT, start_new_session=True)
-    try:
-        wait_for(lambda: subprocess.run([tmux, "-S", socket, "display-message", "-p",
-                                         "#{pid}"], capture_output=True, env=env,
-                                        timeout=5).returncode == 0,
-                 20, interval=0.2,
-                 what=lambda: f"slots' own server; its log: "
-                              f"{log_path.read_text(errors='replace')}")
+    """slots' server on the shell's own socket; yields the socket."""
+    with kit.own_slots(ui_shell) as socket:
         yield socket
-    finally:
-        subprocess.run([tmux, "-S", socket, "kill-server"], capture_output=True, env=env,
-                       timeout=10)
-        if server.poll() is None:
-            try:
-                os.killpg(server.pid, signal.SIGTERM)
-            except OSError:
-                pass
-            try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(server.pid, signal.SIGKILL)
-                server.wait(timeout=10)
 
 
 def test_a_past_slot_session_resumes_in_its_slot_and_the_new_row_arrives_by_push(
@@ -122,3 +71,20 @@ def test_a_past_slot_session_resumes_in_its_slot_and_the_new_row_arrives_by_push
     [run] = wait_for(lambda: [run for run in harness.runs() if run["cwd"] == str(work)], 20,
                      what="the fake harness's run in the slot")
     assert "--resume" in run["argv"] and sid in run["argv"], run["argv"]
+
+
+def test_a_launch_from_home_starts_in_a_real_slot_and_names_it(ui_shell, own_slots, ui_page,
+                                                               harness):
+    piece = kit.open_home(ui_page)
+    go = piece.locator(".go")
+    expect(go).to_have_attribute("data-target", "slot")
+    expect(go).to_have_text(re.compile(r"^Launch in (a new slot|slot \d+)$"))
+    go.click()
+    started = piece.locator('.said [data-line="started"]')
+    expect(started).to_have_text(re.compile(r"^Started in slot \d+ · "), timeout=30_000)
+    row = kit.newest_launch(ui_shell)
+    assert row.target == "slot" and row.slot, row
+    assert f"Started in slot {row.slot} " in started.inner_text()
+    # The fake harness ran in the slot, in the folder the line above the box named.
+    wait_for(lambda: [run for run in harness.runs() if run["cwd"] == row.cwd], 20,
+             what="the fake harness's run in the slot")

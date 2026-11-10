@@ -513,3 +513,67 @@ def test_a_row_reads_stale_only_while_under_way():
 def test_the_stale_bound_is_the_ready_and_first_waits():
     assert store.stale_after_s() == 60 + 120
     assert store.stale_after_s({"ready.wait_s": 5, "first.wait_s": 7}) == 12
+
+
+# -- places ------------------------------------------------------------------------------
+
+
+def placed(conn, request_id, hour, minute=0, **overrides):
+    """A launch `operator` made at `hour`:`minute` of one day."""
+    at = f"2026-10-30T{hour:02d}:{minute:02d}:00.000000Z"
+    codex(conn, request_id=request_id, at=at, **{"actor": "operator", **overrides})
+    return at
+
+
+def test_places_are_the_newest_launch_of_each_project_and_folder(conn):
+    placed(conn, "a", 9, cwd="/work/one")
+    placed(conn, "b", 10, cwd="/src/proj-a", project_key="proj-a")
+    two = placed(conn, "c", 11, cwd="/work/one")
+    inner = placed(conn, "d", 12, cwd="/src/proj-a/docs", project_key="proj-a")
+    assert store.places(conn, "operator") == [
+        store.Place("proj-a", "/src/proj-a/docs", inner),
+        store.Place(None, "/work/one", two)]
+
+
+def test_a_project_and_its_folder_launched_without_it_are_two_places(conn):
+    bare = placed(conn, "a", 9, cwd="/src/proj-a")
+    keyed = placed(conn, "b", 10, cwd="/src/proj-a", project_key="proj-a")
+    assert store.places(conn, "operator") == [
+        store.Place("proj-a", "/src/proj-a", keyed), store.Place(None, "/src/proj-a", bare)]
+
+
+def test_places_leave_out_what_the_actor_would_not_launch_again(conn):
+    kept = placed(conn, "kept", 9, cwd="/work/kept")
+    placed(conn, "failed", 10, cwd="/work/failed")
+    store.set_state(conn, "failed", "failed", reason="exited")
+    placed(conn, "relaunch", 11, cwd="/work/relaunch", relaunch_of="kept")
+    placed(conn, "resume", 12, cwd="/work/resume", resume_of="kept", session_id="thread-1")
+    placed(conn, "other", 13, cwd="/work/other", actor="alice")
+    placed(conn, "scratch", 14, cwd="/tmp/scratch-1",
+           values={"sandbox": "workspace-write", "scratch": True})
+    assert store.places(conn, "operator") == [store.Place(None, "/work/kept", kept)]
+    assert [p.cwd for p in store.places(conn, "alice")] == ["/work/other"]
+    assert store.places(conn, "bob") == []
+
+
+def test_a_place_whose_newest_launch_failed_is_its_newest_launch_that_counts(conn):
+    good = placed(conn, "good", 9, cwd="/work/one")
+    placed(conn, "bad", 10, cwd="/work/one")
+    store.set_state(conn, "bad", "failed", reason="exited")
+    assert store.places(conn, "operator") == [store.Place(None, "/work/one", good)]
+
+
+def test_places_stop_at_five_and_at_the_limit_asked(conn):
+    for number in range(7):
+        placed(conn, f"r{number}", 9 + number, cwd=f"/work/{number}")
+    assert [p.cwd for p in store.places(conn, "operator")] == [
+        f"/work/{number}" for number in (6, 5, 4, 3, 2)]
+    assert [p.cwd for p in store.places(conn, "operator", limit=2)] == ["/work/6", "/work/5"]
+
+
+def test_a_place_older_than_the_rows_read_is_not_given(conn, monkeypatch):
+    placed(conn, "old", 9, cwd="/work/old")
+    placed(conn, "mid", 10, cwd="/work/new")
+    placed(conn, "new", 11, cwd="/work/new")
+    monkeypatch.setattr(store, "PLACES_SCAN", 2)
+    assert [p.cwd for p in store.places(conn, "operator")] == ["/work/new"]
