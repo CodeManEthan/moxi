@@ -156,12 +156,38 @@ test("a status that cannot be read hides nothing and says so", () => {
 
 test("a lane the last pass did not read has a line; one that was never there has none", () => {
   const lanes = [lane("claude", 72), lane("codex", 8, { state: "offline", reason: "its folder can't be listed" }),
-                 lane("opencode", 0, { state: "absent", reason: "no such folder" }),
+                 lane("opencode", 0, { state: "absent", reason: "the OpenCode database /h/opencode.db is missing" }),
                  lane("archive:old", 2, { harness: "claude", state: "held" }),
                  lane("pilot", 0, { state: null })];
   assert.deepEqual(texts(frame({ status: read(status({ lanes })) })), [
     "Codex not read: offline, its folder can't be listed", "Claude (archive:old) not read: held",
     "Pilot not read yet"]);
+});
+
+test("only a folder that was never there has no line", () => {
+  const line = (...lanes) => texts(frame({ status: read(status({ lanes: [lane("claude", 72), ...lanes] })) }));
+  // Never there: the pass could not list it, the index holds nothing for it, and the
+  // reason is that it does not exist.
+  assert.deepEqual(line(lane("codex", 0, { state: "absent", reason: "sessions root does not exist (unmounted?)" })), []);
+  assert.deepEqual(line(lane("opencode", 0, { state: "absent", reason: "the OpenCode database /h/opencode.db is missing" })), []);
+  assert.deepEqual(line(lane("codex", 0, { state: "absent" })), []);
+  // There, and it could not be read: the index holds nothing for it, so the pass calls
+  // it absent too, and the line still shows.
+  assert.deepEqual(line(lane("codex", 0, { state: "absent", reason: "sessions root unreadable: Permission denied" })),
+                   ["Codex not read: absent, sessions root unreadable: Permission denied"]);
+  assert.deepEqual(line(lane("codex", 0, { state: "absent", reason: "sessions root is not a directory (unmounted?)" })),
+                   ["Codex not read: absent, sessions root is not a directory (unmounted?)"]);
+  assert.deepEqual(line(lane("opencode", 0, { state: "absent", reason: "the OpenCode database /h/opencode.db cannot be read" })),
+                   ["OpenCode not read: absent, the OpenCode database /h/opencode.db cannot be read"]);
+  // There, unreadable, with files from an earlier pass.
+  assert.deepEqual(line(lane("codex", 8, { state: "offline", reason: "sessions root unreadable: Permission denied", held: 8 })),
+                   ["Codex not read: offline, sessions root unreadable: Permission denied"]);
+  // Read on an earlier pass and gone now: its files are kept, so it is offline.
+  assert.deepEqual(line(lane("codex", 8, { state: "offline", reason: "sessions root does not exist (unmounted?)", held: 8 })),
+                   ["Codex not read: offline, sessions root does not exist (unmounted?)"]);
+  // Read on an earlier pass, and its folder lists nothing now.
+  assert.deepEqual(line(lane("codex", 8, { state: "held", reason: "codex listed no sources at /h/sessions while the index holds rows for it", held: 8 })),
+                   ["Codex not read: held, codex listed no sources at /h/sessions while the index holds rows for it"]);
 });
 
 test("held files are counted with why", () => {

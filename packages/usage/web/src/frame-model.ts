@@ -200,10 +200,19 @@ function laneName(lane: Lane): string {
   return lane.lane === harness ? harnessName(harness) : `${harnessName(harness)} (${lane.lane})`;
 }
 
+/** Whether a lane's folder was never there: the pass could not list it, the index holds
+ * nothing for it, and the reason it gave is that the folder (or the database) does not
+ * exist. A pass also calls a lane `absent` when its folder is there and could not be
+ * read while the index holds nothing for it; that one's reason says something else. */
+function neverThere(lane: Lane): boolean {
+  return lane.state === "absent" && (!lane.reason || /does not exist|is missing/.test(lane.reason));
+}
+
 /** `Codex not read: offline, <reason>` for each lane the last pass did not read. A lane
- * whose folder was never there leaves nothing out and has no line. */
+ * whose folder was never there leaves nothing out and has no line; a folder that is
+ * there and could not be read has its line, whatever the index holds for it. */
 function laneLines(status: Status): FootLine[] {
-  return status.lanes.filter((lane) => lane.state !== "online" && lane.state !== "absent").map((lane) => ({
+  return status.lanes.filter((lane) => lane.state !== "online" && !neverThere(lane)).map((lane) => ({
     key: `lane:${lane.lane}`,
     text: lane.state === null ? `${laneName(lane)} not read yet`
       : `${laneName(lane)} not read: ${lane.state}${lane.reason ? `, ${lane.reason}` : ""}`,
