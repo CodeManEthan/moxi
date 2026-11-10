@@ -2,6 +2,12 @@
 the groups a list is cut into, the next rows of a group, the folders, and one session
 opened. Plain functions that return plain data (dicts, lists, numbers, strings, None).
 
+`list_sessions`, `more_sessions`, `newest_sessions`, `list_folders` and `open_session`
+take the catalog to read through; the page's handlers and `moxi sessions list` call them.
+`sessions_list`, `sessions_more`, `sessions_newest`, `sessions_folders` and
+`session_opened` are the same reads for another module (`moxi_sessions.api`): they take
+no catalog and read through the calling process's own.
+
 **The filters.** `harness`, `since` (changed at or after it) and `until` (changed before
 it) are tested on a catalog entry and open no file. `folder` (a session whose own head
 names that folder) and `find` (the session's id starts with the text, or the last segment
@@ -674,8 +680,82 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
     return row
 
 
+# --- the reads other modules call -------------------------------------------------------------
+
+def _recent(recent_s: float | None) -> float:
+    if recent_s is not None:
+        return recent_s
+    from . import settings
+
+    return settings.recent_s()
+
+
+def sessions_list(*, recent_s: float | None = None, now: float | None = None,
+                  harness: str | None = None, since: float | None = None,
+                  until: float | None = None, folder: str | None = None,
+                  find: str | None = None) -> dict[str, Any]:
+    """The list of sessions as plain data: `list_sessions` says what it answers.
+
+    `recent_s` is how many seconds after its last change a session counts as active
+    recently; None takes the setting `list.recent_s`, and then a config file that cannot
+    be read raises `moxi.config.ConfigError`.
+
+    It takes no cache from its caller. It reads the roots this process's environment and
+    sessions' config name, through one catalog this process keeps while it lives. A page
+    server answers from the catalog its own process has filled; a caller in another
+    process shares none of that and pays its own cold reads on its first call: each
+    root's listing, every Codex head, and the head and last turn of what it answers.
+    Later calls in the same process reuse them."""
+    return list_sessions(None, recent_s=_recent(recent_s), now=now, harness=harness,
+                         since=since, until=until, folder=folder, find=find)
+
+
+def sessions_more(*, group: str, recent_s: float | None = None, kind: str | None = None,
+                  before: str | None = None, now: float | None = None,
+                  harness: str | None = None, since: float | None = None,
+                  until: float | None = None, folder: str | None = None,
+                  find: str | None = None) -> dict[str, Any]:
+    """The next rows of one group of the list: `more_sessions` says what it answers.
+    `recent_s`, the roots read and the cold reads are as `sessions_list` says. Pass the
+    list answer's `now` so the groups are cut where that list cut them."""
+    return more_sessions(None, group=group, recent_s=_recent(recent_s), kind=kind,
+                         before=before, now=now, harness=harness, since=since,
+                         until=until, folder=folder, find=find)
+
+
+def sessions_newest(*, recent_s: float | None = None, now: float | None = None,
+                    limit: int = NEWEST_ROWS, harness: str | None = None,
+                    since: float | None = None, until: float | None = None,
+                    folder: str | None = None) -> dict[str, Any]:
+    """The sessions as one run, newest change first, with no groups: `newest_sessions`
+    says what it answers. `recent_s`, the roots read and the cold reads are as
+    `sessions_list` says."""
+    return newest_sessions(None, recent_s=_recent(recent_s), now=now, limit=limit,
+                           harness=harness, since=since, until=until, folder=folder)
+
+
+def sessions_folders(*, harness: str | None = None, since: float | None = None,
+                     until: float | None = None, find: str | None = None,
+                     limit: int = FOLDERS_MAX) -> dict[str, Any]:
+    """The folders the sessions ran in: `list_folders` says what it answers. The roots
+    read are as `sessions_list` says; this read's cold cost is the head of every
+    session."""
+    return list_folders(None, harness=harness, since=since, until=until, find=find,
+                        limit=limit)
+
+
+def session_opened(*, harness: str, session: str, recent_s: float | None = None,
+                   now: float | None = None) -> dict[str, Any] | None:
+    """One main session, opened: `open_session` says what it answers. `recent_s`, the
+    roots read and the cold reads are as `sessions_list` says. Its reply and its
+    subagents are read at each call and not kept."""
+    return open_session(None, harness=harness, session=session,
+                        recent_s=_recent(recent_s), now=now)
+
+
 __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIONS",
            "NEWEST_ROWS", "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FIND_MIN", "RECENT",
            "FOUND", "EARLIER", "UNDATED", "PERSON", "PROGRAM", "position",
            "parse_position", "local_day", "list_sessions", "newest_sessions",
-           "more_sessions", "list_folders", "open_session"]
+           "more_sessions", "list_folders", "open_session", "sessions_list",
+           "sessions_more", "sessions_newest", "sessions_folders", "session_opened"]

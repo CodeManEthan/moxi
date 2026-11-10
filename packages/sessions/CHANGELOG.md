@@ -9,7 +9,8 @@
   `--text`, redacted when the secrets module is installed.
 - Interface 4, which is interface 3 plus the list: `sessions_list` (the sessions counted
   and cut into the ones active recently, seven days and the rest), `sessions_more`,
-  `sessions_newest`, `sessions_folders`, `session_opened`, `list_recent_s` and `Catalog`.
+  `sessions_newest`, `sessions_folders` and `session_opened`. Each reads through the
+  calling process's own memory and takes no cache from its caller.
   A list reads each root's listing, then only the sessions it returns, and keeps what it
   read in memory.
 - A list tells a harness that is not on the machine from a root that could not be read.

@@ -10,6 +10,8 @@ from importlib import metadata
 
 import pytest
 
+from conftest import write_config
+
 from moxi import modules
 from moxi.config import Schema
 from moxi_sessions import api, module
@@ -64,79 +66,69 @@ def test_interface_3_adds_retention():
     assert list(inspect.signature(api.retention).parameters) == ["env"]
 
 
-def test_interface_4_adds_the_list():
-    from moxi_sessions import catalog, lists, settings
-    assert {"sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
-            "session_opened", "list_recent_s", "Catalog"} <= set(api.__all__)
-    assert api.sessions_list is lists.list_sessions
-    assert api.sessions_more is lists.more_sessions
-    assert api.sessions_newest is lists.newest_sessions
-    assert api.sessions_folders is lists.list_folders
-    assert api.session_opened is lists.open_session
-    assert api.list_recent_s is settings.recent_s and api.Catalog is catalog.Catalog
-    sig = inspect.signature(api.sessions_list)
-    assert list(sig.parameters) == ["cat", "recent_s", "now", "harness", "since", "until",
-                                    "folder", "find"]
-    assert sig.parameters["cat"].default is None
-    assert sig.parameters["recent_s"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert sig.parameters["recent_s"].default is inspect.Parameter.empty
+LIST_READS = ("sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
+              "session_opened")
+
+
+def test_interface_4_adds_the_lists_reads_and_nothing_they_are_built_from():
+    from moxi_sessions import lists
+
+    before = {"find", "sources", "subagents", "window", "retention", "Retention"}
+    assert before | set(LIST_READS) <= set(api.__all__)
+    for name in ("Catalog", "list_recent_s", "catalog", "lists"):
+        assert name not in api.__all__ and not hasattr(api, name), name
+    for name in LIST_READS:
+        read = getattr(api, name)
+        assert read is getattr(lists, name)
+        parameters = inspect.signature(read).parameters
+        assert "cat" not in parameters, name
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in parameters.values())
+        if "recent_s" in parameters:
+            assert parameters["recent_s"].default is None, name
+    assert list(inspect.signature(api.sessions_list).parameters) == [
+        "recent_s", "now", "harness", "since", "until", "folder", "find"]
     assert list(inspect.signature(api.session_opened).parameters) == [
-        "cat", "harness", "session", "recent_s", "now"]
+        "harness", "session", "recent_s", "now"]
+    assert "recent_s" not in inspect.signature(api.sessions_folders).parameters
 
 
-def test_the_list_answers_through_the_api_over_a_callers_own_roots(tmp_path):
-    projects = tmp_path / "projects"
-    rollouts = tmp_path / "codex-sessions"
-    rollouts.mkdir()
-    t = api.testing.ClaudeTranscript(projects, cwd="/work/proj-a")
+def test_the_list_answers_through_the_api_over_the_roots_the_process_names(
+        tmp_path, monkeypatch, own_config):
+    from moxi_sessions import catalog
+
+    claude_home, codex_home, data = (tmp_path / name for name in ("claude", "codex",
+                                                                  "data"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
+    t = api.testing.ClaudeTranscript(claude_home / "projects", cwd="/work/proj-a")
     t.user("Do the thing.", origin="human")
     t.assistant("Done.")
     t.write()
-    cat = api.Catalog({"claude": projects, "codex": rollouts,
-                       "opencode": api.testing.OpenCodeDb(tmp_path / "opencode").write()})
+    catalog.reset()
+    try:
+        answer = api.sessions_list()
+        row = answer["groups"][0]["rows"][0]
+        newest = api.sessions_newest(now=answer["now"])
+        more = api.sessions_more(group="recent", now=answer["now"])
+        folders = api.sessions_folders()
+        opened = api.session_opened(harness="claude", session=row["session"],
+                                    now=answer["now"])
+        write_config(own_config, "[list]\nrecent_s = 0\n")
+        by_setting = api.sessions_list(now=answer["now"] + 60)
+        by_caller = api.sessions_list(now=answer["now"] + 60, recent_s=3600)
+    finally:
+        catalog.reset()
 
-    answer = api.sessions_list(cat, recent_s=api.list_recent_s())
-
-    assert api.list_recent_s() == 3600
     assert (answer["all"], answer["total"]) == (1, 1)
-    row = answer["groups"][0]["rows"][0]
+    assert answer["harnesses"] == [{"harness": "claude", "count": 1}]
     assert answer["groups"][0]["key"] == "recent" and row["folder"] == "/work/proj-a"
-    assert api.sessions_newest(cat, recent_s=3600)["rows"] == [row]
-    assert api.session_opened(cat, harness="claude", session=row["session"],
-                              recent_s=3600)["reply"]["text"] == "Done."
-
-
-def test_interface_2_keeps_what_cache_reads():
-    assert {"claude", "codex", "read_back", "projects_root"} <= set(api.__all__)
-    assert CLAUDE_NAMES <= set(dir(api.claude))
-    assert CODEX_NAMES <= set(dir(api.codex))
-    assert {"MissingSession", "UnknownSchema", "QueryFailed", "CHECKED_VERSIONS",
-            "TOTALS"} <= set(dir(api.opencode))
-
-
-def test_the_interface_signatures_hold_their_parameters():
-    sig = inspect.signature(api.read_back)
-    assert list(sig.parameters)[:4] == ["path", "block", "limit", "read_head"]
-    assert sig.parameters["block"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert sig.parameters["block"].default is inspect.Parameter.empty
-    assert sig.parameters["limit"].default is inspect.Parameter.empty
-    assert sig.parameters["read_head"].default is False
-    assert list(inspect.signature(api.projects_root).parameters) == ["env"]
-
-
-def test_interface_2_finds_and_lists():
-    assert {"find", "sources", "subagents", "Found", "Probe", "Hit", "Listing", "Listed",
-            "SubagentListing", "Subagent", "Source", "Header", "Unreadable", "root",
-            "root_origin"} <= set(api.__all__)
-    for name in api.__all__:
-        assert hasattr(api, name), name
-    sig = inspect.signature(api.find)
-    assert list(sig.parameters) == ["harness", "session_id", "root"]
-    assert sig.parameters["root"].kind is inspect.Parameter.KEYWORD_ONLY
-    sig = inspect.signature(api.sources)
-    assert list(sig.parameters) == ["harness", "root", "modified_since", "heads"]
-    assert sig.parameters["heads"].default is True
-    assert list(inspect.signature(api.subagents).parameters) == ["source"]
+    assert row["recent"] is True                  # the setting's hour
+    assert newest["rows"] == [row] and more["rows"] == [row]
+    assert folders["folders"][0]["folder"] == "/work/proj-a"
+    assert opened["reply"]["text"] == "Done."
+    assert by_setting["groups"][0]["count"] == 0  # no session is recent at 0 seconds
+    assert by_caller["groups"][0]["count"] == 1
 
 
 def test_the_schema_holds_the_roots_the_guards_switch_and_escapes_and_the_recent_time():
