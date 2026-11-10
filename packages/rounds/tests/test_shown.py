@@ -312,6 +312,14 @@ def test_a_message_after_the_ruling_or_a_page_is_a_showing(rounds, pointer):
     assert mark(ROUND, "C1", record=pointer).marked == ("C1",)
 
 
+def test_a_rulings_own_message_written_with_zeros_is_no_showing_of_it(rounds):
+    rule(at=T1, record="comms:012")
+
+    with pytest.raises(Refused, match="comms:12 is the pointer of C1 itself"):
+        mark(ROUND, "C1", record="comms:12")
+    assert mark(ROUND, "C1", record="comms:013").marked == ("C1",)
+
+
 def test_a_message_numbered_lower_than_a_page_or_session_ruling_is_not_compared(rounds):
     rule(at=T1, record="https://example.com/said")
 
@@ -327,6 +335,10 @@ def test_a_message_numbered_lower_than_a_page_or_session_ruling_is_not_compared(
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
     (ROUND, "C1", "comms:12", "comms:12 is the pointer of C1 itself",
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
+    (ROUND, "C1", "comms:012", "comms:012 is the pointer of C1 itself",
+     f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
+    (ROUND, "C1,C2", "comms:00040", "comms:00040 is the pointer of C2 itself",
+     f"moxi rounds mark {ROUND} C1,C2 --shown --record PTR"),
     (ROUND, "C1", "comms:11", "comms:11 came before comms:12, where he said C1",
      f"moxi rounds mark {ROUND} C1 --shown --record PTR"),
     (ROUND, "C1,C2", "comms:13", "comms:13 came before comms:40, where he said C2",

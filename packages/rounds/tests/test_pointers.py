@@ -55,3 +55,13 @@ def test_only_the_shape_is_checked():
     assert pointers.shape("comms:999999999999") == pointers.COMMS
     assert pointers.shape("https://nowhere.invalid/") == pointers.URL
     assert pointers.shape("file:not-written-yet.md#x") == pointers.FILE
+
+
+@pytest.mark.parametrize("one, other, same", [
+    ("comms:12", "comms:12", True), ("comms:012", "comms:12", True),
+    ("comms:12", "comms:0012", True), ("comms:12", "comms:13", False),
+    ("comms:12", "https://example.com/12", False),
+    ("https://example.com/said", "https://example.com/said", True),
+    ("comms:12", None, False)])
+def test_two_message_pointers_of_one_number_point_at_one_message(one, other, same):
+    assert pointers.same(one, other) is same

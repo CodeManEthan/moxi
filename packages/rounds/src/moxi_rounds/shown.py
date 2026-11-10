@@ -300,14 +300,14 @@ def mark(target: str, ids: str | Iterable[str], *, actor: str, record: str | Non
                          f"is one token: {_SHOWINGS}", again)
         unmet = []
         for ruling in found(view):
-            if ruling.record == record:
+            if pointers.same(ruling.record, record):
                 unmet.append(Unmet(
                     f"{record} is the pointer of {ruling.id} itself: that is where he "
                     "said it, and a showing is the later message that put the "
                     "sentence as recorded in front of him", again))
             elif (shape == pointers.COMMS
                   and pointers.shape(ruling.record) == pointers.COMMS
-                  and _number(record) < _number(ruling.record)):
+                  and pointers.number(record) < pointers.number(ruling.record)):
                 unmet.append(Unmet(
                     f"{record} came before {ruling.record}, where he said "
                     f"{ruling.id}: a message from before a ruling can't have shown "
@@ -344,10 +344,6 @@ def mark(target: str, ids: str | Iterable[str], *, actor: str, record: str | Non
 _SHOWINGS = ("comms:<digits> for a message, <8 or more hex digits>@<UTC time> "
              "(2026-01-02T03:04Z) for a moment in a session, or the https:// URL of a "
              "page that listed it")
-
-
-def _number(pointer: str) -> int:
-    return int(pointer.partition(":")[2])
 
 
 __all__ = ["READBACK", "TIME", "Row", "ReadBack", "Marked", "read_back", "through",

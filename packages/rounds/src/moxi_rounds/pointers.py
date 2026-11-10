@@ -57,6 +57,20 @@ def shape(pointer: object) -> str | None:
     return None
 
 
+def number(pointer: str) -> int:
+    """The number of the message a `COMMS` pointer names. A message is its number, so
+    `comms:012` and `comms:12` name one message."""
+    return int(pointer.partition(":")[2])
+
+
+def same(one: object, other: object) -> bool:
+    """Whether two pointers point at one place: the same token, or two `COMMS`
+    pointers of one number, however each is written."""
+    if one == other:
+        return True
+    return shape(one) == COMMS and shape(other) == COMMS and number(one) == number(other)
+
+
 def unmet(pointer: object, fix: str) -> Unmet | None:
     """The unmet condition of a pointer that has none of the four shapes, or None for one
     that has. `fix` is the command that gives a right one."""
@@ -83,4 +97,5 @@ def _is_under(path: str) -> bool:
     return all(part not in ("", "..") for part in path.split("/"))
 
 
-__all__ = ["COMMS", "SESSION", "URL", "FILE", "SHAPES", "shape", "unmet"]
+__all__ = ["COMMS", "SESSION", "URL", "FILE", "SHAPES", "shape", "number", "same",
+           "unmet"]
