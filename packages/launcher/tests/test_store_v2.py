@@ -171,10 +171,10 @@ def test_the_base_environment_column_is_empty_until_written(conn):
     row = launch(conn)
     assert row.base_env_json is None and store.get(conn, "r1").base_env is None
     conn.execute("UPDATE launches SET base_env_json = ? WHERE request_id = 'r1'",
-                 ('{"HOME":"/home/someone","LANG":"C.UTF-8"}',))
+                 ('{"HOME":"/users/someone","LANG":"C.UTF-8"}',))
     row = store.get(conn, "r1")
-    assert row.base_env == {"HOME": "/home/someone", "LANG": "C.UTF-8"}
-    assert row.as_json()["base_env_json"] == {"HOME": "/home/someone", "LANG": "C.UTF-8"}
+    assert row.base_env == {"HOME": "/users/someone", "LANG": "C.UTF-8"}
+    assert row.as_json()["base_env_json"] == {"HOME": "/users/someone", "LANG": "C.UTF-8"}
 
 
 def test_a_claim_names_its_endpoint_by_pid_and_start():

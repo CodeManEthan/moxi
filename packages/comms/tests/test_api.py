@@ -94,7 +94,10 @@ def test_interface_2_holds_its_names():
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
         "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME",
-        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT"}
+        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
+        "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
+        "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
+        "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer

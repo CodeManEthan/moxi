@@ -285,6 +285,11 @@ def _descriptor(path: str | os.PathLike) -> int:
 
 # -- the install's claim -----------------------------------------------------------------
 
+def _claim_handed() -> bool:
+    """Whether this process was handed the core lock claim."""
+    return LOCK_FD_ENV in os.environ
+
+
 def adopt_core_claim(path: str | os.PathLike) -> bool:
     """Take over the claim on the core lock `path` that an install's parent handed this
     process, and say whether this process now holds one.

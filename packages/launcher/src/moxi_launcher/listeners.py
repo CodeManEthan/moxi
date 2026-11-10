@@ -33,14 +33,16 @@ import os
 import threading
 from collections.abc import Mapping
 
-from .compose.common import RELAUNCH_ENV, REQUEST_ENV
-
 LISTENERS = (
     (("ready", "gone"), "moxi_launcher.listen_ready:observe"),
     (("start",), "moxi_launcher.listen_codex:answer"),
     (("start",), "moxi_launcher.listen_handoff:answer"),
 )
 
+#: The launch's stamp: the request id of the launch that started the session.
+REQUEST_ENV = "MOXI_LAUNCHER_REQUEST"
+#: Set on a relaunch, whose handoff comes in its first turn.
+RELAUNCH_ENV = "MOXI_LAUNCHER_RELAUNCH"
 #: How long a listener waits for the launch log's write lock, in seconds. turns bounds
 #: every listener of an event together (two seconds by default), and a listener holds the
 #: lock for one short write.

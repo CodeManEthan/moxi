@@ -43,6 +43,7 @@ class Resolved:
 class FakeTurns:
     """turns' API as the launcher calls it: the launch additions, counted."""
 
+    COMMANDS_ENV = "MOXI_TURNS_COMMANDS"
     calls: list = field(default_factory=list)
 
     def launch_additions(self, harness, *, cwd, env, session_id=None, commands=()):

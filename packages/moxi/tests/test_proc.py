@@ -1161,11 +1161,11 @@ def test_the_windows_reader_reads_a_child_as_it_was_started():
 def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
     env = {k: v for k, v in os.environ.items() if k.upper() != _mark.STARTED_BY_ENV}
     code = ("import os, moxi._mark as m; "
-            "print(m.started_by, os.environ[m.NAME] == m.program)")
+            "print(m.started_by, os.environ[m.STARTED_BY_ENV] == m.program)")
     done = proc.run([PY, "-c", code], timeout_s=30, env=None, capture=True)
     assert done.returncode == 0
-    # proc.run marks a child it starts, so this child started with the mark.
-    assert done.stdout.decode().split() == [_mark.program, "True"]
+    # proc.run marks a child it starts with this process's program, not the child's.
+    assert done.stdout.decode().strip() == f"{_mark.program} False"
     plain = subprocess.run([PY, "-c", code], env=env, capture_output=True, text=True,
                            timeout=30)
     assert plain.stdout.split() == ["None", "True"], plain.stderr

@@ -44,9 +44,10 @@ import pytest
 
 import moxi.paths
 from moxi.units import _systemd
-from moxi.units._fence import REAL_SUPERVISOR, Fence
+from moxi.units._fence import Fence
 from moxi.units._systemd import SystemdBackend, command_line, quote
 from moxi.units._types import Wrapped
+from moxi_dev.testing import REAL_SUPERVISOR_ENV
 
 from conftest import drop_modules
 
@@ -60,8 +61,8 @@ def _user_manager() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get(REAL_SUPERVISOR) != "1" or not _user_manager(),
-    reason=f"a proof row on the real user manager: set {REAL_SUPERVISOR}=1 on a system "
+    os.environ.get(REAL_SUPERVISOR_ENV) != "1" or not _user_manager(),
+    reason=f"a proof row on the real user manager: set {REAL_SUPERVISOR_ENV}=1 on a system "
            "with a systemd user manager")
 
 

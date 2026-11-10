@@ -87,7 +87,7 @@ def test_interface_4_adds_the_lists_reads_and_nothing_they_are_built_from():
         if "recent_s" in parameters:
             assert parameters["recent_s"].default is None, name
     assert list(inspect.signature(api.sessions_list).parameters) == [
-        "recent_s", "now", "harness", "since", "until", "folder", "find"]
+        "recent_s", "now", "harness", "since", "until", "work_dir", "find"]
     assert list(inspect.signature(api.session_opened).parameters) == [
         "harness", "session", "recent_s", "now"]
     assert "recent_s" not in inspect.signature(api.session_dirs).parameters

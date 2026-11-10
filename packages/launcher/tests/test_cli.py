@@ -771,10 +771,12 @@ def project_notes(monkeypatch, tmp_path):
         return found
 
     real = modules.available
-    loaded = SimpleNamespace(state=modules.PRESENT, reason="",
+    real_load = modules.load
+    loaded = SimpleNamespace(state=modules.PRESENT, ok=True, reason="",
                              api=SimpleNamespace(handoffs_dir=handoffs_dir))
     monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
-    monkeypatch.setattr(modules, "load", lambda name, interface=None: loaded)
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        loaded if name == "notes" else real_load(name, interface=interface))
     return lambda name: handoffs_dir(name, create=True)
 
 

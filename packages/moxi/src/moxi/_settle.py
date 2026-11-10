@@ -1230,7 +1230,7 @@ def main(argv: list[str] | None = None,
     runs after the handlers are in place and before the step (tests)."""
     from . import files, paths
 
-    handed = files.LOCK_FD_ENV in os.environ
+    handed = files._claim_handed()
     if not files.adopt_core_claim(paths.core_lock()) and handed:
         say("the install's lock claim did not check; nothing done", err=True)
         return 1

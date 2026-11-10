@@ -288,7 +288,7 @@ class RootedCache(FakeCache):
 
     @staticmethod
     def projects_root(environ):
-        home = environ.get("HOME", "/home/me")
+        home = environ.get("HOME", "/users/me")
         return environ.get("CLAUDE_CONFIG_DIR", f"{home}/.claude").replace("~", home) \
             + "/projects"
 
@@ -296,11 +296,11 @@ class RootedCache(FakeCache):
 def test_a_claude_launch_with_its_own_config_dir_reads_its_cache_under_it(tmp_path):
     connection = store.connect(tmp_path / "rooted.db")
     try:
-        launched(connection, base_env={"HOME": "/home/ann", "CLAUDE_CONFIG_DIR": "~/.seat",
+        launched(connection, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",
                                        "CLAUDE_CODE_OAUTH_TOKEN": None})
         cache = RootedCache()
         ask(connection, cache=cache)
-        assert cache.reads == [("claude", SID, {"projects_root": "/home/ann/.seat/projects"})]
+        assert cache.reads == [("claude", SID, {"projects_root": "/users/ann/.seat/projects"})]
     finally:
         connection.close()
 

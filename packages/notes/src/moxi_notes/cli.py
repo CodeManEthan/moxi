@@ -151,7 +151,7 @@ def _path(text: str | None) -> str:
 
 
 def _override() -> str | None:
-    return os.environ.get(api.NOTES_DIR_ENV) or None
+    return api._env_override()
 
 
 #: Why a folder has no notes directory, by the resolver rule that said so.

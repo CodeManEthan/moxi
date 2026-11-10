@@ -11,6 +11,7 @@ from moxi import units
 from moxi.units import _backend, _fence
 from moxi.units._backend import Backend, UnitRef
 from moxi.units._fence import Fence, FenceError, argv
+from moxi_dev import testing
 
 from fake_backend import FakeBackend, FakeSupervisor
 
@@ -123,7 +124,7 @@ def test_a_call_keeps_stderr_as_it_is_and_names_a_failed_start():
 
 
 def test_the_real_runner_is_refused_under_pytest(monkeypatch):
-    monkeypatch.delenv(_fence.REAL_SUPERVISOR, raising=False)
+    monkeypatch.delenv(testing.REAL_SUPERVISOR_ENV, raising=False)
     with pytest.raises(_fence.SupervisorRefused):
         Fence("systemd").run("daemon-reload")
 

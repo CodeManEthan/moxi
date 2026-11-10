@@ -91,9 +91,9 @@ from moxi import modules as moxi_modules
 
 from . import catalog, compose, first, handoffs, identity, presets, slots, store, targets
 from .compose import Composition, common
-from .compose.common import (KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV, RELAUNCH_ENV,
-                             REQUEST_ENV)
+from .compose.common import KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV
 from .first import TURNS_ENV
+from .listeners import RELAUNCH_ENV, REQUEST_ENV
 from .slots import SLOTS_ENV
 
 if TYPE_CHECKING:

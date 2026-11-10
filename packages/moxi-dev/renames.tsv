@@ -313,6 +313,8 @@ launcher	packages/launcher/src/moxi_launcher/job.py	ended = api.wait_ended(slot,
 launcher	packages/launcher/src/moxi_launcher/job.py	answer = api.answer_screen(slot, screen, wait=0)	use	wait=	wait_s=
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.RELAUNCH):	use	listeners.RELAUNCH	listeners.RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.REQUEST):	use	listeners.REQUEST	listeners.REQUEST_ENV
+launcher	packages/launcher/src/moxi_launcher/listeners.py	-	name	REQUEST	REQUEST_ENV
+launcher	packages/launcher/src/moxi_launcher/listeners.py	-	name	RELAUNCH	RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/page.py	"PAGE", "PAST", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",	keep	REQUEST	REQUEST
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._thread.join(timeout=2)	keep	timeout	timeout
 launcher	packages/launcher/src/moxi_launcher/recycle.py	`projects_root` over the launch's own `CLAUDE_CONFIG_DIR` (and `HOME`) as its row	keep	HOME	HOME
@@ -333,16 +335,16 @@ launcher	packages/launcher/tests/test_browser_slot.py	server.wait(timeout=10)	ke
 launcher	packages/launcher/tests/test_browser_slot.py	expect(said.locator('[data-follow="row"]')).to_be_visible(timeout=30_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_slot.py	expect(started).to_have_text(re.compile(r"^Started in slot \d+ · "), timeout=30_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_catalog.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
-launcher	packages/launcher/tests/test_compose_env.py	"PATH": "/usr/bin", "HOME": "/home/u", "LANG": "C.UTF-8",	keep	HOME	HOME
+launcher	packages/launcher/tests/test_compose_env.py	"PATH": "/usr/bin", "HOME": "/users/u", "LANG": "C.UTF-8",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_kind.py	self.env = {listeners.REQUEST: request_id}	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/tests/test_kind.py	env={listeners.REQUEST: request_id}, posture="operator",	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/tests/test_live.py	env["HOME"] = real_home	keep	HOME	HOME
 launcher	packages/launcher/tests/test_live.py	server.wait(timeout=10)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_page.py	NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",	keep	environ	environ
-launcher	packages/launcher/tests/test_page.py	brief="the brief text", base_env={"HOME": "/home/ann-secret"}, at=at,	keep	HOME	HOME
+launcher	packages/launcher/tests/test_page.py	brief="the brief text", base_env={"HOME": "/users/ann-secret"}, at=at,	keep	HOME	HOME
 launcher	packages/launcher/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))	keep	HOME	HOME
-launcher	packages/launcher/tests/test_recycle.py	home = environ.get("HOME", "/home/me")	keep	HOME	HOME
-launcher	packages/launcher/tests/test_recycle.py	launched(connection, base_env={"HOME": "/home/ann", "CLAUDE_CONFIG_DIR": "~/.seat",	keep	HOME	HOME
+launcher	packages/launcher/tests/test_recycle.py	home = environ.get("HOME", "/users/me")	keep	HOME	HOME
+launcher	packages/launcher/tests/test_recycle.py	launched(connection, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	job = {"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C",	keep	HOME	HOME
@@ -356,8 +358,8 @@ launcher	packages/launcher/tests/test_replay.py	assert not common.no_credentials
 launcher	packages/launcher/tests/test_replay.py	assert env["PATH"] == os.environ["PATH"] and env["HOME"] == os.environ["HOME"]	keep	HOME	HOME
 launcher	packages/launcher/tests/test_resume_store.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_resume_store.py	assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",	keep	HOME	HOME
-launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/home/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
-launcher	packages/launcher/tests/test_store_v2.py	assert row.as_json()["base_env_json"] == {"HOME": "/home/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
+launcher	packages/launcher/tests/test_store_v2.py	assert row.as_json()["base_env_json"] == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("name", metavar="NAME")	keep	NAME	NAME
 loadout	packages/loadout/src/moxi_loadout/entries.py	| ({"environment": env} if env else {}))	keep	environment	environment
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):	use	range=	rev_range=
@@ -571,6 +573,7 @@ moxi	packages/moxi/tests/test_proc.py	env["HOME"] = os.environ.get("HOME", "/")	
 moxi	packages/moxi/tests/test_proc.py	(fake / "environ").write_bytes(b"A=1\0B=x=y\0junk\0C=\0=nokey\0D=\xff\0")	keep	environ	environ
 moxi	packages/moxi/tests/test_proc.py	(fake / "environ").write_bytes(b"")	keep	environ	environ
 moxi	packages/moxi/tests/test_proc.py	proc._psutil_read(12, "environ")	keep	environ	environ
+moxi	packages/moxi/tests/test_proc.py	"print(m.started_by, os.environ[m.NAME] == m.program)")	use	m.NAME	m.STARTED_BY_ENV
 moxi	packages/moxi/tests/test_resolvers.py	names += [prefix + suffix for suffix in (*paths.LOCATORS, "DEVICE")]	keep	DEVICE	DEVICE
 moxi	packages/moxi/tests/test_resolvers.py	if k.startswith(("XDG_", "WIN_PD_")) or k in ("HOME", "USERPROFILE", "PATH")}	keep	HOME	HOME
 moxi	packages/moxi/tests/test_resolvers.py	"a home only": {"HOME": full["HOME"], "USERPROFILE": full["USERPROFILE"]},	keep	HOME	HOME
@@ -631,6 +634,7 @@ moxi	packages/moxi/tests/test_uninstall.py	monkeypatch.setenv("HOME", str(user))
 moxi	packages/moxi/tests/test_uninstall.py	with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_uninstall.py	assert taken[0] == {"timeout": 0} and {"nested": True} in taken[1:]	use	"timeout"	"timeout_s"
 moxi	packages/moxi/tests/test_units_fence.py	seen.update(env=env, timeout=timeout)	keep	timeout	timeout
+moxi	packages/moxi/tests/test_units_fence.py	monkeypatch.delenv(_fence.REAL_SUPERVISOR, raising=False)	use	_fence.REAL_SUPERVISOR	testing.REAL_SUPERVISOR_ENV
 moxi	packages/moxi/tests/test_units_home.py	seen = {(_home.home_tag({"MOXI_HOME": s, "HOME": str(tmp_path)}),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_home.py	_home.unit_env("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_launchd.py	monkeypatch.setenv("HOME", "/Users/ana")	keep	HOME	HOME
@@ -640,6 +644,9 @@ moxi	packages/moxi/tests/test_units_systemd.py	env = {"HOME": str(tmp_path), "XD
 moxi	packages/moxi/tests/test_units_systemd.py	monkeypatch.setenv("HOME", str(tmp_path / "h"))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_systemd_live.py	row.script("shell", SHELL.format(python=sys.executable, record=str(record)))	keep	record	record
 moxi	packages/moxi/tests/test_units_systemd_live.py	The test fence is function-scoped and keeps a test's writes, `HOME` and the user	keep	HOME	HOME
+moxi	packages/moxi/tests/test_units_systemd_live.py	from moxi.units._fence import REAL_SUPERVISOR, Fence	use	REAL_SUPERVISOR	REAL_SUPERVISOR_ENV
+moxi	packages/moxi/tests/test_units_systemd_live.py	os.environ.get(REAL_SUPERVISOR) != "1" or not _user_manager(),	use	REAL_SUPERVISOR	REAL_SUPERVISOR_ENV
+moxi	packages/moxi/tests/test_units_systemd_live.py	reason=f"a proof row on the real user manager: set {REAL_SUPERVISOR}=1 on a system "	use	REAL_SUPERVISOR	REAL_SUPERVISOR_ENV
 moxi	packages/moxi/tests/test_watch.py	self.shell.wait(timeout=30)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert j.until(lambda: gone(child, grandchild), timeout=10)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	assert j.until(lambda: gone(j.parent["watchdog"]), timeout=10)	keep	timeout	timeout
@@ -904,6 +911,7 @@ sessions	packages/sessions/tests/test_api.py	assert list(sig.parameters)[:4] == 
 sessions	packages/sessions/tests/test_api.py	assert sig.parameters["head"].default is False	use	"head"	"read_head"
 sessions	packages/sessions/tests/test_api.py	assert folders["folders"][0]["folder"] == "/work/proj-a"	keep	folders	folders
 sessions	packages/sessions/tests/test_api.py	LIST_READS = ("sessions_list", "sessions_more", "sessions_newest", "sessions_folders",	use	sessions_folders	session_dirs
+sessions	packages/sessions/tests/test_api.py	"recent_s", "now", "harness", "since", "until", "folder", "find"]	use	"folder"	"work_dir"
 sessions	packages/sessions/tests/test_bench.py	a.step(input=900, output=120, text="It reads every file it is given. " * 10)	keep	input	input
 sessions	packages/sessions/tests/test_catalog.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_catalog.py	session = db.session(title="a title of unknown hand", directory="/work/proj-b",	keep	directory	directory
@@ -1337,6 +1345,9 @@ ui	packages/ui/tests/test_loopback_export.py	site.module("pother", page="PAGE = 
 ui	packages/ui/tests/test_loopback_export.py	site.module("pfails", page="raise ImportError('no such thing\\non two lines')\n")	keep	page	page
 ui	packages/ui/tests/test_loopback_law_check.py	assert node.attr not in ("environ", "getenv", "monotonic", "time"), (	keep	environ	environ
 ui	packages/ui/tests/test_page.py	results.append(ui_shell.session(timeout=90).get("/m/ui/api/doctor?module=ui"))	keep	timeout	timeout
+ui	packages/ui/tests/test_page.py	from moxi_ui.starter import LOG_FILE_VARIABLE, Starters	use	LOG_FILE_VARIABLE	LOG_FILE_ENV
+ui	packages/ui/tests/test_page.py	monkeypatch.setenv(LOG_FILE_VARIABLE, str(tmp_path / "shell.log"))	use	LOG_FILE_VARIABLE	LOG_FILE_ENV
+ui	packages/ui/tests/test_page.py	assert LOG_FILE_VARIABLE not in env and env == starters.child_env()	use	LOG_FILE_VARIABLE	LOG_FILE_ENV
 ui	packages/ui/tests/test_proxy.py	(package / "page.py").write_text(textwrap.dedent(PAGE).replace("NAME", name))	keep	NAME	NAME
 ui	packages/ui/tests/test_push.py	got = [await late.next(timeout=2.0) for _ in range(3)]	keep	timeout	timeout
 ui	packages/ui/tests/test_push.py	(package / "page.py").write_text(textwrap.dedent(PAGE).replace("NAME", name))	keep	NAME	NAME

@@ -466,7 +466,7 @@ def seed(conn, request_id: str, at: str, **more) -> None:
                  cwd="/work", values={"model": "opus"}, argv=["claude", "the brief text"],
                  env={"MOXI_LAUNCHER_REQUEST": "secret-stamp"}, posture="operator",
                  session_id=SID if request_id == "r1" else str(uuid.uuid4()), slot="3",
-                 brief="the brief text", base_env={"HOME": "/home/ann-secret"}, at=at,
+                 brief="the brief text", base_env={"HOME": "/users/ann-secret"}, at=at,
                  **more)
 
 

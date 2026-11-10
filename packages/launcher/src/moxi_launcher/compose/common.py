@@ -35,21 +35,18 @@ from types import MappingProxyType
 from moxi import files, modules, names, paths
 
 from .. import catalog, store
+from ..listeners import RELAUNCH_ENV, REQUEST_ENV
 
 #: The first line of the identity block.
 HEADER = "--- LAUNCH IDENTITY (stamped at launch) ---"
 _WIDTH = len("start posture: ")
 
-#: The launch's stamp: the request id of the launch that started the session.
-REQUEST_ENV = "MOXI_LAUNCHER_REQUEST"
 #: The commands every launch with turns grants; `commands(values)` adds those its
 #: recycle rows need.
 COMMANDS = ("exit",)
 #: The launch's keep-warm and recycle-on-expiry options, read by cache's timer.
 KEEP_WARM_ENV = "MOXI_LAUNCHER_KEEP_WARM"
 RECYCLE_ON_EXPIRY_ENV = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
-#: The run id of a relaunch whose first turn carries its handoff.
-RELAUNCH_ENV = "MOXI_LAUNCHER_RELAUNCH"
 #: The identity block's line on a keep-warm launch.
 KEEP_WARM_LINE = ('on; open a hold with "moxi launcher keep-warm hold <name>" for each '
                   "piece of work you hand out, and release it when the work is done")

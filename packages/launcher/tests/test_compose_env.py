@@ -23,7 +23,7 @@ def ctx(**fields) -> Context:
 
 
 CALLER = {
-    "PATH": "/usr/bin", "HOME": "/home/u", "LANG": "C.UTF-8",
+    "PATH": "/usr/bin", "HOME": "/users/u", "LANG": "C.UTF-8",
     "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PROJECT_DIR": "/p",
     "AI_AGENT": "claude",
     "MOXI_LAUNCHER_REQUEST": "parent-request", "MOXI_LAUNCHER_RELAUNCH": "1",
@@ -37,7 +37,7 @@ def test_the_scrub_takes_claude_names_the_agent_marker_and_each_session_stamp():
     session_env = frozenset({"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",
                              "MOXI_COMMS_", "MOXI_TURNS_COMMANDS"})
     assert common.scrub(CALLER, session_env, windows=False) == {
-        "PATH": "/usr/bin", "HOME": "/home/u", "LANG": "C.UTF-8",
+        "PATH": "/usr/bin", "HOME": "/users/u", "LANG": "C.UTF-8",
         "MOXI_LAUNCHER_STATE_HOME": "/state", "MOXI_LAUNCHER_CONFIG_HOME": "/config",
         "MOXI_COMMSX": "kept", "MOXI_HOME": "/moxi"}
 

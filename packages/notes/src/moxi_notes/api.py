@@ -48,6 +48,11 @@ HANDOFFS = "handoffs"
 NOTES_DIR_ENV = "MOXI_NOTES_DIR"
 
 
+def _env_override() -> str | None:
+    """The launch override in this process's environment, for notes' own CLI."""
+    return os.environ.get(NOTES_DIR_ENV) or None
+
+
 def root():
     """The notes root, `~` expanded, as a `Path`."""
     return _settings.read().root
