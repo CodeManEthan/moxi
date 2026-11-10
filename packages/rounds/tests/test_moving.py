@@ -689,18 +689,21 @@ def test_a_moved_question_is_ruled_where_it_is_now(rounds):
 
 
 def test_a_moved_question_waits_on_him_in_the_log_it_is_in_now(rounds):
+    def waiting(slug=None):
+        return [one.id for one in index.read("proj-a", rounds, slug).of("question")]
+
     ask(A)
-    assert [one.id for one in index.read("proj-a", rounds, "a-round").items] == ["Q1"]
+    assert waiting("a-round") == ["Q1"]
 
     moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
 
-    assert index.read("proj-a", rounds, "a-round").items == ()
-    assert [one.id for one in index.read("proj-a", rounds).items] == ["P1"]
+    assert waiting("a-round") == []
+    assert waiting() == ["P1"]
 
     moving.adopt(B, "P1", actor="curator")
 
-    assert index.read("proj-a", rounds).items == ()
-    assert [one.id for one in index.read("proj-a", rounds, "b-round").items] == ["Q1"]
+    assert waiting() == []
+    assert waiting("b-round") == ["Q1"]
 
 
 # -- a move stopped between the two logs -------------------------------------------------

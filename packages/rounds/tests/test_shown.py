@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from moxi_rounds import asking, corrections, log, opening, ruling, shown, state
+from moxi_rounds import (asking, corrections, folders, index, log, opening, paths, ruling,
+                         shown, state)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, NoRound, Refused, Unreadable
 
@@ -669,3 +670,50 @@ def test_help_says_how_a_read_back_is_recorded(capsys):
     out = " ".join(capsys.readouterr().out.split())
     for word in ("readback=TIME", "not yet shown"):
         assert word in out
+
+
+# -- the list, from the index ------------------------------------------------------------
+
+def test_the_index_keeps_the_rulings_no_mark_names_and_the_read_backs(rounds):
+    rule(at=T1)
+    rule(at=T2, record="https://example.test/said")
+    rule("proj-a", at=T3)
+    mark(ROUND, "C1")
+    read_back(T1)
+
+    kept = index.read("proj-a", rounds, "a-round")
+    assert kept.of(index.RULING) == (index.Item(index.RULING, "C2", {
+        "text": SAID, "rules": None, "record": "https://example.test/said",
+        "supersedes": None, "revokes": None, "at": T2}),)
+    register = index.read("proj-a", rounds)
+    # A ruling his read-back covers has no mark, so it stays a row; a read-back is
+    # a row of its own kind and never one of the rulings.
+    assert [item.id for item in register.of(index.RULING)] == ["S1"]
+    assert register.of(index.READ_BACK) == (
+        index.Item(index.READ_BACK, "S2", {"through": T1}),)
+
+
+def test_the_list_is_the_same_from_the_index_from_a_stale_one_and_from_none(rounds):
+    rule(at=T1)
+    rule(OTHER, at=T2)
+    rule("proj-a", at=T3)
+    mark(OTHER, "C1")
+    read_back(T1)
+    home = folders.home("proj-a")
+    index.rebuild([home])
+    assert index.disagreements([home]) == []
+    fresh = shown.unshown("proj-a", now=LATER)
+    assert [(row.holder, row.id) for row in fresh.rows] == [("proj-a", "S1")]
+
+    # A ruling the index has not seen, appended as another machine's verb would.
+    log.append(round_log(rounds), "ruling.recorded",
+               {"id": "C2", "text": SAID, "record": "comms:13", "kind": "substance",
+                "stages": "all"}, actor="pilot", at=T4)
+    assert index.disagreements([home]) != []
+    stale = shown.unshown("proj-a", now=LATER)
+    assert [(row.holder, row.id) for row in stale.rows] == [
+        ("proj-a", "S1"), (ROUND, "C2")]
+
+    paths.index_file().unlink()
+    assert shown.unshown("proj-a", now=LATER) == stale
+    assert not paths.index_file().exists()

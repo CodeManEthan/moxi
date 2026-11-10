@@ -20,46 +20,32 @@ A ruling is shown when one of two records covers it:
 Only a pointer makes a mark: no read, print or export sets one, and none is ever taken
 off. A read-back is never taken back either, and is itself never on the list.
 
-`unshown(project)` computes the list each time it is asked and stores nothing. A ruling
+`unshown(project)` computes the list each time it is asked and stores nothing: the
+index keeps, for each log, the rulings no mark names and the read-backs, and the list
+is read from those rows, or from a log itself where its row is stale. A ruling
 recorded in the second the list is computed is left for the next list, so no ruling can
 later appear at or before a time a list already showed.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from . import corrections, folders, log, pointers, write
+from . import corrections, folders, index, log, pointers, readback, write
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Unmet, Unreadable
 
-#: What starts the item of a read-back; the time he read the list through follows.
-READBACK = corrections.READBACK
-
-#: A time as a log writes one: UTC, to the second.
-TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+#: A read-back's item and its time, and the two readers of them, are `readback`'s; they
+#: are named here too, where everything else about showing is.
+READBACK = readback.READBACK
+TIME = readback.TIME
+read_back = readback.read_back
+through = readback.through
 
 
 # -- whether a ruling is shown -----------------------------------------------------------
-
-def read_back(ruling: states.Ruling) -> str | None:
-    """The time a read-back says the list was read through, or None for a ruling that
-    is no read-back."""
-    rules = ruling.rules or ""
-    if not rules.startswith(READBACK) or not TIME.fullmatch(rules[len(READBACK):]):
-        return None
-    return rules[len(READBACK):]
-
-
-def through(project_state: states.State) -> str | None:
-    """The time the operator has read the project's list through: the latest any of
-    its read-backs names, or None when it has none."""
-    return max((time for time in map(read_back, project_state.rulings)
-                if time is not None), default=None)
-
 
 def is_shown(ruling: states.Ruling, project_state: states.State) -> bool:
     """Whether `ruling`, one of the project's register or of one of its rounds, is
@@ -110,14 +96,16 @@ class ReadBack:
         return None if self.through is None else f"not yet shown, through {self.through}"
 
 
-def unshown(project: str, *, settings=None, now: str | None = None) -> ReadBack:
+def unshown(project: str, *, settings=None, now: str | None = None,
+            env=None) -> ReadBack:
     """The read-back list of `project`: every ruling of its register and of its rounds,
     open or ended, that is not shown, a read-back itself aside.
 
-    It reads the logs and writes nothing, the index included. `settings` is what
-    `settings.load()` gives, read now when left out. `now` is the second the list is
-    computed in, as `log.stamp` writes one: a ruling recorded in it, or after it, is
-    left for the next list.
+    It reads the index where a log's row is fresh and the log itself where not, and
+    writes nothing, the index included. `settings` is what `settings.load()` gives,
+    read now when left out. `now` is the second the list is computed in, as
+    `log.stamp` writes one: a ruling recorded in it, or after it, is left for the
+    next list.
 
     Raises `UnknownProject` or `NoFolder` for a project with no rounds folder, and
     `Unreadable` when the project's own log can't be read, since the read-backs are in
@@ -125,17 +113,29 @@ def unshown(project: str, *, settings=None, now: str | None = None) -> ReadBack:
     """
     home = folders.home(project, own.load() if settings is None else settings)
     now = log.stamp() if now is None else now
-    project_state, logs, unreadable = _logs(home)
-    rows = [Row(holder=holder, id=ruling.id, text=ruling.text, rules=ruling.rules,
-                record=ruling.record, supersedes=ruling.supersedes,
-                revokes=ruling.revokes, at=ruling.at)
-            for holder, state in logs for ruling in state.rulings
-            if read_back(ruling) is None and ruling.at < now
-            and not is_shown(ruling, project_state)]
+    register = index.read(home.project, home.folder, env=env)
+    if register.unreadable is not None:
+        raise register.unreadable
+    read = max((item.body["through"] for item in register.items
+                if item.kind == index.READ_BACK), default=None)
+    rows, unreadable = [], []
+    for summary in (register, *index.rounds(home.project, home.folder, env=env)):
+        if summary.unreadable is not None:
+            unreadable.append(summary.unreadable)
+            continue
+        for item in summary.items:
+            body = item.body
+            if (item.kind == index.RULING and body["at"] < now
+                    and (read is None or body["at"] > read)):
+                rows.append(Row(holder=summary.name, id=item.id, text=body["text"],
+                                rules=body["rules"], record=body["record"],
+                                supersedes=body["supersedes"],
+                                revokes=body["revokes"], at=body["at"]))
     # Oldest first; rulings of one second stay in the order of their logs.
     rows.sort(key=lambda row: row.at)
     return ReadBack(project=home.project, rows=tuple(rows),
-                    through=rows[-1].at if rows else None, unreadable=unreadable)
+                    through=rows[-1].at if rows else None,
+                    unreadable=tuple(unreadable))
 
 
 def _logs(home: folders.Home):

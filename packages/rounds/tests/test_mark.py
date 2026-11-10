@@ -201,9 +201,9 @@ def test_a_question_whose_wait_is_over_reads_open_and_is_not_reopened(rounds, ca
 def test_a_reopened_question_is_in_the_index_as_open(rounds):
     ask()
     rule("park:Q1", until="B2")
-    [parked] = index.read("proj-a", rounds, "a-round").items
+    [parked] = index.read("proj-a", rounds, "a-round").of("question")
     marking.reopen("proj-a/a-round", "Q1", actor="coder")
-    [found] = index.read("proj-a", rounds, "a-round").items
+    [found] = index.read("proj-a", rounds, "a-round").of("question")
 
     assert (parked.body["state"], parked.body["until"]) == ("parked", "B2")
     assert found.body["state"] == "open" and "until" not in found.body

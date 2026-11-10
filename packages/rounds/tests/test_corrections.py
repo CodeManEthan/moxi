@@ -148,7 +148,7 @@ def test_an_answer_taken_back_leaves_the_question_open_and_holding_its_stages(
     found = question(rounds)
     assert (found.state, found.chose, found.ruling) == ("open", None, "C2")
     assert holding(rounds) == (EVERY, ["Q1"])
-    [waiting] = index.read("proj-a", rounds, "a-round").items
+    [waiting] = index.read("proj-a", rounds, "a-round").of("question")
     assert (waiting.id, waiting.body["state"]) == ("Q1", "open")
 
 

@@ -48,7 +48,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, log, paths, questions, state
+from . import folders, log, paths, questions, readback, state
 from .errors import NoLog, Unreadable
 
 #: The schema, one step per version of it (`moxi.store.migrate`). A step is never
@@ -87,13 +87,19 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 3
+DERIVED = 4
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
-#: recorded as open or parked.
+#: recorded as open or parked, and a ruling while no mark says it was shown. A
+#: project's read-backs are here too: a ruling they cover is shown with no mark, so
+#: the rulings not yet shown are read from the two kinds together.
+QUESTION = "question"
+RULING = "ruling"
+READ_BACK = "read-back"
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
-    "question": questions.waiting}
+    QUESTION: questions.waiting, RULING: readback.unmarked,
+    READ_BACK: readback.read_backs}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""
@@ -128,6 +134,10 @@ class Summary:
     def name(self) -> str:
         """The round's name, or the project's key."""
         return self.project if self.slug is None else f"{self.project}/{self.slug}"
+
+    def of(self, kind: str) -> tuple[Item, ...]:
+        """The items of one kind (a key of `ITEMS`), in the log's order."""
+        return tuple(item for item in self.items if item.kind == kind)
 
     @property
     def notice(self) -> str | None:
@@ -463,5 +473,5 @@ def _drop(conn, project: str, slug: str) -> None:
         conn.execute(f"DELETE FROM {table} WHERE project = ? AND slug = ?", (project, slug))
 
 
-__all__ = ["STEPS", "DERIVED", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
+__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
            "refresh", "rebuild", "read", "rounds", "disagreements"]

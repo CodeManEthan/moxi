@@ -773,7 +773,7 @@ def test_a_ruled_question_leaves_the_index_and_a_parked_one_stays(staged):
     ruling.rule("proj-a/a-round", item="park:Q2", until="B2", record="comms:12",
                 actor="planner")
 
-    [found] = index.read("proj-a", staged, "a-round").items
+    [found] = index.read("proj-a", staged, "a-round").of("question")
     assert (found.id, found.body["state"], found.body["until"]) == ("Q2", "parked", "B2")
 
 
