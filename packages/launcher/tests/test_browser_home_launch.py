@@ -579,6 +579,79 @@ def test_a_press_on_an_old_reading_reads_again_and_names_the_slot_the_launch_tak
     assert kit.newest_launch(ui_shell).slot == "3"
 
 
+TARGETS = "/m/launcher/api/targets"
+
+
+def test_a_reading_is_as_old_as_its_asking_so_a_press_after_a_slow_answer_reads_again(
+        ui_shells, ui_contexts, tmp_path_factory, on_path):
+    fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
+    fake.script(placed=2, slots=kit.free(2, 3, 4))
+    ui_shell = ui_shells(**fake.options())
+    ui_page = ui_contexts(ui_shell).pages[0]
+    ui_page.clock.install()
+    piece = kit.open_home(ui_page)
+    go = piece.locator(".go")
+    expect(go).to_have_text("Launch in slot 2")
+    taken = {"state": "occupied", "launchable": False}
+    fake.script(placed=3, slots={"2": taken, **kit.free(3, 4)})
+    held = []
+
+    def hold_first(route) -> None:
+        """Keep the first answer back; let every later read through."""
+        if held:
+            route.continue_()
+        else:
+            held.append((route, route.fetch()))
+
+    ui_page.route(f"**{TARGETS}", hold_first)
+    ui_page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    wait_for(lambda: ui_page.wait_for_timeout(20) or len(held) == 1, 5, what="the held read")
+    # Slot 3 is taken while the answer is on its way, and the answer is slow.
+    fake.script(placed=4, start_wait_s=2, slots={"2": taken, "3": taken, **kit.free(4)})
+    ui_page.clock.fast_forward("00:06")
+    route, answer = held[0]
+    route.fulfill(response=answer)
+    expect(go).to_have_text("Launch in slot 3")
+    # The answer has only just landed, but it was asked over five seconds ago.
+    body = press(ui_page, piece)
+    assert body["values"]["target"] == "slot" and "slot" not in body["values"], body
+    expect(said(piece, "starting")).to_have_text("Starting in slot 4…")
+    wait_for(lambda: placed(fake, 4), 15, what="the held start to end")
+    ui_page.clock.fast_forward("00:03")
+    expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 4 · "))
+
+
+def test_a_read_that_failed_is_not_a_fresh_reading_so_the_next_press_reads_again(
+        ui_shells, ui_contexts, tmp_path_factory, on_path):
+    # A shell of its own, where no other test's launch makes the page read.
+    fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
+    fake.script(placed=2, slots=kit.free(2, 3))
+    ui_page = ui_contexts(ui_shells(**fake.options())).pages[0]
+    piece = kit.open_home(ui_page)
+    go = piece.locator(".go")
+    expect(go).to_have_text("Launch in slot 2")
+    failed = []
+
+    def fail_first(route) -> None:
+        if failed:
+            route.continue_()
+        else:
+            failed.append(route.request.url)
+            route.fulfill(status=500, body="")
+
+    ui_page.route(f"**{TARGETS}", fail_first)
+    ui_page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    expect(go).to_have_text("Copy command")
+    # The press reads where a launch may run before it asks for the preview, and sends
+    # what the button said.
+    asked = []
+    ui_page.on("request", lambda request: asked.append(request.url.rsplit("/", 1)[-1]))
+    body = press(ui_page, piece)
+    assert body["values"]["target"] == "terminal", body
+    assert "targets" in asked[:asked.index("preview")], asked
+    expect(go).to_have_text("Launch in slot 2")
+
+
 # --- a slot the user's defaults pin ---------------------------------------------------------
 
 @pytest.fixture

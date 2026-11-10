@@ -172,7 +172,8 @@ export class LauncherPrompt extends LitElement {
   flight: Flight = IDLE;
   /** Why the launch form could not be read, when it could not. */
   unread = "";
-  /** When the listing was last read, by the page's clock. */
+  /** When the read that gave the listing was asked, by the page's clock; 0 when the last
+   * read failed, so the next press reads again. */
   #targetsAt = 0;
   #targetsAsked = 0;
   /** Counts presses, so an answer for an earlier launch is dropped. */
@@ -461,10 +462,11 @@ export class LauncherPrompt extends LitElement {
    * reads as no slots. */
   async #readTargets(): Promise<void> {
     const asked = (this.#targetsAsked += 1);
+    const at = Date.now();
     const answer = await api("launcher", "api/targets");
     if (asked !== this.#targetsAsked) return;
     this.targets = parseTargets(answer.status === 200 ? answer.data : null);
-    this.#targetsAt = Date.now();
+    this.#targetsAt = answer.status === 200 ? at : 0;
   }
 
   #toggleRun(): void {
