@@ -11,7 +11,9 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 - `groups`: one for the step the round is at, then one for each stage of the plan
   whose own first step that is not done is another step. A group holds the step, its
   stage and state, `by`, `tier` and `model`, `reads`, `write`, `then` (each a command
-  that completes the step), `waits` (each with the command that meets it), and for the
+  that completes the step), `waits` (each with the command that meets it; the lines
+  leave out the one `instead` already says, and say `waits: nothing` only for a built
+  step that is not waiting), and for the
   step that verifies the design the `pass` asked for, `why`, the two frozen `files` a
   re-check compares, and `instead`, what is done in place of a pass.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
@@ -137,11 +139,15 @@ LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
 
 
 def _waits(step: steps.Step) -> list[dict]:
-    asked = step.asked
-    # What the brake says to do in place of a pass is in the group line by line.
-    told = None if asked is None else (asked.why, "; ".join(asked.instead))
-    return [{"reason": one.reason, "fix": one.fix} for one in step.waits
-            if (one.reason, one.fix) != told]
+    return [{"reason": one.reason, "fix": one.fix} for one in step.waits]
+
+
+def _told(group: dict) -> dict | None:
+    """The wait of a group that its `pass` and `instead` already say line by line:
+    what the brake says to do in place of a pass. None where it has none."""
+    if not group.get("instead"):
+        return None
+    return {"reason": group["why"], "fix": "; ".join(group["instead"])}
 
 
 def _group(found: showing.Shown, step: steps.Step, models) -> dict:
@@ -298,10 +304,14 @@ def _group_lines(said: dict, group: dict) -> list[str]:
         if group["write"] is not None:
             lines.append(f"write: {group['write']}")
         lines += [f"then:  {line}" for line in group["then"]]
-    if not group["waits"]:
-        return [*lines, "waits: nothing"]
+    told = _told(group)
     for wait in group["waits"]:
-        lines += [f"waits: {wait['reason']}", f"  fix: {wait['fix']}"]
+        if wait != told:
+            lines += [f"waits: {wait['reason']}", f"  fix: {wait['fix']}"]
+    # Only a step known to wait for nothing says so: a step that waits has said what
+    # for above, and what a step that is not built waits for is not known.
+    if not group["waits"] and group["built"] and group["state"] != steps.WAITING:
+        lines.append("waits: nothing")
     return lines
 
 

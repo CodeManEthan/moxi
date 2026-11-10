@@ -233,8 +233,8 @@ def test_a_skipped_retro_reads_the_same_in_every_place_that_shows_it(opened, cap
     before = run(capsys, "show", ROUND)
     assert "step: retro, not-built\n" in before
     assert "close waits for: step retro, not-built; question Q1, open\n" in before
-    assert run(capsys, "next", ROUND).splitlines()[0] == (
-        f"round {ROUND}   flow review   step retro   not built in this version")
+    assert run(capsys, "next", ROUND).splitlines() == [
+        f"round {ROUND}   flow review   step retro   not built in this version"]
 
     rule("skip:retro")
 

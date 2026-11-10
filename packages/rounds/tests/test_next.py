@@ -213,7 +213,7 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         "pass:  re-check: v1 was sent back and the design was not frozen since: a "
         "re-check reads what changed",
         f"do:    moxi rounds fold {ROUND}",
-        "waits: nothing"]
+        ""]
     design(folder, question("Q1"), stage("B1"))
     do(capsys, said(printed, "do:")[0])
 
@@ -242,10 +242,10 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
     do(capsys, said(printed, "then:")[0], TEXT=SAID, PTR=PTR)
 
     printed = lines(capsys)
-    assert printed[:2] == [
+    assert printed[0] == (
         f"round {ROUND}   flow full   stage B1   step commission   not built in this "
-        "version",
-        "waits: nothing"]
+        "version")
+    assert said(printed, "waits:") == []
 
 
 def test_a_design_that_builds_nothing_ends_at_no_step(opened, capsys):
@@ -301,8 +301,7 @@ def test_after_two_verdicts_that_sent_the_design_back_no_pass_is_asked_for(
         "do:    state the rule that the findings of the two passes break, and write "
         "the section again from that rule",
         f"do:    moxi rounds fold {ROUND}",
-        f"do:    {mark}",
-        "waits: nothing"]
+        f"do:    {mark}"]
 
     fold(folder)
     printed = lines(capsys)
@@ -336,7 +335,6 @@ def test_a_flow_with_no_questions_step_prints_the_hold_on_each_stage(opened, cap
     head = f"round {ROUND}   flow small   stage"
     assert printed == [
         f"{head} B1   step commission   not built in this version",
-        "waits: nothing",
         "",
         f"{head} B2   step commission   not built in this version",
         f"waits: Q1 holds B2: {ASKED}",
@@ -379,6 +377,72 @@ def test_a_round_that_cant_be_read_is_printed_as_unreadable(folder, capsys):
     found = json.loads(run(capsys, "next", ROUND, "--json"))
     assert set(found) == {"round", "folder", "notice", "unreadable"}
     assert found["unreadable"]["line"] == 2
+
+
+# -- what a step waits for ---------------------------------------------------------------
+
+def group(capsys) -> dict:
+    return json.loads(run(capsys, "next", ROUND, "--json"))["groups"][0]
+
+
+def test_a_step_that_waits_for_what_is_done_in_place_of_a_pass_does_not_say_nothing(
+        folder, capsys):
+    fold(folder)
+    verdict(folder)
+
+    printed = lines(capsys)
+
+    assert said(printed, "do:") == [f"moxi rounds fold {ROUND}"]
+    assert said(printed, "waits:") == []
+    found = group(capsys)
+    assert found["state"] == "waiting"
+    assert found["waits"] == [{"reason": found["why"],
+                               "fix": "; ".join(found["instead"])}]
+
+
+def test_a_step_that_waits_says_each_thing_the_lines_before_did_not(opened, capsys):
+    folder = opened(config=TRACED)
+    rule()
+    fold(folder)
+    verdict(folder)
+
+    printed = lines(capsys)
+
+    assert len(said(printed, "do:")) == 1
+    assert len(said(printed, "waits:")) == 1 and "nothing" not in said(printed, "waits:")
+    assert [one["reason"] for one in group(capsys)["waits"]] == [
+        said(printed, "waits:")[0], group(capsys)["why"]]
+
+
+def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsys):
+    folder = opened("small")
+    fold(folder, stage("B1"))
+
+    assert lines(capsys) == [
+        f"round {ROUND}   flow small   stage B1   step commission   not built in this "
+        "version"]
+    assert (group(capsys)["built"], group(capsys)["waits"]) == (False, [])
+
+
+@pytest.mark.parametrize("state", ["ready", "done", "not-due"])
+def test_a_built_step_that_does_not_wait_says_it_waits_for_nothing(
+        folder, capsys, monkeypatch, state):
+    fold(folder, stage("B1"))
+    verdict(folder, "publishable")
+    monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
+        "commission", state, stage=about.stage))
+
+    assert said(lines(capsys), "waits:") == (["nothing"] if state != "done" else [])
+
+
+def test_a_built_step_that_waits_never_says_it_waits_for_nothing(
+        folder, capsys, monkeypatch):
+    fold(folder, stage("B1"))
+    verdict(folder, "publishable")
+    monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
+        "commission", steps.WAITING, stage=about.stage))
+
+    assert said(lines(capsys), "waits:") == []
 
 
 # -- the data ----------------------------------------------------------------------------
