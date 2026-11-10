@@ -34,9 +34,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 repo = "moxi_repo.module"
 
-# repo's own git hook piece, declared the way any module declares one.
+# repo's own git hook pieces, declared the way any module declares one.
 [project.entry-points."moxi.repo.git_hooks"]
 "repo.commit-rules" = "moxi_repo.commit_rules:COMMIT_RULES"
+"repo.commit-proof" = "moxi_repo.commit_proof:COMMIT_PROOF"
 
 # The listener the core calls after every module's install and uninstall: it keeps the
 # pieces and specs a module registered in line with what that module now declares.

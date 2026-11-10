@@ -13,8 +13,11 @@ Moxi's repo module does two jobs for the git repos you name.
    lets a prepare step drop paths, commits those paths alone with the git hooks running,
    and pushes. A spec can be saved in the repo and run by `moxi repo commit`.
 
-repo also ships one piece of its own, `repo/commit-rules`, which checks a commit message's
-trailers and refuses tags you define. It is in no repo until you add it.
+repo also ships two pieces of its own. `repo/commit-rules` checks a commit message's
+trailers and refuses tags you define. `repo/commit-proof` refuses a commit whose message
+lacks the line `moxi repo rules` prints for the staged tree, so a committer has to run
+that command, and see the repo's rules, before each commit. Each is in no repo until you
+add it.
 
 ```sh
 moxi repo git-hooks available                    # the pieces installed modules declare
@@ -50,6 +53,9 @@ moxi repo git-hooks list                         # every repo repo has written t
 - `moxi repo git-hooks refresh [PATH]` reads the declarations, git's version and the
   interpreter again, and rewrites every hook entry, shim and launcher of one repo or of
   every indexed repo. It keeps each piece's `enabled` key and settings.
+
+- `moxi repo rules [PATH]` prints what a committer in the repo at PATH, or in the one you
+  are in, must know: see [The command `moxi repo rules`](#the-command-moxi-repo-rules).
 
 PATH is a path inside the repo. With the projects module installed it may also be a
 project key; see [Projects](#projects).
@@ -256,12 +262,18 @@ only what its prepare step judged.
 repo: commit-msg refused by repo/commit-rules: no tags: line 3 has "TAG-12"; say it in plain words
 ```
 
-Its two settings live in each repo's git config, and only a command that names the repo
-changes them:
+Its three settings live in each repo's git config, and only a command that names the
+repo changes them. Each takes any number of values:
+
+- `refused-trailer`: a trailer key the repo refuses, matched ignoring case.
+- `tag-pattern`: a regular expression a tag matches.
+- `rule`: one of the repo's own rules for a committer, free text. The piece checks none
+  of them; `moxi repo rules` prints them.
 
 ```sh
 moxi repo git-hooks add ~/src/app repo/commit-rules \
-    --set refused-trailer=Signed-off-by --set 'tag-pattern=\bTAG-[0-9]+\b'
+    --set refused-trailer=Signed-off-by --set 'tag-pattern=\bTAG-[0-9]+\b' \
+    --set 'rule=say what changed and why in plain words'
 moxi repo git-hooks add ~/src/app repo/commit-rules --set tag-pattern=   # no tag check
 ```
 
@@ -279,6 +291,87 @@ The refused-trailer list has no config default: refusing a trailer is decided pe
 pattern that won't compile, or that matches the empty string (it would find an empty match
 on every line and check nothing), is refused by `add` before anything is written, and by
 `moxi config` in the config file.
+
+## The command `moxi repo rules`
+
+`moxi repo rules [PATH]` prints what a committer must know before committing in the repo
+at PATH, or in the one you are in. It reads the two pieces above from the repo's git
+config and always exits 0 on a repo:
+
+```text
+commit rules for /home/alice/src/app
+- trailers this repo refuses: Round, Reconciles
+- no text matching: \bTAG-[0-9]+\b
+- say what changed and why in plain words
+Commit-Check: 3fa1c2d4e5b6
+```
+
+- The heading names the work tree PATH is in, a linked work tree's own top.
+- Where `repo/commit-rules` is registered: the trailer keys it refuses on one line, a line
+  for each tag pattern, then each `rule` value as written. A kind with no value prints no
+  line. Where the piece is disabled its lines still print, under one line saying so:
+  `repo/commit-rules is disabled in this repo: nothing checks a commit against the lines
+  below`.
+- Where `repo/commit-proof` is registered, disabled or not: last, the `Commit-Check` line
+  for what is staged in that work tree now. When the index has unresolved conflicts, or
+  the piece has no salt there, a line starting `no Commit-Check line:` says why instead.
+- With neither piece registered: `no commit rules for PATH`.
+
+The pieces and their settings are the repo's, shared by all its work trees. The
+`Commit-Check` line is not: each work tree has its own index, so run the command in the
+work tree you commit in. Printing the line runs `git write-tree`, which writes the tree
+objects of what is staged into the repo.
+
+## The commit-proof piece
+
+`repo/commit-proof` runs on commit-msg, fail closed, order 20, after the commit-rules
+piece. It refuses a commit unless its message holds the `Commit-Check` line
+`moxi repo rules` printed for the tree being committed. A committer therefore stages,
+runs the command, reads the rules above the line, and commits with the line:
+
+```sh
+git add notes/today.md
+moxi repo rules                      # prints the rules, then Commit-Check: 3fa1c2d4e5b6
+git commit -m 'notes: add today' -m 'Commit-Check: 3fa1c2d4e5b6'
+```
+
+- **The line** is `Commit-Check: <h>`: the first 12 hex characters of SHA-256 over
+  `commit-check`, NUL, the repo's salt, NUL, and the tree id `git write-tree` gives for
+  the index. It shows the command ran on this staged tree. It is not a security boundary:
+  whoever can read the repo's git config can make it.
+- **The salt** is the piece's one setting, `salt`: 16 random hex characters written into
+  the repo's git config when the piece is first registered there, and kept from then on,
+  so a line copied from another repo doesn't match. Removing the piece and adding it again
+  gives the repo a new one. `--set salt=VALUE` takes 16 hex characters and nothing else;
+  `--set salt=` is refused, since the piece refuses every commit without one.
+- **Where it is read**: every trailer paragraph after the subject's, a paragraph whose
+  every line is a trailer (`Key: value`) or continues one, so the line may sit beside
+  other trailers or in a paragraph of its own. The key is matched ignoring case. A
+  paragraph with a prose line is prose and is left alone: a body may quote a line.
+- **What passes without a line**: a commit repo's committer makes; a replay, which is a
+  commit made while a rebase, cherry-pick or revert is in progress; and a clean merge,
+  one other head merged and the index holding exactly the tree git makes of the two heads
+  with no conflict (`git merge-tree --write-tree`, which git has from 2.38, under the
+  2.39 repo needs anyway). A merge with a resolved conflict, or
+  with a change added by hand, holds changes of its own and needs the line.
+- **What is refused**: no line, more than one, a line that isn't 12 hex characters, and
+  a line that doesn't match the tree being committed. Each refusal names the command and
+  the work tree to run it in:
+
+```text
+repo: commit-msg refused by repo/commit-proof: commit proof: line 3 doesn't match the tree being committed in /home/alice/src/app: the index changed after the line was printed, or the line is another repo's; stage first, run: moxi repo rules /home/alice/src/app, and commit with the line it prints
+```
+
+The piece checks the tree that will land. Under `git commit PATH` and `git commit -a` git
+commits a temporary index, so the line for the work tree's whole index doesn't match when
+those commit something else: `git commit -a` over unstaged changes is refused as stale,
+and so is a commit whose pre-commit hook staged more files. Stage first, run the command,
+then commit with plain `git commit`; after a hook restages, run the command again.
+
+One config key turns it on more widely: `commit_proof.everywhere` (default false) makes
+`git-hooks add` and `refresh` register the piece in each repo they touch that lacks it,
+as `commit_rules.everywhere` does for the commit-rules piece. To keep it off one of those
+repos, `disable` it there.
 
 ## The committer
 
