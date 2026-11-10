@@ -99,7 +99,7 @@ def test_a_fold_copies_the_design_to_its_first_version_and_records_its_digest(fo
     assert (frozen.name, frozen.version, frozen.digest) == (ROUND, 1, digest)
     assert last(folder) == {
         "actor": "scout", "type": "design.frozen", "version": 1, "digest": digest,
-        "records_only": False,
+        "records_only": False, "trace": {"asked": False},
         "declared": {
             "question": [{"id": "Q1", "text": ASKED, "blocks": "all"}],
             "stage": [{"id": "B1", "after": [], "repo": "proj-a",
@@ -109,7 +109,7 @@ def test_a_fold_copies_the_design_to_its_first_version_and_records_its_digest(fo
     found = folded(folder)
     assert versions.current(found).n == 1
     assert versions.digest(found) == versions.digest(found, 1) == digest
-    assert versions.current(found).trace is None
+    assert versions.current(found).trace == {"asked": False}
     assert versions.current(found).records_only is False
 
 
@@ -982,7 +982,8 @@ def test_stages_the_version_and_what_it_took_away_are_in_the_index(folder):
                                                    ("B2", "proj-a", ["B1"])]
     assert found.of(index.VERSION) == (index.Item(index.VERSION, "v2", {
         "version": 2, "digest": hashlib.sha256(data).hexdigest(), "at": AT,
-        "by": "scout", "records_only": False, "standing": "none"}),)
+        "by": "scout", "records_only": False, "standing": "none",
+        "trace": {"asked": False}}),)
     assert [(item.id, item.body["said"]) for item in found.of(index.PENDING)] == [
         ("v2:stage:B2", "the stage B2 is gone from the block")]
     assert [item.id for item in found.of(index.QUESTION)] == ["Q1"]

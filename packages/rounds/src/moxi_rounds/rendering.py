@@ -197,7 +197,7 @@ def _flow(shown_as: dict) -> list[str]:
     for one in shown_as["skips"]:
         lines += _item(f"skipped: {showing.skip_line(one)}")
     planned = [*showing.version_lines(shown_as["versions"], shown_as["standing"],
-                                     shown_as["threads"]),
+                                     shown_as["threads"], shown_as["trace"]),
                *(f"stage {showing.stage_line(one)}" for one in shown_as["stages"])]
     if planned:
         lines.append("")

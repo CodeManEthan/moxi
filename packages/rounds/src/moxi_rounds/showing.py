@@ -38,7 +38,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, index, log, questions, shown, skips, versions
+from . import folders, index, log, questions, shown, skips, tracing, versions
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -351,6 +351,7 @@ def _head(found: Shown) -> dict:
             "flow": state.flow, "steps": state.steps,
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
+            "trace": tracing.shown(state, found.register),
             "threads": _threads(state),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
@@ -423,11 +424,12 @@ def thread_line(one: dict) -> str:
 
 
 def version_lines(listed: list[dict], standing: str | None = None,
-                  threads: Sequence[dict] = ()) -> list[str]:
+                  threads: Sequence[dict] = (), trace: dict | None = None) -> list[str]:
     """The design's versions in lines: the newest with its digest, each version
     frozen as a change of records only with its pointer, the design's `standing`
-    when one is given, the lead's decisions on `threads`, and what the newest version
-    took away and still waits."""
+    when one is given, what the check of the newest version's trace rows found
+    (`trace`, as `tracing.shown` gives it) with the rows that are stale, the lead's
+    decisions on `threads`, and what the newest version took away and still waits."""
     if not listed:
         return []
     newest = listed[-1]
@@ -437,6 +439,7 @@ def version_lines(listed: list[dict], standing: str | None = None,
               f"record: {one['record']}" for one in listed if one["records_only"]]
     if standing is not None:
         lines.append(f"standing: {standing}")
+    lines += tracing.lines(trace)
     lines += [thread_line(one) for one in threads]
     lines += [f"pending in v{newest['version']}: {one['said']}"
               for one in newest["outstanding"]]
@@ -517,7 +520,7 @@ def as_text(found: Shown) -> str:
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
     lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
     lines += version_lines(shown_as["versions"], shown_as["standing"],
-                           shown_as["threads"])
+                           shown_as["threads"], shown_as["trace"])
     lines += [f"stage {stage_line(one)}" for one in shown_as["stages"]]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")

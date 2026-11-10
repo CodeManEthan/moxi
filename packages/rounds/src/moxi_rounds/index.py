@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 10
+DERIVED = 11
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is

@@ -693,7 +693,7 @@ def _declare_fold(verbs) -> None:
 
 
 def _fold(args, out) -> int:
-    from . import freezing
+    from . import freezing, tracing
 
     frozen = freezing.freeze(args.round, actor=_actor(args),
                              records_only=args.records_only, record=args.record)
@@ -704,6 +704,8 @@ def _fold(args, out) -> int:
         print(f"records only: {args.record}", file=out)
         print(f"standing: {frozen.standing}", file=out)
     for line in _frozen(frozen.plan):
+        print(line, file=out)
+    for line in tracing.lines(frozen.trace):
         print(line, file=out)
     _warn_of(frozen.failed, args.prog, args.verb)
     return codes.OK

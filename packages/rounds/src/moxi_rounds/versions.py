@@ -260,7 +260,10 @@ def newest(state: states.State):
         yield f"v{version.n}", {"version": version.n, "digest": version.digest,
                                 "at": version.at, "by": version.actor,
                                 "records_only": version.records_only,
-                                "standing": str(standing(state))}
+                                "standing": str(standing(state)),
+                                # What the check of its trace rows found when it
+                                # was frozen, as the event holds it.
+                                "trace": version.trace}
 
 
 def verdicts(state: states.State):

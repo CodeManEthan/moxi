@@ -39,6 +39,13 @@ difference refuses the freezing. Options are no such difference.
 A sentence in the block that differs from the one on record for the same id changes
 nothing: a question on record keeps its sentence, and the freezing says which ids
 differ.
+
+**The trace check.** Where the round's project asks for it, the version's trace rows
+are checked as it is frozen (`tracing.check`) and the event holds what was found;
+where it does not, the event says the check was not asked for. A version that fails
+is frozen all the same: the result is a record, and what waits on it reads it there.
+The setting is read at the freezing, so a change to it reaches the next version and
+no version already frozen.
 """
 
 from __future__ import annotations
@@ -51,7 +58,7 @@ from pathlib import Path
 from moxi import files
 
 from . import (brake, design_block, ending, folders, options, pointers, questions,
-               stages, stepping, versions, write)
+               stages, stepping, tracing, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
@@ -99,8 +106,9 @@ CHECKS: list[Callable[[states.State, design_block.DesignBlock], list[Problem]]] 
 class Frozen:
     """A design as it was frozen: the round's `name`, the `version`'s number, the
     frozen `file` and its `digest`, the `plan` that was carried out, the `event`
-    written, and the design's `standing` after it. `failed` pairs each after-append callback that raised with what it
-    raised."""
+    written, the design's `standing` after it, and `trace`, what the check of its
+    trace rows found, as `tracing.shown` gives it. `failed` pairs each after-append
+    callback that raised with what it raised."""
 
     name: str
     version: int
@@ -109,6 +117,7 @@ class Frozen:
     plan: Plan
     event: dict
     standing: versions.Standing | None = None
+    trace: dict | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -422,11 +431,15 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
     def frozen(view, result):
         number, _target = result
         found = planned(view)
-        # The trace check's result goes here as `trace` once it is run at a freezing;
-        # an event without the field says it was not run.
+        # The check reads the record as this event leaves it: a question the block
+        # adds is open from here on, so a row may name it.
+        traced = (tracing.check(view.state, view.project_state, found.declared,
+                                asked=found.added.get("questions", ()))
+                  if own.round_setting(settings, home.project, "trace")
+                  else tracing.NOT_ASKED)
         fields = {"version": number, "digest": view.facts.block.sha256,
-                  "records_only": records_only, "declared": found.declared,
-                  "added": found.added,
+                  "records_only": records_only, "trace": traced.stored(),
+                  "declared": found.declared, "added": found.added,
                   "pending": [_pending(one) for one in found.pending]}
         if records_only:
             fields["record"] = record
@@ -442,10 +455,12 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
     except NoLog:
         raise NoRound(name) from None
     number, target = written.result
+    after = states.fold(written.round_events)
     return Frozen(name=name, version=number, file=target,
                   digest=written.events[0]["digest"], plan=planned(written.view),
                   event=written.events[0],
-                  standing=versions.standing(states.fold(written.round_events)),
+                  standing=versions.standing(after),
+                  trace=tracing.shown(after, written.view.project_state),
                   failed=written.failed)
 
 
