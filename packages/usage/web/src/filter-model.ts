@@ -220,7 +220,7 @@ export function customRange(since: string, until: string): Range | null {
 export function filterLine(facts: FilterFacts): FilterLine {
   const { state, today } = facts;
   const range: Menu = {
-    key: "range", label: "Range", value: rangeLabel(state.range), set: state.range.kind !== DEFAULT_RANGE.kind,
+    key: "range", label: "Range", value: rangeLabel(state.range, today), set: state.range.kind !== DEFAULT_RANGE.kind,
     items: rangeMenu(state.range, facts.figures, facts.allTime).map((entry): MenuItem => ({
       ...entry, patch: entry.key === "custom" ? null : { range: { kind: entry.key } },
     })),

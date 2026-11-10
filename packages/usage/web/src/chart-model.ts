@@ -96,7 +96,8 @@ const tokenWords = (sum: Sum): string => `${sum.unknown_rows > 0 ? "at least " :
  * Null when the range holds no request with a time: the page then shows `NOTHING_USED`.
  *
  * The sentence, by cost: `The most in these 30 days was today, $19.54. 8 days had no
- * sessions.` By tokens: `71.9M tokens in these 30 days. The most was today, 22.0M.`
+ * sessions.` By tokens: `71.9M tokens in these 30 days. The most was today, 22.0M.`, or
+ * `At least 71.9M tokens …` when a count is not whole.
  * A range of one period has none, since its one bar says its value.
  */
 export function chartModel(report: Report<DayRow>, range: Range, measure: Measure, today: string): ChartModel | null {
@@ -133,7 +134,8 @@ export function chartModel(report: Report<DayRow>, range: Range, measure: Measur
   if (sums.length > 1) {
     const which = dearest === null ? null : `${name(dearest.period, false)}, ${words(dearest.sum)}`;
     if (measure === "tokens") {
-      parts.push(`${tokenWords(sumRows(sums.map((item) => item.sum)))} tokens in ${span}.`);
+      const total = tokenWords(sumRows(sums.map((item) => item.sum)));
+      parts.push(`${total.charAt(0).toUpperCase()}${total.slice(1)} tokens in ${span}.`);
       if (which !== null) parts.push(`The most was ${which}.`);
     } else {
       if (which !== null) parts.push(`The most in ${span} was ${which}.`);
@@ -143,7 +145,7 @@ export function chartModel(report: Report<DayRow>, range: Range, measure: Measur
   }
   return {
     measure, by,
-    aria: `${measure === "cost" ? "Estimated cost" : "Tokens"} each ${unit}, ${rangeLabel(range)}`,
+    aria: `${measure === "cost" ? "Estimated cost" : "Tokens"} each ${unit}, ${rangeLabel(range, today)}`,
     top: top === null ? null : { value: top, words: axisWords(top, measure) },
     bars,
     sentence: parts.length ? parts.join(" ") : null,
@@ -245,7 +247,7 @@ export function chartGroup(report: Report<DayRow>, range: Range, measure: Measur
 /** The chart's sizes, in px. A bar stands on `base` and a bar at the axis's top reaches
  * `top`; the grid line and the axis are drawn half a pixel under those. */
 export const CHART_SIZE = { height: 106, top: 8, base: 84, labels: 100, barShare: 0.565, barMax: 28,
-                            barMin: 1.5, outlineMin: 4, labelGap: 56 };
+                            barMin: 1.5, outlineMin: 4, labelGap: 56, glyph: 6.5 };
 
 export interface DrawnBar {
   period: string;
@@ -290,9 +292,13 @@ const round = (n: number): number => Math.round(n * 10) / 10;
  * The chart at `width` px. Every period has a column; one in which nothing was used has
  * no bar. The axis names the first and the last period, and between them the 1st, 10th
  * and 20th of a month (each January by month) where there is room; with room for all,
- * every period.
+ * every period. A name is centred under its period; the first is set at the chart's left
+ * edge when centring it would reach more than `hang` px past that edge, and the last at
+ * its right edge. Today's value stands left of its bar; where a bar beside it would
+ * be under the words it stands over its own bar, and above the grid line where the bars
+ * there are taller than it.
  */
-export function chartDraw(model: ChartModel, width: number): ChartDraw {
+export function chartDraw(model: ChartModel, width: number, hang = 0): ChartDraw {
   const size = CHART_SIZE;
   const count = model.bars.length;
   const slot = width / Math.max(1, count);
@@ -300,6 +306,7 @@ export function chartDraw(model: ChartModel, width: number): ChartDraw {
   const centre = (i: number): number => i * slot + slot / 2;
   const bars: DrawnBar[] = [];
   let value: ChartDraw["value"] = null;
+  let now: { i: number; x: number; y: number; words: string } | null = null;
   model.bars.forEach((bar, i) => {
     if (bar.empty || bar.hover === null) return;
     const full = bar.share * (size.base - size.top);
@@ -314,12 +321,28 @@ export function chartDraw(model: ChartModel, width: number): ChartDraw {
       slot: { x: round(i * slot), width: round(slot) },
       hover: bar.hover,
     });
-    if (bar.now) {
-      const left = x - 5 >= 64;
-      value = { x: round(left ? x - 5 : x + barWidth + 5), y: round(Math.min(y + 9, size.base - 6)),
-                text: bar.words, anchor: left ? "end" : "start" };
-    }
+    if (bar.now) now = { i, x, y, words: bar.words };
   });
+  if (now !== null) {
+    const { i, x, y, words } = now as { i: number; x: number; y: number; words: string };
+    const left = x - 5 >= 64;
+    const beside = round(Math.min(y + 9, size.base - 6));
+    // The words' box beside the bar, by a width guessed from their length.
+    const reach = words.length * size.glyph + 5;
+    // Whether another bar stands under words that span `from` to `to` with their foot at `foot`.
+    const under = (from: number, to: number, foot: number): boolean => bars.some((other) =>
+      other.period !== model.bars[i].period && other.x + other.width > from && other.x < to && other.y < foot);
+    const end = x + barWidth - reach >= 0;
+    const [from, to] = end ? [x + barWidth - reach, x + barWidth] : [x, x + reach];
+    const over = round(Math.max(size.top + 12, y - 4));
+    if (!(left ? under(x - reach, x, beside) : under(x + barWidth, x + barWidth + reach, beside))) {
+      value = { x: round(left ? x - 5 : x + barWidth + 5), y: beside, text: words, anchor: left ? "end" : "start" };
+    } else {
+      // Over the bar, or above the grid line where the bars beside it are taller than it.
+      value = { x: round(end ? x + barWidth : x), y: under(from, to, over) ? size.top - 4 : over, text: words,
+                anchor: end ? "end" : "start" };
+    }
+  }
 
   const marked = (period: string): boolean =>
     (model.by === "month" ? /-01$/.test(period) : /-(01|10|20)$/.test(period));
@@ -334,7 +357,7 @@ export function chartDraw(model: ChartModel, width: number): ChartDraw {
     const bar = model.bars[i];
     const at = centre(i);
     if (i === count - 1 && count > 1 && slot < size.labelGap) return { x: width, text: bar.label, anchor: "end", now: bar.now };
-    if (at < 16) return { x: 0, text: bar.label, anchor: "start", now: bar.now };
+    if (at - bar.label.length * size.glyph / 2 < -hang) return { x: 0, text: bar.label, anchor: "start", now: bar.now };
     return { x: round(at), text: bar.label, anchor: "middle", now: bar.now };
   });
 

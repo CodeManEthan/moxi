@@ -173,11 +173,21 @@ export function rangeBy(range: Range, today: string): "day" | "month" {
   return days === null || daysFrom(days.since, days.until) + 1 > DAYS_MAX ? "month" : "day";
 }
 
-/** The Range button's words: `last 30 days`, `today`, `all time`, `Oct 10 to Nov 1`. */
-export function rangeLabel(range: Range): string {
+/** The Range button's words: `last 30 days`, `today`, `all time`, `Oct 10 to Nov 1`.
+ * A day of one's own range in another year than `today`'s carries its year, `Dec 28
+ * 2025 to Jan 5`, `Feb 3 to Feb 5 2025`, since the date alone would read as this year's. */
+export function rangeLabel(range: Range, today: string | null = null): string {
   if (range.kind === "all") return "all time";
   if (range.kind !== "custom") return range.kind === "today" ? "today" : PRESET_LABELS[range.kind].toLowerCase();
-  return range.since === range.until ? dateWord(range.since) : `${dateWord(range.since)} to ${dateWord(range.until)}`;
+  const year = (day: string): string | null =>
+    (isDay(day) && isDay(today) && day.slice(0, 4) !== today.slice(0, 4) ? day.slice(0, 4) : null);
+  const word = (day: string, said: boolean): string => {
+    const own = year(day);
+    return own === null || !said ? dateWord(day) : `${dateWord(day)} ${own}`;
+  };
+  if (range.since === range.until) return word(range.since, true);
+  // Two days of one year say it once, after the second.
+  return `${word(range.since, year(range.since) !== year(range.until))} to ${word(range.until, true)}`;
 }
 
 /** One row of the Range menu. */

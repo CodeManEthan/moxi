@@ -235,7 +235,7 @@ def test_a_range_of_two_typed_days_is_charted_and_named_by_its_days(page):
     form.get_by_label("to").fill("2001-02-05")
     form.get_by_role("button", name="Set").click()
     expect(box.get_by_role("menu")).to_have_count(0)
-    expect(box.locator("button.pick")).to_have_text("Feb 3 to Feb 5▾")
+    expect(box.locator("button.pick")).to_have_text("Feb 3 to Feb 5 2001▾")
 
 
 # --- the chart -----------------------------------------------------------------------------

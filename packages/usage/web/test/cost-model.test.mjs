@@ -123,6 +123,11 @@ test("a range's days, its words, and by month only past 92 days", () => {
   assert.equal(rangeLabel({ kind: "all" }), "all time");
   assert.equal(rangeLabel(custom("2026-10-10", "2026-11-01")), "Oct 10 to Nov 1");
   assert.equal(rangeLabel(custom("2026-10-10", "2026-10-10")), "Oct 10");
+  assert.equal(rangeLabel(custom("2026-10-10", "2026-11-01"), TODAY), "Oct 10 to Nov 1");
+  assert.equal(rangeLabel(custom("2025-12-28", "2026-01-05"), TODAY), "Dec 28 2025 to Jan 5");
+  assert.equal(rangeLabel(custom("2025-01-01", "2025-01-01"), TODAY), "Jan 1 2025");
+  assert.equal(rangeLabel(custom("2025-02-03", "2025-02-05"), TODAY), "Feb 3 to Feb 5 2025");
+  assert.equal(rangeLabel(custom("2024-12-30", "2025-02-05"), TODAY), "Dec 30 2024 to Feb 5 2025");
 });
 
 test("the menu: each preset with its figure, the range in force checked", () => {

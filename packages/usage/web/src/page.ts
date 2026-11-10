@@ -130,7 +130,8 @@ const STYLES = css`
   .filt .v { position: relative; top: 1px; margin-left: 6px; font-size: 15px; line-height: 0; color: var(--moxi-text-dim); }
   .filt .tog button { margin-left: 14px; }
   .anchor { position: relative; display: inline-block; }
-  .menu { position: absolute; z-index: 2; left: 0; top: calc(100% + 8px); min-width: 240px; max-width: 400px;
+  .menu { position: absolute; z-index: 2; left: 0; top: calc(100% + 8px); width: max-content; min-width: 240px;
+          max-width: 400px;
           padding: 6px 0; border: 1px solid var(--moxi-border-strong); border-radius: 10px; background: var(--moxi-bg);
           font-size: 14px; line-height: 1.5; color: var(--moxi-text); text-align: left; white-space: normal; }
   .menu hr { margin: 6px 0; border: 0; border-top: 1px solid var(--moxi-border); }
@@ -147,7 +148,7 @@ const STYLES = css`
   .grps.below { margin-top: 0; }
   .chartl { display: flex; justify-content: space-between; gap: 18px; padding: 7px 0 2px;
             font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
-  .chartl button.act { flex: none; }
+  .chartl button.act { flex: none; color: inherit; }
   .none { padding: 7px 0; font-size: 14px; line-height: 20px; color: var(--moxi-text-dim); }
   svg.ch { display: block; margin: 8px 0 6px; overflow: visible; }
   svg.ch text { fill: var(--moxi-text-dim); font-size: 11px; font-family: var(--moxi-font-sans);
@@ -190,6 +191,8 @@ const STYLES = css`
     .one > span:first-child { display: block; padding-right: 0; white-space: normal; }
     .one .t { display: block; padding-left: 64px; font-size: var(--moxi-font-size-sm); line-height: 18px; }
     .one2 { margin-top: 0; white-space: normal; }
+    .filt .fl { column-gap: 18px; }
+    .filt .fl .sep { display: none; }
     .filt .anchor { position: static; }
     .menu { max-width: calc(100% - 4px); }
     .menu button.it { grid-template-columns: 20px 1fr auto; }
@@ -585,6 +588,8 @@ export class UsagePage extends LitElement {
     // The group's label column is beside the chart only on a wide page.
     const wide = !window.matchMedia("(max-width: 720px)").matches;
     const width = Math.max(120, this.width - (wide ? 100 : 0));
+    // Beside the label column the first day's name may reach left of the chart.
+    const hang = wide ? 24 : 0;
     return html`<section class="grp" data-group="chart">
       <div class="gk">${group.label}</div>
       <div class="gl">
@@ -593,7 +598,7 @@ export class UsagePage extends LitElement {
           <span data-part="sentence">${group.sentence ?? nothing}</span>
           ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
             @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
-        ${group.chart === null ? nothing : this.#chartSvg(chartDraw(group.chart, width), group.chart.aria)}
+        ${group.chart === null ? nothing : this.#chartSvg(chartDraw(group.chart, width, hang), group.chart.aria)}
         ${group.table === null ? nothing : this.#table(group.table)}
       </div>
     </section>`;

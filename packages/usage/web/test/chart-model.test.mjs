@@ -70,7 +70,7 @@ test("a day that is not whole says at least, and a range with no price names no 
   assert.deepEqual([none.bars[6].share, none.bars[6].words, none.bars[6].hover], [0, "no price", "today: no price, not whole"]);
   const uncounted = report([day(TODAY, 1, 1500, { complete: false, unknown_rows: 2 }), day("2026-11-07", 1, 500)]);
   const tokens = chartModel(uncounted, { kind: "7d" }, "tokens", TODAY);
-  assert.equal(tokens.sentence, "at least 2.00k tokens in these 7 days. The most was today, at least 1.50k.");
+  assert.equal(tokens.sentence, "At least 2.00k tokens in these 7 days. The most was today, at least 1.50k.");
   assert.equal(tokens.bars[6].hover, "today: at least 1.50k, not whole");
 });
 
@@ -231,4 +231,28 @@ test("by month the axis names the first, the last and each January", () => {
   const draw = chartDraw(chartModel(report(rows), { kind: "all" }, "cost", TODAY), 584);
   assert.deepEqual(draw.labels.map((label) => label.text), ["Nov 2025", "Jan 2026", "Nov 2026"]);
   assert.equal(draw.labels.at(-1).now, true);
+});
+
+test("beside the label column the first day's name is centred under its bar as the others are", () => {
+  const model = chartModel(DAILY, MONTH, "cost", TODAY);
+  assert.deepEqual(chartDraw(model, 584, 24).labels[0], { x: 9.7, text: "Oct 10", anchor: "middle", now: false });
+  assert.deepEqual(chartDraw(model, 584).labels[0], { x: 0, text: "Oct 10", anchor: "start", now: false });
+});
+
+test("today's value stands over its bar where the bar beside it would be under the words", () => {
+  const tall = chartDraw(chartModel(report([day("2026-11-01", 9), day("2026-11-07", 1.5), day(TODAY, 1)]),
+                                    { kind: "30d" }, "cost", TODAY), 584);
+  const now = tall.bars.find((bar) => bar.now);
+  assert.deepEqual(tall.value, { x: now.x + now.width, y: now.y - 4, text: "$1.00", anchor: "end" });
+  // A day beside it that is no taller than the words' foot leaves them where they were.
+  const short = chartDraw(chartModel(report([day("2026-11-07", 1), day(TODAY, 9)]), { kind: "30d" }, "cost", TODAY), 584);
+  const tallest = short.bars.find((bar) => bar.now);
+  assert.deepEqual([short.value.x, short.value.anchor], [Math.round((tallest.x - 5) * 10) / 10, "end"]);
+});
+
+test("today's value stands above the grid line where taller bars are on both sides of its place", () => {
+  const rows = [day("2026-11-05", 9), day("2026-11-06", 9), day("2026-11-07", 1), day(TODAY, 1)];
+  const draw = chartDraw(chartModel(report(rows), { kind: "30d" }, "cost", TODAY), 320);
+  const now = draw.bars.find((bar) => bar.now);
+  assert.deepEqual(draw.value, { x: now.x + now.width, y: 4, text: "$1.00", anchor: "end" });
 });
