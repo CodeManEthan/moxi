@@ -48,6 +48,15 @@ list's order.
 that changed within `recent_s` and of the sessions of the days the answer returns, and
 the last turn of each row it returns. Codex heads are read by the catalog's gather.
 
+**A row's prompt.** `prompt` is the newest message of the whole session that its record
+marks as typed by a person, and None where the session holds none: a reply, a message
+the record marks as injected and a message with no mark are never a prompt. For it a
+Claude Code session that no program started, and that a row shows, is read from its
+start once; the catalog keeps where that read ended, so a list reads no unchanged file
+again and reads only the new lines of one that grew (`catalog`, "The prompt's read",
+which also states the two changes to a file that read does not see). A Codex and an
+OpenCode row's `prompt` is None: their records carry no mark sessions reads.
+
 **Positions.** A `before` is a place in the list's order: an entry's last change in
 nanoseconds, its harness and its id, joined by colons. Asking for more after one answers
 the sessions strictly after that place. So a session that does not change between two
@@ -402,9 +411,12 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
     A row is `{harness, session, path, changed, size, subagents, folder, started,
     by_program, name, model, activity, prompt, recent}`: `subagents` is how many the
     session has, None where its subagents folder could not be listed; `activity` is
-    `{at, who, text}` or None, its text the first 300 bytes of the message; `prompt` is
-    `{at, text, truncated}` or None, its text cut at 64 KiB with `truncated` saying so
-    (the catalog keeps no more of it); and `recent` is true for a session not started by
+    `{at, who, text}` or None, the newest thing said in the last turn, whoever said it
+    (`who` is `you`, `agent` or None), its text the first 300 bytes of the message;
+    `prompt` is `{at, text, truncated}` or None, the newest message of the whole session
+    that the record marks as typed by a person and nothing else (see the module), its
+    text cut at 64 KiB with `truncated` saying so (the catalog keeps no more of it); and
+    `recent` is true for a session not started by
     a program that changed within `recent_s` of `now`. A session with no change time
     sorts last and is counted in `earlier`.
 
@@ -447,8 +459,9 @@ def newest_sessions(cat: Catalog | None = None, *, recent_s: float,
     with no groups: what `list_sessions` answers before its groups (`now`, `today`,
     `all`, `total`, `unreadable`, `roots`, `harnesses`), then `rows`, the first `limit`
     of them as a list's rows, and `before`, the place after them, None when `rows` holds
-    them all. Beyond the Codex heads every gather reads, it reads the head and the last
-    turn of the rows it returns and of no other session, unless `folder` is asked.
+    them all. Beyond the Codex heads every gather reads, it reads the head, the last
+    turn and the prompt of the rows it returns and of no other session, unless `folder`
+    is asked.
 
     Raises ValueError for a filter that is not one, and for a `limit` under 1."""
     cat = _catalog(cat)
@@ -780,8 +793,8 @@ def sessions_list(*, recent_s: float | None = None, now: float | None = None,
     sessions' config name, through one catalog this process keeps while it lives. A page
     server answers from the catalog its own process has filled; a caller in another
     process shares none of that and pays its own cold reads on its first call: each
-    root's listing, every Codex head, and the head and last turn of what it answers.
-    Later calls in the same process reuse them."""
+    root's listing, every Codex head, and the head, the last turn and the prompt of
+    what it answers. Later calls in the same process reuse them."""
     return list_sessions(None, recent_s=_recent(recent_s), now=now, harness=harness,
                          since=since, until=until, folder=folder, find=find)
 

@@ -40,25 +40,25 @@ export const isHarness = (value: unknown): value is Harness =>
 
 // -- routes ---------------------------------------------------------------------------------
 
-/** What the page's route names: the id form, one session, or nothing it knows. */
+/** What the page's route names: the list, one session, or nothing it knows. */
 export type PageRoute =
-  | { view: "form" }
+  | { view: "list" }
   | { view: "session"; target: Target }
   | { view: "unknown"; line: string };
 
 /** The line for a route the page has no view for. */
-export const UNKNOWN_ROUTE = "There is no such view here. Open a session by its harness and id.";
+export const UNKNOWN_ROUTE = "There is no such view here. Find the session in the list by its id or folder.";
 /** The line for a route that names an agent under a harness whose subagents are sessions
  * of their own. */
 export const AGENT_ONLY_CLAUDE = "Only a Claude Code subagent opens under its parent's session. "
   + "An OpenCode or Codex subagent is a session of its own: open it by its own id.";
 
-/** The route `route` (the part of the URL after `/m/sessions/`) names: `""` for the id
- * form, `<harness>/<session>`, or `claude/<session>/<agent>`. Each part is
+/** The route `route` (the part of the URL after `/m/sessions/`) names: `""` for the
+ * list, `<harness>/<session>`, or `claude/<session>/<agent>`. Each part is
  * percent-decoded. */
 export function parseRoute(route: string): PageRoute {
   const path = route.split(/[?#]/)[0].replace(/^\/+|\/+$/g, "");
-  if (path === "") return { view: "form" };
+  if (path === "") return { view: "list" };
   const parts = path.split("/");
   if (parts.length < 2 || parts.length > 3 || parts.some((part) => part === "")) {
     return { view: "unknown", line: UNKNOWN_ROUTE };
@@ -79,27 +79,6 @@ export function parseRoute(route: string): PageRoute {
 export function routeOf(target: Target): string {
   const parts = [target.harness, target.session, ...(target.agent !== null ? [target.agent] : [])];
   return parts.map((part) => encodeURIComponent(part)).join("/");
-}
-
-// -- the id form ----------------------------------------------------------------------------
-
-export const NO_ID = "Type a session id.";
-export const NOT_AN_ID = "A session id holds no /, ? or #. Type the id alone, not a path or a link.";
-/** What the id form says about the lookup it doesn't do. */
-export const FORM_LINE = "Open one session by the id its harness gave it: a Claude Code session id, "
-  + "a Codex thread id, or an OpenCode session id (ses_…). This page lists no sessions.";
-
-/** The id form's answer: the route to open, or the problem to show instead. */
-export type FormOutcome = { route: string } | { problem: string };
-
-/** The route the id form opens for `harness` and the typed `id`, or why it opens none: an
- * empty id, or one holding `/`, `?` or `#`, which would name another route. */
-export function formRoute(harness: string, id: string): FormOutcome {
-  const session = id.trim();
-  if (!isHarness(harness)) return { problem: "Choose a harness." };
-  if (session === "") return { problem: NO_ID };
-  if (/[/?#]/.test(session)) return { problem: NOT_AN_ID };
-  return { route: routeOf({ harness, session, agent: null }) };
 }
 
 // -- the routes' queries --------------------------------------------------------------------
@@ -249,12 +228,15 @@ export function textView(row: Row, expanded: boolean): TextView {
 
 // -- records --------------------------------------------------------------------------------
 
-/** One record as the view draws it. `key` is stable for the record within a session. */
+/** One record as the view draws it. `key` is stable for the record within a session.
+ * `word` is what a record that says something went wrong is called (`failureWord`), drawn
+ * in the heavier weight before the record's own line; null for any other record. */
 export type Item =
-  | { type: "message"; key: string; role: string; label: string; reasoning: boolean; tags: string[]; row: Row; unknown: string[] }
+  | { type: "message"; key: string; role: string; label: string; reasoning: boolean; tags: string[]; row: Row;
+      word: string | null; unknown: string[] }
   | { type: "call"; key: string; name: string; line: string; unknown: string[] }
-  | { type: "result"; key: string; line: string; error: boolean; unknown: string[] }
-  | { type: "rule"; key: string; marker: string; line: string; unknown: string[] }
+  | { type: "result"; key: string; line: string; error: boolean; word: string | null; unknown: string[] }
+  | { type: "rule"; key: string; marker: string; line: string; word: string | null; unknown: string[] }
   | { type: "request"; key: string; line: string; unknown: string[] }
   | { type: "note"; key: string; line: string; unknown: string[] };
 
@@ -323,24 +305,42 @@ export function limitsLine(row: Row): string {
   return windows.length ? `Limits (${name}): ${windows.join(", ")}` : `Limits (${name})`;
 }
 
+/** The word for a tool result its harness marked as failed. */
+export const FAILED = "Failed";
+/** The word for a message its harness wrote in place of a reply that failed. */
+export const ERROR = "Error";
+/** The mark Claude Code puts on the message it writes when a request fails. */
+export const ERROR_FLAG = "isApiErrorMessage";
+
+/** The word a record that says something went wrong is called, or null: `Failed` for a
+ * tool result marked as an error, `Error` for a message carrying its harness's error
+ * mark. A failure is said in this word and in no colour, so it is in the page's text. A
+ * tool call says nothing of how it ended (its result does), so it has no word. */
+export function failureWord(row: Row): string | null {
+  if (row.kind === "tool_result") return row.is_error === true ? FAILED : null;
+  if (row.kind === "message") return (row.flags ?? []).includes(ERROR_FLAG) ? ERROR : null;
+  return null;
+}
+
 /** What one record draws as. A message is text; a synthetic message is a labelled rule; a
  * tool call is its one-line summary; a tool result is its size and error flag; a marker is
  * a labelled rule; a request is its model and token counts. */
 export function itemOf(row: Row): Item {
   const key = rowKey(row);
   const unknown = row.unknown;
+  const word = failureWord(row);
   switch (row.kind) {
     case "message": {
       if (row.synthetic === true) {
         const text = typeof row.text === "string" ? cutAt(row.text.split("\n")[0], 200) : HIDDEN;
-        return { type: "rule", key, marker: "synthetic", line: `Synthetic: ${text}`, unknown };
+        return { type: "rule", key, marker: "synthetic", line: `Synthetic: ${text}`, word, unknown };
       }
       const role = row.role ?? "unknown";
       const reasoning = row.reasoning === true;
       const label = reasoning ? "Thinking" : (ROLE_LABELS[role] ?? (row.role ? row.role : "Message"));
       const tags = [...(row.flags ?? [])];
       if (typeof row.model === "string") tags.push(row.model);
-      return { type: "message", key, role, label, reasoning, tags, row, unknown };
+      return { type: "message", key, role, label, reasoning, tags, row, word, unknown };
     }
     case "tool_call": {
       const name = row.name ?? "tool";
@@ -350,10 +350,10 @@ export function itemOf(row: Row): Item {
     case "tool_result": {
       const size = typeof row.size_bytes === "number" ? fmtBytes(row.size_bytes) : "size unknown";
       const error = row.is_error === true;
-      return { type: "result", key, line: error ? `Result: error, ${size}` : `Result: ${size}`, error, unknown };
+      return { type: "result", key, line: error ? `Result: error, ${size}` : `Result: ${size}`, error, word, unknown };
     }
     case "marker":
-      return { type: "rule", key, marker: row.marker ?? row.raw_kind, line: markerLine(row), unknown };
+      return { type: "rule", key, marker: row.marker ?? row.raw_kind, line: markerLine(row), word, unknown };
     case "request":
       return { type: "request", key, line: requestLine(row), unknown };
     case "limits":
