@@ -161,7 +161,7 @@ VIEWS = {
     "sessions": f'section[data-part=view] tr[data-session="{FIRST}"]',
     "projects": "section[data-part=view] tr[data-project]",
     "models": f'section[data-part=view] tr[data-model="{MODEL}"]',
-    f"session/{FIRST}": f'section[data-part=view] tr[data-agent="{AGENT}"]',
+    f"sessions/claude/{FIRST}": f'section[data-part=view] tr[data-agent="{AGENT}"]',
 }
 
 
@@ -178,8 +178,8 @@ def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_c
 def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
-    session_rows(panel).locator(f'a[href="/m/usage/session/{FIRST}"]').click()
-    expect(ui_page).to_have_url(f"{indexed.url}/m/usage/session/{FIRST}")
+    session_rows(panel).locator(f'a[href="/m/usage/sessions/claude/{FIRST}"]').click()
+    expect(ui_page).to_have_url(f"{indexed.url}/m/usage/sessions/claude/{FIRST}")
     agents = panel.locator("section[data-part=view] tr[data-agent]")
     expect(agents).to_have_count(2)
     expect(panel.locator(f'section[data-part=view] svg g[data-agent="{AGENT}"]')).to_have_count(1)
@@ -190,15 +190,15 @@ def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_
     harness = panel.locator("[data-part=filters] [data-filter=harness] button.pick")
     row = panel.locator(f'section[data-part=view] tr[data-session="{FIRST}"]')
     expect(row).to_be_visible()
-    # One harness holds files, so its filter has no place until one is set.
-    expect(harness).to_have_count(0)
     tokens = row.locator("td.num").nth(-2).inner_text()
     with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
         row.locator("a").click()
     assert "harness=claude" in sent.value.url, sent.value.url
-    expect(harness).to_have_text("Claude▾")
     totals = panel.locator("section[data-part=view] [data-part=totals]")
     expect(totals.locator("span", has_text="Tokens").locator("b")).to_have_text(tokens)
+    # The harness is the address's, not a filter of the page: with one harness holding
+    # files the filter has no place, before and after.
+    expect(harness).to_have_count(0)
 
 
 # --- the index's states --------------------------------------------------------------------
@@ -375,7 +375,7 @@ def dollars(text: str) -> str:
 
 def test_the_page_keeps_the_contract_on_the_cost_terms_view(charted, charted_page,
                                                              ui_component_check):
-    check = ui_component_check(charted_page, "usage", "page", {"route": "terms"},
+    check = ui_component_check(charted_page, "usage", "page", {"route": "prices"},
                                tokens=("text",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/terms?" in url for url in check.requests), check.requests
@@ -383,8 +383,8 @@ def test_the_page_keeps_the_contract_on_the_cost_terms_view(charted, charted_pag
 
 #: What shows on the cost terms and session views once their reports have drawn.
 CHARTED_VIEWS = {
-    "terms": "section[data-part=view] tr[data-line=total]",
-    f"session/{CHARTED}": "section[data-part=view] svg[data-chart=requests] g[data-n]",
+    "prices": "section[data-part=view] tr[data-line=total]",
+    f"sessions/claude/{CHARTED}": "section[data-part=view] svg[data-chart=requests] g[data-n]",
 }
 
 
@@ -398,7 +398,7 @@ def test_the_cost_terms_and_session_views_fit_a_phone(charted, charted_page, ui_
 
 
 def test_the_rates_section_fits_a_phone_when_open(charted, charted_page, ui_width_check):
-    ui_width_check(charted_page, module="usage", route="terms")
+    ui_width_check(charted_page, module="usage", route="prices")
     rates = panel_of(charted_page).locator("section[data-part=view] details[data-part=rates]")
     rates.locator("summary").click()
     expect(rates.locator("tr[data-rate]")).to_have_count(2)
@@ -452,7 +452,7 @@ def scrolled_on_a_phone(table, headers: list[str]) -> None:
 
 def test_reconcile_and_rates_keep_every_column_on_a_phone_and_scroll_with_model_in_view(
         charted, charted_page, ui_width_check):
-    ui_width_check(charted_page, module="usage", route="terms")
+    ui_width_check(charted_page, module="usage", route="prices")
     panel = panel_of(charted_page)
     view = panel.locator("section[data-part=view]")
     table = reconcile(panel)
@@ -470,7 +470,7 @@ def test_reconcile_and_rates_keep_every_column_on_a_phone_and_scroll_with_model_
 
 def test_the_session_view_charts_each_request_its_turns_compaction_and_context(
         charted, charted_page):
-    panel = open_view(charted_page, f"session/{CHARTED}")
+    panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
     bars = requests_chart(panel)
     curve = context_chart(panel)
     expect(bars.locator("g[data-n]")).to_have_count(6)
@@ -510,7 +510,7 @@ def test_the_request_charts_keep_their_labels_inside_wide_and_on_a_phone(
     """The larger window is the top of its chart, so its label goes under its line; on a
     phone the compaction's rule is near enough the right edge that its label goes left of
     it."""
-    panel = open_view(charted_page, f"session/{CHARTED}")
+    panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
     charts = panel.locator("section[data-part=view] svg[data-chart]")
     expect(context_chart(panel).locator("text.window-label")).to_have_count(2)
     wide = charts.evaluate_all(CHART_LABELS)
@@ -523,11 +523,11 @@ def test_the_request_charts_keep_their_labels_inside_wide_and_on_a_phone(
 
 
 def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charted_page):
-    panel = open_view(charted_page, f"session/{CHARTED}")
+    panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
     expect(requests_chart(panel).locator("g[data-n]")).to_have_count(6)
     panel.locator(f'section[data-part=view] tr[data-agent="{CHARTED_AGENT}"] a').click()
     expect(charted_page).to_have_url(
-        f"{charted.url}/m/usage/session/{CHARTED}/{CHARTED_AGENT}")
+        f"{charted.url}/m/usage/sessions/claude/{CHARTED}/{CHARTED_AGENT}")
     bars = requests_chart(panel)
     expect(bars.locator("g[data-n]")).to_have_count(2)
     expect(bars.locator("[data-rule]")).to_have_count(0)
@@ -540,7 +540,7 @@ def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charte
 
 def test_the_cost_terms_total_is_its_group_lines_and_the_models_views_total(
         charted, charted_page):
-    panel = open_view(charted_page, "terms")
+    panel = open_view(charted_page, "prices")
     table = reconcile(panel)
     total = table.locator("tr[data-line=total] td[data-cost]")
     expect(total).to_have_count(1)
@@ -567,7 +567,7 @@ def test_the_cost_terms_total_is_its_group_lines_and_the_models_views_total(
 
 def test_rates_list_every_reconcile_model_and_a_search_finds_a_seeded_row(
         charted, charted_page):
-    panel = open_view(charted_page, "terms")
+    panel = open_view(charted_page, "prices")
     expect(reconcile(panel).locator("tr[data-line=total]")).to_be_visible()
     rates = panel.locator("section[data-part=view] details[data-part=rates]")
     expect(rates.locator("tr[data-rate]")).to_have_count(0)

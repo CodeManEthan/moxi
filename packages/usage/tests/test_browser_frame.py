@@ -207,8 +207,11 @@ def test_a_limit_row_says_its_percent_its_line_and_when_it_fills_and_resets(seed
     # A percent is rounded down, and a row read at another minute says when.
     claude = limit(panel, "claude/plan/300")
     expect(claude.locator(".u")).to_have_text("48% used")
-    # A closed row is not a link and has no act.
-    assert panel.locator("[data-group=limits] a, [data-group=limits] button").count() == 0
+    # A row that opens is a link to its address and has no word of its own; nothing is open.
+    expect(five).to_have_attribute("href", "/m/usage/limit/codex/codex/300")
+    expect(five).to_have_attribute("aria-expanded", "false")
+    assert panel.locator("[data-group=limits] button, [data-group=limits] [data-part=close]").count() == 0
+    expect(panel.locator("[data-part=opened]")).to_have_count(0)
 
 
 def test_a_reading_of_an_ended_period_is_one_dim_row_in_words(seeded, seeded_page):

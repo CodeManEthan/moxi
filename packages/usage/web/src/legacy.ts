@@ -1,31 +1,32 @@
-// <moxi-usage-legacy route="..." .filters=...>: the views the page had before its frame
-// was redrawn, kept mounted under the page's chart until each has its place in the new
-// page: the tab line and the view the route names: `sessions`, `projects`, `models`,
-// `terms` (the cost terms: the class split, the Reconcile table and the rates), or one
-// session, `session/<id>` with its main agent's requests charted or `session/<id>/<agent>`
-// with another's. `""` and `daily` name the page's own chart, so only the tab line shows
-// for them. Every view reads under the page's range and filters, which the page passes
-// in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
+// <moxi-usage-legacy .address=... .filters=... .open=...>: the views the page had before
+// its frame was redrawn, kept mounted under the page's chart until each has its place in
+// the new page. It draws the view that serves the page's address (`legacyRoute`): the
+// sessions table, one session with its main agent's requests charted or a subagent's,
+// the projects table, the models table, or the cost terms (the class split, the
+// Reconcile table and the rates) for Token kinds and Prices. For any other address it
+// draws nothing. A link here opens its piece through the page, which writes the address.
+// Every view reads under the page's range and filters, which the page passes in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
 // line, the chart, the index's state and "Read new sessions" are the page's.
 
 import { css, html, LitElement, nothing, svg } from "lit";
 import type { TemplateResult } from "lit";
-import { api, navigate, subscribe } from "/m/ui/client.js";
+import { api, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseIndexEvent, parsePrices, parseReport } from "./feed.ts";
 import type {
   AgentRow, ModelRow, Prices, ProjectRow, Report, RequestRow, RequestsTotal, SessionRow,
   TermsRow, TermsTotal,
 } from "./feed.ts";
-import { holdState } from "./filter-model.ts";
+import { addressPath, NOTHING_OPEN, sessionAddress, SESSIONS } from "./address-model.ts";
+import type { Address } from "./address-model.ts";
 import { BASE, flag, SERIES } from "./parts.ts";
 import {
   agents, agentTreemap, cellLabel, contextChart, costText, filterKeys, flags, fmtCost, fmtMoment,
-  fmtTokens, layerLine, localDay, MARGIN, NO_FILTERS, overrideLine, parseRoute, pricesPath,
+  fmtTokens, layerLine, legacyRoute, localDay, MARGIN, NO_FILTERS, overrideLine, parseRoute, pricesPath,
   provenanceLine, RATE_FIELDS, rateAsks, rateLine, readout, reconcileLines, REQUEST_CLASSES,
   requestNotes, requestRules, requestsChart, requestsPath, reportState, searchPath, seriesClass,
-  sessionRoute, sessionTermsPath, splitBars, splitKeys, splitLabel, classIndex, TERM_CLASSES,
-  tickText, UNKNOWN_MODEL, viewPath, VIEWS,
+  sessionTermsPath, splitBars, splitKeys, splitLabel, classIndex, TERM_CLASSES,
+  tickText, UNKNOWN_MODEL, viewPath,
 } from "./views.ts";
 import type { ContextChart, Filters, PageRoute, RequestMeasure, RequestsChart, Rules } from "./views.ts";
 
@@ -35,8 +36,7 @@ const SPLIT_HEIGHT = 16;
 const TREEMAP_HEIGHT = 300;
 const SEARCH_MS = 200;
 
-// The request charts' measure outlives one placement: the shell places a new page for
-// each route.
+// The request charts' measure outlives one placement of the page.
 let requestMeasure: RequestMeasure = "tokens";
 
 /** The hatch a price tier's part of a class's segment carries over its colour. */
@@ -52,9 +52,7 @@ const STYLES = [BASE, SERIES, css`
   button:hover:not(:disabled) { background: var(--moxi-bg-hover); }
   button:disabled { color: var(--moxi-text-faint); cursor: default; }
   button[aria-pressed="true"] { background: var(--moxi-selected-soft); border-color: var(--moxi-selected); }
-  nav, .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: var(--moxi-gap); }
-  nav a { padding: 4px 10px; border-radius: var(--moxi-radius); color: var(--moxi-text); text-decoration: none; }
-  nav a[aria-current="page"] { background: var(--moxi-selected-soft); color: var(--moxi-selected); font-weight: 600; }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: var(--moxi-gap); }
   .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; }
   label { display: inline-flex; gap: 4px; align-items: center; min-width: 0; max-width: 100%; }
   .scroll { overflow-x: auto; max-width: 100%; }
@@ -103,13 +101,17 @@ export class UsageLegacy extends LitElement {
   static styles = STYLES;
 
   static properties = {
-    route: { type: String },
+    address: { attribute: false },
+    open: { attribute: false },
     filters: { attribute: false },
     said: { type: Boolean },
     width: { state: true },
   };
 
-  route = "";
+  /** What the page has open. */
+  address: Address = NOTHING_OPEN;
+  /** Opens a piece of the page; the page gives it. */
+  open: ((address: Address) => void) | null = null;
   /** The page's range and filters, as the views' reads take them. */
   filters: Filters = { ...NO_FILTERS };
   /** The page has said that nothing was used in the range, so a view with no row says
@@ -161,7 +163,7 @@ export class UsageLegacy extends LitElement {
   protected willUpdate(): void {
     if (!this.#on) return;
     const today = localDay(new Date());
-    const key = `${this.route}|${JSON.stringify(filterKeys(this.filters, today))}`;
+    const key = `${this.#route() ?? ""}|${JSON.stringify(filterKeys(this.filters, today))}`;
     if (key !== this.#loadedFor) {
       this.#loadedFor = key;
       this.#load(today);
@@ -173,10 +175,14 @@ export class UsageLegacy extends LitElement {
     const update = () => this.requestUpdate();
     this.#view?.close();
     this.#closeExtras();
-    const route = parseRoute(this.route);
+    const found = this.#route();
+    if (found === null) {
+      this.#view = null;
+      return;
+    }
+    const route = parseRoute(found);
     const filters = this.filters;
-    // The page draws the daily chart itself.
-    const path = route.view === "daily" ? null : viewPath(route, filters, today);
+    const path = viewPath(route, filters, today);
     this.#view = path === null ? null : new Feed<AnyReport>(() => api("usage", path), parseReport, update);
     if (route.view === "session") {
       const requests = requestsPath(route, filters, today);
@@ -205,30 +211,29 @@ export class UsageLegacy extends LitElement {
 
   render() {
     if (!this.#on) return nothing;
-    const route = parseRoute(this.route);
-    // An address that names no view has its line at the frame's foot.
-    if (route.view === "unknown") return nothing;
-    return html`
-      ${this.#nav(route)}
-      ${route.view === "daily" ? nothing
-        : html`<section data-part="view" data-view=${route.view}>${this.#body(route)}</section>`}`;
+    const found = this.#route();
+    if (found === null) return nothing;
+    const route = parseRoute(found);
+    return html`<section data-part="view" data-view=${route.view}>${this.#body(route)}</section>`;
   }
 
-  /** A link to one of the page's routes; `follow` runs just before the page moves there. */
-  #link(route: string, label: string | TemplateResult, current = false, follow?: () => void) {
-    return html`<a href=${`/m/usage/${route}`} class=${current ? "" : "link"} aria-current=${current ? "page" : "false"}
-      @click=${(event: MouseEvent) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        event.preventDefault();
-        follow?.();
-        navigate("usage", route);
-      }}>${label}</a>`;
+  /** The route of the view that serves the page's address; null when none does. */
+  #route(): string | null {
+    return legacyRoute(this.address);
   }
 
-  #nav(route: PageRoute) {
-    const at = route.view === "session" ? "sessions" : route.view;
-    return html`<nav aria-label="Views">${VIEWS.map(([name, label]) =>
-      this.#link(name === "daily" ? "" : name, label, at === name))}</nav>`;
+  /** The harness of the session the address names. */
+  #harness(): string {
+    return this.address.piece === "sessions" ? this.address.harness ?? "" : "";
+  }
+
+  /** A link that opens a piece of the page. */
+  #link(address: Address, label: string | TemplateResult) {
+    return html`<a href=${addressPath(address)} class="link" @click=${(event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      this.open?.(address);
+    }}>${label}</a>`;
   }
 
   #body(route: PageRoute) {
@@ -250,7 +255,7 @@ export class UsageLegacy extends LitElement {
 
   #heading(route: PageRoute) {
     if (route.view !== "session") return nothing;
-    return html`<p>${this.#link("sessions", "All sessions")} › <code>${route.session}</code></p>`;
+    return html`<p>${this.#link(SESSIONS, "All sessions")} › <code>${route.session}</code></p>`;
   }
 
   #totals(report: AnyReport) {
@@ -280,8 +285,7 @@ export class UsageLegacy extends LitElement {
       <tbody>${report.rows.map((row) => html`
         <tr data-session=${row.session_id ?? ""}>
           <td class="wrap">${row.session_id === null ? html`<span class="dim">no session</span>`
-            : this.#link(sessionRoute(row.session_id), row.session_id, false,
-              () => { holdState({ harness: row.harness }); })}
+            : this.#link(sessionAddress(row.harness, row.session_id), row.session_id)}
             <div class="dim small">${row.models.join(", ")}</div></td>
           <td class="wide">${row.harness}</td>
           <td class="wrap wide">${row.project ?? row.cwd ?? ""}</td>
@@ -325,7 +329,8 @@ export class UsageLegacy extends LitElement {
           <tr data-agent=${agent.agent} ?data-current=${agent.agent === (route.agent ?? "main")}>
             <td class="wrap"><span class="swatch ${seriesClass(i)}"></span>${agent.agent === (route.agent ?? "main")
               ? html`<code aria-current="page">${agent.agent}</code>`
-              : this.#link(sessionRoute(route.session ?? "", agent.agent), html`<code>${agent.agent}</code>`)}
+              : this.#link(sessionAddress(this.#harness(), route.session ?? "", agent.agent === "main" ? null : agent.agent),
+                           html`<code>${agent.agent}</code>`)}
               ${agent.title ? html`<div class="dim small">${agent.title}</div>` : nothing}</td>
             <td class="wide">${agent.kind}</td>
             <td class="wrap wide">${agent.models.join(", ")}</td>
@@ -561,7 +566,7 @@ export class UsageLegacy extends LitElement {
           <td class="num">${costText(row)}${flag(flags(row))}</td>
         </tr>`)}</tbody>
     </table></div>
-    <p class="dim small">Every term of these costs, and the rates of these models: ${this.#link("terms", "Cost terms")}.
+    <p class="dim small">Every term of these costs, and the rates of these models: ${this.#link({ piece: "prices" }, "Cost terms")}.
       The full price table: <code>moxi usage prices</code>.</p>`;
   }
 }

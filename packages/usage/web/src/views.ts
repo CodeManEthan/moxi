@@ -9,6 +9,8 @@ import { max, min, sum } from "d3-array";
 import { hierarchy, treemap, treemapSquarify } from "d3-hierarchy";
 import { scaleBand, scaleLinear } from "d3-scale";
 
+import type { Address } from "./address-model.ts";
+
 import type {
   AgentRow, DayRow, Failure, Group, IndexEvent, Limits, Mark, Override, Prices, Provenance,
   Rate, Report, RequestRow, RequestsTotal, SplitItem, Status, Sums, Term, TermsRow, Window,
@@ -143,6 +145,26 @@ export function parseRoute(route: string): PageRoute {
 export function sessionRoute(id: string, agent = "main"): string {
   const base = `session/${encodeURIComponent(id)}`;
   return agent === "main" ? base : `${base}/${encodeURIComponent(agent)}`;
+}
+
+/** The view kept from before the page's sections that serves `address` until its
+ * section is built: the sessions table, one session's view, the projects or models table,
+ * and the cost terms for Token kinds and Prices. Null for an address no such view serves. */
+export function legacyRoute(address: Address): string | null {
+  switch (address.piece) {
+    case "sessions":
+      return address.session === null ? "sessions" : sessionRoute(address.session, address.agent ?? "main");
+    case "projects":
+    case "folders":
+      return "projects";
+    case "models":
+      return "models";
+    case "kinds":
+    case "prices":
+      return "terms";
+    default:
+      return null;
+  }
 }
 
 /** The filters a sessions row's link opens its session with: the row's own harness, so

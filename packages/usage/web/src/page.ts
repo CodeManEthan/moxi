@@ -25,15 +25,17 @@
 //   p[data-part=reading]        `Reading…`, until the first read answers
 //   div[data-part=warning]      the one line while a plan limit fills before it resets
 //   div[data-part=top]          the groups above the filter line:
-//     section[data-group=limits]   one per harness with a window to draw, a row per window
+//     section[data-group=limits]   one per harness with a window to draw, a row per window;
+//                                  a row that opens is a link, and the opened one has its
+//                                  lines under it (div[data-part=opened])
 //     section[data-group=cost]     today, 7 days and 30 days, each with the period before
 //   div[data-part=nothing]      in place of Cost and all under it while nothing is counted
 //   div[data-part=filters]      the filter line: Range, Project (or Folder), Harness,
 //                               Model, each a menu, and Cost / Tokens
 //   div[data-part=below]        the groups under the filter line:
 //     section[data-group=chart]    one bar a day or a month, its sentence and its table
-//   moxi-usage-legacy           the views the page had before, each until it has its
-//                               place in the groups under the filter line
+//   moxi-usage-legacy           the views the page had before, each serving its section's
+//                               address until the section has its place under the filter line
 //   div[data-part=foot]         when the sessions were last read, the files, the act
 //   div[data-part=lines]        dim lines: what the figures leave out, reads that failed
 //
@@ -41,17 +43,26 @@
 // no read carries is not in the model and is not drawn. The range and the filters are
 // one state (`filter-model.ts`), held for the document's life; every read under the
 // filter line is asked with it, and today's views are handed it.
+//
+// One piece is open at a time, a limit row or a section, and the address names it
+// (`address-model.ts`). The page is placed with the route the address gave. When a piece
+// opens or closes the page rewrites the address of the history entry it is on and adds no
+// entry, so Back leaves the page, and a reload or a new placement opens the same piece.
 
 import { css, html, LitElement, nothing, svg } from "lit";
-import { api, installed, navigate, subscribe } from "/m/ui/client.js";
+import { api, installed, subscribe } from "/m/ui/client.js";
 
+import {
+  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, settled,
+} from "./address-model.ts";
+import type { Address } from "./address-model.ts";
 import { chartDraw, chartGroup } from "./chart-model.ts";
 import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
 import { rangeDays, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
-import { Feed, parseIndexEvent, parseLimits, parseReport, parseStatus, passOutcome } from "./feed.ts";
-import type { DayRow, IndexEvent, Limits, ModelRow, ProjectRow, Report, Status } from "./feed.ts";
+import { Feed, parseIndexEvent, parseLimits, parseReport, parseStatus, parseWindow, passOutcome } from "./feed.ts";
+import type { DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, ProjectRow, Report, Status } from "./feed.ts";
 import {
   allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
   placesPath, watchState,
@@ -61,8 +72,10 @@ import { COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, shou
 import type { Cost, Foot, FootLine, Nothing, OtherRead } from "./frame-model.ts";
 import "./legacy.ts";
 import type { LimitGroup, LimitRow, Warning } from "./limits-model.ts";
-import { NO_FILTERS, parseRoute } from "./views.ts";
+import { NO_FILTERS } from "./views.ts";
 import type { Filters } from "./views.ts";
+import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
+import type { OpenedLimit } from "./window-model.ts";
 
 const TAG = "moxi-usage-page";
 const TICK_MS = 15_000;
@@ -98,6 +111,18 @@ const STYLES = css`
   .lim .w { display: flex; justify-content: space-between; min-width: 0; color: var(--moxi-text-dim);
             font-variant-numeric: tabular-nums; }
   .lim .w b { font-weight: 400; color: var(--moxi-text); }
+  a.lim { cursor: pointer; }
+  .lim.open { padding-bottom: 3px; }
+  .lim .w .x { font-size: var(--moxi-font-size-sm); }
+  .det { margin: 4px 0 8px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border);
+         font-size: var(--moxi-font-size-sm); line-height: 18px; overflow-wrap: anywhere; }
+  .det .r { display: grid; grid-template-columns: 76px 1fr; padding: 3px 0; align-items: baseline; }
+  .det .k, .det .d { color: var(--moxi-text-dim); }
+  .det .f { min-width: 0; }
+  .det p { padding: 3px 0; }
+  .det .ul { display: flex; justify-content: space-between; gap: 18px; padding: 0 0 3px;
+             font-variant-numeric: tabular-nums; }
+  .det .ul .n { color: var(--moxi-text); }
   .m { display: block; align-self: center; width: 96px; height: 9px; }
   .m .base { fill: var(--moxi-border-strong); }
   .m .fill { fill: var(--moxi-text); }
@@ -243,6 +268,16 @@ export class UsagePage extends LitElement {
   #allTime: Feed<Report<DayRow>> | null = null;
   #places: Feed<Report<ProjectRow>> | null = null;
   #models: Feed<Report<ModelRow>> | null = null;
+  /** What is open: the piece the address names. */
+  #at: Address = NOTHING_OPEN;
+  /** The opened limit row's read, with the window it reads and the reading it was last
+   * asked for. */
+  #window: Feed<OpenedWindow> | null = null;
+  #windowPath: string | null = null;
+  #windowKey: string | null = null;
+  /** The read of a window that was refused and so closed its row, kept for its line at
+   * the foot until another piece opens. */
+  #refused: Feed<OpenedWindow> | null = null;
   #asked: string | null = null;
   #askedAllTime: string | null = null;
   #resize: ResizeObserver | null = null;
@@ -252,6 +287,7 @@ export class UsagePage extends LitElement {
     if (document.visibilityState !== "visible") return;
     void this.#limits?.refresh();
     void this.#status?.refresh();
+    void this.#window?.refresh();
   };
 
   /** The newest day the page's answers carried, else this browser's. */
@@ -297,6 +333,8 @@ export class UsagePage extends LitElement {
     super.disconnectedCallback();
     for (const feed of [this.#limits, this.#status, this.#daily]) feed?.close();
     this.#limits = this.#status = this.#daily = null;
+    this.#closeWindow();
+    this.#refused = null;
     this.#closeBelow();
     for (const stop of this.#stops) stop();
     this.#stops = [];
@@ -317,6 +355,71 @@ export class UsagePage extends LitElement {
    * reads again. */
   setState(patch: Partial<PageState>): void {
     holdState(patch);
+  }
+
+  /** What is open: the piece the address names. */
+  get address(): Address {
+    return this.#at;
+  }
+
+  /** Opens a piece, closing the one that was open; `{ piece: "none" }` closes it. The
+   * address of the history entry the page is on is rewritten to name it. */
+  open(address: Address): void {
+    const next = settled(address, this.#folders());
+    if (sameAddress(next, this.#at)) return;
+    this.#refused = null;
+    this.#setAt(next);
+    this.requestUpdate();
+  }
+
+  #setAt(address: Address): void {
+    this.#at = address;
+    const path = addressWrite(address, location.pathname);
+    if (path !== null) history.replaceState(history.state, "", path);
+  }
+
+  #closeWindow(): void {
+    this.#window?.close();
+    this.#window = null;
+    this.#windowPath = this.#windowKey = null;
+  }
+
+  /** The opened limit row's read follows the address and the limits: it is asked when
+   * the row opens and again when the row's reading changes. The row closes when the
+   * limits no longer hold it as fresh and when its read is refused. */
+  #followWindow(): void {
+    const at = this.#at;
+    const limits = this.#limits;
+    if (at.piece !== "limit" || limits === null) {
+      this.#closeWindow();
+      return;
+    }
+    if (this.#window !== null && this.#window.refused !== null) {
+      this.#refused = this.#window;
+      this.#window = null;
+      this.#closeWindow();
+      this.#setAt(NOTHING_OPEN);
+      return;
+    }
+    const rows = limits.value?.rows;
+    if (rows === undefined) return;
+    const row = openedRow(rows, at);
+    if (row === null) {
+      this.#closeWindow();
+      this.#setAt(NOTHING_OPEN);
+      return;
+    }
+    const path = windowPath(at);
+    const key = readingKey(row);
+    if (this.#window === null || this.#windowPath !== path) {
+      this.#closeWindow();
+      this.#window = new Feed<OpenedWindow>(() => api("usage", path), parseWindow, () => this.requestUpdate());
+      this.#windowPath = path;
+      void this.#window.refresh();
+    } else if (key !== this.#windowKey) {
+      void this.#window.refresh();
+    }
+    this.#windowKey = key;
   }
 
   /** A press outside an open menu closes it. */
@@ -342,7 +445,16 @@ export class UsagePage extends LitElement {
     return !installed("projects");
   }
 
-  protected willUpdate(): void {
+  protected willUpdate(changed: Map<PropertyKey, unknown>): void {
+    if (changed.has("route")) {
+      // A new placement opens the piece its route names. Projects and Folders are one
+      // section, and the address says the name this install shows.
+      const named = parseAddress(this.route);
+      const at = settled(named, this.#folders());
+      if (sameAddress(at, named)) this.#at = at;
+      else this.#setAt(at);
+    }
+    this.#followWindow();
     const status = this.#status;
     if (status === null || !hasBelow(status)) return;
     const update = () => this.requestUpdate();
@@ -379,7 +491,9 @@ export class UsagePage extends LitElement {
     if (!event.running) {
       void this.#status?.refresh();
       void this.#daily?.refresh();
-      for (const feed of [this.#chart, this.#figures, this.#allTime, this.#places, this.#models]) void feed?.refresh();
+      for (const feed of [this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#window]) {
+        void feed?.refresh();
+      }
     }
     this.requestUpdate();
   }
@@ -427,9 +541,18 @@ export class UsagePage extends LitElement {
     other("The range's figures", this.#figures);
     other(this.#folders() ? "The folders" : "The projects", this.#places);
     other("The models", this.#models);
+    const windowRead = this.#window ?? this.#refused;
+    if (windowRead !== null) others.push({ what: "The opened limit", read: windowRead, report: false });
+    const at = this.#at;
+    const openedSource = at.piece === "limit" ? openedRow(limits.value?.rows ?? [], at) : null;
+    const opened = at.piece !== "limit" || openedSource === null ? null : {
+      key: `${at.harness}/${at.limit}/${at.minutes}`,
+      model: openedLimit({ window: this.#window?.value ?? null, loading: this.#window?.loading ?? true,
+                           row: openedSource, now: limits.now() }),
+    };
     const frame = frameModel({
       limits, status, daily, event: this.#event, pass: this.#pass, most: null, range, others,
-      unknownAddress: parseRoute(this.route).view === "unknown", now: limits.now(),
+      unknownAddress: at.piece === "unknown", now: limits.now(),
     });
     const groups = frame.limits.groups;
     const line = !frame.below ? null : filterLine({
@@ -440,19 +563,21 @@ export class UsagePage extends LitElement {
     const group = !frame.below || report === null ? null
       : chartGroup(report, state.range, state.measure, today, this.asTable);
     const days = rangeDays(state.range, today);
-    const filters: Filters = { ...NO_FILTERS, harness: state.harness, model: state.model, project: state.project,
+    // A session's address names its harness, and its view is read under it.
+    const harness = at.piece === "sessions" && at.harness !== null ? at.harness : state.harness;
+    const filters: Filters = { ...NO_FILTERS, harness, model: state.model, project: state.project,
                                folder: state.folder, days: days ?? {} };
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
       ${groups.length || frame.cost ? html`<div class="grps" data-part="top">
-        ${groups.map((group) => this.#group(group))}
+        ${groups.map((group) => this.#group(group, opened))}
         ${frame.cost === null ? nothing : this.#cost(frame.cost)}
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
       ${group === null ? nothing : html`<div class="grps below" data-part="below">${this.#chartGroup(group)}</div>`}
-      ${frame.below ? html`<moxi-usage-legacy .route=${this.route} .filters=${filters}
+      ${frame.below ? html`<moxi-usage-legacy .address=${at} .open=${(address: Address) => this.open(address)} .filters=${filters}
         .said=${group !== null && group.nothing !== null}></moxi-usage-legacy>` : nothing}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
@@ -464,15 +589,17 @@ export class UsagePage extends LitElement {
       warning.more === null ? nothing : html`<span class="sep">·</span>${warning.more}`}</div>`;
   }
 
-  #group(group: LimitGroup) {
+  #group(group: LimitGroup, opened: { key: string; model: OpenedLimit } | null) {
     return html`<section class="grp" data-group="limits" data-harness=${group.harness}>
       <div class="gk">${group.name}${group.read === null ? nothing : html`<small>${group.read}</small>`}</div>
-      <div class="gl">${group.rows.map((row) => this.#limit(row))}</div>
+      <div class="gl">${group.rows.map((row) =>
+        this.#limit(row, opened !== null && opened.key === row.key ? opened.model : null))}</div>
     </section>`;
   }
 
-  /** One window's row, closed. */
-  #limit(row: LimitRow) {
+  /** One window's row. A row that opens is a link to its address; the opened one is a
+   * link that closes it, says so at its right, and has its lines under it. */
+  #limit(row: LimitRow, opened: OpenedLimit | null) {
     if (row.state === "reset") {
       return html`<div class="lim reset" data-limit=${row.key} data-state="reset">${row.label}${
         row.resets === null ? nothing : html`<span class="sep">·</span>${row.resets}`}</div>`;
@@ -480,7 +607,7 @@ export class UsagePage extends LitElement {
     const meter = row.meter;
     const when = [row.fills === null ? null : html`<b>${row.fills}</b>`, row.resets]
       .filter((part) => part !== null);
-    return html`<div class="lim" data-limit=${row.key} data-state=${row.state}>
+    const cells = html`
       <span>${row.label}</span>
       ${meter === null ? html`<span></span>` : html`<svg class="m" role="img" aria-label=${meter.title}
         viewBox="0 0 ${METER.width} ${METER.height}">${svg`<title>${meter.title}</title>
@@ -490,8 +617,43 @@ export class UsagePage extends LitElement {
           y="0" width="1" height=${METER.height}></rect>`}`}</svg>`}
       <span class="u">${row.used ?? nothing}</span>
       <span class="w"><span>${when.map((part, i) => html`${i ? ", " : nothing}${part}`)}${
-        row.read === null ? nothing : html`${when.length ? html`<span class="sep">·</span>` : nothing}${row.read}`}</span></span>
+        row.read === null ? nothing : html`${when.length ? html`<span class="sep">·</span>` : nothing}${row.read}`}</span>${
+        opened === null ? nothing : html`<span class="x" data-part="close">${opened.close}</span>`}</span>`;
+    if (row.route === null || row.minutes === null) {
+      return html`<div class="lim" data-limit=${row.key} data-state=${row.state}>${cells}</div>`;
+    }
+    const target = opened === null ? limitAddress(row.harness, row.limit_id, row.minutes) : NOTHING_OPEN;
+    return html`<a class=${opened === null ? "lim" : "lim open"} href=${addressPath(target)} data-limit=${row.key}
+      data-state=${row.state} aria-expanded=${String(opened !== null)}
+      @click=${(event: MouseEvent) => this.#follow(event, target)}>${cells}</a>${
+      opened === null ? nothing : this.#opened(opened)}`;
+  }
+
+  /** The lines under an opened limit row. */
+  #opened(model: OpenedLimit) {
+    const used = model.used;
+    if (model.reading === null && model.lines.length === 0 && used === null && model.notes.length === 0) return nothing;
+    return html`<div class="det" data-part="opened">
+      ${model.reading === null ? nothing : html`<p class="d" data-opened="reading">${model.reading}</p>`}
+      ${model.lines.map((line) => html`<div class="r" data-opened=${line.key}>
+        <span class="k">${line.label}</span>
+        <span class="f">${line.text}${line.dim === null ? nothing : html` <span class="d">· ${line.dim}</span>`}</span>
+      </div>`)}
+      ${used === null ? nothing : html`<div class="r" data-opened="used">
+        <span class="k">${used.label}</span>
+        <span class="f">${used.rows.map((row) => html`<div class="ul" data-part="used-row">
+          <span>${row.name} <span class="d">· ${row.requests}</span></span><span class="n">${row.cost}</span></div>`)}
+          <div class="ul d" data-part="used-total"><span>${used.total}</span><span>${used.cost}</span></div></span>
+      </div>`}
+      ${model.notes.map((note) => html`<p class="d" data-opened="note">${note}</p>`)}
     </div>`;
+  }
+
+  /** A plain press on a link of the page opens its piece in place. */
+  #follow(event: MouseEvent, address: Address): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    this.open(address);
   }
 
   #cost(cost: Cost) {
@@ -505,20 +667,12 @@ export class UsagePage extends LitElement {
           </div>
           ${i === 0 && cost.most !== null ? html`<span class="one2 ind" data-part="most">${cost.most}</span>` : nothing}`)}
         <div class="capl" data-part="caption">
-          <span>${cost.caption} ${this.#link("terms", cost.prices)}</span>
+          <span>${cost.caption} <a href=${addressPath({ piece: "prices" })}
+            @click=${(event: MouseEvent) => this.#follow(event, { piece: "prices" })}>${cost.prices}</a></span>
           ${cost.read === null ? nothing : html`<span data-part="read">${cost.read}</span>`}
         </div>
       </div>
     </section>`;
-  }
-
-  /** A link to one of the page's routes. */
-  #link(route: string, label: string) {
-    return html`<a href=${`/m/usage/${route}`} @click=${(event: MouseEvent) => {
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      event.preventDefault();
-      navigate("usage", route);
-    }}>${label}</a>`;
   }
 
   /** The filter line. */

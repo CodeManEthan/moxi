@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   agents, agentTreemap, cellLabel, classTotals, costAge, costDays, costText, dailyChart,
   filterKeys, flags, fmtAgo, fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons,
-  labelEvery, MARGIN, menuPaths, meter, NO_FILTERS, parseRoute, projectMenu, provenanceLine,
+  labelEvery, legacyRoute, MARGIN, menuPaths, meter, NO_FILTERS, parseRoute, projectMenu, provenanceLine,
   rangeFor, refusedLine, reportState, segmentTitle, sessionFilters, sessionRoute, shiftDay,
   shouldPass, strip, tickText, viewPath,
   areaPath, BARS_UP_TO, classChart, classCosts, contextChart, LABEL_CHAR, LABEL_HEIGHT, linePath,
@@ -594,4 +594,20 @@ test("the readout and the notes", () => {
     "this harness wrote no turns here"]);
   assert.equal(requestsPath({ view: "session", session: "s1", agent: "a" }, { ...NO_FILTERS, preset: "all" }, "2026-10-01"),
                "api/requests?session=s1&agent=a");
+});
+
+test("an address is served by the view kept from before, until its section is built", () => {
+  const session = (agent) => ({ piece: "sessions", harness: "claude", session: "s 1", agent });
+  assert.equal(legacyRoute({ piece: "sessions", harness: null, session: null, agent: null }), "sessions");
+  assert.equal(legacyRoute(session(null)), "session/s%201");
+  assert.equal(legacyRoute(session("main")), "session/s%201");
+  assert.equal(legacyRoute(session("a/1")), "session/s%201/a%2F1");
+  assert.equal(legacyRoute({ piece: "projects" }), "projects");
+  assert.equal(legacyRoute({ piece: "folders" }), "projects");
+  assert.equal(legacyRoute({ piece: "models" }), "models");
+  assert.equal(legacyRoute({ piece: "kinds" }), "terms");
+  assert.equal(legacyRoute({ piece: "prices" }), "terms");
+  assert.equal(legacyRoute({ piece: "none" }), null);
+  assert.equal(legacyRoute({ piece: "unknown" }), null);
+  assert.equal(legacyRoute({ piece: "limit", harness: "claude", limit: "plan", minutes: 300 }), null);
 });
