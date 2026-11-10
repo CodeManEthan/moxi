@@ -26,6 +26,10 @@ from moxi_launcher import (api, catalog, first, job, page, pagehandlers, presets
 from moxi_launcher.api import ReplayRequest
 
 BRIEF = "Read the design and start the build."
+#: The first turn the seat `scout` gives.
+SCOUT_BRIEF = "Sweep the far corridor first."
+#: The rows Home leaves out of a request whose box is empty or holds its own text.
+FIRST_TURN = ["brief", "brief_file", "handoff"]
 #: The rows of a stored launch's values that are not handed back, or are no row.
 NOT_HANDED = ("target", "slot", "name", "mode", "not_applied", "off_posture", "sources",
               "filled")
@@ -76,8 +80,8 @@ def no_exec(monkeypatch):
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     """Projects `proj-a` and `proj-b` each with a root, a folder outside both, an added
-    folder, and the presets: seats `planner` and `coder` both at home in `proj-a`, and
-    `proj-a`'s project preset."""
+    folder, and the presets: seats `planner` and `coder` both at home in `proj-a`, seats
+    `scout` with a brief and `pilot` with a brief file, and `proj-a`'s project preset."""
     roots = {"proj-a": tmp_path / "proj-a", "proj-b": tmp_path / "proj-b"}
     for root in roots.values():
         root.mkdir()
@@ -107,6 +111,8 @@ def world(tmp_path, monkeypatch):
     work, added = tmp_path / "work", tmp_path / "added"
     work.mkdir()
     added.mkdir()
+    brief_file = tmp_path / "brief.md"
+    brief_file.write_text(BRIEF)
     write_presets(f"""\
 [seat.planner]
 harness = "claude"
@@ -117,14 +123,20 @@ effort = "high"
 harness = "codex"
 home = "proj-a"
 
+[seat.scout]
+harness = "claude"
+brief = "{SCOUT_BRIEF}"
+
+[seat.pilot]
+harness = "claude"
+brief_file = "{brief_file}"
+
 [project.proj-a]
 project = "proj-a"
 model = "opus"
 effort = "medium"
 add_dir = ["{added}"]
 """)
-    brief_file = tmp_path / "brief.md"
-    brief_file.write_text(BRIEF)
     return SimpleNamespace(root=roots["proj-a"], other=roots["proj-b"], work=work,
                            added=added, brief_file=brief_file, elsewhere=tmp_path)
 
@@ -254,6 +266,13 @@ CASES = {
     "a list emptied over the preset's": lambda w: {
         "project_preset": "proj-a", "values": {"add_dir": []}},
     "a row left out": lambda w: {"project_preset": "proj-a", "leave_out": ["effort"]},
+    "a preset's brief left out": lambda w: {
+        "seat": "scout", "values": {"cwd": str(w.work)}, "leave_out": FIRST_TURN},
+    "a preset's brief file left out": lambda w: {
+        "seat": "pilot", "values": {"cwd": str(w.work)}, "leave_out": FIRST_TURN},
+    "a brief typed over a preset's brief file": lambda w: {
+        "seat": "pilot", "values": {"cwd": str(w.work), "brief": SCOUT_BRIEF},
+        "leave_out": ["brief_file", "handoff"]},
     "a name typed": lambda w: {"values": {"cwd": str(w.work), "name": "Night shift"}},
 }
 
@@ -293,6 +312,19 @@ def test_what_is_handed_back_holds_only_what_the_request_gave(world):
     handed = pagehandlers.request_of(
         launch({"values": {"project": "proj-a"}}, "r5"), pagehandlers._available())
     assert handed["values"] == {"cwd": str(world.root)}
+    # A brief the request left out stays out, so the preset's is not given again.
+    for seat, rid in (("scout", "r6"), ("pilot", "r7")):
+        handed = pagehandlers.request_of(
+            launch({"seat": seat, "values": {"cwd": str(world.work)}, "leave_out": FIRST_TURN},
+                   rid), pagehandlers._available())
+        assert handed["values"] == {"cwd": str(world.work)}, seat
+        assert {"brief", "brief_file"} <= set(handed["leave_out"]), seat
+    # A brief typed is handed back as itself, the file left out beside it.
+    handed = pagehandlers.request_of(
+        launch({"seat": "pilot", "values": {"cwd": str(world.work), "brief": SCOUT_BRIEF},
+                "leave_out": ["brief_file", "handoff"]}, "r8"), pagehandlers._available())
+    assert handed["values"] == {"cwd": str(world.work), "brief": SCOUT_BRIEF}
+    assert "brief_file" in handed["leave_out"] and "brief" not in handed["leave_out"]
 
 
 def test_a_typed_row_this_install_no_longer_offers_is_named_and_left_out(world, installed):
@@ -583,6 +615,23 @@ def test_a_recent_shows_what_its_request_resolves_to_now(world):
     # A preset's value is given again by the preset as it is now.
     edit_presets('model = "opus"', 'model = "sonnet"')
     assert recent(request="r1", target="terminal")["shows"]["model"] == "sonnet"
+
+
+@pytest.mark.parametrize("seat", ["scout", "pilot"])
+def test_a_recent_whose_launch_left_out_its_presets_brief_shows_no_prompt(world, seat):
+    row = launch({"seat": seat, "values": {"cwd": str(world.work)}, "leave_out": FIRST_TURN},
+                 "r1")
+    assert row.brief is None
+    said = recent(request="r1", target="terminal")
+    assert said["refused"] is None, said["refused"]
+    assert said["shows"]["prompt"] is None
+    asked = said["request"]
+    assert {"brief", "brief_file"} <= set(asked["leave_out"])
+    assert not set(FIRST_TURN) & {v["name"] for v in asked["values"]}
+    # Run again launches with no first turn, as the launch did.
+    request, _ = pagehandlers.launch_request(body_from(asked), "again")
+    assert api.preview(request).brief is None
+    assert_same_launch(row, presets.resolve(request))
 
 
 def test_a_recent_whose_preset_is_gone_is_refused(world):

@@ -1212,7 +1212,10 @@ def request_of(row: store.LaunchRow, available: Callable[[str], bool]) -> dict[s
     whichever spelling gave it. A row this install no longer offers for the launch's
     harness is named in `not_offered` instead. `leave_out` has each row the request
     left out, and each one it set to nothing (a list emptied, a switch with an optional
-    value set off, a text emptied). `row` must be a launch that recorded its sources."""
+    value set off, a text emptied). A brief row is there only when `brief` is not in
+    `values`, and both are there when the launch left one out and read no brief, so a
+    preset's brief is not given again to a launch that read none. `row` must be a
+    launch that recorded its sources."""
     stored = row.values
     sources: Mapping[str, str] = stored["sources"]
     offered = catalog.offered(row.harness, available)
@@ -1242,6 +1245,12 @@ def request_of(row: store.LaunchRow, available: Callable[[str], bool]) -> dict[s
         values["cwd"] = row.cwd
     if any(sources.get(name) in GIVEN for name in _BRIEF_ROWS) and row.brief:
         values["brief"] = row.brief
+    left = [name for name in _BRIEF_ROWS if sources.get(name) == presets.LEFT_OUT
+            or (sources.get(name) in GIVEN and not row.brief)]
+    if left and not row.brief:
+        # The launch read no first turn: neither spelling may give one again.
+        left = list(_BRIEF_ROWS)
+    leave_out += [name for name in left if name not in values and _a_row(name)]
     seat = row.preset_name if row.preset_kind == "seat" else None
     project_preset = row.preset_name if row.preset_kind == "project" else None
     return {"seat": seat, "project_preset": project_preset, "values": values,
