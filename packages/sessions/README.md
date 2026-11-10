@@ -142,8 +142,8 @@ matches. The sets are fixed. Without secrets, `read` prints as written and says 
 stderr, and `read --json` says `"redacted": false`. `list` passes a session's name
 through the same sets, and with `--text` what was said; without secrets it says so when
 `--text` is given, and `list --json` says `"redacted": false`. What `list --text` shows
-of a message is cut at 300 bytes before it is redacted, so a secret the cut splits can
-show its first part. `read` keeps no secret-path rule: a
+of a message is cut at 300 bytes before it is redacted, and the prompt in `list --json
+--text` at 64 KiB, so a secret the cut splits can show its first part. `read` keeps no secret-path rule: a
 shell command that reads a secret file shows its first 160 characters, redacted.
 
 ## Listing sessions
@@ -289,7 +289,8 @@ each day), `/api/more` (the next 30 rows of a group, or the next older days), `/
 (one session opened) and `/api/folders`. They take the list's filters as query keys and
 read the setting `list.recent_s` at each request. Of a message they send at most 64 KiB,
 saying when it was cut; of the newest thing said on a row and of a subagent's last
-message, 300 bytes. The server keeps what the list read in memory for as long as it runs.
+message, 300 bytes. The server keeps what the list read in memory for as long as it runs,
+and keeps no more of a message than it sends.
 
 The page only reads. It sends no tool call's input and no tool's output, and sends at most
 64 KiB of any one message, saying when it cut one. It reads a session when it is shown and

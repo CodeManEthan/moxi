@@ -268,14 +268,13 @@ def _split_kinds(cat: Catalog, entries: Sequence[Entry]
 
 # --- rows ---------------------------------------------------------------------------------------
 
-def _said(said: Said | None, who: bool) -> dict[str, Any] | None:
+def _said(said: Said | None, prompt: bool) -> dict[str, Any] | None:
+    """A row's `activity` (`{at, who, text}`) or its `prompt` (`{at, text, truncated}`)."""
     if said is None:
         return None
-    out: dict[str, Any] = {"at": said.at}
-    if who:
-        out["who"] = said.who
-    out["text"] = said.text
-    return out
+    if prompt:
+        return {"at": said.at, "text": said.text, "truncated": said.truncated}
+    return {"at": said.at, "who": said.who, "text": said.text}
 
 
 def _row(cat: Catalog, entry: Entry, cutoff: int) -> dict[str, Any]:
@@ -285,8 +284,8 @@ def _row(cat: Catalog, entry: Entry, cutoff: int) -> dict[str, Any]:
         "changed": entry.changed, "size": entry.size, "subagents": entry.subagents,
         "folder": details.folder, "started": details.started,
         "by_program": details.by_program, "name": details.name, "model": details.model,
-        "activity": _said(details.activity, True),
-        "prompt": _said(details.prompt, False),
+        "activity": _said(details.activity, False),
+        "prompt": _said(details.prompt, True),
         "recent": (details.by_program is not True and entry.changed_ns is not None
                    and entry.changed_ns >= cutoff),
     }
@@ -370,7 +369,9 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
     A row is `{harness, session, path, changed, size, subagents, folder, started,
     by_program, name, model, activity, prompt, recent}`: `subagents` is how many the
     session has, None where its subagents folder could not be listed; `activity` is
-    `{at, who, text}` or None, `prompt` is `{at, text}` or None, and `recent` is true for
+    `{at, who, text}` or None, its text the first 300 bytes of the message; `prompt` is
+    `{at, text, truncated}` or None, its text cut at 64 KiB with `truncated` saying so
+    (the catalog keeps no more of it); and `recent` is true for
     a session a person started that changed within `recent_s` of `now`. A session with no
     change time sorts last and is counted in `earlier`.
 

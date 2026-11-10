@@ -16,6 +16,7 @@ from moxi_sessions.catalog import (ACTIVITY_BYTES, Catalog, Details, Said, Unrea
 from moxi_sessions.errors import Unreadable
 from moxi_sessions.shape import CLAUDE, CODEX, OPENCODE, UNKNOWN
 from moxi_sessions.source import HEAD_LINES
+from moxi_sessions.view import TEXT_MAX
 from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
 from moxi_sessions.testing.claude import START
 from moxi_sessions.testing.codex import spawn_meta
@@ -576,6 +577,30 @@ def test_an_injected_message_is_shown_with_no_speaker(roots):
 
     assert found.activity == Said(START + 2, None, "a task finished")
     assert found.prompt == Said(START, "you", "my own words")
+
+
+def test_a_kept_prompt_is_no_longer_than_a_caller_is_sent(roots):
+    t = transcript(roots)
+    t.user("é" * TEXT_MAX, origin="human")          # twice the bytes an answer carries
+    t.assistant("Done.")
+    t.write()
+    cat = Catalog(roots)
+
+    prompt = cat.details(only(cat)).prompt
+
+    assert prompt.truncated is True
+    assert prompt.text == "é" * (TEXT_MAX // 2)
+    (_, kept), = cat._tails.values()
+    assert len(kept.prompt.text.encode()) == TEXT_MAX
+
+    short = transcript(roots, 2)
+    short.user("my own words", origin="human")
+    short.write()
+    assert details_of(Catalog(roots), sid(2)).prompt.truncated is False
+
+
+def details_of(cat: Catalog, session: str) -> Details:
+    return cat.details(next(e for e in cat.gather().entries if e.session == session))
 
 
 def test_a_message_with_no_origin_is_shown_with_no_speaker_and_is_no_prompt(roots):

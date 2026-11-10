@@ -8,9 +8,10 @@ nothing.
 **The list.** `listing`, `more`, `session` and `folders` read through the process's one
 catalog (`moxi_sessions.catalog.shared()`), which keeps what it read for the server's
 life and lets several threads ask at once. Each reads the setting `list.recent_s` when it
-is called, so a change shows in the next answer. What they send of a message is cut here:
-a prompt and a reply at `TEXT_MAX` bytes with `truncated` set, a subagent's last message
-at 300 bytes; the newest thing said on a row comes cut from the catalog.
+is called, so a change shows in the next answer. A reply is cut here, at
+`TEXT_MAX` bytes with `truncated` set, and a subagent's last message at 300 bytes. The
+newest thing said on a row and the prompt come cut from the catalog, which keeps no more
+of either than is sent.
 
 **Finding the session.** `find(harness, session)` asks the harness's root as this server's
 environment and sessions' config give it; the page server runs in the browser shell's

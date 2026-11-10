@@ -547,7 +547,7 @@ def test_an_opened_session_carries_its_row_and_the_reply_to_the_last_prompt(root
     row = opened(roots, sid(1))
 
     assert row["reply"] == {"at": asked + 2, "text": "The new answer."}
-    assert row["prompt"] == {"at": asked, "text": "Second."}
+    assert row["prompt"] == {"at": asked, "text": "Second.", "truncated": False}
     assert row["harness"] == CLAUDE and row["session"] == sid(1)
     assert row["folder"] == "/work/proj-a" and row["recent"] is True
     assert row["subagents"] == [] and row["more"] == 0

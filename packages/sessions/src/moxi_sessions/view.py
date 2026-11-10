@@ -136,13 +136,15 @@ def cut_text(text: str) -> tuple[str, int, bool]:
 
 def cut_message(said: dict[str, Any] | None, redact: Redact | None = None
                 ) -> dict[str, Any] | None:
-    """A list's `{at, text}` (a prompt, a reply) as it is sent or printed:
-    `{at, text, truncated}`, the text redacted when `redact` is given and then cut at
-    `TEXT_MAX` bytes. None stays None."""
+    """A list's prompt or reply as it is sent or printed: `{at, text, truncated}`, the
+    text redacted when `redact` is given and then cut at `TEXT_MAX` bytes. `truncated` is
+    true when the text was cut here or came cut already (a prompt, which the catalog
+    keeps cut). None stays None."""
     if said is None:
         return None
     text, _, truncated = cut_text(redact(said["text"]) if redact else said["text"])
-    return {"at": said["at"], "text": text, "truncated": truncated}
+    return {"at": said["at"], "text": text,
+            "truncated": truncated or said.get("truncated") is True}
 
 
 def _windows(windows: Any) -> list[dict[str, Any]]:

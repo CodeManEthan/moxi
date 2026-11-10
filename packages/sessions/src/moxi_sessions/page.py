@@ -491,8 +491,9 @@ def _target(name: str) -> str:
 #: of them changed in the last seven days, and twenty of those sessions opened (47 MB);
 #: every earlier day of that list paged to its end, so the last turn of each of the 5,000
 #: sessions is kept (52 MB). 7 open fds throughout. The budget is about twice that, with
-#: room for the listener's own sockets. A kept last turn holds the session's newest
-#: typed prompt whole, so a root of long prompts holds more than this one did.
+#: room for the listener's own sockets. A kept last turn holds at most `TEXT_MAX` bytes
+#: of the session's newest typed prompt; the seeded prompts were a few bytes each, so a
+#: root of long prompts holds more than this one did.
 BUDGET = {"rss": "104M", "fds": 32}
 
 PAGE = lb.Page(

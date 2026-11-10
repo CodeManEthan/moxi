@@ -49,7 +49,9 @@ reads again.
 
 **What is kept.** A catalog keeps what it read for as long as it lives, in memory only:
 
-* The last-turn facts of at most `TAIL_MAX` sessions, least recently used dropped. A
+* The last-turn facts of at most `TAIL_MAX` sessions, least recently used dropped. No
+  text among them is longer than a caller is sent: the newest thing said is cut to
+  `ACTIVITY_BYTES` bytes and the prompt to `TEXT_MAX`. A
   file's are reused while its size and mtime are the ones they were read at, an OpenCode
   session's while its `time_updated` is.
 * Each file's head facts, by path, device and inode. A head is read again only when the
@@ -81,6 +83,7 @@ from .errors import Unreadable
 from .find import Listed, Listing, sources
 from .read import window
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN, Marker, Message, Request
+from .view import TEXT_MAX
 from .source import (claude_header, claude_named_head, codex_head, codex_header,
                      root_origin)
 
@@ -200,7 +203,8 @@ class Head:
 @dataclass(frozen=True)
 class Said:
     """A message a row shows: `at` (epoch seconds, None when the record has no time), who
-    said it, and its text.
+    said it, its text, and `truncated`, whether the text kept is less than the message's
+    (a prompt's; `activity` is always its first bytes and does not say).
 
     `who` is `you` for a user message the record says the person at the prompt typed
     (`Message.injected` is false), `agent` for the model's, and None for a user message
@@ -210,6 +214,7 @@ class Said:
     at: float | None
     who: str | None
     text: str
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -224,8 +229,9 @@ class Details:
     * `model`: the newest model the last turn names, Claude Code's `<synthetic>` left out.
     * `activity`: the newest message of the last turn that is a user message with text or
       the model's reply, its text cut to `ACTIVITY_BYTES` bytes at a character boundary.
-    * `prompt`: the newest user message the record says the person typed, whole, with
-      `who` `you`. Where the last turn holds none, up to `PROMPT_TURNS` turns before it are
+    * `prompt`: the newest user message the record says the person typed, with `who`
+      `you`, its text cut to `TEXT_MAX` bytes with `truncated` set: the most any caller
+      is sent of it, so nothing more is kept. Where the last turn holds none, up to `PROMPT_TURNS` turns before it are
       read. None, with no further turn read, for a session a program started.
     """
 
@@ -364,7 +370,8 @@ def _activity(records: Sequence[Any], program: bool | None) -> Said | None:
 def _prompt(records: Sequence[Any]) -> Said | None:
     for record in reversed(records):
         if _spoken(record) and record.role == "user" and record.injected is False:
-            return Said(_time(record.time), YOU, record.text)
+            text = cut(record.text, TEXT_MAX)
+            return Said(_time(record.time), YOU, text, text != record.text)
     return None
 
 
