@@ -110,7 +110,10 @@ def test_the_document_loads_the_theme_and_the_client_and_holds_no_inline_code():
     assert text.count("<html") == 1
     assert '<link rel="stylesheet" href="/m/ui/theme.css">' in text
     assert '<script type="module" src="/m/ui/client.js"></script>' in text
-    assert 'id="moxi-shell"' in text and 'id="moxi-panel"' in text and 'id="moxi-menu-button"' in text
+    assert 'id="moxi-shell"' in text and 'id="moxi-panel"' in text and 'id="moxi-pages-button"' in text
+    # The top line: Moxi, the page's name, Settings; the band of pages starts closed.
+    assert '<nav id="moxi-pages" class="moxi-pages" aria-label="Pages" hidden></nav>' in text
+    assert 'id="moxi-settings"' in text and "moxi-menu" not in text and "<h1" not in text
     # The page's policy allows scripts and styles from the origin only.
     assert re.search(r"<script(?![^>]*\bsrc=)", text) is None
     assert "<style" not in text and "style=" not in text

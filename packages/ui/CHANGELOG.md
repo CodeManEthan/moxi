@@ -23,6 +23,18 @@
 - The pair, sign-in and offline pages and the installed app's colour take the default
   theme's colours, whatever `theme.palette` says.
 - Changed for callers: `moxi_ui.document.body` takes the theme's name after the mode.
+- The shell's bar and menu are now one top line: Moxi, the current page's name with a
+  caret, and Settings alone at the right. Pressing the name opens the band, a layer over
+  the page that lists every page by name; a pick, Escape or a click outside closes it.
+  Names that do not fit one row wrap onto further rows, and at 720 px and under the band
+  is one name per line.
+- A module's `page` component may name its place in the band: `group` (`daily` or
+  `setup`) and `order` (0 to 999, lower first; then by title). A page that names neither
+  is in `setup` at 500. The shell's own Home is first and its Modules last.
+- The modules view is also at `/m/ui/modules`. It and the settings view carry no title of
+  their own; the top line names the page. The document's title is `Moxi` while the panel
+  holds a message and no page.
+- `ComponentInfo` in `client.js` carries `home_as`, `group` and `order`.
 
 ## 0.2.3 (2026-11-08)
 

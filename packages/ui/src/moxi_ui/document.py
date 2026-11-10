@@ -3,8 +3,8 @@
 It is the web build's `shell.html`, from the shell page's assets, with `data-theme` and
 `data-theme-name` on its root set from the `ui` settings `theme.mode` and `theme.palette`
 each time it is served. The document loads
-`theme.css`, `shell.css` and `client.js` from `/m/ui/`; `client.js` draws the menu and
-places the panel for the URL. It is static: no module's server starts for it, and it
+`theme.css`, `shell.css` and `client.js` from `/m/ui/`; `client.js` draws the top line and
+its band of pages and places the panel for the URL. It is static: no module's server starts for it, and it
 holds nothing a request named.
 """
 

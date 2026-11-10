@@ -27,8 +27,16 @@ export interface ComponentInfo {
     doc: string;
     contract: number;
     place: "page" | "block" | "inline";
-    /** Whether the shell's home view may place it. */
+    /** Whether the shell's own views may place it. */
     home: boolean;
+    /** Where Home places a `home` block: its one main spot or a row under it. Null for a
+     * block of the modules view and for a component that is no home block. */
+    home_as: "main" | "row" | null;
+    /** A page's group in the band of pages; null on a component that is no page. */
+    group: "daily" | "setup" | null;
+    /** From 0 to 999, lower first: a page's place in its group, a main piece's rank or a
+     * row's place among rows. Null on any other component. */
+    order: number | null;
     attributes: AttributeInfo[];
 }
 /** An answer from `api`. `status` is 0 when no answer came (a network failure). `data`

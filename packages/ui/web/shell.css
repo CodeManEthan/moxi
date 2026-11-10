@@ -1,5 +1,5 @@
-/* The shell document's own layout: the bar, the menu and the panel. Components style
-   only their own shadow roots, with the --moxi-* tokens of theme.css. */
+/* The shell document's own layout: the top line, the band of pages and the panel.
+   Components style only their own shadow roots, with the --moxi-* tokens of theme.css. */
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -9,64 +9,84 @@ html, body {
   color: var(--moxi-text);
   font-family: var(--moxi-font-sans);
   font-size: var(--moxi-font-size);
-  line-height: 1.45;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 code { font-family: var(--moxi-font-mono); }
 
 #moxi-shell {
+  position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-.moxi-bar {
+/* The top line: Moxi, the current page's name, and Settings alone at the right. It
+   stays above the band, which opens under it. */
+.moxi-top {
+  position: relative;
+  z-index: 4;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--moxi-gap);
-  padding: 8px 16px;
-  background: var(--moxi-bg-raised);
-  border-bottom: 1px solid var(--moxi-border);
+  align-items: baseline;
+  height: 46px;
+  padding: 22px 32px 0;
 }
+
+.moxi-top a { text-decoration: none; }
 
 .moxi-brand {
   color: var(--moxi-text);
+  font-size: 16px;
   font-weight: 600;
-  text-decoration: none;
+  letter-spacing: 0.01em;
 }
 
-.moxi-menu ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
+.moxi-pages-button {
+  margin: 0 0 0 20px;
   padding: 0;
-  list-style: none;
-}
-
-.moxi-menu a {
-  display: block;
-  padding: 4px 10px;
-  border-radius: var(--moxi-radius);
+  border: 0;
+  background: none;
   color: var(--moxi-text-dim);
-  text-decoration: none;
-}
-
-.moxi-menu a:hover { background: var(--moxi-bg-hover); color: var(--moxi-text); }
-.moxi-menu a[aria-current="page"] { background: var(--moxi-selected-soft); color: var(--moxi-text); }
-
-.moxi-menu-button {
-  display: none;
-  margin-left: auto;
-  padding: 4px 10px;
-  border: 1px solid var(--moxi-border-strong);
-  border-radius: var(--moxi-radius);
-  background: var(--moxi-bg);
-  color: var(--moxi-text);
   font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
   cursor: pointer;
 }
+
+.moxi-pages-button:hover, .moxi-pages-button[aria-expanded="true"] { color: var(--moxi-text); }
+.moxi-caret { position: relative; top: 1px; margin-left: 6px; font-size: 15px; line-height: 0; }
+
+.moxi-settings {
+  margin-left: auto;
+  color: var(--moxi-text-dim);
+  font-size: 14px;
+}
+
+.moxi-settings:hover, .moxi-settings[aria-current="page"] { color: var(--moxi-text); }
+
+/* The band: a layer over the page from the top edge, its names under the top line.
+   Names that do not fit one row wrap onto further rows; none splits. */
+.moxi-pages {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 44px;
+  padding: 66px 32px 18px;
+  background: var(--moxi-bg);
+  border-bottom: 1px solid var(--moxi-border);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.moxi-pages-group { display: flex; flex-wrap: wrap; gap: 8px 20px; min-width: 0; }
+.moxi-pages a { color: var(--moxi-text-dim); text-decoration: none; white-space: nowrap; }
+.moxi-pages a:hover, .moxi-pages a[aria-current="page"] { color: var(--moxi-text); }
 
 a:focus-visible, button:focus-visible {
   outline: 2px solid var(--moxi-accent);
@@ -74,15 +94,16 @@ a:focus-visible, button:focus-visible {
 }
 
 .moxi-notice, .moxi-status, .moxi-band {
-  margin: 0;
-  padding: 8px 16px;
+  margin: 12px 0 0;
+  padding: 8px 32px;
+  border-top: 1px solid var(--moxi-border);
   border-bottom: 1px solid var(--moxi-border);
 }
 
 .moxi-notice { background: var(--moxi-error-soft); color: var(--moxi-error); }
 .moxi-status { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
 .moxi-notice a { color: inherit; font-weight: 600; }
-/* The band: on the phone, while the computer or Moxi doesn't answer. */
+/* On the phone, while the computer or Moxi doesn't answer. */
 .moxi-band { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
 [hidden] { display: none !important; }
 
@@ -91,7 +112,7 @@ a:focus-visible, button:focus-visible {
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 40px 32px 32px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -99,11 +120,13 @@ a:focus-visible, button:focus-visible {
 .moxi-message h1 { margin: 0 0 8px; font-size: 1.25em; }
 .moxi-message p { margin: 0 0 8px; color: var(--moxi-text-dim); }
 
-/* At a phone's width the menu collapses to one button. */
-@media (max-width: 640px) {
-  .moxi-menu-button { display: block; }
-  .moxi-menu { display: none; width: 100%; }
-  .moxi-menu-open .moxi-menu { display: block; }
-  .moxi-menu ul { flex-direction: column; }
-  .moxi-panel { padding: 12px; }
+/* At a phone's width the band is one name per line. */
+@media (max-width: 720px) {
+  .moxi-top { height: 40px; padding: 16px 16px 0; }
+  .moxi-pages { display: block; padding: 52px 16px 10px; }
+  .moxi-pages-group { display: block; }
+  .moxi-pages-group + .moxi-pages-group { margin-top: 16px; }
+  .moxi-pages a { display: block; line-height: 32px; }
+  .moxi-notice, .moxi-status, .moxi-band { padding: 8px 16px; }
+  .moxi-panel { padding: 16px; }
 }

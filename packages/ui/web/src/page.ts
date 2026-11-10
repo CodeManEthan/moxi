@@ -1,12 +1,13 @@
-// <moxi-ui-page>: the shell's own panel. With `route` "" it is the modules view: every
-// module's home block, then every installed module with its state, its page and its
-// components, and a Check that shows the doctor's rows for it, then the Gateway section
-// that pairs a phone. With `route` "settings"
+// <moxi-ui-page>: the shell's own panel. With `route` "" or "modules" it is the modules
+// view: every module's home block, then every installed module with its state, its page
+// and its components, and a Check that shows the doctor's rows for it, then the Gateway
+// section that pairs a phone. With `route` "settings"
 // (or "settings/<module>" for one module) it is the settings view: a section per module
 // drawn by <moxi-ui-form>, each change written through `moxi config` by the shell.
 //
 // On the phone it leaves out what only the desk reaches: Check, the Gateway section and
-// the settings, whose routes the gateway doesn't serve.
+// the settings, whose routes the gateway doesn't serve. The views carry no title of their
+// own: the shell's top line names the page.
 //
 // It reads only the shell's own routes and topics, through client.js. The shell places a
 // new element for each navigation, so `route` is read once.
@@ -60,7 +61,6 @@ const STYLES = css`
   section, .card { min-width: 0; }
   .bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--moxi-gap) calc(var(--moxi-gap) * 2);
          margin-bottom: calc(var(--moxi-gap) * 2); }
-  .bar h1 { margin: 0; }
   .grid { display: grid; gap: calc(var(--moxi-gap) * 2); grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
           margin-bottom: calc(var(--moxi-gap) * 3); }
   .list { display: grid; gap: var(--moxi-gap); margin-bottom: calc(var(--moxi-gap) * 3); }
@@ -120,7 +120,7 @@ export class UiPage extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     const route = (this.getAttribute("route") ?? this.route ?? "").replace(/^\/+|\/+$/g, "");
-    if (route === "") {
+    if (route === "" || route === "modules") {
       this.#view = "modules";
       this.#stop = subscribe("ui", "modules", (data) => { this.modules = data; });
     } else if (route === "settings" || route.startsWith("settings/")) {
@@ -143,7 +143,7 @@ export class UiPage extends LitElement {
     if (this.#view === "modules") return this.#modulesView();
     if (this.#view === "settings") return this.#settingsView();
     return html`<h1>Nothing is here</h1>
-      <p>${this.#link("ui", "", "Open the modules view")}.</p>`;
+      <p>${this.#link("ui", "modules", "Open the modules view")}.</p>`;
   }
 
   protected updated(changed: PropertyValues): void {
@@ -165,7 +165,7 @@ export class UiPage extends LitElement {
     const value = this.modules;
     const mods = value === null ? [] : moduleOrder(value.modules);
     return html`
-      <div class="bar"><h1>Modules</h1>${gateway() ? nothing : this.#link("ui", "settings", "Settings")}</div>
+      ${gateway() ? nothing : html`<div class="bar">${this.#link("ui", "settings", "Settings")}</div>`}
       ${value?.error ? html`<p class="problem">${value.error}</p>` : nothing}
       <div class="grid" id="home"></div>
       <h2>Installed</h2>
@@ -260,15 +260,14 @@ export class UiPage extends LitElement {
   // --- the settings view ----------------------------------------------------------------
 
   #settingsView() {
-    const title = this.#only ? `Settings: ${this.#only}` : "Settings";
     if (gateway()) {
-      return html`<div class="bar"><h1>${title}</h1>${this.#link("ui", "", "Modules")}</div>
+      return html`<div class="bar">${this.#link("ui", "modules", "Modules")}</div>
         <p class="dim">Settings are changed at the desk, on the computer's Moxi page.</p>`;
     }
     return html`
-      <div class="bar"><h1>${title}</h1>
+      <div class="bar">
         ${this.#only ? this.#link("ui", "settings", "Every module's settings") : nothing}
-        ${this.#link("ui", "", "Modules")}</div>
+        ${this.#link("ui", "modules", "Modules")}</div>
       ${this.settingsError ? html`<p class="problem">${this.settingsError}</p>` : nothing}
       ${this.sections === null && !this.settingsError ? html`<p class="dim">Reading the settings…</p>` : nothing}
       <div class="settings">${(this.sections ?? []).map((section) => this.#section(section))}</div>`;
