@@ -10,11 +10,13 @@ import re
 import struct
 from pathlib import Path
 
+from moxi.paths import Layout
 from test_gateway_redact import VALUE, Gate, _rows_body, gateway_policy
 
 from moxi_ui import document as _document
 from moxi_ui.gateway.access import OPEN_PATHS, web_file
-from moxi_ui.gateway.router import ICONS, PWA_FILES
+from moxi_ui.gateway.mount import Mount
+from moxi_ui.gateway.router import ICONS, PWA_FILES, document
 
 _TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 _SCRIPT = re.compile(rb"<script\b([^>]*)>(.*?)</script>", re.S)
@@ -39,12 +41,12 @@ def test_every_pwa_file_ships_in_the_ui_web_files_and_is_open() -> None:
         assert path in OPEN_PATHS | ICONS, path
 
 
-def test_the_manifest_starts_the_shell_in_the_light_sets_colour_and_two_maskable_icons() -> None:
+def test_the_manifest_starts_the_shell_in_the_default_themes_light_colour_and_two_maskable_icons() -> None:
     manifest = json.loads(web_file("manifest.json"))
     tokens = json.loads(_TOKENS.read_text())
-    light = next(name for name, entry in tokens["$sets"].items() if entry["mode"] == "light")
+    light = next(iter(tokens["$themes"].values()))["light"]
     background = tokens["bg"]["$extensions"]["moxi"]["sets"][light]
-    assert background == "#f6f4f1"
+    assert (light, background) == ("plain-day", "#fafaf8")
     assert manifest["name"] == "Moxi"
     assert (manifest["start_url"], manifest["scope"], manifest["display"]) == (
         "/m/ui/", "/", "standalone")
@@ -159,5 +161,23 @@ def test_a_marked_cross_site_get_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_desktops_document_neither_links_the_manifest_nor_marks_the_gateway() -> None:
-    body = _document.body("system")
+    body = _document.body("system", "plain")
     assert b"manifest" not in body and b"data-gateway" not in body
+
+
+def test_the_gateways_document_carries_the_mode_and_the_theme_before_its_own_marks() -> None:
+    _status, _headers, body = document(Mount(mounted=True, reason=None), "dark", "midnight-neon")
+    assert (b'<html lang="en" data-theme="dark" data-theme-name="midnight-neon"'
+            b' data-gateway="on" data-gateway-acts="on">') in body
+    assert body.count(b"<html") == 1
+    _status, _headers, body = document(Mount(mounted=False, reason="tcp"))
+    assert (b'<html lang="en" data-theme="system" data-theme-name="plain"'
+            b' data-gateway="on" data-gateway-acts="off" data-gateway-reason="tcp">') in body
+    path = Layout("ui").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[theme]\nmode = "light"\nname = "midnight-neon"\n')
+    _status, _headers, body = document(Mount(mounted=True, reason=None))
+    assert b'<html lang="en" data-theme="light" data-theme-name="midnight-neon" data-gateway="on"' in body
+    path.write_text("this is not toml = = =\n")
+    _status, _headers, body = document(Mount(mounted=True, reason=None))
+    assert b'<html lang="en" data-theme="system" data-theme-name="plain" data-gateway="on"' in body

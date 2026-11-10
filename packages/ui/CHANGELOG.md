@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- The default theme is now plain: near-white paper or near-black, one text colour, greys
+  and one blue accent, with states told in words. The colours until now, calm-workbench
+  in light mode and midnight-neon in dark, are the theme `midnight-neon`, unchanged;
+  `moxi config set ui theme.name midnight-neon` brings them back.
+- New setting `theme.name` (`plain` or `midnight-neon`, default `plain`). The shell
+  document's root carries it as `data-theme-name`, beside `data-theme`, at the desk and on
+  the phone. `theme.mode` still picks light, dark or the browser's scheme within the theme.
+- New colour tokens: `on-accent`, text on the accent's fill, and `danger`, a launch
+  setting that can do harm.
+- `--moxi-font-sans` and `--moxi-font-mono` lead with Adwaita Sans and Adwaita Mono, the
+  earlier stacks after them; no font file ships. `--moxi-font-size` is 15px and
+  `--moxi-font-size-sm` 13px.
+- `tokens.json` names its themes in `$themes`, each a light set and a dark set of
+  `$sets`, the first the default. The build refuses a theme without one of each, a set in
+  two themes and a set in none. `theme.css` holds the default theme on `:root` and a
+  block of colours per other theme under `:root[data-theme-name="<name>"]`.
+- `setTheme(mode, name?)` in `client.js` takes the theme's name as a second, optional
+  argument.
+- The pair, sign-in and offline pages and the installed app's colour take the default
+  theme's colours, whatever `theme.name` says.
+- Changed for callers: `moxi_ui.document.body` takes the theme's name after the mode.
+
 ## 0.2.3 (2026-11-08)
 
 - The shell's console script `moxi-ui-serve` is now `moxi-ui-shell`. Run `moxi install

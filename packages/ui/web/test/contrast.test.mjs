@@ -2,7 +2,8 @@
 //
 // - 4.5:1 (body text) for each token that carries text, on each background and on its own
 //   -soft fill, and for `text` on every soft fill;
-// - 4.5:1 for `bg` on each solid fill, as on a filled button;
+// - 4.5:1 for `bg` on each solid fill, as on a filled button, and for `on-accent` on
+//   `accent`;
 // - 3:1 (a mark that isn't text) for `border-strong` and each chart series on the page's
 //   backgrounds.
 //
@@ -14,8 +15,8 @@ import test from "node:test";
 
 const tokens = JSON.parse(fs.readFileSync(new URL("../tokens.json", import.meta.url), "utf8"));
 
-const TEXT = ["text", "text-dim", "text-faint", "accent", "error", "warn", "ok", "live", "launching", "selected",
-              "attention"];
+const TEXT = ["text", "text-dim", "text-faint", "accent", "error", "danger", "warn", "ok", "live", "launching",
+              "selected", "attention"];
 const BACKGROUNDS = ["bg", "bg-raised", "bg-sunken", "bg-hover"];
 const SOFT = ["accent-soft", "error-soft", "warn-soft", "live-soft", "launching-soft", "selected-soft",
               "attention-soft", "add-soft", "del-soft"];
@@ -46,6 +47,7 @@ function pairs() {
   }
   for (const soft of SOFT) out.push(["text", soft, 4.5]);
   for (const fill of FILLS) out.push(["bg", fill, 4.5]);
+  out.push(["on-accent", "accent", 4.5]);
   for (const mark of MARKS) for (const bg of ["bg", "bg-raised"]) out.push([mark, bg, 3]);
   return out;
 }

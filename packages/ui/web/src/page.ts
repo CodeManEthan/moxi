@@ -333,11 +333,17 @@ export class UiPage extends LitElement {
       form.setError(change.name, failed(answer.status, data, "the change"));
     }
     await this.#readSettings(module);
-    if (module === "ui" && change.name === "theme.mode") {
-      const key = this.sections?.find((section) => section.module === "ui")?.keys
-        .find((item) => item.name === "theme.mode");
-      const mode = typeof key?.value === "string" ? key.value : key?.default;
-      if (typeof mode === "string" && MODES.includes(mode)) setTheme(mode as ThemeMode);
+    if (module === "ui" && (change.name === "theme.mode" || change.name === "theme.name")) {
+      const keys = this.sections?.find((section) => section.module === "ui")?.keys;
+      const now = (name: string): unknown => {
+        const key = keys?.find((item) => item.name === name);
+        return typeof key?.value === "string" ? key.value : key?.default;
+      };
+      const mode = now("theme.mode");
+      const theme = now("theme.name");
+      if (typeof mode === "string" && MODES.includes(mode)) {
+        setTheme(mode as ThemeMode, typeof theme === "string" ? theme : undefined);
+      }
     }
   }
 }

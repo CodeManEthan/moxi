@@ -2,25 +2,19 @@
 // the sign-in's last step. Those pages load before the phone holds a session, so they can
 // read no asset that needs one, theme.css included, and the policy allows no inline style:
 // each page adopts this stylesheet from its script. Its colours are read from tokens.json
-// when the page is built, and follow the browser's scheme: the light set on a light
-// system, the dark set on a dark one.
+// when the page is built: the default theme's, whatever theme the settings name, since
+// these pages show before a session can read a setting. They follow the browser's scheme:
+// the theme's light set on a light system, its dark set on a dark one.
 
 import tokens from "../tokens.json" with { type: "json" };
 import { HOME, KEY_STORAGE } from "./passkey.ts";
 
 type Colour = "bg" | "bg-raised" | "border" | "text" | "text-dim" | "accent" | "error";
 
-const SETS: Record<string, { mode: string }> = tokens.$sets;
+const THEMES: Record<string, { light: string; dark: string }> = tokens.$themes;
 
-/** The name of tokens.json's set shown in `mode`. */
-function set(mode: "light" | "dark"): string {
-  const name = Object.keys(SETS).find((key) => SETS[key].mode === mode);
-  if (name === undefined) throw new Error(`tokens.json has no ${mode} set`);
-  return name;
-}
-
-const LIGHT = set("light");
-const DARK = set("dark");
+/** The default theme's sets: tokens.json's first theme. */
+const { light: LIGHT, dark: DARK } = Object.values(THEMES)[0];
 
 /** A theme colour as `light-dark()` of its light set's and dark set's values. */
 function colour(name: Colour): string {

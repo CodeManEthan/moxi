@@ -206,6 +206,7 @@ declare global {
 const KEY_STORAGE = "moxi-ui-key";
 const DEFINE_MS = 5_000;
 const MODES: readonly string[] = ["system", "light", "dark"];
+const THEME_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 interface ModuleRow {
   name: string;
@@ -520,12 +521,17 @@ export function navigate(module: string, route = ""): void {
   showPanel(module, target.route);
 }
 
-/** Sets the shell document's theme mode until it is next loaded, when the shell sets it
- * from the `ui` setting `theme.mode`. For the settings view, after it writes that
- * setting. */
-export function setTheme(mode: ThemeMode): void {
+/** Sets the shell document's theme mode and, when `name` is given, its theme, until the
+ * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
+ * and `theme.name`. A name theme.css has no block for shows the default theme. For the
+ * settings view, after it writes either setting. */
+export function setTheme(mode: ThemeMode, name?: string): void {
   if (!MODES.includes(mode)) throw new TypeError(`theme mode ${JSON.stringify(mode)} is not system, light or dark`);
+  if (name !== undefined && !THEME_NAME.test(name)) {
+    throw new TypeError(`theme name ${JSON.stringify(name)} is not lower-case words joined by hyphens`);
+  }
   document.documentElement.dataset.theme = mode;
+  if (name !== undefined) document.documentElement.dataset.themeName = name;
 }
 
 // --- the gateway's worker ------------------------------------------------------------------

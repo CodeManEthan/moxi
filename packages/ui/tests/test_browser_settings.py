@@ -1,7 +1,7 @@
 """The settings view and `<moxi-ui-form>` in a browser: every type, the save path through
 `moxi config` (a saved int, a switch-table entry, a refused value, a typing slip, a
-reset), a file that won't parse, the theme mode picking a colour set, and the form in
-submit mode with catalog rows."""
+reset), a file that won't parse, the theme mode and the theme name picking a colour set,
+and the form in submit mode with catalog rows."""
 
 from __future__ import annotations
 
@@ -195,17 +195,17 @@ def test_the_core_has_its_own_section(ui_page):
         expect(ui_page.locator(f"moxi-ui-page section.card[data-module={module}]")).to_be_attached()
 
 
-def _set_background(mode: str) -> str:
-    """The `bg` token of the colour set `mode` shows, as the browser computes it."""
+def _set_background(mode: str, theme: str = "plain") -> str:
+    """The `bg` token of the colour set `theme` shows in `mode`, as the browser computes it."""
     tokens = json.loads(TOKENS.read_text())
-    name = next(name for name, entry in tokens["$sets"].items() if entry["mode"] == mode)
+    name = tokens["$themes"][theme][mode]
     value = tokens["bg"]["$extensions"]["moxi"]["sets"][name]
     return "rgb({}, {}, {})".format(*(int(value[i:i + 2], 16) for i in (1, 3, 5)))
 
 
 def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
     light, dark = _set_background("light"), _set_background("dark")
-    assert (light, dark) == ("rgb(246, 244, 241)", "rgb(10, 9, 24)")
+    assert (light, dark) == ("rgb(250, 250, 248)", "rgb(21, 21, 21)")
     page = ui_contexts(color_scheme="light").pages[0]
     html = page.locator("html")
     form = _settings(page, "ui")
@@ -248,6 +248,53 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui
         status, _ = ui_shell.session().post("/m/ui/api/settings/unset",
                                             {"module": "ui", "key": "theme.mode"})
         assert status == 200
+
+
+def test_theme_name_switches_the_colours_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
+    plain = {mode: _set_background(mode) for mode in ("light", "dark")}
+    neon = {mode: _set_background(mode, "midnight-neon") for mode in ("light", "dark")}
+    assert neon == {"light": "rgb(246, 244, 241)", "dark": "rgb(10, 9, 24)"}
+    page = ui_contexts(color_scheme="light").pages[0]
+    html = page.locator("html")
+    form = _settings(page, "ui")
+    name = form.locator("select[data-control='theme.name']")
+    expect(name.locator("option")).to_have_text(["plain", "midnight-neon"])
+    expect(name).to_have_value("plain")
+
+    def shows(colour: str) -> None:
+        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        # The select sits in <moxi-ui-form>'s shadow root, on --moxi-bg.
+        expect(name).to_have_css("background-color", colour)
+
+    try:
+        expect(html).to_have_attribute("data-theme-name", "plain")
+        shows(plain["light"])
+        # The other theme shows at once, in the browser's scheme, both ways.
+        name.select_option("midnight-neon")
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon", timeout=SETTINGS_MS)
+        shows(neon["light"])
+        page.emulate_media(color_scheme="dark")
+        shows(neon["dark"])
+        assert _file(ui_shell, "ui")["theme"] == {"name": "midnight-neon"}
+        # It stays after a reload, and under a fixed mode.
+        page.reload()
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+        form = _settings(page, "ui")
+        name = form.locator("select[data-control='theme.name']")
+        shows(neon["dark"])
+        form.locator("select[data-control='theme.mode']").select_option("light")
+        expect(html).to_have_attribute("data-theme", "light", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+        shows(neon["light"])
+        # Back to the default theme, the mode kept.
+        name.select_option("plain")
+        expect(html).to_have_attribute("data-theme-name", "plain", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme", "light")
+        shows(plain["light"])
+    finally:
+        for key in ("theme.name", "theme.mode"):
+            status, _ = ui_shell.session().post("/m/ui/api/settings/unset", {"module": "ui", "key": key})
+            assert status == 200
 
 
 CATALOG = [

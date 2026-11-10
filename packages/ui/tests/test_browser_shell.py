@@ -191,6 +191,7 @@ def test_the_pages_run_under_the_policy_with_no_violation_or_error(ui_shell, ui_
     expect(ui_page.locator("moxi-ui-page section.card[data-module=fixture] moxi-ui-form")
            .locator("[data-control=limit]")).to_be_attached(timeout=10_000)
     assert ui_page.evaluate("document.documentElement.dataset.theme") == "system"
+    assert ui_page.evaluate("document.documentElement.dataset.themeName") == "plain"
     assert seen == []
 
 

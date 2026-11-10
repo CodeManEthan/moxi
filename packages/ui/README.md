@@ -43,7 +43,8 @@ every logon. While the gateway is on, the shell also starts at login. The shell 
 each module's page server on the first request for its page.
 
 **Settings** (`moxi config ui`): `port` (8460), `idle_s` (900), `theme.mode` (`system`,
-`light` or `dark`), and the gateway's `gateway.enabled` (off) and `gateway.port` (8461).
+`light` or `dark`), `theme.name` (`plain` or `midnight-neon`), and the gateway's
+`gateway.enabled` (off) and `gateway.port` (8461).
 A change to `port` takes effect once `moxi install ui` rewrites the unit.
 
 ## Confirmed acts in a page

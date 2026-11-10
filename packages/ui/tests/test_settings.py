@@ -237,7 +237,7 @@ def test_the_shell_reads_and_writes_settings_and_a_refused_value_is_a_422(site):
         sections = {section["module"]: section for section in data["sections"]}
         assert list(sections)[0] == "moxi" and "ui" in sections
         assert {k["name"] for k in sections["ui"]["keys"]} == {
-            "port", "idle_s", "theme.mode", "gateway.enabled", "gateway.port"}
+            "port", "idle_s", "theme.mode", "theme.name", "gateway.enabled", "gateway.port"}
         status, data = _request(port, "POST", "/m/ui/api/settings/set", browser,
                                 {"module": "ui", "key": "idle_s", "value": "nope"})
         assert status == 422 and "not an int" in data["refused"]

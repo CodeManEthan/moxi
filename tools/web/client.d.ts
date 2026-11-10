@@ -238,7 +238,8 @@ export declare function place(host: Element, module: string, name: string, attrs
 /** Shows `module`'s panel at `route` (relative to `/m/<module>/`) in the shell's one
  * document, with a new history entry. */
 export declare function navigate(module: string, route?: string): void;
-/** Sets the shell document's theme mode until it is next loaded, when the shell sets it
- * from the `ui` setting `theme.mode`. For the settings view, after it writes that
- * setting. */
-export declare function setTheme(mode: ThemeMode): void;
+/** Sets the shell document's theme mode and, when `name` is given, its theme, until the
+ * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
+ * and `theme.name`. A name theme.css has no block for shows the default theme. For the
+ * settings view, after it writes either setting. */
+export declare function setTheme(mode: ThemeMode, name?: string): void;

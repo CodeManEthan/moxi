@@ -94,15 +94,15 @@ test("the offline page says the case the worker saw and when the gateway last an
   assert.equal(RETRY_MS, 30_000);
 });
 
-test("the manifest starts the shell, standalone, in the light set's background, with both icons", () => {
+test("the manifest starts the shell, standalone, in the default theme's light background, with both icons", () => {
   const value = JSON.parse(manifest(tokens));
-  const light = Object.keys(tokens.$sets).find((name) => tokens.$sets[name].mode === "light");
+  const { light } = Object.values(tokens.$themes)[0];
   assert.equal(value.name, "Moxi");
   assert.equal(value.start_url, "/m/ui/");
   assert.equal(value.scope, "/");
   assert.equal(value.display, "standalone");
   assert.equal(value.background_color, tokens.bg.$extensions.moxi.sets[light]);
-  assert.equal(value.background_color, "#f6f4f1");
+  assert.equal(value.background_color, "#fafaf8");
   assert.equal(value.theme_color, value.background_color);
   assert.deepEqual(value.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
   for (const icon of value.icons) {

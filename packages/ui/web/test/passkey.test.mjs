@@ -93,7 +93,7 @@ test("a fresh n is 16 hex digits", () => {
   assert.equal(freshN((b) => b.fill(0xab)), "ab".repeat(8));
 });
 
-test("the pages' colours are tokens.json's, the light set's and the dark set's", () => {
+test("the pages' colours are tokens.json's, the default theme's light set's and dark set's", () => {
   const tokens = JSON.parse(readFileSync(new URL("../tokens.json", import.meta.url), "utf8"));
   const pairs = [...CSS.matchAll(/light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\)/g)];
   assert.ok(pairs.length >= 7);
@@ -101,9 +101,11 @@ test("the pages' colours are tokens.json's, the light set's and the dark set's",
   assert.equal(CSS.match(/#[0-9a-f]{3,8}\b/g).length, pairs.length * 2);
   for (const name of ["bg", "bg-raised", "border", "text", "text-dim", "accent", "error"]) {
     const values = tokens[name].$extensions.moxi.sets;
-    assert.ok(CSS.includes(`light-dark(${values["calm-workbench"]}, ${values["midnight-neon"]})`), name);
+    assert.ok(CSS.includes(`light-dark(${values["plain-day"]}, ${values["plain-night"]})`), name);
   }
   assert.match(CSS, /:root \{ color-scheme: light dark; \}/);
+  const [first] = Object.values(tokens.$themes);
+  assert.deepEqual(first, { light: "plain-day", dark: "plain-night" });
 });
 
 test("the pages load their scripts from their own paths and hold no inline script or style", () => {
