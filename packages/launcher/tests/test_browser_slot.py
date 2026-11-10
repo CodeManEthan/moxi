@@ -11,15 +11,10 @@ Skipped where slots is not installed or tmux 3.2 or later is not on `PATH`.
 from __future__ import annotations
 
 import importlib.util
-import os
-import re
 import shutil
-import signal
-import subprocess
 import sys
 
 import pytest
-from moxi import paths
 from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
@@ -31,17 +26,6 @@ pytestmark = [pytest.mark.browser,
               pytest.mark.skipif(importlib.util.find_spec("moxi_slots") is None,
                                  reason="slots is not installed"),
               pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not on PATH")]
-
-#: The oldest tmux slots runs on.
-TMUX_FLOOR = (3, 2)
-#: What the shell's environment runs to set slots up and say where its socket is.
-SETUP = """
-import sys
-from moxi import config, paths
-config.set("slots", "tmux", sys.argv[1], by="launcher browser test")
-config.set("slots", "tmux_conf", sys.argv[2], by="launcher browser test")
-print(paths.socket_path("slots", "tmux"))
-"""
 
 
 @pytest.fixture(scope="module")
@@ -58,46 +42,9 @@ def ui_shell_options(harness):
 
 @pytest.fixture(scope="module")
 def own_slots(ui_shell):
-    """slots' server on the shell's own socket, started as the supervisor would start it
-    (tmux's absolute path recorded, `tmux_conf` /dev/null), and stopped after with its
-    tmux server. Yields the socket."""
-    found = shutil.which("tmux")
-    said = subprocess.run([found, "-V"], capture_output=True, text=True, timeout=5).stdout
-    version = re.search(r"(\d+)\.(\d+)", said)
-    if version is None or tuple(map(int, version.groups())) < TMUX_FLOOR:
-        pytest.skip(f"tmux on PATH is {said.strip()!r}, below 3.2")
-    env = dict(ui_shell.env)
-    tmux = os.path.abspath(found)
-    socket = subprocess.run([sys.executable, "-c", SETUP, tmux, os.devnull], env=env,
-                            capture_output=True, text=True, check=True,
-                            timeout=30).stdout.strip()
-    assert socket.startswith(env["MOXI_HOME"]) or "/moxi-" in socket, socket
-    log_path = ui_shell.home / "slots-server.log"
-    with open(log_path, "wb") as log:
-        server = subprocess.Popen([str(paths.script("moxi-slots-server"))], env=env,
-                                  stdin=subprocess.DEVNULL, stdout=log,
-                                  stderr=subprocess.STDOUT, start_new_session=True)
-    try:
-        wait_for(lambda: subprocess.run([tmux, "-S", socket, "display-message", "-p",
-                                         "#{pid}"], capture_output=True, env=env,
-                                        timeout=5).returncode == 0,
-                 20, interval=0.2,
-                 what=lambda: f"slots' own server; its log: "
-                              f"{log_path.read_text(errors='replace')}")
+    """slots' server on the shell's own socket; yields the socket."""
+    with kit.own_slots(ui_shell) as socket:
         yield socket
-    finally:
-        subprocess.run([tmux, "-S", socket, "kill-server"], capture_output=True, env=env,
-                       timeout=10)
-        if server.poll() is None:
-            try:
-                os.killpg(server.pid, signal.SIGTERM)
-            except OSError:
-                pass
-            try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(server.pid, signal.SIGKILL)
-                server.wait(timeout=10)
 
 
 def test_a_past_slot_session_resumes_in_its_slot_and_the_new_row_arrives_by_push(
