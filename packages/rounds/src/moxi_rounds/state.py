@@ -274,6 +274,27 @@ class Version:
     #: Who froze it and when.
     actor: str
     at: str
+    #: The number of its event in the log, which places it among the verdicts.
+    event: int | None = None
+
+
+@dataclass(frozen=True)
+class Decided:
+    """The lead's decision on a thread of the design's verification: no further pass
+    is run on it."""
+
+    #: The number of its event in the log, which places it among the verdicts.
+    n: int | None
+    #: The thread's name, and what was decided of it: closed, or its risk accepted.
+    thread: str | None
+    decision: str | None
+    #: The pointer to where the lead wrote why.
+    record: str | None
+    #: The version of the design that was current then, None when none was frozen.
+    version: int | None
+    #: Who recorded it and when.
+    actor: str
+    at: str
 
 
 @dataclass(frozen=True)
@@ -336,6 +357,8 @@ class State:
     versions: list[Version] = field(default_factory=list)
     #: The verdicts recorded, oldest first.
     verdicts: list[Verdict] = field(default_factory=list)
+    #: The lead's decisions on threads of the design's verification, oldest first.
+    threads: list[Decided] = field(default_factory=list)
     #: Every event, oldest first.
     history: list[dict] = field(default_factory=list)
 
@@ -680,7 +703,7 @@ def _design_frozen(state: State, event: dict) -> None:
         n=version, digest=event.get("digest"),
         records_only=event.get("records_only") is True, record=event.get("record"),
         trace=copy.deepcopy(event.get("trace")), declared=declared,
-        pending=_taken_away(event.get("pending")), **who))
+        pending=_taken_away(event.get("pending")), event=event.get("n"), **who))
     said = {kind: {one.get("id"): one for one in declared.get(kind) or ()
                    if isinstance(one, dict)} for kind in (QUESTION, STAGE)}
     for stage_id in _ids(added.get("stages")):
@@ -751,6 +774,16 @@ def _verdict_recorded(state: State, event: dict) -> None:
         # did, from the history.
 
 
+def _thread_decided(state: State, event: dict) -> None:
+    """The lead's decision on a thread joins the record, with the version of the
+    design it was made at: the one that was current then."""
+    state.threads.append(Decided(
+        n=event.get("n"), thread=event.get("thread"), decision=event.get("decision"),
+        record=event.get("record"),
+        version=state.versions[-1].n if state.versions else None,
+        actor=event["actor"], at=event["at"]))
+
+
 #: The handler of each event type. Every type in `events.TYPES` has a row.
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
@@ -773,11 +806,11 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "lock.cleared": _kept,
     "build.dropped": _kept,
     "round.dropped": _round_dropped,
-    "thread.decided": _kept,
+    "thread.decided": _thread_decided,
     "repair": _kept,
     "round.closed": _kept,
 }
 
-__all__ = ["OPEN", "DROPPED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS", "Ended", "Ruling",
-           "Change", "Question", "Stage", "Pending", "Version", "Verdict", "State", "fold",
-           "without"]
+__all__ = ["OPEN", "DROPPED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
+           "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
+           "Decided", "Verdict", "State", "fold", "without"]

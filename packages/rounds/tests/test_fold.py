@@ -928,13 +928,6 @@ def test_the_command_refuses_with_the_file_the_line_and_the_fix(folder, capsys):
     assert "fix:" in err
 
 
-def test_fold_takes_no_flag_for_a_change_of_records_only(folder, capsys):
-    design(folder, question("Q1"))
-
-    assert main(["fold", ROUND, "--records-only", "--record", "comms:12"]) == 2
-    assert [one["type"] for one in events(folder)] == ["round.opened"]
-
-
 def test_help_says_what_fold_does(capsys):
     assert main(["fold", "--help"]) == 0
     assert "Freeze the round's design as its next version" in capsys.readouterr().out

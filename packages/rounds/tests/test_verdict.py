@@ -620,7 +620,8 @@ def test_verdicts_and_the_standing_are_shown_and_in_the_note(folder, capsys):
     assert [(one["version"], one["verdict"], one["pass"], one["by"], one["model"],
              one["report"], one["flags"]) for one in data["verdicts"]] == [
         (1, "fold-first", "full", "critic", "a-model", "first.md", []),
-        (2, "publishable", "full", "critic", "a-model", "report.md", [])]
+        (2, "publishable", "full", "critic", "a-model", "report.md",
+         ["extra-full-pass"])]
     assert data["verdicts"][0]["findings"] == [
         {"id": "L1", "severity": "major", "state": "open", "text": "a gate reads prose"}]
     assert [one["id"] for one in data["verdicts"][1]["applied"]] == ["B3", "Q2", "Q1"]
@@ -663,7 +664,8 @@ def test_verdicts_and_the_standing_are_in_the_index_and_the_list(folder, capsys)
             "model": "a-model", "report": "first.md", "at": AT, "flags": []}),
         index.Item(index.VERDICT, "d2", {
             "version": 2, "verdict": "publishable", "pass": "full", "by": "critic",
-            "model": "a-model", "report": "report.md", "at": AT, "flags": []}))
+            "model": "a-model", "report": "report.md", "at": AT,
+            "flags": ["extra-full-pass"]}))
     assert found.of(index.PENDING) == ()
     assert main(["list"]) == 0
     assert f"{ROUND}   open   flow full   design: publishable@v2   " in (

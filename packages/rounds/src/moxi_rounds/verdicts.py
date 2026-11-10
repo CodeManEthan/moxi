@@ -27,6 +27,10 @@ A stage whose build is open or finished stays, and the verdict names it. A verdi
 that sends the design back applies nothing: the pass that objects to a removal is not
 the thing that grants it.
 
+**Noted, not refused.** One full pass reads a design. A report of a full pass
+recorded after another one is recorded all the same, with the flag
+`brake.EXTRA_FULL_PASS`.
+
 The standing of a design, which its verdicts give, is `versions.standing`.
 """
 
@@ -37,7 +41,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import ending, folders, questions, report_block, stages, stepping, versions, write
+from . import (brake, ending, folders, questions, report_block, stages, stepping,
+               versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadBlock, NoLog, NoRound, Problem, Refused, Unmet
@@ -178,6 +183,9 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
             applied, left = applies(state, block.design, name=name)
             fields["applied"] = [_entry(one) for one in applied]
             fields["not_applied"] = [{**_entry(one), "why": why} for one, why in left]
+        noted = brake.flags(state, block.pass_)
+        if noted:
+            fields["flags"] = noted
         return write.Entry("verdict.recorded", fields)
 
     try:

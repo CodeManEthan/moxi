@@ -3,7 +3,8 @@ agents to read beside the logs.
 
     <rounds folder>/<slug>/round-note.md   one round: the flow it follows now, the
                                            skips that stand, its design's newest
-                                           version and standing, its stages, its
+                                           version and standing, the lead's
+                                           decisions on threads, its stages, its
                                            questions by state, its rulings, the
                                            verdicts of its design and its history
     <rounds folder>/rulings.md             the project's register: its standing rulings
@@ -192,7 +193,8 @@ def _flow(shown_as: dict) -> list[str]:
         lines.append("")
     for one in shown_as["skips"]:
         lines += _item(f"skipped: {showing.skip_line(one)}")
-    planned = [*showing.version_lines(shown_as["versions"], shown_as["standing"]),
+    planned = [*showing.version_lines(shown_as["versions"], shown_as["standing"],
+                                     shown_as["threads"]),
                *(f"stage {showing.stage_line(one)}" for one in shown_as["stages"])]
     if planned:
         lines.append("")

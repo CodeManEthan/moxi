@@ -1,7 +1,7 @@
 """`moxi rounds`: the rounds command.
 
     moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
-    moxi rounds fold ROUND [--as NAME]
+    moxi rounds fold ROUND [--records-only --record PTR] [--as NAME]
     moxi rounds verdict ROUND REPORT.md [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
@@ -15,6 +15,7 @@
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
+    moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
@@ -54,14 +55,25 @@ list of rulings not yet shown through `TIME`, the time that list was headed with
 `versions/design-v<N>.md` and records that version with what the design's data block
 declares. A question, a stage, a stage another waits for and a wider hold are added to
 the round at once; what the block takes away is recorded as pending and changes
-nothing until a verdict or the operator's ruling applies it.
+nothing until a verdict or the operator's ruling applies it. Freezing a design again
+leaves it with no standing until a re-check reads what changed. `fold --records-only
+--record PTR` is the lead's call that the new version changes records only: no pass is
+asked for, and the design keeps the standing it had, a design that was sent back
+standing at the lead's decision from then on. It is refused when the block's
+questions, its stages, what a question holds up or what a stage waits for differ from
+the version before.
 `verdict` records the verdict of a report, run by whoever wrote it: it reads the
 report's data block and records it against the version of the design the report says
 its pass read, whatever was frozen or edited since. A report of a design is the kind
 recorded. A verdict that finds its version publishable takes out of the round what
 that version's block took away; one that sends the design back takes out nothing. The
 design's standing is the newest verdict of its current version, and `none` after a
-design is frozen again.
+design is frozen again. One full pass reads a design; a second report of a full pass
+is recorded with the flag `extra-full-pass`.
+`mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
+lead wrote why, is the lead's decision on a thread of the design's verification, made
+once the last two verdicts each sent the design back and it was frozen since: no
+further pass is run, and the design stands at `lead-decision`.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
@@ -484,7 +496,8 @@ def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
             "question of a round hold up more stages, reopen a parked one, make a "
             "stage wait for more stages, move a "
-            "round up to a heavier flow, or say that rulings were shown to the "
+            "round up to a heavier flow, decide a thread of the design's "
+            "verification, or say that rulings were shown to the "
             "operator as recorded, with a pointer to where.")
     parser = verbs.add_parser("mark", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
@@ -493,7 +506,9 @@ def _declare_mark(verbs) -> None:
                              "rulings of its register")
     parser.add_argument("id", metavar="ID", nargs="?",
                         help="what is marked: a question, Q<n>; with --after, a "
-                             "stage, B<n>; with --shown, the "
+                             "stage, B<n>; with --close or --accept-risk, a thread "
+                             "of the design's verification, thread:NAME, the name "
+                             "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
                              "several separated by commas; left out with --flow, "
                              "which marks the round")
@@ -516,11 +531,23 @@ def _declare_mark(verbs) -> None:
                            "own flow, to take the steps the config has for it now "
                            "when they have every step it follows; any other move "
                            "is the operator's (rule flow:NAME)")
+    form.add_argument("--close", action="store_true",
+                      help="the lead's decision that the thread thread:NAME is "
+                           "closed: no further pass is run on it; only after the "
+                           "last two verdicts each sent the design back and it was "
+                           "frozen since; needs --record")
+    form.add_argument("--accept-risk", action="store_true",
+                      help="the lead's decision that what is left of the thread "
+                           "thread:NAME is a risk taken; as --close otherwise")
     form.add_argument("--shown", action="store_true",
                       help="the rulings were put in front of the operator as "
                            "recorded; needs --record")
     parser.add_argument("--record", metavar="PTR",
-                        help="with --shown, a pointer to where he was shown them, one "
+                        help="with --close or --accept-risk, a pointer to where the "
+                             "lead wrote why, one token: comms:<digits>, "
+                             "<session>@<UTC time>, an https:// URL, or file:<path "
+                             "in the round's folder>#<anchor>; "
+                             "with --shown, a pointer to where he was shown them, one "
                              "token: comms:<digits> for the message, <session>@<UTC "
                              "time>, or the https:// URL of a page that listed them; "
                              "never a file, the pointer of one of the rulings, or a "
@@ -539,6 +566,8 @@ def _mark(args, out) -> int:
                           "or with --shown the rulings")
     if args.shown:
         return _mark_shown(args, out)
+    if args.close or args.accept_risk:
+        return _mark_thread(args, out)
     if args.after is not None:
         return _mark_after(args, out)
     if args.record is not None:
@@ -553,6 +582,26 @@ def _mark(args, out) -> int:
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
     _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_thread(args, out) -> int:
+    """`mark thread:NAME`: the lead's decision on a thread of the design's
+    verification."""
+    from . import brake
+
+    if not args.id.startswith(brake.PREFIX):
+        raise BadArgument(f"{args.id!r} names no thread",
+                          f"name the thread as {brake.PREFIX}NAME, the name in "
+                          "letters, digits and . _ -")
+    done = brake.decide(args.target, args.id[len(brake.PREFIX):],
+                        brake.CLOSE if args.close else brake.ACCEPT_RISK,
+                        record=args.record, actor=_actor(args))
+    one = done.decision
+    print(f"{done.name} {brake.PREFIX}{one.thread}: {one.decision}   record: "
+          f"{one.record}", file=out)
+    print(f"standing: {done.standing}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 
 
@@ -614,16 +663,32 @@ def _declare_fold(verbs) -> None:
     parser = verbs.add_parser("fold", help=said, description=said)
     parser.add_argument("round", metavar="ROUND",
                         help="the round's name, <project>/<slug>")
+    parser.add_argument("--records-only", action="store_true",
+                        help="the lead's call that this version changes records "
+                             "only: no pass is asked for over it, and the design "
+                             "keeps the standing it had; refused when the block's "
+                             "questions, its stages, what a question holds up or "
+                             "what a stage waits for differ from the version "
+                             "before; needs --record")
+    parser.add_argument("--record", metavar="PTR",
+                        help="with --records-only, a pointer to the record of the "
+                             "change, one token: file:<path in the round's "
+                             "folder>#<anchor> as a rule, or comms:<digits>, "
+                             "<session>@<UTC time>, an https:// URL")
     _writes(parser)
 
 
 def _fold(args, out) -> int:
     from . import freezing
 
-    frozen = freezing.freeze(args.round, actor=_actor(args))
+    frozen = freezing.freeze(args.round, actor=_actor(args),
+                             records_only=args.records_only, record=args.record)
     print(f"froze the design of {frozen.name} as v{frozen.version}", file=out)
     print(f"file: {frozen.file}", file=out)
     print(f"sha256: {frozen.digest}", file=out)
+    if args.records_only:
+        print(f"records only: {args.record}", file=out)
+        print(f"standing: {frozen.standing}", file=out)
     for line in _frozen(frozen.plan):
         print(line, file=out)
     _warn_of(frozen.failed, args.prog, args.verb)

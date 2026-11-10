@@ -98,7 +98,8 @@ NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
                              "question.changed", "ruling.shown", "round.dropped",
                              "flow.changed", "design.frozen", "stage.declared",
-                             "stage.changed", "verdict.recorded"})
+                             "stage.changed", "verdict.recorded",
+                             "thread.decided"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -733,7 +734,8 @@ def test_a_frozen_version_adds_what_it_says_is_new_and_is_the_whole_of_the_freez
     assert after.stages[0].slices == ({"id": "1a", "what": "a piece", "minutes": 40},)
     assert after.versions == [state.Version(
         n=1, digest="0" * 64, records_only=False, record=None, trace=None,
-        declared=DECLARED, pending=(), actor="scout", at="2026-01-03T00:00:00Z")]
+        declared=DECLARED, pending=(), actor="scout", at="2026-01-03T00:00:00Z",
+        event=2)]
     assert dataclasses.replace(after, questions=[], stages=[], versions=[],
                                history=before.history) == before
     assert first["declared"] == DECLARED
@@ -886,3 +888,17 @@ def test_a_verdict_takes_out_what_its_event_says_it_applies_and_nothing_more():
     assert [one.what for one in after.verdicts[0].applied] == [
         "question", "blocks", "after", "stage", "question", "after"]
     assert after.rulings == before.rulings and after.versions == before.versions
+
+
+def test_a_decision_on_a_thread_joins_the_threads_with_the_version_it_was_made_at():
+    start = [opened(), frozen(2, 1), frozen(3, 2)]
+    later = event(4, "thread.decided", thread="the-holds", decision="close",
+                  record="file:notes.md#why")
+
+    before, after = state.fold(start), state.fold([*start, later])
+
+    assert after.threads == [state.Decided(
+        n=4, thread="the-holds", decision="close", record="file:notes.md#why",
+        version=2, actor="planner", at=AT)]
+    assert dataclasses.replace(after, threads=[], history=before.history) == before
+    assert state.fold([opened(), {**later, "n": 2}]).threads[0].version is None

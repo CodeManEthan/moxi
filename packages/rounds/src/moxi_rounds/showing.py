@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -272,6 +272,8 @@ def history_of(event: dict) -> str | None:
             of += f", no longer after {', '.join(map(str, gone))}"
     if event.get("type") == "design.frozen":
         of = f"v{event.get('version')}"
+    if event.get("type") == "thread.decided":
+        of = f"{event.get('thread')}, {event.get('decision')}"
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
     return of if isinstance(of, str) and of else None
@@ -348,6 +350,7 @@ def _head(found: Shown) -> dict:
             "parent": state.parent, "flow": state.flow, "steps": state.steps,
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
+            "threads": _threads(state),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
 
@@ -403,16 +406,37 @@ def _taken_away(one: states.Pending) -> dict:
             "said": versions.said(one)}
 
 
-def version_lines(listed: list[dict], standing: str | None = None) -> list[str]:
-    """The design's versions in lines: the newest with its digest, the design's
-    `standing` when one is given, and what that version took away and still waits."""
+def _threads(state: states.State) -> list[dict]:
+    """The lead's decisions on threads of the design's verification, oldest first:
+    the thread, what was decided of it, the version of the design it was decided at,
+    the pointer to why, and who recorded it and when."""
+    return [{"n": one.n, "thread": one.thread, "decision": one.decision,
+             "version": one.version, "record": one.record, "by": one.actor,
+             "at": one.at} for one in state.threads]
+
+
+def thread_line(one: dict) -> str:
+    """A decision on a thread in a line."""
+    return (f"thread {one['thread']}: {one['decision']} at v{one['version']}, "
+            f"{one['at']} by {one['by']}   record: {one['record']}")
+
+
+def version_lines(listed: list[dict], standing: str | None = None,
+                  threads: Sequence[dict] = ()) -> list[str]:
+    """The design's versions in lines: the newest with its digest, each version
+    frozen as a change of records only with its pointer, the design's `standing`
+    when one is given, the lead's decisions on `threads`, and what the newest version
+    took away and still waits."""
     if not listed:
         return []
     newest = listed[-1]
     lines = [f"design: v{newest['version']}, frozen {newest['at']} by {newest['by']}, "
              f"sha256 {newest['digest']}"]
+    lines += [f"records only: v{one['version']}, {one['at']} by {one['by']}   "
+              f"record: {one['record']}" for one in listed if one["records_only"]]
     if standing is not None:
         lines.append(f"standing: {standing}")
+    lines += [thread_line(one) for one in threads]
     lines += [f"pending in v{newest['version']}: {one['said']}"
               for one in newest["outstanding"]]
     return lines
@@ -491,7 +515,8 @@ def as_text(found: Shown) -> str:
              f"({steps})",
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
     lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
-    lines += version_lines(shown_as["versions"], shown_as["standing"])
+    lines += version_lines(shown_as["versions"], shown_as["standing"],
+                           shown_as["threads"])
     lines += [f"stage {stage_line(one)}" for one in shown_as["stages"]]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")
@@ -508,4 +533,4 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "version_lines", "verdict_lines", "history_of"]
+           "ended_line", "skip_line", "stage_line", "version_lines", "thread_line", "verdict_lines", "history_of"]

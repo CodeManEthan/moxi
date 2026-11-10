@@ -30,6 +30,12 @@ between the two is run again: the file it left is kept when it has the bytes of 
 design, and written again when the design changed meanwhile, since no event had made
 it a version.
 
+**A change of records only.** A version may be frozen as one, with a pointer to the
+record of the change: no pass is asked for over it, and the design stands at what the
+version before it gave (`versions.standing`). It is one only when what the gates read
+is as the version before declared it; `brake.differences` says what is not, and each
+difference refuses the freezing. Options are no such difference.
+
 A sentence in the block that differs from the one on record for the same id changes
 nothing: a question on record keeps its sentence, and the freezing says which ids
 differ.
@@ -44,11 +50,11 @@ from pathlib import Path
 
 from moxi import files
 
-from . import (design_block, ending, folders, options, questions, stages, stepping,
-               versions, write)
+from . import (brake, design_block, ending, folders, options, pointers, questions,
+               stages, stepping, versions, write)
 from . import settings as own
 from . import state as states
-from .errors import BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
+from .errors import BadArgument, BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
 
 #: The step a round's flow must have for its design to be frozen.
 DESIGN = "design"
@@ -92,8 +98,8 @@ CHECKS: list[Callable[[states.State, design_block.DesignBlock], list[Problem]]] 
 @dataclass(frozen=True)
 class Frozen:
     """A design as it was frozen: the round's `name`, the `version`'s number, the
-    frozen `file` and its `digest`, the `plan` that was carried out, and the `event`
-    written. `failed` pairs each after-append callback that raised with what it
+    frozen `file` and its `digest`, the `plan` that was carried out, the `event`
+    written, and the design's `standing` after it. `failed` pairs each after-append callback that raised with what it
     raised."""
 
     name: str
@@ -102,6 +108,7 @@ class Frozen:
     digest: str
     plan: Plan
     event: dict
+    standing: versions.Standing | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -298,12 +305,16 @@ class _Read:
     plans: dict = field(default_factory=dict)
 
 
-def freeze(name: str, *, actor: str, settings=None, wait_s: float = write.WAIT_S,
+def freeze(name: str, *, actor: str, records_only: bool = False,
+           record: str | None = None, settings=None, wait_s: float = write.WAIT_S,
            at: str | None = None) -> Frozen:
     """Freeze the design of the round `name`, `<project>/<slug>`, as its next version.
 
     - `actor`: who freezes it, the event's actor, and who asked each question the
       block adds.
+    - `records_only`: the lead says this version changes records only, so no pass is
+      asked for over it; `record` is then the pointer to the record of the change,
+      and is given with nothing else.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the round's lock; `at`: the event's time.
@@ -315,9 +326,15 @@ def freeze(name: str, *, actor: str, settings=None, wait_s: float = write.WAIT_S
     that the round already used for one since ruled or withdrawn, a stage named that
     is none, options that break a question's rules, a prepared answer, a recorded
     stage given another repo, branch or child round, a stage that left the plan, or a
-    second stage in one repo where the flow does not verify the design. A refusal
-    leaves the log and the versions as they were.
+    second stage in one repo where the flow does not verify the design. A version
+    frozen as a change of records only is also `Refused` when its pointer is missing
+    or has no known shape, and when its block's questions, its stages, what a
+    question holds up or what a stage waits for are not as the version before
+    declared them. A refusal leaves the log and the versions as they were.
     """
+    if record is not None and not records_only:
+        raise BadArgument("a pointer is given only with a version that changes "
+                          "records only", "leave --record out, or add --records-only")
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
@@ -325,6 +342,7 @@ def freeze(name: str, *, actor: str, settings=None, wait_s: float = write.WAIT_S
     folder = home.round_folder(slug)
     design = folder / versions.DESIGN_FILE
     again = f"moxi rounds fold {name}"
+    as_records = f"{again} --records-only --record PTR"
 
     def read(where) -> _Read:
         if not design.is_file():
@@ -357,6 +375,24 @@ def freeze(name: str, *, actor: str, settings=None, wait_s: float = write.WAIT_S
         return Unmet(f"{name} has no design: there is no {design}; write it, with "
                      "its data block, and freeze it then", again)
 
+    def has_a_pointer(view):
+        if not records_only:
+            return None
+        if record is None:
+            return Unmet("a version that changes records only says where the record "
+                         f"of the change is; PTR below is one token: {pointers.SHAPES}",
+                         as_records)
+        return pointers.unmet(record, as_records)
+
+    def changes_records_only(view):
+        if not records_only or view.facts.block is None:
+            return None
+        before = versions.declarations(view.state)
+        return [Unmet(f"this is no change of records only: {one}; a change to what "
+                      "the gates read is frozen as a plain version, which a "
+                      "re-check then reads", again)
+                for one in brake.differences(before, planned(view).declared)]
+
     def freeze_file(view) -> tuple[int, Path]:
         if view.facts.error is not None:
             raise view.facts.error
@@ -388,23 +424,29 @@ def freeze(name: str, *, actor: str, settings=None, wait_s: float = write.WAIT_S
         found = planned(view)
         # The trace check's result goes here as `trace` once it is run at a freezing;
         # an event without the field says it was not run.
-        return write.Entry("design.frozen", {
-            "version": number, "digest": view.facts.block.sha256,
-            "records_only": False, "declared": found.declared, "added": found.added,
-            "pending": [_pending(one) for one in found.pending]})
+        fields = {"version": number, "digest": view.facts.block.sha256,
+                  "records_only": records_only, "declared": found.declared,
+                  "added": found.added,
+                  "pending": [_pending(one) for one in found.pending]}
+        if records_only:
+            fields["record"] = record
+        return write.Entry("design.frozen", fields)
 
     try:
         written = write.record(
             write.Where(home.project, home.folder, slug), actor=actor,
             gates=[ending.takes_new_work(name, "a new version of its design"),
-                   has_a_design_step, has_a_design],
+                   has_a_design_step, has_a_design, has_a_pointer,
+                   changes_records_only],
             act=freeze_file, event=frozen, facts=read, wait_s=wait_s, at=at)
     except NoLog:
         raise NoRound(name) from None
     number, target = written.result
     return Frozen(name=name, version=number, file=target,
                   digest=written.events[0]["digest"], plan=planned(written.view),
-                  event=written.events[0], failed=written.failed)
+                  event=written.events[0],
+                  standing=versions.standing(states.fold(written.round_events)),
+                  failed=written.failed)
 
 
 __all__ = ["DESIGN", "CHECKS", "Plan", "Frozen", "plan", "freeze"]

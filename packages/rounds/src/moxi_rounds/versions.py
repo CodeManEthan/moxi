@@ -11,8 +11,8 @@ from a round's folded state:
 - `pending_removals(state, n)`: what version `n` took away, `outstanding(state, n)`
   what of that would still change the record, and `said(pending)` one of those in a
   line;
-- `standing(state)`: what the design's verification stands at, from the verdicts
-  recorded for its current version;
+- `standing(state)`: what the design's verification stands at for its current
+  version, and `verified(state)` the newest version a pass read;
 - `unchanged(state, folder, name)`: the condition that `design.md` is as it was when the
   current version was frozen, for a gate that needs the design verified.
 
@@ -21,11 +21,23 @@ question held up) changes nothing when it is frozen. It is kept with the version
 carries it, and is applied by a verdict that finds that version publishable or by the
 operator's ruling.
 
-**The standing.** A design's standing is the newest verdict recorded for its current
-version: `publishable@v<N>` or `fold-first@v<N>`, and `none` while that version has no
-verdict, or no version was frozen. A verdict recorded for an earlier version stays in
-the record and is not the standing, so freezing a design again leaves it at `none`
-until a pass reads the new version.
+**The standing.** A design's standing is what its verification stands at for its
+current version: `none`, `publishable@v<N>`, `fold-first@v<N>` or `lead-decision@v<N>`.
+It is read from the log in order, and the newest of these that speaks of the current
+version gives it:
+
+- a verdict recorded for that version gives its word;
+- freezing the design again leaves it at `none`, until a pass reads the new version;
+- freezing it as a change of records only gives the new version what the version
+  before stood at then: `publishable` and `lead-decision` are carried, `fold-first`
+  becomes `lead-decision` (the freezing is the lead's decision that what the pass
+  found were records), and `none` stays `none`;
+- a verdict that finds an earlier version publishable also stands for every later
+  version reached from it by changes of records only, whenever it is recorded;
+- the lead's decision on a thread gives `lead-decision` at the version current then.
+
+A verdict recorded for an earlier version otherwise stays in the record and is not
+the standing.
 """
 
 from __future__ import annotations
@@ -33,9 +45,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from . import questions
+from . import questions, report_block
 from . import state as states
 from .errors import Unmet
 
@@ -130,15 +142,28 @@ DESIGN_REPORT = "design"
 NONE = "none"
 
 
+#: The standing the lead's own decision gives: a thread decided, or a change of
+#: records only frozen after a verdict that sent the design back.
+LEAD_DECISION = "lead-decision"
+
+#: The standings at which a design counts as verified.
+VERIFIED = (report_block.PUBLISHABLE, LEAD_DECISION)
+
+
 @dataclass(frozen=True)
 class Standing:
-    """What a design's verification stands at: `word` is `NONE` or the word of the
-    verdict that says so, `version` the current version's number (None for a design
-    never frozen), and `verdict` the verdict that gives it, or None."""
+    """What a design's verification stands at: `word` is `NONE`, a verdict's word or
+    `LEAD_DECISION`, and `version` the current version's number (None for a design
+    never frozen). What gives it: `verdict`, the verdict whose word it is, or the one
+    that sent the design back before the lead decided by a change of records only;
+    `decision`, the lead's decision on a thread; `fold`, the number of the version
+    whose freezing as a change of records only made it the lead's decision."""
 
     word: str
     version: int | None = None
     verdict: states.Verdict | None = None
+    decision: states.Decided | None = None
+    fold: int | None = None
 
     def __str__(self) -> str:
         return self.word if self.word == NONE else f"{self.word}@v{self.version}"
@@ -152,16 +177,53 @@ def design_verdicts(state: states.State, n: int | None = None
                  and (n is None or one.design == n))
 
 
-def standing(state: states.State) -> Standing:
-    """The standing of the round's design: the newest verdict recorded for its current
-    version, and `NONE` when that version has none or no version was frozen."""
-    version = current(state)
-    if version is None:
-        return Standing(NONE)
-    read = design_verdicts(state, version.n)
-    if not read:
+def verified(state: states.State) -> int | None:
+    """The number of the newest version of the design that a recorded verdict read,
+    or None when no pass read any."""
+    read = [one.design for one in design_verdicts(state)
+            if find(state, one.design) is not None]
+    return max(read) if read else None
+
+
+def _carried(was: Standing | None, version: states.Version) -> Standing:
+    """What a version frozen as a change of records only stands at, from what the
+    version before it stood at then."""
+    if was is None or was.word == NONE:
         return Standing(NONE, version.n)
-    return Standing(read[-1].verdict or NONE, version.n, read[-1])
+    if was.word in VERIFIED:
+        return replace(was, version=version.n)
+    return Standing(LEAD_DECISION, version.n, verdict=was.verdict, fold=version.n)
+
+
+def standing(state: states.State) -> Standing:
+    """The standing of the round's design at its current version, `NONE` when nothing
+    gives it one or no version was frozen. The module's docstring has the rule."""
+    if current(state) is None:
+        return Standing(NONE)
+    acts = sorted([*((one.event or 0, one) for one in state.versions),
+                   *((one.n or 0, one) for one in design_verdicts(state)),
+                   *((one.n or 0, one) for one in state.threads)],
+                  key=lambda act: act[0])
+    stands: dict[int, Standing] = {}
+    only: dict[int, bool] = {}
+    newest = None
+    for _number, one in acts:
+        if isinstance(one, states.Version):
+            stands[one.n] = (_carried(stands.get(newest), one) if one.records_only
+                             else Standing(NONE, one.n))
+            only[one.n] = one.records_only
+            newest = one.n
+        elif isinstance(one, states.Verdict):
+            if one.design not in stands:
+                continue
+            stands[one.design] = Standing(one.verdict or NONE, one.design, one)
+            later = one.design + 1
+            while (one.verdict == report_block.PUBLISHABLE and only.get(later)):
+                stands[later] = Standing(one.verdict, later, one)
+                later += 1
+        elif newest is not None:
+            stands[newest] = Standing(LEAD_DECISION, newest, decision=one)
+    return stands[newest]
 
 
 def said(pending: states.Pending) -> str:
@@ -212,6 +274,15 @@ def verdicts(state: states.State):
                             "flags": list(one.flags)}
 
 
+def threads(state: states.State):
+    """Each decision the lead made on a thread of the design's verification, as
+    `(id, body)` for the index."""
+    for place, one in enumerate(state.threads, 1):
+        yield f"t{place}", {"thread": one.thread, "decision": one.decision,
+                            "version": one.version, "record": one.record,
+                            "by": one.actor, "at": one.at}
+
+
 def waiting(state: states.State):
     """What the current version took away and still waits for a verdict or a ruling,
     each as `(id, body)` for the index."""
@@ -243,5 +314,6 @@ def unchanged(state: states.State, folder: Path | str, name: str) -> Unmet | Non
 
 __all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "declarations",
            "pending_removals", "outstanding", "said", "DESIGN_REPORT", "NONE",
-           "Standing", "design_verdicts", "standing", "stages", "newest", "verdicts",
-           "waiting", "unchanged"]
+           "LEAD_DECISION", "VERIFIED", "Standing", "design_verdicts", "verified",
+           "standing", "stages", "newest", "verdicts",
+           "threads", "waiting", "unchanged"]
