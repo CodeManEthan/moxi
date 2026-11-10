@@ -268,6 +268,9 @@ def test_a_changed_row_is_named_by_its_label_under_the_box_and_reset_puts_it_bac
     found = line.bounding_box()
     assert found["y"] >= box["y"] + box["height"] and found["x"] >= box["x"], (box, found)
     assert found["x"] + found["width"] <= box["x"] + box["width"], (box, found)
+    # Home's next row moves down to make room for it.
+    below = ui_page.get_by_text("Health", exact=True).bounding_box()
+    assert below["y"] >= found["y"] + found["height"] + 10, (found, below)
     # A second row joins it in the panel's order, whichever was changed first.
     group(panel, "seat").click()
     panel.locator('button[data-sub="seat/Name & notes"]').click()
