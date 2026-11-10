@@ -517,6 +517,23 @@ def test_a_request_id_answers_its_row_its_refusal_or_nothing_yet(conn):
                                "problem": "slot 3 is taken", "hint": "pick another slot"}
 
 
+def test_a_failed_launch_asked_by_its_id_carries_the_sentence_recorded_for_it(conn):
+    _, said, _ = get("/api/launches", "request=r2")
+    assert said["why"] is None
+    store.set_state(conn, "r2", "failed", reason="occupied")
+    _, said, _ = get("/api/launches", "request=r2")
+    assert (said["launches"][0]["reason"], said["why"]) == ("occupied", None)
+    store.add_event(conn, "start-failed", {"reason": "occupied", "why": "an older try"},
+                    request_id="r2")
+    store.add_event(conn, "start-failed",
+                    {"reason": "occupied", "why": "slots refused the slot: slot 3 is taken"},
+                    request_id="r2")
+    _, said, _ = get("/api/launches", "request=r2")
+    assert said["why"] == "slots refused the slot: slot 3 is taken"
+    # The log's page names no one launch, and carries no sentence.
+    assert get("/api/launches")[1]["why"] is None
+
+
 @pytest.mark.parametrize("query,words", [
     ("request=r1&limit=2", "request is asked alone, without limit"),
     ("before=yesterday", "before is a time"),
@@ -530,7 +547,7 @@ def test_a_query_the_launch_log_cant_take_is_refused(conn, query, words):
 def test_no_launch_log_reads_empty_and_makes_none():
     status, said, _ = get("/api/launches")
     assert (status, said) == (200, {"state": "up", "detail": None, "launches": [],
-                                    "refused": None})
+                                    "refused": None, "why": None})
     assert not store.path().exists()
 
 

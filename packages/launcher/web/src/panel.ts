@@ -592,9 +592,10 @@ export function outcomeOf(result: ApiResult): Outcome {
   return { kind: "failed", text: answered(result) };
 }
 
-/** Where a started launch or resume stands, read from its status path. */
+/** Where a started launch or resume stands, read from its status path. `why` is the
+ * sentence recorded for a failed row, null where none was. */
 export type Followed =
-  | { kind: "row"; row: LaunchRow }
+  | { kind: "row"; row: LaunchRow; why: string | null }
   | { kind: "refused"; refusal: Refusal }
   | { kind: "waiting" }
   | { kind: "failed"; text: string };
@@ -606,7 +607,7 @@ export function followedOf(result: ApiResult): Followed {
   if (data.state === "error") return { kind: "failed", text: text(data.detail) ?? "the launcher's page server hit an error" };
   if (Array.isArray(data.launches)) {
     const row = data.launches.find((item) => isTable(item) && typeof item.request_id === "string");
-    if (row !== undefined) return { kind: "row", row: row as LaunchRow };
+    if (row !== undefined) return { kind: "row", row: row as LaunchRow, why: text(data.why) };
   }
   if (isRefusal(data.refused)) return { kind: "refused", refusal: refusal(data.refused) };
   return { kind: "waiting" };

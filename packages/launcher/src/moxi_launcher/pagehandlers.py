@@ -424,28 +424,34 @@ def refusal(detail: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _requested(conn: sqlite3.Connection, request_id: str
-               ) -> tuple[list[store.LaunchRow], dict[str, Any] | None]:
+               ) -> tuple[list[store.LaunchRow], dict[str, Any] | None, str | None]:
+    """One launch's row, or the refusal met before it was written, and for a failed row
+    the newest sentence its events recorded for the failure."""
     row = store.get(conn, request_id)
+    events = store.events(conn, request_id)
     if row is not None:
-        return [row], None
-    refused = [e for e in store.events(conn, request_id) if e.kind == store.LAUNCH_REFUSED]
-    return [], refusal(refused[-1].detail) if refused else None
+        said = [e.detail.get("why") for e in events] if row.state == "failed" else []
+        why = [text for text in said if isinstance(text, str) and text]
+        return [row], None, why[-1] if why else None
+    refused = [e for e in events if e.kind == store.LAUNCH_REFUSED]
+    return [], refusal(refused[-1].detail) if refused else None, None
 
 
 def launches(*, limit: int = LIMIT, before: str | None = None,
              request: str | None = None) -> dict[str, Any]:
     """The launch log page the route and the `launches` topic send: newest first, or the
     one launch `request` names, with the refusal of a page launch refused before its row
-    was written."""
+    was written, or the sentence recorded for why it failed."""
     rows: list[store.LaunchRow] = []
-    refused = None
+    refused = why = None
     with _store() as conn:
         if conn is not None and request is not None:
-            rows, refused = _requested(conn, request)
+            rows, refused, why = _requested(conn, request)
         elif conn is not None:
             rows = store.log(conn, limit=limit, before=before)
     after, now = store.stale_after_s(), datetime.now(timezone.utc)
-    return _up(launches=[launch_row(row, after, now) for row in rows], refused=refused)
+    return _up(launches=[launch_row(row, after, now) for row in rows], refused=refused,
+               why=why)
 
 
 def read_launches(call: Any) -> dict[str, Any]:
@@ -457,7 +463,8 @@ def read_launches(call: Any) -> dict[str, Any]:
         try:
             return launches(limit=limit, before=before, request=query.get("request"))
         except Exception as err:
-            return _failed(err, "reading the launch log failed", launches=[], refused=None)
+            return _failed(err, "reading the launch log failed", launches=[], refused=None,
+                           why=None)
 
 
 # -- /api/runs ------------------------------------------------------------------------------
@@ -1154,7 +1161,7 @@ def _known(request_id: str) -> bool:
     with _store() as conn:
         if conn is None:
             return False
-        rows, refused = _requested(conn, request_id)
+        rows, refused, _ = _requested(conn, request_id)
         return bool(rows) or refused is not None
 
 

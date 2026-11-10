@@ -688,7 +688,7 @@ export function startedWords(row: LaunchRow, hour: Clock = HOUR): string {
 /**
  * A followed launch after one read of its status path. A row that started ends the launch
  * and empties the box; a failed row, or a refusal met before the row was written, ends it
- * with the reason. A row that reads stale while it is still starting gives the button back
+ * with the reason: the sentence recorded for the failure, else the row's reason word. A row that reads stale while it is still starting gives the button back
  * and is followed on. No row yet, or a read that failed, changes nothing.
  */
 export function followed(flight: Flight, result: ApiResult, hour: Clock = HOUR): Flight {
@@ -700,7 +700,9 @@ export function followed(flight: Flight, result: ApiResult, hour: Clock = HOUR):
   if (LAUNCHED.includes(row.state)) {
     return { ...ended([{ name: "started", tone: "plain", text: startedWords(row, hour) }], flight.notes), started: true };
   }
-  if (row.state === "failed") return failed(row.reason || "the launcher gave no reason", flight.notes);
+  if (row.state === "failed") {
+    return failed(read.why || row.reason || "the launcher gave no reason", flight.notes);
+  }
   if (row.stale === true && flight.phase === "starting") {
     return { ...flight, phase: "late", lines: [{ name: "late", tone: "plain", text: LATE }] };
   }

@@ -142,9 +142,11 @@ LAUNCH = _table(
     resume_of=_text(nullable=True),
 )
 #: With `request`, `launches` holds that launch's row once it is written, and `refused`
-#: the refusal of a page launch that was refused before its row was.
+#: the refusal of a page launch that was refused before its row was; `why` is the sentence
+#: recorded for that launch's failure, null for a row that did not fail or recorded none.
 LAUNCHES = {**STANDING, "launches": Out("list", items=LAUNCH),
-            "refused": Out("table", items=REFUSAL.items, nullable=True)}
+            "refused": Out("table", items=REFUSAL.items, nullable=True),
+            "why": _text(nullable=True, mark="redact")}
 
 #: One entry of the past-sessions list. `live` is null when it could not be read.
 PAST = _table(

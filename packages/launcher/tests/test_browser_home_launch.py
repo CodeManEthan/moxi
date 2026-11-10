@@ -405,7 +405,8 @@ def test_a_launch_that_fails_says_why_keeps_the_box_and_gives_the_button_back(
     box.fill(BRIEF)
     go = piece.locator(".go")
     go.click()
-    expect(said(piece, "failed")).to_have_text("The launch failed: occupied")
+    expect(said(piece, "failed")).to_have_text(
+        "The launch failed: slot 2 was taken a moment ago")
     expect(box).to_have_value(BRIEF)
     expect(go).to_be_enabled()
     expect(go).to_have_text("Launch in slot 2")

@@ -570,6 +570,17 @@ test("a failed row, or a refusal met before the row, ends the launch with the re
                    [true, false, ["The launch failed: codex is not found on the PATH. install it"]]);
 });
 
+test("a failed row shows the sentence recorded for it, and its reason word where none was", () => {
+  const flight = launched(STARTED, SLOT_2, []).flight;
+  const row = launch("failed", { reason: "occupied" });
+  const told = followed(flight, ok({ state: "up", detail: null, launches: [row], refused: null,
+                                     why: "slots refused the slot: slot 2 is taken" }));
+  assert.deepEqual(texts(told), ["The launch failed: slots refused the slot: slot 2 is taken"]);
+  assert.deepEqual(texts(followed(flight, ok({ state: "up", detail: null, launches: [row], refused: null, why: null }))),
+                   ["The launch failed: occupied"]);
+  assert.deepEqual(texts(followed(flight, status(row))), ["The launch failed: occupied"]);
+});
+
 test("no row yet, a row still starting, and a read that failed change nothing", () => {
   const { flight } = launched(STARTED, SLOT_2, []);
   assert.equal(followed(flight, status()), flight);
