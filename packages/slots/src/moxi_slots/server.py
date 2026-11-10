@@ -37,6 +37,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from moxi import exit as codes
+from moxi.log import LOG_FILE_ENV
 
 from . import places, support, tmux
 from .errors import TmuxError, TryAgain
@@ -220,7 +221,7 @@ def _start(wait: float) -> int:
     except FileNotFoundError as exc:
         raise TmuxError(f"the slots server cannot be started: {exc}") from None
     env = tmux.client_env()
-    env["MOXI_LOG_FILE"] = str(places.server_log())
+    env[LOG_FILE_ENV] = str(places.server_log())
     started = proc.spawn([script], detached=True, output=places.server_log(), env=env)
     deadline = time.monotonic() + wait
     while True:

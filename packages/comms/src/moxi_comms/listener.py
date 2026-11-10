@@ -37,6 +37,8 @@ way to read the setting, so the bound is fixed, and `docs/configuration.md` asks
 
 from __future__ import annotations
 
+from .constants import NAME_ENV
+
 import os
 from pathlib import Path
 
@@ -91,7 +93,7 @@ def answer(event) -> str | None:
     if event.harness not in HARNESSES or event.event not in ("start", "prompt"):
         return None
     env = dict(event.env) if event.env else dict(os.environ)
-    if not env.get("MOXI_COMMS_NAME"):
+    if not env.get(NAME_ENV):
         return None
     socket_path = daemon_socket(env)
     state = memory_path(env)

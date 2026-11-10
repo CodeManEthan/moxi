@@ -31,7 +31,7 @@ def make(folder: Path) -> Path:
 
 def page(monkeypatch):
     """This process as a page job runs: loadout's marker set to the page job's value."""
-    monkeypatch.setenv(homes.MARKER, homes.PAGE_JOB)
+    monkeypatch.setenv(homes.CALLER_ENV, homes.PAGE_JOB)
 
 
 def end(job: str) -> dict:
@@ -256,7 +256,7 @@ def test_the_missing_cli_note_names_the_lasting_path_fix_only_with_ui(lo, monkey
 # -- loadout records nothing ----------------------------------------------------------------
 
 def test_setup_and_install_leave_the_ledger_without_homes_or_git(folder, monkeypatch):
-    monkeypatch.delenv(homes.MARKER, raising=False)
+    monkeypatch.delenv(homes.CALLER_ENV, raising=False)
     assert setup.setup(say=lambda line: None) == 0
     assert not {"homes", "git"} & set(ledger.read())
     make(folder)
@@ -276,7 +276,7 @@ def test_the_next_ledger_write_drops_an_older_releases_homes_and_git(lo):
 
 
 def test_the_git_hooks_child_install_carries_no_marker():
-    assert homes.MARKER not in gitpiece.clean_env()
+    assert homes.CALLER_ENV not in gitpiece.clean_env()
 
 
 # -- the places -----------------------------------------------------------------------------

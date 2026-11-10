@@ -348,7 +348,7 @@ class Target:
     """One thing to read: a bound name as the daemon described it, or a raw session id.
 
     `settled` is the kind already decided: the daemon's verdict for a name, or a failed
-    lookup (`unknown`, with `reason`). `age_seconds` comes with it. A Target with no
+    lookup (`unknown`, with `reason`). `age_s` comes with it. A Target with no
     `settled` is a raw session id, read in this process.
     """
     label: str
@@ -359,8 +359,8 @@ class Target:
     bound_for: float | None = None
     settled: str | None = None
     reason: str | None = None
-    age_seconds: float | None = None
-    ttl_seconds: float | None = None
+    age_s: float | None = None
+    ttl_s: float | None = None
     key: str | None = None
     cache_source: str | None = None
     code: str | None = None
@@ -376,8 +376,8 @@ class CacheState:
     target: str
     kind: str
     reason: str | None = None            # why `unknown`, a lifetime-less `cold`, a free model
-    age_seconds: float | None = None
-    ttl_seconds: float | None = None     # the lifetime the read used, when it used one
+    age_s: float | None = None
+    ttl_s: float | None = None     # the lifetime the read used, when it used one
     key: str | None = None               # what the lifetime was looked up by, in words
     cache_source: str | None = None      # a codex binding's sessions root
     session_id: str | None = None
@@ -427,8 +427,8 @@ def target_for_name(qualified: str, reply: dict | None = None, *,
     code = reply.get("cache_code")
     return Target(**base, settled=kind, code=code if isinstance(code, str) and code else None,
                   reason=(reason or "no reason given") if kind == UNKNOWN else reason,
-                  age_seconds=float(age) if _number(age) else None,
-                  ttl_seconds=float(ttl) if _number(ttl) else None,
+                  age_s=float(age) if _number(age) else None,
+                  ttl_s=float(ttl) if _number(ttl) else None,
                   key=reply.get("cache_key") if isinstance(reply.get("cache_key"), str)
                   else None,
                   cache_source=source if isinstance(source, str) and source else None)
@@ -482,14 +482,14 @@ def kind_of(t: Target) -> CacheState:
     state = CacheState(target=t.label, kind=UNKNOWN, session_id=t.session_id,
                        adapter=t.adapter, bound_at=t.bound_at, bound_for=t.bound_for)
     if t.settled is not None:
-        state.kind, state.reason, state.age_seconds = t.settled, t.reason, t.age_seconds
-        state.ttl_seconds, state.key, state.cache_source = (t.ttl_seconds, t.key,
+        state.kind, state.reason, state.age_s = t.settled, t.reason, t.age_s
+        state.ttl_s, state.key, state.cache_source = (t.ttl_s, t.key,
                                                             t.cache_source)
         state.code = t.code
         return state
     clock = clock_state(t.adapter or "claude-shim", t.session_id)
-    state.kind, state.reason, state.age_seconds = clock.kind, clock.reason, clock.age_s
-    state.ttl_seconds, state.key, state.code = clock.ttl_s, clock.key, clock.code
+    state.kind, state.reason, state.age_s = clock.kind, clock.reason, clock.age_s
+    state.ttl_s, state.key, state.code = clock.ttl_s, clock.key, clock.code
     return state
 
 
@@ -571,7 +571,7 @@ def hold_line(state: CacheState) -> str:
     rollout) says why it is counted cold and, where the age is known, when its last
     request was; it never prints a cold duration. Only a cold read is held: a read comms
     could not make refuses the send."""
-    age, ttl = state.age_seconds, state.ttl_seconds
+    age, ttl = state.age_s, state.ttl_s
     if state.kind == COLD and age is not None and ttl is not None:
         if _harness_agent(state) and state.key:
             _provider, model, _note = _key_parts(state.key)
@@ -588,7 +588,7 @@ def hold_line(state: CacheState) -> str:
 def _lifetime_words(state: CacheState) -> str:
     """`gpt-5.6-terra, 30 minutes after a request`, with a measured row's basis."""
     _provider, model, note = _key_parts(state.key)
-    words = f"{model}, {spoken_span(state.ttl_seconds)} after a request"
+    words = f"{model}, {spoken_span(state.ttl_s)} after a request"
     if note and note.startswith("measured"):
         words += f", {note}"
     return words
@@ -619,7 +619,7 @@ def spoken_line(state: CacheState) -> str:
     if state.kind == UNKNOWN:
         return (f"{name}: cache state not known ({state.reason}). Agents' messages to it "
                 "are held.")
-    age, ttl = state.age_seconds, state.ttl_seconds
+    age, ttl = state.age_s, state.ttl_s
     where = "window" if state.adapter == "opencode" else "session"
     if state.kind == COLD and (age is None or ttl is None):
         why = state.reason or "comms has no cache lifetime to count it by"

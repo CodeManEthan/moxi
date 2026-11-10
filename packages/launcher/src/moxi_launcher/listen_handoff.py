@@ -28,11 +28,11 @@ def answer(event) -> str | None:
     if event.event != "start" or getattr(event, "source", None) != "startup":
         return None
     env = listeners.event_env(event)
-    if env.get(listeners.RELAUNCH):
+    if env.get(listeners.RELAUNCH_ENV):
         return None
     conn = listeners.open_store()
     try:
-        if env.get(listeners.REQUEST):
+        if env.get(listeners.REQUEST_ENV):
             return _launched(event, conn)
         return _by_hand(event, env, conn)
     finally:

@@ -326,8 +326,8 @@ class _Walk:
         if not env:
             return None
         if self.windows:
-            return next((v for k, v in env.items() if k.upper() == _mark.NAME), None)
-        return env.get(_mark.NAME)
+            return next((v for k, v in env.items() if k.upper() == _mark.STARTED_BY_ENV), None)
+        return env.get(_mark.STARTED_BY_ENV)
 
     # -- command lines -------------------------------------------------------------------
 

@@ -191,7 +191,7 @@ def build(request, resolved, *, environ: Mapping[str, str] | None = None,
     too, where a resumed session's transcript is found; its session id is the one it
     resumes when `request.resume_of` is set. It gives the identity block its `posture`,
     and a relaunch with a handoff (`relaunch_of` and `handoff` set) the relaunch's header
-    and, with `run`, the `RELAUNCH` stamp.
+    and, with `run`, the `RELAUNCH_ENV` stamp.
     """
     values = dict(resolved.values)
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
@@ -226,7 +226,7 @@ def _replay(request) -> dict[str, object] | None:
     return {"posture": getattr(request, "posture", None),
             "resume": bool(getattr(request, "resume_of", None)),
             "relaunched": relaunched,
-            "extra_stamps": {common.RELAUNCH: str(run)} if relaunched and run else {}}
+            "extra_stamps": {common.RELAUNCH_ENV: str(run)} if relaunched and run else {}}
 
 
 def _read(row: str, name: object) -> str | None:

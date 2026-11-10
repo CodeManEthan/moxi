@@ -3,7 +3,7 @@
 
 Interface 3 is interface 2 plus `retention()` and `Retention`; interface 4 is interface 3
 plus the list's reads (`sessions_list`, `sessions_more`, `sessions_newest`,
-`sessions_folders`, `session_opened`); interface 5 is interface 4 plus `session_facts`.
+`session_dirs`, `session_opened`); interface 5 is interface 4 plus `session_facts`.
 A caller loads sessions with the newest interface whose names it uses.
 
 The one shape (`moxi_sessions.shape`):
@@ -46,14 +46,14 @@ Each harness's transcript retention (interface 3):
 The list of sessions (interface 4; `moxi_sessions.lists` says what each answers):
 
 * `sessions_list(*, recent_s=None, now=None, harness=None, since=None, until=None,
-  folder=None, find=None)`: the main sessions of the harnesses on the machine as plain
+  work_dir=None, find=None)`: the main sessions of the harnesses on the machine as plain
   data: the counts, and the groups a list is cut into (the sessions active recently, one
   group per day for seven days, the rest as a count) with the first rows of each.
 * `sessions_more(*, group, recent_s=None, kind=None, before=None, now=None, ...)`: the
   next rows of one group, from the place an answer gave.
 * `sessions_newest(*, recent_s=None, now=None, limit=30, ...)`: the same sessions as one
   run, newest change first, with no groups.
-* `sessions_folders(*, harness=None, since=None, until=None, find=None, limit=200)`: the
+* `session_dirs(*, harness=None, since=None, until=None, find=None, limit=200)`: the
   folders those sessions ran in, with how many each holds.
 * `session_opened(*, harness, session, recent_s=None, now=None)`: one session's row
   with its last reply, its newest subagents and the command that picks it up again.
@@ -115,7 +115,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("projects_root",), "claude"),
     **dict.fromkeys(("retention", "Retention"), "retention"),
     **dict.fromkeys(("sessions_list", "sessions_more", "sessions_newest",
-                     "sessions_folders", "session_opened", "session_facts"), "lists"),
+                     "session_dirs", "session_opened", "session_facts"), "lists"),
     **dict.fromkeys(("read_back",), "reader"),
     **dict.fromkeys(("Unreadable",), "errors"),
     **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),

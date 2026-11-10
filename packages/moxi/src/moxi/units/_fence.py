@@ -42,10 +42,8 @@ from dataclasses import dataclass
 
 #: Seconds one supervisor call may take.
 TIMEOUT = 30.0
-#: The variable that lets a test run a real supervisor.
-REAL_SUPERVISOR = "MOXI_TEST_REAL_SUPERVISOR"
 #: The variable that carries task refs to the PowerShell read.
-TASK_REFS = "MOXI_TASK_REFS"
+TASK_REFS_ENV = "MOXI_TASK_REFS"
 #: The most characters one environment variable holds on Windows; a longer ref list is
 #: split over more than one call.
 TASK_REFS_MAX = 32_767
@@ -149,7 +147,7 @@ def task_refs_env(refs: Sequence[tuple[str, str]]) -> list[dict[str, str]]:
         if chunks[-1] and len(json.dumps(chunks[-1] + [item])) > TASK_REFS_MAX:
             chunks.append([])
         chunks[-1].append(item)
-    return [{TASK_REFS: json.dumps(chunk)} for chunk in chunks if chunk]
+    return [{TASK_REFS_ENV: json.dumps(chunk)} for chunk in chunks if chunk]
 
 
 class Fence:
@@ -186,10 +184,12 @@ def under_pytest() -> bool:
 def default_runner() -> Runner:
     """The runner that starts the real program, through `moxi.proc.run` (its own process
     group, stdin closed, the whole group ended at the time limit)."""
-    if under_pytest() and os.environ.get(REAL_SUPERVISOR) != "1":
+    from moxi_dev.testing import REAL_SUPERVISOR_ENV
+
+    if under_pytest() and os.environ.get(REAL_SUPERVISOR_ENV) != "1":
         raise SupervisorRefused(
             "a real supervisor call under pytest; pass a fake runner, or set "
-            f"{REAL_SUPERVISOR}=1 for a proof row")
+            f"{REAL_SUPERVISOR_ENV}=1 for a proof row")
 
     def run(cmd: list[str], *, env: Mapping[str, str] | None, timeout: float):
         from .. import proc

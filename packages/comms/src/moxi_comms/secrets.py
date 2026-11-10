@@ -47,13 +47,12 @@ import logging
 import os
 import re
 
+from .constants import SECRET_PREFIX_ENV
 from .record import RecordError
 
 log = logging.getLogger("comms.secrets")
 
 #: The env step's prefix. `MOXI_COMMS_SECRET_<KEY>`.
-ENV_PREFIX = "MOXI_COMMS_SECRET_"
-
 STEP_ENV = "env"
 STEP_KEYCHAIN = "keychain"
 STEP_STORE = "store"
@@ -99,7 +98,7 @@ def env_key(secret_id: str) -> str:
     own credentials with named keys.
     """
     folded = re.sub(r"[^A-Za-z0-9]+", "_", str(secret_id)).strip("_")
-    return ENV_PREFIX + folded.upper()
+    return SECRET_PREFIX_ENV + folded.upper()
 
 
 def _holder(owner) -> str:
@@ -393,5 +392,5 @@ def from_config(cfg=None, *, env=None, store=None) -> Chain:
 
 __all__ = ["Resolver", "EnvResolver", "KeychainResolver", "StoreResolver", "Chain",
            "SecretError", "SecretNotFound", "SecretStepFailed", "env_key", "build",
-           "from_config", "ENV_PREFIX", "STEPS", "DEFAULT_CHAIN", "default_chain",
+           "from_config", "SECRET_PREFIX_ENV", "STEPS", "DEFAULT_CHAIN", "default_chain",
            "STEP_ENV", "STEP_KEYCHAIN", "STEP_STORE", "KEYCHAIN_SERVICE"]

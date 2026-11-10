@@ -1131,7 +1131,7 @@ def _module_costs(found, active: list, samples: list[dict], now: float,
             continue
         since = state.since or got.started
         one, how = idle_rate(samples, unit, got.cpu, now, since)
-        taken.append({"unit": unit, "at": _stamp(now), "cpu_seconds": round(got.cpu, 3)})
+        taken.append({"unit": unit, "at": _stamp(now), "cpu_s": round(got.cpu, 3)})
         memory += got.memory
         fds += got.fds
         if one is None:
@@ -1174,7 +1174,7 @@ def idle_rate(samples: Iterable[Mapping], unit: str, cpu: float, now: float,
         if sample.get("unit") != unit:
             continue
         at = _parse_stamp(sample.get("at"))
-        then = sample.get("cpu_seconds")
+        then = sample.get("cpu_s")
         if at is None or not isinstance(then, (int, float)) or isinstance(then, bool):
             continue
         age = now - at

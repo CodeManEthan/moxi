@@ -2,6 +2,8 @@
 
 ## 0.1.8 (unreleased)
 
+- Doctor CPU samples now store `cpu_s`. Samples with the older `cpu_seconds` field are
+  not read.
 - The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
   modules --available` know it by name. Its version is 3.
 

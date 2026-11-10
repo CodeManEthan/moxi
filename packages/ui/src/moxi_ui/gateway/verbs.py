@@ -33,7 +33,7 @@ from moxi.paths import Layout, python
 from .. import cli, config
 from . import endpoint
 
-__all__ = ["HOLD_WAIT", "cmd_devices", "cmd_log", "cmd_off", "cmd_on",
+__all__ = ["HOLD_WAIT", "cmd_devices", "cmd_log", "cmd_disable", "cmd_enable",
            "cmd_pair", "cmd_revoke", "dispatch"]
 
 MODULE = "ui"
@@ -221,7 +221,7 @@ def _doctor_text() -> str:
     return row.detail + (f"; {row.fix}" if row.fix else "")
 
 
-def cmd_on(args: argparse.Namespace, say: Callable[[str], Any], *,
+def cmd_enable(args: argparse.Namespace, say: Callable[[str], Any], *,
            environ: Mapping[str, str] | None = None) -> int:
     from .listener import extra_installed
 
@@ -247,7 +247,7 @@ def cmd_on(args: argparse.Namespace, say: Callable[[str], Any], *,
     return 0
 
 
-def cmd_off(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
+def cmd_disable(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
     from .address import REFUSED
     from .listener import read_tunnel
 
@@ -279,7 +279,7 @@ def cmd_off(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 
 
 HANDLERS = {"pair": cmd_pair, "devices": cmd_devices, "revoke": cmd_revoke, "log": cmd_log,
-            "enable": cmd_on, "disable": cmd_off}
+            "enable": cmd_enable, "disable": cmd_disable}
 
 
 def dispatch(args: argparse.Namespace, say: Callable[[str], Any]) -> int:

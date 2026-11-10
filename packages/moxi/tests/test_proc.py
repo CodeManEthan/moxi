@@ -608,7 +608,7 @@ def test_on_windows_every_spelling_of_the_variable_is_taken_out(monkeypatch):
     monkeypatch.setattr(proc, "_WINDOWS", True)
     given = {"PATH": "p", "moxi_lifeline_fd": "7", "Moxi_Lifeline_Fd": "8",
              proc.LIFELINE_ENV: "9"}
-    mark = {_mark.NAME: _mark.program}
+    mark = {_mark.STARTED_BY_ENV: _mark.program}
     assert proc._lifeline_env(given, None) == {"PATH": "p", **mark}
     assert proc._lifeline_env(given, "0") == {"PATH": "p", proc.LIFELINE_ENV: "0", **mark}
     assert given["moxi_lifeline_fd"] == "7"  # the caller's mapping is left alone
@@ -1159,7 +1159,7 @@ def test_the_windows_reader_reads_a_child_as_it_was_started():
 # -- the start mark ------------------------------------------------------------------------
 
 def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
-    env = {k: v for k, v in os.environ.items() if k.upper() != _mark.NAME}
+    env = {k: v for k, v in os.environ.items() if k.upper() != _mark.STARTED_BY_ENV}
     code = ("import os, moxi._mark as m; "
             "print(m.started_by, os.environ[m.NAME] == m.program)")
     done = proc.run([PY, "-c", code], timeout_s=30, env=None, capture=True)
@@ -1173,9 +1173,9 @@ def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
 
 @pytest.mark.parametrize("start", ["run", "spawn", "detached"])
 def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
-    code = "import os; print(os.environ.get(%r))" % _mark.NAME
+    code = "import os; print(os.environ.get(%r))" % _mark.STARTED_BY_ENV
     env = child_env()
-    assert _mark.NAME not in env
+    assert _mark.STARTED_BY_ENV not in env
     if start == "run":
         out = proc.run([PY, "-c", code], timeout_s=30, env=env).stdout.decode()
     elif start == "spawn":
@@ -1193,16 +1193,16 @@ def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
 
 
 def test_a_mark_already_in_the_env_is_kept():
-    env = child_env(**{_mark.NAME: "by hand"})
-    assert proc._lifeline_env(env, None)[_mark.NAME] == "by hand"
-    assert _mark.marked(env)[_mark.NAME] == "by hand"
-    assert env[_mark.NAME] == "by hand" and _mark.NAME in _mark.marked({})
+    env = child_env(**{_mark.STARTED_BY_ENV: "by hand"})
+    assert proc._lifeline_env(env, None)[_mark.STARTED_BY_ENV] == "by hand"
+    assert _mark.marked(env)[_mark.STARTED_BY_ENV] == "by hand"
+    assert env[_mark.STARTED_BY_ENV] == "by hand" and _mark.STARTED_BY_ENV in _mark.marked({})
 
 
 def test_on_windows_any_spelling_of_the_mark_counts(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     assert _mark.marked({"moxi_started_by": "x"}) == {"moxi_started_by": "x"}
-    assert _mark.marked({}) == {_mark.NAME: _mark.program}
+    assert _mark.marked({}) == {_mark.STARTED_BY_ENV: _mark.program}
 
 
 @pytest.mark.parametrize("argv, orig, name", [

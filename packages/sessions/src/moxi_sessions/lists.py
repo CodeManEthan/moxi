@@ -6,7 +6,7 @@ data (dicts, lists, numbers, strings, None).
 `list_sessions`, `more_sessions`, `newest_sessions`, `list_folders`, `open_session` and
 `name_sessions` take the catalog to read through; the page's handlers and `moxi sessions
 list` call the first five. `sessions_list`, `sessions_more`, `sessions_newest`,
-`sessions_folders`, `session_opened` and `session_facts` are the same reads for another
+`session_dirs`, `session_opened` and `session_facts` are the same reads for another
 module (`moxi_sessions.api`): they take no catalog and read through the calling
 process's own.
 
@@ -768,7 +768,7 @@ def _recent(recent_s: float | None) -> float:
 
 def sessions_list(*, recent_s: float | None = None, now: float | None = None,
                   harness: str | None = None, since: float | None = None,
-                  until: float | None = None, folder: str | None = None,
+                  until: float | None = None, work_dir: str | None = None,
                   find: str | None = None) -> dict[str, Any]:
     """The list of sessions as plain data: `list_sessions` says what it answers.
 
@@ -783,34 +783,34 @@ def sessions_list(*, recent_s: float | None = None, now: float | None = None,
     root's listing, every Codex head, and the head and last turn of what it answers.
     Later calls in the same process reuse them."""
     return list_sessions(None, recent_s=_recent(recent_s), now=now, harness=harness,
-                         since=since, until=until, folder=folder, find=find)
+                         since=since, until=until, folder=work_dir, find=find)
 
 
 def sessions_more(*, group: str, recent_s: float | None = None, kind: str | None = None,
                   before: str | None = None, now: float | None = None,
                   harness: str | None = None, since: float | None = None,
-                  until: float | None = None, folder: str | None = None,
+                  until: float | None = None, work_dir: str | None = None,
                   find: str | None = None) -> dict[str, Any]:
     """The next rows of one group of the list: `more_sessions` says what it answers.
     `recent_s`, the roots read and the cold reads are as `sessions_list` says. Pass the
     list answer's `now` so the groups are cut where that list cut them."""
     return more_sessions(None, group=group, recent_s=_recent(recent_s), kind=kind,
                          before=before, now=now, harness=harness, since=since,
-                         until=until, folder=folder, find=find)
+                         until=until, folder=work_dir, find=find)
 
 
 def sessions_newest(*, recent_s: float | None = None, now: float | None = None,
                     limit: int = NEWEST_ROWS, harness: str | None = None,
                     since: float | None = None, until: float | None = None,
-                    folder: str | None = None) -> dict[str, Any]:
+                    work_dir: str | None = None) -> dict[str, Any]:
     """The sessions as one run, newest change first, with no groups: `newest_sessions`
     says what it answers. `recent_s`, the roots read and the cold reads are as
     `sessions_list` says."""
     return newest_sessions(None, recent_s=_recent(recent_s), now=now, limit=limit,
-                           harness=harness, since=since, until=until, folder=folder)
+                           harness=harness, since=since, until=until, folder=work_dir)
 
 
-def sessions_folders(*, harness: str | None = None, since: float | None = None,
+def session_dirs(*, harness: str | None = None, since: float | None = None,
                      until: float | None = None, find: str | None = None,
                      limit: int = FOLDERS_MAX) -> dict[str, Any]:
     """The folders the sessions ran in: `list_folders` says what it answers. The roots
@@ -844,5 +844,5 @@ __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIO
            "RECENT", "FOUND", "EARLIER", "UNDATED", "MAIN", "PROGRAM", "position",
            "parse_position", "local_day", "list_sessions", "newest_sessions",
            "more_sessions", "list_folders", "open_session", "name_sessions",
-           "sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
+           "sessions_list", "sessions_more", "sessions_newest", "session_dirs",
            "session_opened", "session_facts"]

@@ -53,7 +53,7 @@ def rig(tmp_path, monkeypatch):
     """The fake slots behind the launcher's seam; `rig.plan(...)` scripts it."""
     directory = tmp_path / "fake-slots"
     directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
     monkeypatch.setenv(fake.DIR, str(directory))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
@@ -71,7 +71,7 @@ def rig(tmp_path, monkeypatch):
 def turns(tmp_path, monkeypatch):
     directory = tmp_path / "fake-turns"
     directory.mkdir()
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
     monkeypatch.setenv(fake_turns.DIR, str(directory))
     monkeypatch.syspath_prepend(str(TESTS))
     script = directory / "script.json"
@@ -84,7 +84,7 @@ def turns(tmp_path, monkeypatch):
 @pytest.fixture
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "slots" and real(name))
 
@@ -1129,7 +1129,7 @@ def test_the_screens_are_read_from_slots_api_module_only():
 
 def test_the_announcement_names_the_setup_and_the_seam():
     assert module.SETUP == "moxi_launcher.startup:setup"
-    assert slots.SEAM in module.INTERNAL_ENV
+    assert slots.SLOTS_ENV in module.INTERNAL_ENV
 
 
 def test_without_slots_setup_asks_nothing(no_slots):
@@ -1273,7 +1273,7 @@ SHAPES = ("Support", "Hold", "Last", "Slot", "Listing", "Placed", "Screen", "See
 @pytest.fixture
 def real_slots(monkeypatch):
     """slots' own API module; skips when slots is not installed."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     if not modules.available("slots"):
         pytest.skip("slots is not installed")
     found = slots.api()

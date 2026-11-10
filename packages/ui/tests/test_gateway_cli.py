@@ -277,15 +277,15 @@ class World:
 def test_on_checks_in_order_and_names_each_fix(env, tmp_path, monkeypatch):
     World(monkeypatch, env, extra=False)
     with pytest.raises(cli.Refused, match="MOXI_UI_HOME"):
-        verbs.cmd_on(_ns(), print, environ={**env, "MOXI_UI_HOME": str(tmp_path / "m")})
+        verbs.cmd_enable(_ns(), print, environ={**env, "MOXI_UI_HOME": str(tmp_path / "m")})
     with pytest.raises(cli.Refused, match="moxi install ui --with gateway"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, environ=env)
     World(monkeypatch, env, state=("absent", "tunnel isn't installed"))
     with pytest.raises(cli.Refused, match="moxi install ui --with tunnel"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, environ=env)
     world = World(monkeypatch, env, kind="unix")
     with pytest.raises(cli.Refused, match="the gateway's socket"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, environ=env)
     assert world.ran == []  # nothing set, nothing started
 
 
@@ -294,13 +294,13 @@ def test_on_sets_the_switch_starts_the_shell_waits_for_the_hold_then_adds_the_en
     world = World(monkeypatch, env, shell="socket")
     endpoint.write_hold(world.runtime, 8461, pid=os.getpid())
     said = []
-    assert verbs.cmd_on(_ns(), said.append, environ=env) == 0
+    assert verbs.cmd_enable(_ns(), said.append, environ=env) == 0
     assert world.words() == [["config", "set", "--", "ui", "gateway.enabled", "true"],
                              ["tunnel", "add", "ui/gateway"]]
     assert world.started == 1  # the socket held the port, so the unit was started
     world.address = Address()
     world.ran.clear()
-    assert verbs.cmd_on(_ns(), said.append, environ=env) == 0
+    assert verbs.cmd_enable(_ns(), said.append, environ=env) == 0
     assert world.words() == [["config", "set", "--", "ui", "gateway.enabled", "true"]]
     assert said[-1] == "the gateway is on at https://box.example.ts.net:8461/"
 
@@ -308,32 +308,32 @@ def test_on_sets_the_switch_starts_the_shell_waits_for_the_hold_then_adds_the_en
 def test_on_stops_with_the_doctors_text_when_no_hold_comes(env, monkeypatch):
     world = World(monkeypatch, env)
     with pytest.raises(cli.Refused, match="the doctor's text"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, environ=env)
     assert ["tunnel", "add", "ui/gateway"] not in world.words()
 
 
 def test_off_clears_the_switch_and_asks_about_the_entry(env, monkeypatch):
     world = World(monkeypatch, env)
     said = []
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.words() == [["config", "unset", "--", "ui", "gateway.enabled"]]
     assert world.asked == []  # no entry, no question
     world = World(monkeypatch, env, address=Address())
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.asked == [f"{verbs.OFF_QUESTION} {verbs.OFF_PERSIST}"]
     assert world.words()[-1] == ["tunnel", "remove", "ui/gateway"]
     world = World(monkeypatch, env, address=Address(form="unix"), kind="unix", answer=False)
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.asked == [verbs.OFF_QUESTION]
     assert ["tunnel", "remove", "ui/gateway"] not in world.words()
     world = World(monkeypatch, env, address=Address(), tty=False)
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.asked == [] and said[-1].endswith("To remove it: moxi tunnel remove ui/gateway")
     assert verbs.OFF_PERSIST in said[-1]
     world = World(monkeypatch, env, address=REFUSED)
     monkeypatch.setattr("moxi_ui.gateway.listener.read_tunnel",
                         lambda: SimpleNamespace(address=REFUSED, reason="applied.json is newer"))
-    assert verbs.cmd_off(_ns(), said.append) == 0
+    assert verbs.cmd_disable(_ns(), said.append) == 0
     assert world.asked == [] and "applied.json is newer" in said[-1]
     assert "moxi doctor tunnel" in said[-1]
     assert said[-1].endswith("To remove it: moxi tunnel remove ui/gateway")

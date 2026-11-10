@@ -1022,7 +1022,7 @@ class CodexHarness(Harness):
         if running:
             self.endpoint.command_settled(request.id, Refused("busy-turn"))
             return
-        if self.live().busy(shells=not request.stop_shells):
+        if self.live().busy(include_shells=not request.stop_shells):
             self.endpoint.command_settled(request.id, Refused("busy-agents"))
             return
         compaction = _Compaction(request, listed, time.monotonic())

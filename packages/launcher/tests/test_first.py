@@ -30,7 +30,7 @@ def turns(tmp_path, monkeypatch):
     """The fake turns behind the seam, and a way to script it and read its calls."""
     directory = tmp_path / "fake-turns"
     directory.mkdir()
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
     monkeypatch.setenv(fake.DIR, str(directory))
 
     class Rig:
@@ -147,7 +147,7 @@ def test_the_seam_names_the_module_that_stands_in_for_turns(turns):
 
 
 def test_without_the_seam_turns_is_loaded_with_the_interface_the_sender_speaks(monkeypatch):
-    monkeypatch.delenv(first.TURNS_SEAM, raising=False)
+    monkeypatch.delenv(first.TURNS_ENV, raising=False)
     asked = []
 
     class Found:
@@ -162,7 +162,7 @@ def test_without_the_seam_turns_is_loaded_with_the_interface_the_sender_speaks(m
 
 
 def test_turns_absent_or_too_old_is_none(monkeypatch):
-    monkeypatch.delenv(first.TURNS_SEAM, raising=False)
+    monkeypatch.delenv(first.TURNS_ENV, raising=False)
     monkeypatch.setattr(modules, "available", lambda name: False)
     assert first.turns_api() is None
 

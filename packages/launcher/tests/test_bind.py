@@ -421,7 +421,7 @@ def test_a_terminal_launch_with_an_identity_starts_the_deliverer(tmp_path, monke
 def rig(tmp_path, monkeypatch):
     directory = tmp_path / "fake-slots"
     directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
     monkeypatch.setenv(fake.DIR, str(directory))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()

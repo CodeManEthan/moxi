@@ -5,6 +5,24 @@ They are collected in one module so each number lives in exactly one place.
 
 from __future__ import annotations
 
+# --- environment names -------------------------------------------------------------
+BACKEND_ENV = "MOXI_COMMS_BACKEND"
+CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
+COMMAND_ENV = "MOXI_COMMS_COMMAND"
+DIRECTORS_ENV = "MOXI_COMMS_DIRECTORS"
+GLOBAL_ENV = "MOXI_COMMS_GLOBAL"
+MOCK_BACKEND_ENV = "MOXI_COMMS_MOCK_BACKEND"
+NAME_ENV = "MOXI_COMMS_NAME"
+OPERATOR_ENV = "MOXI_COMMS_OPERATOR"
+PROJECT_ENV = "MOXI_COMMS_PROJECT"
+SCOPE_ENV = "MOXI_COMMS_SCOPE"
+SECRET_PREFIX_ENV = "MOXI_COMMS_SECRET_"
+SHELL_REACH_ENV = "MOXI_COMMS_SHELL_REACH"
+SHIM_SOCKET_ENV = "MOXI_COMMS_SHIM_SOCKET"
+TOKEN_ENV = "MOXI_COMMS_MCP_TOKEN"
+TOKEN_STORE_ENV = "MOXI_COMMS_TOKEN_STORE"
+URL_ENV = "MOXI_COMMS_MCP_URL"
+
 # --- send retry: retried, then loud ----------------------------------------------------
 RETRY_ATTEMPTS = 5     # total attempts, then a loud failure at the verb
 RETRY_MAX_SLEEP = 30.0  # cap on an honored Retry-After, per attempt

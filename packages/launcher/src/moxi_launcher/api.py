@@ -91,6 +91,10 @@ from moxi import modules as moxi_modules
 
 from . import catalog, compose, first, handoffs, identity, presets, slots, store, targets
 from .compose import Composition, common
+from .compose.common import (KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV, RELAUNCH_ENV,
+                             REQUEST_ENV)
+from .first import TURNS_ENV
+from .slots import SLOTS_ENV
 
 if TYPE_CHECKING:
     from . import keepwarm
@@ -676,7 +680,8 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["KINDS", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
+__all__ = ["KINDS", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_EXPIRY_ENV", "RELAUNCH_ENV",
+           "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
            "ReplayRequest", "Replayed", "ScratchRoot", "check", "exit_code", "launch",
            "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold"]

@@ -70,7 +70,7 @@ class Comms:
         self.link = link
         self.tools = tools_mod.Tools(
             link, result=self.api.Result, refused=self.api.Result.refused,
-            wait_default=cfg.connector.wait_default, wait_max=cfg.connector.wait_max,
+            wait_default_s=cfg.connector.wait_default_s, wait_max=cfg.connector.wait_max_s,
             record=self.record, env=dict(env))
         await asyncio.to_thread(link.start)
 

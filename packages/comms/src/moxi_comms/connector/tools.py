@@ -114,7 +114,7 @@ def inputs() -> dict[str, dict]:
                        "maximum": CONNECTOR_WAIT_CEILING,
                        "description": "seconds to wait; leave it out for the usual "
                                       "wait. The longest wait is "
-                                      f"{ConnectorConfig.wait_max} seconds unless "
+                                      f"{ConnectorConfig.wait_max_s} seconds unless "
                                       "comms is configured otherwise; a longer "
                                       "one is cut to it"},
         }, "required": ["to", "text"], "additionalProperties": False},
@@ -183,13 +183,13 @@ class Tools:
     `record` and `env` are what the send verb reads (the record, the config's roots);
     `clock` ages messages."""
 
-    def __init__(self, link, *, result: Callable, refused: Callable, wait_default: int,
+    def __init__(self, link, *, result: Callable, refused: Callable, wait_default_s: int,
                  wait_max: int, record=None, env: Mapping[str, str] | None = None,
                  clock: Callable[[], float] = time.time):
         self.link = link
         self.result = result
         self.refused = refused
-        self.wait_default = wait_default
+        self.wait_default_s = wait_default_s
         self.wait_max = wait_max
         self.record = record
         self.env = env
@@ -416,7 +416,7 @@ class Tools:
         unbound = self._unbound()
         if unbound is not None:
             return unbound
-        wait = int(args.get("wait_s", self.wait_default))
+        wait = int(args.get("wait_s", self.wait_default_s))
         if wait < 1:
             return self.refused("wait-shape", f"wait_s {wait} is under 1. Nothing "
                                 "was sent.")

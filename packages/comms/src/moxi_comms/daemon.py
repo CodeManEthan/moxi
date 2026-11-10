@@ -3793,7 +3793,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if args.backend_store:
-        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
+        os.environ[constants.MOCK_BACKEND_ENV] = args.backend_store
     # The flag may name a backend the box's config does not, and every adapter resolves the
     # backend WITHOUT a flag. A daemon holding one record while the shims and the CLI write
     # another is a fleet that looks connected and delivers nothing, so the disagreement is

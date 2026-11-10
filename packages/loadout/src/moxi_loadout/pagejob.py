@@ -55,7 +55,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi_loadout.homes import MARKER, PAGE_JOB
+from moxi_loadout.homes import CALLER_ENV, PAGE_JOB
 
 #: The folder of job records, in loadout's state directory.
 JOBS = "jobs"
@@ -299,7 +299,7 @@ def run(job: str, argv: Sequence[str]) -> int:
     `--json`, and write the end in one write. Returns the exit code written. An error
     anywhere before the end, the log's setup included, is written as exit 1 with its
     line."""
-    os.environ[MARKER] = CALLER
+    os.environ[CALLER_ENV] = CALLER
     try:
         code, outcome, lines = _steps(list(argv))
     except Exception as exc:  # noqa: BLE001 - an error outside the CLI is the job's end

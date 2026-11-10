@@ -1346,7 +1346,7 @@ def build_parser():
     ap.add_argument("--director", action="append", default=[],
                     help="an ALREADY-QUALIFIED director name (repeatable). moxi-comms-claude "
                          "qualifies at launch and passes them here; a hand-run shim must "
-                         f"write `name@scope` itself. Default: ${directors_mod.ENV_VAR}")
+                         f"write `name@scope` itself. Default: ${directors_mod.DIRECTORS_ENV}")
     ap.add_argument("--inject-file",
                     help="the injection seam: write each digest to this file")
     ap.add_argument("--boundary-file", help="touch-file poll: each change = a Stop hook")

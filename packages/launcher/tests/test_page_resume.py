@@ -418,7 +418,7 @@ def test_an_act_the_job_doesnt_run_is_recorded():
 def rig(tmp_path, monkeypatch):
     directory = tmp_path / "fake-slots"
     directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
     monkeypatch.setenv(fake.DIR, str(directory))
     monkeypatch.syspath_prepend(str(TESTS))
     monkeypatch.setattr(slots, "api", SLOTS_API)

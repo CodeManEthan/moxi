@@ -53,6 +53,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from ..paths import HOME_ENV
+
 from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, enabled_by_socket,
     listen_address, socket_name, socket_place, socket_state)
@@ -917,7 +919,7 @@ class SystemdBackend:
         record = f"{module}/{name}"
         # The gate is told the home rather than the service given `MOXI_HOME`, which
         # would reach the foreign unit's own command too.
-        home = unit_env(module).get("MOXI_HOME")
+        home = unit_env(module).get(HOME_ENV)
         run = [gate, "run"] + (["--home", home] if home else [])
         text = _text([
             f"{WRAP_MARK}{record}",

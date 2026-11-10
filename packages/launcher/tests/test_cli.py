@@ -59,7 +59,7 @@ def no_projects(monkeypatch):
 @pytest.fixture
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "slots" and real(name))
 
@@ -311,7 +311,7 @@ def test_turns_failing_to_give_its_additions_prints_a_refusal_not_a_traceback(
     fake = tmp_path / "fake-turns"
     fake.mkdir()
     (fake / "script.json").write_text(json.dumps({"additions": "error"}))
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
     monkeypatch.setenv(fake_turns.DIR, str(fake))
     status, out, err = run([verb, "--brief", BRIEF], capsys)
     assert status == codes.REFUSED and out == ""
@@ -369,15 +369,15 @@ def test_preview_json_is_one_object_with_argv_and_env(work, capsys):
     assert (shown["harness"], shown["mode"], shown["target"]) == ("codex", "exec",
                                                                   "headless")
     assert shown["argv"][:2] == ["codex", "exec"]
-    assert set(shown["env"]) == {common.REQUEST}
+    assert set(shown["env"]) == {common.REQUEST_ENV}
     assert shown["first_turn"] is None and shown["values"]["scratch"] is True
-    assert rows() == [] and not common.scratch_dir(shown["env"][common.REQUEST]).exists()
+    assert rows() == [] and not common.scratch_dir(shown["env"][common.REQUEST_ENV]).exists()
 
 
 def test_preview_names_the_first_turn_owed_and_the_rows_not_applied(work, monkeypatch, capsys):
     monkeypatch.setattr(api, "preview", lambda request, **kw: common.Composition(
         harness="claude", mode="interactive", target="terminal", argv=("claude",),
-        env={common.REQUEST: "r-1"}, values={}, first="Brief from launcher\n\nGo.",
+        env={common.REQUEST_ENV: "r-1"}, values={}, first="Brief from launcher\n\nGo.",
         not_applied=("effort",), warnings=("a warning",)))
     code, out, err = run(["preview"], capsys)
     assert code == codes.OK and err == "warning: a warning\n"
@@ -451,7 +451,7 @@ def stored(rid: str, *, state: str = "started", created: str | None = None) -> N
     try:
         store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
                      cwd="/work", values={"mode": "exec"}, argv=["codex", "exec", "b"],
-                     env={common.REQUEST: rid}, posture="", preset_kind="seat",
+                     env={common.REQUEST_ENV: rid}, posture="", preset_kind="seat",
                      preset_name="coder", at=created)
         if state != "spawning":
             store.set_state(conn, rid, "started")
@@ -782,7 +782,7 @@ def launched(rid: str, cwd: str, *, at: str, **fields) -> None:
     conn = store.connect()
     try:
         store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
-                     cwd=cwd, values={}, argv=["codex"], env={common.REQUEST: rid},
+                     cwd=cwd, values={}, argv=["codex"], env={common.REQUEST_ENV: rid},
                      posture="", at=at, **fields)
     finally:
         conn.close()

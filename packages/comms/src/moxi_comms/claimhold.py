@@ -32,6 +32,7 @@ from pathlib import Path
 from moxi import ipc
 
 from . import claimfile, wire
+from .constants import CLAIM_SOCKET_ENV, GLOBAL_ENV, NAME_ENV, SCOPE_ENV
 from .claimfile import BOUND, HOLDS, OFFLINE, STANDBY, WAITING
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
 from .membership import DEFAULT_PROC, SELF, TREE, ProcView, Root, root_of, sessions_of
@@ -53,9 +54,6 @@ class AdapterMismatch(Exception):
 #: speaks comms 0.2's claim socket.
 OLD_ADAPTER = ("this session's comms adapter is from comms 0.2 and speaks the old wire; "
                "relaunch the session. Nothing was sent.")
-
-#: The one variable every adapter stamps into what it spawns.
-CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
 #: The claim socket's methods, beside the hello: `claim` answers only inside the session,
 #: `state` any local caller.
@@ -756,7 +754,7 @@ __all__ = ["AdapterMismatch", "CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimUnreachable
            "socket_from_env", "whoami"]
 
 
-STAMP_VARS = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL")
+STAMP_VARS = (NAME_ENV, SCOPE_ENV, GLOBAL_ENV)
 
 
 def claim_overlay(env) -> dict:
@@ -787,8 +785,8 @@ def claim_overlay(env) -> dict:
     claim = answer.get("claim") or {}
     if not claim.get("name"):
         return out
-    out["MOXI_COMMS_NAME"] = claim["name"]
+    out[NAME_ENV] = claim["name"]
     if claim.get("global"):
-        out["MOXI_COMMS_GLOBAL"] = "1"
-    out["MOXI_COMMS_SCOPE"] = claim.get("scope") or ""
+        out[GLOBAL_ENV] = "1"
+    out[SCOPE_ENV] = claim.get("scope") or ""
     return out

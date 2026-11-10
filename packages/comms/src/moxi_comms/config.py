@@ -211,8 +211,8 @@ class ConnectorConfig:
     `send_and_wait` waits. Read by comms' provider when the connector starts it."""
 
     identity: str = _default("connector.identity")
-    wait_default: int = _default("connector.wait_default_s")
-    wait_max: int = _default("connector.wait_max_s")
+    wait_default_s: int = _default("connector.wait_default_s")
+    wait_max_s: int = _default("connector.wait_max_s")
 
 
 @dataclass
@@ -495,8 +495,8 @@ def _connector(bad, v, operator: str) -> ConnectorConfig:
     if not 1 <= wait_default <= wait_max:
         raise bad("connector.wait_default_s", f"is {wait_default}",
                   f"set it to a whole number of seconds from 1 to wait_max_s ({wait_max})")
-    return ConnectorConfig(identity=identity, wait_default=wait_default,
-                           wait_max=wait_max)
+    return ConnectorConfig(identity=identity, wait_default_s=wait_default,
+                           wait_max_s=wait_max)
 
 
 def _chain(bad, chain) -> tuple:

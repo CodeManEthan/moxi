@@ -156,7 +156,7 @@ def go(conn, which=SID, *, session=None, slots_api=None, turns=None, **kw):
     return exits.exit_session(
         which, conn=conn, turns=turns or FakeTurns(session or FakeSession()),
         slots_api=slots_api if slots_api is not None else FakeSlots(ended=True),
-        settings=SETTINGS, environ={**os.environ, first.COMMS_NAME: "ann"}, clock=clock,
+        settings=SETTINGS, environ={**os.environ, first.comms_name_env(): "ann"}, clock=clock,
         wall=lambda: 1e9, sleep=clock.sleep, **kw)
 
 

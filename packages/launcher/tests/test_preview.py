@@ -351,7 +351,7 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
     if with_turns:
         fake = tmp_path / "fake-turns"
         fake.mkdir()
-        monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+        monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
         monkeypatch.setenv("LAUNCHER_FAKE_TURNS", str(fake))
     if typed.get("target") == "slot":
         slots = tmp_path / "fake-slots"

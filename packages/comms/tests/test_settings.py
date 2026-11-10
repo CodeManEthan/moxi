@@ -256,13 +256,13 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
     assert tokens.TokenStore().root == paths.tokens_dir()
     write_config(None, f'[credentials]\nstore = "{tmp_path / "a"}"\n')
     assert tokens.TokenStore().root == tmp_path / "a"
-    monkeypatch.setenv(tokens.STORE_ENV_VAR, str(tmp_path / "b"))
+    monkeypatch.setenv(tokens.TOKEN_STORE_ENV, str(tmp_path / "b"))
     assert tokens.TokenStore().root == tmp_path / "b"
     assert tokens.TokenStore(tmp_path / "c").root == tmp_path / "c"
     # A caller's injected env names the override, never the roots.
     assert tokens.TokenStore(env={"MOXI_COMMS_TOKEN_STORE": str(tmp_path / "d")}).root \
         == tmp_path / "d"
-    monkeypatch.delenv(tokens.STORE_ENV_VAR)
+    monkeypatch.delenv(tokens.TOKEN_STORE_ENV)
     assert tokens.TokenStore(env={"MOXI_COMMS_PROJECT": "p"}).root == tmp_path / "a"
 
 

@@ -75,7 +75,7 @@ def test_an_opencode_name_takes_the_daemons_verdict(rig, bind):
     target = cache.target_for_name("coder@proj-a", {
         "bound": True, "adapter": "opencode", "cache_kind": "cold", "age_s": 4000,
         "cache_ttl": 1800})
-    assert (target.settled, target.age_seconds, target.ttl_seconds) == \
+    assert (target.settled, target.age_s, target.ttl_s) == \
         (cache.COLD, 4000.0, 1800.0)
     target = cache.target_for_name("coder@proj-a", {"bound": True, "adapter": "opencode"})
     assert target.settled == cache.UNKNOWN

@@ -77,6 +77,7 @@ import tempfile
 from pathlib import Path
 
 from .. import directors as directors_mod
+from ..constants import GLOBAL_ENV, NAME_ENV, SCOPE_ENV
 from ..context import (BARE_COMMS, COMMAND_ENV, CONTEXT_BLOCK, layer_one, layer_one_form,
                        own_comms)
 from ..roster_view import render_agents
@@ -157,10 +158,10 @@ def self_identity(env=None) -> str | None:
     a claim socket, else the launch stamp, or None."""
     from ..claimhold import claim_overlay
     env = claim_overlay(env if env is not None else os.environ)
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if not name:
         return None
-    scope = GLOBAL if env.get("MOXI_COMMS_GLOBAL") else (env.get("MOXI_COMMS_SCOPE") or GLOBAL)
+    scope = GLOBAL if env.get(GLOBAL_ENV) else (env.get(SCOPE_ENV) or GLOBAL)
     return qualify(name, scope)
 
 
@@ -186,7 +187,7 @@ def render_snapshot(info: dict | None, *, env=None) -> tuple[str, bool]:
     if not usable(info):
         return with_block(OFFLINE, directors=directors, comms=comms, form=form), False
     lines = [LABEL, render_agents(info)]
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if name and not info["bindings"]:
         lines.append(OWN_BINDING_RACE.format(name=name))
     return with_block("\n".join(lines), directors=directors, comms=comms, form=form), True

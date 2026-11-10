@@ -82,7 +82,9 @@ from pathlib import Path
 from moxi import exit as moxi_exit
 
 from .. import directors as directors_mod
-from ..context import COMMAND_ENV, own_comms
+from ..constants import (CLAIM_SOCKET_ENV, COMMAND_ENV, GLOBAL_ENV, NAME_ENV, PROJECT_ENV,
+                         SCOPE_ENV, SHIM_SOCKET_ENV)
+from ..context import own_comms
 from ..mcp import additions as mcp_additions
 from ..paths import claim_socket, log_dir, runtime_root
 from ..scoping import GLOBAL, NAME_RE, project_key, qualify
@@ -90,7 +92,7 @@ from .word import BOUND, FAILED, await_word, exit_of, teller
 
 #: The old wrapper stamp, scrubbed from a child's environment so a nested session
 #: does not inherit its parent's (no comms code reads it).
-SOCKET_ENV = "MOXI_COMMS_SHIM_SOCKET"
+SOCKET_ENV = SHIM_SOCKET_ENV
 
 #: How long the wrapper waits for the adapter's ready byte. The bind and listen take well
 #: under a second; a launch whose bind isn't answered in this time ends with
@@ -146,14 +148,12 @@ def sessions_dir(env=None) -> Path:
 # Every variable comms sets on a session. A child's comms identity is composed ONLY of
 # what its caller stamps, so all of these come off first -- see `stamped_env`.
 #: The claim socket: a session never inherits its wrapper's.
-CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
-
 #: comms' tools' stamps are among them: a wrapper run inside a session that mints nothing
 #: must never pass the outer session's token or URL on, or the inner session would send
 #: as the outer identity.
-INHERITED_COMMS_ENV = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
+INHERITED_COMMS_ENV = (NAME_ENV, SCOPE_ENV, GLOBAL_ENV,
                        "MOXI_COMMS_DIRECTORS", SOCKET_ENV, "MOXI_COMMS_SOCKET",
-                       "MOXI_COMMS_PROJECT", CLAIM_SOCKET_ENV, COMMAND_ENV,
+                       PROJECT_ENV, CLAIM_SOCKET_ENV, COMMAND_ENV,
                        *mcp_additions.STAMPS)
 
 
@@ -194,14 +194,14 @@ def identity_env(*, name=None, scope=None, global_=False,
     env = {}
     env.update(directors_mod.stamp(directors))
     if name:
-        env["MOXI_COMMS_NAME"] = name
+        env[NAME_ENV] = name
     if global_:
-        env["MOXI_COMMS_GLOBAL"] = "1"
-        env["MOXI_COMMS_SCOPE"] = GLOBAL
+        env[GLOBAL_ENV] = "1"
+        env[SCOPE_ENV] = GLOBAL
     elif scope:
-        env["MOXI_COMMS_SCOPE"] = scope
+        env[SCOPE_ENV] = scope
     if project:
-        env["MOXI_COMMS_PROJECT"] = project
+        env[PROJECT_ENV] = project
     return env
 
 
@@ -408,10 +408,6 @@ def launch_session_id(passthrough, own=None):
     return named, ["--session-id", named]
 
 
-#: turns' grant of session commands, which a launcher stamps and this wrapper binds.
-GRANT_ENV = "MOXI_TURNS_COMMANDS"
-
-
 def additions_for(session: Session, env: dict, cwd=None):
     """turns' launch additions for this Claude launch: `moxi_turns.launch_additions` with
     the stamped environment, the launch's working directory and the id it names to
@@ -438,7 +434,7 @@ def granted_commands(env) -> tuple[str, ...]:
     grant (`<id>:<commands>`), or none, gives none: it is left as it is."""
     import moxi_turns
 
-    stamp = env.get(GRANT_ENV) or ""
+    stamp = env.get(moxi_turns.COMMANDS_ENV) or ""
     if ":" in stamp:
         return ()
     names = {part.strip() for part in stamp.split(",")}

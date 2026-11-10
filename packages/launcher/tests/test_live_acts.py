@@ -296,8 +296,8 @@ def test_a_self_relaunch_of_claude_in_a_slot_comes_back_with_its_handoff_alone(
                  what=lambda: f"{answer} from the handoff; saw "
                               f"{pane_text(own_slots, new.pane_id, live_env)[-2000:]}")
         env = proc.process_env(new.pid) or {}
-        assert env.get(common.REQUEST) == new.request_id
-        assert env.get(common.RELAUNCH) == run.run_id
+        assert env.get(common.REQUEST_ENV) == new.request_id
+        assert env.get(common.RELAUNCH_ENV) == run.run_id
         assert exported not in env and env.get(passed) == "1", sorted(env)
     finally:
         kill_panes(own_slots, live_env, row.pane_id if row else None,
@@ -423,8 +423,8 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
         wait_for(lambda: launch_row(new.request_id).pid, timeout=60, interval=0.5,
                  what="the new launch's process")
         env = proc.process_env(launch_row(new.request_id).pid) or {}
-        assert env.get(common.REQUEST) == new.request_id
-        assert common.RELAUNCH not in env
+        assert env.get(common.REQUEST_ENV) == new.request_id
+        assert common.RELAUNCH_ENV not in env
         assert env.get(passed) == "1", sorted(env)
         assert director_var not in env and shell_var not in env, sorted(env)
     finally:

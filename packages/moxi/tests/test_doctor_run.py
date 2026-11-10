@@ -1253,21 +1253,24 @@ def test_a_check_that_breaks_is_one_fail_row_and_the_rest_still_run(d, monkeypat
 def test_the_idle_rate_takes_the_sample_nearest_an_hour_old():
     now = 1_000_000.0
     stamp = _run._stamp
-    samples = [{"unit": "demo/relay", "at": stamp(now - 300), "cpu_seconds": 9.9},
-               {"unit": "demo/relay", "at": stamp(now - 3000), "cpu_seconds": 4.0},
-               {"unit": "demo/relay", "at": stamp(now - 7200), "cpu_seconds": 1.0},
-               {"unit": "demo/other", "at": stamp(now - 3600), "cpu_seconds": 0.0}]
+    samples = [{"unit": "demo/relay", "at": stamp(now - 300), "cpu_s": 9.9},
+               {"unit": "demo/relay", "at": stamp(now - 3000), "cpu_s": 4.0},
+               {"unit": "demo/relay", "at": stamp(now - 7200), "cpu_s": 1.0},
+               {"unit": "demo/other", "at": stamp(now - 3600), "cpu_s": 0.0}]
     rate, how = _run.idle_rate(samples, "demo/relay", 10.0, now, None)
     assert rate == pytest.approx(6.0 / 3000) and how == "over the last 50 min"
 
 
 def test_the_idle_rate_falls_back_to_uptime_after_a_restart_or_without_samples():
     now = 1_000_000.0
-    old = [{"unit": "demo/relay", "at": _run._stamp(now - 3600), "cpu_seconds": 50.0}]
+    old = [{"unit": "demo/relay", "at": _run._stamp(now - 3600), "cpu_s": 50.0}]
     # The daemon started after the sample: the sample is another run's.
     rate, how = _run.idle_rate(old, "demo/relay", 2.0, now, now - 1000)
     assert rate == pytest.approx(2.0 / 1000) and how.startswith("since it started")
     assert _run.idle_rate([], "demo/relay", 2.0, now, None) == (None, "not measured")
+    legacy = [{"unit": "demo/relay", "at": _run._stamp(now - 3600),
+               "cpu_seconds": 1.0}]
+    assert _run.idle_rate(legacy, "demo/relay", 2.0, now, None) == (None, "not measured")
 
 
 def test_the_cgroup_read(tmp_path, monkeypatch):
@@ -1318,7 +1321,7 @@ def test_costs_rows_against_budgets_and_the_samples_kept(d, monkeypatch):
     assert rss.state == "warn" and "over its budget 1M" in rss.detail
     assert got[("demo", "cost fds")].state == "ok"
     samples = files.read_records(moxi.paths.core().state_dir() / "costs.jsonl")
-    assert [(s["unit"], s["cpu_seconds"]) for s in samples] == [("demo/relay", 18.0)]
+    assert [(s["unit"], s["cpu_s"]) for s in samples] == [("demo/relay", 18.0)]
     # Without --costs nothing is measured or kept.
     assert not any(name.startswith("cost") for _, name in d.rows("demo"))
 

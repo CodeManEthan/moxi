@@ -57,7 +57,7 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
     modules = testing._modules()
     assert modules, "the workspace installs Moxi modules; none found"
     expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR",
-                                              testing.ANCHOR_HOME} | {
+                                              testing.ANCHOR_HOME_ENV} | {
         f"MOXI_{m.upper()}_HOME" for m in modules}
     kept = set(testing.KEPT_ENV)
     if testing.WINDOWS:
@@ -81,7 +81,7 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
         home = Path(os.environ[f"MOXI_{module.upper()}_HOME"])
         assert home == fence.module_home(module) and home.parent == fence.short
     # The account's folder, which places the core's anchor, is the test's own.
-    anchor = Path(os.environ[testing.ANCHOR_HOME])
+    anchor = Path(os.environ[testing.ANCHOR_HOME_ENV])
     assert anchor == fence.anchor_home
     assert anchor == (Path(os.environ["LOCALAPPDATA"]) if testing.WINDOWS else fence.home)
     # Short enough that a socket a few directories under it fits in sun_path, where
@@ -201,7 +201,7 @@ def test_terminal_record_writes_the_recorded_names_under_the_tests_anchor(
     assert recorded["HOME"] == os.environ["HOME"] and recorded["PATH"] == os.environ["PATH"]
     assert recorded["MOXI_PROJECTS_DATA_HOME"] == ""          # empty is kept as empty
     assert "ANTHROPIC_API_KEY" not in recorded and "TMPDIR" not in recorded
-    assert testing.ANCHOR_HOME not in recorded and "LANG" not in recorded
+    assert testing.ANCHOR_HOME_ENV not in recorded and "LANG" not in recorded
     if not testing.WINDOWS:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
     given = terminal_record({"HOME": "/h", "MOXI_HOME": "/m", "SECRET": "x"}, version="9.9")

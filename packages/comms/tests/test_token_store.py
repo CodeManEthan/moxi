@@ -13,7 +13,7 @@ import tomllib
 import pytest
 
 from moxi_comms.paths import tokens_dir
-from moxi_comms.tokens import (NOT_A_MAP, OPERATOR_SECRET_ID, STORE_ENV_VAR, TokenStore,
+from moxi_comms.tokens import (NOT_A_MAP, OPERATOR_SECRET_ID, TOKEN_STORE_ENV, TokenStore,
                                TokenStoreError, owner_for_role)
 
 POSTING_KEY = OPERATOR_SECRET_ID
@@ -31,7 +31,7 @@ def test_the_default_location_is_the_device_keyed_state_root():
 def test_the_explicit_override_beats_the_default_state_path(tmp_path):
     """`MOXI_COMMS_HOME` collapses every root, so an alternate-home recipe needs a
     deliberate way to still name the operator's real store."""
-    store = TokenStore(env={STORE_ENV_VAR: str(tmp_path / "elsewhere")})
+    store = TokenStore(env={TOKEN_STORE_ENV: str(tmp_path / "elsewhere")})
     assert store.root == tmp_path / "elsewhere"
 
     store.write_secret(owner_for_role("operator"), POSTING_KEY, "OPERATOR-TOKEN")

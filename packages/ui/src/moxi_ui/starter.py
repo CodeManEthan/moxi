@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi import files, proc
+from moxi.log import LOG_FILE_ENV
 from moxi.names import is_module_name
 from moxi.paths import python
 from moxi_ui.loopback.api import (
@@ -106,10 +107,6 @@ EXPORT_TIMEOUT = 10.0
 LOCK_HELD = 75
 SERVERS_FILE = "servers.json"
 SERVERS_FORMAT = 1
-
-#: The variable that names the shell's log file. A child must not inherit it: its stderr
-#: reaches the shell's log through the shell, and two processes never roll one file.
-LOG_FILE_VARIABLE = "MOXI_LOG_FILE"
 
 _READY = re.compile(rb"\Aready ([0-9a-f]{32})\n\Z")
 _log = logging.getLogger("moxi.ui.starter")
@@ -897,7 +894,7 @@ class Starters:
 
     def child_env(self) -> dict[str, str]:
         """The shell's environment without the variable that names its log file."""
-        return {key: value for key, value in os.environ.items() if key != LOG_FILE_VARIABLE}
+        return {key: value for key, value in os.environ.items() if key != LOG_FILE_ENV}
 
     def get(self, module: str) -> Starter:
         """`module`'s starter, made on first use."""

@@ -34,7 +34,7 @@ class Event:
 
     def __init__(self, event, harness, session_id, request_id, source="startup"):
         self.event, self.harness, self.session_id = event, harness, session_id
-        self.env = {listeners.REQUEST: request_id}
+        self.env = {listeners.REQUEST_ENV: request_id}
         self.source, self.reason = source, None
 
 
@@ -61,7 +61,7 @@ def launch(conn, request_id="r1", *, harness="claude", session_id=CLAUDE_ID, val
               "mode": "interactive" if harness == "claude" else "host", **(values or {})}
     return store.insert(conn, request_id=request_id, actor="someone", harness=harness,
                         target="slot", cwd="/work", values=placed, argv=[harness],
-                        env={listeners.REQUEST: request_id}, posture="operator",
+                        env={listeners.REQUEST_ENV: request_id}, posture="operator",
                         session_id=session_id if harness == "claude" else None,
                         preset_kind=preset_kind,
                         preset_name=None if preset_kind is None else "a-preset",

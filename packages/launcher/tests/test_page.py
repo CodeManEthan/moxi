@@ -684,7 +684,7 @@ def test_a_launch_made_under_a_comms_name_is_that_names_place(log, monkeypatch):
     launched(log, "mine", "2026-01-01T09:00:00.000000Z", cwd="/work/mine")
     launched(log, "theirs", "2026-01-01T10:00:00.000000Z", cwd="/work/theirs",
              actor="planner")
-    monkeypatch.setenv(first.COMMS_NAME, "planner")
+    monkeypatch.setenv(first.comms_name_env(), "planner")
     said = get("/api/places")[1]
     assert said["actor"] == "planner"
     assert [p["cwd"] for p in said["places"]] == ["/work/theirs"]
@@ -730,7 +730,7 @@ def fake_slots(tmp_path, monkeypatch):
 
     directory = tmp_path / "fake-slots"
     directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
     monkeypatch.setenv(fake.DIR, str(directory))
     installed(monkeypatch, "slots")
     fake.reset()

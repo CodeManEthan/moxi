@@ -94,6 +94,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("restart_point", "RestartPoint"), "measure"),
     **dict.fromkeys(("threshold", "Threshold", "stamp", "MARKS"), "thresholds"),
     **dict.fromkeys(("mark", "MarkState", "PurposeState"), "marks"),
+    **dict.fromkeys(("WARN_AT_ENV", "CROSSING_AT_ENV"), "mark"),
     "Crossing": "mark",
 }
 

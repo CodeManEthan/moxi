@@ -44,6 +44,8 @@ from .resolve import Resolution, notes_dir, notes_root_for
 
 #: The folder under a notes directory that holds a project's handoffs.
 HANDOFFS = "handoffs"
+#: The launch override read by notes' CLI and listener.
+NOTES_DIR_ENV = "MOXI_NOTES_DIR"
 
 
 def root():
@@ -91,6 +93,6 @@ def validate():
     return walk()
 
 
-__all__ = ["HANDOFFS", "Resolution", "Inbox", "NotesError", "Refused", "BadSlug", "root",
+__all__ = ["HANDOFFS", "NOTES_DIR_ENV", "Resolution", "Inbox", "NotesError", "Refused", "BadSlug", "root",
            "notes_dir", "handoffs_dir", "notes_root_for", "inbox_dir", "make_inbox",
            "inbox_list", "rename_inbox", "frontmatter", "upsert_frontmatter", "validate"]

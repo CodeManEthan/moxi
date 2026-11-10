@@ -65,9 +65,13 @@ MODULE = "launcher"
 TURNS_INTERFACE = 2
 #: A test seam: the import name of a module that stands in for turns' API, so a test (and a
 #: detached deliverer a test starts) reaches a fake turns without one installed.
-TURNS_SEAM = "MOXI_LAUNCHER_TURNS"
-#: comms' identity stamp; the actor named in the header when the caller has one.
-COMMS_NAME = "MOXI_COMMS_NAME"
+TURNS_ENV = "MOXI_LAUNCHER_TURNS"
+def comms_name_env() -> str | None:
+    """Comms' identity stamp, when the optional comms module is available."""
+    if not modules.available("comms"):
+        return None
+    found = modules.load("comms", interface=2)
+    return found.api.NAME_ENV if found.ok and found.api is not None else None
 
 #: The first line of a first turn that carries a brief only.
 BRIEF_HEADER = "Brief from launcher, launched by {actor}"
@@ -111,7 +115,7 @@ def actor(env: Mapping[str, str] | None = None) -> str:
     """Who launched, as the header names them: the caller's comms identity when its
     environment holds comms' stamp, else the OS user name."""
     environ = os.environ if env is None else env
-    name = environ.get(COMMS_NAME, "").strip()
+    name = environ.get(comms_name_env() or "", "").strip()
     if name:
         return name
     try:
@@ -177,7 +181,7 @@ def turns_api(*, quiet: bool = False) -> Any | None:
     When `MOXI_LAUNCHER_TURNS` names a module, that module stands in for turns' API: the
     seam a test uses to give the launcher a fake turns.
     """
-    seam = os.environ.get(TURNS_SEAM)
+    seam = os.environ.get(TURNS_ENV)
     if seam:
         return importlib.import_module(seam)
     if not modules.available("turns"):
@@ -477,6 +481,6 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
 
 
 __all__ = ["BRIEF_HEADER", "EVENT", "HANDOFF_HEADER", "HANDOFF_UNREADABLE", "NO_READY",
-           "NO_TURNS", "RELAUNCH_HEADER", "TURNS_INTERFACE", "TURNS_SEAM", "UNCONFIRMED", "HandoffUnreadable",
+           "NO_TURNS", "RELAUNCH_HEADER", "TURNS_INTERFACE", "TURNS_ENV", "UNCONFIRMED", "HandoffUnreadable",
            "Outcome", "actor", "deliver", "deliverer_argv", "on_argv", "read_handoff", "ref",
            "run_log", "send", "start_deliverer", "text", "turns_api"]

@@ -25,7 +25,8 @@ import logging
 from collections.abc import Callable, Mapping
 
 from .. import claimfile, claimhold, membership
-from ..sender import OPERATOR_VAR, OperatorRefused, operator_from_env
+from ..constants import NAME_ENV
+from ..sender import OPERATOR_ENV, OperatorRefused, operator_from_env
 
 log = logging.getLogger("comms.connector.gate")
 
@@ -37,11 +38,8 @@ SHELL_IN_SESSION = ("This shell is inside the agent session {name} (MOXI_COMMS_N
                     "claim socket is set). Run moxi connector code in your own terminal, "
                     "outside every agent session.")
 #: The verb's refusal of a shell with no operator stamp.
-SHELL_NO_OPERATOR = (f"This shell carries no operator stamp: {OPERATOR_VAR} is not set. "
+SHELL_NO_OPERATOR = (f"This shell carries no operator stamp: {OPERATOR_ENV} is not set. "
                      "Your own terminal sets it; comms' configuration doc says how.")
-
-NAME_VAR = "MOXI_COMMS_NAME"
-
 
 def peer(peer, *, view: membership.ProcView | None = None, records=None,
          alive: Callable | None = None) -> str | None:
@@ -85,7 +83,7 @@ def shell(env: Mapping[str, str], *, overlay: Callable | None = None) -> str | N
     claim socket (`claimhold.claim_overlay`), for a test."""
     env = dict(env)
     seen = (overlay or claimhold.claim_overlay)(env)
-    if env.get(claimhold.CLAIM_SOCKET_ENV) or env.get(NAME_VAR) or seen.get(NAME_VAR):
+    if env.get(claimhold.CLAIM_SOCKET_ENV) or env.get(NAME_ENV) or seen.get(NAME_ENV):
         return SHELL_IN_SESSION.format(name=_session_name(env, seen))
     try:
         operator = operator_from_env(seen)
@@ -99,7 +97,7 @@ def shell(env: Mapping[str, str], *, overlay: Callable | None = None) -> str | N
 def _session_name(env: Mapping[str, str], seen: Mapping[str, str]) -> str:
     """The session's name as the shell's claim socket answers it, else as its stamp
     spells it, else a placeholder that says the claim socket names it."""
-    name = (seen.get(NAME_VAR) or env.get(NAME_VAR) or "").strip()
+    name = (seen.get(NAME_ENV) or env.get(NAME_ENV) or "").strip()
     return name or "that holds this shell's claim socket"
 
 

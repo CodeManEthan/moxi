@@ -150,6 +150,7 @@ from moxi import exit as moxi_exit
 from . import (api, attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
+from .constants import BACKEND_ENV
 from .store import books
 from .record import RecordError
 from .provision import NAMES
@@ -196,7 +197,7 @@ def cmd_reply(args, ctx: Context) -> int:
     return _render(ctx, sending.run(ctx, args))
 
 
-def cmd_delete(args, ctx: Context) -> int:
+def cmd_remove(args, ctx: Context) -> int:
     """`moxi comms remove`: withdraw one of your messages from every recipient that
     hasn't had it yet. One line per recipient; exit `OK` when it was withdrawn from
     anyone, `REFUSED` when from no one, `TEMPFAIL` with the daemon down."""
@@ -703,7 +704,7 @@ def cmd_doctor(args, ctx: Context) -> int:
     for name in DOCTOR_DIRS:
         row(f"  {name.upper()}", str(getattr(LAYOUT, f"{name}_dir")()))
 
-    configured = bool(ctx.env.get("MOXI_COMMS_BACKEND"))
+    configured = bool(ctx.env.get(BACKEND_ENV))
     try:
         cfg = config.load(env=ctx.env)
         configured = configured or cfg.source != "defaults"
@@ -1072,7 +1073,7 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     dl.add_argument("message_id")
     dl.add_argument("--json", action="store_true",
                     help="print the outcome and each recipient's state as one JSON object")
-    dl.set_defaults(func=cmd_delete)
+    dl.set_defaults(func=cmd_remove)
 
     a = sub.add_parser("agents", help="who you can message")
     shown = a.add_mutually_exclusive_group()

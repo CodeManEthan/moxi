@@ -184,6 +184,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from moxi.paths import ANCHOR_HOME_ENV
 
 #: How often a served server looks for its shutdown request, in seconds.
 SHUTDOWN_POLL = 0.05
@@ -256,9 +257,7 @@ HARNESS_HOMES = {
     "CODEX_HOME": ".codex",
 }
 
-#: The core's stand-in for the account's own folder, which places its anchor; only test
-#: kits set it (module doc).
-ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"
 
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
@@ -625,7 +624,7 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
             env[key] = str(home if rel == "." else home / rel)
         env["HOMEDRIVE"], env["HOMEPATH"] = ntpath.splitdrive(str(home))
         env["TEMP"] = env["TMP"] = str(short)
-    env[ANCHOR_HOME] = env["LOCALAPPDATA"] if WINDOWS else str(home)
+    env[ANCHOR_HOME_ENV] = env["LOCALAPPDATA"] if WINDOWS else str(home)
     return env
 
 
@@ -1037,7 +1036,7 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     _GUARD.active = True
     try:
         yield Fence(home=home, runtime=runtime, short=short, env=dict(env),
-                    roots=tuple(Path(r) for r in roots), anchor_home=Path(env[ANCHOR_HOME]))
+                    roots=tuple(Path(r) for r in roots), anchor_home=Path(env[ANCHOR_HOME_ENV]))
     finally:
         late = _GUARD.breaches[_GUARD.reported:]
         _GUARD.restore(outer)
@@ -1296,9 +1295,9 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["ANCHOR_HOME", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
+__all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
            "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV",
-           "MARKERS", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
+           "MARKERS", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
            "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
            "console_script", "fence", "findings_of", "param_id", "selection", "served",
            "short_dir", "terminal_record", "touches_match", "uv_env", "wait_for",

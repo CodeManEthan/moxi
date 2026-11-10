@@ -32,6 +32,7 @@ from pathlib import Path
 from moxi.store import transaction
 
 from . import directory
+from .constants import MOCK_BACKEND_ENV
 from .config import ProvisionConfig
 from .scoping import GLOBAL, is_auto_name
 
@@ -354,7 +355,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     ap.add_argument("--writer", default="provisioner", help="the declared directory writer")
     ap.add_argument("--db", help="comms.db path (default: STATE/comms/comms.db)")
     ap.add_argument("--store", help=f"token store directory, local backend only (default: "
-                                    f"${tokens.STORE_ENV_VAR} or the STATE path)")
+                                    f"${tokens.TOKEN_STORE_ENV} or the STATE path)")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
     if args.retired_slots is not None:
@@ -363,7 +364,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if args.backend_store:
-        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
+        os.environ[MOCK_BACKEND_ENV] = args.backend_store
 
     backend = backend_name(args.backend)
     _, want_operator = configured()

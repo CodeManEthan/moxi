@@ -237,7 +237,7 @@ def test_warm_cold_and_a_raw_id_with_no_transcript():
     warm, cold, none = cache.cache_states([cache.target_for_session_id(i) for i in
                                            (SESS_REVIEWER, SESS_OTHER, SESS_ARCHIVIST)])
     assert warm.kind == "warm"
-    assert 595 <= warm.age_seconds <= 660
+    assert 595 <= warm.age_s <= 660
     assert cold.kind == "cold"
     # no transcript, and a raw id carries no evidence of no request
     assert none.kind == "unknown" and "no transcript for session" in none.reason
@@ -279,7 +279,7 @@ def test_a_subagents_newer_work_does_not_warm_the_main_clock(tmp_path, monkeypat
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     state = cache.cache_state(SESS_OTHER)
     assert state.kind == "cold", state
-    assert state.age_seconds > HOUR
+    assert state.age_s > HOUR
 
 
 # ============================================================== (d) the hold

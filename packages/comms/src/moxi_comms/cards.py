@@ -53,7 +53,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import CARD_MAX_CHARS, CARD_MAX_LINES, CARD_NATIVE_MAX, CARD_READ_LIMIT
+from .constants import (CARD_MAX_CHARS, CARD_MAX_LINES, CARD_NATIVE_MAX, CARD_READ_LIMIT,
+                        GLOBAL_ENV, NAME_ENV, SCOPE_ENV)
 # The indent, the scrub and the closed-envelope rule are SHARED with the delivery
 # adapter's message bodies (`adapters/claude_shim.py`). `envelope` imports nothing from
 # the package, so the card reader's import closure is unchanged in kind by using it.
@@ -96,9 +97,9 @@ def own_scope(env) -> str:
     else `MOXI_COMMS_SCOPE`, else `global`. A process with no scope in its stamp is the global
     identity of its name, as a bind that names no scope is; the working directory's
     project is never a scope. Read only for the caller's own identity."""
-    if env.get("MOXI_COMMS_GLOBAL"):
+    if env.get(GLOBAL_ENV):
         return GLOBAL
-    return env.get("MOXI_COMMS_SCOPE") or GLOBAL
+    return env.get(SCOPE_ENV) or GLOBAL
 
 
 def _candidates(name: str, scope: str | None, env) -> tuple[list[str], str]:
@@ -122,7 +123,7 @@ def _is_name(value: str | None) -> bool:
 
 def _own_identity(env) -> str | None:
     """Who the caller is, read straight off the claim env; None when it has no claim."""
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if not _is_name(name):
         return None
     return qualify(name, own_scope(env))

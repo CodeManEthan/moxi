@@ -46,6 +46,7 @@ from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from ..paths import HOME_ENV
 from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
 from ._fence import Fence, Ran, task_refs_env
 from ._home import home_tag
@@ -142,7 +143,7 @@ class SchtasksBackend:
         daemon = spec.kind == "daemon"
         log = self.log_path(spec.module, spec.name)
         gate = ["-m", "moxi", "run"]
-        home = dict(spec.environment).get("MOXI_HOME")
+        home = dict(spec.environment).get(HOME_ENV)
         if home:
             gate += ["--home", home]
         if not daemon and spec.switch:

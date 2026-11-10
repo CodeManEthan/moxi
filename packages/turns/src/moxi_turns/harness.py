@@ -180,13 +180,13 @@ class Live:
             return cls(None, draft)
         return cls(count, draft, count - (agents.busy(include_shells=False) or 0))
 
-    def busy(self, *, shells: bool = True) -> bool:
+    def busy(self, *, include_shells: bool = True) -> bool:
         """Whether a live subagent keeps the session busy; an unreadable list does. With
-        `shells` False the background shells counted among `agents` are left out, as a
+        `include_shells` False the background shells counted among `agents` are left out, as a
         command with `stop_shells` reads it."""
         if self.agents is None:
-            return shells or self.without_shells is None or self.without_shells > 0
-        return self.agents - (0 if shells else max(0, self.shells)) > 0
+            return include_shells or self.without_shells is None or self.without_shells > 0
+        return self.agents - (0 if include_shells else max(0, self.shells)) > 0
 
 
 @dataclass(frozen=True)

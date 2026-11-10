@@ -1610,7 +1610,7 @@ def _busy(live: Live | None, *, shells: bool = True) -> bool:
     """A subagent pending, running or waiting, or a list that could not be read: unknown
     counts as busy, never as 0. With `shells` False the background shells the adapter
     counts among `agents` are left out, as a command with `stop_shells` reads it."""
-    return live is None or live.busy(shells=shells)
+    return live is None or live.busy(include_shells=shells)
 
 
 def _unvouched() -> Shells:

@@ -128,11 +128,11 @@ def hooks_socket(directory) -> Path:
 
 
 def command(ping: list[str], socket_path, event: HookEvent,
-            wait_seconds: float = PING_TIMEOUT, refuse: str | None = None) -> str:
+            wait_s: float = PING_TIMEOUT, refuse: str | None = None) -> str:
     argv = [*ping, "--socket", str(socket_path)]
     if refuse is not None:
         argv += ["--refuse-unanswered", refuse]
-    argv += ["--wait-s", f"{wait_seconds:g}", event.event]
+    argv += ["--wait-s", f"{wait_s:g}", event.event]
     if event.source:
         argv += ["--source", event.source]
     return shlex.join(argv)
@@ -251,12 +251,12 @@ def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIM
     keys: dict[str, str] = {}
     for event in EVENTS:
         if event.event == "Stop":
-            wait_seconds = hold_wait_s + 1
+            event_wait_s = hold_wait_s + 1
         elif event.event == "Interrupt":
-            wait_seconds = PING_TIMEOUT
+            event_wait_s = PING_TIMEOUT
         else:
-            wait_seconds = listen_wait_s + 1
-        one = handler(command(ping, socket_path, event, wait_seconds), event.timeout)
+            event_wait_s = listen_wait_s + 1
+        one = handler(command(ping, socket_path, event, event_wait_s), event.timeout)
         argv += ["-c", f"hooks.{event.event}={_toml([{'hooks': [one]}])}"]
         keys[hook_key(event.label)] = trusted_hash(event.label, one)
     tools = []
@@ -531,7 +531,7 @@ class HookServer:
 
 class _Ping:
     def __init__(self, path: Path, event: str, source: str | None,
-                 wait_seconds: float, stamp: float | None = None,
+                 wait_s: float, stamp: float | None = None,
                  refuse: str | None = None):
         self.path = path
         #: The deny guards' cover rule (`refuse_table`), on a `PreToolUse` ping only.
@@ -543,7 +543,7 @@ class _Ping:
         self.stamp = stamp
         self.event = event
         self.source = source
-        self.wait_seconds = wait_seconds
+        self.wait_s = wait_s
         self.conn: protocol.LineConn | None = None
         self.block = False
         self.deny = False
@@ -556,7 +556,7 @@ class _Ping:
         if self.stamp is not None:
             ask["stamp"] = self.stamp
         self.conn.send(ask)
-        reply = self.conn.recv(self.wait_seconds)
+        reply = self.conn.recv(self.wait_s)
         if not isinstance(reply, dict) or not reply.get("ok"):
             raise RuntimeError((reply or {}).get("error", "the hook host did not answer"))
         reason = reply.get("block")

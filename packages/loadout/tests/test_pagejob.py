@@ -28,7 +28,7 @@ def lo(folder):
 def page(monkeypatch):
     """This process as a page job would run: loadout's marker set (and taken out again
     after the test)."""
-    monkeypatch.setenv(homes.MARKER, "test")
+    monkeypatch.setenv(homes.CALLER_ENV, "test")
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ def test_a_job_runs_the_verb_and_writes_its_outcome(lo, page, recorded):
     assert record["exit"] == 0 and record["outcome"]["exit"] == 0
     assert "listed skill review in user" in record["outcome"]["lines"]
     assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
-    assert os.environ[homes.MARKER] == pagejob.CALLER
+    assert os.environ[homes.CALLER_ENV] == pagejob.CALLER
     assert not {"homes", "git"} & set(ledger.read())
     assert pagejob.read("j1")["state"] == "done"
 

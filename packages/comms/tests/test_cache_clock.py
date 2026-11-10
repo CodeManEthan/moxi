@@ -548,10 +548,10 @@ def test_a_cold_read_with_no_lifetime_prints_no_duration_and_describe_agrees():
     assert Daemon._describe(zst) == f"cold ({COMPRESSED})"
     timed = cache.Clock("cold", age_s=42 * 60, ttl_s=1800)
     assert Daemon._describe(timed) == "cold for 12m (last request 42m ago)"
-    state = CacheState(target="x", kind="cold", age_seconds=42 * 60, ttl_seconds=1800,
+    state = CacheState(target="x", kind="cold", age_s=42 * 60, ttl_s=1800,
                        key="codex openai/gpt-5.6-terra", adapter="codex")
     assert "went cold 12m ago" in cache.hold_line(state)
-    for clock_state_ in (CacheState(target="x", kind="cold", age_seconds=180,
+    for clock_state_ in (CacheState(target="x", kind="cold", age_s=180,
                                     reason="no row", adapter="opencode"),
                          CacheState(target="x", kind="cold", reason=COMPRESSED,
                                     adapter="codex")):

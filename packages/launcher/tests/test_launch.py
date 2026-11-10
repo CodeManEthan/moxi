@@ -55,7 +55,7 @@ def turns(tmp_path, monkeypatch):
     """The fake turns behind the launcher's seam."""
     directory = tmp_path / "fake-turns"
     directory.mkdir()
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
     monkeypatch.setenv(fake_turns.DIR, str(directory))
     monkeypatch.syspath_prepend(str(TESTS))
     return SimpleNamespace(dir=directory,

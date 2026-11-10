@@ -64,6 +64,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace as _replaced
 from pathlib import Path
 
+from ..log import LOG_FILE_ENV
+
 from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, listen_address, socket_name)
 from ._fence import Fence, Ran
@@ -166,7 +168,7 @@ class LaunchdBackend:
         body["ProcessType"] = "Background"
         body["StandardOutPath"] = log
         body["StandardErrorPath"] = log
-        body["EnvironmentVariables"] = {"MOXI_LOG_FILE": log, **dict(spec.environment)}
+        body["EnvironmentVariables"] = {LOG_FILE_ENV: log, **dict(spec.environment)}
         if spec.kind == "daemon" and spec.stop == "process":
             body["AbandonProcessGroup"] = True
         if spec.kind == "daemon" and spec.socket is not None:

@@ -109,7 +109,7 @@ DEV = f"{names.HARNESS}-dev"
 DEV_IMPORT = f"{names.HARNESS}_dev"
 #: The variables the contributors' package reads, having no announcement to declare
 #: them in: the test tiers' and the check's own (`MOXI_TEST_LIVE`, `MOXI_TEST_WORKERS`).
-DEV_ENV_PREFIX = "MOXI_TEST_"
+TEST_PREFIX_ENV = "MOXI_TEST_"
 #: The entry-point group a module announces itself in (as `moxi.modules.GROUP`).
 GROUP = "moxi.modules"
 #: The core modules another module may import (the core's table of what it holds). The
@@ -954,7 +954,7 @@ class _Repo:
             exact |= CORE_INTERNAL_ENV
         prefixes = tuple(k for k in internal if k.endswith("_"))
         if self.dev:
-            prefixes += (DEV_ENV_PREFIX,)
+            prefixes += (TEST_PREFIX_ENV,)
         for source in self.sources.values():
             if not source.in_src:
                 continue

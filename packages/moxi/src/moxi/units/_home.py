@@ -56,11 +56,11 @@ def home_tag(env: Mapping[str, str] | None = None) -> str | None:
 def unit_env(module: str, env: Mapping[str, str] | None = None) -> dict[str, str]:
     """The variables `module`'s units are written with: `{"MOXI_HOME": home_path}` for a
     tagged home, nothing for the default home. Every module's units carry the same."""
-    from .. import names
+    from .. import names, paths
 
     names.check_module_name(module)
     path = home_path(env)
-    return {} if path is None else {"MOXI_HOME": path}
+    return {} if path is None else {paths.HOME_ENV: path}
 
 
 def locators_set(module: str, env: Mapping[str, str] | None = None) -> tuple[str, ...]:

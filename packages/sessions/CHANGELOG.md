@@ -25,7 +25,7 @@
   `--text`, redacted when the secrets module is installed.
 - Interface 4, which is interface 3 plus the list: `sessions_list` (the sessions counted
   and cut into the ones active recently, seven days and the rest), `sessions_more`,
-  `sessions_newest`, `sessions_folders` and `session_opened`. Each reads through the
+  `sessions_newest`, `session_dirs` and `session_opened`. Each reads through the
   calling process's own memory and takes no cache from its caller.
 - What a list reads: each root's listing; the first lines of every session of the days
   it returns, shown or not, and of every Codex rollout, once each; and the last turn of

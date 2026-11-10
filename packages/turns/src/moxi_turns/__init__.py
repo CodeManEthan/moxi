@@ -94,6 +94,7 @@ _WHERE = {
                      "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES", "COMMANDS"),
                     "results"),
     **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny"), "guards"),
+    "COMMANDS_ENV": "config",
 }
 
 __all__ = [
@@ -105,7 +106,7 @@ __all__ = [
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
-    "COMMANDS", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
+    "COMMANDS", "COMMANDS_ENV", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
 ]
 
 

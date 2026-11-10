@@ -36,7 +36,7 @@ def no_turns(monkeypatch):
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds, so no verb asks a real tmux
     server."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available",
                         lambda name: name not in ("slots", "cache") and real(name))

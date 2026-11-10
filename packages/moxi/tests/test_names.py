@@ -70,7 +70,7 @@ def test_test_is_kept_for_moxi_devs_test_tier_prefix():
     # moxi-dev's test tiers read MOXI_TEST_*; a module named test would own that prefix.
     from moxi_dev import contract
 
-    assert names.env_prefix("test") == contract.DEV_ENV_PREFIX == "MOXI_TEST_"
+    assert names.env_prefix("test") == contract.TEST_PREFIX_ENV == "MOXI_TEST_"
 
 
 @pytest.mark.parametrize("name", ["moxi-handoff", "moxi-comms-send", "moxi-2fa", "moxi-a1-b2",

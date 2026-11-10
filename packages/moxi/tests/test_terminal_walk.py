@@ -433,14 +433,14 @@ def test_a_unit_that_is_not_the_cores_passes():
 # -- E4 ------------------------------------------------------------------------------------
 
 def test_an_ancestors_start_environment_with_the_mark_stops_it():
-    marked = p(["/usr/bin/script", "-q"], env={_mark.NAME: "moxi-launcher-job"})
+    marked = p(["/usr/bin/script", "-q"], env={_mark.STARTED_BY_ENV: "moxi-launcher-job"})
     got = found(ME, SHELL, marked, *PERSON[1:])
     assert got == Evidence("E4", RUN + 2, "script", "moxi-launcher-job")
 
 
 def test_the_runs_own_environment_is_read_from_what_moxi_noted_at_import():
     # The run's own start environment in the view is not what decides; the noted value is.
-    me = p(ME["argv"], env={_mark.NAME: "ignored"})
+    me = p(ME["argv"], env={_mark.STARTED_BY_ENV: "ignored"})
     assert found(me, *PERSON) is None
     got = found(ME, *PERSON, started_by="by hand")
     assert got == Evidence("E4", RUN, "moxi", "by hand")
@@ -448,7 +448,7 @@ def test_the_runs_own_environment_is_read_from_what_moxi_noted_at_import():
 
 def test_a_shielded_process_is_not_judged_by_the_mark():
     hidden = Proc(pid=RUN + 1, parent=0, started=1.0, argv=("sudo",),
-                  env={_mark.NAME: "x"}, shielded=True)
+                  env={_mark.STARTED_BY_ENV: "x"}, shielded=True)
     assert walk(Table([*chain(ME, top_parent=RUN + 1), hidden]), run()) is None
 
 
@@ -670,7 +670,7 @@ def test_a_moxi_program_above_the_runs_own_launcher_is_e1():
 
 def test_the_entry_chain_is_judged_by_the_mark():
     me = p([WIN_EXE, WIN_MOXI], image=WIN_EXE)
-    launcher = p([WIN_MOXI], image=WIN_MOXI, env={_mark.NAME: "moxi"})
+    launcher = p([WIN_MOXI], image=WIN_MOXI, env={_mark.STARTED_BY_ENV: "moxi"})
     got = windows(me, launcher, PWSH, EXPLORER)
     assert got == Evidence("E4", RUN + 1, "moxi", "moxi")
 
@@ -891,7 +891,7 @@ _CHILD = textwrap.dedent("""\
 def test_live_a_process_started_with_the_mark_stops_its_childs_record():
     import json
 
-    env = {**os.environ, _mark.NAME: "a test"}
+    env = {**os.environ, _mark.STARTED_BY_ENV: "a test"}
     done = subprocess.run([sys.executable, "-c", _CHILD], env=env, capture_output=True,
                           text=True, timeout=90)
     got = json.loads(done.stdout.strip().splitlines()[-1])
@@ -901,7 +901,7 @@ def test_live_a_process_started_with_the_mark_stops_its_childs_record():
 
 
 def test_live_a_run_that_started_with_the_mark_stops_at_itself():
-    env = {**os.environ, _mark.NAME: "by hand"}
+    env = {**os.environ, _mark.STARTED_BY_ENV: "by hand"}
     code = ("import dataclasses, json, moxi.terminal as t; r = t.walk(); "
             "print(json.dumps(r and dataclasses.asdict(r)))")
     done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
@@ -972,7 +972,7 @@ def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_pa
             "PATHEXT")
     env = {k: os.environ[k] for k in keep if k in os.environ}
     env.update(PATH=os.pathsep.join([folder, os.environ.get("PATH", "")]),
-               PYTHONPATH=str(site), WALK_OUT=str(out), **{_mark.NAME: "the hop"})
+               PYTHONPATH=str(site), WALK_OUT=str(out), **{_mark.STARTED_BY_ENV: "the hop"})
     script = "moxi" if form == "bare" else os.path.join(folder, name)
     done = subprocess.run([sys.executable, "-c", _HOP, script, "version"], env=env,
                           cwd=tmp_path, capture_output=True, text=True, timeout=150)

@@ -11,9 +11,7 @@ Standard library only.
 
 from __future__ import annotations
 
-#: The variable only test kits set (`moxi.paths.ANCHOR_HOME_ENV`, repeated here so the words
-#: import nothing).
-ANCHOR_HOME = "MOXI_ANCHOR_HOME"
+from ..paths import ANCHOR_HOME_ENV
 
 #: The command a line names to make a record: cheap, a core verb, and not one the front
 #: door skips, so typing it records.
@@ -75,5 +73,5 @@ NO_KEYBOARD = ("moxi sees no terminal on its input here (it is redirected, or th
 
 
 def row_anchor_set(record: str) -> tuple[str, str]:
-    return (f"{ANCHOR_HOME} is set, which only test kits set, so the record goes to "
+    return (f"{ANCHOR_HOME_ENV} is set, which only test kits set, so the record goes to "
             f"{record}", "take it out of this terminal's environment")

@@ -67,7 +67,7 @@ def test_interface_3_adds_retention():
     assert list(inspect.signature(api.retention).parameters) == ["env"]
 
 
-LIST_READS = ("sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
+LIST_READS = ("sessions_list", "sessions_more", "sessions_newest", "session_dirs",
               "session_opened")
 
 
@@ -90,7 +90,7 @@ def test_interface_4_adds_the_lists_reads_and_nothing_they_are_built_from():
         "recent_s", "now", "harness", "since", "until", "folder", "find"]
     assert list(inspect.signature(api.session_opened).parameters) == [
         "harness", "session", "recent_s", "now"]
-    assert "recent_s" not in inspect.signature(api.sessions_folders).parameters
+    assert "recent_s" not in inspect.signature(api.session_dirs).parameters
 
 
 def test_the_list_answers_through_the_api_over_the_roots_the_process_names(
@@ -112,7 +112,7 @@ def test_the_list_answers_through_the_api_over_the_roots_the_process_names(
         row = answer["groups"][0]["rows"][0]
         newest = api.sessions_newest(now=answer["now"])
         more = api.sessions_more(group="recent", now=answer["now"])
-        folders = api.sessions_folders()
+        folders = api.session_dirs()
         opened = api.session_opened(harness="claude", session=row["session"],
                                     now=answer["now"])
         write_config(own_config, "[list]\nrecent_s = 0\n")

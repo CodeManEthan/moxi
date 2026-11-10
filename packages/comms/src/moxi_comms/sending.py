@@ -267,7 +267,7 @@ class Sender:
         """`base` as the verb would see this sender's process: the claim socket named,
         or the operator's stamp set with no claim socket. A bound sender has no
         environment: it is handed to `run` itself."""
-        from .sender import OPERATOR_VAR
+        from .sender import OPERATOR_ENV
 
         if self.kind == "bound":
             raise TypeError("a bound sender sends only from inside comms' daemon, handed "
@@ -277,7 +277,7 @@ class Sender:
             env[claimhold.CLAIM_SOCKET_ENV] = self.path
         elif self.kind == "operator":
             env.pop(claimhold.CLAIM_SOCKET_ENV, None)
-            env[OPERATOR_VAR] = self.user_id
+            env[OPERATOR_ENV] = self.user_id
         return env
 
     def sender_identity(self) -> SenderIdentity:
@@ -347,7 +347,7 @@ class Context:
             name = self.backend_name()
             if name == gw.MOCK:
                 from .mock_record import MockRecord
-                store = self.env.get("MOXI_COMMS_MOCK_BACKEND")
+                store = self.env.get(constants.MOCK_BACKEND_ENV)
                 if not store:
                     raise SystemExit(
                         "comms is pointed at the mock record and has no store: set "
@@ -612,7 +612,7 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
         _refuse(ctx, "outside-runtime", f"{e} Nothing was sent.")
         return _REFUSED
     if claim_path:
-        if (ctx.env.get("MOXI_COMMS_OPERATOR") or "").strip():
+        if (ctx.env.get(constants.OPERATOR_ENV) or "").strip():
             _refuse(ctx, "operator-in-session",
                     "comms cannot tell who this process is: it carries the operator's "
                     "own stamp inside an agent's session — nothing was sent. The "
@@ -697,8 +697,8 @@ def _stamped_identity(env, project) -> str | None:
     try:
         sender = sender_from_env(env, project)
     except MalformedStamp:
-        name = env.get("MOXI_COMMS_NAME")
-        scope = GLOBAL if env.get("MOXI_COMMS_GLOBAL") else (env.get("MOXI_COMMS_SCOPE") or GLOBAL)
+        name = env.get(constants.NAME_ENV)
+        scope = GLOBAL if env.get(constants.GLOBAL_ENV) else (env.get(constants.SCOPE_ENV) or GLOBAL)
         return qualify(name, scope)
     return sender.qualified if sender is not None else None
 
@@ -1452,8 +1452,8 @@ def _cold_at(state, t_ask: float):
     if state is not None and state.kind in (cache.FRESH, cache.NO_CACHE):
         return machine_line.COLD_AT_LIVE
     if (state is not None and state.kind in (cache.WARM, cache.COLD)
-            and state.age_seconds is not None and state.ttl_seconds is not None):
-        return max(0, math.floor(t_ask - state.age_seconds + state.ttl_seconds))
+            and state.age_s is not None and state.ttl_s is not None):
+        return max(0, math.floor(t_ask - state.age_s + state.ttl_s))
     return max(0, math.floor(t_ask))
 
 
@@ -2440,7 +2440,7 @@ def _delete(ctx: Context, mid: str, *, bound=None):
     user = None
     if bound is not None:
         who, token = bound.identity, bound.token
-    elif claim_path and not (ctx.env.get("MOXI_COMMS_OPERATOR") or "").strip():
+    elif claim_path and not (ctx.env.get(constants.OPERATOR_ENV) or "").strip():
         got = _claim_sender(ctx, claim_path)
         if isinstance(got, int):
             return got, None

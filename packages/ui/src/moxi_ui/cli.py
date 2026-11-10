@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi import files
+from moxi.log import LOG_FILE_ENV
 from moxi.config import ConfigError
 from moxi.paths import Layout, python
 from moxi_ui.loopback.api import NotOurServer, RuntimeInfo, call, read_runtime
@@ -410,7 +411,7 @@ def spawn_shell() -> None:
     cwd = layout().runtime_dir(create=True)
     log = log_path()
     files.private_dir(log.parent)
-    env = {**os.environ, "MOXI_LOG_FILE": str(log)}
+    env = {**os.environ, LOG_FILE_ENV: str(log)}
     _spawn(_shell_argv(), cwd=cwd, output=log, env=env)
 
 

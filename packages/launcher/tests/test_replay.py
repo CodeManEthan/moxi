@@ -64,7 +64,7 @@ def no_exec(monkeypatch):
 def rig(tmp_path, monkeypatch):
     directory = tmp_path / "fake-slots"
     directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
     monkeypatch.setenv(fake.DIR, str(directory))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
@@ -186,10 +186,10 @@ def test_a_relaunch_header_and_its_stamp():
     got = claude.compose(
         {"harness": "claude", "cwd": "/work", "handoff": "/h/one.md"},
         ctx(handoff_text="where it stands", relaunched=True,
-            extra_stamps={common.RELAUNCH: "run1"}))
+            extra_stamps={common.RELAUNCH_ENV: "run1"}))
     assert got.prompt == "Handoff from launcher, relaunched by ann: /h/one.md\n\n" \
                          "where it stands"
-    assert got.env[common.RELAUNCH] == "run1"
+    assert got.env[common.RELAUNCH_ENV] == "run1"
     assert first.on_argv(got.argv)
 
 
@@ -543,7 +543,7 @@ def test_an_option_the_install_no_longer_offers_is_not_replayed(work, harness, n
     assert "recycle_on_expiry clear is not applied: recycle_on_expiry needs turns" in \
         got.warnings
     env = no_exec[-1]["env"]
-    assert common.KEEP_WARM not in env and common.RECYCLE_ON_EXPIRY not in env
+    assert common.KEEP_WARM_ENV not in env and common.RECYCLE_ON_EXPIRY_ENV not in env
 
 
 def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
@@ -589,11 +589,11 @@ def test_a_self_relaunch_carries_its_handoff_alone(work, harness, no_exec, tmp_p
     assert opening == (f"Handoff from launcher, relaunched by planner: {handoff}\n\n"
                        "where the work stands")
     assert BRIEF not in opening
-    assert no_exec[-1]["env"][common.RELAUNCH] == "run1"
+    assert no_exec[-1]["env"][common.RELAUNCH_ENV] == "run1"
     new = row("r2")
     assert new.handoff_path == str(handoff) and new.brief is None
     assert new.posture == f"relaunched (handoff: {handoff})"
-    assert new.env[common.RELAUNCH] == "run1"
+    assert new.env[common.RELAUNCH_ENV] == "run1"
     prompt = Path(common.prompt_path(targets.runs_dir(), "r2")).read_text()
     assert f"start posture: relaunched (handoff: {handoff})" in prompt
 
@@ -601,7 +601,7 @@ def test_a_self_relaunch_carries_its_handoff_alone(work, harness, no_exec, tmp_p
 def test_a_relaunch_with_no_handoff_has_no_relaunch_stamp(work, harness, no_exec):
     api.launch(request(work))
     api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", run="run1"))
-    assert common.RELAUNCH not in no_exec[-1]["env"]
+    assert common.RELAUNCH_ENV not in no_exec[-1]["env"]
 
 
 def test_a_resume_keeps_the_session_id_and_is_found_by_it(work, harness, no_exec):

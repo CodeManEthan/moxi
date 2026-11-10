@@ -47,8 +47,12 @@ log = logging.getLogger("moxi.launcher.handoffs")
 MODULE = "launcher"
 #: The launcher's own handoff folder, under its data directory (the `handoffs` store).
 FOLDER = "handoffs"
-#: comms' identity stamp in a session's environment.
-COMMS_NAME = "MOXI_COMMS_NAME"
+def comms_name_env() -> str | None:
+    """Comms' identity stamp, when the optional comms module is available."""
+    if not modules.available("comms"):
+        return None
+    found = modules.load("comms", interface=2)
+    return found.api.NAME_ENV if found.ok and found.api is not None else None
 #: What a key may be: it is part of a file name.
 _KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _DATE = r"(\d{4}-\d{2}-\d{2})"
@@ -100,7 +104,7 @@ def key_of_row(row) -> str | None:
 def key_of_env(env: Mapping[str, str]) -> str | None:
     """The key of a session the launcher did not start: its comms name without any
     `@scope`."""
-    name = env.get(COMMS_NAME)
+    name = env.get(comms_name_env() or "")
     return check_key(name.split("@", 1)[0]) if name else None
 
 
@@ -280,7 +284,7 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     from . import listeners, store
 
     env = os.environ if env is None else env
-    request_id = env.get(listeners.REQUEST)
+    request_id = env.get(listeners.REQUEST_ENV)
     if request_id:
         conn = listeners.open_store()
         row = None
@@ -302,7 +306,7 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     return Current(key, folder(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
-__all__ = ["COMMS_NAME", "FOLDER", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
+__all__ = ["comms_name_env", "FOLDER", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
            "current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",
            "key_of_env", "key_of_row", "newest_launch", "own_folder", "parse", "pointer",
            "unpicked", "waiting"]

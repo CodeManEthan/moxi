@@ -44,6 +44,8 @@ import shlex
 
 from moxi import paths as moxi_paths
 
+from .constants import COMMAND_ENV
+
 CONTEXT_BLOCK = (
     'You can message other agents with `moxi comms send <name> --posture <posture> "text"`. '
     "`--posture`: `none` for no reply, `optional` for a reply only if you have something "
@@ -120,7 +122,6 @@ MOXI_COMMS_PATH_LINE = (
     "`moxi comms` on your shell's PATH may be a different install.")
 
 #: Where the Claude wrapper stamps its own comms command for the listener to name.
-COMMAND_ENV = "MOXI_COMMS_COMMAND"
 
 
 def _parts(directors, comms, form) -> tuple[str, str | None]:

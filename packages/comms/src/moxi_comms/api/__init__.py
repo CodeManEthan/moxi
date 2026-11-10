@@ -60,6 +60,10 @@ from ..adapters import codex_wrapper as _codex_wrapper
 from ..adapters import session as _claude_wrapper
 from ..claimhold import ClaimServer
 from ..client import DaemonError, DaemonOffline
+from ..constants import (BACKEND_ENV, CLAIM_SOCKET_ENV, COMMAND_ENV, DIRECTORS_ENV,
+                         GLOBAL_ENV, MOCK_BACKEND_ENV, NAME_ENV, OPERATOR_ENV,
+                         PROJECT_ENV, SCOPE_ENV, SECRET_PREFIX_ENV, SHELL_REACH_ENV,
+                         SHIM_SOCKET_ENV, TOKEN_ENV, TOKEN_STORE_ENV, URL_ENV)
 from ..scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
 from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, DeleteResult, Recipient, Refusal,
                        Sender, SendResult)
@@ -575,5 +579,8 @@ __all__ = [
     "Standing", "Owner", "roster_rows", "RosterRow",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
-    "DaemonError", "DaemonOffline",
+    "DaemonError", "DaemonOffline", "BACKEND_ENV", "CLAIM_SOCKET_ENV", "COMMAND_ENV",
+    "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV", "OPERATOR_ENV",
+    "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV", "SHELL_REACH_ENV",
+    "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV",
 ]

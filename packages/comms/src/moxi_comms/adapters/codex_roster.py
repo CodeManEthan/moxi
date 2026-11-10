@@ -58,6 +58,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..constants import MOCK_BACKEND_ENV
 from ..config import ConfigError
 from ..paths import codex_threads_dir
 from . import roster_rows
@@ -213,7 +214,7 @@ def record_write_root(env=None, cwd=None) -> tuple:
         source = absolute(record) if record else comms_db()
         return source.parent, f"the local backend's record ({source})"
     if backend == MOCK:
-        store = env.get("MOXI_COMMS_MOCK_BACKEND")
+        store = env.get(MOCK_BACKEND_ENV)
         if not store:
             return None, "the mock backend names no store (MOXI_COMMS_MOCK_BACKEND is unset)"
         source = absolute(store)

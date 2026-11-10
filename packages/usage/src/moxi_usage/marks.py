@@ -161,7 +161,7 @@ def _live_marks(session_id: str) -> dict[str, str | None] | None:
         if session is None:
             return None
         with session:
-            return session.environ([listener.WARN_AT, listener.CROSSING_AT])
+            return session.environ([listener.WARN_AT_ENV, listener.CROSSING_AT_ENV])
     except Exception:  # noqa: BLE001 - an endpoint that can't say leaves the record
         return None
 

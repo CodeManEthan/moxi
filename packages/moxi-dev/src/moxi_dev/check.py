@@ -117,7 +117,7 @@ PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
-WORKERS_VAR = "MOXI_TEST_WORKERS"
+WORKERS_ENV = "MOXI_TEST_WORKERS"
 #: pytest-xdist's arguments for the serial pass of the timed tests: no workers.
 SERIAL = ("-n", "0")
 
@@ -296,10 +296,10 @@ def worker_args(environ: Mapping[str, str], cpus: int | None = None) -> list[str
 
     N is never 0, which would run the suite serially."""
     count = max(1, cpu_count() if cpus is None else cpus)
-    cap = environ.get(WORKERS_VAR, "").strip()
+    cap = environ.get(WORKERS_ENV, "").strip()
     if cap:
         if not cap.isdigit() or int(cap) < 1:
-            raise CheckError(f"{WORKERS_VAR} must be a whole number of workers, 1 or more; "
+            raise CheckError(f"{WORKERS_ENV} must be a whole number of workers, 1 or more; "
                              f"it is {cap!r}")
         count = min(count, int(cap))
     return ["-n", str(count)]

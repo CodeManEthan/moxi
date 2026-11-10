@@ -58,6 +58,8 @@ field here would be a second source of truth for the same fact.
 
 from __future__ import annotations
 
+from .constants import BACKEND_ENV, MOCK_BACKEND_ENV
+
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -201,7 +203,7 @@ class BackendChoice:
         if self.source == SOURCE_FLAG:
             return "the --backend flag"
         if self.source == SOURCE_ENV:
-            return "MOXI_COMMS_BACKEND"
+            return BACKEND_ENV
         if self.source == SOURCE_CONFIG:
             return "the config file"
         return "the default"
@@ -259,7 +261,7 @@ def open_record(explicit: str | None = None, *, role: str = "reader", env=None,
     name = backend_name(explicit, env=env)
     if name == MOCK:
         from .mock_record import MockRecord
-        store = env.get("MOXI_COMMS_MOCK_BACKEND")
+        store = env.get(MOCK_BACKEND_ENV)
         if not store:
             raise RecordError(
                 "the mock record needs a store: set MOXI_COMMS_MOCK_BACKEND=<store.json>")
