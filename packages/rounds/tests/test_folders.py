@@ -158,6 +158,26 @@ def test_a_relative_dir_is_not_resolved_when_notes_has_no_folder_for_the_project
     assert said in caught.value.reason
 
 
+@pytest.mark.parametrize("answer, has", [
+    ("/notes/proj-a", True),
+    (None, False),
+    (RuntimeError("no such place"), None),
+])
+def test_the_config_check_asks_this_lookup_whether_a_project_has_a_notes_folder(
+        add_project, notes_gives, answer, has):
+    from moxi_rounds import settings
+
+    add_project("proj-a")
+    notes_gives(answer)
+    assert settings.has_notes_folder("proj-a") is has
+    if has:
+        assert folders.notes_folder("proj-a") == Path(answer)
+    else:
+        with pytest.raises(NoFolder) as caught:
+            folders.notes_folder("proj-a")
+        assert caught.value.known is (has is False)
+
+
 def test_a_project_the_projects_list_does_not_hold_is_its_own_error(without_notes):
     with pytest.raises(UnknownProject) as caught:
         folders.home("proj-b")

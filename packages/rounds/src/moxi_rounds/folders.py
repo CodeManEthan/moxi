@@ -81,6 +81,13 @@ def homes(settings=None) -> tuple[list[Home], list[RoundsError]]:
     return found, failed
 
 
+def notes_folder(project: str) -> Path:
+    """The notes folder of the project `project` (its key, in any case): the one its
+    projects record names, else the one the notes module gives it. Raises
+    `UnknownProject`, or `NoFolder` when it has none or none can be found out."""
+    return _notes_folder(_record(_projects().get, project))
+
+
 def slugs(folder: Path) -> list[str]:
     """The slug of each round in the rounds folder `folder`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not
@@ -122,19 +129,24 @@ def _projects():
 def _home(get, project: str, settings) -> Home:
     from . import settings as own
 
-    api = _projects()
-    try:
-        record = get(project)
-    except api.NotFound:
-        raise UnknownProject(project) from None
-    except api.ProjectsError as error:
-        raise RoundsError(f"the projects list can't be read: {error}") from None
+    record = _record(get, project)
     value = own.round_setting(_settings(settings), record.key, "dir")
     folder = Path(os.path.expanduser(value))
     if folder.is_absolute():
         return Home(record.key, folder)
     notes = _notes_folder(record)
     return Home(record.key, notes / folder)
+
+
+def _record(get, project: str):
+    """The projects record `get` gives for `project`. Raises `UnknownProject`."""
+    api = _projects()
+    try:
+        return get(project)
+    except api.NotFound:
+        raise UnknownProject(project) from None
+    except api.ProjectsError as error:
+        raise RoundsError(f"the projects list can't be read: {error}") from None
 
 
 def _notes_folder(record) -> Path:
@@ -151,15 +163,16 @@ def _notes_folder(record) -> Path:
     notes = modules.load("notes", interface=1)
     if not notes.ok or notes.api is None:
         raise NoFolder(record.key, f"{relative} and the notes module can't be used "
-                                   f"({notes.reason})")
+                                   f"({notes.reason})", known=False)
     try:
         found = notes.api.notes_root_for(record.root, record.kind, record.key)
     except Exception as error:  # noqa: BLE001 - whatever notes raises, the answer is none
         raise NoFolder(record.key, f"{relative} and notes could not give it one "
-                                   f"({error})") from None
+                                   f"({error})", known=False) from None
     if found is None:
         raise NoFolder(record.key, f"{relative} and notes gives it none")
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "slugs", "names"]
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "slugs",
+           "names"]

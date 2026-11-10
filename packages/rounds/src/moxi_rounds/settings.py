@@ -189,26 +189,16 @@ def has_notes_folder(project: str) -> bool | None:
     names, else the one the notes module gives it by default. None when that can't be
     told: projects has no such project, or projects or an installed notes can't be
     read."""
-    from moxi import modules
+    from . import folders
+    from .errors import NoFolder, RoundsError
 
-    found = modules.load("projects", interface=1)
-    if not found.ok or found.api is None:
-        return None
     try:
-        record = found.api.get(project)
-    except found.api.ProjectsError:
+        folders.notes_folder(project)
+    except NoFolder as none:
+        return False if none.known else None
+    except RoundsError:
         return None
-    if record.notes_root:
-        return True
-    if not modules.available("notes"):
-        return False
-    notes = modules.load("notes", interface=1)
-    if not notes.ok or notes.api is None:
-        return None
-    try:
-        return notes.api.notes_root_for(record.root, record.kind, record.key) is not None
-    except Exception:  # noqa: BLE001 - notes' own trouble is not this config's fault
-        return None
+    return True
 
 
 def _check_string(file, where, value) -> None:

@@ -150,13 +150,15 @@ class UnknownProject(RoundsError):
 
 class NoFolder(RoundsError):
     """The rounds folder of the project `project` can't be worked out; `problem` says
-    why."""
+    why. `known` is False when the notes module was there to ask and the asking failed,
+    so whether the project has a notes folder is not known."""
 
     exit_code = exits.REFUSED
 
-    def __init__(self, project: str, problem: str):
+    def __init__(self, project: str, problem: str, *, known: bool = True):
         self.project = project
         self.problem = problem
+        self.known = known
         super().__init__(
             f"the rounds folder of the project {project!r} can't be worked out: {problem}",
             f'set dir = "/an/absolute/folder" under [projects.{project}] in rounds\' '
