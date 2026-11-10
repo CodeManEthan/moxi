@@ -555,6 +555,39 @@ def test_a_round_at_no_step_is_told_what_keeps_it_open(folder, capsys):
         "waits": ["question Q1, parked"]}
 
 
+def test_a_parked_question_whose_wait_is_over_has_one_state_in_what_show_prints(
+        opened, capsys):
+    folder = opened("sketch")
+    opening.open_round("proj-a/another", description="a placeholder round",
+                       actor="planner", flow="empty")
+    fold(folder, question("Q1", blocks='"none"'))
+    rule("park:Q1", until="round:proj-a/another")
+
+    shown = run(capsys, "show", ROUND)
+    as_data = json.loads(run(capsys, "show", ROUND, "--json"))
+
+    assert "close waits for: question Q1, open\n" in shown
+    assert "question Q1, parked" not in shown
+    assert as_data["close"] == {"waits": ["question Q1, open"]}
+    assert [one["state"] for one in as_data["questions"]] == ["open"]
+    assert json.loads(run(capsys, "next", ROUND, "--json"))["close"] == {
+        "waits": ["question Q1, open"]}
+    assert api.round(ROUND)["close"] == {"waits": ["question Q1, open"]}
+    # Whether the round closes reads its own log alone, and is the same either way.
+    assert waits(folder) == ("question Q1, parked",)
+    assert status(folder) == "open"
+
+
+def test_a_question_parked_until_a_round_still_open_is_named_as_parked(opened, capsys):
+    folder = opened("sketch")
+    opening.open_round("proj-a/another", description="a placeholder round",
+                       actor="planner", flow="paper")
+    fold(folder, question("Q1", blocks='"none"'))
+    rule("park:Q1", until="round:proj-a/another")
+
+    assert "close waits for: question Q1, parked\n" in run(capsys, "show", ROUND)
+
+
 def test_what_a_close_waits_for_is_read_from_the_state_alone(folder):
     fold(folder, question("Q1", blocks='"none"'))
     found = folded(folder)
@@ -567,7 +600,7 @@ def test_what_a_close_waits_for_is_read_from_the_state_alone(folder):
 def test_a_part_added_to_the_condition_is_asked_with_the_rest(folder, monkeypatch):
     fold(folder)
     monkeypatch.setattr(closing, "CONDITIONS",
-                        (*closing.CONDITIONS, lambda _state: iter(["a placeholder"])))
+                        (*closing.CONDITIONS, lambda _state, _closed: iter(["a placeholder"])))
 
     rule("skip:verify-design")
 

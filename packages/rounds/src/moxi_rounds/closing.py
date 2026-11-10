@@ -12,6 +12,13 @@ that stopped short is made by the next write, whatever that write is.
   finished;
 - no question is open or parked.
 
+Whether the round closes reads its own log alone: a question parked until another
+round closes keeps this one open whether or not that round has closed. How such a
+question is named in a line is another matter, since it reads as open once that round
+has closed: whoever prints the lines beside its own reading of the questions passes
+`closed`, the answer it read them with, so one question has one state in what it
+prints.
+
 A round whose flow has a `build` step also waits for a finished stage. This version
 finishes none, so such a round does not close in it, and `waits` says only that. It
 ends by being dropped.
@@ -37,16 +44,19 @@ NOT_IN_THIS_VERSION = ("a finished stage, which this version does not build, so 
                        "round does not close in it")
 
 
+Closed = Callable[[str], bool]
+
+
 def _never(_name: str) -> bool:
     # A question parked until another round closes keeps this round open whether or
     # not that round has closed: it then reads as open. So no other log is read.
     return False
 
 
-def _plan_done(state: states.State) -> Iterator[str]:
+def _plan_done(state: states.State, closed: Closed) -> Iterator[str]:
     """The plan is done: each step of the flow is done or skipped, and each stage of
     the plan is finished."""
-    for step in steps.of(state, closed=_never):
+    for step in steps.of(state, closed=closed):
         # The questions step waits for exactly the open questions, which are named
         # one by one below.
         if step.step != steps.QUESTIONS and not step.settled:
@@ -57,17 +67,19 @@ def _plan_done(state: states.State) -> Iterator[str]:
             yield f"stage {stage.id}, not finished"
 
 
-def _nothing_open(state: states.State) -> Iterator[str]:
+def _nothing_open(state: states.State, closed: Closed) -> Iterator[str]:
     """Nothing is open: no question is open or parked."""
     for question in state.questions:
-        reads = questions.current(question, state, closed=_never)
+        reads = questions.current(question, state, closed=closed)
         if reads in (questions.OPEN, questions.PARKED):
             yield f"question {question.id}, {reads}"
 
 
 #: The parts of the close condition, in the order their lines are given. Each takes
-#: the round's state and gives a line for each thing it waits for.
-CONDITIONS: tuple[Callable[[states.State], Iterator[str]], ...] = (
+#: the round's state and what answers whether another round is closed, and gives a
+#: line for each thing it waits for. That answer may change how a line reads, never
+#: whether the part gives one.
+CONDITIONS: tuple[Callable[[states.State, Closed], Iterator[str]], ...] = (
     _plan_done, _nothing_open)
 
 
@@ -76,12 +88,17 @@ def builds(state: states.State) -> bool:
     return flows.has(state.steps, BUILD)
 
 
-def waits(state: states.State) -> tuple[str, ...]:
+def waits(state: states.State, *, closed: Closed | None = None) -> tuple[str, ...]:
     """What the close of the round `state` is of waits for, a line each; empty when
-    nothing is, which is when the round closes. It reads the state alone."""
+    nothing is, which is when the round closes. It reads the state alone.
+
+    `closed` answers whether another round, by name, is closed, for how a question
+    parked until one is reads in its line; left out, no round reads as closed and
+    such a question is named as parked. The lines are as many either way."""
     if builds(state):
         return (NOT_IN_THIS_VERSION,)
-    return tuple(line for condition in CONDITIONS for line in condition(state))
+    asked = _never if closed is None else closed
+    return tuple(line for condition in CONDITIONS for line in condition(state, asked))
 
 
 def is_due(state: states.State) -> bool:

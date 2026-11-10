@@ -257,7 +257,7 @@ def read(name: str, *, settings=None) -> dict:
     return {**said, "status": found.state.status, "flow": found.state.flow,
             "groups": _groups(found, settings["models"]),
             "close": (None if found.state.status != states.OPEN
-                      else {"waits": list(closing.waits(found.state))}),
+                      else {"waits": list(closing.waits(found.state, closed=found.closed))}),
             "warnings": _warnings(found)}
 
 
