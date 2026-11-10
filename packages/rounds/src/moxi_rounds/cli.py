@@ -20,6 +20,8 @@
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
+    moxi rounds next ROUND [--json]
+    moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
     moxi rounds list [PROJECT] --waiting [--json]
@@ -92,6 +94,15 @@ his pointer is a ruling, and is printed as `rule` prints one. `list --questions`
 the questions that wait on the operator, of one round or of one project with its open
 rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
 data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
+`next` says what is done next in a round: the step it is at, who does it and at which
+tier, with the model the `models` setting names for that tier, what they read, the
+command that completes the step and what the step waits for; then what the lead
+should know and nothing waits for. For the step that verifies the design it says
+which pass is asked for, a full pass or a re-check with the two frozen files to
+compare, or what is done in place of a pass; for the questions step, the command that
+writes the questions out and the `rule` line of each open one. A step this version
+does not have is printed as not built. `next --schema KIND` prints the empty data
+block of a report of that kind, a comment on each key. `next` records nothing.
 `show` shows one round: what it is for, its flow, its questions by state, its rulings
 and whether each was shown to him, and its history. `list` with no flag lists the open
 rounds, each with its flow and its counts, and with `--closed` the rounds that have
@@ -836,6 +847,39 @@ def _drop(args, out) -> int:
     return codes.OK
 
 
+# -- next --------------------------------------------------------------------------------
+
+def _declare_next(verbs) -> None:
+    from . import next_step
+
+    said = ("Say what is done next in a round: the step it is at, who does it, at "
+            "which tier, what they read, the command that completes it and what it "
+            "waits for, then what the lead should know. With --schema, print the "
+            "empty data block of a report of that kind. Nothing is recorded.")
+    parser = verbs.add_parser("next", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND", nargs="?",
+                        help="the round, <project>/<slug>")
+    parser.add_argument("--json", dest="as_json", action="store_true",
+                        help="print the same as data, not as lines")
+    parser.add_argument("--schema", metavar="KIND",
+                        help="print the empty data block of this kind of report: "
+                             f"{', '.join(next_step.SCHEMAS[:-1])}")
+
+
+def _next(args, out) -> int:
+    from . import next_step
+
+    if args.schema is not None:
+        out.write(next_step.schema(args.schema))
+        return codes.OK
+    if args.round is None:
+        raise BadArgument("a round is needed: nothing says which round's next step "
+                          "to print", "moxi rounds next <project>/<slug>")
+    found = next_step.read(args.round)
+    out.write(next_step.as_json(found) if args.as_json else next_step.as_text(found))
+    return codes.OK
+
+
 # -- show --------------------------------------------------------------------------------
 
 def _declare_show(verbs) -> None:
@@ -934,13 +978,15 @@ def _list_questions(args, out) -> int:
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict,
                                   _declare_ask,
                                   _declare_rule,
-                                  _declare_mark, _declare_drop, _declare_show,
+                                  _declare_mark, _declare_drop, _declare_next,
+                                  _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict,
                                "ask": _ask, "rule": _rule,
-                               "mark": _mark, "drop": _drop, "show": _show,
+                               "mark": _mark, "drop": _drop, "next": _next,
+                               "show": _show,
                                "list": _list}
 
 
