@@ -17,6 +17,11 @@
   with no launch is read in the folder of the caller's directory, as before. It says on
   stderr which folder it read, and its `--json` names that launch as `launch`. Without
   `--key` nothing changes. New `handoffs.folder_of_key` and `handoffs.newest_launch`.
+- The page server answers two new reads. `GET /api/places` gives where the user last
+  launched (a project or a folder each, newest first, five at most) and whether a launch
+  here may name a project; `GET /api/targets` gives each slot with whether it is free
+  and which launch took it, whether a new slot can be made, and the choice a launch
+  starts with, which is never headless. New `store.places` and `store.launched_by`.
 
 ## 0.1.3 (2026-11-08)
 
