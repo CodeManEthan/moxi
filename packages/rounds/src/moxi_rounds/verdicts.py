@@ -86,7 +86,16 @@ def applies(state: states.State, n: int, *, name: str = "the round"
     and still stands, everything but what the current version's block put back and a
     stage that can't leave the plan."""
     applied, left = [], []
-    for one in versions.outstanding(state, n):
+    stands = {(one.what, one.id): one for one in versions.outstanding(state, n)}
+    finished = questions.finished_stages(state) - questions.left_stages(state)
+    for taken in versions.pending_removals(state, n):
+        one = stands.get((taken.what, taken.id))
+        if one is None:
+            if taken.what == states.STAGE and taken.id in finished:
+                # Its removal changes nothing any more, and the verdict says why it
+                # stays, as it does of a stage with an open build.
+                left.append((taken, stages.cannot_leave(state, taken.id, name=name)))
+            continue
         kept, back, why = _still_made(state, one, n)
         if back is not None:
             left.append((back, why))

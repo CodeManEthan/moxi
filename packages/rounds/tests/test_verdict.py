@@ -454,16 +454,35 @@ def test_a_stage_with_a_build_is_not_taken_out_and_is_named(folder, built, why, 
 
     printed = capsys.readouterr().out
     event = events(folder)[-1]
-    if built:
-        # A finished stage is met: its removal no longer stands, and nothing names it.
-        assert event["not_applied"] == []
-        assert "B4" not in printed
-    else:
-        assert event["not_applied"] == [{"what": "stage", "id": "B4", "why": why}]
-        assert f"not applied: the stage B4 is gone from the block: {why}" in printed
+    assert event["not_applied"] == [{"what": "stage", "id": "B4", "why": why}]
+    assert f"not applied: the stage B4 is gone from the block: {why}" in printed
     assert {"what": "stage", "id": "B4"} not in event["applied"]
     assert len(event["applied"]) == 3
     assert stages.state_of(folded(folder), "B4") == stages.PLANNED
+
+
+def test_a_finished_stage_is_named_by_each_verdict_and_is_not_outstanding(folder):
+    taken_away(folder)
+    build(folder, "B4", "finish.done")
+    assert "B4" not in [one.id for one in versions.outstanding(folded(folder), 2)]
+    record(report(folder, design=2))
+
+    again = record(report(folder, design=2, pass_="re-check", name="again.md"))
+
+    assert again.event["applied"] == []
+    assert [(one["id"], one["why"].partition(":")[0])
+            for one in again.event["not_applied"]] == [("B4", "B4 is finished")]
+
+
+def test_a_finished_stage_a_ruling_took_out_is_not_named(folder):
+    taken_away(folder)
+    log.append(log.round_log(folder), "finish.done", {"stage": "B4", "tip": "0" * 40},
+               actor="coder")
+    log.append(log.round_log(folder), "ruling.recorded",
+               {"id": "C90", "record": "comms:1234567", "kind": "process",
+                "rules": "unstage:B4"}, actor="planner")
+
+    assert record(report(folder, design=2)).event["not_applied"] == []
 
 
 def test_a_stage_whose_build_was_dropped_is_taken_out(folder):
