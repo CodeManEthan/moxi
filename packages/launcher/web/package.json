@@ -1,7 +1,7 @@
 {
   "name": "moxi-launcher-web",
   "private": true,
-  "description": "The launcher module's web sources: its panel, the launched sessions' state and one session's state.",
+  "description": "The launcher module's web sources: its panel, the piece for Home's main spot, the launched sessions' state and one session's state.",
   "license": "MIT",
   "type": "module",
   "scripts": {

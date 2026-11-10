@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The launcher offers a piece for Home's main spot in the browser UI shell: a box to say
+  what the agent should do. New component `prompt` (`<moxi-launcher-prompt>`).
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;
