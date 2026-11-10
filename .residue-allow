@@ -36,3 +36,11 @@ packages/rounds/tests/test_pointers.py	0a1b2c3d@2026-13-02	data: a made-up sessi
 packages/rounds/tests/test_open.py	0a1b2c3d@2026-01-02	data: a made-up session pointer the test gives open as the go pointer, to see its shape accepted
 packages/rounds/tests/test_rule.py	0a1b2c3d@2026-01-02	data: a made-up session pointer the test gives rule as its pointer, to see its shape accepted
 packages/rounds/tests/test_rule.py	round proj-a/c-round	data: the message the test expects for a made-up round that was never opened; the scan reads it as a round cite
+packages/rounds/README.md	round alpha/ranking	data: the first words of what next prints for a made-up round of the example project; the scan reads it as a round cite
+packages/rounds/src/moxi_rounds/report_block.py	L1	data: the example report block in the module docstring gives its finding this id, the shape a report block's finding ids take
+packages/rounds/tests/test_report_block.py	L1	data: a finding id in the report blocks the reader's tests feed it
+packages/rounds/tests/test_report_block.py	L2	data: a finding id in the report blocks the reader's tests feed it
+packages/rounds/tests/test_report_block.py	L9	data: a finding id in the report blocks the reader's tests feed it
+packages/rounds/tests/test_state.py	L1	data: the finding id of a made-up finding the state test records
+packages/rounds/tests/test_verdict.py	L1	data: a finding id in the made-up reports the verdict tests record
+packages/rounds/tests/test_verdict.py	L2	data: a finding id in the made-up reports the verdict tests record

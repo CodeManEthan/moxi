@@ -19,6 +19,8 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
   and the fix names the setting that gives it one.
 - `SharedFolder` (exit 3), a `NoFolder`: the project's rounds folder is another
   project's too. `other` is that project and `folder` the one folder both reach.
+- `BadBlock` (exit 3): a file's data block can't be used. `file` is the file and
+  `problems` every thing wrong with it, each a `Problem` with its line and its fix.
 """
 
 from __future__ import annotations
@@ -212,6 +214,41 @@ class SharedFolder(NoFolder):
             "--notes-root DIR`")
 
 
+@dataclass(frozen=True)
+class Problem:
+    """One thing wrong with a file's data block: `line` is the line of the file it is
+    on, counted from 1, or None when it is on no one line; `what` says what is wrong
+    and `fix` the edit that puts it right."""
+
+    line: int | None
+    what: str
+    fix: str
+
+    def __post_init__(self):
+        if not self.what or not self.fix:
+            raise ValueError("a problem says what it is and the edit that fixes it")
+
+
+class BadBlock(RoundsError):
+    """The data block of `file` can't be used as `what` (`"a design's data block"`):
+    `problems` holds every thing wrong with it, in the order of their lines. Nothing
+    of the block is used."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, file: Path, what: str, problems: Iterable[Problem]):
+        self.file = Path(file)
+        self.what = what
+        self.problems = tuple(sorted(problems, key=lambda one: one.line or 0))
+        if not self.problems:
+            raise ValueError("a bad block names at least one problem")
+        lines = [f"{self.file} can't be read as {what}:"]
+        for one in self.problems:
+            where = "the file" if one.line is None else f"line {one.line}"
+            lines += [f"  - {where}: {one.what}", f"    fix: {one.fix}"]
+        super().__init__("\n".join(lines))
+
+
 __all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked",
            "BadName", "BadArgument", "UnknownProject", "NoRound", "NoFolder",
-           "SharedFolder"]
+           "SharedFolder", "Problem", "BadBlock"]
