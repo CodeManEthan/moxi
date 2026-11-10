@@ -498,8 +498,8 @@ export class UsagePage extends LitElement {
         <th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
       <tbody>${report.rows.map((row) => html`
         <tr data-session=${row.session_id ?? ""}>
-          <td class="wrap">${row.session_id === null ? html`<span class="dim">${row.title ?? "no session"}</span>`
-            : this.#link(sessionRoute(row.session_id), row.title ?? row.session_id, false,
+          <td class="wrap">${row.session_id === null ? html`<span class="dim">no session</span>`
+            : this.#link(sessionRoute(row.session_id), row.session_id, false,
               () => { filters = sessionFilters(filters, row); })}
             <div class="dim small">${row.models.join(", ")}</div></td>
           <td class="wide">${row.harness}</td>
