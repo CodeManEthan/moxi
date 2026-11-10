@@ -1,12 +1,14 @@
 """What a list of sessions answers, built on the catalog: the filters and their counts,
 the groups a list is cut into, the next rows of a group, the folders, and one session
-opened. Plain functions that return plain data (dicts, lists, numbers, strings, None).
+opened; and the names of sessions asked for by key. Plain functions that return plain
+data (dicts, lists, numbers, strings, None).
 
-`list_sessions`, `more_sessions`, `newest_sessions`, `list_folders` and `open_session`
-take the catalog to read through; the page's handlers and `moxi sessions list` call them.
-`sessions_list`, `sessions_more`, `sessions_newest`, `sessions_folders` and
-`session_opened` are the same reads for another module (`moxi_sessions.api`): they take
-no catalog and read through the calling process's own.
+`list_sessions`, `more_sessions`, `newest_sessions`, `list_folders`, `open_session` and
+`name_sessions` take the catalog to read through; the page's handlers and `moxi sessions
+list` call the first five. `sessions_list`, `sessions_more`, `sessions_newest`,
+`sessions_folders`, `session_opened` and `session_facts` are the same reads for another
+module (`moxi_sessions.api`): they take no catalog and read through the calling
+process's own.
 
 **The filters.** `harness`, `since` (changed at or after it) and `until` (changed before
 it) are tested on a catalog entry and open no file. `folder` (a session whose own head
@@ -53,6 +55,12 @@ calls is answered once and never skipped; one that changes moves to the front of
 list, is not answered again by a call for more, and is in the next list. A session that
 is in `recent` only because of the time (it has not changed, and `now` has moved past
 its hour) leaves `recent` for its day between two calls; the next list places it.
+
+**Names by key.** `name_sessions` answers, for `(harness, session)` pairs a caller
+already holds, what names each one: its name, its folder and its start, by the code a
+row's are read by, so a session is named the same wherever it is shown. It is not a
+list: it answers the pairs asked, in the order asked, and reads of each the head and one
+turn, the last (`Catalog.facts`).
 """
 
 from __future__ import annotations
@@ -93,6 +101,9 @@ FOLDERS_MAX = 200
 
 #: How many subagents an opened session lists.
 SUBAGENTS_MAX = 8
+
+#: The most pairs one call for names takes.
+FACTS_MAX = 200
 
 #: The fewest characters a `find` has.
 FIND_MIN = 2
@@ -684,6 +695,67 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
     return row
 
 
+# --- names by key -----------------------------------------------------------------------------
+
+def name_sessions(cat: Catalog | None, keys: Iterable[Sequence[Any]]) -> dict[str, Any]:
+    """What names each of some sessions: `{sessions, roots}`.
+
+    `keys` is at most 200 `(harness, session)` pairs; `cat` is the catalog to read
+    through (the process's own when None).
+
+    * `sessions`: `{harness, session, name, folder, started}` for each pair the catalog
+      lists as a main session, in the order asked; a pair asked twice is answered twice.
+      `name` is the name a list's row carries, read by the same code: the name typed for
+      the session in the harness, and None for a Codex or an OpenCode session and for
+      one that has only a title the harness made up. `folder` and `started` are the ones
+      the head of the session's record gives. Each of the three is None where it was not
+      read, as for a session whose file cannot be read.
+    * A pair the catalog does not list has no item: a session whose record is gone, a
+      compressed Codex rollout, a subagent, a Codex thread another thread spawned, a
+      session id that is not text.
+    * `roots`: `{harness, root, reason}` for each harness whose root was not listed
+      whole, as a list's `roots` names them: `reason` says why a root could not be
+      listed, and is None for a root that was listed but for some folders or files
+      under it. A pair of such a harness with no item was not looked for everywhere; a
+      pair with no item whose harness is not in `roots` is held by no root.
+
+    Of each session it answers it reads the head and one turn, the last, and no turn
+    before it; no turn of a Codex or an OpenCode session. Nothing is read of a pair it
+    does not answer beyond the roots' listing.
+
+    Raises ValueError for more than 200 pairs, for a key that is not a pair, and for a
+    harness that is not one, before anything is read. It never raises for a session that
+    cannot be read."""
+    pairs = []
+    for key in keys:
+        if isinstance(key, (str, bytes)) or not isinstance(key, Sequence) or len(key) != 2:
+            raise ValueError(f"a key is a (harness, session) pair, not {key!r}")
+        harness, session = key
+        if not isinstance(harness, str) or harness not in HARNESSES:
+            raise ValueError(f"harness is one of {', '.join(HARNESSES)}, "
+                             f"not {harness!r}")
+        pairs.append((harness, session))
+        if len(pairs) > FACTS_MAX:
+            raise ValueError(f"keys is at most {FACTS_MAX} (harness, session) pairs")
+    cat = _catalog(cat)
+    gathered = cat.gather()
+    wanted = {pair for pair in pairs if isinstance(pair[1], str)}
+    held = {(e.harness, e.session): e for e in gathered.entries
+            if (e.harness, e.session) in wanted}
+    sessions = []
+    for pair in pairs:
+        entry = held.get(pair) if isinstance(pair[1], str) else None
+        if entry is None:
+            continue
+        facts = cat.facts(entry)
+        sessions.append({"harness": entry.harness, "session": entry.session,
+                         "name": facts.name, "folder": facts.folder,
+                         "started": facts.started})
+    return {"sessions": sessions,
+            "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason}
+                      for r in gathered.roots]}
+
+
 # --- the reads other modules call -------------------------------------------------------------
 
 def _recent(recent_s: float | None) -> float:
@@ -757,9 +829,20 @@ def session_opened(*, harness: str, session: str, recent_s: float | None = None,
                         recent_s=_recent(recent_s), now=now)
 
 
+def session_facts(keys: Iterable[Sequence[Any]]) -> dict[str, Any]:
+    """What names each of up to 200 sessions, asked for as `(harness, session)` pairs:
+    `{sessions: [{harness, session, name, folder, started}], roots: [{harness, root,
+    reason}]}`. `name_sessions` says what it answers and what it raises. The roots read
+    are as `sessions_list` says. Its cold cost is each root's listing and every Codex
+    head, then the head and the last turn of each Claude Code session it answers; a name
+    is kept, with no other text of the turn, while the file's size and mtime stand."""
+    return name_sessions(None, keys)
+
+
 __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIONS",
-           "NEWEST_ROWS", "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FIND_MIN", "RECENT",
-           "FOUND", "EARLIER", "UNDATED", "MAIN", "PROGRAM", "position",
+           "NEWEST_ROWS", "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FACTS_MAX", "FIND_MIN",
+           "RECENT", "FOUND", "EARLIER", "UNDATED", "MAIN", "PROGRAM", "position",
            "parse_position", "local_day", "list_sessions", "newest_sessions",
-           "more_sessions", "list_folders", "open_session", "sessions_list",
-           "sessions_more", "sessions_newest", "sessions_folders", "session_opened"]
+           "more_sessions", "list_folders", "open_session", "name_sessions",
+           "sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
+           "session_opened", "session_facts"]

@@ -241,7 +241,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
 
     assert module.PAGE == "moxi_sessions.page:PAGE"
     assert "ui" in module.OPTIONAL
-    assert module.INTERFACES == frozenset({2, 3, 4})
+    assert module.INTERFACES == frozenset({2, 3, 4, 5})
     probe = ("import sys, moxi_sessions.module, moxi_sessions.cli, moxi_sessions.api\n"
              "print(sorted(m for m in sys.modules if m.startswith(('moxi_ui', "
              "'moxi_sessions.page'))))")
