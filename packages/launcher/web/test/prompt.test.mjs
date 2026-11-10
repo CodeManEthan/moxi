@@ -4,7 +4,7 @@ import test from "node:test";
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
   buttonWords, copied, edited, followed, following, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
-  parseTargets, PRESSED, previewed, runMenu, runOf, slotWords, startedWords, stopped,
+  afterNoAnswer, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
 } from "../src/prompt-model.ts";
@@ -356,6 +356,18 @@ test("a listing that can't be read offers no slot and the command to copy", () =
   assert.deepEqual(parseTargets(null), NO_TARGETS);
   assert.deepEqual(parseTargets({ ...NO_SLOTS, state: "error", detail: "RuntimeError" }), NO_TARGETS);
   assert.deepEqual(parseTargets({ state: "up" }), NO_TARGETS);
+  // Slots that are there and can't be read are told apart from no slots at all.
+  assert.equal(NO_TARGETS.unread, false);
+  assert.deepEqual(parseTargets({ ...NO_SLOTS, unread: true }), UNREAD_TARGETS);
+  assert.deepEqual(parseTargets({ ...NO_SLOTS, state: "error", detail: "RuntimeError", unread: true }), UNREAD_TARGETS);
+  assert.deepEqual(parseTargets({ ...NO_SLOTS, unread: false }), NO_TARGETS);
+  assert.equal(parseTargets(TARGETS).unread, false);
+  assert.deepEqual(UNREAD_TARGETS.default, { target: "terminal" });
+  // A request with no answer: unread only where the reading before it had slots.
+  assert.deepEqual(afterNoAnswer(null), NO_TARGETS);
+  assert.deepEqual(afterNoAnswer(parseTargets(NO_SLOTS)), NO_TARGETS);
+  assert.deepEqual(afterNoAnswer(parseTargets(TARGETS)), UNREAD_TARGETS);
+  assert.deepEqual(afterNoAnswer(UNREAD_TARGETS), UNREAD_TARGETS);
   // A default that names a slot the listing does not show free is a new slot's.
   assert.deepEqual(parseTargets({ ...TARGETS, default: { target: "slot", slot: 1 } }).default, NEW_SLOT);
   // Headless is never the default, whatever the answer says.

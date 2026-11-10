@@ -718,7 +718,7 @@ def test_places_name_the_home_folder_the_page_server_sees(monkeypatch, tmp_path)
 
 # --- /api/targets -------------------------------------------------------------------------
 
-TERMINAL = {"state": "up", "detail": None, "slots": [], "new_slot": False,
+TERMINAL = {"state": "up", "detail": None, "slots": [], "new_slot": False, "unread": False,
             "default": {"target": "terminal", "slot": None}}
 
 
@@ -779,6 +779,7 @@ def test_the_default_is_a_new_slot_when_none_is_launchable_or_there_is_none(fake
     assert said["new_slot"] is True and said["default"] == {"target": "slot", "slot": None}
     fake_slots()
     assert targets_answer() == {"state": "up", "detail": None, "slots": [], "new_slot": True,
+                                "unread": False,
                                 "default": {"target": "slot", "slot": None}}
 
 
@@ -822,9 +823,9 @@ def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, 
     assert said["default"] == {"target": "slot", "slot": None}
 
 
-def test_slots_that_cannot_be_read_offer_no_slot_and_the_terminal(fake_slots):
+def test_slots_that_cannot_be_read_offer_the_terminal_and_say_they_are_unread(fake_slots):
     fake_slots(list="error", slots={"1": {"state": "free", "launchable": True}})
-    assert targets_answer() == TERMINAL
+    assert targets_answer() == {**TERMINAL, "unread": True}
 
 
 def test_slots_that_cannot_run_here_offer_no_slot_and_the_terminal(fake_slots):
@@ -864,9 +865,18 @@ def test_a_failed_targets_read_says_only_the_class(fake_slots, monkeypatch):
     monkeypatch.setattr(fake_slots.fake, "list_slots", broken)
     status, said, raw = get("/api/targets")
     assert status == 200 and said == {
-        **TERMINAL, "state": "error",
+        **TERMINAL, "state": "error", "unread": True,
         "detail": pagehandlers.UNEXPECTED.format("RuntimeError")}
     assert b"someone" not in raw
+
+
+def test_a_failed_targets_read_without_slots_does_not_say_slots_are_unread(monkeypatch):
+    def broken(conn=None):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(pagehandlers, "_available", lambda: broken)
+    status, said, _ = get("/api/targets")
+    assert status == 200 and (said["state"], said["unread"]) == ("error", False)
 
 
 # --- the announcement, and the launcher without the UI ---------------------------------------

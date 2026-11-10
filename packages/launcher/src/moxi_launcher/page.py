@@ -216,9 +216,11 @@ SLOT = _table(number=Out("int"), state=_text(), launchable=Out("bool"),
               holder=_text(nullable=True), until=Out("float", nullable=True),
               taken_by=_table(request_id=_text(), label=_text(), nullable=True))
 #: Where a launch may run. `slots` is empty and `new_slot` false where slots can't be
-#: used or read. `default` is the choice a launch starts with: `target` is `slot` or
-#: `terminal`, and `slot` the lowest slot free now, or null to take a new one.
+#: used or read; `unread` is true only where slots is installed and can run and its
+#: slots could not be read. `default` is the choice a launch starts with: `target` is
+#: `slot` or `terminal`, and `slot` the lowest slot free now, or null to take a new one.
 TARGETS = {**STANDING, "slots": Out("list", items=SLOT), "new_slot": Out("bool"),
+           "unread": Out("bool"),
            "default": _table(target=_text(), slot=Out("int", nullable=True))}
 
 

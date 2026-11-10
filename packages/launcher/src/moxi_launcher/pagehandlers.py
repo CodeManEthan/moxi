@@ -563,18 +563,34 @@ def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | No
     return None if row is None else {"request_id": request_id, "label": _taken_label(row)}
 
 
+def _usable_slots() -> Any:
+    """slots' API where slots is installed, loads and can run here, else None."""
+    api = slots.api() if _available()(slots.MODULE) else None
+    return api if api is not None and api.supported().ok else None
+
+
+def _slots_there() -> bool:
+    """Whether slots can be used here, asked after a read of where a launch may run
+    raised; false when that can't be told either."""
+    try:
+        return _usable_slots() is not None
+    except Exception:
+        return False
+
+
 def targets_now() -> dict[str, Any]:
     """`/api/targets`' answer. Where slots is installed, loads and can run, each
     registered slot in number order, and a default that names the lowest launchable one,
     or none when a launch would take a new slot. Where it is not, or the slots can't be
-    read, no slot and the terminal as the default. Headless is never the default."""
-    none = _up(slots=[], new_slot=False, default=dict(NO_SLOTS))
-    api = slots.api() if _available()(slots.MODULE) else None
-    if api is None or not api.supported().ok:
+    read, no slot and the terminal as the default, with `unread` true only for slots
+    that are there and could not be read. Headless is never the default."""
+    none = _up(slots=[], new_slot=False, unread=False, default=dict(NO_SLOTS))
+    api = _usable_slots()
+    if api is None:
         return none
     listing = api.list_slots()
     if not listing.ok:
-        return none
+        return {**none, "unread": True}
     listed = sorted(listing.slots, key=lambda slot: slot.number)
     with _store() as conn:
         rows = [{"number": slot.number, "state": slot.state, "launchable": slot.launchable,
@@ -582,7 +598,8 @@ def targets_now() -> dict[str, Any]:
                  "until": slot.hold.until if slot.hold else None,
                  "taken_by": _taken_by(conn, slot)} for slot in listed]
     free = next((slot.number for slot in listed if slot.launchable), None)
-    return _up(slots=rows, new_slot=True, default={"target": "slot", "slot": free})
+    return _up(slots=rows, new_slot=True, unread=False,
+               default={"target": "slot", "slot": free})
 
 
 def read_targets(call: Any) -> dict[str, Any]:
@@ -592,7 +609,7 @@ def read_targets(call: Any) -> dict[str, Any]:
             return targets_now()
         except Exception as err:
             return _failed(err, "reading where a launch may run failed", slots=[],
-                           new_slot=False, default=dict(NO_SLOTS))
+                           new_slot=False, unread=_slots_there(), default=dict(NO_SLOTS))
 
 
 # -- live launches and their state ------------------------------------------------------------

@@ -394,19 +394,28 @@ export type Run =
   | { target: "headless" };
 
 /** The value of `/api/targets`: the slots in number order, and the choice a launch starts
- * with. */
+ * with. `unread` says slots is there and its slots could not be read. */
 export interface Targets {
   slots: Slot[];
   default: Run;
+  unread: boolean;
 }
 
 /** What the button offers when the slots can't be used or read: no slot, and the command
  * to copy as the choice. */
-export const NO_TARGETS: Targets = { slots: [], default: { target: "terminal" } };
+export const NO_TARGETS: Targets = { slots: [], default: { target: "terminal" }, unread: false };
+
+/** The same offer where slots is there and its slots could not be read. */
+export const UNREAD_TARGETS: Targets = { ...NO_TARGETS, unread: true };
+
+/** The line under the box while the slots could not be read. */
+export const SLOTS_UNREAD = "The slots can't be read right now. Your terminal and Headless still work.";
 
 /** `/api/targets`' value. Anything that isn't one, or says the read failed, reads as no
- * slots. The default is a slot only where the answer says a new one can be made. */
+ * slots, unread where the answer says so. The default is a slot only where the answer
+ * says a new one can be made. */
 export function parseTargets(data: unknown): Targets {
+  if (isTable(data) && data.unread === true) return UNREAD_TARGETS;
   if (!isTable(data) || data.state !== "up" || !Array.isArray(data.slots)) return NO_TARGETS;
   const slots: Slot[] = [];
   for (const row of data.slots) {
@@ -421,9 +430,16 @@ export function parseTargets(data: unknown): Targets {
   }
   slots.sort((a, b) => a.number - b.number);
   const first = isTable(data.default) ? data.default : {};
-  if (first.target !== "slot" || data.new_slot !== true) return { slots, default: { target: "terminal" } };
+  if (first.target !== "slot" || data.new_slot !== true) return { slots, default: { target: "terminal" }, unread: false };
   const free = slots.find((slot) => slot.launchable && slot.number === first.slot);
-  return { slots, default: { target: "slot", slot: free ? free.number : null, named: false } };
+  return { slots, default: { target: "slot", slot: free ? free.number : null, named: false }, unread: false };
+}
+
+/** What the button offers after a request for `/api/targets` got no answer to read. The
+ * slots are unread only if the reading before it (`last`) had slots, or had them unread:
+ * a request that failed can't say whether slots is there. */
+export function afterNoAnswer(last: Targets | null): Targets {
+  return last !== null && (last.unread || last.default.target === "slot") ? UNREAD_TARGETS : NO_TARGETS;
 }
 
 function sameRun(a: Run, b: Run): boolean {

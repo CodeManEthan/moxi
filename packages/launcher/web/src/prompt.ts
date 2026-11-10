@@ -41,9 +41,9 @@ import {
 } from "./panel.ts";
 import type { Catalog, Form } from "./panel.ts";
 import {
-  buttonWords, chipFace, chipMenu, copied, edited, followed, following, hasEffort, IDLE, inFlight, launched,
+  afterNoAnswer, buttonWords, chipFace, chipMenu, copied, edited, followed, following, hasEffort, IDLE, inFlight, launched,
   launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
-  runOf, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
+  runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
 
@@ -173,7 +173,7 @@ export class LauncherPrompt extends LitElement {
   /** Why the launch form could not be read, when it could not. */
   unread = "";
   /** When the read that gave the listing was asked, by the page's clock; 0 when the last
-   * read failed, so the next press reads again. */
+   * read failed or left the slots unread, so the next press reads again. */
   #targetsAt = 0;
   #targetsAsked = 0;
   /** Counts presses, so an answer for an earlier launch is dropped. */
@@ -459,14 +459,14 @@ export class LauncherPrompt extends LitElement {
   // --- the button, its menu and the launch ---------------------------------------------------
 
   /** Reads where a launch may run. Only the latest read's answer is kept; one that fails
-   * reads as no slots. */
+   * reads as no slots, unread where slots was there before. */
   async #readTargets(): Promise<void> {
     const asked = (this.#targetsAsked += 1);
     const at = Date.now();
     const answer = await api("launcher", "api/targets");
     if (asked !== this.#targetsAsked) return;
-    this.targets = parseTargets(answer.status === 200 ? answer.data : null);
-    this.#targetsAt = answer.status === 200 ? at : 0;
+    this.targets = answer.status === 200 ? parseTargets(answer.data) : afterNoAnswer(this.targets);
+    this.#targetsAt = answer.status === 200 && !this.targets.unread ? at : 0;
   }
 
   #toggleRun(): void {
@@ -610,14 +610,16 @@ export class LauncherPrompt extends LitElement {
       data-current=${row.current ? "true" : "false"} @click=${() => this.#pickRun(pick)}>${inner}</button>`;
   }
 
-  /** The lines under the box: the launch's, or why the launch form can't be read. */
+  /** The lines under the box: the launch's, or why the launch form can't be read, then a
+   * dim one while the slots can't be read. */
   #said() {
     const lines: Line[] = [...this.flight.lines, ...this.flight.notes];
     return html`<div class="said" role="status">${
       lines.length === 0 && this.unread !== ""
         ? html`<p data-line="unread">The launch form can't be read: ${this.unread}.</p>` : nothing}${
       lines.map((line) => html`<p class=${line.tone} data-line=${line.name}>${line.text}</p>${
-        line.command === undefined ? nothing : html`<code data-line="command">${line.command}</code>`}`)}</div>`;
+        line.command === undefined ? nothing : html`<code data-line="command">${line.command}</code>`}`)}${
+      this.targets?.unread === true ? html`<p class="dim" data-line="slots-unread">${SLOTS_UNREAD}</p>` : nothing}</div>`;
   }
 }
 

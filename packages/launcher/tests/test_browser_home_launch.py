@@ -192,6 +192,29 @@ def test_the_button_says_where_the_default_launch_runs(fake, ui_page, script, wo
         "aria-expanded", "false")
 
 
+def test_slots_that_cant_be_read_are_said_under_the_box_and_no_slots_are_not(fake, ui_page):
+    unread = "The slots can't be read right now. Your terminal and Headless still work."
+    fake.script(list="error", slots=kit.free(2))
+    piece = kit.open_home(ui_page)
+    go = piece.locator(".go")
+    line = said(piece, "slots-unread")
+    expect(go).to_have_text("Copy command")
+    expect(line).to_have_text(unread)
+    assert line.evaluate("line => line.className") == "dim"
+    assert open_run(piece).locator(".row").evaluate_all(
+        "rows => rows.map((row) => row.dataset.run)") == ["Your terminal", "Headless"]
+    # Read again once they can be, the line goes and the button names a slot.
+    fake.script(placed=2, slots=kit.free(2))
+    ui_page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    expect(go).to_have_text("Launch in slot 2")
+    expect(line).to_have_count(0)
+    # Where slots can't run at all, nothing is said of slots.
+    fake.script(supported={"ok": False, "why": "tmux is not on PATH"})
+    piece = kit.open_home(ui_page)
+    expect(piece.locator(".go")).to_have_text("Copy command")
+    expect(piece.locator(".said")).not_to_contain_text("slots")
+
+
 def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_picked(
         fake, ui_page, ui_shell):
     # The launch in slot 1 is another user's, so it is no place of this shell's user.
