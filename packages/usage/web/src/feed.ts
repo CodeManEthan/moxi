@@ -51,11 +51,26 @@ export interface Context {
   window: number | null;
 }
 
-/** A row of `/api/sessions`. */
-export interface SessionRow extends RowSums {
+/** What names one session, wherever an answer names one. The id is for addresses and
+ * requests; a session is shown by its name, folder and start. */
+export interface SessionRef {
   harness: string;
   /** Null when the row has no session view. */
   session_id: string | null;
+  /** The name typed for the session; null when it has none. */
+  name: string | null;
+  /** The folder of the session's record, else the one the index stored. */
+  folder: string | null;
+  /** When the session started, epoch seconds. With `known` false it is the session's
+   * earliest request in the index; with `known` null it is null. */
+  started: number | null;
+  /** True when the session's record was found, false when it is gone, null when it
+   * was not looked for. */
+  known: boolean | null;
+}
+
+/** A row of `/api/sessions`. */
+export interface SessionRow extends RowSums, SessionRef {
   cwd: string | null;
   project: string | null;
   models: string[];
@@ -288,6 +303,8 @@ export interface Report<R, T extends Sums = Sums> {
   home?: string | null;
   /** `/api/session`'s context, as a sessions row carries it. */
   context?: Context | null;
+  /** `/api/session`'s session; null when no one harness holds a session of that id. */
+  ref?: SessionRef | null;
 }
 
 /** One transcript lane of `/api/status`. */
@@ -366,9 +383,7 @@ export interface Reading {
 }
 
 /** A session's part of an opened window. */
-export interface UsedRow {
-  harness: string;
-  session_id: string | null;
+export interface UsedRow extends SessionRef {
   requests: number;
   cost: number | null;
 }
@@ -383,8 +398,10 @@ export interface OpenedWindow {
   resets_at: string;
   used_percent: number;
   opened: string | null;
-  /** `first` is null when the period's earliest reading is `last`. */
-  readings: { count: number; first: Reading | null; last: Reading } | null;
+  /** `first` is null when the period's earliest reading is `last`; `last.session` is
+   * the session the reading came from, null when it names none. */
+  readings: { count: number; first: Reading | null;
+              last: Reading & { session: SessionRef | null } } | null;
   /** Null for a limit that is not the harness's main one, with no known start, and
    * with no index to read. `rows` are the ten dearest. */
   used: { since: string; count: number; requests: number; cost: number | null; complete: boolean;
