@@ -646,10 +646,6 @@ def test_a_correction_needs_his_pointer(rounds, capsys):
 @pytest.mark.parametrize("target, argv", [
     (ROUND, ["--text", SAID, "--supersedes", "Q1"]),
     (ROUND, ["--text", SAID, "--supersedes", "C01"]),
-    (ROUND, ["--text", SAID, "--supersedes", "S1"]),
-    (ROUND, ["--text", SAID, "--standing", "--supersedes", "C1"]),
-    ("proj-a", ["--text", SAID, "--supersedes", "C1"]),
-    (ROUND, ["revoke:S1"]), ("proj-a", ["revoke:C1"]),
     (ROUND, ["revoke:C1", "--stages", "B1"]), (ROUND, ["revoke:C1", "--standing"]),
     (ROUND, ["revoke:C1", "--supersedes", "C1"]), (ROUND, ["revoke:C1", "--text", " "]),
     ("proj-a", ["revoke:S1", "--scope", "proj-a"]),
@@ -662,6 +658,27 @@ def test_a_correction_that_cant_be_read_is_a_usage_error(rounds, capsys, target,
 
     assert main(["rule", target, *argv, "--record", "comms:13"]) == 2
 
+    assert logs(rounds) == before
+
+
+@pytest.mark.parametrize("target, argv, fix", [
+    (ROUND, ["--text", SAID, "--supersedes", "S1"],
+     "moxi rounds rule proj-a --text TEXT --supersedes S1 --record PTR"),
+    (ROUND, ["--text", SAID, "--standing", "--supersedes", "C1"],
+     "moxi rounds rule proj-a/a-round --text TEXT --supersedes C1 --record PTR"),
+    ("proj-a", ["--text", SAID, "--supersedes", "C1"],
+     "moxi rounds rule proj-a/<slug> --text TEXT --supersedes C1 --record PTR"),
+    (ROUND, ["revoke:S1"], "moxi rounds rule proj-a revoke:S1 --record PTR"),
+    ("proj-a", ["revoke:C1"], "moxi rounds rule proj-a/<slug> revoke:C1 --record PTR")])
+def test_a_correction_naming_a_ruling_of_the_other_log_is_refused(rounds, capsys,
+                                                                  target, argv, fix):
+    rule(text=SAID)
+    rule(text=SAID, target="proj-a")
+    before = logs(rounds)
+
+    assert main(["rule", target, *argv, "--record", "comms:13"]) == 3
+
+    assert f"run: {fix}" in capsys.readouterr().err
     assert logs(rounds) == before
 
 

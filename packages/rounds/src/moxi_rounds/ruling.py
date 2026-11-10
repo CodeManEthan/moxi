@@ -72,7 +72,7 @@ from . import corrections, folders, log, pointers, questions, shown, write
 from . import options as choices
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, NoLog, NoRound, Unmet
+from .errors import BadArgument, NoLog, NoRound, Refused, Unmet
 
 #: The kind of a ruling that says what is built.
 SUBSTANCE = "substance"
@@ -205,9 +205,9 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     opened, and `Refused` when a gate does not hold, the pointer's among them: an item
     that names no question, a question already ruled or withdrawn, a key the
     question does not offer, a second ruling of a thing that does not name the first,
-    a correction of a ruling that the log does not hold, that no longer stands, or
-    that rules another thing, or a read-back through a time that is no ruling's or is
-    not yet past. A refusal leaves both logs as they were.
+    a correction of a ruling that is of the other log, that the log does not hold,
+    that no longer stands, or that rules another thing, or a read-back through a time
+    that is no ruling's or is not yet past. A refusal leaves both logs as they were.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says what the ruling is on",
@@ -236,12 +236,16 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
                               "name the ruling this one replaces: C<n> for a round's "
                               "own, S<n> for one in the project's register")
         if supersedes.startswith("S") != standing:
-            raise BadArgument(
+            # The id is a ruling's, of the other log: a refusal, as it is for a mark
+            # that names a ruling by the wrong holder.
+            where = (f"{project}/<slug>" if slug is None
+                     else target if standing else project)
+            raise Refused([Unmet(
                 f"{supersedes} is {_whose(supersedes)}, and this ruling is "
                 f"{_whose('S' if standing else 'C')}: a ruling replaces one in its "
-                "own log", "record the ruling where the one it replaces is: on the "
-                           "round for C<n>; on the project, or with --standing, for "
-                           "S<n>")
+                "own log",
+                f"moxi rounds rule {where} --text TEXT --supersedes {supersedes} --record "
+                "PTR")])
     scoped = None if scope is None else parse_scope(scope)
     staged = None if stages is None else parse_stages(stages)
     if at is None and (item or "").startswith(shown.READBACK):
@@ -600,12 +604,13 @@ def _revoke(item: str, asked: Asked) -> Form | None:
                                                  "out")
     if ruling_id.startswith("S") != asked.standing:
         project = asked.name.partition("/")[0]
-        raise BadArgument(
+        # The id is a ruling's, of the other log: a refusal, not a slip in the typing.
+        where = f"{project}/<slug>" if asked.standing else project
+        raise Refused([Unmet(
             f"{ruling_id} is {_whose(ruling_id)}, and {asked.name} is "
-            f"{'a project' if asked.standing else 'a round'}",
-            f"a round's own ruling is taken back on the round, as {corrections.REVOKE}"
-            f"C<n>; one of the register on the project: moxi rounds rule {project} "
-            f"{corrections.REVOKE}S<n> --record PTR")
+            f"{'a project' if asked.standing else 'a round'}: a ruling is taken back "
+            "in the log that holds it",
+            f"moxi rounds rule {where} {corrections.REVOKE}{ruling_id} --record PTR")])
     return Form(kind=PROCESS, rules=item, fields=_said(asked),
                 gates=(corrections.can_be_taken_back(
                     ruling_id, name=asked.name, held=lambda view: _held(view, asked)),),
