@@ -115,6 +115,8 @@ JOB_GONE = ("error", "job-gone")
 DETAIL_CAP = 4 * 1024
 #: The most rows of one table `prune` deletes in one call.
 PRUNE_LIMIT = 1000
+#: How many of the log's newest rows `places` reads.
+PLACES_SCAN = 500
 
 SCHEMA_1 = """
 CREATE TABLE launches (
@@ -930,6 +932,39 @@ def log(conn: sqlite3.Connection, *, limit: int | None = None,
     return [_row(cursor, values) for values in cursor.fetchall()]
 
 
+class Place(NamedTuple):
+    """Where a user last launched: a project's key or, with none, a folder, with the
+    folder and the time of the newest launch there."""
+
+    project_key: str | None
+    cwd: str
+    at: str
+
+
+def launched_by(row: LaunchRow, actor: str) -> bool:
+    """Whether `row` is a launch `actor` made and may make again: one that did not fail,
+    that is no relaunch or resume of another, and that did not work in a scratch
+    folder."""
+    return (row.state != "failed" and row.relaunch_of is None and row.resume_of is None
+            and row.actor == actor and row.values.get("scratch") is not True)
+
+
+def places(conn: sqlite3.Connection, actor: str, limit: int = 5) -> list[Place]:
+    """The places `actor` last launched in, newest first, at most `limit`: one per
+    project key, and one per folder for the launches that name no project, each from its
+    newest launch that `launched_by` counts. Only the newest `PLACES_SCAN` rows of the
+    log are read; a place older than those is not given."""
+    found: dict[tuple[str, str], Place] = {}
+    for row in log(conn, limit=PLACES_SCAN):
+        if len(found) >= limit:
+            break
+        if not launched_by(row, actor):
+            continue
+        key = ("project", row.project_key) if row.project_key else ("cwd", row.cwd)
+        found.setdefault(key, Place(row.project_key or None, row.cwd, row.created_at))
+    return list(found.values())
+
+
 def running(conn: sqlite3.Connection) -> list[LaunchRow]:
     """Launches that may still run, newest first: every row not `failed` that records a
     process or an endpoint to look at. Whether that process runs is the caller's look."""
@@ -1711,19 +1746,20 @@ def table_lines(name: str, *, limit: int | None = None, before: str | datetime |
 
 
 __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
-           "HOWS", "JOB_GONE", "KINDS", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PRUNE_LIMIT",
-           "RECLAIMED",
+           "HOWS", "JOB_GONE", "KINDS", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PLACES_SCAN",
+           "PRUNE_LIMIT", "RECLAIMED",
            "RUN_COLUMNS",
            "RUN_FIELDS", "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES",
            "STATES", "STEPS", "TABLES", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow",
-           "Inserted", "Hold", "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionLive",
+           "Inserted", "Hold", "LaunchRow", "Place", "Run", "RunEvent", "RunOpen", "SessionLive",
            "SessionTaken", "TooLarge", "add_event", "add_exit", "add_pick", "add_run_event",
            "advance_run", "chain",
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
            "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
-           "holds_log", "insert_run", "kinds", "learn_session", "log", "log_lines", "made_by",
+           "holds_log", "insert_run", "kinds", "launched_by", "learn_session", "log", "log_lines",
+           "made_by",
            "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
-           "pend_compact", "pending_compact", "picked", "prune", "release_hold", "resolve",
+           "pend_compact", "pending_compact", "picked", "places", "prune", "release_hold", "resolve",
            "running", "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts",
            "set_run_job", "set_state", "stale_after_s", "stamp", "table", "table_lines"]

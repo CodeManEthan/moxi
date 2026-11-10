@@ -11,6 +11,11 @@
     GET  /api/sessions  the past-sessions list, as `moxi launcher sessions` gives it
     GET  /api/state     a session's state, or the state of every live launch
     GET  /api/runs      runs and their events: one run, one launch's, or the newest
+    GET  /api/places    where this user last launched: a project or a folder each, newest
+                        first, and whether a launch here may name a project
+    GET  /api/targets   where a launch may run now: each slot with whether it is free and
+                        which launch took it, whether a new slot can be made, and the
+                        choice a launch starts with
     POST /api/preview   what a launch would start, its refusals, and a ticket to launch it
     POST /api/launch    the launch a ticket was issued for, run as a detached job (202)
     POST /api/resume    a past session resumed: a slot one as a detached job (202), a
@@ -29,8 +34,8 @@ its brief; a preview's argv and first turn may hold the brief, and are marked `r
 paths are marked `path`.
 
 The page's assets are what the repository's web build writes from `packages/launcher/web/`
-into this package's `web/` folder: the panel and the two components the announcement
-declares (`page.js`, `sessions.js`, `state.js`), committed with their sources.
+into this package's `web/` folder: the panel and the three components the announcement
+declares (`page.js`, `prompt.js`, `sessions.js`, `state.js`), committed with their sources.
 
 The browser UI shell starts the page server on the first request for the launcher's page,
 and loopback stops it when it has been idle. Only that server and loopback's export command
@@ -137,9 +142,11 @@ LAUNCH = _table(
     resume_of=_text(nullable=True),
 )
 #: With `request`, `launches` holds that launch's row once it is written, and `refused`
-#: the refusal of a page launch that was refused before its row was.
+#: the refusal of a page launch that was refused before its row was; `why` is the sentence
+#: recorded for that launch's failure, null for a row that did not fail or recorded none.
 LAUNCHES = {**STANDING, "launches": Out("list", items=LAUNCH),
-            "refused": Out("table", items=REFUSAL.items, nullable=True)}
+            "refused": Out("table", items=REFUSAL.items, nullable=True),
+            "why": _text(nullable=True, mark="redact")}
 
 #: One entry of the past-sessions list. `live` is null when it could not be read.
 PAST = _table(
@@ -193,6 +200,28 @@ RUN = _table(
     events=Out("list", items=RUN_EVENT),
 )
 RUNS = {**STANDING, "runs": Out("list", items=RUN)}
+
+#: One place the user launched in: a project's key, or null for a folder, with the folder
+#: and the time of the newest launch there.
+PLACE = _table(project_key=_text(nullable=True), cwd=_text(mark="path"), at=_text())
+#: `projects` is whether a launch here may name a project; `actor` is who the page
+#: server launches as, whose launches the places are; `home` is the user's home folder
+#: as the page server sees it.
+PLACES = {**STANDING, "projects": Out("bool"), "actor": _text(), "home": _text(mark="path"),
+          "places": Out("list", items=PLACE)}
+
+#: One slot a launch may name. `holder` and `until` (seconds since the epoch) are a live
+#: hold's; `taken_by` is the launch that occupies the slot when the launch log knows it.
+SLOT = _table(number=Out("int"), state=_text(), launchable=Out("bool"),
+              holder=_text(nullable=True), until=Out("float", nullable=True),
+              taken_by=_table(request_id=_text(), label=_text(), nullable=True))
+#: Where a launch may run. `slots` is empty and `new_slot` false where slots can't be
+#: used or read; `unread` is true only where slots is installed and can run and its
+#: slots could not be read. `default` is the choice a launch starts with: `target` is
+#: `slot` or `terminal`, and `slot` the lowest slot free now, or null to take a new one.
+TARGETS = {**STANDING, "slots": Out("list", items=SLOT), "new_slot": Out("bool"),
+           "unread": Out("bool"),
+           "default": _table(target=_text(), slot=Out("int", nullable=True))}
 
 
 def _values_table() -> dict[str, Field]:
@@ -281,6 +310,8 @@ PAGE = lb.Page(
                  query={**_PAGED, "run": Field("string", required=False, max=QUERY_MAX),
                         "request": Field("string", required=False, max=QUERY_MAX)},
                  returns=RUNS),
+        lb.Route("/api/places", "read", _target("read_places"), returns=PLACES),
+        lb.Route("/api/targets", "read", _target("read_targets"), returns=TARGETS),
         lb.Route("/api/preview", "act", _target("preview"), body=REQUEST, returns=PREVIEW),
         lb.Route("/api/launch", "act", _target("launch"),
                  body={**REQUEST, "ticket": Field("string", max=1024)}, returns=LAUNCHED),
@@ -298,6 +329,6 @@ PAGE = lb.Page(
 )
 
 __all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
-           "PAGE", "PAST", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
-           "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "STANDING", "STATE",
-           "VALUES"]
+           "PAGE", "PAST", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
+           "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE",
+           "TARGETS", "VALUES"]

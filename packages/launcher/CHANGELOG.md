@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The launcher offers a piece for Home's main spot in the browser UI shell: a box to say
+  what the agent should do, the line above it that picks the project or folder the
+  session starts in, a chip that picks the harness, the model and the effort, and a
+  button that starts the session. The button names where the launch runs (the lowest
+  free slot, a new slot, or the command to copy where no slot can be used) and its caret
+  opens the other choices; a launch from Home runs where the button says, whatever
+  `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
+  went. New component `prompt` (`<moxi-launcher-prompt>`).
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;
@@ -13,6 +21,11 @@
   with no launch is read in the folder of the caller's directory, as before. It says on
   stderr which folder it read, and its `--json` names that launch as `launch`. Without
   `--key` nothing changes. New `handoffs.folder_of_key` and `handoffs.newest_launch`.
+- The page server answers two new reads. `GET /api/places` gives where the user last
+  launched (a project or a folder each, newest first, five at most), whether a launch
+  here may name a project, and the user's home folder; `GET /api/targets` gives each slot with whether it is free
+  and which launch took it, whether a new slot can be made, and the choice a launch
+  starts with, which is never headless. New `store.places` and `store.launched_by`.
 
 ## 0.1.3 (2026-11-08)
 
