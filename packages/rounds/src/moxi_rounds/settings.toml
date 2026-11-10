@@ -18,7 +18,7 @@ read = "use"
 [models]
 type = "table"
 default = {}
-doc = "Tier names to model names, per harness. The order the tiers are written in is their order, strongest first. The next step's line prints them."
+doc = "Tier names to model names: a table per harness, or one model for every harness. The order the tiers are written in is their order, strongest first. The next step's line prints them."
 read = "use"
 
 [worktree_dir]

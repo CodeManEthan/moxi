@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from moxi_rounds import flows, model_tiers, settings
+from moxi_rounds import flows, model_tiers, next_step, settings
 from moxi_rounds.model_tiers import BELOW_TIER
 
 STEP = "verify-design"
@@ -179,7 +179,109 @@ def test_a_tier_that_lists_the_model_under_no_harness_is_passed_over(models):
     assert noted(table, "model-a") == []
 
 
+# -- a tier written as one model ---------------------------------------------------------
+
+PER_HARNESS = """\
+    [models]
+    second = { claude = "model-two", codex = "model-b" }
+    third  = { claude = "model-three" }
+"""
+PLAIN = """\
+    [models]
+    second = { claude = "model-two", codex = "model-b" }
+    third  = "model-three"
+"""
+
+
+@pytest.mark.parametrize("text", [PER_HARNESS, PLAIN])
+def test_a_tier_written_as_one_model_names_that_model_as_one_harness_would(
+        models, text):
+    table = models(text)
+    assert model_tiers.tier_of(table, "model-three") == "third"
+    assert noted(table, "model-three") == [BELOW_TIER]
+    assert noted(table, "model-two") == noted(table, "model-b") == []
+    assert noted(table, "model-two", pass_="re-check") == []
+
+
+def test_the_written_order_orders_tiers_of_both_forms(models):
+    table = models("""\
+        [models]
+        first  = "model-one"
+        second = { claude = "model-two", codex = "model-b" }
+        third  = "model-three"
+    """)
+    assert list(table) == ["first", "second", "third"]
+    assert noted(table, "model-three") == [BELOW_TIER]
+    assert noted(table, "model-one") == []
+    held_to_first = [{"step": STEP, "model": "first"}]
+    assert noted(table, "model-b", steps=held_to_first) == [BELOW_TIER]
+    assert noted(table, "model-one", steps=held_to_first) == []
+    turned = models("""\
+        [models]
+        third  = "model-three"
+        second = { claude = "model-two", codex = "model-b" }
+        first  = "model-one"
+    """)
+    assert noted(turned, "model-three") == []
+    assert noted(turned, "model-one") == [BELOW_TIER]
+
+
+def test_a_model_a_plain_tier_and_a_harness_both_name_is_in_the_stronger(models):
+    table = models("""\
+        [models]
+        first  = "model-x"
+        second = { claude = "model-two" }
+        third  = { claude = "model-x" }
+    """)
+    assert model_tiers.tier_of(table, "model-x") == "first"
+    assert noted(table, "model-x") == []
+
+
+@pytest.mark.parametrize(("named", "expected"), [
+    ("model-two", [(None, "model-two")]),
+    ({"claude": "model-two", "codex": "model-b"},
+     [("claude", "model-two"), ("codex", "model-b")]),
+    ({"codex": "model-b", "claude": "model-two"},
+     [("codex", "model-b"), ("claude", "model-two")]),
+    ({"claude": "model-two", "codex": "", "other": 7}, [("claude", "model-two")]),
+    ("", []), ({}, []), (7, []), (["model-two"], []),
+])
+def test_the_models_of_a_tier_are_the_ones_it_names_in_the_order_written(
+        named, expected):
+    assert model_tiers.models_of({"second": named}, "second") == expected
+
+
+@pytest.mark.parametrize(("table", "tier"), [
+    ({}, "second"), ({"second": "model-two"}, "third"),
+    ({"second": "model-two"}, None), ("no table", "second")])
+def test_a_tier_the_table_does_not_name_has_no_models(table, tier):
+    assert model_tiers.models_of(table, tier) == []
+
+
+@pytest.mark.parametrize("named", [
+    "model-two", {"claude": "model-two"}, {"claude": "model-two", "codex": "model-b"},
+    {"claude": "model-two", "codex": "model-two"}, {"claude": "model-two", "codex": ""},
+    {"claude": "", "codex": 7}, "", {}, 7])
+def test_every_model_printed_beside_a_tier_is_placed_in_it_and_no_other(named):
+    table = {"first": {"claude": "model-one"}, "second": named}
+    listed = [model for _harness, model in model_tiers.models_of(table, "second")]
+    printed = next_step.model_of(table, "second")
+    assert (printed is None) == (not listed)
+    for model in listed:
+        assert model in printed
+        assert model_tiers.tier_of(table, model) == "second"
+    for model in ("model-two", "model-b"):
+        if model not in listed:
+            assert model_tiers.tier_of(table, model) is None
+
+
 # -- where the order is said -------------------------------------------------------------
 
 def test_the_setting_s_own_text_says_the_written_order_is_the_tiers_order():
     assert "strongest first" in settings.schema().keys["models"].doc
+
+
+def test_the_setting_s_own_text_names_both_forms_of_a_tier():
+    doc = settings.schema().keys["models"].doc
+    assert "per harness" in doc
+    assert "one model" in doc

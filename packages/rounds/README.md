@@ -503,7 +503,7 @@ When a log's earlier lines changed outside this machine, it is read as it stands
 | `defaults.flow` | `"full"` | the flow a round opens with when `--flow` names none |
 | `flows` | `{}` | your own flows by name, each a list of steps; one named like a built-in flow replaces it |
 | `tiers` | `["fix", "small", "full"]` | the flows from lightest to heaviest; each must be a flow |
-| `models` | `{}` | the model each tier names, per harness; see below |
+| `models` | `{}` | the model each tier names, per harness or one for all; see below |
 | `defaults.trace` | `false` | run the trace check when a design is frozen |
 | `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow` and `trace` for that project |
 
@@ -537,6 +537,10 @@ for it:
 first  = { claude = "model-one", codex = "model-a" }
 second = { claude = "model-two", codex = "model-b" }
 ```
+
+A tier may also be written as one model, `third = "model-three"`. It names that model
+for every harness: `next` prints `tier third (model-three)`, and a report by
+`model-three` is placed in `third`, as with `third = { claude = "model-three" }`.
 
 A report names the model that wrote it. `verdict` looks that name up under every
 harness and places it in the strongest tier that lists it. When that tier is written

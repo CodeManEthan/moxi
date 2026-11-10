@@ -26,8 +26,9 @@ a function `(found, step) -> dict` that gives the group's `reads`, `write` and `
 and any key of its own; the head of the group and its waits are filled in for it.
 
 A tier's model is what the `models` setting names for the tier, as `model_of` gives
-it: the one name where the tier has one harness or every harness names the same
-model, else every harness with its model in the order the setting writes them, since
+it from `model_tiers.models_of`, the same reader that places a report's model in a
+tier: the one name where the tier is written as one model, has one harness or every
+harness names the same model, else every harness with its model in the order the setting writes them, since
 nothing recorded says which harness the step runs under. A tier the setting does not
 name is printed alone. This holds wherever a tier is printed: a step's own, and the
 tier a re-check is held to.
@@ -81,13 +82,7 @@ def model_of(models, tier: str | None) -> str | None:
     the one model's name when the tier has one harness or each harness names the same
     model, else `harness: model` for every harness, in the order the table writes
     them. None when the table names no model for the tier."""
-    named = models.get(tier) if isinstance(models, dict) and tier else None
-    if isinstance(named, str):
-        return named or None
-    if not isinstance(named, dict):
-        return None
-    each = [(harness, name) for harness, name in named.items()
-            if isinstance(name, str) and name]
+    each = model_tiers.models_of(models, tier)
     if len({name for _harness, name in each}) <= 1:
         return each[0][1] if each else None
     return ", ".join(f"{harness}: {name}" for harness, name in each)

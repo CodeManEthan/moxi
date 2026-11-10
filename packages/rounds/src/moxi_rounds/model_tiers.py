@@ -7,6 +7,11 @@ as `recheck_model`. The `models` setting maps each tier to a model per harness:
     first  = { claude = "model-one", codex = "model-a" }
     second = { claude = "model-two", codex = "model-b" }
 
+A tier may also be written as one model, `third = "model-three"`: it names that model
+whatever the harness. `models_of` reads both forms, and it is the one reader of a
+tier: the note here and the model the next step prints beside a tier both ask it, so a
+model printed for a tier is a model placed in it.
+
 The order the tiers are written in is their order, strongest first. Nothing else orders
 them: a tier's name is a free word.
 
@@ -14,7 +19,7 @@ A full pass is held to the step's `model`. Any other pass is held to its
 `recheck_model`, and to `model` when the step names none. `flags` gives `BELOW_TIER`
 for a report whose model is in a tier written after the one its pass is held to. A
 report does not say which harness wrote it, so its model is looked up under every
-harness and placed in the strongest tier that lists it under any. It is a note on the
+harness and placed in the strongest tier that names it under any. It is a note on the
 record and refuses nothing; rounds can't prove which model ran.
 
 There is no note when the question can't be answered: the table is empty, the report
@@ -49,13 +54,27 @@ def held_to(steps, step: str, pass_: str | None) -> str | None:
     return step_tier(steps, step, "recheck_model") or step_tier(steps, step, "model")
 
 
+def models_of(models, tier: str | None) -> list[tuple[str | None, str]]:
+    """The models the table `models` names for `tier`, as `(harness, model)` in the
+    order written: one pair per harness for a tier written as a table, and the one
+    pair `(None, model)` for a tier written as a model's name. A harness that names
+    no model is left out. Empty when the table does not name the tier."""
+    named = models.get(tier) if isinstance(models, dict) and tier else None
+    if isinstance(named, str):
+        return [(None, named)] if named else []
+    if not isinstance(named, dict):
+        return []
+    return [(harness, model) for harness, model in named.items()
+            if isinstance(model, str) and model]
+
+
 def tier_of(models, model: str | None) -> str | None:
-    """The strongest tier of the table `models` that lists `model` under any harness,
-    or None when no tier does."""
+    """The strongest tier of the table `models` that names `model`, under any harness
+    or as the tier's one model, or None when no tier does."""
     if not model or not isinstance(models, dict):
         return None
-    for tier, named in models.items():
-        if isinstance(named, dict) and model in named.values():
+    for tier in models:
+        if any(model == named for _harness, named in models_of(models, tier)):
             return tier
     return None
 
@@ -81,4 +100,5 @@ def flags(models, steps, step: str, *, pass_: str | None,
     return [BELOW_TIER] if below(models, model=model, tier=tier) else []
 
 
-__all__ = ["BELOW_TIER", "below", "flags", "held_to", "step_tier", "tier_of"]
+__all__ = ["BELOW_TIER", "below", "flags", "held_to", "models_of", "step_tier",
+           "tier_of"]

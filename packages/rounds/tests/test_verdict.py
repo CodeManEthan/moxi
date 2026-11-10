@@ -894,6 +894,24 @@ def test_a_recheck_is_held_to_the_step_s_tier_for_one(folder, write_config):
     assert below.event["flags"] == ["model-below-tier"]
 
 
+@pytest.mark.parametrize("third", ['"model-three"', '{ claude = "model-three" }'])
+def test_a_tier_written_as_one_model_flags_as_the_same_tier_per_harness_does(
+        folder, write_config, capsys, third):
+    write_config(f"""\
+        [models]
+        second = {{ claude = "model-two", codex = "model-b" }}
+        third = {third}
+    """)
+    fold(folder, question("Q1"))
+
+    done = passed(folder, "model-three")
+    assert main(["next", ROUND]) == 0
+    printed = capsys.readouterr().out
+
+    assert done.event["flags"] == ["model-below-tier"]
+    assert "tier third (model-three)" in printed
+
+
 def test_no_table_of_tiers_flags_no_model(folder):
     fold(folder, question("Q1"))
 
