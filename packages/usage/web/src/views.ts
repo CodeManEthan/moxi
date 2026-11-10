@@ -157,6 +157,10 @@ export interface Filters {
   harness: string;
   model: string;
   project: string;
+  /** A folder's whole path, in place of a project. */
+  folder?: string;
+  /** The days the page's range gives, in place of the preset's; empty for all time. */
+  days?: { since?: string; until?: string };
 }
 
 export const HARNESSES = ["claude", "codex", "opencode"] as const;
@@ -167,12 +171,13 @@ export const TOP = 200;
 
 /** The query keys the filters give, in a fixed order; `leave` names a key to leave out. */
 export function filterKeys(filters: Filters, today: string, leave: string[] = []): [string, string][] {
-  const range = rangeFor(filters.preset, today);
+  const range = filters.days ?? rangeFor(filters.preset, today);
   const keys: [string, string][] = [];
   if (range.since) keys.push(["since", range.since]);
   if (range.until) keys.push(["until", range.until]);
   if (filters.harness) keys.push(["harness", filters.harness]);
   if (filters.project) keys.push(["project", filters.project]);
+  if (filters.folder) keys.push(["folder", filters.folder]);
   if (filters.model) keys.push(["model", filters.model]);
   return keys.filter(([key]) => !leave.includes(key));
 }

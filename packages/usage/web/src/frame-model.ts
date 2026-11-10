@@ -138,6 +138,14 @@ export function newestDay(...days: (string | null | undefined)[]): string | null
   return held.length ? held[held.length - 1] : null;
 }
 
+/** Whether the pieces under Cost have a place: an index that holds requests, or a
+ * status that could not be read. False until the status has answered. */
+export function hasBelow(status: Read<Status>): boolean {
+  const state = status.value;
+  if (state === null) return !status.loading;
+  return !needsCommand(state) && state.total.requests > 0;
+}
+
 /** The path of the Cost rows' report: the daily report over the 90 days to `today`. */
 export function costPath(today: string): string {
   return `api/daily?since=${addDays(today, 1 - COST_DAYS)}&until=${today}`;
@@ -277,7 +285,7 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
   const last = lastPass(state, event);
   const none = state !== null && needsCommand(state);
   const empty = state !== null && !none && state.total.requests === 0;
-  const up = (state !== null && !none && !empty) || (state === null && !status.loading);
+  const up = hasBelow(status);
 
   let nothing: Nothing | null = null;
   if (none) {

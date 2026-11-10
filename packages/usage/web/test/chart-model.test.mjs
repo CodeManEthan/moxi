@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { axisWords, chartModel, chartTable, niceTop, NOTHING_USED } from "../src/chart-model.ts";
+import { axisWords, chartDraw, chartGroup, chartModel, chartTable, niceTop, NOTHING_USED } from "../src/chart-model.ts";
 
 const TODAY = "2026-11-08";    // a Sunday
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
@@ -152,4 +152,83 @@ test("the tokens table: a column per token class, by day or by month", () => {
     ["Oct 2026", "0", "0", "0", "50", "50", ""],
   ]);
   assert.deepEqual(chartTable(report([]), "tokens").rows, []);
+});
+
+// --- the group and the layout -------------------------------------------------------------
+
+test("the group is the chart with Table beside its sentence, or the table with Chart", () => {
+  const drawn = chartGroup(DAILY, MONTH, "cost", TODAY, false);
+  assert.deepEqual([drawn.label, drawn.sentence, drawn.toggle, drawn.nothing, drawn.table],
+                   ["Each day", "The most in these 30 days was today, $19.54. 8 days had no sessions.", "Table", null, null]);
+  assert.equal(drawn.chart.bars.length, 30);
+  const tabled = chartGroup(DAILY, MONTH, "cost", TODAY, true);
+  assert.deepEqual([tabled.sentence, tabled.toggle, tabled.chart, tabled.nothing], [drawn.sentence, "Chart", null, null]);
+  assert.equal(tabled.table.rows.length, 22);
+  assert.equal(chartGroup(report([day("2026-10", 4)]), { kind: "all" }, "cost", TODAY, false).label, "Each month");
+});
+
+test("a range that holds nothing says so in the chart's place", () => {
+  assert.deepEqual(chartGroup(report([]), MONTH, "cost", TODAY, true),
+                   { label: "Each day", sentence: null, toggle: null, nothing: NOTHING_USED, chart: null, table: null });
+});
+
+test("rows that all have no time show as their table alone", () => {
+  const group = chartGroup(report([day(null, 0.25)]), MONTH, "cost", TODAY, false);
+  assert.deepEqual([group.sentence, group.toggle, group.nothing, group.chart], [null, null, null, null]);
+  assert.deepEqual(group.table.rows.map((row) => row.cells[0]), ["no time"]);
+});
+
+test("the chart at 584 px: a column a day, today's value beside its bar, four labels", () => {
+  const draw = chartDraw(chartModel(DAILY, MONTH, "cost", TODAY), 584);
+  assert.deepEqual([draw.width, draw.height, draw.axis, draw.labelY], [584, 106, 84.5, 100]);
+  assert.deepEqual(draw.grid, { y: 8.5, words: "$20" });
+  assert.equal(draw.bars.length, 22);
+  assert.deepEqual(draw.bars[0], { period: "2026-10-10", x: 4.2, y: 80.2, width: 11, height: 3.8, now: false,
+                                   outline: null, slot: { x: 0, width: 19.5 }, hover: "Oct 10: $1.00" });
+  const now = draw.bars.at(-1);
+  assert.deepEqual([now.period, now.x, now.y, now.height, now.now], [TODAY, 568.8, 9.7, 74.3, true]);
+  assert.deepEqual(draw.value, { x: 563.8, y: 18.7, text: "$19.54", anchor: "end" });
+  assert.deepEqual(draw.labels, [
+    { x: 0, text: "Oct 10", anchor: "start", now: false }, { x: 204.4, text: "Oct 20", anchor: "middle", now: false },
+    { x: 438, text: "Nov 1", anchor: "middle", now: false }, { x: 584, text: "today", anchor: "end", now: true }]);
+});
+
+test("a narrow chart names fewer days, never two within 56 px", () => {
+  const draw = chartDraw(chartModel(DAILY, { kind: "90d" }, "cost", TODAY), 320);
+  assert.equal(draw.labels[0].text, "Aug 11");
+  assert.equal(draw.labels.at(-1).text, "today");
+  const places = draw.labels.map((label) => label.x);
+  assert.ok(places.every((x, i) => i === 0 || x - places[i - 1] >= 50), places.join(" "));
+  assert.ok(draw.labels.length >= 3 && draw.labels.length <= 6, String(draw.labels.length));
+});
+
+test("a short range names every day, and a lone bar has its value at its right", () => {
+  const week = chartDraw(chartModel(report([day("2026-11-05", 2), day(TODAY, 1)]), { kind: "7d" }, "cost", TODAY), 584);
+  assert.deepEqual(week.labels.map((label) => label.text), ["Nov 2", "Nov 3", "Nov 4", "Nov 5", "Nov 6", "Nov 7", "today"]);
+  assert.equal(week.bars[0].width, 28);
+  const one = chartDraw(chartModel(report([day(TODAY, 1)]), { kind: "today" }, "cost", TODAY), 300);
+  assert.deepEqual(one.labels, [{ x: 150, text: "today", anchor: "middle", now: true }]);
+  assert.deepEqual([one.bars[0].x, one.bars[0].width], [136, 28]);
+  assert.deepEqual(one.value, { x: 131, y: 17, text: "$1.00", anchor: "end" });
+  const left = chartDraw(chartModel(report([day(TODAY, 1)]), { kind: "today" }, "cost", TODAY), 120);
+  assert.deepEqual([left.value.x, left.value.anchor], [79, "start"]);
+});
+
+test("a period that is not whole has a dashed outline, tall enough to see with no bar", () => {
+  const rows = [day("2026-11-07", 4, 0, { complete: false, unpriced_tokens: 1200 }),
+                day("2026-11-06", null, 0, { complete: false, unpriced_tokens: 1200 }), day(TODAY, 8)];
+  const draw = chartDraw(chartModel(report(rows), { kind: "7d" }, "cost", TODAY), 584);
+  const [none, part, whole] = draw.bars;
+  assert.deepEqual([none.height, none.outline], [0, { x: 360.9, y: 79.5, width: 29, height: 5 }]);
+  assert.equal(none.hover, "Nov 6: no price, not whole");
+  assert.deepEqual([part.height, part.outline], [30.4, { x: 444.4, y: 53.1, width: 29, height: 31.4 }]);
+  assert.equal(part.hover, "Nov 7: at least $4.00, not whole");
+  assert.equal(whole.outline, null);
+});
+
+test("by month the axis names the first, the last and each January", () => {
+  const rows = ["2025-11", "2025-12", "2026-01", "2026-06", "2026-11"].map((month) => day(month, 3));
+  const draw = chartDraw(chartModel(report(rows), { kind: "all" }, "cost", TODAY), 584);
+  assert.deepEqual(draw.labels.map((label) => label.text), ["Nov 2025", "Jan 2026", "Nov 2026"]);
+  assert.equal(draw.labels.at(-1).now, true);
 });

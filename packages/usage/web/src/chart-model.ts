@@ -1,7 +1,7 @@
 // The chart under the filter line: one bar a day (or a month), the sentence above it and
-// the table that stands in its place, worked out from a daily report with no DOM. The
-// view scales `share` to its height and places the labels; every word and figure is
-// decided here. Nothing was used in the range: there is no chart, and the page says so.
+// the table that stands in its place, worked out from a daily report with no DOM, and
+// laid out at a width. Every word, figure and place is decided here; the view draws
+// what it is given. Nothing was used in the range: there is no chart, and the page says so.
 
 import { costWords, countWords, rangeBy, rangeDays, rangeLabel, sumRows, whyNotWhole } from "./cost-model.ts";
 import type { Range, Sum } from "./cost-model.ts";
@@ -194,5 +194,153 @@ export function chartTable(report: Report<DayRow>, measure: Measure, by: "day" |
               ...heads.map((label) => ({ label, num: true })), { label: "Total", num: true },
               ...(flagged ? [{ label: "Not whole", num: false }] : [])],
     rows: lines.map(({ key, cells, why }) => ({ key, cells: flagged ? [...cells, why ?? ""] : cells })),
+  };
+}
+
+// --- the group the chart stands in --------------------------------------------------------
+
+/** The link that shows the chart's rows as a table in its place, and the one back. */
+export const TABLE = "Table";
+export const CHART = "Chart";
+
+/** The chart's group as the view places it: one of the chart, its table, or the
+ * sentence that nothing was used. */
+export interface ChartGroup {
+  /** The group's name at its left: `Each day`, `Each month`. */
+  label: string;
+  /** The line above the chart or the table. */
+  sentence: string | null;
+  /** `Table` beside the sentence while the chart shows, `Chart` while the table does;
+   * null where there is only one of them to show. */
+  toggle: string | null;
+  /** `Nothing was used in this range.`, in the chart's place. */
+  nothing: string | null;
+  chart: ChartModel | null;
+  table: Table | null;
+}
+
+/**
+ * The chart's group over a daily report of the range. With no row the range holds
+ * nothing, and the group says so. Rows that all have no time have no bar to stand on,
+ * so only their table shows.
+ */
+export function chartGroup(report: Report<DayRow>, range: Range, measure: Measure, today: string,
+                           asTable: boolean): ChartGroup {
+  const by = rangeBy(range, today);
+  const label = by === "day" ? "Each day" : "Each month";
+  if (report.rows.length === 0) {
+    return { label, sentence: null, toggle: null, nothing: NOTHING_USED, chart: null, table: null };
+  }
+  const chart = chartModel(report, range, measure, today);
+  if (chart === null) {
+    return { label, sentence: null, toggle: null, nothing: null, chart: null, table: chartTable(report, measure, by) };
+  }
+  return asTable
+    ? { label, sentence: chart.sentence, toggle: CHART, nothing: null, chart: null, table: chartTable(report, measure, by) }
+    : { label, sentence: chart.sentence, toggle: TABLE, nothing: null, chart, table: null };
+}
+
+// --- the chart, placed --------------------------------------------------------------------
+
+/** The chart's sizes, in px. A bar stands on `base` and a bar at the axis's top reaches
+ * `top`; the grid line and the axis are drawn half a pixel under those. */
+export const CHART_SIZE = { height: 106, top: 8, base: 84, labels: 100, barShare: 0.565, barMax: 28,
+                            barMin: 1.5, outlineMin: 4, labelGap: 56 };
+
+export interface DrawnBar {
+  period: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  now: boolean;
+  /** A period that is not whole: a dashed outline around the bar. */
+  outline: { x: number; y: number; width: number; height: number } | null;
+  /** The whole column over the period, which gives the value on hover. */
+  slot: { x: number; width: number };
+  hover: string;
+}
+
+export interface DrawnLabel {
+  x: number;
+  text: string;
+  anchor: "start" | "middle" | "end";
+  /** Today's (this month's) label, in the text colour. */
+  now: boolean;
+}
+
+/** A chart model laid out at one width. */
+export interface ChartDraw {
+  width: number;
+  height: number;
+  /** The grid line at the axis's top with its value above it; null when every bar is zero. */
+  grid: { y: number; words: string } | null;
+  /** The line the bars stand on. */
+  axis: number;
+  bars: DrawnBar[];
+  labels: DrawnLabel[];
+  labelY: number;
+  /** Today's value in words beside its bar. */
+  value: { x: number; y: number; text: string; anchor: "start" | "end" } | null;
+}
+
+const round = (n: number): number => Math.round(n * 10) / 10;
+
+/**
+ * The chart at `width` px. Every period has a column; one in which nothing was used has
+ * no bar. The axis names the first and the last period, and between them the 1st, 10th
+ * and 20th of a month (each January by month) where there is room; with room for all,
+ * every period.
+ */
+export function chartDraw(model: ChartModel, width: number): ChartDraw {
+  const size = CHART_SIZE;
+  const count = model.bars.length;
+  const slot = width / Math.max(1, count);
+  const barWidth = Math.min(size.barMax, Math.max(1, slot * size.barShare));
+  const centre = (i: number): number => i * slot + slot / 2;
+  const bars: DrawnBar[] = [];
+  let value: ChartDraw["value"] = null;
+  model.bars.forEach((bar, i) => {
+    if (bar.empty || bar.hover === null) return;
+    const full = bar.share * (size.base - size.top);
+    const height = bar.value > 0 ? Math.max(size.barMin, full) : 0;
+    const x = centre(i) - barWidth / 2;
+    const y = size.base - height;
+    const outlined = Math.max(size.outlineMin, height);
+    bars.push({
+      period: bar.period, x: round(x), y: round(y), width: round(barWidth), height: round(height), now: bar.now,
+      outline: bar.whole ? null
+        : { x: round(x) - 0.5, y: round(size.base - outlined) - 0.5, width: round(barWidth) + 1, height: round(outlined) + 1 },
+      slot: { x: round(i * slot), width: round(slot) },
+      hover: bar.hover,
+    });
+    if (bar.now) {
+      const left = x - 5 >= 64;
+      value = { x: round(left ? x - 5 : x + barWidth + 5), y: round(Math.min(y + 9, size.base - 6)),
+                text: bar.words, anchor: left ? "end" : "start" };
+    }
+  });
+
+  const marked = (period: string): boolean =>
+    (model.by === "month" ? /-01$/.test(period) : /-(01|10|20)$/.test(period));
+  const order = slot >= size.labelGap ? model.bars.map((_, i) => i)
+    : [0, count - 1, ...model.bars.map((bar, i) => (marked(bar.period) ? i : -1)).filter((i) => i > 0 && i < count - 1)];
+  const taken: number[] = [];
+  for (const i of order) {
+    if (i < 0 || i >= count || taken.includes(i)) continue;
+    if (slot >= size.labelGap || taken.every((other) => Math.abs(centre(other) - centre(i)) >= size.labelGap)) taken.push(i);
+  }
+  const labels = taken.sort((a, b) => a - b).map((i): DrawnLabel => {
+    const bar = model.bars[i];
+    const at = centre(i);
+    if (i === count - 1 && count > 1 && slot < size.labelGap) return { x: width, text: bar.label, anchor: "end", now: bar.now };
+    if (at < 16) return { x: 0, text: bar.label, anchor: "start", now: bar.now };
+    return { x: round(at), text: bar.label, anchor: "middle", now: bar.now };
+  });
+
+  return {
+    width, height: size.height,
+    grid: model.top === null ? null : { y: size.top + 0.5, words: model.top.words },
+    axis: size.base + 0.5, bars, labels, labelY: size.labels, value,
   };
 }

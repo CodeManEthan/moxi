@@ -1,5 +1,5 @@
-/*! Bundled with d3-array, d3-color, d3-format, d3-hierarchy, d3-interpolate, d3-scale and
- * internmap, each under the ISC licence:
+/*! Bundled with d3-array, d3-color, d3-format, d3-hierarchy, d3-interpolate and d3-scale,
+ * each under the ISC licence:
  *
  * d3-array 3.2.4: Copyright 2010-2023 Mike Bostock
  * d3-color 3.1.0: Copyright 2010-2022 Mike Bostock
@@ -7,7 +7,6 @@
  * d3-hierarchy 3.1.2: Copyright 2010-2021 Mike Bostock
  * d3-interpolate 3.0.1: Copyright 2010-2021 Mike Bostock
  * d3-scale 4.0.2: Copyright 2010-2021 Mike Bostock
- * internmap 2.0.3: Copyright 2021 Mike Bostock
  *
  * Permission to use, copy, modify, and/or distribute this software for any purpose
  * with or without fee is hereby granted, provided that the above copyright notice and
@@ -29,26 +28,41 @@
 //     section[data-group=limits]   one per harness with a window to draw, a row per window
 //     section[data-group=cost]     today, 7 days and 30 days, each with the period before
 //   div[data-part=nothing]      in place of Cost and all under it while nothing is counted
-//   moxi-usage-legacy           the views the page had before, while the frame holds an
-//                               index with requests: the place of the filter line, the
-//                               chart and the sections
+//   div[data-part=filters]      the filter line: Range, Project (or Folder), Harness,
+//                               Model, each a menu, and Cost / Tokens
+//   div[data-part=below]        the groups under the filter line:
+//     section[data-group=chart]    one bar a day or a month, its sentence and its table
+//   moxi-usage-legacy           the views the page had before, each until it has its
+//                               place in the groups under the filter line
 //   div[data-part=foot]         when the sessions were last read, the files, the act
 //   div[data-part=lines]        dim lines: what the figures leave out, reads that failed
 //
-// The view places what `frame-model.ts` returns and words nothing itself: a piece whose
-// fact no read carries is not in the model and is not drawn.
+// The view places what its models return and words nothing itself: a piece whose fact
+// no read carries is not in the model and is not drawn. The range and the filters are
+// one state (`filter-model.ts`), held for the document's life; every read under the
+// filter line is asked with it, and today's views are handed it.
 
 import { css, html, LitElement, nothing, svg } from "lit";
-import { api, navigate, subscribe } from "/m/ui/client.js";
+import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
+import { chartDraw, chartGroup } from "./chart-model.ts";
+import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
+import { rangeDays, sumRows } from "./cost-model.ts";
+import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
 import { Feed, parseIndexEvent, parseLimits, parseReport, parseStatus, passOutcome } from "./feed.ts";
-import type { DayRow, IndexEvent, Limits, Report, Status } from "./feed.ts";
-import { COPIED, COPY, costPath, frameModel, newestDay, passLine, shouldPass } from "./frame-model.ts";
-import type { Cost, Foot, FootLine, Nothing } from "./frame-model.ts";
+import type { DayRow, IndexEvent, Limits, ModelRow, ProjectRow, Report, Status } from "./feed.ts";
+import {
+  allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
+  placesPath, watchState,
+} from "./filter-model.ts";
+import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
+import { COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, shouldPass } from "./frame-model.ts";
+import type { Cost, Foot, FootLine, Nothing, OtherRead } from "./frame-model.ts";
 import "./legacy.ts";
 import type { LimitGroup, LimitRow, Warning } from "./limits-model.ts";
-import { parseRoute } from "./views.ts";
+import { NO_FILTERS, parseRoute } from "./views.ts";
+import type { Filters } from "./views.ts";
 
 const TAG = "moxi-usage-page";
 const TICK_MS = 15_000;
@@ -106,6 +120,52 @@ const STYLES = css`
   .lines { padding: 6px 2px 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim);
            overflow-wrap: anywhere; }
   .lines p + p { margin-top: 2px; }
+  .filt { position: relative; display: flex; justify-content: space-between; margin: 14px 0 12px; padding: 0 2px;
+          font-size: 14px; line-height: 20px; color: var(--moxi-text-dim); white-space: nowrap; }
+  .filt .fl { display: flex; flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+  .filt .k { margin-right: 8px; }
+  .filt .sep { margin: 0 12px; }
+  .filt button { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+  .filt button.set, .filt .tog button[aria-pressed="true"] { color: var(--moxi-text); }
+  .filt .v { position: relative; top: 1px; margin-left: 6px; font-size: 15px; line-height: 0; color: var(--moxi-text-dim); }
+  .filt .tog button { margin-left: 14px; }
+  .anchor { position: relative; display: inline-block; }
+  .menu { position: absolute; z-index: 2; left: 0; top: calc(100% + 8px); min-width: 240px; max-width: 400px;
+          padding: 6px 0; border: 1px solid var(--moxi-border-strong); border-radius: 10px; background: var(--moxi-bg);
+          font-size: 14px; line-height: 1.5; color: var(--moxi-text); text-align: left; white-space: normal; }
+  .menu hr { margin: 6px 0; border: 0; border-top: 1px solid var(--moxi-border); }
+  .menu button.it { display: grid; grid-template-columns: 20px 1fr auto; column-gap: 0; align-items: baseline; width: 100%;
+                    padding: 7px 14px; color: var(--moxi-text); text-align: left; overflow-wrap: anywhere; }
+  .menu button.it:hover { background: var(--moxi-bg-hover); }
+  .menu .t { padding-left: 16px; color: var(--moxi-text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .menu .custom { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding: 2px 14px 8px 34px;
+                  color: var(--moxi-text-dim); }
+  .menu .custom input { max-width: 100%; padding: 2px 4px; border: 1px solid var(--moxi-border-strong);
+                        border-radius: var(--moxi-radius); background: var(--moxi-bg); color: var(--moxi-text);
+                        font: inherit; font-size: var(--moxi-font-size-sm); }
+  .menu .custom button { color: var(--moxi-text); }
+  .grps.below { margin-top: 0; }
+  .chartl { display: flex; justify-content: space-between; gap: 18px; padding: 7px 0 2px;
+            font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .chartl button.act { flex: none; }
+  .none { padding: 7px 0; font-size: 14px; line-height: 20px; color: var(--moxi-text-dim); }
+  svg.ch { display: block; margin: 8px 0 6px; overflow: visible; }
+  svg.ch text { fill: var(--moxi-text-dim); font-size: 11px; font-family: var(--moxi-font-sans);
+                font-variant-numeric: tabular-nums; }
+  svg.ch text.v { fill: var(--moxi-text); }
+  svg.ch .bar { fill: var(--moxi-text); fill-opacity: 0.36; }
+  svg.ch .bar.now { fill-opacity: 1; }
+  svg.ch .ax { stroke: var(--moxi-border-strong); stroke-width: 1; }
+  svg.ch .gr { stroke: var(--moxi-border); stroke-width: 1; }
+  svg.ch .dash { fill: none; stroke: var(--moxi-text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+  svg.ch .hit { fill: none; pointer-events: all; }
+  .scroll { max-width: 100%; overflow-x: auto; padding: 2px 0 6px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: var(--moxi-font-size-sm); line-height: 18px;
+         white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tbl th, .tbl td { padding: 5px 0 5px 16px; text-align: left; font-weight: 400; }
+  .tbl th:first-child, .tbl td:first-child { padding-left: 0; }
+  .tbl th { color: var(--moxi-text-dim); }
+  .tbl .n { text-align: right; }
   .quietline { padding: 150px 0 14px; font-size: 22px; line-height: 32px; text-align: center;
                letter-spacing: -0.005em; }
   .grps + .nothing .quietline { padding-top: 56px; }
@@ -130,6 +190,9 @@ const STYLES = css`
     .one > span:first-child { display: block; padding-right: 0; white-space: normal; }
     .one .t { display: block; padding-left: 64px; font-size: var(--moxi-font-size-sm); line-height: 18px; }
     .one2 { margin-top: 0; white-space: normal; }
+    .filt .anchor { position: static; }
+    .menu { max-width: calc(100% - 4px); }
+    .menu button.it { grid-template-columns: 20px 1fr auto; }
     .capl, .note { display: block; }
     .capl span, .note span { display: block; }
     .quietline { padding-top: 56px; white-space: normal; }
@@ -143,12 +206,24 @@ export class UsagePage extends LitElement {
     route: { type: String },
     tick: { state: true },
     copied: { state: true },
+    menu: { state: true },
+    custom: { state: true },
+    asTable: { state: true },
+    width: { state: true },
   };
 
   route = "";
   tick = 0;
   /** The command was just copied. */
   copied = false;
+  /** The filter whose menu is open. */
+  menu: Menu["key"] | null = null;
+  /** The Range menu shows the two days of `From … to …`. */
+  custom = false;
+  /** The chart's table stands in its place. */
+  asTable = false;
+  /** The element's own width, in px. */
+  width = 680;
 
   #limits: Feed<Limits> | null = null;
   #status: Feed<Status> | null = null;
@@ -159,6 +234,15 @@ export class UsagePage extends LitElement {
   #events = 0;
   /** What a pass the page asked for came to, when it did not start. */
   #pass: string | null = null;
+  /** The reads under the filter line, opened for the state they were asked with. */
+  #chart: Feed<Report<DayRow>> | null = null;
+  #figures: Feed<Report<DayRow>> | null = null;
+  #allTime: Feed<Report<DayRow>> | null = null;
+  #places: Feed<Report<ProjectRow>> | null = null;
+  #models: Feed<Report<ModelRow>> | null = null;
+  #asked: string | null = null;
+  #askedAllTime: string | null = null;
+  #resize: ResizeObserver | null = null;
   #stops: (() => void)[] = [];
   #timer: ReturnType<typeof setInterval> | undefined;
   #shown = (): void => {
@@ -195,7 +279,14 @@ export class UsagePage extends LitElement {
       }
     });
     void daily.refresh();
+    this.#stops.push(watchState(update));
+    this.#resize = new ResizeObserver((entries) => {
+      const found = Math.floor(entries[0]?.contentRect.width ?? 0);
+      if (found > 0 && found !== this.width) this.width = found;
+    });
+    this.#resize.observe(this);
     document.addEventListener("visibilitychange", this.#shown);
+    document.addEventListener("pointerdown", this.#outside);
     this.#timer = setInterval(() => { this.tick += 1; }, TICK_MS);
   }
 
@@ -203,10 +294,78 @@ export class UsagePage extends LitElement {
     super.disconnectedCallback();
     for (const feed of [this.#limits, this.#status, this.#daily]) feed?.close();
     this.#limits = this.#status = this.#daily = null;
+    this.#closeBelow();
     for (const stop of this.#stops) stop();
     this.#stops = [];
+    this.#resize?.disconnect();
+    this.#resize = null;
     document.removeEventListener("visibilitychange", this.#shown);
+    document.removeEventListener("pointerdown", this.#outside);
     clearInterval(this.#timer);
+  }
+
+  /** The page's range, filters and measure: one state for every piece under the filter
+   * line, held for the document's life. */
+  get state(): PageState {
+    return heldState();
+  }
+
+  /** Changes the range, a filter or the measure; every piece that reads under them
+   * reads again. */
+  setState(patch: Partial<PageState>): void {
+    holdState(patch);
+  }
+
+  /** A press outside an open menu closes it. */
+  #outside = (event: Event): void => {
+    if (this.menu === null) return;
+    const inside = event.composedPath().some((node) => node instanceof Element && node.classList.contains("anchor"));
+    if (!inside) this.#closeMenu();
+  };
+
+  #closeMenu(): void {
+    this.menu = null;
+    this.custom = false;
+  }
+
+  #closeBelow(): void {
+    for (const feed of [this.#chart, this.#figures, this.#allTime, this.#places, this.#models]) feed?.close();
+    this.#chart = this.#figures = this.#allTime = this.#places = this.#models = null;
+    this.#asked = this.#askedAllTime = null;
+  }
+
+  /** Whether the project filter is by folder: projects is not installed. */
+  #folders(): boolean {
+    return !installed("projects");
+  }
+
+  protected willUpdate(): void {
+    const status = this.#status;
+    if (status === null || !hasBelow(status)) return;
+    const update = () => this.requestUpdate();
+    const state = heldState();
+    const today = this.#today();
+    const paths = { chart: chartPath(state, today), figures: figuresPath(state, today),
+                    places: placesPath(state, today, this.#folders()), models: modelsPath(state, today) };
+    const asked = JSON.stringify(paths);
+    if (asked !== this.#asked) {
+      this.#asked = asked;
+      for (const feed of [this.#chart, this.#figures, this.#places, this.#models]) feed?.close();
+      this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
+      const figures = paths.figures;
+      this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
+      this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update);
+      this.#models = new Feed<Report<ModelRow>>(() => api("usage", paths.models), parseReport, update);
+      for (const feed of [this.#chart, this.#figures, this.#places, this.#models]) void feed?.refresh();
+    }
+    // All time's figure is asked when the Range menu first opens, and again under new filters.
+    const allTime = allTimePath(state);
+    if ((this.menu === "range" || this.#askedAllTime !== null) && allTime !== this.#askedAllTime) {
+      this.#askedAllTime = allTime;
+      this.#allTime?.close();
+      this.#allTime = new Feed<Report<DayRow>>(() => api("usage", allTime), parseReport, update);
+      void this.#allTime.refresh();
+    }
   }
 
   #indexEvent(data: unknown): void {
@@ -217,6 +376,7 @@ export class UsagePage extends LitElement {
     if (!event.running) {
       void this.#status?.refresh();
       void this.#daily?.refresh();
+      for (const feed of [this.#chart, this.#figures, this.#allTime, this.#places, this.#models]) void feed?.refresh();
     }
     this.requestUpdate();
   }
@@ -249,11 +409,36 @@ export class UsagePage extends LitElement {
     const status = this.#status;
     const daily = this.#daily;
     if (limits === null || status === null || daily === null) return nothing;
+    const state = heldState();
+    const today = this.#today();
+    const chart = this.#chart;
+    const report = chart?.value ?? null;
+    // The range's total, for the line that says it is not whole.
+    const range: Sum | null = report === null || report.rows.length === 0 ? null
+      : sumRows([{ ...report.total, unpriced_models: report.unpriced_models }]);
+    const others: OtherRead[] = [];
+    const other = (what: string, read: OtherRead["read"] | null): void => {
+      if (read !== null) others.push({ what, read, report: true });
+    };
+    other("The chart", chart);
+    other("The range's figures", this.#figures);
+    other(this.#folders() ? "The folders" : "The projects", this.#places);
+    other("The models", this.#models);
     const frame = frameModel({
-      limits, status, daily, event: this.#event, pass: this.#pass, most: null, range: null, others: [],
+      limits, status, daily, event: this.#event, pass: this.#pass, most: null, range, others,
       unknownAddress: parseRoute(this.route).view === "unknown", now: limits.now(),
     });
     const groups = frame.limits.groups;
+    const line = !frame.below ? null : filterLine({
+      state, today, figures: this.#figures === null ? daily.value : this.#figures.value,
+      allTime: this.#allTime?.value ?? null, places: this.#places?.value ?? null, folders: this.#folders(),
+      models: this.#models?.value ?? null, lanes: status.value?.lanes ?? null,
+    });
+    const group = !frame.below || report === null ? null
+      : chartGroup(report, state.range, state.measure, today, this.asTable);
+    const days = rangeDays(state.range, today);
+    const filters: Filters = { ...NO_FILTERS, harness: state.harness, model: state.model, project: state.project,
+                               folder: state.folder, days: days ?? {} };
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -262,7 +447,10 @@ export class UsagePage extends LitElement {
         ${frame.cost === null ? nothing : this.#cost(frame.cost)}
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
-      ${frame.below ? html`<moxi-usage-legacy .route=${this.route}></moxi-usage-legacy>` : nothing}
+      ${line === null ? nothing : this.#filters(line)}
+      ${group === null ? nothing : html`<div class="grps below" data-part="below">${this.#chartGroup(group)}</div>`}
+      ${frame.below ? html`<moxi-usage-legacy .route=${this.route} .filters=${filters}
+        .said=${group !== null && group.nothing !== null}></moxi-usage-legacy>` : nothing}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -328,6 +516,114 @@ export class UsagePage extends LitElement {
       event.preventDefault();
       navigate("usage", route);
     }}>${label}</a>`;
+  }
+
+  /** The filter line. */
+  #filters(line: FilterLine) {
+    const menus = [line.range, line.place, line.harness, line.model].filter((menu): menu is Menu => menu !== null);
+    return html`<div class="filt" data-part="filters" @keydown=${(event: KeyboardEvent) => {
+      if (event.key !== "Escape" || this.menu === null) return;
+      const open = this.menu;
+      this.#closeMenu();
+      void this.updateComplete.then(() =>
+        this.renderRoot.querySelector<HTMLElement>(`[data-filter="${open}"] button.pick`)?.focus());
+    }}>
+      <span class="fl">${menus.map((menu, i) => html`${i ? html`<span class="sep">·</span>` : nothing}${
+        this.#filter(menu, line)}`)}</span>
+      <span class="tog" role="group" data-part="measure">${line.measures.map((measure) => html`<button type="button"
+        data-measure=${measure.key} aria-pressed=${String(measure.picked)}
+        @click=${() => { holdState({ measure: measure.key }); }}>${measure.label}</button>`)}</span>
+    </div>`;
+  }
+
+  /** One filter: its name, the button that says what it is set to, and its menu. */
+  #filter(menu: Menu, line: FilterLine) {
+    const open = this.menu === menu.key;
+    return html`<span class="f" data-filter=${menu.key}><span class="k">${menu.label}</span><span class="anchor">
+      <button type="button" class=${menu.set ? "pick set" : "pick"} aria-haspopup="menu" aria-expanded=${String(open)}
+        @click=${() => { if (open) this.#closeMenu(); else { this.menu = menu.key; this.custom = false; } }}>${
+        menu.value}<span class="v" aria-hidden="true">▾</span></button>
+      ${open ? html`<div class="menu" role="menu" aria-label=${menu.label} data-menu=${menu.key}>
+        ${menu.items.map((item) => html`${item.ruled ? html`<hr>` : nothing}${this.#item(item)}${
+          item.patch === null && this.custom ? this.#custom(line) : nothing}`)}
+      </div>` : nothing}</span></span>`;
+  }
+
+  #item(item: MenuItem) {
+    const patch = item.patch;
+    return html`<button type="button" class="it" role="menuitemradio" aria-checked=${String(item.picked)}
+      data-item=${item.key} @click=${() => {
+        if (patch === null) { this.custom = !this.custom; return; }
+        this.#closeMenu();
+        holdState(patch);
+      }}><span aria-hidden="true">${item.picked ? "✓" : nothing}</span><span>${item.label}</span>${
+      item.figure === null ? html`<span></span>` : html`<span class="t">${item.figure}</span>`}</button>`;
+  }
+
+  /** The two days of `From … to …`. */
+  #custom(line: FilterLine) {
+    const days = line.custom;
+    const set = (event: Event) => {
+      event.preventDefault();
+      const form = event.currentTarget as HTMLFormElement;
+      const day = (name: string) => (form.elements.namedItem(name) as HTMLInputElement).value;
+      const range = customRange(day("since"), day("until"));
+      if (range === null) return;
+      this.#closeMenu();
+      holdState({ range });
+    };
+    return html`<form class="custom" data-part="custom" @submit=${set}>
+      <label>${days.from} <input type="date" name="since" required .value=${days.since}></label>
+      <label>${days.to} <input type="date" name="until" required .value=${days.until}></label>
+      <button type="submit">${days.act}</button>
+    </form>`;
+  }
+
+  /** The chart's group: its sentence and one of the chart, its table, or the sentence
+   * that nothing was used. */
+  #chartGroup(group: ChartGroup) {
+    // The group's label column is beside the chart only on a wide page.
+    const wide = !window.matchMedia("(max-width: 720px)").matches;
+    const width = Math.max(120, this.width - (wide ? 100 : 0));
+    return html`<section class="grp" data-group="chart">
+      <div class="gk">${group.label}</div>
+      <div class="gl">
+        ${group.nothing === null ? nothing : html`<p class="none" data-part="none">${group.nothing}</p>`}
+        ${group.sentence === null && group.toggle === null ? nothing : html`<div class="chartl">
+          <span data-part="sentence">${group.sentence ?? nothing}</span>
+          ${group.toggle === null ? nothing : html`<button type="button" class="act" data-part="table-toggle"
+            @click=${() => { this.asTable = !this.asTable; }}>${group.toggle}</button>`}</div>`}
+        ${group.chart === null ? nothing : this.#chartSvg(chartDraw(group.chart, width), group.chart.aria)}
+        ${group.table === null ? nothing : this.#table(group.table)}
+      </div>
+    </section>`;
+  }
+
+  #chartSvg(draw: ChartDraw, aria: string) {
+    return html`<svg class="ch" data-part="chart" role="img" aria-label=${aria} width=${draw.width} height=${draw.height}
+      viewBox="0 0 ${draw.width} ${draw.height}">${svg`
+      ${draw.grid === null ? nothing : svg`<line class="gr" x1="0" x2=${draw.width} y1=${draw.grid.y} y2=${draw.grid.y}></line>
+        <text data-part="top" x="0" y="4">${draw.grid.words}</text>`}
+      ${draw.bars.map((bar) => svg`<g data-period=${bar.period} data-whole=${String(bar.outline === null)}>
+        <title>${bar.hover}</title>
+        <rect class=${bar.now ? "bar now" : "bar"} x=${bar.x} y=${bar.y} width=${bar.width} height=${bar.height} rx="1"></rect>
+        ${bar.outline === null ? nothing : svg`<rect class="dash" x=${bar.outline.x} y=${bar.outline.y}
+          width=${bar.outline.width} height=${bar.outline.height}></rect>`}
+        <rect class="hit" x=${bar.slot.x} y="0" width=${bar.slot.width} height=${draw.axis}></rect>
+      </g>`)}
+      <line class="ax" x1="0" x2=${draw.width} y1=${draw.axis} y2=${draw.axis}></line>
+      ${draw.labels.map((label) => svg`<text class=${label.now ? "v" : ""} x=${label.x} y=${draw.labelY}
+        text-anchor=${label.anchor}>${label.text}</text>`)}
+      ${draw.value === null ? nothing : svg`<text class="v" data-part="value" x=${draw.value.x} y=${draw.value.y}
+        text-anchor=${draw.value.anchor}>${draw.value.text}</text>`}`}</svg>`;
+  }
+
+  #table(table: Table) {
+    return html`<div class="scroll"><table class="tbl" data-part="table">
+      <thead><tr>${table.columns.map((column) => html`<th class=${column.num ? "n" : ""}>${column.label}</th>`)}</tr></thead>
+      <tbody>${table.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>
+        html`<td class=${table.columns[i]?.num ? "n" : ""}>${cell}</td>`)}</tr>`)}</tbody>
+    </table></div>`;
   }
 
   #nothing(block: Nothing) {

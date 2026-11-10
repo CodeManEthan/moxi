@@ -1,11 +1,12 @@
-// <moxi-usage-legacy route="...">: the views the page had before its frame was redrawn,
-// kept mounted under the frame's Cost until each has its place in the new page: the
-// tab line, the filters (a range preset worked out in the browser, harness, model and
-// project), and the view the route names: `""` or `daily`, `sessions`, `projects`,
-// `models`, `terms` (the cost terms: the class split, the Reconcile table and the
-// rates), or one session, `session/<id>` with its main agent's requests charted or
-// `session/<id>/<agent>` with another's. A row whose figures aren't whole carries a flag
-// saying why. The limits, the index's state and "Read new sessions" are the frame's.
+// <moxi-usage-legacy route="..." .filters=...>: the views the page had before its frame
+// was redrawn, kept mounted under the page's chart until each has its place in the new
+// page: the tab line and the view the route names: `sessions`, `projects`, `models`,
+// `terms` (the cost terms: the class split, the Reconcile table and the rates), or one
+// session, `session/<id>` with its main agent's requests charted or `session/<id>/<agent>`
+// with another's. `""` and `daily` name the page's own chart, so only the tab line shows
+// for them. Every view reads under the page's range and filters, which the page passes
+// in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
+// line, the chart, the index's state and "Read new sessions" are the page's.
 
 import { css, html, LitElement, nothing, svg } from "lit";
 import type { TemplateResult } from "lit";
@@ -13,38 +14,29 @@ import { api, navigate, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseIndexEvent, parsePrices, parseReport } from "./feed.ts";
 import type {
-  AgentRow, DayRow, ModelRow, Prices, ProjectRow, Report, RequestRow, RequestsTotal, SessionRow,
+  AgentRow, ModelRow, Prices, ProjectRow, Report, RequestRow, RequestsTotal, SessionRow,
   TermsRow, TermsTotal,
 } from "./feed.ts";
+import { holdState } from "./filter-model.ts";
 import { BASE, flag, SERIES } from "./parts.ts";
 import {
-  agents, agentTreemap, CLASSES, cellLabel, classChart, classCosts, classPath, classTotals,
-  contextChart, costText, dailyChart, filterKeys, flags, fmtCost, fmtMoment, fmtTokens,
-  HARNESSES, labelEvery, layerLine, localDay, MARGIN, menuPaths, NO_FILTERS,
-  overrideLine, parseRoute, PRESETS, pricesPath, projectMenu, provenanceLine, RATE_FIELDS,
-  rateAsks, rateLine, readout, reconcileLines, REQUEST_CLASSES, requestNotes,
-  requestRules, requestsChart, requestsPath, reportState, searchPath, segmentTitle,
-  seriesClass, sessionFilters, sessionRoute, sessionTermsPath, splitBars,
-  splitKeys, splitLabel, classIndex, TERM_CLASSES, tickText, UNKNOWN_MODEL, viewPath,
-  VIEWS,
+  agents, agentTreemap, cellLabel, contextChart, costText, filterKeys, flags, fmtCost, fmtMoment,
+  fmtTokens, layerLine, localDay, MARGIN, NO_FILTERS, overrideLine, parseRoute, pricesPath,
+  provenanceLine, RATE_FIELDS, rateAsks, rateLine, readout, reconcileLines, REQUEST_CLASSES,
+  requestNotes, requestRules, requestsChart, requestsPath, reportState, searchPath, seriesClass,
+  sessionRoute, sessionTermsPath, splitBars, splitKeys, splitLabel, classIndex, TERM_CLASSES,
+  tickText, UNKNOWN_MODEL, viewPath, VIEWS,
 } from "./views.ts";
-import type {
-  Chart, ContextChart, Filters, Measure, PageRoute, Preset, RequestMeasure, RequestsChart,
-  Rules,
-} from "./views.ts";
+import type { ContextChart, Filters, PageRoute, RequestMeasure, RequestsChart, Rules } from "./views.ts";
 
 const TAG = "moxi-usage-legacy";
-const CHART_HEIGHT = 240;
 const REQUESTS_HEIGHT = 200;
 const SPLIT_HEIGHT = 16;
 const TREEMAP_HEIGHT = 300;
 const SEARCH_MS = 200;
 
-// The filters and the daily view's choices outlive one placement: the shell places a new
-// page for each route, and the user's filters carry over.
-let filters: Filters = { ...NO_FILTERS };
-let by: "day" | "month" = "day";
-let measure: Measure | "class" = "tokens";
+// The request charts' measure outlives one placement: the shell places a new page for
+// each route.
 let requestMeasure: RequestMeasure = "tokens";
 
 /** The hatch a price tier's part of a class's segment carries over its colour. */
@@ -59,14 +51,11 @@ const STYLES = [BASE, SERIES, css`
            background: var(--moxi-bg); color: var(--moxi-text); cursor: pointer; }
   button:hover:not(:disabled) { background: var(--moxi-bg-hover); }
   button:disabled { color: var(--moxi-text-faint); cursor: default; }
-  button.primary { border-color: var(--moxi-accent); color: var(--moxi-accent); }
   button[aria-pressed="true"] { background: var(--moxi-selected-soft); border-color: var(--moxi-selected); }
-  nav, .filters, .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: var(--moxi-gap); }
+  nav, .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: var(--moxi-gap); }
   nav a { padding: 4px 10px; border-radius: var(--moxi-radius); color: var(--moxi-text); text-decoration: none; }
   nav a[aria-current="page"] { background: var(--moxi-selected-soft); color: var(--moxi-selected); font-weight: 600; }
   .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; }
-  select { font: inherit; max-width: 100%; padding: 3px 6px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
-           background: var(--moxi-bg); color: var(--moxi-text); }
   label { display: inline-flex; gap: 4px; align-items: center; min-width: 0; max-width: 100%; }
   .scroll { overflow-x: auto; max-width: 100%; }
   table { width: 100%; border-collapse: collapse; font-size: var(--moxi-font-size-sm); }
@@ -115,20 +104,24 @@ export class UsageLegacy extends LitElement {
 
   static properties = {
     route: { type: String },
+    filters: { attribute: false },
+    said: { type: Boolean },
     width: { state: true },
   };
 
   route = "";
+  /** The page's range and filters, as the views' reads take them. */
+  filters: Filters = { ...NO_FILTERS };
+  /** The page has said that nothing was used in the range, so a view with no row says
+   * nothing more. */
+  said = false;
   width = 640;
 
   #on = false;
   #view: Feed<AnyReport> | null = null;
-  #projects: Feed<Report<ProjectRow>> | null = null;
-  #models: Feed<Report<ModelRow>> | null = null;
-  /** The session view's requests and cost terms, and the daily view's cost by class. */
+  /** The session view's requests and cost terms. */
   #requests: Feed<Report<RequestRow, RequestsTotal>> | null = null;
   #sessionTerms: Feed<Report<TermsRow, TermsTotal>> | null = null;
-  #classes: Feed<Report<TermsRow, TermsTotal>> | null = null;
   /** The Rates section's models, opened with the section, and its search. */
   #rates: Feed<Prices> | null = null;
   #search: Feed<Prices> | null = null;
@@ -154,8 +147,8 @@ export class UsageLegacy extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#on = false;
-    for (const feed of [this.#view, this.#projects, this.#models]) feed?.close();
-    this.#view = this.#projects = this.#models = null;
+    this.#view?.close();
+    this.#view = null;
     this.#closeExtras();
     clearTimeout(this.#searchTimer);
     this.#loadedFor = null;
@@ -168,7 +161,7 @@ export class UsageLegacy extends LitElement {
   protected willUpdate(): void {
     if (!this.#on) return;
     const today = localDay(new Date());
-    const key = `${this.route}|${by}|${measure === "class" ? "class" : ""}|${JSON.stringify(filterKeys(filters, today))}`;
+    const key = `${this.route}|${JSON.stringify(filterKeys(this.filters, today))}`;
     if (key !== this.#loadedFor) {
       this.#loadedFor = key;
       this.#load(today);
@@ -179,33 +172,25 @@ export class UsageLegacy extends LitElement {
   #load(today: string): void {
     const update = () => this.requestUpdate();
     this.#view?.close();
-    this.#projects?.close();
-    this.#models?.close();
     this.#closeExtras();
     const route = parseRoute(this.route);
-    const path = viewPath(route, filters, today, by);
+    const filters = this.filters;
+    // The page draws the daily chart itself.
+    const path = route.view === "daily" ? null : viewPath(route, filters, today);
     this.#view = path === null ? null : new Feed<AnyReport>(() => api("usage", path), parseReport, update);
     if (route.view === "session") {
       const requests = requestsPath(route, filters, today);
       const terms = sessionTermsPath(route, filters, today);
       this.#requests = new Feed(() => api("usage", requests), parseReport<RequestRow, RequestsTotal>, update);
       this.#sessionTerms = new Feed(() => api("usage", terms), parseReport<TermsRow, TermsTotal>, update);
-    } else if (route.view === "daily" && measure === "class") {
-      const classes = classPath(filters, today, by);
-      this.#classes = new Feed(() => api("usage", classes), parseReport<TermsRow, TermsTotal>, update);
     }
-    for (const feed of [this.#requests, this.#sessionTerms, this.#classes]) void feed?.refresh();
-    const menus = menuPaths(filters, today);
-    this.#projects = new Feed<Report<ProjectRow>>(() => api("usage", menus.projects), parseReport, update);
-    this.#models = new Feed<Report<ModelRow>>(() => api("usage", menus.models), parseReport, update);
+    for (const feed of [this.#requests, this.#sessionTerms]) void feed?.refresh();
     void this.#view?.refresh();
-    void this.#projects.refresh();
-    void this.#models.refresh();
   }
 
   #closeExtras(): void {
-    for (const feed of [this.#requests, this.#sessionTerms, this.#classes, this.#rates, this.#search]) feed?.close();
-    this.#requests = this.#sessionTerms = this.#classes = this.#rates = this.#search = null;
+    for (const feed of [this.#requests, this.#sessionTerms, this.#rates, this.#search]) feed?.close();
+    this.#requests = this.#sessionTerms = this.#rates = this.#search = null;
     this.#searchText = "";
     this.#hover = null;
   }
@@ -215,14 +200,7 @@ export class UsageLegacy extends LitElement {
     const event = parseIndexEvent(data);
     if (event === null || event.running) return;
     void this.#view?.refresh();
-    void this.#projects?.refresh();
-    void this.#models?.refresh();
-    for (const feed of [this.#requests, this.#sessionTerms, this.#classes]) void feed?.refresh();
-  }
-
-  #setFilters(patch: Partial<Filters>): void {
-    filters = { ...filters, ...patch };
-    this.requestUpdate();
+    for (const feed of [this.#requests, this.#sessionTerms]) void feed?.refresh();
   }
 
   render() {
@@ -230,12 +208,10 @@ export class UsageLegacy extends LitElement {
     const route = parseRoute(this.route);
     // An address that names no view has its line at the frame's foot.
     if (route.view === "unknown") return nothing;
-    const unpriced = this.#view?.value?.unpriced_models ?? [];
     return html`
       ${this.#nav(route)}
-      ${this.#filters()}
-      <section data-part="view" data-view=${route.view}>${this.#body(route)}</section>
-      ${unpriced.length ? html`<p class="dim small" data-part="unpriced">No price for ${unpriced.join(", ")}: their tokens count, their cost doesn't.</p>` : nothing}`;
+      ${route.view === "daily" ? nothing
+        : html`<section data-part="view" data-view=${route.view}>${this.#body(route)}</section>`}`;
   }
 
   /** A link to one of the page's routes; `follow` runs just before the page moves there. */
@@ -255,30 +231,6 @@ export class UsageLegacy extends LitElement {
       this.#link(name === "daily" ? "" : name, label, at === name))}</nav>`;
   }
 
-  #filters() {
-    const projects = projectMenu(this.#projects?.value?.rows ?? [], filters.project);
-    const models = (this.#models?.value?.rows ?? []).map((row) => row.model).filter((m): m is string => !!m);
-    if (filters.model && !models.includes(filters.model)) models.unshift(filters.model);
-    const pick = (event: Event) => (event.target as HTMLSelectElement).value;
-    return html`<div class="filters" data-part="filters">
-      <span class="seg" role="group" aria-label="Range">${PRESETS.map(([preset, label]) => html`
-        <button type="button" aria-pressed=${String(filters.preset === preset)}
-          @click=${() => this.#setFilters({ preset: preset as Preset })}>${label}</button>`)}</span>
-      <label>Harness <select aria-label="Harness" @change=${(e: Event) => this.#setFilters({ harness: pick(e) })}>
-        <option value="" ?selected=${filters.harness === ""}>all</option>
-        ${HARNESSES.map((name) => html`<option value=${name} ?selected=${filters.harness === name}>${name}</option>`)}
-      </select></label>
-      <label>Model <select aria-label="Model" @change=${(e: Event) => this.#setFilters({ model: pick(e) })}>
-        <option value="" ?selected=${filters.model === ""}>all</option>
-        ${models.map((name) => html`<option value=${name} ?selected=${filters.model === name}>${name}</option>`)}
-      </select></label>
-      <label>Project <select aria-label="Project" @change=${(e: Event) => this.#setFilters({ project: pick(e) })}>
-        <option value="" ?selected=${filters.project === ""}>all</option>
-        ${projects.map((key) => html`<option value=${key} ?selected=${filters.project === key}>${key}</option>`)}
-      </select></label>
-    </div>`;
-  }
-
   #body(route: PageRoute) {
     const feed = this.#view;
     if (feed === null) return nothing;
@@ -288,11 +240,12 @@ export class UsageLegacy extends LitElement {
         state === "loading" ? "Reading…" : state === "refused" ? detail : `This view can't be read: ${detail}.`}</p>`;
     if (feed.value === null) return html`${stale}`;
     if (state === "empty") {
+      if (this.said && !(detail && /moxi usage index/.test(detail))) return this.#heading(route);
       return html`${this.#heading(route)}<p class="dim" data-state="empty">${detail && /moxi usage index/.test(detail)
         ? html`${detail}` : "Nothing was used in this range."}</p>`;
     }
     const report = feed.value;
-    return html`${stale}${this.#heading(route)}${this.#totals(report, route)}${this.#view_(route, report)}`;
+    return html`${stale}${this.#heading(route)}${this.#totals(report)}${this.#view_(route, report)}`;
   }
 
   #heading(route: PageRoute) {
@@ -300,23 +253,17 @@ export class UsageLegacy extends LitElement {
     return html`<p>${this.#link("sessions", "All sessions")} › <code>${route.session}</code></p>`;
   }
 
-  #totals(report: AnyReport, route: PageRoute) {
+  #totals(report: AnyReport) {
     const total = report.total;
     return html`<div class="totals" data-part="totals">
       <span>Cost <b>${costText(total)}</b>${flag(flags({ ...total, unpriced_models: report.unpriced_models }))}</span>
       <span>Tokens <b>${fmtTokens(total.tokens)}</b></span>
       <span>Requests <b>${total.requests.toLocaleString("en-US")}</b></span>
-    </div>
-    ${route.view === "daily" ? html`<div class="totals small" data-part="classes">${classTotals(total).map((item) =>
-      html`<span data-class=${item.key}>${item.label} <b>${fmtTokens(item.value)}</b></span>`)}</div>` : nothing}
-    ${route.view === "daily" && measure === "class" && this.#classes?.value ? html`<div class="totals small" data-part="class-costs">${
-      classCosts(this.#classes.value.total.split).map((item) =>
-        html`<span data-class=${item.key}>${item.label} <b>${fmtCost(item.value)}</b></span>`)}</div>` : nothing}`;
+    </div>`;
   }
 
   #view_(route: PageRoute, report: AnyReport) {
     switch (route.view) {
-      case "daily": return this.#daily(report as Report<DayRow>);
       case "sessions": return this.#sessions(report as Report<SessionRow>);
       case "session": return this.#session(report as Report<AgentRow>, route);
       case "projects": return this.#projectsView(report as Report<ProjectRow>);
@@ -324,54 +271,6 @@ export class UsageLegacy extends LitElement {
       case "terms": return this.#termsView(report as Report<TermsRow, TermsTotal>);
       default: return nothing;
     }
-  }
-
-  #daily(report: Report<DayRow>) {
-    const width = Math.max(280, this.width);
-    const classes = this.#classes;
-    const byClass = measure === "class";
-    const chart: Chart | null = !byClass ? dailyChart(report.rows, measure as Measure, width, CHART_HEIGHT)
-      : classes?.value ? classChart(classes.value.rows, width, CHART_HEIGHT) : null;
-    const names = new Map<string, string>(CLASSES.map(([key, label]) => [key, label]));
-    const set = (patch: () => void) => { patch(); this.requestUpdate(); };
-    const controls = html`
-      <div class="controls">
-        <span class="seg" role="group" aria-label="By">
-          <button type="button" aria-pressed=${String(by === "day")} @click=${() => set(() => { by = "day"; })}>By day</button>
-          <button type="button" aria-pressed=${String(by === "month")} @click=${() => set(() => { by = "month"; })}>By month</button>
-        </span>
-        <span class="seg" role="group" aria-label="Measure">
-          <button type="button" aria-pressed=${String(measure === "tokens")} @click=${() => set(() => { measure = "tokens"; })}>Tokens by class</button>
-          <button type="button" aria-pressed=${String(measure === "class")} @click=${() => set(() => { measure = "class"; })}>Cost by class</button>
-          <button type="button" aria-pressed=${String(measure === "cost")} @click=${() => set(() => { measure = "cost"; })}>Cost by model</button>
-        </span>
-      </div>`;
-    if (chart === null) return html`${controls}${this.#extraState(classes)}`;
-    const every = labelEvery(chart.bars.length, width);
-    const label = (key: string) => byClass ? splitLabel(key) : names.get(key) ?? key;
-    const colour = (key: string, i: number) => byClass ? classIndex(key) : i;
-    return html`${controls}
-      <div class="legend">${chart.keys.map((key, i) => html`
-        <span data-key=${key}><span class="swatch ${seriesClass(colour(key, i))}"></span>${label(key)}</span>`)}</div>
-      <svg viewBox="0 0 ${width} ${CHART_HEIGHT}" role="img" aria-label=${measure === "tokens" ? "Tokens by class per period"
-        : byClass ? "Cost by class and price tier per period" : "Cost by model per period"}>
-        ${HATCH}
-        ${chart.ticks.map((tick) => svg`
-          <line class="axis" x1=${MARGIN.left} x2=${width - MARGIN.right} y1=${tick.y} y2=${tick.y}></line>
-          <text x=${MARGIN.left - 4} y=${tick.y + 4} text-anchor="end">${tickText(tick.value, measure)}</text>`)}
-        ${chart.bars.map((bar, i) => svg`
-          <g data-period=${bar.period}>
-            <title>${bar.period}: ${measure === "tokens" ? `${fmtTokens(bar.total)} tokens` : fmtCost(bar.total)}${bar.incomplete ? " (not whole)" : ""}</title>
-            ${bar.segments.map((seg) => svg`<rect class=${seriesClass(seg.index)} data-key=${seg.key} x=${bar.x} y=${seg.y} width=${bar.width} height=${Math.max(0, seg.height)}>
-              <title>${segmentTitle(bar.period, seg.key, seg.value, measure)}</title></rect>
-              ${seg.hatch ? svg`<rect class="hatched" fill="url(#usage-hatch)" pointer-events="none" x=${bar.x} y=${seg.y} width=${bar.width} height=${Math.max(0, seg.height)}></rect>` : nothing}`)}
-            ${bar.incomplete && bar.segments.length ? svg`<rect class="incomplete" fill="none" x=${bar.x} y=${bar.segments[bar.segments.length - 1].y} width=${bar.width}
-              height=${Math.max(0, CHART_HEIGHT - MARGIN.bottom - bar.segments[bar.segments.length - 1].y)}></rect>` : nothing}
-            ${i % every === 0 ? svg`<text x=${bar.x + bar.width / 2} y=${CHART_HEIGHT - 6} text-anchor="middle">${by === "day" ? bar.period.slice(5) : bar.period}</text>` : nothing}
-          </g>`)}
-      </svg>
-      ${chart.undated ? html`<p class="dim small">${chart.undated} row${chart.undated === 1 ? "" : "s"} with no time ${chart.undated === 1 ? "isn't" : "aren't"} drawn; the totals count them.</p>` : nothing}
-      ${chart.bars.some((bar) => bar.incomplete) ? html`<p class="dim small">A dashed outline marks a period whose figures aren't whole.</p>` : nothing}`;
   }
 
   #sessions(report: Report<SessionRow>) {
@@ -382,7 +281,7 @@ export class UsageLegacy extends LitElement {
         <tr data-session=${row.session_id ?? ""}>
           <td class="wrap">${row.session_id === null ? html`<span class="dim">no session</span>`
             : this.#link(sessionRoute(row.session_id), row.session_id, false,
-              () => { filters = sessionFilters(filters, row); })}
+              () => { holdState({ harness: row.harness }); })}
             <div class="dim small">${row.models.join(", ")}</div></td>
           <td class="wide">${row.harness}</td>
           <td class="wrap wide">${row.project ?? row.cwd ?? ""}</td>
@@ -454,7 +353,7 @@ export class UsageLegacy extends LitElement {
   }
 
   /** What a view's second feed shows while it has no value: reading, refused or failed. */
-  #extraState(feed: Feed<Report<unknown, never>> | Feed<Report<TermsRow, TermsTotal>> | Feed<Report<RequestRow, RequestsTotal>> | null) {
+  #extraState(feed: Feed<Report<TermsRow, TermsTotal>> | Feed<Report<RequestRow, RequestsTotal>> | null) {
     if (feed === null) return nothing;
     const { state, detail } = reportState(feed as Feed<Report<unknown>>);
     if (state === "loading") return html`<p class="dim" data-state="loading">Reading…</p>`;

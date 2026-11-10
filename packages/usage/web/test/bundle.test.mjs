@@ -41,7 +41,7 @@ async function bundled(entry) {
 test("the page bundle's tail holds the ISC notice of each package in it but Lit's", async () => {
   const packages = await bundled("page.ts");
   const d3 = [...packages.keys()].filter((name) => !LIT.has(name)).sort();
-  assert.ok(d3.includes("d3-scale") && d3.includes("internmap"), d3.join(", "));
+  assert.ok(d3.includes("d3-scale") && d3.includes("d3-hierarchy"), d3.join(", "));
   const page = read("page.js");
   const tail = page.slice(page.lastIndexOf("/*! Bundled with d3"));
   assert.ok(tail.length > 0 && tail.length < 4000, "the notice is the bundle's last comment");
