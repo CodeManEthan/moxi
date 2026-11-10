@@ -12,7 +12,7 @@ what it holds up. An answer may name the key that was chosen.
 **A key keeps its text.** A key the question has is refused with another line. A wrong
 line is corrected by retiring its key and adding the right line under a new one, which
 one call may do. A retired key stays in the log, is offered no longer, and is never
-used again, not even with the line it had. So a key in an answer always means the line
+used again, not even with the line it had, and not in the call that retires it. So a key in an answer always means the line
 that was shown under it.
 
 **How many.** A question that has options has `FEWEST` to `MOST`, retired ones not
@@ -188,7 +188,13 @@ def fill(target: str, question_id: str, *, actor: str, options: Sequence[str] = 
             return None
         unmet = []
         for key, text in adding:
-            if key in question.retired:
+            if key in retiring:
+                unmet.append(Unmet(
+                    f"the key {key} is retired by this call and is never used again, "
+                    "with any line, the one it had included; add the line under a new "
+                    "key, or leave the key as it is",
+                    f"{again} --retire {key} --option K=TEXT"))
+            elif key in question.retired:
                 unmet.append(Unmet(
                     f"the key {key} was retired from {question_id} and is never used "
                     "again, with any line; add the line under a new key",
@@ -220,7 +226,9 @@ def fill(target: str, question_id: str, *, actor: str, options: Sequence[str] = 
         if question is None:
             return None
         keys = {key for key, _text in question.options}
-        left = len((keys - set(retiring)) | {key for key, _text in adding})
+        # What the event will leave: a key this call retires is not offered after
+        # it, whether or not the call gives it again.
+        left = len((keys | {key for key, _text in adding}) - set(retiring))
         return how_many(left, f"{again} --option K=TEXT... [--retire K]...")
 
     def changed(view, result):

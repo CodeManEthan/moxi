@@ -355,16 +355,31 @@ def test_a_retired_key_is_refused_again_with_any_text(rounds, capsys, again):
     assert logs(rounds) == before
 
 
-def test_a_key_is_not_retired_and_added_again_in_one_call(rounds, capsys):
+@pytest.mark.parametrize("again", [C, "c=something else"])
+def test_a_key_is_not_retired_and_given_again_in_one_call(rounds, capsys, again):
     ask(A, B, C)
     before = logs(rounds)
 
-    assert fill("--retire", "c", "--option", "c=something else") == 3
-    assert fill("--retire", "c", "--option", C) == 0
+    assert fill("--retire", "c", "--option", again) == 3
 
-    assert question(rounds).retired == ("c",)
-    assert len(logs(rounds)) == len(before)
-    assert [key for key, _text in question(rounds).options] == ["a", "b"]
+    err = capsys.readouterr().err
+    assert "the key c is retired by this call and is never used again" in err
+    assert "run: moxi rounds ask proj-a/a-round Q1 --retire c --option K=TEXT" in err
+    assert logs(rounds) == before
+
+
+def test_a_retire_with_its_own_key_given_again_never_leaves_one_option(rounds, capsys):
+    ask(A, B)
+    before = logs(rounds)
+
+    assert fill("--retire", "a", "--option", A) == 3
+
+    err = capsys.readouterr().err
+    assert "the key a is retired by this call" in err
+    assert "this would leave it 1" in err
+    assert logs(rounds) == before
+    assert question(rounds).options == (("a", PAIRS["a"]), ("b", PAIRS["b"]))
+    assert question(rounds).retired == ()
 
 
 def test_a_retire_of_a_key_the_question_never_had_or_already_retired_is_refused(
