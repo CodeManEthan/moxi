@@ -404,6 +404,28 @@ def test_an_empty_box_sends_no_brief_though_the_defaults_set_one(
     assert not [run for run in harness.runs() if DEFAULT_BRIEF in " ".join(run["argv"])]
 
 
+def test_an_empty_box_sends_no_brief_file_though_the_defaults_name_one(
+        fake, ui_page, ui_shell, harness, tmp_path):
+    words = "sweep the far corridor"
+    first = tmp_path / "first.md"
+    first.write_text(words)
+    file = presets.path(env=ui_shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f'[defaults]\nbrief_file = "{first}"\n')
+    try:
+        piece = kit.open_home(ui_page)
+        expect(piece.locator("textarea")).to_have_value("")
+        body = press(ui_page, piece)
+        assert "brief_file" not in body["values"] and "brief_file" in body["leave_out"], body
+        expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "))
+        row = kit.newest_launch(ui_shell)
+        assert row.brief is None, row
+        assert words not in " ".join(row.argv) and str(first) not in " ".join(row.argv), row.argv
+        assert not [run for run in harness.runs() if words in " ".join(run["argv"])]
+    finally:
+        file.unlink()
+
+
 def test_the_text_in_the_box_is_the_brief_sent_whatever_the_defaults_set(
         fake, ui_page, ui_shell, harness, default_brief):
     typed = "count the open doors"

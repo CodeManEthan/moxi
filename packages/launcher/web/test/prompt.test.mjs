@@ -475,6 +475,19 @@ test("an empty box leaves out a brief the form withheld, and the box's text repl
   assert.equal(launchRequest(FORM_FIELDS, form, SET, SLOT_2).values.brief, "fix the build");
 });
 
+test("a brief file the form is filled with is left out, with the box empty and with text in it", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "notes/first.md" })];
+  const empty = launchRequest(fields, null, { ...SET, brief: null }, SLOT_2);
+  assert.equal("brief_file" in empty.values, false);
+  assert.equal(empty.leave_out.includes("brief_file") && empty.leave_out.includes("brief"), true);
+  const typed = launchRequest(fields, null, SET, SLOT_2);
+  assert.equal(typed.values.brief, "fix the build");
+  assert.equal("brief_file" in typed.values, false);
+  assert.equal(typed.leave_out.includes("brief_file"), true);
+  // A form with no such row sends nothing of it.
+  assert.equal(launchRequest(FORM_FIELDS, null, SET, SLOT_2).leave_out.includes("brief_file"), false);
+});
+
 // --- the launch, and the lines under the box -----------------------------------------------
 
 const PREVIEW = { refused: [], harness: "claude", mode: "interactive", target: "slot", argv: ["claude"], stamps: [],
