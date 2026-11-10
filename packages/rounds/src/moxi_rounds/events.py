@@ -92,7 +92,9 @@ TYPES = _types(
     # what a parked one waits for (`until`) and what it holds up from then on
     # (`blocks`), each only when the ruling changes it; a move of the question to
     # another log names the record it became there, `moved_to`. A skip of the questions
-    # step for a stage lists the questions it lets that stage past, `covers`.
+    # step for a stage lists the questions it lets that stage past, `covers`. A ruling
+    # that replaces an earlier one names it in `supersedes`, and one that takes an
+    # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",

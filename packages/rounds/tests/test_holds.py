@@ -288,3 +288,18 @@ def test_the_questions_a_skip_lets_a_stage_past_are_the_ones_it_lists(path):
     assert holds.skipped(found, "B3") == {"Q2"}
     assert holds.skipped(found, "B1") == frozenset()
     assert [one.covers for one in found.rulings] == [("Q1",), ("Q2",)]
+
+
+@pytest.mark.parametrize("names", ["revokes", "supersedes"])
+def test_a_skip_that_was_taken_back_or_replaced_lets_its_stage_past_nothing(
+        path, names):
+    build(path, [(ask,), (skip, "B2", "Q1")])
+    assert held(path)[0] == {"B1": ["Q1"], "B2": [], "B3": ["Q1"]}
+
+    log.append(path, "ruling.recorded",
+               {"id": "C81", "record": "comms:14", "kind": "process", names: "C80"},
+               actor="planner")
+
+    found = state.fold(log.read(path))
+    assert holds.skipped(found, "B2") == frozenset()
+    assert held(path)[0] == EVERY

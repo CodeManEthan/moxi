@@ -394,3 +394,100 @@ def test_a_log_that_opened_no_round_has_no_status():
     assert found.status is None
     assert found.description is None and found.flow is None and found.steps == []
     assert len(found.history) == 1
+
+
+# -- a ruling that replaces another, or takes one back -----------------------------------
+
+def test_a_ruling_marks_the_one_it_replaces_and_the_one_it_takes_back():
+    found = state.fold([
+        opened(), event(2, "ruling.recorded", id="C1", kind="substance", text="One."),
+        event(3, "ruling.recorded", id="C2", kind="substance", text="Two.",
+              supersedes="C1"),
+        event(4, "ruling.recorded", id="C3", kind="process", rules="revoke:C2",
+              revokes="C2")])
+
+    assert [(one.id, one.supersedes, one.revokes, one.replaced_by, one.revoked_by)
+            for one in found.rulings] == [
+        ("C1", None, None, "C2", None), ("C2", "C1", None, None, "C3"),
+        ("C3", None, "C2", None, None)]
+
+
+def test_a_ruling_already_replaced_or_one_the_log_never_held_is_left_as_it_is():
+    found = state.fold([
+        opened(), event(2, "ruling.recorded", id="C1", kind="substance", text="One."),
+        event(3, "ruling.recorded", id="C2", kind="substance", supersedes="C1"),
+        event(4, "ruling.recorded", id="C3", kind="process", revokes="C1"),
+        event(5, "ruling.recorded", id="C4", kind="process", revokes="C9"),
+        event(6, "ruling.recorded", id="C5", kind="process", revokes="C5")])
+
+    assert [(one.replaced_by, one.revoked_by) for one in found.rulings] == [
+        ("C2", None), (None, None), (None, None), (None, None), (None, None)]
+
+
+def test_a_question_reads_as_the_changes_left_once_a_ruling_of_it_is_taken_back():
+    parked = ruled_as(3, "C1", rules="park:Q1", state="parked", until="B2")
+    narrowed = ruled_as(4, "C2", rules="narrow:Q1=B1", blocks=["B1"])
+    widened = event(5, "question.changed", id="Q1", blocks=["B1", "B3"])
+    unparked = ruled_as(6, "C3", rules="revoke:C1", revokes="C1")
+    unnarrowed = ruled_as(7, "C4", rules="revoke:C2", revokes="C2")
+    log_events = [opened(), asked(2, blocks=["B1", "B2"]), parked, narrowed, widened,
+                  unparked, unnarrowed]
+
+    def after(count):
+        [found] = state.fold(log_events[:count]).questions
+        return found
+
+    assert (after(5).state, after(5).until, after(5).blocks) == (
+        "parked", "B2", ("B1", "B3"))
+    assert (after(6).state, after(6).until, after(6).blocks, after(6).ruling) == (
+        "open", None, ("B1", "B3"), "C3")
+    assert (after(7).state, after(7).blocks, after(7).ruling) == (
+        "open", ("B1", "B2", "B3"), "C4")
+    assert [(change.ruling, change.undone_by) for change in after(7).changes] == [
+        ("C1", "C3"), ("C2", "C4"), (None, None), ("C3", None), ("C4", None)]
+
+
+def test_an_answer_taken_back_leaves_no_key_chosen_and_a_replaced_one_the_later_key():
+    first = ruled_as(3, "C1", rules="Q1", state="ruled", chose="a")
+    second = ruled_as(4, "C2", rules="Q1", state="ruled", chose="b", supersedes="C1")
+    taken_back = ruled_as(5, "C3", rules="revoke:C2", revokes="C2", state="open")
+    log_events = [opened(), asked(2, options={"a": "One.", "b": "Two."}), first, second,
+                  taken_back]
+
+    def after(count):
+        [found] = state.fold(log_events[:count]).questions
+        return found
+
+    assert (after(4).state, after(4).chose, after(4).ruling) == ("ruled", "b", "C2")
+    assert (after(5).state, after(5).chose, after(5).ruling) == ("open", None, "C3")
+
+
+def test_a_question_with_no_ruling_left_out_reads_as_the_fold_gives_it():
+    log_events = [
+        opened(), asked(2, blocks=["B1"]),
+        ruled_as(3, "C1", rules="park:Q1", state="parked", until="B2"),
+        event(4, "question.changed", id="Q1", blocks="all"),
+        ruled_as(5, "C2", rules="narrow:Q1=B2,B3", blocks=["B2", "B3"]),
+        event(6, "question.changed", id="Q1", state="open"),
+        ruled_as(7, "C3", rules="Q1", state="ruled"),
+        ruled_as(8, "C4", rules="revoke:C3", revokes="C3", state="open"),
+        event(9, "question.changed", id="Q1", blocks="all"),
+        ruled_as(10, "C5", rules="withdraw:Q1", state="withdrawn")]
+
+    for count in range(2, len(log_events) + 1):
+        found = state.fold(log_events[:count])
+        assert state.without(found, found.questions[0]) == found.questions[0]
+
+
+def test_a_question_read_without_a_ruling_is_as_if_that_ruling_was_never_made():
+    found = state.fold([
+        opened(), asked(2, blocks=["B1", "B2"]),
+        ruled_as(3, "C1", rules="narrow:Q1=B1", blocks=["B1"]),
+        event(4, "question.changed", id="Q1", blocks=["B1", "B3"]),
+        ruled_as(5, "C2", rules="park:Q1", state="parked")])
+    [question] = found.questions
+
+    assert state.without(found, question, ["C1"]).blocks == ("B1", "B2", "B3")
+    assert state.without(found, question, ["C2"]).state == "open"
+    assert state.without(found, question, ["C1", "C2"]).ruling is None
+    assert found.questions == [question]

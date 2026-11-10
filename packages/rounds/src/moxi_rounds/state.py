@@ -12,7 +12,12 @@ its questions, each with every change made to it, the options it offers and the 
 answer chose, and the whole history. A ruling of a question is one event: the ruling's
 own record names the question and says what it becomes, and the fold changes the
 question from it. A question that was moved to another log stays in this one as moved,
-naming the record it became; the one that arrived names the record it was. A log with no
+naming the record it became; the one that arrived names the record it was.
+
+A ruling may replace an earlier one or take it back, and names it. Nothing is rewritten:
+the earlier ruling stays in the rulings, marked with the id of the one that replaced it
+or took it back, and each question it changed reads as its other changes leave it
+(`without`). A log with no
 opening event, a project's for one, has a status of None; the rulings of a project's log
 are its register, and its questions the project's list.
 """
@@ -58,6 +63,13 @@ class Ruling:
     question: str | None = None
     #: The ids of the questions a skip of the questions step lets its stage past.
     covers: tuple[str, ...] = ()
+    #: The earlier ruling this one replaces, and the one it takes back, or None.
+    supersedes: str | None = None
+    revokes: str | None = None
+    #: The later ruling that replaced this one, and the one that took it back, or None
+    #: while it stands. A ruling with either is read by nothing but a listing.
+    replaced_by: str | None = None
+    revoked_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +95,10 @@ class Change:
     retired: tuple[str, ...] = ()
     #: The record the question became in another log, when the change moved it there.
     moved_to: str | None = None
+    #: The later ruling that replaced or took back the ruling that made this change, or
+    #: None. A change with one is kept as history and is no part of what the question
+    #: reads as.
+    undone_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -183,7 +199,8 @@ def _ruling_recorded(state: State, event: dict) -> None:
         # A copy, so the state's scope and the event's never share a dict.
         scope=tuple(copy.deepcopy(event.get("scope") or [])),
         actor=event["actor"], at=event["at"], chose=event.get("chose"),
-        question=event.get("question"), covers=tuple(event.get("covers") or ())))
+        question=event.get("question"), covers=tuple(event.get("covers") or ()),
+        supersedes=event.get("supersedes"), revokes=event.get("revokes")))
     # A ruling of a question is the whole of its change: nothing else is written for
     # it, so a verb stopped after this event has left the question ruled.
     if event.get("question") is not None:
@@ -193,6 +210,88 @@ def _ruling_recorded(state: State, event: dict) -> None:
     for place, question in enumerate(state.questions):
         if question.id is not None and question.id == event.get("rules"):
             state.questions[place] = replace(question, chose=event.get("chose"))
+    _corrected(state, event)
+
+
+def _corrected(state: State, event: dict) -> None:
+    """Mark the ruling that `event`, a ruling just added, replaces or takes back, and
+    read again each question that ruling changed. A ruling that is already replaced or
+    taken back, or that the log does not hold, is left as it is."""
+    touched = set()
+    for names, mark in (("supersedes", "replaced_by"), ("revokes", "revoked_by")):
+        target = event.get(names)
+        for place, ruling in enumerate(state.rulings[:-1]):
+            if (not isinstance(target, str) or ruling.id != target
+                    or ruling.replaced_by is not None or ruling.revoked_by is not None):
+                continue
+            state.rulings[place] = replace(ruling, **{mark: event.get("id")})
+            touched.add(ruling.rules)
+            for at, question in enumerate(state.questions):
+                if any(change.ruling == target for change in question.changes):
+                    touched.add(question.id)
+                    state.questions[at] = replace(question, changes=tuple(
+                        replace(change, undone_by=event.get("id"))
+                        if change.ruling == target and change.undone_by is None
+                        else change for change in question.changes))
+    for place, question in enumerate(state.questions):
+        if question.id is not None and question.id in touched:
+            answers = [ruling.chose for ruling in state.rulings
+                       if ruling.rules == question.id and ruling.replaced_by is None
+                       and ruling.revoked_by is None]
+            state.questions[place] = replace(
+                without(state, question), chose=answers[-1] if answers else None)
+
+
+def without(state: State, question: Question, rulings: Iterable[str] = ()) -> Question:
+    """`question`, one of `state`'s, as it reads with no change from a ruling that was
+    replaced or taken back, nor from the `rulings` named here: its state, what a parked
+    one waits for, what it holds up, the ruling that last changed it and the record it
+    became. With no ruling named this is the question as the fold gives it.
+
+    Each change that is left is applied in order from the question as it was asked.
+    Leaving out a narrowing leaves what the question held up before it; a widening
+    that anyone made while that narrowing stood then adds its stages to that, since it
+    was a list of the narrowed question and said nothing of the stages already let go.
+    """
+    left_out = frozenset(rulings)
+    asked = next((event for event in state.history if event["type"] == "question.asked"
+                  and event.get("id") == question.id), {})
+    reads, until = asked.get("state"), asked.get("until")
+    blocks = _blocks(asked.get("blocks", _ALL))
+    ruling = moved_to = None
+    # The rulings whose own change is still to come and that undid a narrowing above:
+    # until then a list is one of the narrowed question.
+    pending: set[str | None] = set()
+    for change in question.changes:
+        if change.undone_by is not None or change.ruling in left_out:
+            if change.blocks is not None:
+                pending.add(change.undone_by)
+            continue
+        if change.ruling is not None:
+            pending.discard(change.ruling)
+        if change.state is not None:
+            reads, until = change.state, change.until
+        if change.blocks is not None:
+            blocks = (_widest(blocks, change.blocks)
+                      if change.ruling is None and pending else change.blocks)
+        ruling = ruling if change.ruling is None else change.ruling
+        moved_to = moved_to if change.moved_to is None else change.moved_to
+    return replace(question, state=reads, until=until, blocks=blocks, ruling=ruling,
+                   moved_to=moved_to)
+
+
+def _widest(one, other):
+    """What holds up every stage that `one` or `other` does."""
+    if _ALL in (one, other):
+        return _ALL
+    stages = tuple(dict.fromkeys(
+        stage for blocks in (one, other) if not isinstance(blocks, str)
+        for stage in blocks or ()))
+    return stages or (one if other is None else other)
+
+
+#: What `blocks` holds for a question that holds up every stage.
+_ALL = "all"
 
 
 def _blocks(value):
@@ -216,7 +315,7 @@ def _question_asked(state: State, event: dict) -> None:
     state.questions.append(Question(
         id=event.get("id"), text=event.get("text"), origin=event.get("from"),
         # A question that does not say what it holds up holds up every stage.
-        blocks=_blocks(event.get("blocks", "all")), state=event.get("state"),
+        blocks=_blocks(event.get("blocks", _ALL)), state=event.get("state"),
         # A question brought here from another log keeps who asked it and when.
         by=event.get("asked_by") or event["actor"],
         at=event.get("asked_at") or event["at"], record=event.get("record"),
@@ -293,4 +392,4 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.closed": _kept,
 }
 
-__all__ = ["OPEN", "Ruling", "Change", "Question", "State", "fold"]
+__all__ = ["OPEN", "Ruling", "Change", "Question", "State", "fold", "without"]

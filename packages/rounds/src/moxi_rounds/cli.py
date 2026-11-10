@@ -8,7 +8,7 @@
     moxi rounds ask PROJECT --move ROUND:Q<n> [--record PTR] [--as NAME]
     moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--chose K]
                      [--reason TEXT] [--standing] [--scope SPEC] [--stages LIST]
-                     [--until WHAT] [--as NAME]
+                     [--until WHAT] [--supersedes C<n>|S<n>] [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
@@ -16,6 +16,9 @@ where the operator said something, or to where a question came from. It is
 `comms:<digits>`, `<session>@<UTC time>`, an `https://` URL or `file:<path>#<anchor>`.
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
+A ruling is corrected by a later one: `--supersedes` names the earlier ruling of the
+same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
+project) takes a ruling back with nothing in its place.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
@@ -114,7 +117,8 @@ def _declare_rule(verbs) -> None:
             "where he said it. On a round it is the round's own; with --standing, or on "
             "a project, it goes in the project's register and outlasts the round. With "
             "an ITEM it rules a question: answers it, parks it, narrows what it holds "
-            "up, or withdraws it.")
+            "up, or withdraws it. A later ruling corrects an earlier one: with "
+            "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back.")
     parser = verbs.add_parser("rule", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the ruling is on, <project>/<slug>, or a "
@@ -123,7 +127,9 @@ def _declare_rule(verbs) -> None:
                         help="what is ruled, when it is a question: Q<n> (P<n> on a "
                              "project) for its answer, given with --text; park:Q<n>; "
                              "narrow:Q<n>=LIST or narrow:Q<n>=none, the stages it "
-                             "holds up from then on; withdraw:Q<n>")
+                             "holds up from then on; withdraw:Q<n>; or revoke:C<n> "
+                             "(revoke:S<n> on a project), which takes that ruling back "
+                             "and puts nothing in its place")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator said it, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
@@ -149,6 +155,11 @@ def _declare_rule(verbs) -> None:
                              "of the round, B<n>, or another round, "
                              "round:<project>/<slug>; it reads as open again once "
                              "that stage is finished or that round is closed")
+    parser.add_argument("--supersedes", metavar="C<n>|S<n>",
+                        help="the earlier ruling of the same thing that this one "
+                             "replaces: C<n> of the round, S<n> of the project's "
+                             "register; a second ruling of a thing is refused "
+                             "without it")
     _writes(parser)
 
 
@@ -158,13 +169,18 @@ def _rule(args, out) -> int:
     ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,
                         text=args.text, reason=args.reason, standing=args.standing,
                         scope=args.scope, stages=args.stages, item=args.item,
-                        until=args.until, chose=args.chose)
+                        until=args.until, chose=args.chose,
+                        supersedes=args.supersedes)
     for line in _recorded(ruled):
         print(line, file=out)
     if ruled.long:
         print(f"{args.prog} {args.verb}: note: {ruled.id} is {len(ruled.text)} "
               f"characters long and is recorded as given; a ruling is meant to be "
               f"short, {ruling.LONG} characters or fewer", file=sys.stderr)
+    if ruled.ended is not None:
+        print(f"{args.prog} {args.verb}: note: {ruled.name} was {ruled.ended} and "
+              f"stays as it ended; {ruled.id} is recorded, and what follows from it "
+              "is new work, in a new round", file=sys.stderr)
     _warn_of(ruled.failed, args.prog, args.verb)
     return codes.OK
 

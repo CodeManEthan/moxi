@@ -122,7 +122,8 @@ def test_help_says_what_rule_does(capsys):
                  "--chose K", "--reason TEXT", "--standing", "--scope SPEC",
                  "--stages LIST",
                  "--until WHAT", "--as NAME", "comms:<digits>", "park:Q<n>",
-                 "narrow:Q<n>=LIST", "withdraw:Q<n>"):
+                 "narrow:Q<n>=LIST", "withdraw:Q<n>", "--supersedes C<n>|S<n>",
+                 "revoke:C<n>", "revoke:S<n>"):
         assert word in out
 
 
@@ -525,8 +526,7 @@ def test_a_second_answer_is_refused_and_names_the_first(staged, capsys):
 @pytest.mark.parametrize("first, was, then", [
     ("Q1", "ruled", "park:Q1"), ("Q1", "ruled", "narrow:Q1=none"),
     ("Q1", "ruled", "withdraw:Q1"), ("withdraw:Q1", "withdrawn", "park:Q1"),
-    ("withdraw:Q1", "withdrawn", "narrow:Q1=none"),
-    ("withdraw:Q1", "withdrawn", "withdraw:Q1"), ("withdraw:Q1", "withdrawn", "Q1")])
+    ("withdraw:Q1", "withdrawn", "narrow:Q1=none"), ("withdraw:Q1", "withdrawn", "Q1")])
 def test_a_ruled_or_withdrawn_question_takes_no_other_ruling(
         staged, capsys, first, was, then):
     ask()
@@ -683,14 +683,16 @@ def test_a_parked_question_is_narrowed_and_stays_parked(staged):
         "parked", "B3", ("B1",), "C2")
 
 
-def test_a_parked_question_is_parked_again_answered_or_withdrawn(staged):
+def test_a_parked_question_is_parked_in_place_of_its_parking_answered_or_withdrawn(
+        staged):
     for _ in range(3):
         ask()
         ask()
     for number in range(1, 4):
         assert run("proj-a/a-round", f"park:Q{number}", "--until", "B1", text=None) == 0
 
-    assert run("proj-a/a-round", "park:Q1", text=None) == 0
+    assert run("proj-a/a-round", "park:Q1", text=None) == 3
+    assert run("proj-a/a-round", "park:Q1", "--supersedes", "C1", text=None) == 0
     assert run("proj-a/a-round", "Q2", text=ANSWER) == 0
     assert run("proj-a/a-round", "withdraw:Q3", text=None) == 0
 

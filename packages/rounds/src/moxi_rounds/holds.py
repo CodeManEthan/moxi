@@ -17,7 +17,8 @@ or closed, only while `on_stage` gives nothing for it, and a round may close onl
   stage the round has and each it gains later. One that holds up none holds no stage.
 - no skip of the questions step for this stage lists it. Such a skip lets the stage
   past the questions it lists, the ones that held the stage when it was recorded, and
-  no other: a question asked afterwards holds the stage like any other.
+  no other: a question asked afterwards holds the stage like any other. A skip that
+  was replaced or taken back lets nothing past.
 
 A stage that is finished, or that left the plan, has nothing left to stop: no question
 holds it.
@@ -35,7 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from . import questions
+from . import corrections, questions
 from . import state as states
 
 #: What starts the item of a ruling that skips the questions step for one stage; the
@@ -75,9 +76,9 @@ def on_close(state: states.State) -> tuple[states.Question, ...]:
 
 def skipped(state: states.State, stage: str) -> frozenset[str]:
     """The ids of the questions that the skips of the questions step for `stage` let
-    it past: what each such skip lists. This is the one place that says which skips
-    count."""
-    return frozenset(question_id for ruling in state.rulings
+    it past: what each such skip that stands lists. This is the one place that says
+    which skips count."""
+    return frozenset(question_id for ruling in corrections.live(state.rulings)
                      if ruling.rules == SKIP + stage for question_id in ruling.covers)
 
 

@@ -45,13 +45,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import folders, pointers, questions, ruling, state, write
+from . import corrections, folders, pointers, questions, ruling, state, write
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
 #: What starts the item of a ruling that is a move of a question; the question's id
 #: follows.
-MOVE = "move:"
+MOVE = corrections.MOVE
 
 
 @dataclass(frozen=True)

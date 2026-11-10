@@ -42,6 +42,16 @@ changes. A ruling of a question names the question and holds what it becomes (it
 state, what a parked one waits for, what it holds up), and the fold changes the question
 from that event alone. So a verb stopped right after its append has recorded the whole
 ruling, and run again it is refused as already ruled.
+
+**Corrections.** A ruling may replace an earlier one, or take one back; `corrections`
+has the rules. To replace, the same thing is ruled again with `supersedes`, the id of
+the ruling it replaces: a question's answer, parking, narrowing or withdrawal, or a
+ruling that stands on its own, which any other such ruling may replace. A second ruling
+of a thing that does not name the first is refused. `revoke:C<n>` (`revoke:S<n>` on a
+project) takes a ruling back and puts nothing in its place: an answered question is
+open again, and a parked, narrowed or withdrawn one reads as its other changes leave
+it. Both rulings stay in the log. A correction recorded on a round that was closed or
+dropped is recorded and reopens nothing.
 """
 
 from __future__ import annotations
@@ -50,9 +60,10 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
-from . import folders, pointers, questions, write
+from . import corrections, folders, pointers, questions, write
 from . import options as choices
 from . import settings as own
+from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
 #: The kind of a ruling that says what is built.
@@ -71,7 +82,7 @@ STAGE = questions.STAGE
 
 # A project's key, as the projects list writes one.
 _KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_ID = re.compile(r"[CS]([1-9][0-9]*)")
+_ID = corrections.ID
 
 
 @dataclass(frozen=True)
@@ -80,8 +91,9 @@ class Asked:
     project's `name`, whether the ruling is `standing`, the `text` as given (None when
     there was none), and the `stages` named, parsed (None when none were). `slug` is the
     round's, None for a ruling on a project. `record` is the pointer as given, `until`
-    what a parking waits for, `scoped` whether a scope was given, and `chose` the key
-    of the option an answer names."""
+    what a parking waits for, `scoped` whether a scope was given, `chose` the key
+    of the option an answer names, and `supersedes` the id of the ruling this one
+    replaces."""
 
     name: str
     standing: bool
@@ -92,6 +104,7 @@ class Asked:
     until: str | None = None
     scoped: bool = False
     chose: str | None = None
+    supersedes: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,7 +127,9 @@ class Form:
 class Ruled:
     """A ruling as recorded: its `id`, the `name` of the round or project whose log
     holds it, whether it is `standing`, its `text` read back from the event, and the
-    `event` itself. `long` says the text is past `LONG` characters. `failed` pairs each
+    `event` itself. `long` says the text is past `LONG` characters. `ended` is how the
+    round had ended, `closed` or `dropped`, when the ruling corrects one of its own:
+    the correction is recorded and the round stays as it ended. `failed` pairs each
     after-append callback that raised with what it raised."""
 
     id: str
@@ -123,13 +138,15 @@ class Ruled:
     text: str | None
     event: dict
     long: bool = False
+    ended: str | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
 def rule(target: str, *, actor: str, record: str | None = None, text: str | None = None,
          reason: str | None = None, standing: bool = False, scope: str | None = None,
          stages: str | None = None, item: str | None = None,
-         until: str | None = None, chose: str | None = None, settings=None,
+         until: str | None = None, chose: str | None = None,
+         supersedes: str | None = None, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Ruled:
     """Record one ruling on `target`, a round `<project>/<slug>` or a project's key, and
     return it as recorded.
@@ -145,11 +162,14 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     - `stages`: the stages of the round a round's ruling applies to, `B2,B3`; every stage
       when left out.
     - `item`: what is ruled, or None for a plain ruling: a question's id for its
-      answer, or `park:`, `narrow:` or `withdraw:` and the question.
+      answer; `park:`, `narrow:` or `withdraw:` and the question; or `revoke:` and
+      the id of a ruling, to take that ruling back.
     - `until`: with `park:`, what the question waits for: a stage of the round, `B2`,
       or another round, `round:<project>/<slug>`.
     - `chose`: with a question's id, the key of the option he chose. With no `text`
       the option's line is the sentence recorded.
+    - `supersedes`: the id of the earlier ruling of the same thing that this one
+      replaces, `C<n>` for a round's own and `S<n>` for one in the register.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for each lock; `at`: the event's time.
@@ -157,8 +177,10 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject` or
     `NoFolder` for a project with no rounds folder, `NoRound` for a round that was never
     opened, and `Refused` when a gate does not hold, the pointer's among them: an item
-    that names no question, a question already ruled or withdrawn, or a key the
-    question does not offer. A refusal leaves both logs as they were.
+    that names no question, a question already ruled or withdrawn, a key the
+    question does not offer, a second ruling of a thing that does not name the first,
+    or a correction of a ruling that the log does not hold, that no longer stands, or
+    that rules another thing. A refusal leaves both logs as they were.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says what the ruling is on",
@@ -181,6 +203,18 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     if chose is not None and not _QUESTION.fullmatch(item or ""):
         raise BadArgument("--chose names the option he chose in answer to a question",
                           "give it with the question's id, Q<n>, or leave --chose out")
+    if supersedes is not None:
+        if not _ID.fullmatch(supersedes):
+            raise BadArgument(f"--supersedes {supersedes!r} is not a ruling's id",
+                              "name the ruling this one replaces: C<n> for a round's "
+                              "own, S<n> for one in the project's register")
+        if supersedes.startswith("S") != standing:
+            raise BadArgument(
+                f"{supersedes} is {_whose(supersedes)}, and this ruling is "
+                f"{_whose('S' if standing else 'C')}: a ruling replaces one in its "
+                "own log", "record the ruling where the one it replaces is: on the "
+                           "round for C<n>; on the project, or with --standing, for "
+                           "S<n>")
     scoped = None if scope is None else parse_scope(scope)
     staged = None if stages is None else parse_stages(stages)
 
@@ -189,12 +223,20 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     name = home.project if slug is None else f"{home.project}/{slug}"
     form = _form(item, Asked(name=name, standing=standing, text=text, stages=staged,
                              slug=slug, record=record, until=until,
-                             scoped=scope is not None, chose=chose))
+                             scoped=scope is not None, chose=chose,
+                             supersedes=supersedes))
     # The command that records it, with the sentence only where the form has one.
     again = (f"moxi rounds rule {name}{'' if item is None else ' ' + item}"
              f"{'' if chose is None else ' --chose ' + chose}"
              f"{' --text TEXT' if 'text' in form.fields else ''} "
              f"--record PTR{' --standing' if standing and slug is not None else ''}")
+    corrects = supersedes is not None or (item or "").startswith(corrections.REVOKE)
+    gates = [*form.gates]
+    if supersedes is not None:
+        gates.append(corrections.replaces(
+            supersedes, form.rules, name=name, again=again,
+            held=lambda view: view.project_state if standing else view.state))
+    ended: list[str | None] = [None]
 
     def has_a_pointer(view):
         if record is None:
@@ -214,6 +256,11 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
             fields["reason"] = reason
         if scoped is not None:
             fields["scope"] = scoped
+        if supersedes is not None:
+            fields["supersedes"] = supersedes
+        if corrects and not standing:
+            # Recorded all the same: it changes what is read, and reopens nothing.
+            ended[0] = corrections.ended(view.state)
         # One event is the whole ruling, so a stopped verb never leaves half of one.
         return write.Entry("ruling.recorded", fields,
                            log=write.PROJECT if standing else write.ROUND)
@@ -222,7 +269,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     # the round's state holds its stages.
     try:
         written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
-                               gates=[has_a_pointer, *form.gates], event=recorded,
+                               gates=[has_a_pointer, *gates], event=recorded,
                                with_project=standing, wait_s=wait_s, at=at)
     except NoLog:
         # Only a round's log can be missing here: a project's reads as empty.
@@ -230,7 +277,12 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     event = written.events[0]
     said = event.get("text")
     return Ruled(id=event["id"], name=name, standing=standing, text=said, event=event,
-                 long=said is not None and len(said) > LONG, failed=written.failed)
+                 long=said is not None and len(said) > LONG, ended=ended[0],
+                 failed=written.failed)
+
+
+def _whose(ruling_id: str) -> str:
+    return "the project's register's" if ruling_id.startswith("S") else "a round's own"
 
 
 # -- the forms ---------------------------------------------------------------------------
@@ -248,9 +300,9 @@ def _plain(asked: Asked) -> Form:
 
 # -- the forms that rule a question ------------------------------------------------------
 
-_PARK = "park:"
-_NARROW = "narrow:"
-_WITHDRAW = "withdraw:"
+_PARK = corrections.PARK
+_NARROW = corrections.NARROW
+_WITHDRAW = corrections.WITHDRAW
 _QUESTION = re.compile(r"[QP][1-9][0-9]*")
 
 
@@ -278,9 +330,13 @@ def _of_a_question(asked: Asked, *, act: bool) -> None:
                                                  "out")
 
 
-def _can_be_ruled(question_id: str, asked: Asked, *, answer: bool = False) -> write.Gate:
+def _can_be_ruled(question_id: str, asked: Asked, *, item: str | None = None,
+                  puts: str | None = None) -> write.Gate:
     """The gate every ruling of a question has: the log holds the question, and it is
-    not ruled or withdrawn already, nor moved to another log."""
+    not ruled or withdrawn already, nor moved to another log. `item` is what the ruling
+    is on and `puts` the state it puts the question in, for a ruling that ends the
+    question: one that is in that state already takes the ruling only as the
+    replacement of the ruling that put it there, which it names."""
     def gate(view):
         question = questions.find(_held(view, asked), question_id)
         listing = (f"moxi rounds show {asked.name}" if asked.slug is not None else
@@ -293,17 +349,23 @@ def _can_be_ruled(question_id: str, asked: Asked, *, answer: bool = False) -> wr
                          listing)
         if question.state not in (questions.RULED, questions.WITHDRAWN):
             return None
-        by = question.ruling or ("S<n>" if asked.standing else "C<n>")
-        if answer and question.state == questions.RULED:
+        by = (corrections.put_by(question) or question.ruling
+              or ("S<n>" if asked.standing else "C<n>"))
+        if question.state == puts:
+            if asked.supersedes == by:
+                return None
+            answer = puts == questions.RULED
             return Unmet(
-                f"{question_id} is already ruled, by {by}; a second answer replaces "
-                "the first and names it",
-                f"moxi rounds rule {asked.name} {question_id} --text TEXT --record PTR "
-                f"--supersedes {by}")
+                f"{question_id} is already {question.state}, by {by}; a second "
+                f"{'answer' if answer else 'withdrawal'} replaces the first and names "
+                "it",
+                f"moxi rounds rule {asked.name} {item}{' --text TEXT' if answer else ''}"
+                f" --record PTR --supersedes {by}")
         return Unmet(f"{question_id} is already {question.state}, by {by}; it takes "
                      f"another ruling only once {by} is taken back, which makes it "
                      "open again",
-                     f"moxi rounds rule {asked.name} revoke:{by} --record PTR")
+                     f"moxi rounds rule {asked.name} {corrections.REVOKE}{by} "
+                     "--record PTR")
     return gate
 
 
@@ -356,7 +418,7 @@ def _answer(item: str, asked: Asked) -> Form | None:
         return fields
 
     fields = _said(asked)
-    gates = [_can_be_ruled(item, asked, answer=True)]
+    gates = [_can_be_ruled(item, asked, item=item, puts=questions.RULED)]
     if chose is not None:
         fields["chose"] = chose
         gates.append(offers_what_he_chose)
@@ -374,7 +436,19 @@ def _park(item: str, asked: Asked) -> Form | None:
     _of_a_question(asked, act=True)
     until = asked.until
     change: dict[str, object] = {"state": questions.PARKED}
-    gates = [_can_be_ruled(question_id, asked)]
+
+    def is_not_parked_already(view):
+        question = questions.find(_held(view, asked), question_id)
+        by = None if question is None else corrections.put_by(question)
+        if (question is None or question.state != questions.PARKED or by is None
+                or by == asked.supersedes):
+            return None
+        return Unmet(f"{question_id} is already parked, by {by}; a second parking "
+                     "replaces the first and names it",
+                     f"moxi rounds rule {asked.name} {item} --record PTR "
+                     f"[--until B<n>|round:<project>/<slug>] --supersedes {by}")
+
+    gates = [_can_be_ruled(question_id, asked), is_not_parked_already]
     if until is not None:
         change["until"] = until
         if until.startswith(questions.UNTIL_ROUND):
@@ -424,8 +498,21 @@ def _narrow(item: str, asked: Asked) -> Form | None:
                      f"{questions.stages_said(view.state)}",
                      f"moxi rounds show {asked.name}")
 
+    def is_not_narrowed_already(view):
+        first = corrections.standing(view.state, _NARROW + question_id)
+        if first is None or first.id == asked.supersedes:
+            return None
+        return Unmet(f"{question_id} was narrowed already, by {first.id}; a second "
+                     "narrowing replaces the first and names it",
+                     f"moxi rounds rule {asked.name} {item} --record PTR "
+                     f"--supersedes {first.id}")
+
     def narrows(view):
         question = questions.find(view.state, question_id)
+        if question is not None and asked.supersedes is not None:
+            # What it replaces narrowed the question too: the new list is held to
+            # what the question holds up with that narrowing left out.
+            question = states.without(view.state, question, (asked.supersedes,))
         if question is None or questions.holds_every(question.blocks, wanted):
             return None
         return Unmet(
@@ -438,8 +525,8 @@ def _narrow(item: str, asked: Asked) -> Form | None:
     return Form(kind=PROCESS, rules=item,
                 fields={**_said(asked),
                         **_becomes(question_id, blocks=questions.stored(wanted))},
-                gates=(_can_be_ruled(question_id, asked), names_stages_of_the_round,
-                       narrows))
+                gates=(_can_be_ruled(question_id, asked), is_not_narrowed_already,
+                       names_stages_of_the_round, narrows))
 
 
 def _withdraw(item: str, asked: Asked) -> Form | None:
@@ -451,13 +538,48 @@ def _withdraw(item: str, asked: Asked) -> Form | None:
     return Form(kind=PROCESS, rules=item,
                 fields={**_said(asked),
                         **_becomes(question_id, state=questions.WITHDRAWN)},
-                gates=(_can_be_ruled(question_id, asked),))
+                gates=(_can_be_ruled(question_id, asked, item=item,
+                                     puts=questions.WITHDRAWN),))
+
+
+# -- taking a ruling back ----------------------------------------------------------------
+
+def _revoke(item: str, asked: Asked) -> Form | None:
+    """Taking a ruling back, with nothing put in its place: an act on the process,
+    whose event names the ruling and holds what its kind says the taking back changes."""
+    ruling_id = item[len(corrections.REVOKE):]
+    if not item.startswith(corrections.REVOKE) or not _ID.fullmatch(ruling_id):
+        return None
+    for flag, given in (("--stages", asked.stages is not None),
+                        ("--scope", asked.scoped),
+                        ("--standing", asked.standing and asked.slug is not None),
+                        ("--supersedes", asked.supersedes is not None)):
+        if given:
+            raise BadArgument(f"{flag} is for a ruling that says something new, and "
+                              f"{item} only takes {ruling_id} back",
+                              f"leave {flag} out")
+    if asked.text is not None and not asked.text.strip():
+        raise BadArgument("--text says nothing", "give the sentence, or leave --text "
+                                                 "out")
+    if ruling_id.startswith("S") != asked.standing:
+        project = asked.name.partition("/")[0]
+        raise BadArgument(
+            f"{ruling_id} is {_whose(ruling_id)}, and {asked.name} is "
+            f"{'a project' if asked.standing else 'a round'}",
+            f"a round's own ruling is taken back on the round, as {corrections.REVOKE}"
+            f"C<n>; one of the register on the project: moxi rounds rule {project} "
+            f"{corrections.REVOKE}S<n> --record PTR")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=(corrections.can_be_taken_back(
+                    ruling_id, name=asked.name, held=lambda view: _held(view, asked)),),
+                found=lambda view: corrections.taking_back(_held(view, asked),
+                                                           ruling_id))
 
 
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
-    _answer, _park, _narrow, _withdraw)
+    _answer, _park, _narrow, _withdraw, _revoke)
 
 
 def _form(item: str | None, asked: Asked) -> Form:
