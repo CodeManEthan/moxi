@@ -44,14 +44,16 @@ def test_an_opening_under_a_parent_sets_the_parent():
     assert state.fold([opened(parent="proj-a/program")]).parent == "proj-a/program"
 
 
-def test_an_opening_changes_only_those_five_fields_and_the_history():
+def test_an_opening_changes_only_those_six_fields_and_the_history():
     first = opened(parent="proj-a/program", inherits=["S1"], record="comms:12")
 
     changed = {field.name for field in dataclasses.fields(state.State)
                if getattr(state.fold([first]), field.name) != getattr(state.State(),
                                                                        field.name)}
 
-    assert changed == {"description", "flow", "steps", "parent", "status", "history"}
+    assert changed == {"description", "flow", "steps", "parent", "inherits", "status",
+                       "history"}
+    assert state.fold([first]).inherits == ["S1"]
 
 
 def test_the_history_is_every_event_in_order():

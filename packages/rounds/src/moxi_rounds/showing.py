@@ -347,7 +347,8 @@ def _head(found: Shown) -> dict:
     # a function says what step a round is at.
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
-            "parent": state.parent, "flow": state.flow, "steps": state.steps,
+            "parent": state.parent, "inherits": list(state.inherits),
+            "flow": state.flow, "steps": state.steps,
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "threads": _threads(state),
@@ -520,6 +521,8 @@ def as_text(found: Shown) -> str:
     lines += [f"stage {stage_line(one)}" for one in shown_as["stages"]]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")
+    if shown_as["inherits"]:
+        lines.append(f"inherits: {', '.join(shown_as['inherits'])}")
     if shown_as["ended"] is not None:
         lines.append(f"ended: {ended_line(shown_as['ended'])}")
     if found.notice is not None:

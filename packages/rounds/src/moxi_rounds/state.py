@@ -342,6 +342,9 @@ class State:
     steps: list[dict] = field(default_factory=list)
     #: The round this one is a child of, or None.
     parent: str | None = None
+    #: The ids of the project's standing rulings the round starts from, as it was
+    #: opened with them.
+    inherits: list[str] = field(default_factory=list)
     #: `OPEN` or `DROPPED`, or None for a log that opened no round.
     status: str | None = None
     #: How the round ended, or None while it has not.
@@ -382,6 +385,7 @@ def _round_opened(state: State, event: dict) -> None:
     # A copy, so a later change to the state's steps never reaches the event.
     state.steps = copy.deepcopy(event["steps"])
     state.parent = event.get("parent")
+    state.inherits = list(_ids(event.get("inherits")))
     state.status = OPEN
 
 

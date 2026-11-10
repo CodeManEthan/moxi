@@ -189,6 +189,9 @@ def _flow(shown_as: dict) -> list[str]:
     # The step the round is at goes here, after the flow's steps, once a function
     # says what step a round is at.
     lines = [f"{shown_as['flow']}: {steps}"]
+    if shown_as["inherits"]:
+        lines += ["", *_item("starts from the standing rulings "
+                             f"{', '.join(shown_as['inherits'])}")]
     if shown_as["skips"]:
         lines.append("")
     for one in shown_as["skips"]:

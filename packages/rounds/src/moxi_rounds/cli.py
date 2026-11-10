@@ -168,6 +168,10 @@ def _declare_open(verbs) -> None:
                              "setting)")
     parser.add_argument("--record", metavar="PTR",
                         help="a pointer to where the operator gave the go")
+    parser.add_argument("--inherits", metavar="LIST",
+                        help="the standing rulings of the project the round starts "
+                             "from, as S1,S2: each one that says what is built and "
+                             "still stands")
     _writes(parser)
 
 
@@ -175,14 +179,24 @@ def _open(args, out) -> int:
     from . import opening
 
     opened = opening.open_round(args.round, description=args.description,
-                                actor=_actor(args), flow=args.flow, record=args.record)
+                                actor=_actor(args), flow=args.flow, record=args.record,
+                                inherits=_listed(args.inherits))
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.folder}", file=out)
+    if opened.inherits:
+        print(f"inherits: {', '.join(opened.inherits)}", file=out)
     for line in _left(opened):
         print(line, file=out)
     _warn_of(opened.failed, args.prog, args.verb)
     return codes.OK
+
+
+def _listed(text: str | None) -> list[str] | None:
+    """The ids of a list given as one argument, `S1,S2`; None when none was given."""
+    if text is None:
+        return None
+    return [one.strip() for one in text.split(",") if one.strip()]
 
 
 def _left(opened) -> list[str]:
