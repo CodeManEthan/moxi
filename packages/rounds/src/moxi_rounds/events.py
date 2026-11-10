@@ -61,19 +61,23 @@ TYPES = _types(
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
     # operator's pointer when the question is his own; it is then the origin too.
-    # `options` are the choices it offers, each key with its one line.
+    # `options` are the choices it offers, each key with its one line. A question
+    # brought here from another log also says the record it was there (`moved_from`),
+    # what it held up in the round it left (`held`), what a parked one waits for
+    # (`until`) and the keys that were `retired` from it.
     EventType("question.asked",
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
-               "options", "prepared"),
+               "options", "prepared", "until", "retired", "moved_from", "held"),
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
     # A question changed by something that is no ruling: its state or what it holds
     # up, with who changed it and the operator's pointer when the change needs one;
     # `options` added, each key with its one line, and the keys `retired`; a prepared
-    # answer. A ruling of a question writes none of these: its own event says what the
-    # question becomes.
+    # answer; the record it became in another log when it was moved there
+    # (`moved_to`). A ruling of a question writes none of these: its own event says
+    # what the question becomes.
     EventType("question.changed",
               ("id", "state", "blocks", "until", "by", "record", "options",
-               "retired", "prepared"),
+               "retired", "prepared", "moved_to"),
               required=("id",)),
     # A stage joined the plan: its id, the repo and branch it builds on or the child
     # round it stands for, the stages it comes after, and its slices.
@@ -86,12 +90,13 @@ TYPES = _types(
     # the ruling it replaces or takes back. A ruling of a question is the whole of the
     # change: it names the `question` and holds what the question becomes, its `state`,
     # what a parked one waits for (`until`) and what it holds up from then on
-    # (`blocks`), each only when the ruling changes it. A skip of the questions step
-    # for a stage lists the questions it lets that stage past, `covers`.
+    # (`blocks`), each only when the ruling changes it; a move of the question to
+    # another log names the record it became there, `moved_to`. A skip of the questions
+    # step for a stage lists the questions it lets that stage past, `covers`.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes"),
+               "revokes", "moved_to"),
               required=("id", "record", "kind")),
     # Rulings were put in front of the operator: their ids, and the pointer to where.
     EventType("ruling.shown", ("ids", "record")),

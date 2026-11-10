@@ -4,6 +4,8 @@
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
+    moxi rounds ask ROUND --adopt P<n> [--blocks LIST [--record PTR]] [--as NAME]
+    moxi rounds ask PROJECT --move ROUND:Q<n> [--record PTR] [--as NAME]
     moxi rounds rule ROUND|PROJECT [ITEM] --record PTR [--text TEXT] [--chose K]
                      [--reason TEXT] [--standing] [--scope SPEC] [--stages LIST]
                      [--until WHAT] [--as NAME]
@@ -15,7 +17,10 @@ where the operator said something, or to where a question came from. It is
 `ITEM` is what a ruling is on: a question's id for its answer, `park:Q<n>`,
 `narrow:Q<n>=LIST|none` or `withdraw:Q<n>`; with none the ruling stands on its own.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
-id adds options to it or retires them. A verb that writes takes `--as NAME`, who is
+id adds options to it or retires them. `ask --adopt` brings a question of the project's
+list into a round, and `ask --move` puts a round's question on its project's list; the
+operator's pointer goes with a move that ends what the question holds up, and with a
+list of stages for a question that came from a round. A verb that writes takes `--as NAME`, who is
 doing it; without it that is the user the command runs as.
 
 Exit codes: 0 done; 1 an error; 2 bad arguments or a bad setting; 3 refused. A refusal
@@ -180,14 +185,17 @@ def _declare_ask(verbs) -> None:
             "list. A question may offer options, two to four, a line each under a "
             "short key. With the id of a question on record in place of the sentence, "
             "add options to it or retire them: a key keeps its line, and a retired key "
-            "is never used again.")
+            "is never used again. With --adopt, bring a question of the project's list "
+            "into the round; with --move, put a round's question on the project's "
+            "list, where it holds up nothing.")
     parser = verbs.add_parser("ask", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round the question is asked in, <project>/<slug>, or "
                              "a project's key")
-    parser.add_argument("text", metavar="TEXT|ID",
+    parser.add_argument("text", metavar="TEXT|ID", nargs="?",
                         help="the question, one sentence on one line; or the id of a "
-                             "question on record, Q<n> or P<n>, to change its options")
+                             "question on record, Q<n> or P<n>, to change its options; "
+                             "left out with --adopt and --move")
     parser.add_argument("--from", dest="origin", metavar="PTR",
                         help="a pointer to where the question came from, one token: "
                              "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
@@ -196,10 +204,13 @@ def _declare_ask(verbs) -> None:
                              "question with no origin is refused")
     parser.add_argument("--record", metavar="PTR",
                         help="in place of --from, for a question that is the "
-                             "operator's own: a pointer to where he asked it")
+                             "operator's own: a pointer to where he asked it; with "
+                             "--move, or with --adopt and a list, a pointer to where "
+                             "he said so")
     parser.add_argument("--blocks", metavar="LIST|none",
                         help="the stages the question holds up, as B2,B3, or none "
-                             "(default: all, every stage the round has or gains)")
+                             "(default: all, every stage the round has or gains); an "
+                             "adopted question takes no none")
     parser.add_argument("--option", dest="options", metavar="K=TEXT", action="append",
                         default=[],
                         help="an option the question offers: a short key and its one "
@@ -208,6 +219,18 @@ def _declare_ask(verbs) -> None:
                         help="with an ID, take the option under this key out; to "
                              "correct a line, retire its key and add the right line "
                              "under a new one")
+    parser.add_argument("--adopt", metavar="P<n>",
+                        help="on a round, in place of a sentence: bring this question "
+                             "of the project's list into the round, in the state it "
+                             "has. It holds up every stage unless --blocks names "
+                             "some; for a question that came from a round a list "
+                             "needs the operator's pointer, --record PTR")
+    parser.add_argument("--move", metavar="ROUND:Q<n>",
+                        help="on a project, in place of a sentence: put this question "
+                             "of one of its rounds on the project's list. That ends "
+                             "what it holds up, so it needs the operator's pointer, "
+                             "--record PTR, unless the question is parked and every "
+                             "stage it holds up is finished or out of the plan")
     _writes(parser)
 
 
@@ -215,6 +238,12 @@ def _ask(args, out) -> int:
     from . import asking, questions
     from . import options as choices
 
+    if args.adopt is not None or args.move is not None:
+        return _carry(args, out)
+    if args.text is None:
+        raise BadArgument("nothing is asked",
+                          f"give the question as one sentence: {args.prog} ask "
+                          f"{args.target} TEXT --from PTR")
     if choices.QUESTION_ID.fullmatch(args.text):
         return _fill(args, out)
     if args.retire:
@@ -250,6 +279,38 @@ def _fill(args, out) -> int:
     if found.retired:
         print(f"retired: {', '.join(found.retired)}", file=out)
     _warn_of(filled.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _carry(args, out) -> int:
+    """`ask --adopt` and `ask --move`: carry a question on record to the other log of
+    its project."""
+    from . import moving, questions
+
+    flag = "--adopt" if args.adopt is not None else "--move"
+    if args.adopt is not None and args.move is not None:
+        raise BadArgument("--adopt brings a question into a round and --move takes "
+                          "one out", "give one of the two")
+    for other, given in (("the sentence", args.text), ("--from", args.origin),
+                         ("--option", args.options or None),
+                         ("--retire", args.retire or None),
+                         ("--blocks", args.blocks if args.move is not None else None)):
+        if given is not None:
+            raise BadArgument(f"{flag} carries a question as it is on record, and "
+                              f"{other} is not for it", f"leave {other} out")
+    if args.adopt is not None:
+        moved = moving.adopt(args.target, args.adopt, actor=_actor(args),
+                             blocks=args.blocks, record=args.record)
+    else:
+        moved = moving.move(args.target, args.move, actor=_actor(args),
+                            record=args.record)
+    found = moved.question
+    print(f"{found.id}: {found.text}", file=out)
+    print(f"blocks: {questions.said(found.blocks)}   from: {found.origin}", file=out)
+    was = (f", where it held up {questions.said(found.held)}"
+           if found.held is not None else "")
+    print(f"moved from: {moved.source}{was}", file=out)
+    _warn_of(moved.failed, args.prog, args.verb)
     return codes.OK
 
 

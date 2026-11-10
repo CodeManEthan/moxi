@@ -205,7 +205,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
 
     def recorded(view, result):
         held = view.project_state if standing else view.state
-        fields = {"id": _next_id("S" if standing else "C", held.rulings),
+        fields = {"id": next_id("S" if standing else "C", held.rulings),
                   **form.fields, **(form.found(view) if form.found else {}),
                   "record": record, "kind": form.kind}
         if form.rules is not None:
@@ -280,13 +280,17 @@ def _of_a_question(asked: Asked, *, act: bool) -> None:
 
 def _can_be_ruled(question_id: str, asked: Asked, *, answer: bool = False) -> write.Gate:
     """The gate every ruling of a question has: the log holds the question, and it is
-    not ruled or withdrawn already."""
+    not ruled or withdrawn already, nor moved to another log."""
     def gate(view):
         question = questions.find(_held(view, asked), question_id)
+        listing = (f"moxi rounds show {asked.name}" if asked.slug is not None else
+                   f"moxi rounds list {asked.name} --questions")
         if question is None:
-            listing = (f"moxi rounds show {asked.name}" if asked.slug is not None else
-                       f"moxi rounds list {asked.name} --questions")
             return Unmet(f"{asked.name} has no question {question_id}", listing)
+        if question.state == questions.MOVED:
+            return Unmet(f"{question_id} was moved out of {asked.name} and is now "
+                         f"{question.moved_to}, which is the record a ruling is on",
+                         listing)
         if question.state not in (questions.RULED, questions.WITHDRAWN):
             return None
         by = question.ruling or ("S<n>" if asked.standing else "C<n>")
@@ -467,7 +471,7 @@ def _form(item: str | None, asked: Asked) -> Form:
                       "leave it out for a plain ruling: --text TEXT --record PTR")
 
 
-def _next_id(letter: str, rulings: Iterable) -> str:
+def next_id(letter: str, rulings: Iterable) -> str:
     """The next id of a log's rulings: one past the highest it holds, so an id is never
     given twice even when a line was taken out by hand."""
     numbers = [int(found.group(1)) for found in
@@ -516,4 +520,4 @@ def parse_scope(text: str) -> list[dict]:
 
 
 __all__ = ["SUBSTANCE", "PROCESS", "EVERY_STAGE", "LONG", "STAGE", "Asked", "Form",
-           "Ruled", "rule", "parse_stages", "parse_scope"]
+           "Ruled", "rule", "next_id", "parse_stages", "parse_scope"]

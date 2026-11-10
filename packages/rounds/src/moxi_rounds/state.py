@@ -11,7 +11,8 @@ the steps recorded for it, its parent, and its status), the rulings recorded in 
 its questions, each with every change made to it, the options it offers and the key its
 answer chose, and the whole history. A ruling of a question is one event: the ruling's
 own record names the question and says what it becomes, and the fold changes the
-question from it. A log with no
+question from it. A question that was moved to another log stays in this one as moved,
+naming the record it became; the one that arrived names the record it was. A log with no
 opening event, a project's for one, has a status of None; the rulings of a project's log
 are its register, and its questions the project's list.
 """
@@ -80,6 +81,8 @@ class Change:
     #: The options it added, each `(key, line)`, and the keys it retired.
     options: tuple[tuple[str, str], ...] = ()
     retired: tuple[str, ...] = ()
+    #: The record the question became in another log, when the change moved it there.
+    moved_to: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,9 +97,9 @@ class Question:
     origin: str | None
     #: What it holds up: `"all"`, `"none"`, or stage ids.
     blocks: str | tuple[str, ...] | None
-    #: `open`, `parked`, `ruled` or `withdrawn`, as last recorded. A parked question
-    #: that waits for something reads as open once that is reached; `questions.current`
-    #: gives the state as it reads now.
+    #: `open`, `parked`, `ruled` or `withdrawn`, as last recorded, or `moved` for one
+    #: that left this log for another. A parked question that waits for something reads
+    #: as open once that is reached; `questions.current` gives the state as it reads now.
     state: str | None
     #: Who asked it, and when.
     by: str
@@ -115,6 +118,14 @@ class Question:
     retired: tuple[str, ...] = ()
     #: The key of the option its answer chose, or None.
     chose: str | None = None
+    #: The record it was in the log it was brought here from: `P<n>` of this project's
+    #: list, or `<project>/<slug>:Q<n>` of a round. None for one asked here.
+    moved_from: str | None = None
+    #: What it held up in the round it left, kept as said then: it holds up nothing
+    #: on a project's list. None for one that left no round.
+    held: str | tuple[str, ...] | None = None
+    #: The record it became in the log it was moved to, or None while it is here.
+    moved_to: str | None = None
 
 
 @dataclass
@@ -209,7 +220,10 @@ def _question_asked(state: State, event: dict) -> None:
         # A question brought here from another log keeps who asked it and when.
         by=event.get("asked_by") or event["actor"],
         at=event.get("asked_at") or event["at"], record=event.get("record"),
-        options=_offered(event.get("options"))))
+        until=event.get("until"), options=_offered(event.get("options")),
+        # A key retired where the question was before stays retired here.
+        retired=tuple(event.get("retired") or ()),
+        moved_from=event.get("moved_from"), held=_blocks(event.get("held"))))
 
 
 def _question_changed(state: State, event: dict) -> None:
@@ -230,6 +244,7 @@ def _change(state: State, event: dict, *, question_id: str | None,
     change = Change(state=event.get("state"), blocks=_blocks(event.get("blocks")),
                     until=event.get("until"), ruling=ruling,
                     record=event.get("record"), actor=event["actor"], at=event["at"],
+                    moved_to=event.get("moved_to"),
                     options=_offered(event.get("options"), question.options,
                                      question.retired),
                     # Only a key the question offers is retired, and only once.
@@ -244,6 +259,7 @@ def _change(state: State, event: dict, *, question_id: str | None,
         # ends it.
         until=question.until if change.state is None else change.until,
         ruling=question.ruling if change.ruling is None else change.ruling,
+        moved_to=question.moved_to if change.moved_to is None else change.moved_to,
         changes=(*question.changes, change),
         options=tuple(one for one in (*question.options, *change.options)
                       if one[0] not in change.retired),

@@ -103,7 +103,8 @@ def test_help_says_what_ask_does(capsys):
 
     out = " ".join(capsys.readouterr().out.split())
     for word in ("ROUND|PROJECT", "TEXT", "--from PTR", "--record PTR",
-                 "--blocks LIST|none", "--as NAME", "file:design.md#<anchor>"):
+                 "--blocks LIST|none", "--as NAME", "file:design.md#<anchor>",
+                 "--adopt P<n>", "--move ROUND:Q<n>"):
         assert word in out
 
 

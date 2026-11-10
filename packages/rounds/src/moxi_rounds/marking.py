@@ -51,8 +51,8 @@ def widen(target: str, question_id: str, blocks: str, *, actor: str, settings=No
 
         def still_asked(view):
             question = questions.find(view.state, question_id)
-            if question is None or question.state not in (questions.RULED,
-                                                          questions.WITHDRAWN):
+            if question is None or question.state not in (
+                    questions.RULED, questions.WITHDRAWN, questions.MOVED):
                 return None
             return Unmet(f"{question_id} is {question.state} and holds nothing up, so "
                          "there is nothing to widen", show)

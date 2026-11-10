@@ -5,7 +5,9 @@ in a round's log, `P<n>` in a project's), the sentence, where it came from, what
 up (`blocks`), its state, and who asked it and when. The fold keeps each as a
 `state.Question`; this module reads them.
 
-**State.** `OPEN`, `PARKED`, `RULED` or `WITHDRAWN`. The log records a parking with what
+**State.** `OPEN`, `PARKED`, `RULED` or `WITHDRAWN`; a question that was moved to another
+log is `MOVED` in the one it left, where it is asked no longer and holds nothing. The
+log records a parking with what
 the question waits for, when it waits for something: a stage, or another round. Nothing
 is written when that is reached, so the recorded state stays `parked`; `current` gives
 the state as it reads now, which is `open` again once the stage is finished or the round
@@ -34,6 +36,10 @@ OPEN = "open"
 PARKED = "parked"
 RULED = "ruled"
 WITHDRAWN = "withdrawn"
+#: What a question's state is in a log it was moved out of. It is no state of a
+#: question that is still asked: the record it became, in the other log, has one of
+#: the four.
+MOVED = "moved"
 
 #: What `blocks` holds for a question that holds up every stage, and for one that holds
 #: up none.
@@ -214,7 +220,7 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
         yield question.id, body
 
 
-__all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "ALL", "NONE", "ROUND_ID",
+__all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "MOVED", "ALL", "NONE", "ROUND_ID",
            "PROJECT_ID", "STAGE", "UNTIL_ROUND", "UNSTAGE", "find", "next_id",
            "parse_blocks", "said", "stored", "holds_every", "recorded_stages",
            "finished_stages", "left_stages", "unrecorded", "stages_said", "is_closed",

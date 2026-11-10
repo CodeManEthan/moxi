@@ -331,6 +331,43 @@ def test_a_ruling_that_rules_no_question_chooses_nothing():
     assert found.chose is None
 
 
+def test_a_question_brought_from_another_log_says_what_it_was_there():
+    arrived = asked(2, id="P1", blocks="none", state="parked", asked_by="scout",
+                    asked_at="2025-12-31T00:00:00Z", until="round:proj-a/b-round",
+                    options={"a": "one", "b": "two"}, retired=["c"],
+                    moved_from="proj-a/a-round:Q4", held=["B1", "B2"])
+
+    [found] = state.fold([arrived]).questions
+
+    assert found == state.Question(
+        id="P1", text="Is it so?", origin="comms:12", blocks="none", state="parked",
+        by="scout", at="2025-12-31T00:00:00Z", until="round:proj-a/b-round",
+        options=(("a", "one"), ("b", "two")), retired=("c",),
+        moved_from="proj-a/a-round:Q4", held=("B1", "B2"))
+
+
+def test_a_question_moved_to_another_log_is_moved_here_and_names_what_it_became():
+    by_anyone = event(4, "question.changed", id="Q1", state="moved", moved_to="P3")
+    his = {**ruled_as(5, "C1", rules="move:Q2", state="moved", moved_to="P4"),
+           "question": "Q2"}
+    before = state.fold([opened(), asked(2), asked(3, id="Q2", blocks=["B1"])])
+
+    after = state.fold([opened(), asked(2), asked(3, id="Q2", blocks=["B1"]),
+                        by_anyone, his])
+
+    first, second = after.questions
+    assert (first.state, first.moved_to, first.ruling, first.blocks) == (
+        "moved", "P3", None, "all")
+    assert (second.state, second.moved_to, second.ruling, second.blocks) == (
+        "moved", "P4", "C1", ("B1",))
+    assert [(change.state, change.moved_to, change.ruling) for change in
+            (*first.changes, *second.changes)] == [("moved", "P3", None),
+                                                   ("moved", "P4", "C1")]
+    assert [ruling.id for ruling in after.rulings] == ["C1"]
+    assert dataclasses.replace(after, questions=before.questions, rulings=[],
+                               history=before.history) == before
+
+
 def test_a_projects_questions_are_its_list():
     found = state.fold([event(1, "question.asked", id="P1", text="Is it so?",
                               blocks="none", state="open", asked_by="scout",
