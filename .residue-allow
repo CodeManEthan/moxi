@@ -30,3 +30,9 @@ packages/moxi-dev/tests/test_tags.py	L50	data: the tag check's own tests feed th
 packages/launcher/src/moxi_launcher/compose/common.py	(X86)	data: Windows environment variable names, PROGRAMFILES(X86) and COMMONPROGRAMFILES(X86)
 packages/usage/src/moxi_usage/data/models.json	L2	data: part of third-party model names in the shipped price snapshot (MythoMax-L2-13b)
 packages/usage/src/moxi_usage/data/models.json	L3	data: part of third-party model names in the shipped price snapshot (Sao10K/L3-8B-...)
+packages/rounds/tests/test_pointers.py	0a1b2c3d@2026-01-02	data: a made-up session pointer the pointer-shape tests feed to the shape check they test
+packages/rounds/tests/test_pointers.py	0A1B2C3D4E5F@2026-01-02	data: a made-up session pointer the pointer-shape tests feed to the shape check they test
+packages/rounds/tests/test_pointers.py	0a1b2c3d@2026-13-02	data: a made-up session pointer with no such month, which the shape check must refuse
+packages/rounds/tests/test_open.py	0a1b2c3d@2026-01-02	data: a made-up session pointer the test gives open as the go pointer, to see its shape accepted
+packages/rounds/tests/test_rule.py	0a1b2c3d@2026-01-02	data: a made-up session pointer the test gives rule as its pointer, to see its shape accepted
+packages/rounds/tests/test_rule.py	round proj-a/c-round	data: the message the test expects for a made-up round that was never opened; the scan reads it as a round cite
