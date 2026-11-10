@@ -10,6 +10,9 @@
   opens the other choices; a launch from Home runs where the button says, whatever
   `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
   went. New component `prompt` (`<moxi-launcher-prompt>`).
+- New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
+  run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
+  so a caller on an install without the UI shell can read what is alive.
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;
