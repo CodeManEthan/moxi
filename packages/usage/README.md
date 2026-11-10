@@ -27,7 +27,7 @@ the `moxi` command.
 ## Requirements
 
 - Linux and Python 3.12 or later, with [uv](https://docs.astral.sh/uv/) to install.
-- `moxi`, Moxi's core, 0.1.6 or later, and `moxi-sessions` 0.2.
+- `moxi`, Moxi's core, 0.1.6 or later, and `moxi-sessions` 0.2.8 or later.
 - The live parts need turns and the harness it reaches: Claude limits, the warn-at mark
   and the worker ceiling need Claude Code (or Codex) sessions running under turns, and a
   pulled Codex limits reading needs `codex` on PATH. The token index, the reports, the
@@ -380,10 +380,10 @@ The page server's reads, each a `GET` under `/api`:
 | route | query | answers |
 |---|---|---|
 | `limits` | none | each plan window now, from the stored readings, with `opened` |
-| `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period, and the sessions that used it |
+| `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, and the sessions that used it |
 | `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
-| `sessions` | `top` (1 to 200), `skip`, filters | sessions, dearest first: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` |
-| `session` | `session`, filters | one session by agent and model, with its `context` |
+| `sessions` | `top` (1 to 200), `skip`, filters | sessions, dearest first: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` and what names it |
+| `session` | `session`, filters | one session by agent and model, with its `context` and what names it (`ref`) |
 | `projects` | `by` (`project`, `folder`), filters | tokens and cost by project, or by folder alone, with the account's `home` folder |
 | `models` | filters | tokens and cost by model, with where each price came from |
 | `terms` | `by` (`model`, `day`, `month`, `agent`), `session`, filters | every term of each cost, and `saving` on the total |
@@ -407,6 +407,18 @@ the model table. A session's `context` is the whole prompt of the newest request
 main file and the window it ran against, null when that is not known. `window`'s sessions
 are given for the harness's main limit when its start is known and there is an index to
 read, else null.
+
+Wherever an answer names a session it carries `harness`, `session_id`, `name`, `folder`,
+`started` and `known`. The page server asks the sessions module for them once per answer,
+for the sessions that answer sends. `name` is the name typed for the session in its
+harness; a Codex or an OpenCode session has none, and a title the harness made up is not
+one. `known` is true when the session's record was found. It is false when every root of
+the harness was listed and none holds it: the record is gone, the session keeps its
+figures, `folder` is the `cwd` the index stored and `started` the session's earliest
+request in the index. It is null when the session was not looked for (its harness's root
+could not be listed whole, the row has no session id, or the sessions module could not be
+asked), and then `name` and `started` are null too. The id is there for the page's
+addresses and requests; the page shows a session by its name, or by its folder and start.
 
 The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
 "Read new sessions" runs one in the page server, which the page also asks for when it opens

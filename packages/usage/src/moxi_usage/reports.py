@@ -802,6 +802,61 @@ def session_contexts(keys: Iterable[tuple[str | None, str]], *,
     return out
 
 
+def session_origins(keys: Iterable[tuple[str | None, str]], *,
+                    env: Mapping[str, str] | None = None,
+                    ) -> dict[tuple[str | None, str], dict[str, Any] | None]:
+    """What the index holds of where and when each session of `keys` began, for each
+    `(harness, session id)`: `{harness, cwd, first_ts}`, from the index as it is, with
+    no pass and nothing written.
+
+    `cwd` is the folder the `sessions` report gives the session: its main file's, else
+    the first of its files that has one. `first_ts` is the time of the earliest request
+    the index holds in any of its files, whatever range a report is cut to; None when
+    none of them holds a request with a time. `harness` None finds the one harness that
+    holds a main file of that id, and `harness` in the answer says which.
+
+    A key is None when the index holds no file of that session, when `harness` is None
+    and no harness or more than one holds a main file of that id, and when there is no
+    index or it is at another version. One read per key, by the session's files."""
+    from . import store
+
+    wanted = list(dict.fromkeys(keys))
+    out: dict[tuple[str | None, str], dict[str, Any] | None] = dict.fromkeys(wanted)
+    if not wanted or not store.index_path(env).exists():
+        return out
+    conn = store.connect(env=env, create=False)
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] != store.INDEX_VERSION:
+            return out
+        cursor = conn.cursor()
+        cursor.row_factory = None
+        for harness, session_id in wanted:
+            if not session_id:
+                continue
+            files = cursor.execute(
+                "SELECT harness, kind = 'main', cwd, first_ts FROM files"
+                " WHERE session_id = ? AND parent_session IS NULL"
+                " ORDER BY kind = 'main' DESC, rank, id", (session_id,)).fetchall()
+            if harness is None:
+                holders = {row[0] for row in files if row[1]}
+                if len(holders) != 1:
+                    continue
+                held_by = holders.pop()
+            else:
+                held_by = harness
+            files = [row for row in files if row[0] == held_by]
+            if not files:
+                continue
+            firsts = [row[3] for row in files if row[3] is not None]
+            out[harness, session_id] = {
+                "harness": held_by,
+                "cwd": next((row[2] for row in files if row[2] is not None), None),
+                "first_ts": min(firsts) if firsts else None}
+    finally:
+        conn.close()
+    return out
+
+
 #: A file's agent in its session: `main` for the session's main file, else the file's
 #: agent id (a child session's is its own session id).
 _AGENT_SQL = ("CASE WHEN f.kind = 'main' AND f.parent_session IS NULL THEN 'main'"

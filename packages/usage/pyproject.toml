@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
 ]
-dependencies = ["moxi>=0.1.6,<0.2", "moxi-sessions>=0.2,<0.3"]
+dependencies = ["moxi>=0.1.6,<0.2", "moxi-sessions>=0.2.8,<0.3"]
 
 [project.optional-dependencies]
 turns = ["moxi-turns>=0.2,<0.3"]

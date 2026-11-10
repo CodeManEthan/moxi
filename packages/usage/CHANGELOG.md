@@ -31,6 +31,16 @@
     newest request of the session's main file and the window it ran against, or null.
     A row no longer carries `title`.
   - `/api/session` carries the session's `context`.
+  - An answer that names a session carries what names it: `{harness, session_id, name,
+    folder, started, known}`. It is on each `/api/sessions` row, as `ref` on
+    `/api/session`, and on `/api/window`'s last reading (`session`) and each session
+    listed there. `name` is the name typed for the session in its harness, from the
+    sessions module, null when there is none; a title the harness made up is not a
+    name. `known` is true when the session's record was found, false when it is gone,
+    and null when it was not looked for. For a session whose record is gone, `folder`
+    is the index's `cwd` and `started` its earliest request in the index. The sessions
+    module is asked once per answer.
+- usage requires `moxi-sessions` 0.2.8 or later, for sessions' interface 5.
   - `/api/projects` takes `by=project|folder` and answers with `by` and `home`, the
     account's home folder.
   - Every report route takes `folder`.

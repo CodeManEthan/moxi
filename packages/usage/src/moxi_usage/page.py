@@ -7,7 +7,9 @@
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
     GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
                         how many there are and how many come after, each with its context
+                        and what names it
     GET  /api/session   one session by agent and model (`session=ID`), with its context
+                        and what names it
     GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
                         `cwd` alone with `by=folder`; with the account's `home` folder
     GET  /api/models    tokens and cost by model, with where each price came from
@@ -41,8 +43,13 @@ day against the server's day and not the browser's.
 
 Where the API's answer holds a map with open keys, the route carries it as a list of
 `{name, value}` rows or leaves it out, so every shape here is fixed. Every value that can
-hold a path carries the mark `path` (a `cwd`, the `home` folder), and a session title the
-mark `redact`; only the gateway acts on a mark, and no route is the gateway's.
+hold a path carries the mark `path` (a `cwd`, a session's `folder`, the `home` folder),
+and a session's name or title the mark `redact`; only the gateway acts on a mark, and no
+route is the gateway's.
+
+Wherever an answer names a session it carries `SESSION_REF`: the name typed for the
+session, its folder and its start, asked of the sessions module once per answer for the
+sessions that answer sends, and `known`, whether the session's record was found.
 
 The page's assets are the built files in `web/` beside this module: the `page`, `limits`
 and `cost` components' scripts and the build's stamp.
@@ -84,6 +91,7 @@ _MAYBE_INT = lb.Out("int", nullable=True)
 _FLOAT = lb.Out("float")
 _WHEN = lb.Out("float", nullable=True)
 _BOOL = lb.Out("bool")
+_MAYBE_BOOL = lb.Out("bool", nullable=True)
 _WORDS = lb.Out("list", items=_TEXT)
 
 
@@ -166,12 +174,35 @@ COST = _report(PERIOD_ROW)
 #: null when the session has no such request or its prompt size is unknown.
 CONTEXT = lb.Out("table", nullable=True, items={"tokens": _INT, "window": _MAYBE_INT})
 
-#: One session: its main file's `cwd` and project, its models, its first and last
-#: request in range, and its context. `session_id` is null for a file with no session
-#: id: no route reads such a row by id, so it has no session view and a null `context`.
-SESSION_ROW = {
+#: What names one session, wherever an answer names one. `harness` and `session_id` are
+#: the index's, for the page's addresses and requests; a session is shown by `name`,
+#: `folder` and `started`, never by its id.
+#:
+#: * `known`: true when the sessions module holds the session's record; false when it
+#:   was looked for under every root of its harness and none holds it (the record is
+#:   gone); null when it was not looked for: its harness's root was not listed whole,
+#:   the row has no session id, or the sessions module could not be asked.
+#: * `name`: the name typed for the session in its harness; null when it has none, for
+#:   a Codex or an OpenCode session, and unless `known` is true.
+#: * `folder`: the folder the session's record gives, else the `cwd` the index stored.
+#: * `started`: when the session's record says it started. With `known` false it is the
+#:   time of the earliest request the index holds for the session, and with `known`
+#:   null it is null: the first request's time stands in only for a record that is gone.
+SESSION_REF = {
     "harness": _TEXT,
     "session_id": _MAYBE,
+    "name": _MAYBE_SAYS,
+    "folder": _MAYBE_PATH,
+    "started": _WHEN,
+    "known": _MAYBE_BOOL,
+}
+
+#: One session: what names it, its main file's `cwd` and project, its models, its first
+#: and last request in range, and its context. `session_id` is null for a file with no
+#: session id: no route reads such a row by id, so it has no session view, a null
+#: `context` and a null `known`.
+SESSION_ROW = {
+    **SESSION_REF,
     "cwd": _MAYBE_PATH,
     "project": _MAYBE,
     "models": _WORDS,
@@ -195,7 +226,10 @@ AGENT_ROW = {
     "last_ts": _WHEN,
     **ROW_SUMS,
 }
-SESSION = _report(AGENT_ROW, context=CONTEXT)
+#: `ref` is what names the session, null when no `harness` was asked for and the index
+#: holds no one harness's session of that id.
+SESSION = _report(AGENT_ROW, context=CONTEXT,
+                  ref=lb.Out("table", nullable=True, items=SESSION_REF))
 
 #: One project key, or for files with none, one `cwd`; by folder, one `cwd` and no key.
 PROJECT_ROW = {"project": _MAYBE, "cwd": _MAYBE_PATH, "models": _WORDS, **ROW_SUMS}
@@ -440,10 +474,12 @@ _READING = {"at": _TEXT, "used_percent": _WHEN}
 #: One window opened: the row `/api/limits` shows for it, when it started, the readings
 #: of its period and the sessions it was used by. Times are ISO 8601 UTC, as a limits
 #: row's are, but `now`. `readings.last` is the reading the row is from and `first` the
-#: period's earliest, null when that is the same one. `used` is this machine's sessions
-#: of the harness with requests since the window opened: how many (`count`), their
-#: requests and cost since then, and the ten dearest; null for a limit that is not the
-#: harness's main one, with a null `opened`, and when there is no index to read.
+#: period's earliest, null when that is the same one; `last.session` is what names the
+#: session the reading came from, null when the reading names none. `used` is this
+#: machine's sessions of the harness with requests since the window opened: how many
+#: (`count`), their requests and cost since then, and the ten dearest, each with what
+#: names it; null for a limit that is not the harness's main one, with a null `opened`,
+#: and when there is no index to read.
 OPENED_WINDOW = {
     "now": _FLOAT,
     "today": _TEXT,
@@ -456,7 +492,9 @@ OPENED_WINDOW = {
     "readings": lb.Out("table", nullable=True, items={
         "count": _INT,
         "first": lb.Out("table", nullable=True, items=_READING),
-        "last": lb.Out("table", items=_READING)}),
+        "last": lb.Out("table", items={
+            **_READING,
+            "session": lb.Out("table", nullable=True, items=SESSION_REF)})}),
     "used": lb.Out("table", nullable=True, items={
         "since": _TEXT,
         "count": _INT,
@@ -464,7 +502,7 @@ OPENED_WINDOW = {
         "cost": _WHEN,
         "complete": _BOOL,
         "rows": lb.Out("list", items=lb.Out("table", items={
-            "harness": _TEXT, "session_id": _MAYBE, "requests": _INT, "cost": _WHEN}))}),
+            **SESSION_REF, "requests": _INT, "cost": _WHEN}))}),
 }
 
 #: The restart point of one model's main sessions: `model` is the id the measure keys
@@ -534,6 +572,7 @@ __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESS
            "INDEX_TOPIC", "LANE", "LIMITS", "LIMIT_HARNESSES", "MODELS", "MODEL_ROW",
            "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
-           "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS", "SESSION_ROW",
+           "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS",
+           "SESSION_REF", "SESSION_ROW",
            "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
            "USED_MAX", "WINDOW"]

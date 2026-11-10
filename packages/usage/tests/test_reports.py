@@ -1514,6 +1514,57 @@ def test_contexts_build_no_index(monkeypatch):
     assert not store.index_path().exists()
 
 
+def test_a_sessions_origin_is_its_folder_and_its_earliest_request_whatever_the_range(conn):
+    t = at("2026-10-01T12:00")
+    # the main file gives the folder though a subagent's file comes first in the index,
+    # and the earliest request is the subagent's
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t - 60)],
+           session_id="s1", kind="subagent", agent_id="a", cwd="/w/elsewhere")
+    source(conn, "/p/s1.jsonl", [request("r1", t), request("r2", t + 600)],
+           session_id="s1", cwd="/w/app")
+    source(conn, "/p/bare.jsonl", [request("n1", None)], session_id="bare")
+    db = "/oc/opencode.db"
+    source(conn, db, [request("o1", t + 5, harness="opencode")], lane="opencode",
+           harness="opencode", part="ses_p", session_id="ses_p", cwd="/w/oc", rank=2)
+    source(conn, db, [request("o2", t - 900, harness="opencode")], lane="opencode",
+           harness="opencode", part="ses_c", session_id="ses_c", parent_session="ses_p",
+           agent_id="ses_c", kind="subagent", cwd="/w/child", rank=2)
+    source(conn, "/p/both.jsonl", [request("b1", t + 1)], session_id="both", cwd="/w/a")
+    source(conn, "/c/both.jsonl", [request("b2", t + 2, harness="codex")], lane="codex",
+           harness="codex", session_id="both", rank=1, cwd="/w/b")
+    keys = [("claude", "s1"), (None, "s1"), ("claude", "bare"), ("opencode", "ses_p"),
+            ("opencode", "ses_c"), ("claude", "both"), ("codex", "both"), (None, "both"),
+            ("codex", "s1"), ("claude", "nobody"), (None, "nobody"), ("claude", "")]
+    assert reports.session_origins(keys) == {
+        ("claude", "s1"): {"harness": "claude", "cwd": "/w/app", "first_ts": t - 60},
+        (None, "s1"): {"harness": "claude", "cwd": "/w/app", "first_ts": t - 60},
+        ("claude", "bare"): {"harness": "claude", "cwd": None, "first_ts": None},
+        ("opencode", "ses_p"): {"harness": "opencode", "cwd": "/w/oc", "first_ts": t + 5},
+        ("opencode", "ses_c"): None,              # a child session is its parent's agent
+        ("claude", "both"): {"harness": "claude", "cwd": "/w/a", "first_ts": t + 1},
+        ("codex", "both"): {"harness": "codex", "cwd": "/w/b", "first_ts": t + 2},
+        (None, "both"): None,                     # two harnesses hold a session of that id
+        ("codex", "s1"): None, ("claude", "nobody"): None, (None, "nobody"): None,
+        ("claude", ""): None}
+    assert reports.session_origins([]) == {}
+
+
+def test_origins_read_the_index_as_it_is_and_build_none(conn):
+    source(conn, "/p/s1.jsonl", [request("r1", at("2026-10-01T12:00"))], cwd="/w/app")
+    key = ("claude", "s1")
+    assert reports.session_origins([key])[key] is not None
+    conn.execute(f"PRAGMA user_version = {store.INDEX_VERSION - 1}")
+    conn.commit()
+    assert reports.session_origins([key]) == {key: None}
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.INDEX_VERSION - 1
+
+
+def test_origins_build_no_index():
+    assert not store.index_path().exists()
+    assert reports.session_origins([("claude", "s1")]) == {("claude", "s1"): None}
+    assert not store.index_path().exists()
+
+
 def test_requests_price_a_request_its_session_group_leaves_unpriced(conn):
     # one file of `half`: one request with tokens in the term it has no price for, and
     # one without; the session report sums both into one group, which stays unpriced
