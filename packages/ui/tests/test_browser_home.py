@@ -89,6 +89,18 @@ def _kept(home, run: dict) -> None:
     (state / CHECKS_FILE).write_text(json.dumps(run))
 
 
+def _others() -> list[str]:
+    """Every installed module but ui. A shell that leaves them out shows Home as ui and
+    the fixture make it, whatever else this environment holds: another module's main
+    piece would take the spot, and its rows would join the fixture's."""
+    return [found.name for found in modules.scan() if found.name != "ui"]
+
+
+@pytest.fixture(scope="module")
+def ui_shell_options(fixture_site):
+    return {"site": [fixture_site], "leave_out": _others()}
+
+
 @pytest.fixture(scope="module")
 def kept_shell(ui_shells, fixture_site, tmp_path_factory):
     """A shell over the fixture that kept a run with one failing check, one warning and
@@ -258,7 +270,7 @@ def test_a_row_whose_script_does_not_load_shows_nothing_and_stays_on_the_modules
 def test_a_main_piece_takes_the_spot_in_place_of_the_sentence(ui_shells, ui_contexts,
                                                               tmp_path_factory):
     site = fixture_kit.install(tmp_path_factory.mktemp("main-site"), main=True)
-    page = ui_contexts(ui_shells(site=[site])).pages[0]
+    page = ui_contexts(ui_shells(site=[site], leave_out=_others())).pages[0]
     home = _home(page)
     piece = home.locator(".spot moxi-fixture-main").get_by_test_id("main")
     expect(piece).to_have_text("The fixture's main piece")
@@ -279,7 +291,7 @@ def test_a_main_piece_takes_the_spot_in_place_of_the_sentence(ui_shells, ui_cont
 def test_the_sentence_waits_for_a_main_piece_and_shows_when_it_does_not_load(
         ui_shells, ui_contexts, tmp_path_factory):
     site = fixture_kit.install(tmp_path_factory.mktemp("slow-site"), main=True)
-    shell = ui_shells(site=[site])
+    shell = ui_shells(site=[site], leave_out=_others())
     context = ui_contexts(shell, sign_in=False)
     held: list = []
     # The piece's script is kept on its way, and any later try for it fails at once.
@@ -300,8 +312,7 @@ def test_with_the_core_and_ui_alone_home_is_the_sentence_and_health(ui_shells, u
                                                                     tmp_path_factory):
     home_dir = tmp_path_factory.mktemp("small")
     _kept(home_dir, {"at": _now(), "rows": [PASS], "error": None})
-    others = [found.name for found in modules.scan() if found.name != "ui"]
-    page = ui_contexts(ui_shells(home=home_dir, leave_out=others)).pages[0]
+    page = ui_contexts(ui_shells(home=home_dir, leave_out=_others())).pages[0]
     home = _home(page)
     expect(home.get_by_text(SENTENCE)).to_be_visible()
     _expect_shown(page, [HEALTH])
@@ -445,8 +456,7 @@ def test_a_run_that_could_not_run_says_why_and_offers_check_again(ui_shells, ui_
     home_dir = tmp_path_factory.mktemp("failed")
     why = "the doctor gave no answer within 60 s"
     _kept(home_dir, {"at": _now(), "rows": [], "error": why})
-    others = [found.name for found in modules.scan() if found.name != "ui"]
-    page = ui_contexts(ui_shells(home=home_dir, leave_out=others)).pages[0]
+    page = ui_contexts(ui_shells(home=home_dir, leave_out=_others())).pages[0]
     home = _home(page)
     row = home.get_by_role("button", name=re.compile("Health"))
     expect(row.locator(".fact")).to_have_text(f"The checks could not run · {why}")

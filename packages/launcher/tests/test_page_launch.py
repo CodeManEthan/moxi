@@ -1087,3 +1087,20 @@ def test_the_sweep_takes_an_old_request_file():
     os.utime(path, (old, old))
     swept = targets.sweep(keep_days=90)
     assert path.name in swept.removed and not path.exists()
+
+
+@pytest.mark.parametrize(("pinned", "more"), [
+    ('target = "slot"', ""), ('target = "slot"\nslot = "7"', " --leave-out slot"),
+    ('target = "headless"', "")])
+def test_a_terminal_launchs_command_names_the_terminal_where_the_defaults_pin_another_target(
+        work, tmp_path, monkeypatch, pinned, more):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    write_presets(f"[defaults]\n{pinned}\n")
+    # What the box on the shell's home sends, empty, for a launch in the user's terminal.
+    said = previewed({"values": {"harness": "claude", "cwd": str(work), "target": "terminal"},
+                      "leave_out": ["brief", "slot"]})
+    assert said["refused"] == [] and said["target"] == "terminal"
+    assert said["command"] == f"moxi launcher run --cwd={work} --target=terminal{more}"
+    # Pasted, the command starts in the terminal: the pinned target does not take it.
+    _, composition = command_line_preview(said["command"].split()[3:])
+    assert composition.target == "terminal"
