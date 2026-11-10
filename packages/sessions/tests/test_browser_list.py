@@ -417,6 +417,18 @@ def test_the_find_field_finds_by_folder_and_by_id_a_program_session_too(seeded, 
     expect(view.locator("section")).to_have_count(9)
 
 
+def test_a_find_or_filter_that_leaves_nothing_out_is_counted_as_the_whole_list(seeded, ui_page):
+    view = open_list(ui_page)
+    # Every seeded session ran in a folder whose name holds "proj".
+    view.get_by_label("Find a session").fill("proj")
+    expect(view.locator('section [data-line="label"]')).to_have_count(0)
+    expect(view.locator("section")).to_have_count(1)
+    expect(count_line(view)).to_have_text(f"{ALL} sessions")
+    filter_button(view, "harness").click()
+    view.locator('[data-menu="harness"]').get_by_role("menuitemradio", name="Claude Code").click()
+    expect(count_line(view)).to_have_text(f"{CLAUDE} of {ALL} sessions")
+
+
 def test_a_find_that_matches_nothing_says_no_sessions_match(seeded, ui_page):
     view = open_list(ui_page)
     view.get_by_label("Find a session").fill("zzzz")

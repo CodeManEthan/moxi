@@ -464,15 +464,20 @@ test("the find field's results are one group with no label, and the days with no
 
 // -- the count line -----------------------------------------------------------------------------
 
-test("the count is N sessions, and N of M sessions with a filter or the find field set", () => {
+test("the count is M sessions, and N of M sessions when a filter or the find field leaves some out", () => {
   const some = [day("2026-11-07", [row("b1", at("2026-11-07 22:50"))])];
   assert.equal(countLine(stateOf(some)), "62 sessions");
   assert.equal(countLine(stateOf(some, { all: 1, total: 1 })), "1 session");
   assert.equal(countLine(stateOf(some, { all: 5165, total: 5165 })), "5,165 sessions");
   const filtered = queryOf({ ...NO_FILTERS, harness: "claude" }, TODAY, UTC);
   assert.equal(countLine(stateOf(some, { total: 15 }, filtered)), "15 of 62 sessions");
-  assert.equal(countLine(stateOf(some, { total: 62 }, filtered)), "62 of 62 sessions");
-  assert.equal(countLine(stateOf(some, { all: 1, total: 1 }, filtered)), "1 of 1 session");
+  assert.equal(countLine(stateOf(some, { total: 0 }, filtered)), "0 of 62 sessions");
+  // A filter that leaves nothing out is counted as the list with none.
+  assert.equal(countLine(stateOf(some, { total: 62 }, filtered)), "62 sessions");
+  assert.equal(countLine(stateOf(some, { all: 1, total: 1 }, filtered)), "1 session");
+  const found = queryOf({ ...NO_FILTERS, find: "proj" }, TODAY, UTC);
+  assert.equal(countLine(stateOf(some, { total: 62 }, found)), "62 sessions");
+  assert.equal(countLine(stateOf(some, { total: 3 }, found)), "3 of 62 sessions");
   assert.equal(countLine(stateOf(some, { all: 5165, total: 1200 }, filtered)), "1,200 of 5,165 sessions");
   assert.equal(countLine(stateOf([], { all: 0, total: 0 })), null);
 });

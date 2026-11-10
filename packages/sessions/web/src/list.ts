@@ -739,10 +739,12 @@ export function groupLabel(key: string, today: string): string | null {
   return dayLabel(key, today);
 }
 
-/** The count at the right of the filter line. */
+/** The count at the right of the filter line: `N of M sessions` when a filter or the find
+ * field leaves sessions out, else the whole list's `M sessions`, so a filter that leaves
+ * nothing out is counted as the list with none. */
 export function countLine(state: ListState): string | null {
   if (state.all === 0) return null;
-  if (!isFiltered(state.query)) return count(state.all, "session", "sessions");
+  if (!isFiltered(state.query) || state.total === state.all) return count(state.all, "session", "sessions");
   return `${fmtCount(state.total)} of ${count(state.all, "session", "sessions")}`;
 }
 
