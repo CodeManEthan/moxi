@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from moxi_rounds import (asking, dropping, flows, holds, index, listing, log, opening,
-                         questions, ruling, showing, state, stepping)
+                         questions, ruling, showing, state, stepping, write)
 from moxi_rounds import settings as own
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, Refused
@@ -381,3 +381,52 @@ def test_the_flow_a_round_follows_now_is_shown_listed_and_in_its_note(rounds, ca
     assert index.read("proj-a", rounds, "a-round").flow == "fix"
     assert main(["list"]) == 0
     assert f"{ROUND}   open   flow fix   " in capsys.readouterr().out
+
+
+# -- a change of flow stopped right after its record -------------------------------------
+
+def stopped_after_its_append(monkeypatch, act):
+    """Run `act`, and stop it as soon as its event is in the log: before anything that
+    follows an append has run."""
+    def stop(written):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patched:
+        patched.setattr(write, "ON_APPEND", (stop,))
+        with pytest.raises(KeyboardInterrupt):
+            act()
+
+
+def test_a_ruling_of_the_flow_stopped_after_its_append_has_moved_the_round(
+        rounds, monkeypatch):
+    path = opened(rounds)
+    events_before = len(log.read(path))
+
+    stopped_after_its_append(monkeypatch, lambda: rule("flow:full"))
+
+    with pytest.raises(Refused, match="nothing to move"):
+        rule("flow:full")
+    after = log.read(path)
+    assert len(after) == events_before + 1
+    assert [(event["id"], event["rules"], event["was"], event["flow"])
+            for event in after if event["type"] == "ruling.recorded"] == [
+        ("C1", "flow:full", "small", "full")]
+    assert not [event for event in after if event["type"] == "flow.changed"]
+    found = stepping.current(folded(path))
+    assert (found.name, list(found.steps)) == ("full", flows.BUILT_IN["full"])
+
+
+def test_a_step_up_stopped_after_its_append_has_moved_the_round(rounds, monkeypatch):
+    path = opened(rounds)
+    events_before = len(log.read(path))
+
+    stopped_after_its_append(monkeypatch, lambda: up("full"))
+
+    with pytest.raises(Refused, match="nothing to move"):
+        up("full")
+    after = log.read(path)
+    assert len(after) == events_before + 1
+    assert [event["flow"] for event in after if event["type"] == "flow.changed"] == [
+        "full"]
+    found = stepping.current(folded(path))
+    assert (found.name, list(found.steps)) == ("full", flows.BUILT_IN["full"])

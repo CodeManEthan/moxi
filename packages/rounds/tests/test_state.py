@@ -96,7 +96,8 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
-                             "question.changed", "ruling.shown", "round.dropped"})
+                             "question.changed", "ruling.shown", "round.dropped",
+                             "flow.changed"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -579,3 +580,89 @@ def test_a_mark_outlasts_the_replacing_and_the_taking_back_of_its_ruling():
             for one in found.rulings] == [
         ("C1", "comms:20", "C2", None), ("C2", None, None, "C3"),
         ("C3", None, None, None)]
+
+
+# -- the flow a round follows, and the skips that stand ----------------------------------
+
+LATER = [*STEPS, {"step": "retro", "by": "helper"}]
+
+
+def test_a_change_of_flow_sets_the_flow_and_its_steps_and_nothing_else():
+    before = state.fold([opened()])
+    moved = event(2, "flow.changed", was="fix", flow="small", steps=LATER, by="lead")
+
+    after = state.fold([opened(), moved])
+    after.steps.append({"step": "one more"})
+
+    assert (after.flow, after.steps[:-1]) == ("small", LATER)
+    assert moved["steps"] == LATER
+    assert dataclasses.replace(after, flow="fix", steps=before.steps,
+                               history=before.history) == before
+
+
+@pytest.mark.parametrize("fields", [{}, {"flow": "small"}, {"steps": LATER},
+                                    {"flow": 3, "steps": LATER},
+                                    {"flow": "small", "steps": "retro"}])
+def test_a_change_of_flow_with_no_name_or_no_steps_moves_the_round_nowhere(fields):
+    found = state.fold([opened(), event(2, "flow.changed", **fields)])
+
+    assert (found.flow, found.steps) == ("fix", STEPS)
+
+
+def test_a_ruling_of_the_flow_moves_the_round_as_the_leads_change_does():
+    ruled = event(2, "ruling.recorded", id="C1", kind="process", rules="flow:small",
+                  record="comms:12", was="fix", flow="small", steps=LATER)
+
+    found = state.fold([opened(), ruled])
+
+    assert (found.flow, found.steps) == ("small", LATER)
+    assert [one.rules for one in found.rulings] == ["flow:small"]
+
+
+def skip_of_the_questions_step(n, ruling_id, **more):
+    return event(n, "ruling.recorded", id=ruling_id, kind="process",
+                 rules="skip:docket:B1", record="comms:13", **more)
+
+
+def test_a_skip_taken_back_is_marked_with_the_ruling_that_took_it_back():
+    skipped = skip_of_the_questions_step(3, "C1", covers=["Q1"])
+    taken_back = event(4, "ruling.recorded", id="C2", kind="process",
+                       rules="revoke:C1", revokes="C1", record="comms:14")
+    before = state.fold([opened(), asked(2, blocks=["B1"]), skipped])
+
+    after = state.fold([opened(), asked(2, blocks=["B1"]), skipped, taken_back])
+
+    assert (before.rulings[0].revoked_by, before.rulings[0].covers) == (None, ("Q1",))
+    assert [(one.id, one.revoked_by, one.covers, one.let_go)
+            for one in after.rulings] == [("C1", "C2", ("Q1",), ()),
+                                          ("C2", None, (), ())]
+    assert after.questions == before.questions
+
+
+def test_a_skip_lets_go_of_a_listed_question_narrowed_off_its_stage_for_good():
+    start = [opened(), asked(2, blocks=["B1", "B2"]), asked(3, id="Q2", blocks=["B1"]),
+             skip_of_the_questions_step(4, "C1", covers=["Q1", "Q2"])]
+    narrowed = ruled_as(5, "C2", rules="narrow:Q1=B2", blocks=["B2"], record="comms:14")
+    widened = {**event(6, "question.changed", id="Q1", blocks=["B1", "B2"]),
+               "actor": "scout"}
+
+    before = state.fold(start)
+    after = state.fold([*start, narrowed])
+    again = state.fold([*start, narrowed, widened])
+
+    assert before.rulings[0].let_go == ()
+    assert after.rulings[0].let_go == ("Q1",)
+    assert after.rulings[0].covers == ("Q1", "Q2")
+    assert again.rulings[0].let_go == ("Q1",)
+    assert again.questions[0].blocks == ("B1", "B2")
+
+
+def test_a_skip_keeps_a_listed_question_that_still_holds_its_stage():
+    start = [opened(), asked(2, blocks=["B1", "B2"]),
+             skip_of_the_questions_step(3, "C1", covers=["Q1"])]
+    narrowed = ruled_as(4, "C2", rules="narrow:Q1=B1", blocks=["B1"], record="comms:14")
+    widened = {**event(5, "question.changed", id="Q1", blocks="all"), "actor": "scout"}
+
+    found = state.fold([*start, narrowed, widened])
+
+    assert found.rulings[0].let_go == ()

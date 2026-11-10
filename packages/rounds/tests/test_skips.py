@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from moxi_rounds import (asking, holds, log, marking, opening, ruling, showing, skips,
-                         state, stepping)
+                         state, stepping, write)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, Refused
 
@@ -479,3 +479,33 @@ def test_a_skip_that_lets_a_question_past_no_longer_is_shown_as_that(path, capsy
 
     assert ("skipped: docket for B2, by C1, past no question and no longer past Q1 "
             "(record comms:12)\n") in capsys.readouterr().out
+
+
+# -- a skip stopped right after its record -----------------------------------------------
+
+@pytest.mark.parametrize("item", SKIPPABLE)
+def test_a_skip_stopped_after_its_append_stands_and_is_refused_when_run_again(
+        path, monkeypatch, item):
+    step, stage = parts(item)
+    ask(blocks="B2")
+    events_before = len(log.read(path))
+
+    def stop(written):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patched:
+        patched.setattr(write, "ON_APPEND", (stop,))
+        with pytest.raises(KeyboardInterrupt):
+            rule(item)
+
+    with pytest.raises(Refused, match="C1"):
+        rule(item)
+    after = log.read(path)
+    assert len(after) == events_before + 1
+    assert [(event["id"], event["rules"]) for event in after
+            if event["type"] == "ruling.recorded"] == [("C1", item)]
+    found = folded(path)
+    assert skips.is_skipped(found, step, stage)
+    assert [(skip.id, skip.step, skip.stage) for skip in skips.live(found)] == [
+        ("C1", step, stage)]
+    assert held(path)["B2"] == ([] if step == "docket" else ["Q1"])
