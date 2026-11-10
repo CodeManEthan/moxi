@@ -987,3 +987,10 @@ def test_the_places_follow_the_mapping_alone(tmp_path, monkeypatch):
     assert not any(poison in path for path in found.values())
     assert all(in_set(name) for name in env.read)
     assert pagecheck.places(Noting(given), ["svc"])["svc's data folder"]
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_projects import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("daily", 60)

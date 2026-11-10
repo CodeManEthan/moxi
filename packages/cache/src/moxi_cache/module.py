@@ -23,6 +23,7 @@ PAGE = "moxi_cache.page:PAGE"
 #: What cache offers the browser UI shell: its panel, and a chip any host may place.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Cache", "contract": 1, "place": "page",
+             "group": "daily", "order": 50,
              "doc": "Each live session's prompt cache, warm or cold"},
     "chip": {"script": "chip.js", "title": "Cache chip", "contract": 1, "place": "inline",
              "doc": "One session's cache: warm, near or cold, and the time left",

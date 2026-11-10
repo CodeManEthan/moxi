@@ -469,3 +469,10 @@ def test_the_announcement_names_the_page_and_its_components():
     found = modules.load("comms", interface=2)
     assert found.ok and found.page == module.PAGE
     assert set(found.components) == {"page", "roster"}
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_comms import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("daily", 40)

@@ -63,6 +63,7 @@ from moxi_ui.loopback.api import (
 
 from . import cli, config, listen
 from . import page as shell_page
+from .checks import CHECKS_FILE, Checks
 from .listen import Listeners
 from .gateway import Gateway, Parts
 from .gateway import audit as _audit
@@ -221,6 +222,10 @@ class Shell:
     `gateway` is the shell's `Gateway`, or True to build one, with the gateway's sign-in
     state as `phone`; without it (the default, which tests take) the shell runs no
     gateway. `phone` is that sign-in state when a test passes its own gateway.
+
+    `checks` is the shell's kept doctor run, `Shell.checks`. With `run_checks` False it
+    starts no doctor and answers with what is kept (test shells, unless a test asks).
+    `run()` cancels a run that is going before the shell's page servers stop.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -230,7 +235,8 @@ class Shell:
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
                  child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
                  leave_out: Sequence[str] = (), idle_s: float | None = None,
-                 gateway: Gateway | bool = False, phone: Access | None = None):
+                 gateway: Gateway | bool = False, phone: Access | None = None,
+                 run_checks: bool = True):
         self.listeners = listeners
         self.epoch = epoch
         self.idle_s = idle_s
@@ -251,6 +257,10 @@ class Shell:
             runtime_dir=self.layout.runtime_dir(), state_dir=self.layout.state_dir(),
             log=cli.log_path(), child_args=child_args)
         self.push = push if push is not None else Push(self.starters, mounts=self._mounts)
+        self.checks = Checks(self.layout.state_dir() / CHECKS_FILE,
+                             run=lambda: shell_page.doctor_answer(self),
+                             changed=self._checks_changed, enabled=run_checks)
+        self._checks_changed(self.checks.value())
         self._proxy = proxy if proxy is not None else Proxy(
             self.starters, table=lambda: self.profile.table)
         if snapshot is True:
@@ -374,6 +384,11 @@ class Shell:
             self.push.set_exports(mounts)
             self.push.publish("modules", view.value)
 
+    def _checks_changed(self, value: dict[str, Any]) -> None:
+        """Send the kept doctor run's new value as `ui.checks`."""
+        if isinstance(self.push, Push):
+            self.push.publish("checks", value)
+
     def set_table(self, table: Table) -> None:
         """Check every request from the next one on against `table`, which this freezes."""
         self.profile = shell_profile(table, self.sessions, self.listeners.names)
@@ -408,6 +423,7 @@ class Shell:
             ending.cancel()
             if idling is not None:
                 idling.cancel()
+            await self.checks.aclose()
             if self.snapshot is not None:
                 await self.snapshot.aclose()
             if isinstance(self.push, Push):
