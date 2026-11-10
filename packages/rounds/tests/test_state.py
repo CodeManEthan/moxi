@@ -99,7 +99,7 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
                              "question.changed", "ruling.shown", "round.dropped",
-                             "flow.changed", "design.frozen", "stage.declared",
+                             "round.closed", "flow.changed", "design.frozen", "stage.declared",
                              "stage.changed", "verdict.recorded",
                              "thread.decided"})
 
@@ -147,6 +147,26 @@ def test_a_drop_that_names_no_question_ends_the_round_and_changes_none():
 
     assert (after.status, after.ended.by, after.ended.questions) == ("dropped", None, ())
     assert state.fold([opened()]).ended is None
+
+
+def test_a_closing_ends_the_round_as_closed_and_changes_nothing_else():
+    before = state.fold([opened()])
+    closing = event(2, "round.closed")
+
+    after = state.fold([opened(), closing])
+
+    assert after.status == state.CLOSED
+    assert after.ended == state.Ended(how="closed", by=None, record=None,
+                                      actor=closing["actor"], at=closing["at"])
+    assert dataclasses.replace(after, status=before.status, ended=None,
+                               history=before.history) == before
+
+
+def test_a_round_stays_as_it_first_ended():
+    dropped = state.fold([opened(), event(2, "round.dropped", by="lead"),
+                          event(3, "round.closed")])
+
+    assert (dropped.status, dropped.ended.how) == ("dropped", "dropped")
 
 
 def test_a_ruling_is_added_to_the_rulings_and_changes_nothing_else():

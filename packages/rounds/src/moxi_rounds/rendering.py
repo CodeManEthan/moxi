@@ -52,7 +52,7 @@ from pathlib import Path
 from moxi import files
 
 from . import questions as asked
-from . import folders, log, readback, ruling, showing, write
+from . import closing, folders, log, readback, ruling, showing, write
 from . import state as states
 from .errors import Locked, NoLog, Unreadable
 
@@ -192,6 +192,8 @@ def _flow(shown_as: dict) -> list[str]:
         lines.append("")
     for line in at:
         lines += _item(line.strip())
+    if shown_as["close"] is not None:
+        lines += [*([] if at else [""]), *_item(closing.said(shown_as["close"]["waits"]))]
     if shown_as["inherits"]:
         lines += ["", *_item("starts from the standing rulings "
                              f"{', '.join(shown_as['inherits'])}")]

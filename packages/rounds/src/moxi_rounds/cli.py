@@ -78,6 +78,11 @@ of the `models` setting than its pass is held to is recorded with the flag
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
 further pass is run, and the design stands at `lead-decision`.
+No verb closes a round. A round closes itself on the write that leaves its close
+nothing to wait for: in a flow with no `build` step, every step done or skipped, no
+question open or parked, and no stage left in its plan. `show` says what the close
+of an open round waits for. A round whose flow has a `build` step waits for a
+finished stage, which this version does not build, so it does not close in it.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
@@ -103,8 +108,9 @@ compare, or what is done in place of a pass; for the questions step, the command
 writes the questions out and the `rule` line of each open one. A step this version
 does not have is printed as not built. `next --schema KIND` prints the empty data
 block of a report of that kind, a comment on each key. `next` records nothing.
-`show` shows one round: what it is for, its flow, its questions by state, its rulings
-and whether each was shown to him, and its history. `list` with no flag lists the open
+`show` shows one round: what it is for, its flow, the step it is at, what its close
+waits for, its questions by state, its rulings and whether each was shown to him, and
+its history. `list` with no flag lists the open
 rounds, each with its flow and its counts, and with `--closed` the rounds that have
 ended; `list --waiting` lists what waits on the operator, the open and the parked
 questions and the rulings not yet shown to him. Each is of every project, or of the

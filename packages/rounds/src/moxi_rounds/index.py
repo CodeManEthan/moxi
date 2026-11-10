@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 12
+DERIVED = 13
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -155,8 +155,9 @@ class Summary:
     changed_since: str | None = None
     unreadable: Unreadable | None = None
     #: How a round that is open no longer ended: `{"how", "by", "record", "at"}`, the
-    #: status it has since, whose act it was, the pointer it carried and when. None
-    #: for an open round and for a project.
+    #: status it has since, whose act it was, the pointer it carried and when; a
+    #: round that closed has no `by` and no `record`. None for an open round and for
+    #: a project.
     ended: Mapping | None = None
 
     @property

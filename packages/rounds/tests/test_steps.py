@@ -485,7 +485,8 @@ def test_a_skipped_step_is_passed_wherever_the_step_is_shown(folder, capsys):
 
 def test_a_round_at_no_step_and_one_that_ended_are_listed_at_none(opened, capsys):
     folder = opened("paper")
-    fold(folder)
+    # A stage keeps the round open, and a flow that builds nothing has no step for it.
+    fold(folder, stage("B1"))
     verdict(folder, "publishable")
     assert listed() is None
     assert main(["list"]) == 0

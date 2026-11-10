@@ -67,9 +67,10 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
 def round(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
     `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
-    `step`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
+    `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
     `register_unreadable`) and its records (`questions`, `rulings`, `verdicts`,
-    `history`).
+    `history`). `close` is None for a round that has ended; for an open one it
+    is `{"waits"}`, what its close waits for, a line each.
 
     A round whose log can't be read is `{"name", "project", "slug", "folder",
     "notice", "unreadable": {"file", "line", "problem", "reason", "fix"}}` and nothing

@@ -103,6 +103,7 @@ a placeholder round
 fix: {steps(B)}
 
 - step: commission, not-built
+- close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 ## Questions
 
@@ -161,6 +162,7 @@ a placeholder round
 fix: {steps()}
 
 - step: commission, not-built
+- close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 ## Questions
 

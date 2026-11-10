@@ -80,6 +80,7 @@ round {B}   open   flow fix ({names})
 description: a placeholder round
 folder: {rounds / "b-round"}
 step: commission, not-built
+close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 questions: none
 
@@ -93,11 +94,11 @@ history: 1 event
     found = data(capsys, B)
     assert list(found) == ["name", "project", "slug", "folder", "notice", "status",
                            "ended", "description", "parent", "inherits", "flow",
-                           "steps", "step", "skips",
+                           "steps", "step", "close", "skips",
                            "stages", "versions", "standing", "trace", "threads",
                            "register_unreadable", "questions",
                            "rulings", "verdicts", "history"]
-    assert {key: found[key] for key in list(found)[:20]} == {
+    assert {key: found[key] for key in list(found)[:21]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",
         "ended": None, "description": "a placeholder round", "parent": None,
@@ -105,6 +106,8 @@ history: 1 event
         "steps": steps,
         "step": {"step": "commission", "stage": None, "state": "not-built",
                  "waits": [], "questions": []},
+        "close": {"waits": ["a finished stage, which this version does not build, so "
+                            "the round does not close in it"]},
         "skips": [], "stages": [], "versions": [],
         "standing": "none", "trace": None, "threads": [],
         "register_unreadable": None}
@@ -413,7 +416,7 @@ def test_a_log_changed_outside_this_machine_is_shown_with_the_notice(rounds, cap
     notice = found["notice"]
     assert notice.startswith("log changed outside this machine since ")
     assert found["description"] == "another placeholder"
-    assert printed(capsys, A).splitlines()[4] == notice
+    assert printed(capsys, A).splitlines()[5] == notice
     # It stays through every showing, until the next write here.
     assert data(capsys)["notice"] == notice
     ask(text=OTHER, at=T3)

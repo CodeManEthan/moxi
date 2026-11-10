@@ -11,7 +11,9 @@ design with what that version took away, and its stages; then its records, a sec
 for each kind: its questions by state, each with who asked it and when; its own rulings, each with its pointer and whether
 the operator was shown it; and its history, every event, oldest first.
 
-A round that has ended is shown with how it ended. A question whose record still reads
+A round that is open is shown with what its close waits for, since no verb closes a
+round: it closes on the write that leaves nothing waited for. A round that has ended
+is shown with how it ended. A question whose record still reads
 as open or parked there (a correction made after the end can leave one so) is shown as
 waiting for a new round, apart from the open and the parked ones: it is put to nobody
 on a round that has ended.
@@ -38,7 +40,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, index, log, questions, shown, skips, steps, tracing, versions
+from . import (closing, folders, index, log, questions, shown, skips, steps, tracing,
+               versions)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -349,6 +352,8 @@ def _head(found: Shown) -> dict:
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
             "step": None if at is None else at.data(),
+            "close": (None if state.status != states.OPEN
+                      else {"waits": list(closing.waits(state))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),
@@ -496,8 +501,11 @@ def _ended(state: states.State) -> dict | None:
 
 
 def ended_line(ended: dict) -> str:
-    """How a round ended, in a line: `dropped by operator at <time>, record <pointer>`
-    and where its questions went."""
+    """How a round ended, in a line: `closed at <time>`, or `dropped by operator at
+    <time>, record <pointer>` and where its questions went."""
+    if ended["how"] == states.CLOSED:
+        # Closing is nobody's act and carries no pointer.
+        return f"{ended['how']} at {ended['at']}"
     went = ", ".join(f"{one} {'withdrawn' if where == 'withdrawn' else 'to ' + where}"
                      for one, where in ended["questions"].items())
     return (f"{ended['how']} by {ended['by']} at {ended['at']}, record "
@@ -532,6 +540,8 @@ def as_text(found: Shown) -> str:
              f"({steps})",
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
     lines += step_lines(shown_as["step"])
+    if shown_as["close"] is not None:
+        lines.append(closing.said(shown_as["close"]["waits"]))
     lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
     lines += version_lines(shown_as["versions"], shown_as["standing"],
                            shown_as["threads"], shown_as["trace"])

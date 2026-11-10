@@ -8,7 +8,8 @@ writing verb:
 3. evaluate every gate, and refuse with every unmet one (`Refused`), having written
    nothing;
 4. do the verb's act outside the log, when it has one;
-5. append the verb's events, call the after-append callbacks, and release the lock.
+5. append the verb's events, close the round when nothing is left for it to wait
+   for, call the after-append callbacks, and release the lock.
 
 **The locks.** A round's lock file is `locks/rounds/<project>/<slug>.lock` and a project
 log's is `locks/projects/<project>.lock`, both in rounds' state directory and never in a
@@ -29,10 +30,14 @@ read again and the events appended. `event` is given what that second read found
 other verbs may have written meanwhile; what it appends is a fact about the act (this
 ran, with this result), which is true whatever else was written.
 
-**After the append.** The callbacks in `ON_APPEND` (or `on_append`) run with the lock
-still held. One that raises does not undo the events, which are on disk by then: the
-others still run, and `Written.failed` names it for the verb to report. Whatever such a
-callback keeps is rebuilt by the next verb's write.
+**After the append.** A round closes itself, here: once a verb's events are appended
+to a round, the log as it then stands is asked whether its close waits for anything,
+and when it does not the closing event is appended too (`Written.closed`). That is
+asked after every write to a round, so a close that stopped short is made by the next
+one. Then the callbacks in `ON_APPEND` (or `on_append`) run, with the lock still held.
+A close or a callback that raises does not undo the events, which are on disk by then:
+the rest still runs, and `Written.failed` names it for the verb to report. Whatever
+such a callback keeps is rebuilt by the next verb's write.
 
 A verb stopped between its act and its append is simply run again, so an act must be safe
 to repeat or leave something a rerun finds.
@@ -122,10 +127,12 @@ class View:
 
 @dataclass(frozen=True)
 class Written:
-    """What a write did. `events` are the events appended, in order, as written; `result`
-    is what the act returned; `view` is what was read before the append. `round_events`
-    and `project_events` are each whole log after it. `failed` pairs each after-append
-    callback that raised with what it raised."""
+    """What a write did. `events` are the verb's events appended, in order, as written;
+    `result` is what the act returned; `view` is what was read before the append.
+    `closed` is the event that closed the round, when this write did. `round_events`
+    and `project_events` are each whole log after it, a closing event included.
+    `failed` pairs the close or each after-append callback that raised with what it
+    raised."""
 
     where: Where
     view: View
@@ -134,6 +141,7 @@ class Written:
     project_events: tuple[dict, ...]
     result: object = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    closed: dict | None = None
 
 
 Gate = Callable[[View], "Unmet | Iterable[Unmet] | None"]
@@ -145,6 +153,23 @@ def _render(written: Written) -> None:
     from . import rendering
 
     rendering.on_append(written)
+
+
+def _close(where: Where, round_events: Sequence[dict], *, actor: str,
+           at: str | None) -> dict | None:
+    """Close the round whose log now holds `round_events`, when its close waits for
+    nothing more, and return the closing event; None when the round stays as it is,
+    and for a write on a project alone."""
+    # Imported here: what says a round's steps reads what the verbs record, and
+    # they import this module.
+    from . import closing
+
+    if where.slug is None:
+        return None
+    entry = closing.entry(state.fold(round_events))
+    if entry is None:
+        return None
+    return log.append(where.round_log, entry.type, entry.fields, actor=actor, at=at)
 
 
 #: The callbacks every write calls after its append, in order, each with the `Written`.
@@ -309,10 +334,17 @@ def _append(view: View, entries: list[Entry], result: object, *, actor: str,
         written = log.append(path, entry.type, entry.fields, actor=actor, at=at)
         appended.append(written)
         after[entry.log].append(written)
+    failed = []
+    closed = None
+    try:
+        closed = _close(where, after[ROUND], actor=actor, at=at)
+    except Exception as error:  # the verb's events are on disk; the next write closes
+        failed.append((_close, error))
+    if closed is not None:
+        after[ROUND].append(closed)
     done = Written(where=where, view=view, events=tuple(appended),
                    round_events=tuple(after[ROUND]), project_events=tuple(after[PROJECT]),
-                   result=result)
-    failed = []
+                   result=result, closed=closed)
     for callback in callbacks:
         try:
             callback(done)

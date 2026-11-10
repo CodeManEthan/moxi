@@ -255,9 +255,7 @@ def test_a_design_that_builds_nothing_ends_at_no_step(opened, capsys):
     do(capsys, said(lines(capsys), "then:")[0],
        **{"<your report>": str(report(folder, "publishable"))})
 
-    assert lines(capsys) == [
-        f"round {ROUND}   flow paper   step none: every step of the flow is done or "
-        "skipped"]
+    assert lines(capsys) == [f"round {ROUND}   flow paper   step none: the round is closed"]
 
 
 def test_a_question_that_offers_options_is_answered_by_choosing_one(folder, capsys):
@@ -394,6 +392,8 @@ def test_the_data_holds_each_group_and_each_warning(opened, capsys):
             {"step": "commission", "stage": "B1", "state": "not-built", "built": False,
              "by": None, "tier": None, "model": None, "reads": [], "write": None,
              "then": [], "questions": [], "waits": []}],
+        "close": {"waits": ["a finished stage, which this version does not build, so "
+                            "the round does not close in it"]},
         "warnings": [
             {"what": "not-shown",
              "text": f"not yet shown to the operator: {ROUND} {made} {SAID}",

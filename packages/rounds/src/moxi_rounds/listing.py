@@ -7,7 +7,8 @@ index is then left as it is, and the answer is the same.
 
 **The rounds** (`rounds`): the open rounds of every project, or of one, each with its
 flow, the step it is at and its counts; or, when the ended ones are asked for, the
-rounds that are open no longer, each with how it ended, by whom, when and on what pointer. A round whose
+rounds that are open no longer, each with how it ended and when, and for a dropped
+one by whom and on what pointer. A round whose
 log can't be read is listed as unreadable, in either listing,
 since nothing says which it belongs in.
 
@@ -207,7 +208,10 @@ def rounds_as_text(listing: Rounds) -> str:
         counts = "   ".join(f"{called[key]}: {'not known' if count is None else count}"
                             for key, count in one.counts)
         how = one.status
-        if one.ended is not None:
+        if one.ended is not None and one.status == states.CLOSED:
+            # Closing is nobody's act and carries no pointer.
+            how = f"{one.status} at {one.ended.get('at')}"
+        elif one.ended is not None:
             how = (f"{one.status} by {one.ended.get('by')} at {one.ended.get('at')}, "
                    f"record {one.ended.get('record')}")
         design = "" if one.standing is None else f"   design: {one.standing}"

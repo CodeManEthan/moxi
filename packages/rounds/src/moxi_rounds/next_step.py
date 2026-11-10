@@ -14,6 +14,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   that completes the step), `waits` (each with the command that meets it), and for the
   step that verifies the design the `pass` asked for, `why`, the two frozen `files` a
   re-check compares, and `instead`, what is done in place of a pass.
+- `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
+  is printed for a round at no step, where nothing else says why it is still open.
 - `warnings`: what the lead should know and no step waits for.
 
 A step with no row in `steps.ROWS` is printed as not built in this version, with the
@@ -31,7 +33,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import brake, model_tiers, report_block, showing, stages, steps, tracing, versions
+from . import (brake, closing, model_tiers, report_block, showing, stages, steps,
+               tracing, versions)
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -241,6 +244,8 @@ def read(name: str, *, settings=None) -> dict:
                                        "fix": error.fix}}
     return {**said, "status": found.state.status, "flow": found.state.flow,
             "groups": _groups(found, settings["models"]),
+            "close": (None if found.state.status != states.OPEN
+                      else {"waits": list(closing.waits(found.state))}),
             "warnings": _warnings(found)}
 
 
@@ -307,6 +312,9 @@ def as_text(said: dict) -> str:
         else:
             rest = f"step none: the round is {said['status']}"
         lines = [f"round {said['round']}   flow {said['flow']}   {rest}"]
+        if said["close"] is not None:
+            # Nothing is left to do at a step, so what keeps the round open is said.
+            lines.append(closing.said(said["close"]["waits"]))
     else:
         lines = []
         for group in said["groups"]:

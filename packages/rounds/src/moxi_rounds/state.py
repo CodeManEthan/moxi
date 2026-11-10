@@ -46,9 +46,8 @@ plan keeps its record, as one the operator rules out does.
 
 A round that was dropped is `DROPPED` from that event on, and the event is the whole of
 the drop in the round's log: it says who dropped the round, and where each question
-that was open or parked went, which the fold applies to the question as a change. A log
-with no
-opening event, a project's for one, has a status of None; the rulings of a project's log
+that was open or parked went, which the fold applies to the question as a change. A
+round that closed is `CLOSED` from its closing event on. A log with no opening event, a project's for one, has a status of None; the rulings of a project's log
 are its register, and its questions the project's list.
 """
 
@@ -62,6 +61,8 @@ from dataclasses import dataclass, field, replace
 OPEN = "open"
 #: The status of a round that was withdrawn before its work was done.
 DROPPED = "dropped"
+#: The status of a round whose work is done: it closed itself.
+CLOSED = "closed"
 
 #: Where a drop says a question went when it was withdrawn with its round. A question
 #: that went to the project's list has its id there in this place.
@@ -75,10 +76,12 @@ class Ended:
 
     #: The status the round has from then on.
     how: str
-    #: Whose act it was, `lead` or `operator`, and the pointer it carried.
+    #: Whose act it was, `lead` or `operator`, and the pointer it carried. Both are
+    #: None for a round that closed: closing is nobody's act.
     by: str | None
     record: str | None
-    #: Who recorded it, and when.
+    #: Who recorded it, and when. For a round that closed, who ran the verb whose
+    #: write closed it.
     actor: str
     at: str
     #: Where each question that was open or parked went, in the order asked: its id
@@ -346,7 +349,7 @@ class State:
     #: The ids of the project's standing rulings the round starts from, as it was
     #: opened with them.
     inherits: list[str] = field(default_factory=list)
-    #: `OPEN` or `DROPPED`, or None for a log that opened no round.
+    #: `OPEN`, `CLOSED` or `DROPPED`, or None for a log that opened no round.
     status: str | None = None
     #: How the round ended, or None while it has not.
     ended: Ended | None = None
@@ -415,6 +418,16 @@ def _round_dropped(state: State, event: dict) -> None:
         _change(state, {**change, "record": event.get("record"),
                         "actor": event["actor"], "at": event["at"]},
                 question_id=question_id, ruling=None)
+
+
+def _round_closed(state: State, event: dict) -> None:
+    """The round is closed, from this event on. A round that had ended already stays
+    as it ended: only the first ending counts."""
+    if state.ended is not None:
+        return
+    state.status = CLOSED
+    state.ended = Ended(how=CLOSED, by=None, record=None, actor=event["actor"],
+                        at=event["at"])
 
 
 def _ruling_recorded(state: State, event: dict) -> None:
@@ -813,9 +826,9 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.dropped": _round_dropped,
     "thread.decided": _thread_decided,
     "repair": _kept,
-    "round.closed": _kept,
+    "round.closed": _round_closed,
 }
 
-__all__ = ["OPEN", "DROPPED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
+__all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
            "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
            "Decided", "Verdict", "State", "fold", "without"]
