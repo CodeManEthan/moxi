@@ -1,12 +1,14 @@
 """A round that has ended: what it still takes.
 
 A round ends by being closed or by being dropped, and stays as it ended. From then on
-it takes no new work: no question, no mark and no ruling of its own. What follows from
+it takes no new work: no question, no change to one and no ruling of its own. What follows from
 an ended round is work for a new round.
 
-One thing is still recorded on it. A correction of a ruling it holds (a later ruling
-that replaces the earlier one, or takes it back) changes what is read from then on and
-reopens nothing, so it is no new work and is never asked `takes_new_work`.
+Two things are still recorded on it, and neither is asked `takes_new_work`. A
+correction of a ruling it holds (a later ruling that replaces the earlier one, or takes
+it back) changes what is read from then on and reopens nothing, so it is no new work.
+And the mark that a ruling it holds was shown to the operator: that says something of
+what is already recorded and adds nothing to the round.
 
 `takes_new_work(name, what)` is the one gate every verb that would add work to a round
 runs. `how(state)` says how a round ended, from the event that ended it.

@@ -37,8 +37,10 @@ list of rulings not yet shown through `TIME`, the time that list was headed with
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
-prints them, to be adopted by the round that takes the work up. A dropped round takes
-no new question, mark or ruling; a correction of one of its rulings is still recorded.
+prints them, to be adopted by the round that takes the work up. A round that was dropped
+or closed takes no new question, no change to a question and no new ruling; a
+correction of one of its rulings is still recorded, and `mark --shown` still marks
+its rulings.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
@@ -483,7 +485,8 @@ def _declare_drop(verbs) -> None:
             "holds none of the operator's acts, with a pointer to why. Its open and "
             "parked questions go to the project's list as they are, where they hold "
             "up nothing, or with --withdraw-questions are withdrawn. A dropped round "
-            "takes no new work; a correction of one of its rulings is still recorded.")
+            "takes no new work; a correction of one of its rulings is still recorded, "
+            "and its rulings are still marked as shown.")
     parser = verbs.add_parser("drop", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
     parser.add_argument("--by", choices=("lead", "operator"), required=True,

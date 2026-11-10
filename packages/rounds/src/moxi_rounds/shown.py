@@ -17,6 +17,10 @@ A ruling is shown when one of two records covers it:
   in its register and in its rounds, recorded at or before `TIME`. Each read-back is a
   ruling of its own, and the latest time among them covers all the earlier ones.
 
+A mark is no new work, so a round that was closed or dropped still takes one: a
+ruling recorded on it, a correction recorded after it ended included, is shown to him
+like any other.
+
 Only a pointer makes a mark: no read, print or export sets one, and none is ever taken
 off. A read-back is never taken back either, and is itself never on the list.
 
@@ -32,7 +36,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from . import corrections, ending, folders, index, log, pointers, readback, write
+from . import corrections, folders, index, log, pointers, readback, write
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Unmet, Unreadable
@@ -329,8 +333,8 @@ def mark(target: str, ids: str | Iterable[str], *, actor: str, record: str | Non
     try:
         written = write.record(
             write.Where(home.project, home.folder, slug), actor=actor,
-            gates=[ending.takes_new_work(name, "a mark"),
-                   are_named_by_what_holds_them, are_on_record, are_not_his_own_word,
+            # No gate asks whether the round has ended: a mark adds no work to it.
+            gates=[are_named_by_what_holds_them, are_on_record, are_not_his_own_word,
                    is_a_showing],
             event=shown, wait_s=wait_s, at=at)
     except NoLog:

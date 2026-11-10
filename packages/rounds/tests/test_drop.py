@@ -478,7 +478,6 @@ def dropped_with_a_ruling_and_a_question(rounds):
      "a move of one of its questions"),
     (["mark", A, "Q2", "--blocks", "all"], "a mark"),
     (["mark", A, "Q2", "--reopen"], "a mark"),
-    (["mark", A, "C1", "--shown", "--record", "comms:41"], "a mark"),
     (["rule", A, "--text", "A new ruling.", "--record", "comms:40"], "a new ruling"),
     (["rule", A, "park:Q2", "--record", "comms:40"], "a new ruling"),
     (["rule", A, "Q2", "--text", "An answer.", "--record", "comms:40"],

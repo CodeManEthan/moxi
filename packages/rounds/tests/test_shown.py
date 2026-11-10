@@ -729,3 +729,45 @@ def test_the_list_is_the_same_from_the_index_from_a_stale_one_and_from_none(roun
     paths.index_file().unlink()
     assert shown.unshown("proj-a", now=LATER) == stale
     assert not paths.index_file().exists()
+
+
+# -- a round that has ended --------------------------------------------------------------
+
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+def test_a_round_that_has_ended_still_takes_the_mark_that_its_rulings_were_shown(
+        rounds, capsys, how):
+    rule(at=T1)
+    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    rule(at=T2, text=None, item="park:Q1", record="comms:13")
+    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    # A correction recorded after the round ended is shown like any other ruling.
+    rule(at=T3, text="Usage is shown there.", record="comms:14", supersedes="C1")
+    capsys.readouterr()
+
+    assert main(["mark", ROUND, "C1,C3", "--shown", "--record", "comms:20"]) == 0
+
+    assert capsys.readouterr().out == f"{ROUND} C1, C3: shown   record: comms:20\n"
+    event = last(round_log(rounds))
+    assert (event["type"], event["ids"], event["record"]) == (
+        "ruling.shown", ["C1", "C3"], "comms:20")
+    assert listed() == [(ROUND, "C2")]
+
+
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+@pytest.mark.parametrize("argv, what", [
+    (["mark", ROUND, "Q1", "--blocks", "all"], "a mark"),
+    (["mark", ROUND, "Q1", "--reopen"], "a mark"),
+    (["ask", ROUND, "A new question?", "--from", "comms:40"], "a new question")])
+def test_a_round_that_has_ended_takes_no_other_mark_and_no_question(
+        rounds, capsys, how, argv, what):
+    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    rule(at=T1, text=None, item="park:Q1", record="comms:13")
+    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    before = logs(rounds)
+
+    assert main(argv) == 3
+
+    err = capsys.readouterr().err
+    assert f"{ROUND} was {how} and stays as it ended: it takes {what} no longer" in err
+    assert "run: moxi rounds open proj-a/SLUG --description TEXT" in err
+    assert logs(rounds) == before
