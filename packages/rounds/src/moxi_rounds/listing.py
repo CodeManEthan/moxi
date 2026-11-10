@@ -2,7 +2,8 @@
 
 Both are computed when they are asked for and record nothing. Each brings the index up
 to the logs first, when it can, and then reads from it; where it can't, the logs
-themselves answer.
+themselves answer. A caller that must write nothing at all says `refresh=False`: the
+index is then left as it is, and the answer is the same.
 
 **The rounds** (`rounds`): the open rounds of every project, or of one, each with its
 flow and its counts; or, when the ended ones are asked for, the rounds that are open
@@ -127,16 +128,17 @@ class Rounds:
 
 
 def rounds(project: str | None = None, *, ended: bool = False, settings=None,
-           now: str | None = None) -> Rounds:
+           now: str | None = None, refresh: bool = True) -> Rounds:
     """The open rounds of every project, or of `project`, each with its flow and its
     counts; with `ended`, the rounds that are open no longer. `settings` is what
     `settings.load()` gives, read now when left out, and `now` the second the listing
-    is computed in.
+    is computed in. With `refresh` false the index is left as it is, and a round it
+    is behind on is read from its log.
 
     Raises `Refused` when `project` names a round, and `UnknownProject` or `NoFolder`
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
-    found, no_folder = _projects(project, settings, now)
+    found, no_folder = _projects(project, settings, now, refresh=refresh)
     listed = []
     for one in found:
         for summary in one.rounds:
@@ -283,16 +285,17 @@ class Waiting:
 
 
 def waiting(project: str | None = None, *, settings=None,
-            now: str | None = None) -> Waiting:
+            now: str | None = None, refresh: bool = True) -> Waiting:
     """What waits on the operator across every project, or in `project`. `settings` is
     what `settings.load()` gives, read now when left out, and `now` the second the
     listing is computed in, which every project's list of rulings not yet shown is
-    computed in too.
+    computed in too. With `refresh` false the index is left as it is, and a log it is
+    behind on is read itself.
 
     Raises `Refused` when `project` names a round, and `UnknownProject` or `NoFolder`
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
-    found, no_folder = _projects(project, settings, now)
+    found, no_folder = _projects(project, settings, now, refresh=refresh)
     readable = [one for one in found if one.unreadable is None]
     unreadable = [one.unreadable.reason for one in found if one.unreadable is not None]
     for one in readable:
@@ -343,11 +346,12 @@ def as_json(listing: Rounds | Waiting) -> str:
     return json.dumps(listing.data(), indent=2, ensure_ascii=False) + "\n"
 
 
-def _projects(project: str | None, settings,
-              now: str) -> tuple[list[Project], tuple[str, ...]]:
+def _projects(project: str | None, settings, now: str, *,
+              refresh: bool = True) -> tuple[list[Project], tuple[str, ...]]:
     """What each project of a listing gives, and a line for each project whose rounds
     folder can't be worked out. With `project`, that one alone. The index is brought
-    up to every project's logs first."""
+    up to every project's logs first, unless `refresh` is false: the reads below
+    answer the same from an index that is behind, and write nothing."""
     if project is not None and (not isinstance(project, str) or not project.strip()):
         raise BadArgument("the project to keep the listing to has no name",
                           "name a project by its key, or leave it out")
@@ -358,11 +362,13 @@ def _projects(project: str | None, settings,
             f"moxi rounds show {project}")])
     settings = own.load() if settings is None else settings
     homes, unresolved = folders.homes(settings)
-    try:
-        index.rebuild(homes)
-    except (sqlite3.Error, OSError, store.StoreError):
-        # The index is a cache: what can't be brought up to date is read from the logs.
-        pass
+    if refresh:
+        try:
+            index.rebuild(homes)
+        except (sqlite3.Error, OSError, store.StoreError):
+            # The index is a cache: what can't be brought up to date is read from the
+            # logs.
+            pass
     if project is not None:
         homes, unresolved = [folders.home(project, settings)], []
     return ([_project(home, settings, now) for home in homes],

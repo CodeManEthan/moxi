@@ -1,7 +1,8 @@
 """Showing one round: its state and its records, as its log gives them now.
 
 `show(name)` reads the round's log and its project's, and records nothing; it brings
-the round's row of the index up to its log when it can. What it gives is printed as
+the round's row of the index up to its log when it can, unless it is told to leave
+the index as it is. What it gives is printed as
 lines (`as_text`) or as data (`as_json`), both from the same reading.
 
 A round is shown with what it is for, its status, its flow's name and the steps
@@ -63,9 +64,10 @@ class Shown:
     closed: Callable[[str], bool] | None = None
 
 
-def show(name: str, *, settings=None) -> Shown:
+def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
     """The round `name`, `<project>/<slug>`, as its log gives it now. `settings` is
-    what `settings.load()` gives, read now when left out.
+    what `settings.load()` gives, read now when left out. With `refresh` false the
+    index is left as it is, and nothing at all is written.
 
     Raises `Refused` for a project's key, `BadName` or `BadArgument` for a name that
     is neither, `UnknownProject` or `NoFolder` for a project with no rounds folder,
@@ -84,7 +86,8 @@ def show(name: str, *, settings=None) -> Shown:
     found = {"name": f"{home.project}/{slug}", "project": home.project, "slug": slug,
              "folder": home.round_folder(slug)}
     try:
-        summary = _refreshed(home, slug)
+        summary = (_refreshed(home, slug) if refresh
+                   else index.read(home.project, home.folder, slug))
         found["notice"] = summary.notice
         if summary.unreadable is not None:
             return Shown(**found, unreadable=summary.unreadable)
