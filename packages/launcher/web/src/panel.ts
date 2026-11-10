@@ -294,7 +294,8 @@ function isOff(field: FieldDescriptor): boolean {
   return field.needs_absent === true;
 }
 
-function isListField(field: FieldDescriptor): boolean {
+/** Whether a field is drawn as a list: the `list` type, or a row that may be given more than once. */
+export function isListField(field: FieldDescriptor): boolean {
   return field.type === "list" || field.repeatable === true;
 }
 
@@ -431,7 +432,8 @@ function isSet(field: FieldDescriptor, value: FormValue | undefined): boolean {
   return value !== "" && value !== leaveOutChoice(field);
 }
 
-function same(a: FormValue | undefined, b: FormValue | undefined): boolean {
+/** Whether two values of a field are the same value. */
+export function same(a: FormValue | undefined, b: FormValue | undefined): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 

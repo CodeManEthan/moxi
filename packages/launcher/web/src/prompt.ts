@@ -32,10 +32,25 @@
 // leaves a line under the box and gives the button back. A launch in the user's terminal
 // is never run here: its command is copied. The lines stay until the next press or an
 // edit of the box.
+//
+// `Options`, beside the chip, opens a panel at the window's right edge, drawn here and
+// fixed to the window, with the box and the button still in use beside it. The piece tells
+// Home the panel's width with `moxi-home-side` when it opens and 0 when it closes or the
+// piece leaves, and Home moves its column aside where the window has the room. The panel
+// holds a find field and the launch form's other rows in the catalog's groups, each group
+// and subgroup opening in place and saying, while closed, which of its values differ from
+// the shipped defaults. Each row is drawn by the shell's form renderer; a value changed
+// there is one more row this piece sets, and goes in the launch request with the rest.
 
 import { css, html, LitElement, nothing } from "lit";
 import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
-import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
+import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
+
+import {
+  changedValue, drawnField, findRows, HIDDEN_FLAG, keptOptions, NO_MATCH, PANEL_WIDTH_PX, panelGroups, SIDE_EVENT, valueNow,
+  withOption,
+} from "./options-model.ts";
+import type { PanelField, PanelGroup, PanelRow, PanelSub } from "./options-model.ts";
 
 import {
   fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
@@ -114,6 +129,31 @@ const STYLES = css`
   .run .row.taken { color: var(--moxi-text-dim); cursor: default; }
   .run .row.taken:hover { background: none; }
   .run hr { margin: 6px 0; border: 0; border-top: 1px solid var(--moxi-border); }
+  .opt { padding: 8px 6px; border: 0; background: none; color: var(--moxi-text-dim); font: 14px/1 var(--moxi-font-sans); }
+  .panel { position: fixed; z-index: 5; top: 0; right: 0; bottom: 0; width: ${PANEL_WIDTH_PX}px; max-width: 100vw;
+           padding: 20px 20px 0; overflow: auto; border-left: 1px solid var(--moxi-border);
+           background: var(--moxi-bg); color: var(--moxi-text); font-size: 14px; }
+  .ph { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+  .ph b { font-size: 16px; font-weight: 600; }
+  .close { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; }
+  .pfind { display: block; width: 100%; margin: 0 0 12px; padding: 6px 10px; border: 1px solid var(--moxi-border);
+           border-radius: 7px; background: none; color: var(--moxi-text); font: inherit; }
+  .pfind::placeholder { color: var(--moxi-text-dim); opacity: 1; }
+  .cat, .sub { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%;
+               border: 0; background: none; color: var(--moxi-text); font: inherit; text-align: left; }
+  .cat { height: 38px; padding: 0; border-top: 1px solid var(--moxi-border); line-height: 38px; }
+  .cat b { font-weight: 600; }
+  .sub { height: 31px; padding: 0 0 0 16px; line-height: 31px; }
+  .cat > span:first-child, .sub > span:first-child { flex: none; }
+  .ar { display: inline-block; width: 16px; color: var(--moxi-text-dim); font-size: 13px; }
+  .sum { min-width: 0; overflow: hidden; color: var(--moxi-text-dim); text-overflow: ellipsis; white-space: nowrap; }
+  .catbody { padding-bottom: 8px; }
+  .subopen { padding: 0 0 4px 32px; }
+  .loose { padding: 0 0 4px 16px; }
+  .prow { padding: 6px 0; }
+  .at { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 2px; color: var(--moxi-text-dim);
+        font-size: 13px; line-height: 18px; }
+  .none { margin: 0; padding: 8px 0; border-top: 1px solid var(--moxi-border); color: var(--moxi-text-dim); }
   .said { margin: 10px 2px 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
   .said p { margin: 0; }
   .said .dim { color: var(--moxi-text-dim); }
@@ -148,6 +188,10 @@ export class LauncherPrompt extends LitElement {
     picked: { state: true },
     flight: { state: true },
     unread: { state: true },
+    panel: { state: true },
+    query: { state: true },
+    opened: { state: true },
+    options: { state: true },
   };
 
   /** The box's text. */
@@ -174,6 +218,15 @@ export class LauncherPrompt extends LitElement {
   flight: Flight = IDLE;
   /** Why the launch form could not be read, when it could not. */
   unread = "";
+  /** The Options panel is open. */
+  panel = false;
+  /** The text in the panel's find field. */
+  query = "";
+  /** The panel's open groups, by key, and open subgroups, by `<group key>/<subgroup>`. */
+  opened: ReadonlySet<string> = new Set();
+  /** The values set in the panel, by row; a row not named here keeps what the form is
+   * filled with. */
+  options: Record<string, FormValue> = {};
   /** When the read that gave the listing was asked, by the page's clock; 0 when the last
    * read failed or left the slots unread, so the next press reads again. */
   #targetsAt = 0;
@@ -241,6 +294,19 @@ export class LauncherPrompt extends LitElement {
     this.#targetsAsked += 1;
     this.#pressed += 1;
     this.#stopFollow();
+    if (this.panel) {
+      this.panel = false;
+      this.#side(0);
+    }
+  }
+
+  protected updated(changed: Map<string, unknown>): void {
+    if (changed.has("panel") && changed.get("panel") !== undefined) this.#side(this.panel ? PANEL_WIDTH_PX : 0);
+  }
+
+  /** Tells Home how wide the panel beside its column is now; 0 is no panel. */
+  #side(width: number): void {
+    this.dispatchEvent(new CustomEvent(SIDE_EVENT, { bubbles: true, composed: true, detail: { width } }));
   }
 
   protected firstUpdated(): void {
@@ -261,10 +327,10 @@ export class LauncherPrompt extends LitElement {
     return this.#form?.harness ?? "";
   }
 
-  /** The rows this piece sets, over what `/api/form` fills: the brief, the place, and the
-   * model and the effort once the chip's menu set them. */
+  /** The rows this piece sets, over what `/api/form` fills: the brief, the place, the
+   * model and the effort once the chip's menu set them, and each value set in the panel. */
   get set(): Record<string, FormValue> {
-    return { ...this.chosen, brief: this.brief === "" ? null : this.brief,
+    return { ...this.options, ...this.chosen, brief: this.brief === "" ? null : this.brief,
              ...(this.pick === null ? {} : pickValues(this.pick)) };
   }
 
@@ -288,9 +354,12 @@ export class LauncherPrompt extends LitElement {
       if (this.#form === null) this.unread = unreadWhy(answer, form);
       return;
     }
-    if (this.#form !== null && form.harness !== this.#form.harness) this.chosen = {};
+    const other = this.#form !== null && form.harness !== this.#form.harness;
+    if (other) this.chosen = {};
     this.#form = form;
     this.#refill();
+    // A row the other harness has no place for in the panel is no longer set.
+    if (other && this.fields.length > 0) this.options = keptOptions(this.options, this.fields);
   }
 
   /** Reads the catalog and the form again, whichever the last read of it left unread. */
@@ -382,8 +451,12 @@ export class LauncherPrompt extends LitElement {
   }
 
   #keys(event: KeyboardEvent): void {
-    if (event.key !== "Escape" || this.menu === "") return;
+    if (event.key !== "Escape" || (this.menu === "" && !this.panel)) return;
     event.stopPropagation();
+    if (this.menu === "") {
+      this.#closePanel();
+      return;
+    }
     const face = this.renderRoot.querySelector<HTMLElement>(".anchor.open > button");
     this.menu = "";
     face?.focus();
@@ -396,9 +469,10 @@ export class LauncherPrompt extends LitElement {
         <textarea aria-label="What should the agent do?" placeholder="What should the agent do?"
           .value=${this.brief}
           @input=${(event: Event) => this.#edit((event.target as HTMLTextAreaElement).value)}></textarea>
-        <div class="boxrow"><div class="left">${this.#chip()}</div>${this.#button()}</div>
+        <div class="boxrow"><div class="left">${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
       </div>
       ${this.#said()}
+      ${this.panel ? this.#panel() : nothing}
     </div>`;
   }
 
@@ -463,6 +537,94 @@ export class LauncherPrompt extends LitElement {
       ${this.older ? html`<input class="find" type="text" aria-label="A model's full name"
         placeholder="A model's full name" autocomplete="off" spellcheck="false" .value=${menu.typed}
         @keydown=${this.#olderKey}>` : nothing}
+    </div>`;
+  }
+
+  // --- the Options panel ----------------------------------------------------------------------
+
+  #togglePanel(): void {
+    if (this.panel) this.#closePanel();
+    else {
+      this.panel = true;
+      this.menu = "";
+    }
+  }
+
+  /** Closes the panel and gives the focus back to the word that opens it. */
+  #closePanel(): void {
+    this.panel = false;
+    this.query = "";
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".opt")?.focus());
+  }
+
+  /** Opens or closes a group or a subgroup, by its key. */
+  #toggleOpen(key: string): void {
+    const next = new Set(this.opened);
+    if (!next.delete(key)) next.add(key);
+    this.opened = next;
+  }
+
+  /** Takes one change of a row from the form renderer that draws it. */
+  #optionChanged(field: PanelField, event: CustomEvent<FormChange>): void {
+    event.stopPropagation();
+    this.options = withOption(this.options, field, changedValue(field, valueNow(field, this.options), event.detail),
+                              this.fields as PanelField[]);
+  }
+
+  /** The word beside the chip that opens the panel, once there is a form to draw in it. */
+  #optionsWord() {
+    if (this.fields.length === 0) return nothing;
+    return html`<button type="button" class="opt" aria-expanded=${this.panel ? "true" : "false"}
+      @click=${this.#togglePanel}>Options</button>`;
+  }
+
+  #panel() {
+    const fields = this.fields as PanelField[];
+    const finding = this.query.trim() !== "";
+    return html`<aside class="panel" aria-label="Options" data-panel>
+      <div class="ph"><b>Options</b><button type="button" class="close" @click=${this.#closePanel}>Close</button></div>
+      <input class="pfind" type="text" aria-label="Find an option" placeholder="Find an option" autocomplete="off"
+        spellcheck="false" .value=${this.query}
+        @input=${(event: Event) => { this.query = (event.target as HTMLInputElement).value; }}>
+      ${finding ? this.#found(fields) : panelGroups(fields, this.options).map((group) => this.#group(group))}
+    </aside>`;
+  }
+
+  #found(fields: PanelField[]) {
+    const rows = findRows(fields, this.query);
+    if (rows.length === 0) return html`<p class="none" role="status">${NO_MATCH}</p>`;
+    return html`<div class="found">${rows.map((row) => this.#optionRow(row, row.where))}</div>`;
+  }
+
+  #group(group: PanelGroup) {
+    const open = this.opened.has(group.key);
+    return html`<button type="button" class="cat" data-group=${group.key} aria-expanded=${open ? "true" : "false"}
+        @click=${() => this.#toggleOpen(group.key)}><span><span class="ar" aria-hidden="true">${open ? "▾" : "▸"}</span><b>${
+        group.title}</b></span><span class="sum">${open ? "" : group.summary}</span></button>
+      ${open ? html`<div class="catbody" data-body=${group.key}>${group.subs.map((sub) => this.#sub(group, sub))}</div>` : nothing}`;
+  }
+
+  /** A subgroup: its line, and its rows while it is open. The rows with no subgroup are
+   * drawn under the group itself. */
+  #sub(group: PanelGroup, sub: PanelSub) {
+    if (sub.name === "") return html`<div class="loose">${sub.rows.map((row) => this.#optionRow(row))}</div>`;
+    const key = `${group.key}/${sub.name}`;
+    const open = this.opened.has(key);
+    return html`<button type="button" class="sub" data-sub=${key} aria-expanded=${open ? "true" : "false"}
+        @click=${() => this.#toggleOpen(key)}><span><span class="ar" aria-hidden="true">${open ? "▾" : "▸"}</span>${
+        sub.name}</span><span class="sum">${open ? "" : sub.summary}</span></button>
+      ${open ? html`<div class="subopen">${sub.rows.map((row) => this.#optionRow(row))}</div>` : nothing}`;
+  }
+
+  /** One row: where it sits when the find field found it, the mark of a hidden flag, and
+   * the form renderer's control for its kind. */
+  #optionRow(row: PanelRow, where = "") {
+    const field = row.field;
+    return html`<div class="prow" data-row=${row.name}>
+      ${where === "" && !row.hidden ? nothing : html`<div class="at"><span>${where}</span>${
+        row.hidden ? html`<span data-mark="hidden">${HIDDEN_FLAG}</span>` : nothing}</div>`}
+      <moxi-ui-form mode="each" .fields=${[drawnField(field, valueNow(field, this.options))]}
+        @moxi-change=${(event: CustomEvent<FormChange>) => this.#optionChanged(field, event)}></moxi-ui-form>
     </div>`;
   }
 

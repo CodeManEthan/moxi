@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { anyNeeds, readReport, rowMode, rowOpen, shownRows } from "../src/home-model.ts";
+import { anyNeeds, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "../src/home-model.ts";
 
 const entry = (key, order, detail) => ({ key, order, report: readReport(detail) });
 const keys = (entries) => shownRows(entries).map((item) => item.key);
@@ -61,4 +61,32 @@ test("a component is shown under its row after a click or while it holds itself 
   // A click that came before the component stopped opening shows nothing.
   assert.equal(rowOpen(readReport({ parts: [] }), true), false);
   assert.equal(rowOpen(null, true), false);
+});
+
+test("a side panel's width is a number above 0, and anything else is no panel", () => {
+  assert.equal(readSide({ width: 400 }), 400);
+  assert.equal(readSide({ width: 312.5 }), 312.5);
+  for (const detail of [null, undefined, 400, "400", {}, { width: 0 }, { width: -400 }, { width: "400" },
+                        { width: NaN }, { width: Infinity }, { width: true }]) {
+    assert.equal(readSide(detail), 0);
+  }
+});
+
+// The column's centre in a window `inner` px wide, where the block that holds the
+// column is `block` px wide and centred in the window, as the browser works the margin out.
+function columnCentre(inner, block, width) {
+  const [, less] = /^calc\(50% - ([\d.]+)px\)$/.exec(sideMargin(width));
+  return (inner - block) / 2 + block / 2 - Number(less) + 340;
+}
+
+test("beside a side panel the column's centre is the centre of the window less the panel", () => {
+  assert.equal(sideMargin(400), "calc(50% - 540px)");
+  assert.equal(columnCentre(1400, 1136, 400), (1400 - 400) / 2);
+  assert.equal(columnCentre(SIDE_FROM_PX, SIDE_FROM_PX - 64, 400), (SIDE_FROM_PX - 400) / 2);
+  assert.equal(columnCentre(1920, 1136, 321), (1920 - 321) / 2);
+});
+
+test("no panel leaves the column centred, and the panel moves it from 1100 px of window", () => {
+  assert.equal(sideMargin(0), "");
+  assert.equal(SIDE_FROM_PX, 1100);
 });
