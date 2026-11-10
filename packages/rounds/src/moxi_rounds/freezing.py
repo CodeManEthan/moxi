@@ -28,7 +28,10 @@ again is an act of its own, by the verbs that widen a hold or add a wait.
 
 Three things a block may not say of a stage, each refused: a recorded stage's id with
 another repo, branch or child round; the id of a stage that left the plan; and, in a
-round whose flow does not verify its design, a second stage in one repo.
+round whose flow does not verify its design, a second stage in one repo. And a wait is
+added only while it can still be met: one for a stage that left the plan, or one that
+closes a circle with the waits on record, is refused as the verb that adds a wait by
+hand refuses it.
 
 Options are no declaration. A block that gives a question options adds the keys the
 question does not have and retires each key it leaves out; a block that gives it none
@@ -61,7 +64,7 @@ no version already frozen.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -241,6 +244,8 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
     refused: list[tuple[str, str]] = []
     reworded: list[str] = []
     kept_off: list[KeptOff] = []
+    # The waits this freezing would add, by stage.
+    adds: dict[str, Sequence[str]] = {}
     recorded = {stage.id: stage for stage in state.stages}
     # What the version before declared: a list adds only what it gained since.
     before = versions.declarations(state)
@@ -268,6 +273,7 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
         have = recorded.get(stage.id)
         if have is None:
             add("stages", None, stage.id)
+            adds[stage.id] = stage.after
             continue
         listed = (stages_before.get(stage.id) or {}).get("after") or ()
         missing = [one for one in stage.after if one not in have.after]
@@ -278,6 +284,7 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
         gone = tuple(one for one in have.after if one not in stage.after)
         if more:
             add("after", stage.id, more)
+            adds[stage.id] = more
         if gone:
             pending.append(states.Pending(states.AFTER, stage.id, gone=gone))
     declared_now = tuple(stage.id for stage in block.stages)
@@ -346,6 +353,7 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
                 if one.id in carried and one.id not in asked_now
                 and one.state in _ASKED]
 
+    problems += stages.unmeetable(state, block, adds)
     for check in CHECKS:
         problems += check(state, block)
     return Plan(declared=_declared(block), added=added, pending=tuple(pending),
@@ -428,7 +436,8 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
     design's block can't be read or can't be frozen onto the record: a question's id
     that the round already used for one since ruled or withdrawn, a stage named that
     is none, options that break a question's rules, a prepared answer, a recorded
-    stage given another repo, branch or child round, a stage that left the plan, or a
+    stage given another repo, branch or child round, a stage that left the plan, a
+    wait added for a stage that left it or that closes a circle of waits, or a
     second stage in one repo where the flow does not verify the design. A version
     frozen as a change of records only is also `Refused` when its pointer is missing
     or has no known shape, and when its block's questions, its stages, what a

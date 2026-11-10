@@ -654,6 +654,120 @@ def test_a_circle_is_refused_naming_the_ruling_that_takes_a_wait_off(opened, cap
     assert raw(folder) == before
 
 
+LEFT_FOR_GOOD = ("B2 left the plan, and a stage that left does not come back, so B1 "
+                 "waiting for B2 could never start")
+CIRCLE = ("B3 waits for B1 already, directly or through other stages, so B1 waiting "
+          "for B3 would leave neither able to start; the operator takes a wait off")
+
+
+@pytest.mark.parametrize("how", ["ruling", "verdict"])
+def test_a_wait_for_a_stage_that_left_the_plan_is_refused(opened, how, capsys):
+    folder = opened("full")
+    planned(folder, "B1", "B2", "B3")
+    if how == "ruling":
+        rule("unstage:B2")
+    else:
+        design(folder, stage("B1"), stage("B2"), stage("B3"))
+        fold()
+        applied(folder, {"what": "stage", "id": "B2"})
+    before = raw(folder)
+
+    with pytest.raises(Refused) as refused:
+        stages.wait(ROUND, "B1", "B3,B2", actor="scout")
+
+    assert LEFT_FOR_GOOD in str(refused.value)
+    assert main(["mark", ROUND, "B1", "--after", "B2"]) == 3
+    assert LEFT_FOR_GOOD in capsys.readouterr().err
+    assert raw(folder) == before
+    assert stages.wait(ROUND, "B1", "B3", actor="scout").added == ("B3",)
+
+
+def test_a_wait_for_a_finished_stage_is_still_added(opened):
+    folder = opened("full")
+    planned(folder, "B1", "B2")
+    log.append(log.round_log(folder), "finish.done", {"stage": "B2"}, actor="planner")
+
+    assert stages.wait(ROUND, "B1", "B2", actor="scout").added == ("B2",)
+
+
+def test_a_fold_refuses_a_circle_of_waits_in_the_words_of_the_wait_added_by_hand(
+        opened):
+    folder = opened("full")
+    design(folder, stage("B1"), stage("B2", after='["B1"]'),
+           stage("B3", after='["B2"]'))
+    fold()
+    with pytest.raises(Refused) as by_hand:
+        stages.wait(ROUND, "B1", "B3", actor="scout")
+    design(folder, stage("B1", after='["B3"]'), stage("B2", after='["B1"]'),
+           stage("B3", after='["B2"]'))
+    before = raw(folder)
+
+    with pytest.raises(BadBlock) as refused:
+        fold()
+
+    [problem] = refused.value.problems
+    assert problem.what == CIRCLE and CIRCLE in str(by_hand.value)
+    assert "take B3 out of the after of B1" in problem.fix
+    assert "unafter:B<n>=B<m> --record PTR" in problem.fix
+    assert problem.line == line_with(folder, 'after = ["B3"]')
+    assert raw(folder) == before
+    assert not (folder / "versions" / "design-v2.md").exists()
+
+
+def test_a_first_fold_refuses_a_circle_among_the_stages_it_declares(opened):
+    folder = opened("full")
+    design(folder, stage("B1", after='["B3"]'), stage("B2", after='["B1"]'),
+           stage("B3", after='["B2"]'), stage("B4", after='["B1", "B2"]'))
+    before = raw(folder)
+
+    with pytest.raises(BadBlock) as refused:
+        fold()
+
+    [problem] = refused.value.problems
+    assert problem.what == (
+        "B2 waits for B3 already, directly or through other stages, so B3 waiting "
+        "for B2 would leave neither able to start; the operator takes a wait off")
+    assert problem.line == line_with(folder, 'after = ["B2"]')
+    assert raw(folder) == before
+
+
+def test_a_fold_counts_a_wait_the_block_left_out_until_it_is_taken_off(opened):
+    folder = opened("full")
+    design(folder, stage("B1"), stage("B2", after='["B1"]'))
+    fold()
+    design(folder, stage("B1", after='["B2"]'), stage("B2"))
+
+    with pytest.raises(BadBlock) as refused:
+        fold()
+
+    assert "B2 waits for B1 already" in refused.value.problems[0].what
+    rule("unafter:B2=B1")
+    assert fold().plan.added == {"after": {"B1": ["B2"]}}
+    assert stages.find(folded(folder), "B1").after == ("B2",)
+
+
+def test_a_fold_refuses_a_wait_it_adds_for_a_stage_that_left_the_plan(opened):
+    folder = opened("full")
+    design(folder, stage("B1"), stage("B2"), stage("B3", after='["B2"]'))
+    fold()
+    rule("unstage:B2")
+    design(folder, stage("B1", after='["B2"]'), stage("B3", after='["B2"]'),
+           stage("B4", after='["B2"]'))
+    before = raw(folder)
+
+    with pytest.raises(BadBlock) as refused:
+        fold()
+
+    assert [(one.what, one.line) for one in refused.value.problems] == [
+        (LEFT_FOR_GOOD, line_with(folder, 'id = "B1"') + 3),
+        (LEFT_FOR_GOOD.replace("B1", "B4"), line_with(folder, 'id = "B4"') + 3)]
+    assert refused.value.problems[0].fix == "take B2 out of the after of B1"
+    assert raw(folder) == before
+    # The wait B3 had before the stage left is none this freezing adds.
+    design(folder, stage("B1"), stage("B3", after='["B2"]'))
+    assert fold().plan.added == {}
+
+
 @pytest.mark.parametrize("argv", [
     ("B1", "--after", ""), ("B1", "--after", "all"), ("B1", "--after", "B2,B2"),
     ("B1", "--after", "B2,Q1"), ("Q1", "--after", "B2"), ("--after", "B2"),

@@ -30,7 +30,7 @@ be commissioned. The way on is a flow that verifies the design.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from . import design_block, ending, flows, folders, questions, write
@@ -293,9 +293,14 @@ def parse_after(text: str) -> tuple[str, ...]:
     return ids
 
 
-def _reaches(state: states.State, start: str, goal: str) -> bool:
-    """Whether the stage `start` waits for `goal`, directly or through other stages."""
-    after = {stage.id: stage.after for stage in state.stages}
+def waits(state: states.State) -> dict[str, tuple[str, ...]]:
+    """What each recorded stage waits for, by its id."""
+    return {stage.id: stage.after for stage in state.stages}
+
+
+def _reaches(after: Mapping[str, Sequence[str]], start: str, goal: str) -> bool:
+    """Whether the stage `start` waits for `goal`, directly or through other stages,
+    where `after` says what each stage waits for."""
     seen, todo = set(), [start]
     while todo:
         one = todo.pop()
@@ -307,6 +312,54 @@ def _reaches(state: states.State, start: str, goal: str) -> bool:
     return False
 
 
+def waits_for_one_that_left(state: states.State, stage_id: str,
+                            waited: str) -> str | None:
+    """Why `stage_id` can't be made to wait for `waited`, a stage that left the plan;
+    None for one still in it. A wait is recorded only while it can still be met."""
+    if waited not in questions.left_stages(state):
+        return None
+    return (f"{waited} left the plan, and a stage that left does not come back, so "
+            f"{stage_id} waiting for {waited} could never start")
+
+
+def closes_a_circle(after: Mapping[str, Sequence[str]], stage_id: str,
+                    waited: str) -> str | None:
+    """Why `stage_id` can't be made to wait for `waited` where `after` says what each
+    stage waits for: `waited` waits for it already. None when it does not."""
+    if not _reaches(after, waited, stage_id):
+        return None
+    return (f"{waited} waits for {stage_id} already, directly or through other "
+            f"stages, so {stage_id} waiting for {waited} would leave neither able to "
+            "start; the operator takes a wait off")
+
+
+def unmeetable(state: states.State, block: design_block.DesignBlock,
+               adds: Mapping[str, Sequence[str]]) -> list[Problem]:
+    """What a freezing refuses of the waits it would add, `adds` giving them by
+    stage: one for a stage that left the plan, and one that closes a circle with the
+    waits on record and the ones added before it. The words are the ones a wait
+    added by hand is refused with."""
+    after = {key: list(value) for key, value in waits(state).items()}
+    problems = []
+    for stage in block.stages:
+        for waited in adds.get(stage.id, ()):
+            left = waits_for_one_that_left(state, stage.id, waited)
+            circle = closes_a_circle(after, stage.id, waited)
+            if left is not None:
+                problems.append(Problem(
+                    stage.line_of("after"), left,
+                    f"take {waited} out of the after of {stage.id}"))
+            elif circle is not None:
+                problems.append(Problem(
+                    stage.line_of("after"), circle,
+                    f"take {waited} out of the after of {stage.id}, or have the wait "
+                    f"that closes the circle taken off first: moxi rounds rule ROUND "
+                    f"{UNAFTER}B<n>=B<m> --record PTR"))
+            else:
+                after.setdefault(stage.id, []).append(waited)
+    return problems
+
+
 def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Waiting:
     """Make the stage `stage_id` of the round `target` wait for the stages `after`,
@@ -315,8 +368,8 @@ def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject`,
     `NoFolder` or `NoRound` for a round that can't be found, and `Refused` when the
     round has ended, the stage or one it is to wait for is no recorded stage of the
-    round, a stage named waits for this one already, directly or through others, or
-    the stage waits for every one named already. A refusal leaves the log as it was.
+    round, a stage named left the plan, a stage named waits for this one already,
+    directly or through others, or the stage waits for every one named already. A refusal leaves the log as it was.
     """
     if not isinstance(target, str) or "/" not in target:
         raise BadArgument(f"{target!r} is not a round",
@@ -338,16 +391,17 @@ def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
         return Unmet(f"{', '.join(missing)} is not a stage of {name}: "
                      f"{questions.stages_said(view.state)}", show)
 
-    def makes_no_circle(view):
+    def can_still_be_met(view):
         for one in wanted:
             if one == stage_id:
                 return Unmet(f"{stage_id} can't wait for itself", show)
-            if _reaches(view.state, one, stage_id):
-                return Unmet(f"{one} waits for {stage_id} already, directly or "
-                             f"through other stages, so {stage_id} waiting for {one} "
-                             "would leave neither able to start; the operator takes "
-                             "a wait off",
-                             f"moxi rounds rule {name} {UNAFTER}B<n>=B<m> --record PTR")
+            left = waits_for_one_that_left(view.state, stage_id, one)
+            if left is not None:
+                return Unmet(left, show)
+            circle = closes_a_circle(waits(view.state), stage_id, one)
+            if circle is not None:
+                return Unmet(
+                    circle, f"moxi rounds rule {name} {UNAFTER}B<n>=B<m> --record PTR")
         return None
 
     def adds_something(view):
@@ -366,7 +420,7 @@ def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
         written = write.record(
             write.Where(home.project, home.folder, slug), actor=actor,
             gates=[ending.takes_new_work(name, "a mark"), are_stages_of_the_round,
-                   makes_no_circle, adds_something],
+                   can_still_be_met, adds_something],
             event=changed, wait_s=wait_s, at=at)
     except NoLog:
         raise NoRound(name) from None
@@ -379,4 +433,5 @@ __all__ = ["UNSTAGE", "UNAFTER", "PLANNED", "LEFT", "BUILDING", "FINISHED", "VER
            "CHECKS", "Waiting", "find", "state_of", "in_plan", "build_of", "waits_for",
            "cannot_leave", "keeps_what_it_is_of",
            "one_to_a_repo", "stays_out", "parse_unstage", "parse_unafter",
-           "unstage_gates", "unafter_gates", "parse_after", "wait"]
+           "unstage_gates", "unafter_gates", "parse_after", "waits",
+           "waits_for_one_that_left", "closes_a_circle", "unmeetable", "wait"]

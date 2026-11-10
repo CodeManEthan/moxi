@@ -322,8 +322,10 @@ A stage's repo and branch never change: different work takes a new id. A stage l
 the plan by the operator's ruling, `unstage:B<n>`, or by a publishable verdict on a
 design that left it out; it does not come back, and its id is not used again.
 `mark ROUND B<n> --after B<m>` makes a stage wait for more stages, which anyone may
-do; only the operator takes one off, with `unafter:B<n>=B<m>`. In a round whose flow
-does not verify its design, a second stage in one repo is refused.
+do; only the operator takes one off, with `unafter:B<n>=B<m>`. A wait is added only
+while it can still be met: `mark --after` and `fold` both refuse one for a stage that
+left the plan, and one that closes a circle with the waits on record. In a round whose
+flow does not verify its design, a second stage in one repo is refused.
 
 Once a round has stages, a question may hold up some of them (`ask --blocks B1,B2`,
 `narrow:Q<n>=B2`), be parked until one is finished (`park:Q<n> --until B2`), and a
