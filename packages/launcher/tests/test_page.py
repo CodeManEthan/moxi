@@ -154,7 +154,8 @@ def test_the_page_declares_every_route_none_for_the_gateway():
 
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
-    assert exported["assets"] == ["build-stamp.txt", "page.js", "sessions.js", "state.js"]
+    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "sessions.js",
+                                  "state.js"]
 
 
 def test_no_answer_declares_an_environment_a_brief_or_a_process():
@@ -857,9 +858,9 @@ def test_the_announcement_names_the_page_and_the_ui_link():
 def test_the_announcement_declares_the_panel_the_home_block_and_the_state():
     from moxi_launcher import module
 
-    assert set(module.COMPONENTS) == {"page", "sessions", "state"}
+    assert set(module.COMPONENTS) == {"page", "prompt", "sessions", "state"}
     assert {name: decl["place"] for name, decl in module.COMPONENTS.items()} == {
-        "page": "page", "sessions": "block", "state": "inline"}
+        "page": "page", "prompt": "block", "sessions": "block", "state": "inline"}
     assert module.COMPONENTS["sessions"]["home"] is True
     assert "attributes" not in module.COMPONENTS["sessions"]
     assert module.COMPONENTS["state"]["attributes"] == {
@@ -868,7 +869,7 @@ def test_the_announcement_declares_the_panel_the_home_block_and_the_state():
         assert decl["contract"] == 1
         assert decl["title"].strip() and "\n" not in decl["doc"]
     found = modules.load("launcher")
-    assert found.ok and set(found.components) == {"page", "sessions", "state"}
+    assert found.ok and set(found.components) == {"page", "prompt", "sessions", "state"}
 
 
 def test_each_components_script_is_a_built_asset_that_defines_its_element():

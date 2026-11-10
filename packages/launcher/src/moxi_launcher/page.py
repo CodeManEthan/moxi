@@ -34,8 +34,8 @@ its brief; a preview's argv and first turn may hold the brief, and are marked `r
 paths are marked `path`.
 
 The page's assets are what the repository's web build writes from `packages/launcher/web/`
-into this package's `web/` folder: the panel and the two components the announcement
-declares (`page.js`, `sessions.js`, `state.js`), committed with their sources.
+into this package's `web/` folder: the panel and the three components the announcement
+declares (`page.js`, `prompt.js`, `sessions.js`, `state.js`), committed with their sources.
 
 The browser UI shell starts the page server on the first request for the launcher's page,
 and loopback stops it when it has been idle. Only that server and loopback's export command
