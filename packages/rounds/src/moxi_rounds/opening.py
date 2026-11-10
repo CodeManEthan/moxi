@@ -9,9 +9,10 @@ The flow is the one named, else the project's `flow` setting. Its steps are copi
 the log because the round follows what it was opened with: a flow edited in the config
 afterwards reaches no round that is already open.
 
-A round is opened once. A folder that already holds a log is refused, as is a flow the
-config does not have; a project the projects list does not hold and a rounds folder that
-can't be worked out are refused before anything is locked or made.
+A round is opened once. A folder that already holds a log is refused, as are a flow the
+config does not have and a go pointer of no known shape; a project the projects list
+does not hold and a rounds folder that can't be worked out are refused before anything
+is locked or made.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import flows, folders, log, write
+from . import flows, folders, log, pointers, write
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
 
@@ -47,14 +48,16 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
     - `description`: what the round is for, in a line.
     - `actor`: who opens it, the event's actor.
     - `flow`: the flow's name; the project's `flow` setting when left out.
-    - `record`: the pointer to where the operator gave the go, kept as given.
+    - `record`: the pointer to where the operator gave the go, kept as given once its
+      shape is one a pointer has.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the round's lock; `at`: the event's time.
 
     Raises `BadName` or `BadArgument` for a name or description that can't be used,
     `UnknownProject` or `NoFolder` for a project with no rounds folder to open it in, and
-    `Refused` when the folder already holds a log or the flow is not one the config has.
+    `Refused` when the folder already holds a log, the flow is not one the config has,
+    or the pointer has no shape a pointer has.
     A refusal leaves no folder and no event behind.
     """
     project, slug = folders.split(name)
@@ -97,16 +100,21 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
                               "give the project a rounds folder that can be written "
                               "to") from None
 
+    def go_is_a_pointer(view):
+        if record is None:
+            return None
+        return pointers.unmet(record, f"moxi rounds open {name} --description TEXT "
+                                      "--record PTR")
+
     def opened(view, result):
         fields = {"description": description, "flow": flow, "steps": steps}
         if record is not None:
-            # Kept as written. What a pointer may look like is checked where rulings
-            # are recorded, and that check belongs here too once it exists.
             fields["record"] = record
         return write.Entry("round.opened", fields)
 
     written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
-                           gates=[not_yet_opened, flow_exists], act=make_folder,
+                           gates=[not_yet_opened, flow_exists, go_is_a_pointer],
+                           act=make_folder,
                            event=opened, opens=True, wait_s=wait_s, at=at)
     return Opened(name=name, folder=folder, flow=flow, steps=tuple(steps),
                   event=written.events[0], failed=written.failed)

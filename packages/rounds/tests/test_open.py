@@ -206,6 +206,28 @@ def test_the_pointer_to_the_go_is_kept_as_given(rounds):
     assert "record" not in log.read(log.round_log(rounds / "b-round"))[0]
 
 
+@pytest.mark.parametrize("pointer", ["0a1b2c3d@2026-01-02T03:04Z",
+                                     "https://example.com/pages/7",
+                                     "file:design.md#the-go"])
+def test_a_go_pointer_of_any_known_shape_is_kept(rounds, pointer):
+    assert run("proj-a/a-round", "--record", pointer) == 0
+
+    assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == pointer
+
+
+@pytest.mark.parametrize("pointer", ["he said go", "comms:twelve",
+                                     "http://example.com/pages/7"])
+def test_a_go_pointer_of_no_known_shape_is_refused_and_no_folder_is_made(
+        rounds, capsys, pointer):
+    assert run("proj-a/a-round", "--record", pointer) == 3
+
+    out, err = capsys.readouterr()
+    assert out == "" and "refused, with nothing written" in err
+    assert repr(pointer) in err and "comms:<digits>" in err
+    assert "run: moxi rounds open proj-a/a-round --description TEXT --record PTR" in err
+    assert not rounds.exists()
+
+
 # -- what is refused ---------------------------------------------------------------------
 
 def test_a_folder_that_already_holds_a_log_is_refused_and_left_as_it_was(rounds, capsys):
