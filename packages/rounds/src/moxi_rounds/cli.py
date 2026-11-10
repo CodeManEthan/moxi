@@ -45,7 +45,8 @@ its rulings.
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
 operator's pointer goes with a move that ends what the question holds up, and with a
-list of stages for a question that came from a round. `list --questions` writes out
+list of stages for a question that came from a round; a move or an adoption with
+his pointer is a ruling, and is printed as `rule` prints one. `list --questions` writes out
 the questions that wait on the operator, of one round or of one project with its open
 rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
 data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
@@ -378,7 +379,7 @@ def _fill(args, out) -> int:
 def _carry(args, out) -> int:
     """`ask --adopt` and `ask --move`: carry a question on record to the other log of
     its project."""
-    from . import moving, questions
+    from . import moving, questions, ruling
 
     flag = "--adopt" if args.adopt is not None else "--move"
     if args.adopt is not None and args.move is not None:
@@ -403,6 +404,16 @@ def _carry(args, out) -> int:
     was = (f", where it held up {questions.said(found.held)}"
            if found.held is not None else "")
     print(f"moved from: {moved.source}{was}", file=out)
+    if moved.ruling is not None:
+        # With his pointer the move is his ruling, in the log the question left: it
+        # is printed as `rule` prints one, since its id is what a mark names.
+        left = moved.events[-1]
+        adopted = args.adopt is not None
+        ruled = ruling.Ruled(
+            id=moved.ruling, standing=adopted, text=left.get("text"), event=left,
+            name=moved.name if adopted else moved.source.rpartition(":")[0])
+        for line in _recorded(ruled):
+            print(line, file=out)
     _warn_of(moved.failed, args.prog, args.verb)
     return codes.OK
 

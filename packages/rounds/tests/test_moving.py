@@ -88,6 +88,15 @@ def count(path):
     return len(log.read(path)) if log.exists(path) else 0
 
 
+def recorded_as(ruling_id, rules, holder):
+    """What is printed for a move that is the operator's ruling: the ruling as
+    recorded, and how whoever recorded it says he was shown it."""
+    return (f"Recorded as {ruling_id}: {rules}\n"
+            'show him this under "Recorded as" in your next message, then:\n'
+            f"  moxi rounds mark {holder} {ruling_id} --shown --record "
+            "<pointer to that message>\n")
+
+
 def from_a_round(rounds, blocks=None):
     """A question of `a-round` put on the project's list by the operator; returns its
     id there."""
@@ -320,6 +329,32 @@ def test_a_list_with_his_pointer_is_taken_and_the_adoption_is_his_ruling(rounds)
     assert (gone.state, gone.ruling, gone.moved_to) == ("moved", "S1", f"{B}:Q1")
 
 
+def test_an_adoption_that_is_his_ruling_is_printed_with_the_mark_that_says_he_saw_it(
+        rounds, capsys):
+    from_a_round(rounds)
+
+    assert main(["ask", B, "--adopt", "P1", "--blocks", "B2", "--record",
+                 "comms:21"]) == 0
+
+    out, err = capsys.readouterr()
+    assert out == (f"Q1: {SAID}\nblocks: B2   from: comms:11\nmoved from: P1\n"
+                   + recorded_as("S1", "move:P1", "proj-a"))
+    assert err == ""
+    # The id printed is the one a mark takes.
+    assert main(["mark", "proj-a", "S1", "--shown", "--record", "comms:30"]) == 0
+
+
+def test_a_move_that_is_not_his_ruling_prints_no_ruling(rounds, capsys):
+    ask(A, "B1")
+    park(A, "Q1")
+    finish(rounds, "B1")
+    capsys.readouterr()
+
+    assert main(["ask", "proj-a", "--move", f"{A}:Q1"]) == 0
+
+    assert "Recorded as" not in capsys.readouterr().out
+
+
 def test_a_pointer_of_no_known_shape_is_refused_at_an_adoption(rounds):
     from_a_round(rounds)
     before = logs(rounds)
@@ -352,7 +387,8 @@ def test_the_operators_move_puts_a_rounds_question_on_the_projects_list(rounds, 
         "state": "moved", "moved_to": "P1"}
     out, err = capsys.readouterr()
     assert out == (f"P1: {SAID}\nblocks: none   from: comms:11\n"
-                   f"moved from: {A}:Q1, where it held up B1,B2\n")
+                   f"moved from: {A}:Q1, where it held up B1,B2\n"
+                   + recorded_as("C1", "move:Q1", A))
     assert err == ""
 
 
