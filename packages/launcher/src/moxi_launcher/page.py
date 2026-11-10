@@ -5,7 +5,8 @@
     GET  /api/presets   the seats and project presets, checked
     GET  /api/form      the value of each row a launch takes from the shipped defaults,
                         `[defaults]` and at most one preset, for one harness: what the
-                        launch form shows when a preset is chosen
+                        launch form shows when a preset is chosen; and the command a
+                        launch of that harness composes in each place it may run
     GET  /api/launches  the launch log, newest first, paged by `limit` and `before`; with
                         `request`, the one launch a page launch's 202 points to
     GET  /api/sessions  the past-sessions list, as `moxi launcher sessions` gives it
@@ -139,9 +140,15 @@ PRESETS = {**STANDING, "presets": Out("list", items=PRESET),
 FORM_ROW = _table(name=_text(), value=_text(nullable=True),
                   items=Out("list", items=Out("string"), nullable=True),
                   source=_text(), withheld=Out("bool"))
+#: The command a launch of the form's harness composes when it runs in `target`, one of
+#: the names a catalog row's `modes` holds; null where such a launch is refused.
+FORM_MODE = _table(target=_text(), mode=_text(nullable=True))
 #: The launch form for one harness: the harness drawn, the value of each row offered for
 #: it, or, when the preset can't be laid for that harness, no rows and the refusal.
+#: `modes` has one entry per value of the `target` row, in the row's order, for a launch
+#: under the comms name the query's `identity` gives.
 FORM = {**STANDING, "harness": _text(), "rows": Out("list", items=FORM_ROW),
+        "modes": Out("list", items=FORM_MODE),
         "refused": Out("table", items=REFUSAL.items, nullable=True)}
 
 #: One launch log row, cut to what the page shows: none of its recorded values, argv,
@@ -321,7 +328,8 @@ PAGE = lb.Page(
                  query={"seat": Field("string", required=False, max=QUERY_MAX),
                         "project_preset": Field("string", required=False, max=QUERY_MAX),
                         "harness": Field("enum", required=False,
-                                         values=catalog.HARNESSES)},
+                                         values=catalog.HARNESSES),
+                        "identity": Field("string", required=False, max=QUERY_MAX)},
                  returns=FORM),
         lb.Route("/api/launches", "read", _target("read_launches"),
                  query={**_PAGED, "request": Field("string", required=False, max=QUERY_MAX)},
@@ -363,7 +371,7 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
+__all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
            "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
            "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE",
            "TARGETS", "TEMPLATE_MAX", "VALUES"]

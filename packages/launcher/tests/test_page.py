@@ -448,6 +448,60 @@ def test_no_presets_file_gives_the_shipped_defaults():
     assert {r["source"] for r in said["rows"]} == {"shipped"}
 
 
+def form_modes(query: str = "") -> dict[str, str | None]:
+    said = form(query)
+    assert [m["target"] for m in said["modes"]] == ["terminal", "headless", "slot"]
+    return {m["target"]: m["mode"] for m in said["modes"]}
+
+
+def test_the_form_names_the_command_a_launch_composes_in_each_target():
+    assert form()["modes"] == [{"target": "terminal", "mode": "interactive"},
+                               {"target": "headless", "mode": "print"},
+                               {"target": "slot", "mode": "interactive"}]
+    assert form_modes("harness=codex") == {"terminal": "interactive", "headless": "exec",
+                                           "slot": "interactive"}
+
+
+def test_the_forms_modes_follow_turns_host_for_codex(monkeypatch):
+    installed(monkeypatch, "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    assert form_modes("harness=codex") == {"terminal": "host", "headless": "exec",
+                                           "slot": "host"}
+    assert form_modes("harness=claude")["terminal"] == "interactive"
+
+
+def test_the_forms_modes_are_null_where_a_launch_under_the_identity_is_refused(monkeypatch):
+    installed(monkeypatch, "comms", "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    assert form_modes("identity=planner") == {"terminal": "interactive", "headless": None,
+                                              "slot": "interactive"}
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": "host", "headless": None, "slot": "host"}
+    # Without its wrapper's host a Codex launch under a name is refused everywhere.
+    monkeypatch.setattr(presets, "_host_installed", lambda: False)
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": None, "headless": None, "slot": None}
+    assert form_modes("harness=codex")["terminal"] == "interactive"
+
+
+def test_an_identity_changes_no_mode_without_comms():
+    assert form_modes("identity=planner") == form_modes()
+    assert form_modes("harness=codex&identity=planner") == form_modes("harness=codex")
+
+
+def test_the_forms_modes_are_for_the_harness_it_is_drawn_for():
+    write_presets(FORM_FILE)
+    assert form_modes("seat=coder")["headless"] == "exec"
+    # A form that is refused still says its harness's modes.
+    said = form("seat=coder&harness=claude")
+    assert said["rows"] == [] and said["modes"][1] == {"target": "headless", "mode": "print"}
+    # Every mode named is one some row of that harness composes into.
+    for harness in catalog.HARNESSES:
+        known = {mode for row in catalog.load(harness) for mode in row.modes}
+        assert set(form_modes(f"harness={harness}").values()) <= known
+
+
 def test_a_failed_form_read_says_only_the_class(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("/home/someone/private/presets.toml")

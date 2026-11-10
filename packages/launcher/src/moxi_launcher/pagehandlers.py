@@ -30,7 +30,9 @@ exception: a failure is logged once per class and the next tick reads again.
 
 **The launch form** is filled from `/api/form`: the value each row offered for a harness
 takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
-lays them for `resolve`, so the form and the launch can't disagree. A brief or standing
+lays them for `resolve`, so the form and the launch can't disagree. Beside the rows it names the command a
+launch of that harness composes in each place it may run (`presets.mode_of`), which is
+what a row's `modes` are matched with. A brief or standing
 instructions that `[defaults]` or the preset writes inline is named `withheld`, and its
 text is not sent. A preset that can't be laid for the harness is answered with no rows and
 the resolver's refusal.
@@ -353,21 +355,43 @@ def _form_harness(request: presets.Request, asked: str | None) -> str:
         return _shipped_harness()
 
 
+def modes(harness: str, identity: str | None,
+          available: Callable[[str], bool]) -> list[dict[str, Any]]:
+    """The command a `harness` launch composes in each place the `target` row names, in
+    the row's order, as the resolver decides it (`presets.mode_of`); null where the
+    resolver refuses such a launch. `identity` counts only with comms installed, since
+    the resolver drops it without."""
+    name = identity if identity and available("comms") else None
+    out = []
+    for where in catalog.launcher()["target"].values or ():
+        try:
+            mode: str | None = presets.mode_of(harness, str(where), identity=name,
+                                               available=available)[0]
+        except catalog.Refused:
+            mode = None
+        out.append({"target": str(where), "mode": mode})
+    return out
+
+
 def form(seat: str | None = None, project_preset: str | None = None,
-         harness: str | None = None) -> dict[str, Any]:
+         harness: str | None = None, identity: str | None = None) -> dict[str, Any]:
     """`/api/form`'s answer: the harness the form is drawn for (`harness`, else the one the
     layers give) and each of its rows as the shipped defaults, `[defaults]` and the one
     preset named lay them. A request the resolver refuses (both presets named, a preset
     unknown or not laid for `harness`, a presets file that can't be read) is answered
     with no rows and its refusal. The `harness` row holds the layers' harness, which is
-    `harness` only when none is asked or the layers name the one asked."""
+    `harness` only when none is asked or the layers name the one asked. `modes` is for
+    the harness the form is drawn for, under the comms name `identity`."""
     request = presets.Request(seat=seat or None, project_preset=project_preset or None)
+    available = _available()
     try:
-        laid = presets.layered(request, harness=harness, available=_available())
+        laid = presets.layered(request, harness=harness, available=available)
     except REFUSALS as error:
-        return _up(harness=_form_harness(request, harness), rows=[],
+        drawn = _form_harness(request, harness)
+        return _up(harness=drawn, rows=[], modes=modes(drawn, identity, available),
                    refused=_refusal(error))
-    return _up(harness=laid.harness, rows=form_rows(laid), refused=None)
+    return _up(harness=laid.harness, rows=form_rows(laid),
+               modes=modes(laid.harness, identity, available), refused=None)
 
 
 def read_form(call: Any) -> dict[str, Any]:
@@ -375,10 +399,11 @@ def read_form(call: Any) -> dict[str, Any]:
     query = call.query
     with call.busy("read"):
         try:
-            return form(query.get("seat"), query.get("project_preset"), query.get("harness"))
+            return form(query.get("seat"), query.get("project_preset"), query.get("harness"),
+                        query.get("identity"))
         except Exception as err:
             return _failed(err, "reading the launch form failed",
-                           harness=_shipped_harness(), rows=[], refused=None)
+                           harness=_shipped_harness(), rows=[], modes=[], refused=None)
 
 
 # -- the launch log -------------------------------------------------------------------------
@@ -1382,7 +1407,7 @@ __all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "NO_SLOTS", "PRO
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
            "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
            "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
-           "launched", "launches", "live", "live_states", "name_now", "on_path", "page_key",
+           "launched", "launches", "live", "live_states", "modes", "name_now", "on_path", "page_key",
            "places", "preview", "previewed", "read_catalog", "read_form", "read_launches",
            "read_name", "read_places", "read_presets", "read_runs", "read_sessions", "read_state",
            "read_targets", "refusal", "resumable", "resume", "resumed", "run_entry",

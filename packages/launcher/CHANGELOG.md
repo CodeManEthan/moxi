@@ -34,6 +34,10 @@
   launch of the form would take, a template being edited rendered unsaved with the save
   check's refusal, and what saving it writes. A taken slot's label in `GET /api/targets`
   is the launch's name.
+- `GET /api/form` takes the query `identity` and answers `modes`: for each value of the
+  `target` row, the command a launch of the form's harness composes there under that
+  comms name, or null where such a launch is refused. A catalog field's `modes` are
+  matched with it. New `pagehandlers.modes` and `page.FORM_MODE`.
 - New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
   run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
   so a caller on an install without the UI shell can read what is alive.
