@@ -7,10 +7,16 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
   `line` and `problem` say where and what.
 - `TooNew` (exit 3), an `Unreadable`: the line was written in a log format this code does
   not know.
+- `Refused` (exit 3): a verb's conditions are not all met. `unmet` holds every one that
+  is not, each an `Unmet` with the command that meets it. Nothing was written.
+- `Locked` (exit 3): another process held a lock past the wait. `file` is the lock file
+  and `holder` the pid written in it.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from moxi import exit as exits
@@ -67,4 +73,50 @@ class TooNew(Unreadable):
                          "upgrade moxi-rounds on this machine to the version that wrote it")
 
 
-__all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew"]
+@dataclass(frozen=True)
+class Unmet:
+    """One condition of a verb that does not hold: `reason` says which, and `fix` is the
+    command that makes it hold."""
+
+    reason: str
+    fix: str
+
+    def __post_init__(self):
+        if not self.reason or not self.fix:
+            raise ValueError("an unmet condition says what it is and the command that "
+                             "meets it")
+
+
+class Refused(RoundsError):
+    """A verb was refused because the conditions in `unmet` do not hold. Every one that
+    does not hold is there, not only the first, and the verb wrote nothing."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, unmet: Iterable[Unmet]):
+        self.unmet = tuple(unmet)
+        if not self.unmet:
+            raise ValueError("a refusal names at least one unmet condition")
+        lines = ["refused, with nothing written:"]
+        for one in self.unmet:
+            lines += [f"  - {one.reason}", f"    run: {one.fix}"]
+        super().__init__("\n".join(lines))
+
+
+class Locked(RoundsError):
+    """Another process held the lock file `file` for the whole wait of `waited_s`
+    seconds. `holder` is the pid written in the file, or None when it holds none."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, file: Path, holder: int | None, waited_s: float):
+        self.file = Path(file)
+        self.holder = holder
+        self.waited_s = waited_s
+        who = f"pid {holder}" if holder else "another process"
+        super().__init__(f"{self.file} was still locked by {who} after {waited_s:g} "
+                         "seconds, so nothing was written",
+                         f"run the command again once {who} is done")
+
+
+__all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked"]
