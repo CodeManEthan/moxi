@@ -514,6 +514,9 @@ def test_a_launch_followed_to_the_end_of_its_watch_says_it_stopped_watching(fake
     ui_page.clock.fast_forward("00:10")
     expect(said(piece, "stopped")).to_have_text(STOPPED)
     expect(said(piece, "started")).to_have_count(0)
+    # The line names the launcher's page, and the name opens it.
+    said(piece, "stopped").get_by_role("link", name="Launcher page").click()
+    expect(ui_page.locator("#moxi-panel > moxi-launcher-page")).to_be_visible()
 
 
 # --- the terminal ---------------------------------------------------------------------------
@@ -725,6 +728,8 @@ def test_a_launch_that_stays_starting_gives_the_button_back_and_is_followed_unti
     go.click()
     late = said(piece, "late")
     expect(late).to_have_text(LATE)
+    expect(late.get_by_role("link", name="Launcher page")).to_have_attribute(
+        "href", "/m/launcher/")
     expect(said(piece, "starting")).to_have_count(0)
     expect(go).to_be_enabled()
     expect(go).to_have_text("Launch in slot 2")

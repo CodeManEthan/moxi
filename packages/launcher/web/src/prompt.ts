@@ -33,7 +33,7 @@
 // edit of the box.
 
 import { css, html, LitElement, nothing } from "lit";
-import { api, components, place, subscribe } from "/m/ui/client.js";
+import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
 
 import {
@@ -41,8 +41,8 @@ import {
 } from "./panel.ts";
 import type { Catalog, Form } from "./panel.ts";
 import {
-  afterNoAnswer, buttonWords, chipFace, chipMenu, copied, edited, followed, following, hasEffort, IDLE, inFlight, launched,
-  launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
+  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, edited, followed, following, hasEffort, IDLE, inFlight, launched,
+  LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
   runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
@@ -116,6 +116,7 @@ const STYLES = css`
   .said { margin: 10px 2px 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
   .said p { margin: 0; }
   .said .dim { color: var(--moxi-text-dim); }
+  .said a { color: inherit; }
   .said code { display: block; margin-top: 4px; font: 13px/1.5 var(--moxi-font-mono); user-select: all; }
   :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
   textarea:focus-visible, .find:focus-visible { outline: 0; }
@@ -610,6 +611,17 @@ export class LauncherPrompt extends LitElement {
       data-current=${row.current ? "true" : "false"} @click=${() => this.#pickRun(pick)}>${inner}</button>`;
   }
 
+  /** A line's text, with the launcher's page a link where the line names it. */
+  #words(line: Line) {
+    const around = aroundPage(line);
+    if (around === null) return line.text;
+    return html`${around[0]}<a href="/m/launcher/" @click=${(event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigate("launcher");
+    }}>${LAUNCHER_PAGE}</a>${around[1]}`;
+  }
+
   /** The lines under the box: the launch's, or why the launch form can't be read, then a
    * dim one while the slots can't be read. */
   #said() {
@@ -617,7 +629,7 @@ export class LauncherPrompt extends LitElement {
     return html`<div class="said" role="status">${
       lines.length === 0 && this.unread !== ""
         ? html`<p data-line="unread">The launch form can't be read: ${this.unread}.</p>` : nothing}${
-      lines.map((line) => html`<p class=${line.tone} data-line=${line.name}>${line.text}</p>${
+      lines.map((line) => html`<p class=${line.tone} data-line=${line.name}>${this.#words(line)}</p>${
         line.command === undefined ? nothing : html`<code data-line="command">${line.command}</code>`}`)}${
       this.targets?.unread === true ? html`<p class="dim" data-line="slots-unread">${SLOTS_UNREAD}</p>` : nothing}</div>`;
   }

@@ -4,7 +4,7 @@ import test from "node:test";
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
   buttonWords, copied, edited, followed, following, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
-  afterNoAnswer, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
+  afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
 } from "../src/prompt-model.ts";
@@ -591,6 +591,15 @@ test("a failed row shows the sentence recorded for it, and its reason word where
   assert.deepEqual(texts(followed(flight, ok({ state: "up", detail: null, launches: [row], refused: null, why: null }))),
                    ["The launch failed: occupied"]);
   assert.deepEqual(texts(followed(flight, status(row))), ["The launch failed: occupied"]);
+});
+
+test("the two lines that send the user to the launcher's page are cut around its name", () => {
+  const flight = launched(STARTED, SLOT_2, []).flight;
+  const late = followed(flight, status(launch("spawning", { stale: true })));
+  assert.deepEqual(aroundPage(late.lines[0]), ["Not started yet, and it should have been by now. The ", " lists it."]);
+  assert.deepEqual(aroundPage(stopped(flight).lines[0]), ["Stopped watching this launch. The ", " lists it."]);
+  assert.equal(aroundPage(flight.lines[0]), null);
+  assert.equal(aroundPage({ name: "warning", tone: "dim", text: "The Launcher page is elsewhere" }), null);
 });
 
 test("no row yet, a row still starting, and a read that failed change nothing", () => {

@@ -692,6 +692,16 @@ export const LAUNCHED: readonly string[] = ["started", "ready", "sending", "firs
 export const LATE = "Not started yet, and it should have been by now. The Launcher page lists it.";
 export const STOPPED = "Stopped watching this launch. The Launcher page lists it.";
 
+/** The launcher's page as those two lines name it. */
+export const LAUNCHER_PAGE = "Launcher page";
+
+/** A line's text around the launcher's page's name, for the page to make the name a link;
+ * null for a line that does not send the user there. */
+export function aroundPage(line: Line): [string, string] | null {
+  const at = line.name === "late" || line.name === "stopped" ? line.text.indexOf(LAUNCHER_PAGE) : -1;
+  return at < 0 ? null : [line.text.slice(0, at), line.text.slice(at + LAUNCHER_PAGE.length)];
+}
+
 /** `Started in slot 2 · 19:06`, or `Started headless · 19:06`, from what the row records. */
 export function startedWords(row: LaunchRow, hour: Clock = HOUR): string {
   const then = new Date(row.created_at);
