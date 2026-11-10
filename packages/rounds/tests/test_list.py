@@ -93,11 +93,14 @@ def test_the_open_rounds_of_every_project_are_listed_with_flow_and_counts(
     ask(C, at=T2)
 
     assert printed(capsys) == (
-        f"{A}   open   flow fix   open questions: 2   parked: 1   "
+        f"{A}   open   flow fix   step commission of B1, not-built   "
+        "open questions: 2   parked: 1   "
         "rulings not shown: 2\n"
-        f"{B}   open   flow fix   open questions: 0   parked: 0   "
+        f"{B}   open   flow fix   step commission, not-built   "
+        "open questions: 0   parked: 0   "
         "rulings not shown: 0\n"
-        f"{C}   open   flow fix   open questions: 1   parked: 0   "
+        f"{C}   open   flow fix   step commission, not-built   "
+        "open questions: 1   parked: 0   "
         "rulings not shown: 0\n")
 
 
@@ -113,15 +116,18 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
     assert found["rounds"] == [
         {"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
          "status": "open", "flow": "fix",
+         "step": {"step": "commission", "stage": "B1", "state": "not-built"},
          "counts": {"open": 1, "parked": 0, "not_shown": 1}, "standing": None,
          "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
          "status": "open", "flow": "fix",
+         "step": {"step": "commission", "stage": None, "state": "not-built"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None},
         {"name": C, "project": "proj-b",
          "folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),
          "status": "open", "flow": "fix",
+         "step": {"step": "commission", "stage": None, "state": "not-built"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None}]
 
@@ -131,7 +137,8 @@ def test_a_project_named_keeps_the_rounds_to_its_own(rounds, capsys):
     assert [one["name"] for one in data(capsys, "proj-b")["rounds"]] == [C]
     assert data(capsys, "proj-b")["project"] == "proj-b"
     assert printed(capsys, "proj-b").splitlines() == [
-        f"{C}   open   flow fix   open questions: 0   parked: 0   "
+        f"{C}   open   flow fix   step commission, not-built   "
+        "open questions: 0   parked: 0   "
         "rulings not shown: 0"]
 
 
@@ -270,7 +277,8 @@ def test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known(
 
     out = printed(capsys)
     assert out.splitlines()[0] == (
-        f"{A}   open   flow fix   open questions: 1   parked: 0   "
+        f"{A}   open   flow fix   step commission of B1, not-built   "
+        "open questions: 1   parked: 0   "
         "rulings not shown: not known")
     assert "logs that can't be read, whose records are not listed:" in out
     found = data(capsys)

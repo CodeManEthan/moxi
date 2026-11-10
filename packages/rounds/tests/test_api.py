@@ -146,8 +146,9 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert listing["rounds"][0] == {
         "name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
         "status": "open", "flow": "fix",
+        "step": {"step": "commission", "stage": "B1", "state": "not-built"},
         "counts": {"open": 1, "parked": 1, "not_shown": 3}, "standing": None,
-         "ended": None}
+        "ended": None}
     [ended] = api.rounds(status="closed")["rounds"]
     assert (ended["name"], ended["status"]) == (D, "dropped")
     assert [one["name"] for one in api.rounds("proj-b")["rounds"]] == [C]
@@ -167,9 +168,14 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert api.questions("proj-a")["entries"] == [*waits["open"][:2], *waits["parked"]]
 
 
-def test_no_call_says_what_step_a_round_is_at(rounds):
-    assert all("step" not in one for one in api.rounds()["rounds"])
-    assert "step" not in api.round(A)
+def test_the_calls_say_what_step_a_round_is_at(rounds):
+    assert [one["step"] for one in api.rounds()["rounds"]] == [
+        {"step": "commission", "stage": "B1", "state": "not-built"},
+        {"step": "commission", "stage": None, "state": "not-built"},
+        {"step": "commission", "stage": None, "state": "not-built"}]
+    assert api.rounds(status="closed")["rounds"][0]["step"] is None
+    at = api.round(A)["step"]
+    assert (at["step"], at["stage"], at["state"]) == ("commission", "B1", "not-built")
 
 
 def test_a_line_the_index_has_not_seen_is_in_what_every_call_gives(rounds, capsys):

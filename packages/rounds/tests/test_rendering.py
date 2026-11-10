@@ -102,6 +102,8 @@ a placeholder round
 
 fix: {steps(B)}
 
+- step: commission, not-built
+
 ## Questions
 
 No question.
@@ -157,6 +159,8 @@ a placeholder round
 ## Flow
 
 fix: {steps()}
+
+- step: commission, not-built
 
 ## Questions
 

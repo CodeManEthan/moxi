@@ -38,7 +38,7 @@ ruling that did it. An entry that was replaced or taken back stays, marked.
 **A later kind of record** (a stage, a build, a waiting item) joins the note as a row
 of `PARTS`: its heading and the lines it gives from the round as `showing.data` has it,
 so the record is first a row of `showing.SECTIONS`. What a round is doing now, its
-current step, joins the lines of `_flow`.
+current step, is among the lines of `_flow`.
 """
 
 from __future__ import annotations
@@ -186,9 +186,12 @@ def note(project: str, slug: str, events: Iterable[dict],
 
 def _flow(shown_as: dict) -> list[str]:
     steps = ", ".join(str(step.get("step")) for step in shown_as["steps"]) or "no steps"
-    # The step the round is at goes here, after the flow's steps, once a function
-    # says what step a round is at.
     lines = [f"{shown_as['flow']}: {steps}"]
+    at = showing.step_lines(shown_as["step"])
+    if at:
+        lines.append("")
+    for line in at:
+        lines += _item(line.strip())
     if shown_as["inherits"]:
         lines += ["", *_item("starts from the standing rulings "
                              f"{', '.join(shown_as['inherits'])}")]

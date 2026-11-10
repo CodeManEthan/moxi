@@ -668,8 +668,8 @@ def test_verdicts_and_the_standing_are_in_the_index_and_the_list(folder, capsys)
             "flags": ["extra-full-pass"]}))
     assert found.of(index.PENDING) == ()
     assert main(["list"]) == 0
-    assert f"{ROUND}   open   flow full   design: publishable@v2   " in (
-        capsys.readouterr().out)
+    assert (f"{ROUND}   open   flow full   step docket, ready   "
+            "design: publishable@v2   ") in capsys.readouterr().out
     assert main(["list", "--json"]) == 0
     [listed] = json.loads(capsys.readouterr().out)["rounds"]
     assert listed["standing"] == "publishable@v2"

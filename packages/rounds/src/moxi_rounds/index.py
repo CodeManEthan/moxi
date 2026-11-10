@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 11
+DERIVED = 12
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -109,11 +109,22 @@ VERSION = "version"
 PENDING = "pending"
 VERDICT = "verdict"
 THREAD = "thread"
+#: And the step the round is at.
+STEP = "step"
+
+
+def _step(folded: state.State):
+    # What says a step's state reads the modules of the verbs, which append through
+    # this one: it is loaded when a log is first read, not with this module.
+    from . import steps
+    return steps.at(folded)
+
+
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
     READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
     PENDING: versions.waiting, VERDICT: versions.verdicts,
-    THREAD: versions.threads}
+    THREAD: versions.threads, STEP: _step}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""
@@ -518,6 +529,6 @@ def _drop(conn, project: str, slug: str) -> None:
         conn.execute(f"DELETE FROM {table} WHERE project = ? AND slug = ?", (project, slug))
 
 
-__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION", "VERDICT", "THREAD",
+__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION", "VERDICT", "THREAD", "STEP",
            "PENDING", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
            "refresh", "rebuild", "read", "rounds", "usable", "disagreements"]

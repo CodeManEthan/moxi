@@ -8,8 +8,9 @@ import shutil
 
 import pytest
 
-from moxi_rounds import (asking, brake, freezing, log, opening, ruling, state, steps,
-                         verdicts)
+from moxi_rounds import (api, asking, brake, dropping, freezing, index, listing, log,
+                         opening, ruling, state, steps, verdicts)
+from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
 ASKED = "Do agent-read times follow the settings?"
@@ -445,6 +446,67 @@ def test_the_index_names_the_rounds_a_parked_question_waits_for(folder):
     assert list(steps.at(folded(folder))) == [
         ("step", {"step": "commission", "stage": None, "state": steps.NOT_BUILT,
                   "until": ["proj-a/another"]})]
+
+
+# -- the step where rounds are shown and listed ------------------------------------------
+
+def listed(**how):
+    return listing.rounds(**how).rounds[0].step
+
+
+def test_the_list_the_index_and_the_calls_say_the_step_a_round_is_at(folder, capsys):
+    fold(folder, question("Q1"), stage("B1"))
+    waiting = {"step": "verify-design", "stage": None, "state": steps.READY}
+    assert listed() == waiting
+    assert [item.body for item in
+            index.read("proj-a", folder.parent, "a-round").of(index.STEP)] == [waiting]
+    assert api.rounds()["rounds"][0]["step"] == waiting
+    assert api.round(ROUND)["step"] == {**waiting, "waits": [], "questions": []}
+    assert main(["list"]) == 0
+    assert f"{ROUND}   open   flow full   step verify-design, ready   design: none" in (
+        capsys.readouterr().out)
+
+    verdict(folder, "publishable")
+    assert listed() == {"step": "docket", "stage": None, "state": steps.READY}
+    assert main(["show", ROUND]) == 0
+    assert "step: docket, ready   questions: Q1\n" in capsys.readouterr().out
+    assert "- step: docket, ready   questions: Q1\n" in (
+        folder / "round-note.md").read_text(encoding="utf-8")
+
+
+def test_a_skipped_step_is_passed_wherever_the_step_is_shown(folder, capsys):
+    fold(folder)
+    rule("skip:verify-design")
+    assert listed()["step"] == "commission"
+    assert api.round(ROUND)["step"]["step"] == "commission"
+    assert main(["show", ROUND]) == 0
+    assert "step: commission, not-built\n" in capsys.readouterr().out
+
+
+def test_a_round_at_no_step_and_one_that_ended_are_listed_at_none(opened, capsys):
+    folder = opened("paper")
+    fold(folder)
+    verdict(folder, "publishable")
+    assert listed() is None
+    assert main(["list"]) == 0
+    assert "flow paper   step none   design: publishable@v1" in capsys.readouterr().out
+    dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
+    assert listed(ended=True) is None
+    assert main(["list", "--closed"]) == 0
+    assert "   step " not in capsys.readouterr().out
+
+
+def test_the_list_reads_the_log_again_once_a_round_a_question_waits_for_closed(
+        opened, monkeypatch):
+    folder = opened("paper")
+    fold(folder, question("Q1", blocks='"none"'))
+    verdict(folder, "publishable")
+    rule("park:Q1", until="round:proj-a/another")
+    assert listed() is None
+    monkeypatch.setattr("moxi_rounds.questions.is_closed",
+                        lambda name, settings=None: name == "proj-a/another")
+    assert listed() == {"step": "docket", "stage": None, "state": steps.READY}
+    assert listed(refresh=False) == listed()
 
 
 @pytest.mark.parametrize("found, expected", [

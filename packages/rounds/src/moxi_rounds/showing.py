@@ -25,7 +25,7 @@ A project is not shown: its rounds are listed.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
-doing now, its current step, joins the head in `_head`.
+doing now, its current step, is in the head as `steps.current` gives it.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, index, log, questions, shown, skips, tracing, versions
+from . import folders, index, log, questions, shown, skips, steps, tracing, versions
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -343,18 +343,31 @@ def _head(found: Shown) -> dict:
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     state = found.state
-    # The round's current step goes here, after the steps recorded for its flow, once
-    # a function says what step a round is at.
+    at = steps.current(state, name=found.name, closed=found.closed)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
+            "step": None if at is None else at.data(),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),
             "threads": _threads(state),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
+
+
+def step_lines(step: dict | None) -> list[str]:
+    """The step a round is at, in lines: the step with its state and the questions
+    that make it due, then each thing it waits for with the command that meets it.
+    Nothing for a round at no step."""
+    if step is None:
+        return []
+    asked = f"   questions: {', '.join(step['questions'])}" if step["questions"] else ""
+    lines = [f"step: {steps.said(step)}{asked}"]
+    for wait in step["waits"]:
+        lines += [f"  waits for: {wait['reason']}", f"    fix: {wait['fix']}"]
+    return lines
 
 
 def _stages(state: states.State) -> list[dict]:
@@ -518,6 +531,7 @@ def as_text(found: Shown) -> str:
     lines = [f"round {found.name}   {shown_as['status']}   flow {shown_as['flow']} "
              f"({steps})",
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
+    lines += step_lines(shown_as["step"])
     lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
     lines += version_lines(shown_as["versions"], shown_as["standing"],
                            shown_as["threads"], shown_as["trace"])
@@ -539,4 +553,4 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "version_lines", "thread_line", "verdict_lines", "history_of"]
+           "ended_line", "skip_line", "stage_line", "step_lines", "version_lines", "thread_line", "verdict_lines", "history_of"]

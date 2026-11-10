@@ -6,8 +6,8 @@ themselves answer. A caller that must write nothing at all says `refresh=False`:
 index is then left as it is, and the answer is the same.
 
 **The rounds** (`rounds`): the open rounds of every project, or of one, each with its
-flow and its counts; or, when the ended ones are asked for, the rounds that are open
-no longer, each with how it ended, by whom, when and on what pointer. A round whose
+flow, the step it is at and its counts; or, when the ended ones are asked for, the
+rounds that are open no longer, each with how it ended, by whom, when and on what pointer. A round whose
 log can't be read is listed as unreadable, in either listing,
 since nothing says which it belongs in.
 
@@ -31,7 +31,7 @@ from datetime import datetime
 
 from moxi import store
 
-from . import export, folders, index, log, questions, shown
+from . import export, folders, index, log, questions, shown, steps
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet, Unreadable
@@ -81,6 +81,32 @@ COUNTS: tuple[tuple[str, str, Callable[[index.Summary, Project], int | None]], .
     ("not_shown", "rulings not shown", _not_shown))
 
 
+def _step(summary: index.Summary, project: Project) -> dict | None:
+    """The step the round is at, as `{"step", "stage", "state"}`, or None for a round
+    at no step. The index keeps it as the round's own log gives it. Where a question
+    of the round is parked until another round closes and that round has, the log is
+    read again: the question reads as open from then on, and may hold the round at
+    an earlier step."""
+    kept = next((item.body for item in summary.of(index.STEP)), None)
+    if kept is None:
+        return None
+
+    def closed(name: str) -> bool:
+        return questions.is_closed(name, project.settings)
+
+    if any(closed(name) for name in kept.get("until", ())):
+        try:
+            folded = states.fold(log.read_round(log.round_log(summary.folder)))
+        except RoundsError:
+            return None
+        at = steps.current(folded, name=summary.name, closed=closed)
+        kept = {} if at is None else {"step": at.step, "stage": at.stage,
+                                      "state": at.state}
+    if kept.get("step") is None:
+        return None
+    return {key: kept[key] for key in ("step", "stage", "state")}
+
+
 @dataclass(frozen=True)
 class Round:
     """One round of the rounds listing. One that can't be read has its error in
@@ -91,6 +117,9 @@ class Round:
     folder: str
     status: str | None = None
     flow: str | None = None
+    #: The step it is at, as `{"step", "stage", "state"}`: the first of its flow that
+    #: is neither done nor skipped. None for a round at no step, and one that ended.
+    step: Mapping | None = None
     counts: tuple[tuple[str, int | None], ...] = ()
     #: What the verification of its design stands at, for a round whose design was
     #: frozen; None for one with no version.
@@ -106,7 +135,9 @@ class Round:
             return {"name": self.name, "project": self.project, "folder": self.folder,
                     "unreadable": _error(self.unreadable)}
         return {"name": self.name, "project": self.project, "folder": self.folder,
-                "status": self.status, "flow": self.flow, "counts": dict(self.counts),
+                "status": self.status, "flow": self.flow,
+                "step": None if self.step is None else dict(self.step),
+                "counts": dict(self.counts),
                 "standing": self.standing,
                 "ended": None if self.ended is None else dict(self.ended)}
 
@@ -150,11 +181,10 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                 listed.append(Round(summary.name, summary.project, str(summary.folder),
                                     unreadable=summary.unreadable))
             elif (summary.status not in (states.OPEN, None)) == ended:
-                # The round's current step joins its flow here, once a function says
-                # what step a round is at.
                 listed.append(Round(
                     summary.name, summary.project, str(summary.folder),
                     status=summary.status, flow=summary.flow, ended=summary.ended,
+                    step=_step(summary, one),
                     standing=next((item.body.get("standing")
                                    for item in summary.of(index.VERSION)), None),
                     counts=tuple((key, count(summary, one))
@@ -181,7 +211,8 @@ def rounds_as_text(listing: Rounds) -> str:
             how = (f"{one.status} by {one.ended.get('by')} at {one.ended.get('at')}, "
                    f"record {one.ended.get('record')}")
         design = "" if one.standing is None else f"   design: {one.standing}"
-        lines.append(f"{one.name}   {how}   flow {one.flow}{design}   {counts}")
+        step = "" if one.ended is not None else f"   step {steps.said(one.step)}"
+        lines.append(f"{one.name}   {how}   flow {one.flow}{step}{design}   {counts}")
     if not listing.rounds:
         kind = "has ended" if listing.ended else "is open"
         where = "" if listing.project is None else f" of {listing.project}"

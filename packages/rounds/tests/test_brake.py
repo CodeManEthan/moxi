@@ -746,5 +746,5 @@ def test_the_decisions_and_the_carried_standing_are_in_the_index_and_the_list(
     assert [(item.body["standing"], item.body["records_only"])
             for item in found.of(index.VERSION)] == [("lead-decision@v4", True)]
     assert main(["list"]) == 0
-    assert f"{ROUND}   open   flow full   design: lead-decision@v4   " in (
-        capsys.readouterr().out)
+    assert (f"{ROUND}   open   flow full   step docket, ready   "
+            "design: lead-decision@v4   ") in capsys.readouterr().out
