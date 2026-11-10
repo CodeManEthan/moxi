@@ -22,7 +22,7 @@ repository holds all of them.
 | `packages/notes` | `moxi-notes` | Where each session keeps its notes, snapshots of the notes repository, and the secret checks that guard it |
 | `packages/projects` | `moxi-projects` | A list of named places: projects, their roots, kinds and agents |
 | `packages/repo` | `moxi-repo` | Git hooks run as declared pieces, and one shared committer |
-| `packages/rounds` | `moxi-rounds` | A piece of work tracked from design to landing: its questions, rulings, builds and gates |
+| `packages/rounds` | `moxi-rounds` | The record of a piece of work: its questions, the operator's rulings and each project's standing rulings |
 | `packages/secrets` | `moxi-secrets` | Named pattern sets for credentials and personal data, and one way to scan text for them |
 | `packages/services` | `moxi-services` | One list of every daemon and timer on the machine, to start, stop, enable, disable and watch |
 | `packages/sessions` | `moxi-sessions` | Reads a harness's own session records |
