@@ -8,7 +8,8 @@ import {
 } from "../src/prompt-model.ts";
 
 const place = (project_key, cwd, at = "2026-11-10T18:45:00Z") => ({ project_key, cwd, at });
-const PLACES = { state: "up", detail: null, projects: true, actor: "operator",
+const ALICE = "/home/alice";
+const PLACES = { state: "up", detail: null, projects: true, actor: "operator", home: ALICE,
                  places: [place("proj-a", "/home/alice/code/proj-a/web"), place(null, "/home/alice/notes"),
                           place("proj-b", "/srv/proj-b")] };
 const field = (name, extra = {}) => ({ name, type: "string", default: null, values: null, ...extra });
@@ -28,6 +29,8 @@ function reads(table) {
 test("the places read keeps each place's project, folder and time", () => {
   const read = parsePlaces(PLACES);
   assert.equal(read.projects, true);
+  assert.equal(read.home, ALICE);
+  assert.equal(parsePlaces({ ...PLACES, home: undefined }).home, "");
   assert.deepEqual(read.places[0], place("proj-a", "/home/alice/code/proj-a/web"));
   assert.equal(read.places[1].project_key, null);
   assert.deepEqual(parsePlaces({ ...PLACES, places: [{ cwd: "" }, "x", { project_key: 3, cwd: "/a" }] }).places,
@@ -115,47 +118,56 @@ test("a Home that never launched, without projects, opens on the home folder and
   for (const [data, picker] of [[{ ...PLACES, places: [] }, false], [{ ...PLACES, projects: false, places: [] }, true]]) {
     const { read, asked } = reads({ "launcher api/places": { status: 200, data } });
     const where = await openWhere(read, picker);
-    assert.deepEqual(where, { withProjects: false, places: [], pick: { kind: "folder", path: "~" } });
+    assert.deepEqual(where, { withProjects: false, home: ALICE, places: [], pick: { kind: "folder", path: "~" } });
     assert.deepEqual(asked, ["launcher api/places"]);
   }
 });
 
 test("a places read that fails opens on the home folder with no projects", async () => {
   const { read, asked } = reads({});
-  assert.deepEqual(await openWhere(read, true), { withProjects: false, places: [], pick: { kind: "folder", path: "~" } });
+  assert.deepEqual(await openWhere(read, true), { withProjects: false, home: "", places: [], pick: { kind: "folder", path: "~" } });
   assert.deepEqual(asked, ["launcher api/places"]);
 });
 
 // --- folders -------------------------------------------------------------------------------
 
-test("the home folder is written ~ and any other path as it is", () => {
-  assert.equal(tilde("/home/alice/code/proj-a"), "~/code/proj-a");
-  assert.equal(tilde("/home/alice"), "~");
-  assert.equal(tilde("/Users/alice/notes/"), "~/notes");
-  assert.equal(tilde("/root/x"), "~/x");
-  assert.equal(tilde("/homework/alice"), "/homework/alice");
-  assert.equal(tilde("/srv/proj-b"), "/srv/proj-b");
-  assert.equal(tilde("~/notes"), "~/notes");
-  assert.equal(tilde("/"), "/");
+test("the home folder the page server names is written ~ and any other path as it is", () => {
+  assert.equal(tilde("/home/alice/code/proj-a", ALICE), "~/code/proj-a");
+  assert.equal(tilde("/home/alice", ALICE), "~");
+  assert.equal(tilde("/home/alice/notes/", "/home/alice/"), "~/notes");
+  assert.equal(tilde("/home/alice-two/x", ALICE), "/home/alice-two/x");
+  assert.equal(tilde("/home/bob/x", ALICE), "/home/bob/x");
+  assert.equal(tilde("/srv/proj-b", ALICE), "/srv/proj-b");
+  assert.equal(tilde("~/notes", ALICE), "~/notes");
+  assert.equal(tilde("/", ALICE), "/");
+});
+
+test("a home folder of any form is written ~, and none is recognised by its form", () => {
+  assert.equal(tilde("/data/people/alice/code", "/data/people/alice"), "~/code");
+  assert.equal(tilde("/home/alice/code", "/data/people/alice"), "/home/alice/code");
+  // With no home folder named, or the root as one, every path is drawn whole.
+  assert.equal(tilde("/home/alice/code/", ""), "/home/alice/code");
+  assert.equal(tilde("/root/x", ""), "/root/x");
+  assert.equal(tilde("/srv/x", "/"), "/srv/x");
 });
 
 test("a folder's face is the dim path and its own name", () => {
-  assert.deepEqual(folderFace("/home/alice/code/proj-a"), { dim: "~/code/", name: "proj-a" });
-  assert.deepEqual(folderFace("/srv/proj-b"), { dim: "/srv/", name: "proj-b" });
-  assert.deepEqual(folderFace("/home/alice"), { dim: "", name: "~" });
-  assert.deepEqual(folderFace("~"), { dim: "", name: "~" });
-  assert.deepEqual(folderFace("/"), { dim: "", name: "/" });
-  assert.deepEqual(folderFace("/srv"), { dim: "/", name: "srv" });
+  assert.deepEqual(folderFace("/home/alice/code/proj-a", ALICE), { dim: "~/code/", name: "proj-a" });
+  assert.deepEqual(folderFace("/srv/proj-b", ALICE), { dim: "/srv/", name: "proj-b" });
+  assert.deepEqual(folderFace("/home/alice", ALICE), { dim: "", name: "~" });
+  assert.deepEqual(folderFace("~", ALICE), { dim: "", name: "~" });
+  assert.deepEqual(folderFace("/", ALICE), { dim: "", name: "/" });
+  assert.deepEqual(folderFace("/srv", ALICE), { dim: "/", name: "srv" });
 });
 
 test("a long folder is cut in the middle of its dim part, keeping the first segment and the name", () => {
-  assert.deepEqual(folderFace("/home/alice/one/two/three/four/proj-a", 16), { dim: "~/…/four/", name: "proj-a" });
-  assert.deepEqual(folderFace("/home/alice/one/two/three/four/proj-a", 24), { dim: "~/…/three/four/", name: "proj-a" });
-  assert.deepEqual(folderFace("/var/lib/one/two/proj-a", 16), { dim: "/var/…/", name: "proj-a" });
-  assert.deepEqual(folderFace("/home/alice/one/a-very-long-folder-name-that-is-never-cut", 20),
+  assert.deepEqual(folderFace("/home/alice/one/two/three/four/proj-a", ALICE, 16), { dim: "~/…/four/", name: "proj-a" });
+  assert.deepEqual(folderFace("/home/alice/one/two/three/four/proj-a", ALICE, 24), { dim: "~/…/three/four/", name: "proj-a" });
+  assert.deepEqual(folderFace("/var/lib/one/two/proj-a", ALICE, 16), { dim: "/var/…/", name: "proj-a" });
+  assert.deepEqual(folderFace("/home/alice/one/a-very-long-folder-name-that-is-never-cut", ALICE, 20),
                    { dim: "~/…/", name: "a-very-long-folder-name-that-is-never-cut" });
   // Nothing between the first segment and the name to cut.
-  assert.deepEqual(folderFace("/home/alice/a-very-long-folder-name", 10), { dim: "~/", name: "a-very-long-folder-name" });
+  assert.deepEqual(folderFace("/home/alice/a-very-long-folder-name", ALICE, 10), { dim: "~/", name: "a-very-long-folder-name" });
 });
 
 test("a typed folder must be absolute or start with ~", () => {
@@ -170,18 +182,18 @@ test("a typed folder must be absolute or start with ~", () => {
 // --- the line and its menu -----------------------------------------------------------------
 
 test("the line reads Project with a key and Folder with a path", () => {
-  assert.deepEqual(whereFace({ kind: "project", key: "proj-a" }), { word: "Project", dim: "", name: "proj-a" });
-  assert.deepEqual(whereFace({ kind: "folder", path: "/home/alice/code/proj-a" }),
+  assert.deepEqual(whereFace({ kind: "project", key: "proj-a" }, ALICE), { word: "Project", dim: "", name: "proj-a" });
+  assert.deepEqual(whereFace({ kind: "folder", path: "/home/alice/code/proj-a" }, ALICE),
                    { word: "Folder", dim: "~/code/", name: "proj-a" });
-  assert.deepEqual(whereFace({ kind: "folder", path: "~" }), { word: "Folder", dim: "", name: "~" });
-  assert.deepEqual(whereFace({ kind: "choose" }), { word: "Project", dim: "", name: "choose" });
+  assert.deepEqual(whereFace({ kind: "folder", path: "~" }, ALICE), { word: "Folder", dim: "", name: "~" });
+  assert.deepEqual(whereFace({ kind: "choose" }, ALICE), { word: "Project", dim: "", name: "choose" });
 });
 
 test("two picks are the same place by key, or by folder however home is written", () => {
-  assert.equal(samePick({ kind: "folder", path: "~/notes" }, { kind: "folder", path: "/home/alice/notes/" }), true);
-  assert.equal(samePick({ kind: "project", key: "proj-a" }, { kind: "project", key: "proj-a" }), true);
-  assert.equal(samePick({ kind: "project", key: "notes" }, { kind: "folder", path: "notes" }), false);
-  assert.equal(samePick({ kind: "choose" }, { kind: "choose" }), false);
+  assert.equal(samePick({ kind: "folder", path: "~/notes" }, { kind: "folder", path: "/home/alice/notes/" }, ALICE), true);
+  assert.equal(samePick({ kind: "project", key: "proj-a" }, { kind: "project", key: "proj-a" }, ALICE), true);
+  assert.equal(samePick({ kind: "project", key: "notes" }, { kind: "folder", path: "notes" }, ALICE), false);
+  assert.equal(samePick({ kind: "choose" }, { kind: "choose" }, ALICE), false);
 });
 
 test("a place's time is the time of day today and the day before that", () => {
@@ -198,7 +210,7 @@ test("a place's time is the time of day today and the day before that", () => {
 
 test("with projects a place that has a project is its key alone, and the current one is ticked", () => {
   const now = new Date("2026-11-10T19:00:00Z");
-  const rows = placeRows(parsePlaces(PLACES).places, true, { kind: "project", key: "proj-b" }, now, () => "t", () => "d");
+  const rows = placeRows(parsePlaces(PLACES).places, true, { kind: "project", key: "proj-b" }, ALICE, now, () => "t", () => "d");
   assert.deepEqual(rows.map((row) => [row.dim, row.name, row.current]),
                    [["", "proj-a", false], ["~/", "notes", false], ["", "proj-b", true]]);
   assert.deepEqual(rows[0].pick, { kind: "project", key: "proj-a" });
@@ -207,7 +219,7 @@ test("with projects a place that has a project is its key alone, and the current
 
 test("without projects every place is its folder and a pick of it sets the folder", () => {
   const now = new Date("2026-11-10T19:00:00Z");
-  const rows = placeRows(parsePlaces(PLACES).places, false, { kind: "folder", path: "~/notes" }, now);
+  const rows = placeRows(parsePlaces(PLACES).places, false, { kind: "folder", path: "~/notes" }, ALICE, now);
   assert.deepEqual(rows.map((row) => [row.dim, row.name, row.current]),
                    [["~/code/proj-a/", "web", false], ["~/", "notes", true], ["/srv/", "proj-b", false]]);
   assert.ok(rows.every((row) => row.pick.kind === "folder"));
@@ -216,9 +228,9 @@ test("without projects every place is its folder and a pick of it sets the folde
 
 test("two places drawn the same are one row, the newer", () => {
   const places = [place("proj-a", "/srv/x", "2026-11-10T18:00:00Z"), place(null, "/srv/x", "2026-11-09T18:00:00Z")];
-  const rows = placeRows(places, false, { kind: "choose" }, new Date("2026-11-10T19:00:00Z"), () => "new", () => "old");
+  const rows = placeRows(places, false, { kind: "choose" }, ALICE, new Date("2026-11-10T19:00:00Z"), () => "new", () => "old");
   assert.deepEqual(rows.map((row) => row.time), ["new"]);
-  assert.equal(placeRows(places, true, { kind: "choose" }, new Date()).length, 2);
+  assert.equal(placeRows(places, true, { kind: "choose" }, ALICE, new Date()).length, 2);
 });
 
 // --- the form's values ---------------------------------------------------------------------

@@ -503,13 +503,20 @@ def read_runs(call: Any) -> dict[str, Any]:
 PROJECTS = "projects"
 
 
+def _home() -> str:
+    """The user's home folder as the page server sees it, which is what `~` in a launch's
+    folder stands for."""
+    return os.path.expanduser("~")
+
+
 def places() -> dict[str, Any]:
     """`/api/places`' answer: who the page server launches as, the places that actor last
-    launched in, newest first, and whether a launch here may name a project."""
+    launched in, newest first, whether a launch here may name a project, and the home
+    folder, so the page can write a place under it with `~`."""
     actor = first.actor()
     with _store() as conn:
         found = [] if conn is None else store.places(conn, actor)
-    return _up(projects=_available()(PROJECTS), actor=actor,
+    return _up(projects=_available()(PROJECTS), actor=actor, home=_home(),
                places=[place._asdict() for place in found])
 
 
@@ -520,7 +527,7 @@ def read_places(call: Any) -> dict[str, Any]:
             return places()
         except Exception as err:
             return _failed(err, "reading the places failed", projects=False,
-                           actor=first.actor(), places=[])
+                           actor=first.actor(), home=_home(), places=[])
 
 
 # -- /api/targets ---------------------------------------------------------------------------

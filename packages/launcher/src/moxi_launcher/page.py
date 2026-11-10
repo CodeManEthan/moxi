@@ -203,8 +203,9 @@ RUNS = {**STANDING, "runs": Out("list", items=RUN)}
 #: and the time of the newest launch there.
 PLACE = _table(project_key=_text(nullable=True), cwd=_text(mark="path"), at=_text())
 #: `projects` is whether a launch here may name a project; `actor` is who the page
-#: server launches as, whose launches the places are.
-PLACES = {**STANDING, "projects": Out("bool"), "actor": _text(),
+#: server launches as, whose launches the places are; `home` is the user's home folder
+#: as the page server sees it.
+PLACES = {**STANDING, "projects": Out("bool"), "actor": _text(), "home": _text(mark="path"),
           "places": Out("list", items=PLACE)}
 
 #: One slot a launch may name. `holder` and `until` (seconds since the epoch) are a live

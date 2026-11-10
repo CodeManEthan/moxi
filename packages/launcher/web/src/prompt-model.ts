@@ -32,10 +32,12 @@ export interface Place {
   at: string;
 }
 
-/** The value of `/api/places`: the places, newest first, and whether the page server would
- * take a project for a launch's place. */
+/** The value of `/api/places`: the places, newest first, whether the page server would
+ * take a project for a launch's place, and the user's home folder as the page server sees
+ * it ("" when the answer names none). */
 export interface Places {
   projects: boolean;
+  home: string;
   places: Place[];
 }
 
@@ -48,7 +50,7 @@ export function parsePlaces(data: unknown): Places | null {
     places.push({ project_key: typeof row.project_key === "string" && row.project_key ? row.project_key : null,
                   cwd: row.cwd, at: typeof row.at === "string" ? row.at : "" });
   }
-  return { projects: data.projects === true, places };
+  return { projects: data.projects === true, home: typeof data.home === "string" ? data.home : "", places };
 }
 
 /** Whether projects is there: the page server would take a project, and the shell has
@@ -97,6 +99,8 @@ export type Read = (module: string, path: string) => Promise<ApiResult>;
 /** What the line above the box opens with. */
 export interface Where {
   withProjects: boolean;
+  /** The user's home folder, "" when the places could not be read. */
+  home: string;
   places: Place[];
   pick: Pick;
 }
@@ -112,10 +116,11 @@ export async function openWhere(read: Read, picker: boolean): Promise<Where> {
   const places = answer.status === 200 ? parsePlaces(answer.data) : null;
   const projects = withProjects(places, picker);
   const rows = places?.places ?? [];
-  if (rows.length > 0) return { withProjects: projects, places: rows, pick: pickOf(rows[0], projects) };
-  if (!projects) return { withProjects: false, places: rows, pick: HOME_PICK };
+  const home = places?.home ?? "";
+  if (rows.length > 0) return { withProjects: projects, home, places: rows, pick: pickOf(rows[0], projects) };
+  if (!projects) return { withProjects: false, home, places: rows, pick: HOME_PICK };
   const listed = await read("projects", "api/projects");
-  return { withProjects: true, places: rows,
+  return { withProjects: true, home, places: rows,
            pick: firstOpen(true, listed.status === 200 ? projectKeys(listed.data) : null) };
 }
 
@@ -131,14 +136,19 @@ export function pickValues(pick: Pick): Record<string, FormValue> {
 
 // --- folders -------------------------------------------------------------------------------
 
-const HOME_FOLDER = /^(?:\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/;
+function bare(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
+}
 
-/** A path with the user's home folder written `~`. The home folder is told by its usual
- * forms (`/home/<name>`, `/Users/<name>`, `/root`); any other path comes back as it is,
- * less its closing slashes. */
-export function tilde(path: string): string {
-  const bare = path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
-  return bare.replace(HOME_FOLDER, HOME);
+/** A path with the user's home folder written `~`. `home` is that folder as the page
+ * server names it; a path outside it, and every path while `home` is "", comes back as it
+ * is, less its closing slashes. */
+export function tilde(path: string, home: string): string {
+  const said = bare(path);
+  const root = bare(home);
+  if (root === "" || root === "/") return said;
+  if (said === root) return HOME;
+  return said.startsWith(`${root}/`) ? `${HOME}${said.slice(root.length)}` : said;
 }
 
 /** A folder as the page draws it: the path before its last segment, which is drawn dim, and
@@ -156,8 +166,8 @@ export const FACE_MAX = 56;
  * cut in the dim part only, from its middle, keeping the first segment and as many of the
  * segments next to the name as fit: `~/…/deep/name`. The name is never cut.
  */
-export function folderFace(path: string, max = FACE_MAX): FolderFace {
-  const shown = tilde(path);
+export function folderFace(path: string, home: string, max = FACE_MAX): FolderFace {
+  const shown = tilde(path, home);
   const at = shown.lastIndexOf("/");
   if (at < 0 || shown === "/") return { dim: "", name: shown };
   const dim = shown.slice(0, at + 1);
@@ -192,19 +202,20 @@ export interface WhereFace extends FolderFace {
   word: "Project" | "Folder";
 }
 
-export function whereFace(pick: Pick): WhereFace {
+export function whereFace(pick: Pick, home: string): WhereFace {
   if (pick.kind === "project") return { word: "Project", dim: "", name: pick.key };
   if (pick.kind === "choose") return { word: "Project", dim: "", name: "choose" };
-  return { word: "Folder", ...folderFace(pick.path) };
+  return { word: "Folder", ...folderFace(pick.path, home) };
 }
 
-function pickKey(pick: Pick): string {
-  return pick.kind === "project" ? `project ${pick.key}` : pick.kind === "folder" ? `folder ${tilde(pick.path)}` : "";
+function pickKey(pick: Pick, home: string): string {
+  return pick.kind === "project" ? `project ${pick.key}`
+    : pick.kind === "folder" ? `folder ${tilde(pick.path, home)}` : "";
 }
 
 /** Whether two picks name the same place. */
-export function samePick(a: Pick, b: Pick): boolean {
-  return pickKey(a) !== "" && pickKey(a) === pickKey(b);
+export function samePick(a: Pick, b: Pick, home: string): boolean {
+  return pickKey(a, home) !== "" && pickKey(a, home) === pickKey(b, home);
 }
 
 /** A time as the browser's locale writes it. */
@@ -240,17 +251,17 @@ export interface PlaceRow extends FolderFace {
  * project's root; any other place, and every place without projects, is its folder. Two
  * places drawn the same are one row, the newer.
  */
-export function placeRows(places: readonly Place[], projects: boolean, pick: Pick, now: Date,
+export function placeRows(places: readonly Place[], projects: boolean, pick: Pick, home: string, now: Date,
                           hour: Clock = HOUR, day: Clock = DAY): PlaceRow[] {
   const seen = new Set<string>();
   const out: PlaceRow[] = [];
   for (const place of places) {
     const mine = pickOf(place, projects);
-    const key = pickKey(mine);
+    const key = pickKey(mine, home);
     if (seen.has(key)) continue;
     seen.add(key);
-    const face = mine.kind === "project" ? { dim: "", name: mine.key } : folderFace(place.cwd, ROW_MAX);
-    out.push({ ...face, pick: mine, time: placeTime(place.at, now, hour, day), current: samePick(mine, pick) });
+    const face = mine.kind === "project" ? { dim: "", name: mine.key } : folderFace(place.cwd, home, ROW_MAX);
+    out.push({ ...face, pick: mine, time: placeTime(place.at, now, hour, day), current: samePick(mine, pick, home) });
   }
   return out;
 }

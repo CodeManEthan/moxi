@@ -133,6 +133,8 @@ export class LauncherPrompt extends LitElement {
   #typed = false;
   /** Whether projects is there, worked out once when the piece connects. */
   #withProjects = false;
+  /** The user's home folder as the page server names it, drawn as `~`. */
+  #home = "";
   /** Holds projects' picker, placed the first time the line's menu opens. */
   #picker = document.createElement("div");
   #pickerPlaced = false;
@@ -228,6 +230,7 @@ export class LauncherPrompt extends LitElement {
     const where = await openWhere(api, picker);
     if (mine !== this.#opened) return;
     this.#withProjects = where.withProjects;
+    this.#home = where.home;
     this.places = where.places;
     // A place he picked while the read was under way stands.
     this.pick ??= where.pick;
@@ -320,7 +323,7 @@ export class LauncherPrompt extends LitElement {
   }
 
   #where(pick: Pick) {
-    const face = whereFace(pick);
+    const face = whereFace(pick, this.#home);
     const open = this.menu === "where";
     return html`<div class="where" data-word=${face.word}><span class="k">${face.word}</span><span
       class=${open ? "anchor open" : "anchor"}><button type="button" class="face" aria-haspopup="true"
@@ -333,7 +336,7 @@ export class LauncherPrompt extends LitElement {
   }
 
   #whereMenu(pick: Pick) {
-    const rows = placeRows(this.places, this.#withProjects, pick, new Date());
+    const rows = placeRows(this.places, this.#withProjects, pick, this.#home, new Date());
     return html`<div class="menu" data-menu="where">
       <input class="find" type="text" aria-label="Type a folder path" placeholder="Type a folder path"
         autocomplete="off" spellcheck="false" @keydown=${this.#typedKey}>

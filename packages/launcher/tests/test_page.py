@@ -628,6 +628,7 @@ def test_places_are_the_actors_own_newest_first_with_the_actor_named(log):
     status, said, _ = get("/api/places")
     assert (status, said) == (200, {
         "state": "up", "detail": None, "projects": False, "actor": first.actor(),
+        "home": os.path.expanduser("~"),
         "places": [
             {"project_key": None, "cwd": "/work/one", "at": "2026-01-01T11:00:00.000000Z"},
             {"project_key": "proj-a", "cwd": "/src/proj-a/docs",
@@ -675,7 +676,8 @@ def test_a_launch_made_under_a_comms_name_is_that_names_place(log, monkeypatch):
 def test_no_launch_log_reads_no_place_and_makes_none():
     status, said, _ = get("/api/places")
     assert (status, said) == (200, {"state": "up", "detail": None, "projects": False,
-                                    "actor": first.actor(), "places": []})
+                                    "actor": first.actor(),
+                                    "home": os.path.expanduser("~"), "places": []})
     assert not store.path().exists()
 
 
@@ -687,8 +689,14 @@ def test_a_failed_places_read_says_only_the_class(log, monkeypatch):
     status, said, raw = get("/api/places")
     assert status == 200 and said == {
         "state": "error", "detail": pagehandlers.UNEXPECTED.format("RuntimeError"),
-        "projects": False, "actor": first.actor(), "places": []}
+        "projects": False, "actor": first.actor(), "home": os.path.expanduser("~"),
+        "places": []}
     assert b"someone" not in raw
+
+
+def test_places_name_the_home_folder_the_page_server_sees(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    assert get("/api/places")[1]["home"] == str(tmp_path / "elsewhere")
 
 
 # --- /api/targets -------------------------------------------------------------------------
