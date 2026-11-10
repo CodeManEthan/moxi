@@ -210,7 +210,7 @@ def test_a_round_that_cant_be_read_is_listed_as_unreadable(rounds, capsys):
 
     lines = printed(capsys).splitlines()
     assert lines[0].startswith(f"{A}   unreadable: {file} line 5 ")
-    assert "open" not in lines[0] and lines[1].startswith(f"{B}   open")
+    assert "   open" not in lines[0] and lines[1].startswith(f"{B}   open")
 
     first = data(capsys)["rounds"][0]
     assert set(first) == {"name", "project", "folder", "unreadable"}
