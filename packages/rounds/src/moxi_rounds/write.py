@@ -47,7 +47,7 @@ from pathlib import Path
 from moxi import files
 
 from . import events as event_types
-from . import log, paths, state
+from . import index, log, paths, state
 from .errors import Locked, NoLog, Refused, Unmet
 
 #: How long a verb waits for a lock before it refuses, in seconds.
@@ -133,7 +133,7 @@ Gate = Callable[[View], "Unmet | Iterable[Unmet] | None"]
 
 #: The callbacks every write calls after its append, in order, each with the `Written`.
 #: A module that keeps something derived from the logs adds its function here.
-ON_APPEND: tuple[Callable[[Written], None], ...] = ()
+ON_APPEND: tuple[Callable[[Written], None], ...] = (index.on_append,)
 
 
 def record(where: Where, *, actor: str,

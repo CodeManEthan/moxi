@@ -298,3 +298,17 @@ def test_a_line_in_a_later_log_format_is_refused_as_too_new(path):
     assert isinstance(error, TooNew)
     assert error.line == 2
     assert "upgrade moxi-rounds" in error.fix
+
+
+def test_bytes_already_read_parse_to_the_events_a_read_of_the_file_gives(tmp_path):
+    path = tmp_path / "round.jsonl"
+    log.append(path, "round.opened",
+               {"description": "a placeholder round", "flow": "fix", "steps": []},
+               actor="planner")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="planner")
+    data = path.read_bytes()
+    assert log.parse(path, data) == log.read(path)
+    assert log.parse(path, b"") == []
+    with pytest.raises(Unreadable) as caught:
+        log.parse(path, data[:-1])
+    assert (caught.value.file, caught.value.line) == (path, 2)

@@ -63,6 +63,14 @@ def read(path: Path) -> list[dict]:
         data = path.read_bytes()
     except FileNotFoundError:
         raise NoLog(path) from None
+    return parse(path, data)
+
+
+def parse(path: Path, data: bytes) -> list[dict]:
+    """The events in `data`, the whole content of the log `path`, oldest first. For a
+    caller that needs the bytes it read and the events they hold to be one reading of
+    the file. Raises `Unreadable` as `read` does."""
+    path = Path(path)
     if not data:
         return []
     lines = data.split(b"\n")
@@ -130,4 +138,4 @@ def append(path: Path, name: str, fields: Mapping[str, object], *, actor: str,
 
 
 __all__ = ["ROUND_LOG", "PROJECT_LOG", "round_log", "project_log", "exists", "stamp",
-           "read", "append"]
+           "read", "parse", "append"]

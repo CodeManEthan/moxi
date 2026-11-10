@@ -11,6 +11,10 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
   is not, each an `Unmet` with the command that meets it. Nothing was written.
 - `Locked` (exit 3): another process held a lock past the wait. `file` is the lock file
   and `holder` the pid written in it.
+- `BadName` (exit 2): a round's name is not `<project>/<slug>`.
+- `UnknownProject` (exit 3): the projects list holds no project of that key.
+- `NoFolder` (exit 3): a project's rounds folder can't be worked out. `problem` says why,
+  and the fix names the setting that gives it one.
 """
 
 from __future__ import annotations
@@ -119,4 +123,46 @@ class Locked(RoundsError):
                          f"run the command again once {who} is done")
 
 
-__all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked"]
+class BadName(RoundsError):
+    """`name` is not a round's name: a project's key, `/`, and a slug of lower-case
+    letters, digits and `-`."""
+
+    exit_code = exits.USAGE
+
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(f"{name!r} is not a round's name",
+                         "name a round as <project>/<slug>, the slug in lower-case "
+                         "letters, digits and -")
+
+
+class UnknownProject(RoundsError):
+    """The projects list holds no project whose key is `project`."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, project: str):
+        self.project = project
+        super().__init__(f"there is no project {project!r}",
+                         f"add it with `moxi projects add {project} --root DIR`, or see "
+                         "the keys with `moxi projects list`")
+
+
+class NoFolder(RoundsError):
+    """The rounds folder of the project `project` can't be worked out; `problem` says
+    why."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, project: str, problem: str):
+        self.project = project
+        self.problem = problem
+        super().__init__(
+            f"the rounds folder of the project {project!r} can't be worked out: {problem}",
+            f'set dir = "/an/absolute/folder" under [projects.{project}] in rounds\' '
+            "config, or give the project a notes folder with `moxi projects set "
+            f"{project} --notes-root DIR`")
+
+
+__all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked",
+           "BadName", "UnknownProject", "NoFolder"]
