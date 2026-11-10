@@ -673,7 +673,9 @@ def _declare_fold(verbs) -> None:
     said = ("Freeze the round's design as its next version: copy design.md to "
             "versions/design-v<N>.md and record the version with what its data block "
             "declares. What the block adds is added at once; what it takes away "
-            "waits for a verdict or the operator's ruling.")
+            "waits for a verdict or the operator's ruling. Where the project's "
+            "trace setting is on, the version's trace rows are checked and what "
+            "the check found is recorded with it.")
     parser = verbs.add_parser("fold", help=said, description=said)
     parser.add_argument("round", metavar="ROUND",
                         help="the round's name, <project>/<slug>")

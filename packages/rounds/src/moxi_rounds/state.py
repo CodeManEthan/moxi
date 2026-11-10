@@ -264,7 +264,8 @@ class Version:
     #: Whether it was frozen as a change of records only, and the pointer that says so.
     records_only: bool
     record: str | None
-    #: What the trace check found when it was frozen, None when it was not run.
+    #: What the check of its trace rows found when it was frozen, as the event holds
+    #: it (`tracing.recorded` reads it); None for an event that holds no result.
     trace: object
     #: What the design's block declared, as the event holds it: `question`, `stage`,
     #: `trace` and `commitment`, each a list.

@@ -10,6 +10,7 @@ import pytest
 
 from moxi_rounds import freezing, log, opening, ruling, state, tracing, versions
 from moxi_rounds.cli import main
+from moxi_rounds.errors import NoLog
 
 ROUND = "proj-a/a-round"
 ASKED = "Do agent-read times follow the settings?"
@@ -91,7 +92,7 @@ def fold(folder, *entries, plan=PLAN, **how):
 
 
 def rule(item=None, target=ROUND, text=SAID, **more):
-    if item is not None and not item[0] in "QP":
+    if item is not None and item[0] not in "QP":
         text = None
     return ruling.rule(target, item=item, record=PTR, actor="planner", text=text,
                        **more).id
@@ -102,9 +103,10 @@ def folded(folder):
 
 
 def register(folder):
+    """The state of the project's log, empty while nothing is recorded on it."""
     try:
         return state.fold(log.read(log.project_log(folder.parent)))
-    except Exception:
+    except NoLog:
         return state.State()
 
 
