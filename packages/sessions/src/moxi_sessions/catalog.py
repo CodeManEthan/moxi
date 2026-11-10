@@ -54,11 +54,15 @@ reads again.
   `ACTIVITY_BYTES` bytes and the prompt to `TEXT_MAX`. A
   file's are reused while its size and mtime are the ones they were read at, an OpenCode
   session's while its `time_updated` is.
-* Each file's head facts, by path, device and inode. A head is read again only when the
-  file has grown and the earlier read left a fact open: one that ended at the file's end,
+* Each file's head facts, by path, device and inode. A head is read again when the file
+  has grown and the earlier read left a fact open: one that ended at the file's end,
   where later lines can still add a folder, a start, an entrypoint or a name, or a Codex
-  read that found no line 1. Once a file has outgrown the head's bounds its head reads the
-  same for ever, and it is read once.
+  read that found no line 1. A file that has outgrown the head's bounds has its head read
+  once: the harnesses write a record by adding lines at its end, so its first lines are
+  taken to stay as they were read. A file that is smaller than when its head was read
+  was written again, and its head is read again; so is one at the same path with another
+  inode. A gather drops the head of a file it no longer lists, so the heads kept are
+  those of the files that are there.
 
 One lock guards what is kept. It is never held while a file or a database is read.
 `Catalog.read_heads(entries)` makes sure the heads of some entries are read;
@@ -545,6 +549,8 @@ class Catalog:
         unread: list[Unread] = []
         listed: list[str] = []
         unreadable = None
+        live: set[str] = set()           # the files whose heads a catalog keeps
+        unsure: list[str | None] = []    # roots not listed whole: their heads stay
         for harness in HARNESSES:
             if harness in self._roots:
                 root, named = Path(self._roots[harness]), True
@@ -553,6 +559,7 @@ class Catalog:
                     origin = root_origin(harness)
                 except ConfigError as exc:
                     unread.append(Unread(harness, None, str(exc)))
+                    unsure.append(None)
                     continue
                 root, named = origin.path, origin.configured
             if not named and _absent(root):
@@ -561,6 +568,7 @@ class Catalog:
             if not listing.ok:
                 unread.append(Unread(harness, listing.root,
                                      listing.reason or "could not be listed"))
+                unsure.append(listing.root)
                 continue
             listed.append(harness)
             parts = _unlisted(listing)
@@ -575,6 +583,10 @@ class Catalog:
                 parts += unopened
             if parts:
                 unread.append(Unread(harness, listing.root, None, parts))
+                unsure.append(listing.root)
+            if harness != OPENCODE:
+                live.update(e.source.path for e in listing
+                            if e.kind != "subagent" and not e.compressed)
         entries.sort(key=lambda e: e.order)
         seen: set[tuple[str, str]] = set()
         kept = []
@@ -587,6 +599,11 @@ class Catalog:
                           self._clock())
         with self._lock:
             self._gathered = result
+            if None not in unsure:
+                under = tuple(f"{root}/" for root in unsure)
+                for path in [p for p in self._heads
+                             if p not in live and not p.startswith(under)]:
+                    del self._heads[path]
         return result
 
     def _codex_entries(self, listing: Listing) -> tuple[list[Entry], int]:
@@ -613,8 +630,10 @@ class Catalog:
         head = self._heads.get(listed.source.path)
         if head is None or (head.dev, head.ino) != (listed.dev, listed.ino):
             return None, False
-        grown = (listed.size or 0) > (head.size or 0)
-        return head, head.settled or not grown
+        size, was = listed.size or 0, head.size or 0
+        if size < was:
+            return None, False           # written again: what was read is not its head
+        return head, head.settled or size == was
 
     def _read_heads(self, listeds: Sequence[Listed], imports: Any = None
                     ) -> list[Head | None]:

@@ -891,6 +891,67 @@ def test_a_file_written_anew_under_the_same_path_is_read_again(roots):
     assert cat.head_reads == 2
 
 
+def test_a_file_written_again_in_place_and_smaller_has_its_head_read_again(roots):
+    t = transcript(roots, cwd="/work/proj-a")
+    for n in range(HEAD_LINES):
+        t.user(f"prompt {n}", origin="human")
+    path = t.write()
+    clock = Clock()
+    cat = Catalog(roots, clock=clock)
+    assert cat.head(only(cat)).settled is True
+
+    other = ClaudeTranscript(roots[CLAUDE], session_id=sid(2), cwd="/work/proj-b")
+    other.user("go", origin="human")
+    lines = other.write().read_bytes()
+    other.path.unlink()
+    with open(path, "r+b") as handle:           # the same file, the same inode
+        handle.truncate(0)
+        handle.write(lines)
+    clock.now += 5
+
+    assert cat.head(only(cat)).folder == "/work/proj-b"
+    assert cat.head_reads == 2
+
+
+def test_a_gather_drops_the_heads_of_files_it_no_longer_lists(roots):
+    kept, gone = transcript(roots, 1), transcript(roots, 2)
+    thread = rollout(roots, 1)
+    for each in (kept, gone, thread):
+        each.user("go")
+        each.write()
+    clock = Clock()
+    cat = Catalog(roots, clock=clock)
+    cat.read_heads()
+    assert set(cat._heads) == {str(kept.path), str(gone.path), str(thread.path)}
+
+    gone.path.unlink()
+    thread.path.unlink()
+    clock.now += 5
+    cat.gather()
+
+    assert set(cat._heads) == {str(kept.path)}
+
+
+def test_a_root_that_was_not_listed_keeps_its_heads(roots):
+    t = transcript(roots, 1)
+    t.user("go")
+    t.write()
+    clock = Clock()
+    cat = Catalog(roots, clock=clock)
+    cat.read_heads()
+
+    moved = roots[CLAUDE].with_name("moved")
+    roots[CLAUDE].rename(moved)                  # the root is away for one gather
+    clock.now += 5
+    assert [u.harness for u in cat.gather().roots] == [CLAUDE]
+    assert set(cat._heads) == {str(t.path)}
+
+    moved.rename(roots[CLAUDE])
+    clock.now += 5
+    assert cat.head(only(cat)).folder == t.cwd
+    assert cat.head_reads == 1
+
+
 def test_a_rollout_head_is_read_once_and_one_with_no_first_line_again(roots):
     whole = rollout(roots, 1)
     whole.turn()

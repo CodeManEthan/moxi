@@ -233,8 +233,11 @@ def claude_named_head(handle: BinaryIO, end: int) -> tuple[str | None, bool]:
     marker among the records.
 
     `complete` is true when the head's bounds, not the file's end at `end`, stopped the
-    read. Lines are only ever appended, so a complete head reads the same however the
-    file grows; one the file's end stopped can still gain lines, a name among them."""
+    read. Claude Code writes a transcript by adding lines at its end, and no transcript
+    sessions has read had a line changed where it stood; on that, a complete head is
+    taken to read the same as the file grows. One the file's end stopped can still gain
+    lines, a name among them. A caller that keeps a head checks that the file is the
+    same one and no smaller before it relies on this."""
     name = None
     count = size = 0
     for data in _head_lines(handle, end):
