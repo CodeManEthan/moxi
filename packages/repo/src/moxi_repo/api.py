@@ -1,8 +1,8 @@
-"""The verbs behind `moxi repo git-hooks` and `moxi repo specs`, for the CLI and for other
-modules.
+"""The verbs behind `moxi repo git-hooks`, `moxi repo rules` and `moxi repo specs`, for the
+CLI and for other modules.
 
 `add`, `remove`, `enable`, `disable` and `refresh` change a repo's git hooks and return a
-`Report` of what they did; `status` and `available` read. A verb that can't act raises a
+`Report` of what they did; `status`, `available` and `rules` read. A verb that can't act raises a
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
@@ -126,6 +126,19 @@ SEEDS: dict[str, Callable[[], dict[str, list[str]]]] = {COMMIT_RULES: _seed_comm
 #: fn(setting, values) -> why they are refused, or None.
 SETTING_CHECKS: dict[str, Callable[[str, list[str]], str | None]] = {
     COMMIT_RULES: _check_commit_rules}
+
+
+def _commit_rules_lines(repo: Repo, settings: dict[str, list[str]]) -> list[str]:
+    from moxi_repo.commit_rules import rule_lines
+
+    return rule_lines(settings)
+
+
+#: The pieces that give a repo commit rules, in the order `rules` prints them: piece id ->
+#: fn(repo, the piece's settings there) -> its lines. A repo where none of them is
+#: registered has no commit rules.
+RULE_LINES: dict[str, Callable[[Repo, dict[str, list[str]]], list[str]]] = {
+    COMMIT_RULES: _commit_rules_lines}
 
 
 # -- the module's config ------------------------------------------------------------------
@@ -945,6 +958,22 @@ def forget_spec(path: str | os.PathLike, name: str) -> Report:
 
 # -- reading ------------------------------------------------------------------------------
 
+def rules(path: str | os.PathLike) -> list[str]:
+    """What a committer in the repo at `path` must know, as the lines `moxi repo rules`
+    prints: a heading naming the repo, then the lines of each registered piece in
+    `RULE_LINES`. With none of those pieces registered, one line saying the repo has no
+    commit rules. A disabled piece is still registered."""
+    repo = _resolve(path)
+    state = _state(repo)
+    found = [pid for pid in RULE_LINES if pid in state.pieces]
+    if not found:
+        return [f"no commit rules for {repo.root}"]
+    lines = [f"commit rules for {repo.root}"]
+    for pid in found:
+        lines += RULE_LINES[pid](repo, settings_of(state.pieces[pid]))
+    return lines
+
+
 def status(path: str | os.PathLike | None = None) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
@@ -1143,7 +1172,8 @@ def __dir__():
 
 
 __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
-           "available", "add", "remove", "enable", "disable", "refresh", "status",
+           "RULE_LINES", "available", "add", "remove", "enable", "disable", "refresh",
+           "rules", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
            "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]

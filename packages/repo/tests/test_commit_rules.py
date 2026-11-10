@@ -252,7 +252,7 @@ def test_it_is_declared_and_off_unless_added(demo, capsys):
     code, out, _ = run(capsys, "git-hooks", "available")
     assert code == 0
     assert ("repo/commit-rules  commit-msg, closed, order 10, settings: refused-trailer "
-            "(multi), tag-pattern (multi)") in out
+            "(multi), rule (multi), tag-pattern (multi)") in out
     repo = demo.repo()
     write_config("[commit_rules]\ntag_patterns = ['\\bTAG-[0-9]+\\b']\n")
     assert run(capsys, "git-hooks", "add", str(repo), "demo/msg")[0] == 0

@@ -1,4 +1,5 @@
-"""`moxi repo`: the git hooks of the repos you name, and the committer's specs.
+"""`moxi repo`: the git hooks of the repos you name, a repo's commit rules, and the
+committer's specs.
 
     moxi repo git-hooks [list] [PATH] [--projects] [--json]
     moxi repo git-hooks available [--json]
@@ -6,6 +7,7 @@
     moxi repo git-hooks remove PATH [PIECE...]
     moxi repo git-hooks enable|disable PATH PIECE
     moxi repo git-hooks refresh [PATH]
+    moxi repo rules [PATH]
     moxi repo commit PATH [--spec NAME] [--wait-s SECONDS] [--json]
     moxi repo specs [PATH] [--json]
     moxi repo specs remove PATH NAME
@@ -99,6 +101,13 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                     "of one repo or of every indexed repo, keeping each "
                                     "piece's enabled key, settings and record flag.")
     rf.add_argument("path", nargs="?", metavar="PATH")
+
+    ru = verbs.add_parser(
+        "rules", help="what a committer in a repo must know",
+        description="Print the commit rules of the repo at PATH, or of the one you are in: "
+                    "the trailers it refuses, the text its commit messages may not hold, "
+                    "and its own rule lines. A repo with none says so.", epilog=note)
+    ru.add_argument("path", nargs="?", metavar="PATH")
 
     cm = verbs.add_parser(
         "commit", allow_abbrev=False, help="run a repo's saved committer specs",
@@ -308,6 +317,12 @@ def _refresh(args) -> int:
     return print_report(api.refresh(args.path))
 
 
+def _rules(args) -> int:
+    for line in api.rules(args.path if args.path is not None else os.curdir):
+        print(line)
+    return 0
+
+
 def _commit(args) -> int:
     from moxi_repo import committer
 
@@ -383,4 +398,4 @@ def _specs(args) -> int:
 
 _ACTIONS = {"list": _list, "available": _available, "add": _add, "remove": _remove,
             "enable": _enable, "disable": _disable, "refresh": _refresh,
-            "commit": _commit, "specs": _specs}
+            "rules": _rules, "commit": _commit, "specs": _specs}
