@@ -43,7 +43,7 @@ FLOWS = """\
 
     [flows.fix]
     steps = [ { step = "build", by = "builder", model = "second" },
-              { step = "staging", does = "command", before = "finish", timeout_s = 900 },
+              { step = "staging", does = "command", before = "finish", argv = ["./stage.sh", "{tip}"], timeout_s = 900 },
               { step = "finish", by = "builder" } ]
 """
 
@@ -190,7 +190,8 @@ def test_a_flows_table_reads_back_as_it_was_written(write_config):
     assert flows["design"]["steps"][1] == {"step": "verify-design", "by": "checker",
                                            "recheck_model": "third"}
     assert flows["fix"]["steps"][1] == {"step": "staging", "does": "command",
-                                        "before": "finish", "timeout_s": 900}
+                                        "before": "finish",
+                                        "argv": ["./stage.sh", "{tip}"], "timeout_s": 900}
 
 
 def test_moxi_config_shows_the_tables_the_file_holds(write_config):
