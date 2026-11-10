@@ -28,7 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from . import folders, log, pointers, questions, write
+from . import ending, folders, log, pointers, questions, write
 from . import options as choices
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
@@ -152,7 +152,8 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
 
     try:
         written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
-                               gates=[has_an_origin, names_stages_of_the_round,
+                               gates=[ending.takes_new_work(name, "a new question"),
+                                      has_an_origin, names_stages_of_the_round,
                                       offers_two_to_four],
                                event=asked, wait_s=wait_s, at=at)
     except NoLog:

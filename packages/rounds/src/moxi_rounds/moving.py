@@ -45,7 +45,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import corrections, folders, pointers, questions, ruling, state, write
+from . import corrections, ending, folders, pointers, questions, ruling, state, write
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
@@ -175,7 +175,8 @@ def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = Non
 
     return _carry(
         home, slug, question_id, into_round=True, record=record, actor=actor,
-        gates=[exists, _still_asked(found, question_id, listing),
+        gates=[ending.takes_new_work(name, "a question"), exists,
+               _still_asked(found, question_id, listing),
                names_stages_of_the_round, a_list_that_narrows_is_his,
                finishes_with_the_list_it_began_with],
         blocks=wanted, settings=settings, wait_s=wait_s, at=at)
@@ -250,7 +251,8 @@ def move(target: str, source: str, *, actor: str, record: str | None = None,
 
     return _carry(
         home, slug, question_id, into_round=False, record=record, actor=actor,
-        gates=[exists, _still_asked(found, question_id, show), is_his_or_ends_nothing],
+        gates=[ending.takes_new_work(name, "a move of one of its questions"), exists,
+               _still_asked(found, question_id, show), is_his_or_ends_nothing],
         blocks=questions.NONE, settings=settings, wait_s=wait_s, at=at)
 
 

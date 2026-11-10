@@ -51,7 +51,8 @@ of a thing that does not name the first is refused. `revoke:C<n>` (`revoke:S<n>`
 project) takes a ruling back and puts nothing in its place: an answered question is
 open again, and a parked, narrowed or withdrawn one reads as its other changes leave
 it. Both rulings stay in the log. A correction recorded on a round that was closed or
-dropped is recorded and reopens nothing.
+dropped is recorded and reopens nothing. Any other ruling of such a round's own is
+refused: it would be new work, and that is for a new round.
 
 **Shown.** A ruling is recorded by someone else than the operator, so what is returned
 holds the sentence as the appended event has it, and the sentence of the question it
@@ -68,7 +69,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
-from . import corrections, folders, log, pointers, questions, shown, write
+from . import corrections, ending, folders, log, pointers, questions, shown, write
 from . import options as choices
 from . import settings as own
 from . import state as states
@@ -267,6 +268,10 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
              f"--record PTR{' --standing' if standing and slug is not None else ''}")
     corrects = supersedes is not None or (item or "").startswith(corrections.REVOKE)
     gates = [*form.gates]
+    if not corrects and not standing:
+        # A correction changes what is read and reopens nothing, so an ended round
+        # takes it; any other ruling of the round's own is new work.
+        gates.insert(0, ending.takes_new_work(name, "a new ruling"))
     if supersedes is not None:
         gates.append(corrections.replaces(
             supersedes, form.rules, name=name, again=again,

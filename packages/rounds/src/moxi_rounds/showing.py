@@ -267,10 +267,31 @@ def _head(found: Shown) -> dict:
     state = found.state
     # The round's current step goes here, after the steps recorded for its flow, once
     # a function says what step a round is at.
-    return {**head, "status": state.status, "description": state.description,
+    return {**head, "status": state.status, "ended": _ended(state),
+            "description": state.description,
             "parent": state.parent, "flow": state.flow, "steps": state.steps,
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
+
+
+def _ended(state: states.State) -> dict | None:
+    """How the round ended, or None while it is open: the status it has since, whose
+    act it was and the pointer it carried, who recorded it and when, and where each
+    question that was open or parked went."""
+    end = state.ended
+    if end is None:
+        return None
+    return {"how": end.how, "by": end.by, "record": end.record, "actor": end.actor,
+            "at": end.at, "questions": dict(end.questions)}
+
+
+def ended_line(ended: dict) -> str:
+    """How a round ended, in a line: `dropped by operator at <time>, record <pointer>`
+    and where its questions went."""
+    went = ", ".join(f"{one} {'withdrawn' if where == 'withdrawn' else 'to ' + where}"
+                     for one, where in ended["questions"].items())
+    return (f"{ended['how']} by {ended['by']} at {ended['at']}, record "
+            f"{ended['record']}{f'; questions: {went}' if went else ''}")
 
 
 def data(found: Shown) -> dict:
@@ -302,6 +323,8 @@ def as_text(found: Shown) -> str:
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")
+    if shown_as["ended"] is not None:
+        lines.append(f"ended: {ended_line(shown_as['ended'])}")
     if found.notice is not None:
         lines.append(found.notice)
     if found.register_unreadable is not None:
@@ -312,4 +335,5 @@ def as_text(found: Shown) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text"]
+__all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
+           "ended_line"]

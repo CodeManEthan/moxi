@@ -740,13 +740,18 @@ def test_a_correction_on_a_round_that_has_ended_is_recorded_and_reopens_nothing(
     assert questions.find(found, "Q1").state == "open"
 
 
-def test_a_ruling_that_corrects_nothing_says_nothing_of_a_round_that_has_ended(
-        rounds, capsys):
-    log.append(round_log(rounds), "round.closed", {}, actor="planner")
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+def test_a_ruling_that_corrects_nothing_is_refused_on_a_round_that_has_ended(
+        rounds, capsys, how):
+    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    before = round_log(rounds).read_bytes()
 
-    assert main(["rule", ROUND, "--text", SAID, "--record", "comms:13"]) == 0
+    assert main(["rule", ROUND, "--text", SAID, "--record", "comms:13"]) == 3
 
-    assert capsys.readouterr().err == ""
+    err = capsys.readouterr().err
+    assert f"proj-a/a-round was {how} and stays as it ended" in err
+    assert "run: moxi rounds open proj-a/SLUG --description TEXT" in err
+    assert round_log(rounds).read_bytes() == before
 
 
 # -- the table of kinds ------------------------------------------------------------------

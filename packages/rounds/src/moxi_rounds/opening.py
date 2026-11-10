@@ -18,6 +18,10 @@ A rounds folder may be shared with another tool that keeps rounds of its own the
 each with a note of the same name as the one written here and no log. A folder that
 holds such a note and no log is that tool's round: opening it is refused and the note is
 left as it is, so the two tools never claim one round.
+
+Nothing says that a new round is the work of one that was dropped. So an opening gives
+the questions a dropped round of the project left on the project's list, and whoever
+opens the round adopts the ones it takes up.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import flows, folders, log, pointers, write
+from . import dropping, flows, folders, log, pointers, write
 from .rendering import NOTE_FILE
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
@@ -35,14 +39,17 @@ from .errors import BadArgument, RoundsError, Unmet
 @dataclass(frozen=True)
 class Opened:
     """A round as it was opened: its name with the project's key as the projects list
-    stores it, its folder, its flow's name and steps, and the event written. `failed`
-    pairs each after-append callback that raised with what it raised."""
+    stores it, its folder, its flow's name and steps, and the event written. `left`
+    are the questions on the project's list that came from a round since dropped, for
+    whoever opens this round to adopt the ones whose work it takes up. `failed` pairs
+    each after-append callback that raised with what it raised."""
 
     name: str
     folder: Path
     flow: str
     steps: tuple[dict, ...]
     event: dict
+    left: tuple[dropping.Left, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -135,7 +142,9 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
                            act=make_folder,
                            event=opened, opens=True, wait_s=wait_s, at=at)
     return Opened(name=name, folder=folder, flow=flow, steps=tuple(steps),
-                  event=written.events[0], failed=written.failed)
+                  event=written.events[0], failed=written.failed,
+                  left=dropping.left_behind(written.view.project_state, home,
+                                            settings=settings))
 
 
 __all__ = ["Opened", "open_round"]

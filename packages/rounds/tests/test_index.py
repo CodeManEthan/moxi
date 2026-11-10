@@ -3,6 +3,7 @@ and the notice a log changed outside this machine carries."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -117,7 +118,7 @@ def test_a_write_leaves_the_rounds_folder_status_and_flow_and_its_logs_digest(ho
     assert found["logs"] == [("proj-a", "a-round", str(at.round_log), len(data),
                               hashlib.sha256(data).hexdigest(), 1, index.DERIVED, None)]
     assert found["rounds"] == [("proj-a", "a-round", str(home.folder / "a-round"), "open",
-                                "small")]
+                                "small", None)]
     assert found["items"] == []
 
 
@@ -246,6 +247,28 @@ def test_a_read_does_not_trust_an_index_of_another_schema(home):
     conn.commit()
     conn.close()
     assert index.read("proj-a", home.folder, "a-round").flow == "small"
+
+
+def test_an_index_of_the_first_schema_is_brought_up_by_the_next_write(home):
+    from moxi import store
+
+    paths.index_file().parent.mkdir(parents=True, exist_ok=True)
+    conn = store.connect(paths.index_file())
+    store.migrate(conn, index.STEPS[:1])
+    conn.close()
+
+    at = open_round(home)
+    write.record(at, actor="planner", at=AT, event=lambda view, result: write.Entry(
+        "round.dropped", {"by": "operator", "record": "comms:30", "questions": {}}))
+
+    conn = sqlite3.connect(paths.index_file())
+    assert conn.execute("PRAGMA user_version").fetchone() == (len(index.STEPS),)
+    [(status, ended)] = conn.execute("SELECT status, ended FROM rounds").fetchall()
+    conn.close()
+    assert status == "dropped"
+    assert json.loads(ended) == {"how": "dropped", "by": "operator",
+                                 "record": "comms:30", "at": AT}
+    assert index.disagreements([home]) == []
 
 
 def test_a_row_made_before_more_was_derived_is_stale(home, monkeypatch):

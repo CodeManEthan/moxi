@@ -6,7 +6,8 @@ themselves answer.
 
 **The rounds** (`rounds`): the open rounds of every project, or of one, each with its
 flow and its counts; or, when the ended ones are asked for, the rounds that are open
-no longer. A round whose log can't be read is listed as unreadable, in either listing,
+no longer, each with how it ended, by whom, when and on what pointer. A round whose
+log can't be read is listed as unreadable, in either listing,
 since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -91,13 +92,18 @@ class Round:
     flow: str | None = None
     counts: tuple[tuple[str, int | None], ...] = ()
     unreadable: Unreadable | None = None
+    #: How a round that is open no longer ended, as the index keeps it: the status it
+    #: has since (`how`), whose act it was (`by`), the pointer it carried (`record`)
+    #: and when (`at`). None for an open round.
+    ended: Mapping | None = None
 
     def data(self) -> dict:
         if self.unreadable is not None:
             return {"name": self.name, "project": self.project, "folder": self.folder,
                     "unreadable": _error(self.unreadable)}
         return {"name": self.name, "project": self.project, "folder": self.folder,
-                "status": self.status, "flow": self.flow, "counts": dict(self.counts)}
+                "status": self.status, "flow": self.flow, "counts": dict(self.counts),
+                "ended": None if self.ended is None else dict(self.ended)}
 
 
 @dataclass(frozen=True)
@@ -142,7 +148,7 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                 # what step a round is at.
                 listed.append(Round(
                     summary.name, summary.project, str(summary.folder),
-                    status=summary.status, flow=summary.flow,
+                    status=summary.status, flow=summary.flow, ended=summary.ended,
                     counts=tuple((key, count(summary, one))
                                  for key, _called, count in COUNTS)))
     return Rounds(computed=now, project=None if project is None else found[0].home.project,
@@ -162,7 +168,11 @@ def rounds_as_text(listing: Rounds) -> str:
             continue
         counts = "   ".join(f"{called[key]}: {'not known' if count is None else count}"
                             for key, count in one.counts)
-        lines.append(f"{one.name}   {one.status}   flow {one.flow}   {counts}")
+        how = one.status
+        if one.ended is not None:
+            how = (f"{one.status} by {one.ended.get('by')} at {one.ended.get('at')}, "
+                   f"record {one.ended.get('record')}")
+        lines.append(f"{one.name}   {how}   flow {one.flow}   {counts}")
     if not listing.rounds:
         kind = "has ended" if listing.ended else "is open"
         where = "" if listing.project is None else f" of {listing.project}"

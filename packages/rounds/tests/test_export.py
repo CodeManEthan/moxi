@@ -9,8 +9,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, export, folders, index, log, moving, opening, options,
-                         paths, questions, ruling, state)
+from moxi_rounds import (asking, dropping, export, folders, index, log, moving, opening,
+                         options, paths, questions, ruling, state)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, NoRound, Refused, Unreadable
 
@@ -453,6 +453,30 @@ def test_a_projects_export_holds_its_list_and_every_open_round(rounds, capsys):
         assert said in parked and said not in head
     assert "computed 2026-01-03T00:00:00Z: 3 open, 2 parked" in markdown
     assert "docket" not in markdown
+
+
+def test_a_projects_export_holds_no_question_of_a_round_that_was_dropped(
+        rounds, capsys):
+    ask("proj-a", at=T1)
+    ask(A, at=T2)
+    ask(B, text=THIRD, at=T2)
+    ask(B, text=OTHER, at=T2)
+    rule(B, item="Q2", text="It is.", at=T3)
+    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T4)
+    # An answer taken back after the drop leaves its question unanswered in a round
+    # that takes no answer: it is not put to him from there.
+    rule(B, item="revoke:C1", at=T5)
+
+    found = export.questions_of("proj-a")
+
+    assert named(entry.data() for entry in found.entries) == [
+        ("proj-a", "P1", "open"), ("proj-a", "P2", "open"), (A, "Q1", "open")]
+    assert found.entries[1].moved_from == f"{B}:Q1"
+    assert f"### {B} " not in printed(capsys, "proj-a", "--questions")
+    assert export.waiting(folders.home("proj-a")).entries == found.entries
+    # The round's own export is still what its log says.
+    assert named(entry.data() for entry in export.questions_of(B).entries) == [
+        (B, "Q2", "open")]
 
 
 def test_a_projects_export_is_the_rows_waiting_in_the_project(rounds):

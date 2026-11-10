@@ -20,7 +20,12 @@ operator was shown it; the mark stays whatever is recorded later.
 A ruling may replace an earlier one or take it back, and names it. Nothing is rewritten:
 the earlier ruling stays in the rulings, marked with the id of the one that replaced it
 or took it back, and each question it changed reads as its other changes leave it
-(`without`). A log with no
+(`without`).
+
+A round that was dropped is `DROPPED` from that event on, and the event is the whole of
+the drop in the round's log: it says who dropped the round, and where each question
+that was open or parked went, which the fold applies to the question as a change. A log
+with no
 opening event, a project's for one, has a status of None; the rulings of a project's log
 are its register, and its questions the project's list.
 """
@@ -33,6 +38,30 @@ from dataclasses import dataclass, field, replace
 
 #: The status of a round that was opened and has not ended.
 OPEN = "open"
+#: The status of a round that was withdrawn before its work was done.
+DROPPED = "dropped"
+
+#: Where a drop says a question went when it was withdrawn with its round. A question
+#: that went to the project's list has its id there in this place.
+_WITHDRAWN = "withdrawn"
+_MOVED = "moved"
+
+
+@dataclass(frozen=True)
+class Ended:
+    """How a round ended, as the event that ended it recorded it."""
+
+    #: The status the round has from then on.
+    how: str
+    #: Whose act it was, `lead` or `operator`, and the pointer it carried.
+    by: str | None
+    record: str | None
+    #: Who recorded it, and when.
+    actor: str
+    at: str
+    #: Where each question that was open or parked went, in the order asked: its id
+    #: on the project's list, or `withdrawn`.
+    questions: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -164,8 +193,10 @@ class State:
     steps: list[dict] = field(default_factory=list)
     #: The round this one is a child of, or None.
     parent: str | None = None
-    #: `OPEN`, or None for a log that opened no round.
+    #: `OPEN` or `DROPPED`, or None for a log that opened no round.
     status: str | None = None
+    #: How the round ended, or None while it has not.
+    ended: Ended | None = None
     #: The rulings the log recorded, oldest first. A project's are its register.
     rulings: list[Ruling] = field(default_factory=list)
     #: The questions the log holds, in the order they were asked. A project's are
@@ -195,6 +226,24 @@ def _round_opened(state: State, event: dict) -> None:
     state.steps = copy.deepcopy(event["steps"])
     state.parent = event.get("parent")
     state.status = OPEN
+
+
+def _round_dropped(state: State, event: dict) -> None:
+    """The round is dropped, and each question the event names is where it says: on
+    the project's list under the id given, or withdrawn. Nothing else is written for
+    a drop in this log, so a verb stopped after this event has left the round whole."""
+    went = event.get("questions")
+    went = tuple((key, where) for key, where in went.items()
+                 if isinstance(where, str)) if isinstance(went, dict) else ()
+    state.status = DROPPED
+    state.ended = Ended(how=DROPPED, by=event.get("by"), record=event.get("record"),
+                        actor=event["actor"], at=event["at"], questions=went)
+    for question_id, where in went:
+        change = ({"state": _WITHDRAWN} if where == _WITHDRAWN else
+                  {"state": _MOVED, "moved_to": where})
+        _change(state, {**change, "record": event.get("record"),
+                        "actor": event["actor"], "at": event["at"]},
+                question_id=question_id, ruling=None)
 
 
 def _ruling_recorded(state: State, event: dict) -> None:
@@ -405,10 +454,11 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "finish.done": _kept,
     "lock.cleared": _kept,
     "build.dropped": _kept,
-    "round.dropped": _kept,
+    "round.dropped": _round_dropped,
     "thread.decided": _kept,
     "repair": _kept,
     "round.closed": _kept,
 }
 
-__all__ = ["OPEN", "Ruling", "Change", "Question", "State", "fold", "without"]
+__all__ = ["OPEN", "DROPPED", "Ended", "Ruling", "Change", "Question", "State", "fold",
+           "without"]

@@ -8,7 +8,8 @@ loses no record, and `rebuild` makes the same rows from the logs again. Three ta
             slug for a project's own log), the file, its length and SHA-256 as last seen
             here and when that was, whether it could be read, and since when it has been
             known to have changed outside this machine
-    rounds  one row per round: its folder, its status and its flow's name
+    rounds  one row per round: its folder, its status, its flow's name, and how it
+            ended once it has
     items   what each log holds open, one row per item, by kind
 
 **Who writes it.** Every write to a log updates that log's rows before the lock is let go
@@ -83,11 +84,13 @@ STEPS = ("""
         body TEXT NOT NULL,
         PRIMARY KEY (project, slug, kind, id)
     );
-""",)
+""", """
+    ALTER TABLE rounds ADD COLUMN ended TEXT;
+""")
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 4
+DERIVED = 5
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -129,6 +132,10 @@ class Summary:
     items: tuple[Item, ...] = ()
     changed_since: str | None = None
     unreadable: Unreadable | None = None
+    #: How a round that is open no longer ended: `{"how", "by", "record", "at"}`, the
+    #: status it has since, whose act it was, the pointer it carried and when. None
+    #: for an open round and for a project.
+    ended: Mapping | None = None
 
     @property
     def name(self) -> str:
@@ -276,6 +283,7 @@ class _Row:
     status: str | None = None
     flow: str | None = None
     items: tuple[Item, ...] = ()
+    ended: Mapping | None = None
 
 
 @dataclass(frozen=True)
@@ -304,7 +312,16 @@ def _derive(project: str, slug: str, path: Path,
     items = tuple(Item(kind, item_id, _plain(body))
                   for kind, listed in ITEMS.items() for item_id, body in listed(folded))
     return _Row(project, slug, str(path), len(data), digest, readable=True,
-                status=folded.status, flow=folded.flow, items=items), None
+                status=folded.status, flow=folded.flow, items=items,
+                ended=_ended(folded)), None
+
+
+def _ended(folded: state.State) -> dict | None:
+    """How the round ended, as the index keeps it, or None while it has not."""
+    end = folded.ended
+    if end is None:
+        return None
+    return {"how": end.how, "by": end.by, "record": end.record, "at": end.at}
 
 
 def _plain(body: Mapping) -> dict:
@@ -341,7 +358,7 @@ def _summary(row: _Row, error: Unreadable | None, folder: Path,
     return Summary(project=row.project, slug=None if project_own else row.slug,
                    folder=folder if project_own else folder / row.slug,
                    status=row.status, flow=row.flow, items=row.items,
-                   changed_since=changed_since, unreadable=error)
+                   changed_since=changed_since, unreadable=error, ended=row.ended)
 
 
 def _read(conn, project: str, slug: str, folder: Path) -> Summary:
@@ -415,7 +432,8 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
     try:
         found = conn.execute(
             "SELECT logs.path, logs.length, logs.sha256, logs.readable, logs.derived, "
-            "logs.seen_at, logs.changed_since, rounds.status, rounds.flow "
+            "logs.seen_at, logs.changed_since, rounds.status, rounds.flow, "
+            "rounds.ended "
             "FROM logs LEFT JOIN rounds USING (project, slug) "
             "WHERE logs.project = ? AND logs.slug = ?", (project, slug)).fetchone()
         if found is None:
@@ -425,9 +443,14 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
                                    "AND slug = ? ORDER BY position", (project, slug)))
     except (sqlite3.Error, ValueError):
         return None
-    path, length, digest, readable, derived, seen_at, changed_since, status, flow = found
+    (path, length, digest, readable, derived, seen_at, changed_since, status, flow,
+     ended) = found
+    try:
+        ended = None if ended is None else json.loads(ended)
+    except ValueError:
+        return None
     return _Stored(_Row(project, slug, path, length, digest, bool(readable), status, flow,
-                        items), derived, seen_at, changed_since)
+                        items, ended), derived, seen_at, changed_since)
 
 
 def _refresh(conn, project: str, slug: str, folder: Path, *, wrote: bool) -> Summary | None:
@@ -457,9 +480,11 @@ def _put(conn, row: _Row, folder: Path, *, seen_at: str, changed_since: str | No
                  (row.project, row.slug, row.path, row.length, row.sha256,
                   int(row.readable), DERIVED, seen_at, changed_since))
     if row.slug != _PROJECT:
-        conn.execute("INSERT INTO rounds (project, slug, folder, status, flow) "
-                     "VALUES (?, ?, ?, ?, ?)",
-                     (row.project, row.slug, str(folder / row.slug), row.status, row.flow))
+        conn.execute("INSERT INTO rounds (project, slug, folder, status, flow, ended) "
+                     "VALUES (?, ?, ?, ?, ?, ?)",
+                     (row.project, row.slug, str(folder / row.slug), row.status, row.flow,
+                      None if row.ended is None
+                      else json.dumps(row.ended, sort_keys=True)))
     conn.executemany(
         "INSERT INTO items (project, slug, kind, id, position, body) "
         "VALUES (?, ?, ?, ?, ?, ?)",

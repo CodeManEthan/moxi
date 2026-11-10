@@ -13,6 +13,8 @@
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
+    moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
+                     [--as NAME]
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
     moxi rounds list [PROJECT] --waiting [--json]
@@ -32,6 +34,11 @@ operator, and `mark --shown` records, with a pointer to the message, session or 
 that showed him, that he saw it; a ruling is named by the round or project that holds
 it and its id. On a project, the item `readback=TIME` is his own word that he read the
 list of rulings not yet shown through `TIME`, the time that list was headed with.
+`drop` ends a round short of its work: the operator drops any round, and the lead one
+that holds none of the operator's acts. Its open and parked questions go to the
+project's list, where they hold up nothing, and `open` of a later round of the project
+prints them, to be adopted by the round that takes the work up. A dropped round takes
+no new question, mark or ruling; a correction of one of its rulings is still recorded.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
@@ -129,8 +136,35 @@ def _open(args, out) -> int:
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
     print(f"folder: {opened.folder}", file=out)
+    for line in _left(opened):
+        print(line, file=out)
     _warn_of(opened.failed, args.prog, args.verb)
     return codes.OK
+
+
+def _left(opened) -> list[str]:
+    """What an opening prints of the questions a dropped round left on the project's
+    list: each with where it came from, who asked it and when, and the command that
+    brings one into the round just opened."""
+    from . import questions
+
+    if not opened.left:
+        return []
+    project = opened.name.partition("/")[0]
+    lines = ["", f"questions on the list of {project} that came from a dropped round; "
+                 "adopt the ones whose work this round takes up:",
+             f"  moxi rounds ask {opened.name} --adopt P<n>"]
+    for one in opened.left:
+        found = one.question
+        said = [f"from: {found.origin}", f"blocks: {questions.said(found.blocks)}",
+                f"state: {one.state}", f"by: {found.by}", f"at: {found.at}"]
+        if one.state == questions.PARKED and found.until is not None:
+            said.append(f"until: {found.until}")
+        said.append(f"moved from: {found.moved_from}")
+        if found.held is not None:
+            said.append(f"held up there: {questions.said(found.held)}")
+        lines += [f"  {found.id}: {found.text}", f"    {'   '.join(said)}"]
+    return lines
 
 
 # -- rule --------------------------------------------------------------------------------
@@ -441,6 +475,59 @@ def _mark_shown(args, out) -> int:
     return codes.OK
 
 
+# -- drop --------------------------------------------------------------------------------
+
+def _declare_drop(verbs) -> None:
+    said = ("Drop a round: end it short of its work. The operator drops any round, "
+            "with a pointer to where he said so; the lead drops only a round that "
+            "holds none of the operator's acts, with a pointer to why. Its open and "
+            "parked questions go to the project's list as they are, where they hold "
+            "up nothing, or with --withdraw-questions are withdrawn. A dropped round "
+            "takes no new work; a correction of one of its rulings is still recorded.")
+    parser = verbs.add_parser("drop", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
+    parser.add_argument("--by", choices=("lead", "operator"), required=True,
+                        help="whose drop it is: the operator's, of any round, or the "
+                             "lead's, of a round that holds no ruling, no skip, no "
+                             "question asked with the operator's pointer, no opening "
+                             "on his go, no build that reached its target or may "
+                             "have, no decision on such a build and no open waiting "
+                             "item")
+    parser.add_argument("--record", metavar="PTR",
+                        help="with --by operator, a pointer to where he dropped it; "
+                             "with --by lead, a pointer to why; one token: "
+                             "comms:<digits>, <session>@<UTC time>, an https:// URL, or "
+                             "file:<path in the round's folder>#<anchor>; a drop "
+                             "without one is refused")
+    parser.add_argument("--withdraw-questions", action="store_true",
+                        help="withdraw the round's open and parked questions, where "
+                             "they would go to the project's list; the operator's "
+                             "alone")
+    _writes(parser)
+
+
+def _drop(args, out) -> int:
+    from . import dropping
+
+    dropped = dropping.drop(args.round, by=args.by, record=args.record,
+                            actor=_actor(args),
+                            withdraw_questions=args.withdraw_questions)
+    project = dropped.name.partition("/")[0]
+    print(f"dropped {dropped.name}   by: {dropped.by}   record: {dropped.record}",
+          file=out)
+    withdrawn = [one for one, where in dropped.went if where == dropping.WITHDRAWN]
+    moved = [f"{one} as {where}" for one, where in dropped.went
+             if where != dropping.WITHDRAWN]
+    if moved:
+        print(f"questions now on the list of {project}: {', '.join(moved)}", file=out)
+    if withdrawn:
+        print(f"questions withdrawn: {', '.join(withdrawn)}", file=out)
+    if not dropped.went:
+        print("it had no open or parked question", file=out)
+    _warn_of(dropped.failed, args.prog, args.verb)
+    return codes.OK
+
+
 # -- show --------------------------------------------------------------------------------
 
 def _declare_show(verbs) -> None:
@@ -537,11 +624,13 @@ def _list_questions(args, out) -> int:
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_ask, _declare_rule,
-                                  _declare_mark, _declare_show, _declare_list)
+                                  _declare_mark, _declare_drop, _declare_show,
+                                  _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "ask": _ask, "rule": _rule,
-                               "mark": _mark, "show": _show, "list": _list}
+                               "mark": _mark, "drop": _drop, "show": _show,
+                               "list": _list}
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:

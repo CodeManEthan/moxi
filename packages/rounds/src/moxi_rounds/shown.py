@@ -32,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from . import corrections, folders, index, log, pointers, readback, write
+from . import corrections, ending, folders, index, log, pointers, readback, write
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Unmet, Unreadable
@@ -329,7 +329,8 @@ def mark(target: str, ids: str | Iterable[str], *, actor: str, record: str | Non
     try:
         written = write.record(
             write.Where(home.project, home.folder, slug), actor=actor,
-            gates=[are_named_by_what_holds_them, are_on_record, are_not_his_own_word,
+            gates=[ending.takes_new_work(name, "a mark"),
+                   are_named_by_what_holds_them, are_on_record, are_not_his_own_word,
                    is_a_showing],
             event=shown, wait_s=wait_s, at=at)
     except NoLog:

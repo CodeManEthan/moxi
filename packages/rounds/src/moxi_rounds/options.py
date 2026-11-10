@@ -27,7 +27,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from . import folders, questions, state, write
+from . import ending, folders, questions, state, write
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
@@ -240,7 +240,8 @@ def fill(target: str, question_id: str, *, actor: str, options: Sequence[str] = 
     try:
         written = write.record(
             write.Where(home.project, home.folder, slug), actor=actor,
-            gates=[exists, still_asked, keys_keep_their_text, retires_what_is_offered,
+            gates=[ending.takes_new_work(name, "a change to a question's options"),
+                   exists, still_asked, keys_keep_their_text, retires_what_is_offered,
                    keeps_two_to_four],
             event=changed, wait_s=wait_s, at=at)
     except NoLog:

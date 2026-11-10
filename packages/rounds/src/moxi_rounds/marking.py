@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import folders, questions, state, write
+from . import ending, folders, questions, state, write
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, Unmet
 
@@ -134,7 +134,8 @@ def _mark(target: str, question_id: str, change: dict, gates, *, actor: str, set
 
     try:
         written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
-                               gates=[exists, *gates(name)], event=changed,
+                               gates=[ending.takes_new_work(name, "a mark"), exists,
+                                      *gates(name)], event=changed,
                                wait_s=wait_s, at=at)
     except NoLog:
         raise NoRound(name) from None

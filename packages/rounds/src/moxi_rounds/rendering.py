@@ -126,6 +126,8 @@ def note(project: str, slug: str, events: Iterable[dict],
              f"- status: {shown_as['status']}"]
     if shown_as["parent"] is not None:
         lines.append(f"- parent: {shown_as['parent']}")
+    if shown_as["ended"] is not None:
+        lines.append(f"- ended: {showing.ended_line(shown_as['ended'])}")
     for part in PARTS:
         lines += ["", f"## {part.title}", "", *part.lines(shown_as)]
     return "\n".join(lines) + "\n"

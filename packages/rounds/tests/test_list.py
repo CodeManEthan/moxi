@@ -8,8 +8,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, export, index, listing, log, opening, paths, ruling,
-                         shown)
+from moxi_rounds import (asking, dropping, export, index, listing, log, opening, paths,
+                         ruling, shown)
 from moxi_rounds.cli import main
 
 A = "proj-a/a-round"
@@ -113,14 +113,14 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
     assert found["rounds"] == [
         {"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
          "status": "open", "flow": "fix",
-         "counts": {"open": 1, "parked": 0, "not_shown": 1}},
+         "counts": {"open": 1, "parked": 0, "not_shown": 1}, "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
          "status": "open", "flow": "fix",
-         "counts": {"open": 0, "parked": 0, "not_shown": 0}},
+         "counts": {"open": 0, "parked": 0, "not_shown": 0}, "ended": None},
         {"name": C, "project": "proj-b",
          "folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),
          "status": "open", "flow": "fix",
-         "counts": {"open": 0, "parked": 0, "not_shown": 0}}]
+         "counts": {"open": 0, "parked": 0, "not_shown": 0}, "ended": None}]
 
 
 def test_a_project_named_keeps_the_rounds_to_its_own(rounds, capsys):
@@ -161,24 +161,46 @@ def test_no_open_round_is_among_the_ended_ones(rounds, capsys):
     assert found["ended"] is True and found["rounds"] == []
 
 
-def test_a_round_that_is_open_no_longer_is_listed_only_among_the_ended(
-        rounds, capsys, monkeypatch):
-    # No verb ends a round yet, so the index is made to answer as it will for one.
-    real = index.rounds
-
-    def ended(project, folder, **more):
-        from dataclasses import replace
-        return [replace(one, status="closed") if one.name == B else one
-                for one in real(project, folder, **more)]
-
-    monkeypatch.setattr(index, "rounds", ended)
+def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
+        rounds, capsys):
+    rule(B, text=RULED)
+    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T6)
 
     assert [one["name"] for one in data(capsys)["rounds"]] == [A, C]
+    assert B not in printed(capsys) and B not in printed(capsys, "proj-a")
     [found] = data(capsys, "--closed")["rounds"]
-    assert (found["name"], found["status"]) == (B, "closed")
-    assert printed(capsys, "--closed") == (
-        f"{B}   closed   flow fix   open questions: 0   parked: 0   "
-        "rulings not shown: 0\n")
+    assert (found["name"], found["status"]) == (B, "dropped")
+    assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",
+                              "at": T6}
+    assert found["counts"] == {"open": 0, "parked": 0, "not_shown": 1}
+    assert printed(capsys, "--closed") == printed(capsys, "proj-a", "--closed") == (
+        f"{B}   dropped by operator at {T6}, record comms:30   flow fix   "
+        "open questions: 0   parked: 0   rulings not shown: 1\n")
+    assert printed(capsys, "proj-b", "--closed") == "no round of proj-b has ended\n"
+
+
+def test_a_dropped_round_is_listed_the_same_with_no_index(rounds, capsys):
+    dropping.drop(B, by="lead", record="comms:30", actor="planner", at=T6)
+    paths.index_file().unlink()
+
+    assert listing.rounds(ended=True).rounds[0].ended == {
+        "how": "dropped", "by": "lead", "record": "comms:30", "at": T6}
+
+
+def test_nothing_of_a_dropped_round_waits_on_the_operator(rounds, capsys):
+    # A question left open in a round that has ended: its answer was taken back
+    # after the drop, which reopens nothing.
+    ask(B)
+    rule(B, item="Q1", text="They do.", at=T3)
+    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T4)
+    rule(B, item="revoke:C1", at=T5)
+    ask(A, OTHER)
+
+    found = data(capsys, "--waiting")
+    assert [(one["holder"], one["id"]) for one in found["open"]] == [(A, "Q1")]
+    assert found["parked"] == []
+    # Its rulings are still his to be shown.
+    assert {row["holder"] for row in found["not_shown"][0]["rows"]} == {B}
 
 
 def test_a_round_that_cant_be_read_is_listed_as_unreadable(rounds, capsys):

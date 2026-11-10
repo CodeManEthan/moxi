@@ -36,7 +36,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
-from . import questions
+from . import ending, questions
 from . import state as states
 from .errors import Unmet
 
@@ -218,10 +218,7 @@ def put_by(question: states.Question) -> str | None:
 def ended(state: states.State) -> str | None:
     """How the round `state` is of ended, `closed` or `dropped`, or None while it has
     not."""
-    for event in reversed(state.history):
-        if event["type"] in ("round.closed", "round.dropped"):
-            return event["type"].partition(".")[2]
-    return None
+    return ending.how(state)
 
 
 # -- the gates ---------------------------------------------------------------------------

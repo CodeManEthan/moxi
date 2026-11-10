@@ -96,7 +96,7 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
-                             "question.changed", "ruling.shown"})
+                             "question.changed", "ruling.shown", "round.dropped"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -108,6 +108,40 @@ def test_a_type_with_no_part_in_the_state_changes_only_the_history(name):
 
     assert after.history == [*before.history, later]
     assert dataclasses.replace(after, history=before.history) == before
+
+
+def test_a_drop_ends_the_round_and_says_where_each_question_went():
+    asked_three = [
+        opened(),
+        *(event(n, "question.asked", id=f"Q{n - 1}", text="A placeholder question?",
+                **{"from": "comms:11"}, blocks="all", state="open", asked_by="scout",
+                asked_at="2026-01-02T03:04:05Z") for n in (2, 3, 4)),
+        event(5, "ruling.recorded", id="C1", record="comms:12", kind="substance",
+              rules="Q3", question="Q3", state="ruled", text="A placeholder answer.")]
+    drop = event(6, "round.dropped", by="operator", record="comms:30",
+                 questions={"Q1": "P4", "Q2": "withdrawn"})
+    before = state.fold(asked_three)
+
+    after = state.fold([*asked_three, drop])
+
+    assert after.status == state.DROPPED
+    assert after.ended == state.Ended(
+        how="dropped", by="operator", record="comms:30", actor=drop["actor"],
+        at=drop["at"], questions=(("Q1", "P4"), ("Q2", "withdrawn")))
+    assert [(one.state, one.moved_to) for one in after.questions] == [
+        ("moved", "P4"), ("withdrawn", None), ("ruled", None)]
+    assert after.questions[0].changes[-1] == state.Change(
+        state="moved", blocks=None, until=None, ruling=None, record="comms:30",
+        actor=drop["actor"], at=drop["at"], moved_to="P4")
+    assert after.questions[2] == before.questions[2]
+    assert after.rulings == before.rulings and after.flow == before.flow
+
+
+def test_a_drop_that_names_no_question_ends_the_round_and_changes_none():
+    after = state.fold([opened(), event(2, "round.dropped")])
+
+    assert (after.status, after.ended.by, after.ended.questions) == ("dropped", None, ())
+    assert state.fold([opened()]).ended is None
 
 
 def test_a_ruling_is_added_to_the_rulings_and_changes_nothing_else():
