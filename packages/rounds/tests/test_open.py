@@ -6,9 +6,9 @@ from __future__ import annotations
 import pytest
 from moxi import cli
 
-from moxi_rounds import flows, index, log, opening, paths, state, write
+from moxi_rounds import flows, folders, index, log, opening, paths, state, write
 from moxi_rounds.cli import main
-from moxi_rounds.errors import BadArgument, BadName, Refused
+from moxi_rounds.errors import BadArgument, BadName, NoLog, Refused
 
 ONE_STEP = """
     [flows.light]
@@ -256,6 +256,66 @@ def test_an_empty_log_file_counts_as_a_log(rounds):
     assert run("proj-a/a-round") == 3
 
     assert log.round_log(rounds / "a-round").read_bytes() == b""
+
+
+FOREIGN = b"---\ntype: round-note\n---\n\nkept by another tool\n"
+
+
+def test_a_folder_with_another_tools_note_and_no_log_is_refused_and_the_note_kept(
+        rounds, capsys):
+    theirs = rounds / "a-round" / "round-note.md"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_bytes(FOREIGN)
+    before = (theirs.read_bytes(), theirs.stat().st_mtime_ns, theirs.stat().st_ino)
+
+    assert run("proj-a/a-round", "--flow", "fix") == 3
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "refused, with nothing written" in err
+    assert f"{rounds / 'a-round'} holds a round-note.md and no log" in err
+    assert "belongs to another tool" in err and "pick another slug" in err
+    assert "run: moxi rounds open proj-a/SLUG --description TEXT" in err
+    assert (theirs.read_bytes(), theirs.stat().st_mtime_ns, theirs.stat().st_ino) == before
+    assert files_under(rounds) == ["a-round", "a-round/round-note.md"]
+    with pytest.raises(NoLog):
+        index.read("proj-a", rounds, "a-round")
+
+
+def test_another_tools_round_is_no_round_to_any_reading_command(rounds, capsys):
+    theirs = rounds / "a-round" / "round-note.md"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_bytes(FOREIGN)
+    assert run("proj-a/b-round", "--flow", "fix") == 0
+    capsys.readouterr()
+
+    assert folders.slugs(rounds) == ["b-round"]
+    assert main(["list"]) == 0
+    assert "a-round" not in capsys.readouterr().out
+    assert main(["show", "proj-a/a-round"]) == 3
+    assert theirs.read_bytes() == FOREIGN
+    assert files_under(rounds / "a-round") == ["round-note.md"]
+
+
+def test_a_folder_with_a_note_and_a_log_is_refused_as_a_round_already_there(
+        rounds, capsys):
+    assert run("proj-a/a-round", "--flow", "fix") == 0
+    capsys.readouterr()
+
+    assert run("proj-a/a-round", "--flow", "fix") == 3
+
+    err = capsys.readouterr().err
+    assert "proj-a/a-round is already there" in err
+    assert "another tool" not in err
+
+
+def test_a_folder_that_is_there_and_empty_is_opened_into(rounds):
+    (rounds / "a-round").mkdir(parents=True)
+
+    assert run("proj-a/a-round", "--flow", "fix") == 0
+
+    assert folded(rounds / "a-round").status == state.OPEN
+    assert files_under(rounds / "a-round") == ["round-note.md", "round.jsonl"]
 
 
 def test_a_project_the_projects_list_does_not_hold_is_refused(rounds, capsys):

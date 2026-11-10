@@ -43,7 +43,7 @@ from pathlib import Path
 from moxi import files
 
 from . import questions as asked
-from . import ruling, showing
+from . import log, ruling, showing
 from . import state as states
 
 #: The names of the three files.
@@ -82,7 +82,9 @@ def on_append(written) -> None:
     folder = Path(where.folder)
     wrote_project = len(written.project_events) > len(written.view.project_events)
     work: list[tuple[Path, Callable[[], str]]] = []
-    if where.slug is not None:
+    # A note is written only beside its log: a folder with none is not a round of
+    # ours, and a note there may be another tool's.
+    if where.slug is not None and log.exists(log.round_log(folder / where.slug)):
         work.append((folder / where.slug / NOTE_FILE, lambda: note(
             where.project, where.slug, written.round_events, written.project_events)))
     # A round's verb that only read the project's log holds no lock on it, so that

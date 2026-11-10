@@ -13,6 +13,11 @@ A round is opened once. A folder that already holds a log is refused, as are a f
 config does not have and a go pointer of no known shape; a project the projects list
 does not hold and a rounds folder that can't be worked out are refused before anything
 is locked or made.
+
+A rounds folder may be shared with another tool that keeps rounds of its own there,
+each with a note of the same name as the one written here and no log. A folder that
+holds such a note and no log is that tool's round: opening it is refused and the note is
+left as it is, so the two tools never claim one round.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import flows, folders, log, pointers, write
+from .rendering import NOTE_FILE
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
 
@@ -56,8 +62,9 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
 
     Raises `BadName` or `BadArgument` for a name or description that can't be used,
     `UnknownProject` or `NoFolder` for a project with no rounds folder to open it in, and
-    `Refused` when the folder already holds a log, the flow is not one the config has,
-    or the pointer has no shape a pointer has.
+    `Refused` when the folder already holds a log, or another tool's note of a round
+    and no log, the flow is not one the config has, or the pointer has no shape a
+    pointer has.
     A refusal leaves no folder and no event behind.
     """
     project, slug = folders.split(name)
@@ -82,6 +89,16 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
                          "and a round is opened once; a new round needs another name",
                          f"moxi rounds show {name}")
         return None
+
+    def not_another_tools(view):
+        # The note is written here only beside a log, so one with no log is not ours,
+        # and opening would overwrite it.
+        if log.exists(log.round_log(folder)) or not (folder / NOTE_FILE).exists():
+            return None
+        return Unmet(f"{folder} holds a {NOTE_FILE} and no log, so the round there "
+                     "belongs to another tool and is not opened here; pick another "
+                     "slug for this round",
+                     f"moxi rounds open {home.project}/SLUG --description TEXT")
 
     def flow_exists(view):
         if steps is None:
@@ -113,7 +130,8 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
         return write.Entry("round.opened", fields)
 
     written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
-                           gates=[not_yet_opened, flow_exists, go_is_a_pointer],
+                           gates=[not_yet_opened, not_another_tools, flow_exists,
+                                  go_is_a_pointer],
                            act=make_folder,
                            event=opened, opens=True, wait_s=wait_s, at=at)
     return Opened(name=name, folder=folder, flow=flow, steps=tuple(steps),

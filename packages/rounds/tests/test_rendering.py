@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from moxi_rounds import (asking, log, marking, opening, rendering, ruling, showing,
-                         shown, write)
+                         shown, state, write)
 from moxi_rounds.cli import main
 
 A = "proj-a/a-round"
@@ -541,6 +541,24 @@ def test_someones_own_file_in_the_folder_is_left_as_it_is(rounds):
     assert sorted(path.name for path in rounds.iterdir()) == [
         "a-round", "b-round", "project.jsonl", "questions.md", "rulings.md",
         "thoughts.md"]
+
+
+def test_a_folder_with_no_log_is_never_written_into(rounds):
+    theirs = rounds / "c-round" / "round-note.md"
+    theirs.parent.mkdir()
+    theirs.write_bytes(b"kept by another tool\n")
+    before = stamps(theirs)
+    where = write.Where("proj-a", rounds, "c-round")
+    opened = [{"v": 1, "n": 1, "at": T1, "actor": "planner", "type": "round.opened",
+               "description": "a placeholder round", "flow": "fix", "steps": []}]
+    view = write.View(where=where, events=[], state=state.fold([]), project_events=[],
+                      project_state=state.fold([]))
+
+    rendering.on_append(write.Written(where=where, view=view, events=tuple(opened),
+                                      round_events=tuple(opened), project_events=()))
+
+    assert stamps(theirs) == before
+    assert [path.name for path in theirs.parent.iterdir()] == ["round-note.md"]
 
 
 # -- the same log, the same bytes --------------------------------------------------------
