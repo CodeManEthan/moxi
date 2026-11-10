@@ -346,7 +346,8 @@ changed last, each with what it was asked, its type, when it ran and the newest 
 said; the `Session` line (the harness, the model, from the start to the last change); and
 `Resume`, the harness's own command for picking the session up again, with the folder to
 run it in where the harness needs one, and `Copy`, which puts the command on the
-clipboard. A piece the record does not give is not drawn. Under them `Read the
+clipboard. A folder under your home folder is written with `~`, here and in the Folder
+menu; any other folder is written whole. A piece the record does not give is not drawn. Under them `Read the
 transcript` goes to the session's address and `Copy id` copies its id. An opened row is
 read again after a newer list only when that list shows the session changed. Leaving the
 list for a transcript and coming back gives the list from its top, with no filter set
@@ -358,14 +359,22 @@ On a machine with no session the page says so in place of the list.
 
 **One session.** A session's address is `<harness>/<session id>`, or
 `claude/<session id>/<agent id>` for a Claude Code subagent. An OpenCode child session and
-a Codex subagent thread each open at their own id. The page shows the session's directory,
-title and last activity, then its last five turns, oldest first. Each message shows as
+a Codex subagent thread each open at their own id. Over the session, the first line has
+`Sessions`, which goes back to the list, the session's name as the list names it (a name
+typed for it, else its folder and when it started) and `Refresh`. The second has the
+harness, the model and from when to when, and `Details`, which shows and hides the rest:
+the harness's name, the session's id, its title, directory, last activity, version,
+parent session, entrypoint and the file it was read from. A subagent, and a session
+another one started, is not in the list, so it keeps a heading that names it by its id or
+title, with those facts in the open. Under the header come the session's last five turns,
+oldest first. Each message shows as
 text, cut at 2,000 characters with a way to show the rest; each tool call as one line
 naming the tool and what it was called on; each tool result as its size and whether it
 failed; compactions, aborted turns and rollbacks as labelled rules; and each request's
 model and token counts. "Earlier" shows the turns before. The page lists the session's
-subagents, and opening one shows its turns the same way. A session that can't be found or
-read shows why.
+subagents, and opening one shows its turns the same way. While the turns are read the page
+says so. A session that can't be found or read shows why, and when its harness's sessions
+were not all read the line that says so under the list stands under the header too.
 
 The page server runs in the shell's environment, so the roots it reads are the ones that
 environment and sessions' settings name, which can differ from your terminal's.
@@ -378,6 +387,10 @@ subagent chosen in the block opens in the block, with Back to return.
 The list is four reads of the page server: `/api/list` (the counts and the groups, with
 the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 rows of a
 group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
+`/api/list` and `/api/session` also carry `home`, the home folder of the account the page
+server runs as, which is what the page writes as `~`. The header over one session asks
+`/api/list` for that session by its harness and id, which reads every session's first
+lines once, as any `find` does.
 They take the list's filters as query keys and read the setting `list.recent_s` at each
 request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what

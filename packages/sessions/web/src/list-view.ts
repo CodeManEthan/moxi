@@ -520,7 +520,7 @@ export class SessionsList extends LitElement {
         </div></div>`;
     }
     const feed = this.#folders;
-    const menu = folderMenu(feed?.value ?? null, this.#filters, this.#narrow, state.today);
+    const menu = folderMenu(feed?.value ?? null, this.#filters, this.#narrow, state.today, LOCAL, state.home);
     const status = statusLine(feed ?? NOT_READ, "the folders");
     return html`<div class="menu" role="menu" data-menu="folder">
       <input type="text" class="narrow" aria-label=${NARROW_FOLDERS} placeholder=${NARROW_FOLDERS} autocomplete="off"

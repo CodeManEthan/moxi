@@ -13,7 +13,7 @@
 import { charCount, cutAt } from "./views.ts";
 import type { FeedState } from "./views.ts";
 import type { ListRow, Message, Root, SessionAnswer, SessionSubagent } from "./list-feed.ts";
-import { dayWords, GONE, LOCAL, noticeOf, timeWords } from "./list.ts";
+import { dayWords, folderWords, GONE, LOCAL, noticeOf, timeWords } from "./list.ts";
 import type { RowView, StatusLine, Zone } from "./list.ts";
 
 /** A message is shown up to this many characters; the transcript has the rest. */
@@ -75,7 +75,8 @@ export interface OpenedView {
     label: string;
     /** The harness's command, the text `Copy` copies. */
     command: string;
-    /** Dim, under the command: `run it in /work/proj-a`. */
+    /** Dim, under the command: `run it in ~/code/proj-a`; a folder that is not under the
+     * account's home folder as it is. */
     where: string | null;
     copy: string;
   } | null;
@@ -135,7 +136,8 @@ export function subagentView(sub: SessionSubagent, on: string, today: string, zo
 
 /** The `Session` line: the harness as its id and the model, then from the start to the
  * last change, each with its day. A part that was not read is left out. */
-export function sessionLine(answer: SessionAnswer, today: string, zone: Zone = LOCAL): { lead: string; rest: string | null } {
+export function sessionLine(answer: Pick<ListRow, "harness" | "model" | "started" | "changed">, today: string,
+                            zone: Zone = LOCAL): { lead: string; rest: string | null } {
   const model = label(answer.model);
   return {
     lead: model !== null ? `${answer.harness} · ${model}` : answer.harness,
@@ -202,7 +204,7 @@ export function openedView(row: RowView, feed: FeedState<SessionAnswer> | null,
     view.resume = {
       label: RESUME,
       command: answer.resume.command,
-      where: folder !== null ? `run it in ${folder}` : null,
+      where: folder !== null ? `run it in ${folderWords(folder, answer.home)}` : null,
       copy: COPY,
     };
   }

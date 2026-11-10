@@ -71,7 +71,8 @@ session not started by a program that changed within the setting `list.recent_s`
 `now`).
 
 *`/api/list`*: `now` (the time the answer was cut at), `today` (the server's local date,
-`YYYY-MM-DD`), `all` (the sessions before the filters) and `total` (after them), both of
+`YYYY-MM-DD`), `home` (the home folder of the account the page server runs as, so the
+page can word a folder under it with `~`; null when the account has none), `all` (the sessions before the filters) and `total` (after them), both of
 both kinds; `unreadable` (compressed Codex rollouts left out, null when Codex's root was
 not listed); `roots` (`{harness, root, reason, parts}` per harness whose root was not
 read whole, below); `harnesses` (`{harness, count}` for each harness whose root was
@@ -135,7 +136,7 @@ being its newest message cut at 300 bytes; null when they could not be listed), 
 listed) and `resume` (`{command, folder}`: the harness's command for picking the session
 up again and the folder to run it in, null where it runs anywhere; `resume` itself is
 null for a harness with no command, and for one whose command must be run in the
-session's folder when that folder was not read). It says nothing of whether the session
+session's folder when that folder was not read) and `home`, as the list's. It says nothing of whether the session
 is working. An id that is not a main session's (a subagent's, a spawned Codex thread's,
 an unknown one) is refused.
 
@@ -144,8 +145,8 @@ an unknown one) is refused.
 
 A filter, group, kind or `before` that is not one, and a config that cannot be read, are
 refused with the reason. Text a person or model wrote, a typed name, a subagent's
-description and a root's reason are marked `redact`; folders, paths and roots are marked
-`path`.
+description and a root's reason are marked `redact`; folders, paths, roots and `home` are
+marked `path`.
 
 The page's assets are what the repository's web build writes from `packages/sessions/web/`
 into this package's `web/`: `page.js`, the page, and `window.js`, the block other pages
@@ -402,6 +403,7 @@ LIST = {
     "shape": _INT,
     "now": lb.Out("float"),
     "today": _TEXT,
+    "home": _MAYBE_PATH,
     "all": _INT,
     "total": _INT,
     "unreadable": _MAYBE_INT,
@@ -443,6 +445,7 @@ SESSION = {
     "more": _MAYBE_INT,
     "resume": lb.Out("table", nullable=True,
                      items={"command": _TEXT, "folder": _MAYBE_PATH}),
+    "home": _MAYBE_PATH,
 }
 
 #: `/api/folders`.

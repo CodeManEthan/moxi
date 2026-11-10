@@ -13,6 +13,10 @@ is called, so a change shows in the next answer. A reply is cut here, at
 newest thing said on a row and the prompt come cut from the catalog, which keeps no more
 of either than is sent.
 
+**The home folder.** The list's answer and an opened session's carry `home`, the home
+folder of the account this server runs as (`Path.home()`), so the page can word a folder
+under it with `~`. It is null when the account has no home folder to name.
+
 **Finding the session.** `find(harness, session)` asks the harness's root as this server's
 environment and sessions' config give it; the page server runs in the browser shell's
 environment, not the user's terminal's. A Codex thread can have several candidate files:
@@ -40,6 +44,7 @@ answer fails its declared shape on what a harness wrote.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from moxi.config import ConfigError
@@ -200,6 +205,14 @@ def _recent_s() -> int:
         raise lb.Refused(f"sessions' config cannot be read: {exc}") from None
 
 
+def _home() -> str | None:
+    """The home folder of the account this server runs as; None when it has none."""
+    try:
+        return str(Path.home())
+    except (RuntimeError, OSError):
+        return None
+
+
 def _seconds(query: Any, name: str) -> float | None:
     text = query.get(name)
     if text is None:
@@ -236,7 +249,7 @@ def listing(call: Any) -> dict[str, Any]:
         answer = lists.list_sessions(recent_s=recent_s, **filters)
     except ValueError as exc:
         raise lb.Refused(str(exc)) from None
-    return {"shape": SHAPE, **answer,
+    return {"shape": SHAPE, **answer, "home": _home(),
             "groups": [_group(group) for group in answer["groups"]]}
 
 
@@ -271,7 +284,8 @@ def session(call: Any) -> dict[str, Any]:
     if opened is None:
         raise lb.Refused(f"the list holds no {harness} session {name}: a subagent, or a "
                          "thread another thread started, is not in the list")
-    out = {"shape": SHAPE, **_row(opened), "reply": cut_message(opened["reply"])}
+    out = {"shape": SHAPE, **_row(opened), "reply": cut_message(opened["reply"]),
+           "home": _home()}
     if opened["subagents"] is not None:
         out["subagents"] = [
             {**sub, "last": None if sub["last"] is None else cut(sub["last"],

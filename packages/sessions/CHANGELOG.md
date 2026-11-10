@@ -37,7 +37,20 @@
   goes to the session's address, and `Copy id`. The session is read when its row is
   opened, and again only when a newer list shows it changed.
 - The form that asked for a harness and a session id is gone: type the id in the find
-  field. A session's own address shows it as before.
+  field.
+- A session's own address has a new header: `Sessions`, which goes back to the list, and
+  the session's name as the list names it; under it the harness, the model and from when
+  to when. The page's heading and its opening sentence are gone. What the old header
+  listed (the harness's name, the id, title, directory, last activity, version, parent
+  session, entrypoint, the file read) is behind `Details`. A subagent and a session
+  another one started keep a heading by id or title, with those facts in the open. The
+  turns, "Earlier", `Refresh` and the subagents are as before, without the accent,
+  warning and error colours. A read on its way and a read that failed each say so in
+  words, and a harness whose sessions were not all read has its line under the header.
+- `/api/list` and `/api/session` carry `home`, the home folder of the account the page
+  server runs as (null when it has none), marked as a path. The page writes a folder
+  under it with `~`: the resume line's folder, the path in the Folder menu and the
+  directory in `Details`.
 
 ## 0.2.7 (2026-11-10)
 

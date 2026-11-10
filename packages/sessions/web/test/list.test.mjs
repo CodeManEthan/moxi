@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   ACTIVE_RECENTLY, addMore, CLEAR, countLine, filterLine, FIND_PLACEHOLDER, folderMenu, GONE, harnessMenu, statusLine,
   unlistedLine, WAITING, whenMenu, whenOf, whenWords, dateWords, dayAfter, dayLabel, dayWords, EARLIER, earlierLine, FIND_MAX,
-  foldersPath, groupLabel, harnessWords, HIDE, isFiltered, keyOf, lastSegment, listPath, listView, LOCAL, morePath,
+  foldersPath, folderWords, groupLabel, harnessWords, HIDE, isFiltered, keyOf, lastSegment, listPath, listView, LOCAL, morePath,
   NO_FILTERS, NO_MATCH, NO_SESSIONS, NO_SESSIONS_SENTENCE, noticeOf, queryOf, refresh, REST_MAX, rowName, rowView,
   sessionPath, SHOW, showMore, showMoreProgram, shownRow, START_ONE, subagentsLead, timeWords, toggleOpen, toggleProgram,
   UNDATED,
@@ -954,6 +954,40 @@ test("the Folder menu names each folder by its last segment, with the path befor
   ]);
   assert.equal(menu.line, null);
   assert.equal(folderMenu(folders, NO_FILTERS, "", TODAY, UTC).all.checked, true);
+});
+
+test("a folder under the home folder is worded with a tilde, and any other as it is", () => {
+  assert.equal(folderWords("/home/alice/code/proj-a", "/home/alice"), "~/code/proj-a");
+  assert.equal(folderWords("/home/alice/code/proj-a/", "/home/alice/"), "~/code/proj-a/");
+  assert.equal(folderWords("/home/alice", "/home/alice"), "~");
+  assert.equal(folderWords("/home/alice/", "/home/alice"), "~");
+  assert.equal(folderWords("/home/alice-old/proj-a", "/home/alice"), "/home/alice-old/proj-a");
+  assert.equal(folderWords("/work/proj-a", "/home/alice"), "/work/proj-a");
+  assert.equal(folderWords("/work/proj-a", null), "/work/proj-a");
+  assert.equal(folderWords("/work/proj-a", undefined), "/work/proj-a");
+  assert.equal(folderWords("/work/proj-a", ""), "/work/proj-a");
+  assert.equal(folderWords("/work/proj-a", "/"), "/work/proj-a");
+  assert.equal(folderWords("work/proj-a", "work"), "work/proj-a");
+});
+
+test("the list keeps the home folder its answer names, and null when it names none", () => {
+  assert.equal(stateOf([recent([])], { home: "/home/alice" }).home, "/home/alice");
+  assert.equal(stateOf([recent([])], { home: null }).home, null);
+  assert.equal(stateOf([recent([])]).home, null);
+});
+
+test("the Folder menu words the path before a folder against the home folder, and narrows by either form", () => {
+  const folders = { shape: 1, more: 0, folders: [
+    { folder: "/home/alice/code/proj-a", count: 3, changed: null },
+    { folder: "/home/alice/proj-b", count: 1, changed: null },
+    { folder: "/work/proj-c", count: 1, changed: null }] };
+  const menu = (narrow, home) => folderMenu(folders, NO_FILTERS, narrow, TODAY, UTC, home);
+  assert.deepEqual(menu("", "/home/alice").items.map((one) => [one.label, one.dim, one.value]), [
+    ["proj-a", "~/code", "/home/alice/code/proj-a"], ["proj-b", "~", "/home/alice/proj-b"], ["proj-c", "/work", "/work/proj-c"]]);
+  assert.deepEqual(menu("", null).items.map((one) => one.dim), ["/home/alice/code", "/home/alice", "/work"]);
+  assert.deepEqual(menu("~/code", "/home/alice").items.map((one) => one.label), ["proj-a"]);
+  assert.deepEqual(menu("/home/alice/code", "/home/alice").items.map((one) => one.label), ["proj-a"]);
+  assert.deepEqual(menu("~/code", null).items, []);
 });
 
 test("the Folder menu narrows by any part of the path, and says when nothing matches or folders were left off", () => {

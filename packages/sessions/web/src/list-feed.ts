@@ -80,6 +80,8 @@ export interface ListAnswer {
   now: number;
   /** The server's local date, `YYYY-MM-DD`. */
   today: string;
+  /** The home folder of the account the page server runs as; null when it has none. */
+  home: string | null;
   /** The sessions before the filters, and after them; both of both kinds. */
   all: number;
   total: number;
@@ -124,6 +126,8 @@ export interface SessionAnswer extends Omit<ListRow, "subagents"> {
   /** The harness's command for picking the session up again, and the folder to run it in
    * (null where it runs anywhere); null for a harness with no command. */
   resume: { command: string; folder: string | null } | null;
+  /** The home folder of the account the page server runs as; null when it has none. */
+  home: string | null;
 }
 
 /** `/api/folders`: the folders the listed sessions ran in, newest change first. */
@@ -175,8 +179,8 @@ export function parseList(data: unknown): ListAnswer | null {
   if (!isList(data.roots) || !data.roots.every(isRoot)) return null;
   if (!isList(data.harnesses)
       || !data.harnesses.every((row) => isTable(row) && isText(row.harness) && isNumber(row.count))) return null;
-  if (!isList(data.groups) || !data.groups.every(isGroup)) return null;
-  return data as unknown as ListAnswer;
+  if (!isList(data.groups) || !data.groups.every(isGroup) || !orNull(data.home, isText)) return null;
+  return { ...(data as unknown as ListAnswer), home: (data.home ?? null) as string | null };
 }
 
 /** `/api/more`'s value, or null: the next rows of a group, or the next older days. */
@@ -196,12 +200,14 @@ export function parseSession(data: unknown): SessionAnswer | null {
   if (!orNull(data.subagents, (value) => isList(value) && value.every(isTable))) return null;
   if (!orNull(data.more, isNumber)) return null;
   if (!orNull(data.resume, (value) => isTable(value) && isText(value.command) && orNull(value.folder, isText))) return null;
+  if (!orNull(data.home, isText)) return null;
   return {
     ...(data as unknown as SessionAnswer),
     reply: (data.reply ?? null) as Message | null,
     subagents: (data.subagents ?? null) as SessionSubagent[] | null,
     more: (data.more ?? null) as number | null,
     resume: (data.resume ?? null) as SessionAnswer["resume"],
+    home: (data.home ?? null) as string | null,
   };
 }
 

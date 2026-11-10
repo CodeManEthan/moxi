@@ -12,7 +12,8 @@
 // reason.
 //
 // What selecting a subagent or the parent session does is the component's: the page
-// navigates to its route, the block opens it in place.
+// navigates to its route, the block opens it in place. The page also draws its own header
+// over the turns, so the turns and the subagents are each a part it can place.
 
 import { html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
@@ -24,7 +25,7 @@ import {
   headerFields, headingOf, keepEarlier, listingView, pages, subagentsPath, textView, unknownLine,
   windowPath, windowView,
 } from "./views.ts";
-import type { EntryView, Item, Target } from "./views.ts";
+import type { EntryView, Field, Item, Target } from "./views.ts";
 
 export abstract class SessionView extends LitElement {
   #target: Target | null = null;
@@ -135,6 +136,11 @@ export abstract class SessionView extends LitElement {
 
   // -- rendering ---------------------------------------------------------------------------
 
+  /** The read of the open session's turns; null when no session is open. */
+  protected get windowFeed(): Feed<WindowAnswer> | null {
+    return this.#window;
+  }
+
   /** Whether sessions went away while the view was open. */
   protected get sessionGone(): boolean {
     return this.#window?.gone === true || this.#listing?.gone === true;
@@ -156,19 +162,22 @@ export abstract class SessionView extends LitElement {
       </div>
       ${view.state === "loading" ? html`<div class="placeholder"></div>` : nothing}
       ${view.line !== null ? html`<p class="problem" data-line=${view.state} role="status">${view.line}</p>` : nothing}
-      ${answer !== null ? this.#body(target, answer) : nothing}
+      ${answer !== null ? this.renderTurns(target, answer) : nothing}
     </section>
-    ${this.#listingPart()}`;
+    ${this.renderSubagents()}`;
   }
 
-  #body(target: Target, answer: WindowAnswer) {
+  /** The header's facts as `fields` (none when null), the link to the parent session,
+   * "Earlier" and the records. */
+  protected renderTurns(target: Target, answer: WindowAnswer, fields: Field[] | null = headerFields(answer)) {
     const header = answer.header;
     const parent: Target | null = target.agent !== null ? { ...target, agent: null }
       : typeof header.parent === "string" && header.parent !== "" ? { harness: target.harness, session: header.parent, agent: null }
       : null;
     const shown = pages(answer, this.#earlier);
-    return html`<dl data-part="header">${headerFields(answer).map((field) => html`
-        <dt>${field.label}</dt><dd data-field=${field.name}>${field.code ? html`<code>${field.value}</code>` : field.value}</dd>`)}</dl>
+    return html`${fields !== null ? html`<dl data-part="header">${fields.map((field) => html`
+        <dt>${field.label}</dt><dd data-field=${field.name}>${field.code ? html`<code>${field.value}</code>` : field.value}</dd>`)}</dl>`
+        : nothing}
       ${parent !== null ? html`<p><button type="button" class="link" data-action="parent"
         @click=${() => this.openParent(parent)}>Open the parent session</button></p>` : nothing}
       <div class="bar" data-part="earlier">
@@ -213,7 +222,8 @@ export abstract class SessionView extends LitElement {
     }
   }
 
-  #listingPart() {
+  /** The session's subagents, each a button that opens it. */
+  protected renderSubagents() {
     const feed = this.#listing;
     if (feed === null) return nothing;
     const view = listingView(feed);

@@ -164,6 +164,15 @@ test("the subagents not listed are not counted on the page", () => {
   assert.equal(JSON.stringify(view).includes("12"), false);
 });
 
+test("the resume line's folder is worded against the home folder, and the command is the harness's own", () => {
+  const under = (folder, home) => draw(answer({ home, resume: { command: `claude --resume ${ID}`, folder } })).resume;
+  assert.equal(under("/home/alice/code/proj-a", "/home/alice").where, "run it in ~/code/proj-a");
+  assert.equal(under("/home/alice", "/home/alice").where, "run it in ~");
+  assert.equal(under("/work/proj-a", "/home/alice").where, "run it in /work/proj-a");
+  assert.equal(under("/home/alice/code/proj-a", null).where, "run it in /home/alice/code/proj-a");
+  assert.equal(under("/home/alice/code/proj-a", "/home/alice").command, `claude --resume ${ID}`);
+});
+
 test("a codex session's subagents carry the line for parts of codex that were not read", () => {
   const codex = { harness: "codex", resume: { command: "codex resume t1", folder: null } };
   const parts = { harness: "codex", root: "/codex", reason: null, parts: 3 };

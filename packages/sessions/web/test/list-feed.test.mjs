@@ -10,7 +10,7 @@ const ROW = {
   recent: true,
 };
 const LIST = {
-  shape: 1, now: 1000.5, today: "2026-11-08", all: 3, total: 3, unreadable: 0, roots: [],
+  shape: 1, now: 1000.5, today: "2026-11-08", home: "/home/alice", all: 3, total: 3, unreadable: 0, roots: [],
   harnesses: [{ harness: "claude", count: 3 }],
   groups: [
     { key: "recent", count: 1, rows: [ROW], before: null },
@@ -21,7 +21,7 @@ const LIST = {
 const SESSION = {
   shape: 1, ...ROW, reply: { at: 1000, text: "Done.", truncated: false },
   subagents: [{ description: "Read the logs", agent_type: "scout", started: 960, last_at: 990, last: "Found it." }],
-  more: 0, resume: { command: "claude --resume s1", folder: "/work/proj-a" },
+  more: 0, resume: { command: "claude --resume s1", folder: "/work/proj-a" }, home: "/home/alice",
 };
 
 test("a list answer of shape 1 is read with its three kinds of group", () => {
@@ -37,6 +37,19 @@ test("a list answer is read with a harness missing, a failed root and a root lis
   const read = parseList({ ...LIST, roots, harnesses: [], unreadable: null });
   assert.deepEqual(read.roots, roots);
   assert.equal(read.unreadable, null);
+});
+
+test("the home folder is read from a list and an opened session, and is null when the answer names none", () => {
+  assert.equal(parseList(LIST).home, "/home/alice");
+  assert.equal(parseSession(SESSION).home, "/home/alice");
+  const { home: _list, ...list } = LIST;
+  const { home: _session, ...session } = SESSION;
+  assert.equal(parseList(list).home, null);
+  assert.equal(parseList({ ...LIST, home: null }).home, null);
+  assert.equal(parseSession(session).home, null);
+  assert.equal(parseSession({ ...SESSION, home: null }).home, null);
+  assert.equal(parseList({ ...LIST, home: 7 }), null);
+  assert.equal(parseSession({ ...SESSION, home: 7 }), null);
 });
 
 test("a list answer without what the model reads first is not one", () => {

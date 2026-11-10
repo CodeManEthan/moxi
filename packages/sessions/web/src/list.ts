@@ -267,6 +267,9 @@ export interface ListState {
   query: Query;
   now: number;
   today: string;
+  /** The account's home folder, which a folder under it is worded against; null when
+   * the answer named none. */
+  home: string | null;
   all: number;
   total: number;
   unreadable: number | null;
@@ -399,6 +402,7 @@ export function refresh(kept: ListState | null, answer: ListAnswer, query: Query
       query,
       now,
       today: answer.today,
+      home: answer.home ?? null,
       all: answer.all,
       total: answer.total,
       unreadable: answer.unreadable ?? null,
@@ -546,6 +550,19 @@ export function lastSegment(folder: string): string {
   const cut = folder.replace(/\/+$/, "");
   const last = cut.slice(cut.lastIndexOf("/") + 1);
   return last !== "" ? last : folder;
+}
+
+/**
+ * A folder as it is drawn: one under the account's home folder starts with `~`
+ * (`~/code/proj-a`, and `~` for the home folder itself). A folder that is not under
+ * `home`, and any folder when `home` is not known, is shown as it is.
+ */
+export function folderWords(folder: string, home: string | null | undefined): string {
+  if (typeof home !== "string") return folder;
+  const base = home.replace(/\/+$/, "");
+  if (base === "" || !base.startsWith("/")) return folder;
+  if (folder === base || folder.replace(/\/+$/, "") === base) return "~";
+  return folder.startsWith(`${base}/`) ? `~${folder.slice(base.length)}` : folder;
 }
 
 const count = (n: number, one: string, many: string): string => `${fmtCount(n)} ${n === 1 ? one : many}`;
@@ -936,13 +953,16 @@ export interface FolderMenu {
 /**
  * The Folder menu from `/api/folders`' answer, narrowed to the folders whose path holds
  * `narrow` (without regard to case). A folder is its last segment, the path before it in
- * dim, and when its newest session changed: the time today, else the date.
+ * dim (with `~` for the part that is `home`), and when its newest session changed: the
+ * time today, else the date.
  */
 export function folderMenu(answer: FoldersAnswer | null, filters: Filters, narrow: string, today: string,
-                           zone: Zone = LOCAL): FolderMenu {
+                           zone: Zone = LOCAL, home: string | null = null): FolderMenu {
   const set = filters.folder !== null && filters.folder !== "" ? filters.folder : null;
   const text = narrow.trim().toLowerCase();
-  const folders = (answer?.folders ?? []).filter((row) => text === "" || row.folder.toLowerCase().includes(text));
+  // The text narrows by the path as it is and as it is drawn, so `~/code` finds a folder too.
+  const folders = (answer?.folders ?? []).filter((row) => text === "" || row.folder.toLowerCase().includes(text)
+                                                 || folderWords(row.folder, home).toLowerCase().includes(text));
   const items = folders.map((row): MenuItem<string> => {
     const name = lastSegment(row.folder);
     const cut = row.folder.replace(/\/+$/, "");
@@ -951,7 +971,7 @@ export function folderMenu(answer: FoldersAnswer | null, filters: Filters, narro
     return {
       value: row.folder,
       label: name,
-      dim: parent !== "" && parent !== "/" ? parent.replace(/\/+$/, "") : null,
+      dim: parent !== "" && parent !== "/" ? folderWords(parent.replace(/\/+$/, ""), home) : null,
       tail: day === null ? null : day === today ? zone.clock(row.changed as number) : dateWords(day, today),
       checked: row.folder === set,
     };

@@ -216,8 +216,8 @@ def test_what_a_person_or_a_model_wrote_is_redact_and_every_folder_and_path_is_p
         "/api/list roots[].reason", "/api/session reply.text",
         "/api/session subagents[].description", "/api/session subagents[].last"}
     assert {k for k, v in found.items() if v == "path"} == _in_rows(ROW_PATH) | {
-        "/api/list roots[].root", "/api/session resume.folder",
-        "/api/folders folders[].folder"}
+        "/api/list roots[].root", "/api/list home", "/api/session resume.folder",
+        "/api/session home", "/api/folders folders[].folder"}
 
 
 # -- the list -------------------------------------------------------------------------------
@@ -478,6 +478,26 @@ def test_more_refuses_what_it_cannot_answer(roots):
     assert "epoch seconds" in refused("/api/more", "group=recent&now=soon")
     assert get("/api/more", "group=recent&kind=other")[0] == 400
     assert get("/api/more", "")[0] == 400
+
+
+def test_the_list_and_an_opened_session_carry_the_accounts_home_folder(roots, monkeypatch):
+    seed(roots)
+    monkeypatch.setenv("HOME", "/home/alice")
+
+    assert read("/api/list")["home"] == "/home/alice"
+    assert read("/api/session", f"harness=claude&session={sid(1)}")["home"] == "/home/alice"
+
+
+def test_an_account_with_no_home_folder_answers_a_null_home(roots, monkeypatch):
+    seed(roots)
+
+    def no_home():
+        raise RuntimeError("no home folder")
+
+    monkeypatch.setattr("moxi_sessions.pagehandlers.Path.home", no_home)
+
+    assert read("/api/list")["home"] is None
+    assert read("/api/session", f"harness=claude&session={sid(1)}")["home"] is None
 
 
 # -- one session ----------------------------------------------------------------------------
