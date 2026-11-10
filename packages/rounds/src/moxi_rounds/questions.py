@@ -16,8 +16,8 @@ stage), or a tuple of stage ids. A question that did not say is `ALL`. A project
 question is `NONE`. `holds_every(new, old)` is the test of a widening and, with its
 arguments swapped, of a narrowing.
 
-Nothing here decides whether a question stops a step: that reads `current` and
-`Question.blocks`, and belongs to whatever asks.
+Nothing here decides whether a question stops a step: `holds` does, from `current` and
+`Question.blocks`.
 """
 
 from __future__ import annotations
@@ -49,6 +49,10 @@ STAGE = re.compile(r"B[1-9][0-9]*")
 
 #: What starts the name of the round a parked question waits for.
 UNTIL_ROUND = "round:"
+
+#: What starts the item of a ruling that takes a stage out of the plan; the stage's id
+#: follows.
+UNSTAGE = "unstage:"
 
 Blocks = str | tuple[str, ...]
 
@@ -111,8 +115,9 @@ def holds_every(new: Blocks | None, old: Blocks | None) -> bool:
 
 
 # -- what a round's log says of its stages -----------------------------------------------
-# The two readers below take what they need from the history. They are the one place
-# that says which stages a round has and which are finished, for the code here.
+# The readers below take what they need from the history and the rulings. They are the
+# one place that says which stages a round has, which are finished and which left the
+# plan.
 
 def recorded_stages(state: states.State) -> tuple[str, ...]:
     """The ids of the stages the round's log declared, in the order it declared them."""
@@ -126,6 +131,19 @@ def finished_stages(state: states.State) -> frozenset[str]:
     return frozenset(event["stage"] for event in state.history
                      if event["type"] == "finish.done"
                      and isinstance(event.get("stage"), str))
+
+
+def left_stages(state: states.State) -> frozenset[str]:
+    """The ids of the stages that left the round's plan: each one a change to the stage
+    records as removed, and each one a ruling takes out. A stage that left does not
+    come back."""
+    removed = {event["id"] for event in state.history
+               if event["type"] == "stage.changed" and event.get("removed") is True
+               and isinstance(event.get("id"), str)}
+    ruled_out = {ruling.rules[len(UNSTAGE):] for ruling in state.rulings
+                 if (ruling.rules or "").startswith(UNSTAGE)
+                 and STAGE.fullmatch(ruling.rules[len(UNSTAGE):])}
+    return frozenset(removed | ruled_out)
 
 
 def unrecorded(blocks: Blocks | None, state: states.State) -> tuple[str, ...]:
@@ -197,6 +215,7 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
 
 
 __all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "ALL", "NONE", "ROUND_ID",
-           "PROJECT_ID", "STAGE", "UNTIL_ROUND", "find", "next_id", "parse_blocks",
-           "said", "stored", "holds_every", "recorded_stages", "finished_stages",
-           "unrecorded", "stages_said", "is_closed", "reached", "current", "waiting"]
+           "PROJECT_ID", "STAGE", "UNTIL_ROUND", "UNSTAGE", "find", "next_id",
+           "parse_blocks", "said", "stored", "holds_every", "recorded_stages",
+           "finished_stages", "left_stages", "unrecorded", "stages_said", "is_closed",
+           "reached", "current", "waiting"]

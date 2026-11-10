@@ -55,6 +55,8 @@ class Ruling:
     chose: str | None = None
     #: The question it changes, or None for a ruling that changes none.
     question: str | None = None
+    #: The ids of the questions a skip of the questions step lets its stage past.
+    covers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -170,7 +172,7 @@ def _ruling_recorded(state: State, event: dict) -> None:
         # A copy, so the state's scope and the event's never share a dict.
         scope=tuple(copy.deepcopy(event.get("scope") or [])),
         actor=event["actor"], at=event["at"], chose=event.get("chose"),
-        question=event.get("question")))
+        question=event.get("question"), covers=tuple(event.get("covers") or ())))
     # A ruling of a question is the whole of its change: nothing else is written for
     # it, so a verb stopped after this event has left the question ruled.
     if event.get("question") is not None:

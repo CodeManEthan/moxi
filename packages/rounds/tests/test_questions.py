@@ -168,3 +168,19 @@ def test_the_index_keeps_the_questions_recorded_as_open_or_parked():
                 "state": "open", "by": "planner", "at": AT}),
         ("Q2", {"text": "Is it so?", "from": "comms:12", "blocks": ["B1", "B2"],
                 "state": "parked", "by": "planner", "at": AT, "until": "B2"})]
+
+
+def test_a_stage_left_the_plan_when_a_change_removed_it_or_a_ruling_took_it_out():
+    found = state.fold([
+        event(1, "stage.declared", id="B1"), event(2, "stage.declared", id="B2"),
+        event(3, "stage.declared", id="B3"), event(4, "stage.declared", id="B4"),
+        event(5, "stage.changed", id="B1", removed=True),
+        # A stage that only lost a wait is still in the plan.
+        event(6, "stage.changed", id="B2", after=[]),
+        event(7, "ruling.recorded", id="C1", kind="process", rules="unstage:B3"),
+        event(8, "ruling.recorded", id="C2", kind="process", rules="skip:docket:B4"),
+        event(9, "ruling.recorded", id="C3", kind="substance", text="a ruling")])
+
+    assert questions.left_stages(found) == {"B1", "B3"}
+    assert questions.left_stages(state.State()) == frozenset()
+    assert questions.recorded_stages(found) == ("B1", "B2", "B3", "B4")

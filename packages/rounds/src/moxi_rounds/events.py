@@ -86,10 +86,11 @@ TYPES = _types(
     # the ruling it replaces or takes back. A ruling of a question is the whole of the
     # change: it names the `question` and holds what the question becomes, its `state`,
     # what a parked one waits for (`until`) and what it holds up from then on
-    # (`blocks`), each only when the ruling changes it.
+    # (`blocks`), each only when the ruling changes it. A skip of the questions step
+    # for a stage lists the questions it lets that stage past, `covers`.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
-               "chose", "question", "state", "until", "blocks", "supersedes",
+               "chose", "question", "state", "until", "blocks", "covers", "supersedes",
                "revokes"),
               required=("id", "record", "kind")),
     # Rulings were put in front of the operator: their ids, and the pointer to where.
