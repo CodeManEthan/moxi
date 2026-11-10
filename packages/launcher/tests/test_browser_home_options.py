@@ -1,7 +1,9 @@
 """The Options panel of the box on Home in a browser, through a real shell that starts the
 launcher's real page server: the word that opens it, the panel at the window's right edge
 with Home's column moved aside, its groups and their subgroups, the find field, a row
-changed there reaching the harness's command line, and the panel on a narrow page.
+changed there reaching the harness's command line, the line under the box that names the
+changed rows with its `Reset`, a value that can do harm turned on and launched, and the
+panel on a narrow page.
 
 The shell runs the fake slots in slots' place and a fake `claude` first on its `PATH`, so
 a launch from Home starts no real session.
@@ -229,6 +231,157 @@ def test_a_row_found_and_changed_is_in_the_launch_and_on_its_groups_line(fake, u
     assert argv[argv.index("--add-dir") + 1] == folder, argv
     # The panel stays open through the launch, with its values.
     expect(row(panel, "native_name")).to_have_value("helper-1")
+
+
+def changed_line(piece):
+    """The line under the box that names the changed rows."""
+    return piece.locator('[data-line="changed"]')
+
+
+def open_mode(panel):
+    """Access > Mode opened; returns the permission mode's control."""
+    group(panel, "access").click()
+    panel.locator('button[data-sub="access/Mode"]').click()
+    return row(panel, "permission_mode")
+
+
+def test_a_changed_row_is_named_by_its_label_under_the_box_and_reset_puts_it_back(fake, ui_page):
+    piece = home_at(ui_page, 1400)
+    word = piece.locator(".opt")
+    expect(word).to_have_text("Options")
+    expect(changed_line(piece)).to_have_count(0)
+    piece.locator("textarea").fill(BRIEF)
+    piece.locator(".more").click()
+    piece.locator('[data-menu="run"] button[data-run="Headless"]').click()
+    panel = open_options(piece)
+    mode = open_mode(panel)
+    mode.select_option("plan")
+    line = changed_line(piece)
+    expect(line.locator("b")).to_have_text(["Permission mode"])
+    expect(line).to_have_text("ChangedPermission modeReset")
+    expect(word).to_have_text("Options · 1")
+    kit.assert_colour(word, "text")
+    kit.assert_colour(line, "text-dim")
+    kit.assert_colour(line.locator("b"), "text")
+    # The line sits under the box, in its column.
+    box = piece.locator(".box").bounding_box()
+    found = line.bounding_box()
+    assert found["y"] >= box["y"] + box["height"] and found["x"] >= box["x"], (box, found)
+    assert found["x"] + found["width"] <= box["x"] + box["width"], (box, found)
+    # A second row joins it in the panel's order, whichever was changed first.
+    group(panel, "seat").click()
+    panel.locator('button[data-sub="seat/Name & notes"]').click()
+    name = row(panel, "native_name")
+    name.fill("helper-1")
+    name.blur()
+    expect(line.locator("b")).to_have_text(["Permission mode", "Native name"])
+    expect(word).to_have_text("Options · 2")
+    # A row set back by hand leaves the line.
+    mode.select_option("default")
+    expect(line.locator("b")).to_have_text(["Native name"])
+    expect(word).to_have_text("Options · 1")
+    mode.select_option("plan")
+    expect(word).to_have_text("Options · 2")
+    # Reset puts every changed row back and leaves the box, the button and the panel.
+    line.get_by_role("button", name="Reset").click()
+    expect(line).to_have_count(0)
+    expect(word).to_have_text("Options")
+    kit.assert_colour(word, "text-dim")
+    expect(mode).to_have_value("default")
+    expect(name).to_have_value("")
+    expect(piece.locator("textarea")).to_have_value(BRIEF)
+    expect(piece.locator(".go")).to_have_text("Launch headless")
+    expect(panel).to_be_visible()
+    with ui_page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+        piece.locator(".go").click()
+    body = json.loads(sent.value.post_data)
+    assert body["values"]["permission_mode"] == "default" and "native_name" in body["leave_out"], body
+    assert "off_posture" not in body, body
+    expect(piece.locator('.said [data-line="started"]')).to_be_visible()
+
+
+def test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag(fake, ui_page, harness):
+    piece = home_at(ui_page, 1400)
+    panel = open_options(piece)
+    mode = open_mode(panel)
+    asked = panel.locator('[data-ask="permission_mode"]')
+    expect(asked).to_have_count(0)
+    mode.select_option("bypassPermissions")
+    # Picked, it is not set: two dim sentences and the two acts under it.
+    expect(asked.locator("p")).to_have_text(
+        "Every tool runs without asking, whatever the mode and the rules say. Confirmed for this launch only.")
+    kit.assert_colour(asked.locator("p"), "text-dim")
+    expect(changed_line(piece)).to_have_count(0)
+    expect(piece.locator(".opt")).to_have_text("Options")
+    kit.assert_colour(panel.locator('[data-row="permission_mode"] label'), "text")
+    asked.get_by_role("button", name="Cancel").click()
+    expect(asked).to_have_count(0)
+    expect(mode).to_have_value("default")
+    expect(changed_line(piece)).to_have_count(0)
+    # Turned on, it is in the warning colour wherever it is drawn.
+    mode.select_option("bypassPermissions")
+    asked.get_by_role("button", name="Turn on").click()
+    expect(mode).to_have_value("bypassPermissions")
+    expect(asked.get_by_role("button")).to_have_count(0)
+    expect(asked.locator("p")).to_contain_text("Confirmed for this launch only.")
+    kit.assert_colour(panel.locator('[data-row="permission_mode"] label'), "danger")
+    kit.assert_colour(mode, "danger")
+    # A second row, changed after it, is named after it; a row holding no such value is plain.
+    panel.locator('button[data-sub="access/Reach"]').click()
+    kit.assert_colour(panel.locator('[data-row="add_dir"] .label'), "text")
+    folder = "/srv/proj-a"
+    row(panel, "add_dir").fill(folder)
+    panel.locator('[data-row="add_dir"]').get_by_role("button", name="Add").click()
+    marks = changed_line(piece).locator("b")
+    expect(marks).to_have_text(["Permission mode", "Extra folders"])
+    kit.assert_colour(marks.nth(0), "danger")
+    kit.assert_colour(marks.nth(1), "text")
+    expect(piece.locator(".opt")).to_have_text("Options · 2")
+    kit.assert_colour(piece.locator(".opt"), "text")
+    # The closed subgroup and group say the value in the same colour.
+    panel.locator('button[data-sub="access/Mode"]').click()
+    said = panel.locator('button[data-sub="access/Mode"] .sum')
+    expect(said).to_have_text("bypassPermissions")
+    kit.assert_colour(said.locator("span"), "danger")
+    group(panel, "access").click()
+    words = group(panel, "access").locator(".sum span")
+    expect(words).to_have_text(["bypassPermissions", "Extra folders 1"])
+    kit.assert_colour(words.nth(0), "danger")
+    kit.assert_colour(words.nth(1), "text-dim")
+    # The launch says it is off the usual permissions and is not refused.
+    piece.locator(".more").click()
+    piece.locator('[data-menu="run"] button[data-run="Headless"]').click()
+    brief = "say the word harm"
+    piece.locator("textarea").fill(brief)
+    with ui_page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
+        piece.locator(".go").click()
+    body = json.loads(sent.value.post_data)
+    assert body["values"]["permission_mode"] == "bypassPermissions" and body["off_posture"] is True, body
+    expect(piece.locator('.said [data-line="started"]')).to_be_visible()
+    expect(piece.locator('.said [data-line="refused"]')).to_have_count(0)
+    [run] = wait_for(lambda: [run for run in harness.runs() if brief in " ".join(run["argv"])],
+                     10, what="the fake harness's run with the brief")
+    argv = run["argv"]
+    assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions", argv
+    # The value is still on after the launch, and still named.
+    expect(marks).to_have_text(["Permission mode", "Extra folders"])
+
+
+def test_the_warning_colour_is_the_themes_in_light_and_in_dark(fake, ui_contexts):
+    seen = {}
+    for scheme in ("light", "dark"):
+        page = ui_contexts(color_scheme=scheme).pages[0]
+        fake.script(placed=2, slots=kit.free(2, 3))
+        piece = home_at(page, 1400)
+        panel = open_options(piece)
+        mode = open_mode(panel)
+        mode.select_option("bypassPermissions")
+        panel.locator('[data-ask="permission_mode"]').get_by_role("button", name="Turn on").click()
+        mark = changed_line(piece).locator("b")
+        kit.assert_colour(mark, "danger")
+        kit.assert_colour(mode, "danger")
+        seen[scheme] = mark.evaluate("(node) => getComputedStyle(node).color")
+    assert seen["light"] != seen["dark"], seen
 
 
 def test_a_row_whose_flag_the_harness_hides_carries_a_dim_mark(fake, ui_page):

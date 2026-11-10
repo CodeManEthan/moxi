@@ -41,23 +41,33 @@
 // and subgroup opening in place and saying, while closed, which of its values differ from
 // the shipped defaults. Each row is drawn by the shell's form renderer; a value changed
 // there is one more row this piece sets, and goes in the launch request with the rest.
+//
+// A row changed in the panel is named by its label on a dim line under the box, `Changed`,
+// and counted on the word, `Options · 2`; `Reset` on that line puts every changed row back
+// to what the form is filled with and leaves the box, the place, the chip and the button
+// as they are. A value that can do harm is in the warning colour wherever it is drawn: the
+// row's name and control, the summaries above it, and first on the line under the box.
+// Picked in a row's control it is not set until `Turn on` under it is pressed. A launch
+// whose permission rows are not all at the user's usual values says so in its request, and
+// each such row is one of those the line under the box names.
 
 import { css, html, LitElement, nothing } from "lit";
 import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import {
-  changedValue, drawnField, findRows, HIDDEN_FLAG, keptOptions, NO_MATCH, PANEL_WIDTH_PX, panelGroups, SIDE_EVENT, valueNow,
-  withOption,
+  asksFirst, CHANGED, changedValue, changes, DEFAULTS, drawnField, findRows, HIDDEN_FLAG, keptOptions, NO_MATCH, optionsWord,
+  PANEL_WIDTH_PX, panelGroups, RESET, SIDE_EVENT, valueNow, withOption,
 } from "./options-model.ts";
-import type { PanelField, PanelGroup, PanelRow, PanelSub } from "./options-model.ts";
+import type { Change, PanelField, PanelGroup, PanelRow, PanelSub, Pending, Word } from "./options-model.ts";
 
 import {
   fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
 } from "./panel.ts";
 import type { Catalog, Form } from "./panel.ts";
 import {
-  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, edited, followed, following, hasEffort, IDLE, inFlight, launched,
+  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
+  inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
   runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
@@ -129,7 +139,22 @@ const STYLES = css`
   .run .row.taken { color: var(--moxi-text-dim); cursor: default; }
   .run .row.taken:hover { background: none; }
   .run hr { margin: 6px 0; border: 0; border-top: 1px solid var(--moxi-border); }
-  .opt { padding: 8px 6px; border: 0; background: none; color: var(--moxi-text-dim); font: 14px/1 var(--moxi-font-sans); }
+  .opt { padding: 8px 6px; border: 0; background: none; color: var(--moxi-text-dim); font: 14px/1 var(--moxi-font-sans);
+         font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .opt.on { color: var(--moxi-text); }
+  .changed { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin: 10px 2px 0;
+             color: var(--moxi-text-dim); font-size: 14px; line-height: 20px; }
+  .changed .k { margin-right: 10px; }
+  .changed b { color: var(--moxi-text); font-weight: 400; }
+  .changed .sep { margin: 0 8px; }
+  .changed button { flex: none; padding: 0; border: 0; background: none; color: inherit; font: inherit; }
+  .dg, .changed b.dg { color: var(--moxi-danger); }
+  .prow.dg moxi-ui-form { --moxi-text: var(--moxi-danger); }
+  .ask { margin: 6px 0 2px; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .ask p { margin: 0; }
+  .ask div { display: flex; gap: 14px; margin-top: 6px; }
+  .ask button { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; }
+  .ask button.on { color: var(--moxi-text); font-weight: 600; }
   .panel { position: fixed; z-index: 5; top: 0; right: 0; bottom: 0; width: ${PANEL_WIDTH_PX}px; max-width: 100vw;
            padding: 20px 20px 0; overflow: auto; border-left: 1px solid var(--moxi-border);
            background: var(--moxi-bg); color: var(--moxi-text); font-size: 14px; }
@@ -192,6 +217,7 @@ export class LauncherPrompt extends LitElement {
     query: { state: true },
     opened: { state: true },
     options: { state: true },
+    pending: { state: true },
   };
 
   /** The box's text. */
@@ -227,6 +253,8 @@ export class LauncherPrompt extends LitElement {
   /** The values set in the panel, by row; a row not named here keeps what the form is
    * filled with. */
   options: Record<string, FormValue> = {};
+  /** A value that can do harm, picked in its row and waiting for `Turn on`. */
+  pending: Pending | null = null;
   /** When the read that gave the listing was asked, by the page's clock; 0 when the last
    * read failed or left the slots unread, so the next press reads again. */
   #targetsAt = 0;
@@ -359,7 +387,10 @@ export class LauncherPrompt extends LitElement {
     this.#form = form;
     this.#refill();
     // A row the other harness has no place for in the panel is no longer set.
-    if (other && this.fields.length > 0) this.options = keptOptions(this.options, this.fields);
+    if (other && this.fields.length > 0) {
+      this.options = keptOptions(this.options, this.fields);
+      this.pending = null;
+    }
   }
 
   /** Reads the catalog and the form again, whichever the last read of it left unread. */
@@ -471,6 +502,7 @@ export class LauncherPrompt extends LitElement {
           @input=${(event: Event) => this.#edit((event.target as HTMLTextAreaElement).value)}></textarea>
         <div class="boxrow"><div class="left">${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
       </div>
+      ${this.#changed()}
       ${this.#said()}
       ${this.panel ? this.#panel() : nothing}
     </div>`;
@@ -564,18 +596,63 @@ export class LauncherPrompt extends LitElement {
     this.opened = next;
   }
 
-  /** Takes one change of a row from the form renderer that draws it. */
+  /** Takes one change of a row from the form renderer that draws it. A value that can do
+   * harm is held back until `Turn on` is pressed under it; any other value is set, and
+   * lets go of one held back for the row. */
   #optionChanged(field: PanelField, event: CustomEvent<FormChange>): void {
     event.stopPropagation();
-    this.options = withOption(this.options, field, changedValue(field, valueNow(field, this.options), event.detail),
-                              this.fields as PanelField[]);
+    const now = valueNow(field, this.options);
+    const next = changedValue(field, now, event.detail);
+    if (asksFirst(field, now, next)) {
+      this.pending = { name: field.name, value: next as string };
+      return;
+    }
+    if (this.pending?.name === field.name) this.pending = null;
+    this.options = withOption(this.options, field, next, this.fields as PanelField[]);
   }
 
-  /** The word beside the chip that opens the panel, once there is a form to draw in it. */
+  /** Sets the value held back for a row. */
+  #turnOn(field: PanelField): void {
+    if (this.pending?.name !== field.name) return;
+    this.options = withOption(this.options, field, this.pending.value, this.fields as PanelField[]);
+    this.pending = null;
+  }
+
+  /** Puts every changed row back to what the form is filled with. The box's text, the
+   * place, the chip's choices and where the launch runs are not changed rows and stay. */
+  #reset(): void {
+    this.options = {};
+    this.pending = null;
+  }
+
+  /** The rows changed in the panel, as the line under the box names them. */
+  get #changes(): Change[] {
+    return changes(this.fields as PanelField[], this.options);
+  }
+
+  /** The word beside the chip that opens the panel, once there is a form to draw in it,
+   * with the number of changed rows. */
   #optionsWord() {
     if (this.fields.length === 0) return nothing;
-    return html`<button type="button" class="opt" aria-expanded=${this.panel ? "true" : "false"}
-      @click=${this.#togglePanel}>Options</button>`;
+    const count = this.#changes.length;
+    return html`<button type="button" class=${count > 0 ? "opt on" : "opt"} aria-expanded=${this.panel ? "true" : "false"}
+      @click=${this.#togglePanel}>${optionsWord(count)}</button>`;
+  }
+
+  /** The line under the box that names each changed row, with `Reset`; absent with none. */
+  #changed() {
+    const rows = this.#changes;
+    if (rows.length === 0) return nothing;
+    return html`<div class="changed" data-line="changed"><span><span class="k">${CHANGED}</span>${rows.map((row, at) =>
+      html`${at === 0 ? nothing : html`<span class="sep" aria-hidden="true">·</span>`}<b class=${row.danger ? "dg" : ""}
+        data-change=${row.name}>${row.label}</b>`)}</span><button type="button" @click=${this.#reset}>${RESET}</button></div>`;
+  }
+
+  /** A closed group's or subgroup's summary: its values, the ones that can do harm in the
+   * warning colour. */
+  #summary(words: Word[]) {
+    if (words.length === 0) return DEFAULTS;
+    return words.map((word, at) => html`${at === 0 ? "" : " · "}<span class=${word.danger ? "dg" : ""}>${word.text}</span>`);
   }
 
   #panel() {
@@ -591,7 +668,7 @@ export class LauncherPrompt extends LitElement {
   }
 
   #found(fields: PanelField[]) {
-    const rows = findRows(fields, this.query);
+    const rows = findRows(fields, this.query, this.options);
     if (rows.length === 0) return html`<p class="none" role="status">${NO_MATCH}</p>`;
     return html`<div class="found">${rows.map((row) => this.#optionRow(row, row.where))}</div>`;
   }
@@ -600,7 +677,7 @@ export class LauncherPrompt extends LitElement {
     const open = this.opened.has(group.key);
     return html`<button type="button" class="cat" data-group=${group.key} aria-expanded=${open ? "true" : "false"}
         @click=${() => this.#toggleOpen(group.key)}><span><span class="ar" aria-hidden="true">${open ? "▾" : "▸"}</span><b>${
-        group.title}</b></span><span class="sum">${open ? "" : group.summary}</span></button>
+        group.title}</b></span><span class="sum">${open ? "" : this.#summary(group.words)}</span></button>
       ${open ? html`<div class="catbody" data-body=${group.key}>${group.subs.map((sub) => this.#sub(group, sub))}</div>` : nothing}`;
   }
 
@@ -612,20 +689,37 @@ export class LauncherPrompt extends LitElement {
     const open = this.opened.has(key);
     return html`<button type="button" class="sub" data-sub=${key} aria-expanded=${open ? "true" : "false"}
         @click=${() => this.#toggleOpen(key)}><span><span class="ar" aria-hidden="true">${open ? "▾" : "▸"}</span>${
-        sub.name}</span><span class="sum">${open ? "" : sub.summary}</span></button>
+        sub.name}</span><span class="sum">${open ? "" : this.#summary(sub.words)}</span></button>
       ${open ? html`<div class="subopen">${sub.rows.map((row) => this.#optionRow(row))}</div>` : nothing}`;
   }
 
   /** One row: where it sits when the find field found it, the mark of a hidden flag, and
-   * the form renderer's control for its kind. */
+   * the form renderer's control for its kind, showing the value held back for the row while
+   * one is. A row whose value can do harm has its name and control in the warning colour. */
   #optionRow(row: PanelRow, where = "") {
     const field = row.field;
-    return html`<div class="prow" data-row=${row.name}>
+    const held = this.pending?.name === row.name ? this.pending.value : null;
+    return html`<div class=${row.danger ? "prow dg" : "prow"} data-row=${row.name}>
       ${where === "" && !row.hidden ? nothing : html`<div class="at"><span>${where}</span>${
         row.hidden ? html`<span data-mark="hidden">${HIDDEN_FLAG}</span>` : nothing}</div>`}
-      <moxi-ui-form mode="each" .fields=${[drawnField(field, valueNow(field, this.options))]}
+      <moxi-ui-form mode="each" .fields=${[drawnField(field, held ?? valueNow(field, this.options))]}
         @moxi-change=${(event: CustomEvent<FormChange>) => this.#optionChanged(field, event)}></moxi-ui-form>
+      ${this.#ask(row, held)}
     </div>`;
+  }
+
+  /** Under a value that can do harm: what it does and that it holds for this launch only.
+   * While the value is held back, `Turn on` sets it and `Cancel` lets it go; once the user
+   * set it the sentences stay. A value the form was filled with says nothing here. */
+  #ask(row: PanelRow, held: string | null) {
+    const field = row.field;
+    const set = Object.hasOwn(this.options, row.name) && row.danger ? this.options[row.name] : null;
+    const value = held ?? (typeof set === "string" ? set : null);
+    if (value === null) return nothing;
+    const [does, lasts] = dangerSentences(field, value);
+    return html`<div class="ask" data-ask=${row.name}><p>${does} ${lasts}</p>${held === null ? nothing
+      : html`<div><button type="button" class="on" @click=${() => this.#turnOn(field)}>Turn on</button><button
+          type="button" @click=${() => { this.pending = null; }}>Cancel</button></div>`}</div>`;
   }
 
   // --- the button, its menu and the launch ---------------------------------------------------

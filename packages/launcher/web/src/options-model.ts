@@ -13,12 +13,16 @@
 // the other rows the piece sets. Each row is drawn by the shell's one form renderer, from
 // the descriptor `drawnField` gives it.
 //
+// A row whose value is not the one the form was filled with is changed: the line under the
+// box names each by its label and the word that opens the panel counts them. A value that
+// can do harm is marked wherever it is drawn, however it got there, and is named first.
+//
 // Every string here goes into the page as text.
 
 import type { FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import { GROUPS, isListField, leaveOutChoice, same, shownValue } from "./panel.ts";
-import { FIRST_TURN } from "./prompt-model.ts";
+import { FIRST_TURN, launchedValue, offPosture } from "./prompt-model.ts";
 
 /** A launch form's field with what the catalog says of its place in the panel. */
 export interface PanelField extends FieldDescriptor {
@@ -112,19 +116,9 @@ export function shippedValue(field: PanelField): FormValue {
   return shownValue({ ...field, value: undefined, value_items: undefined });
 }
 
-/** A value as the launch takes it: a row left empty launches with its shipped default. */
-function settled(field: PanelField, value: FormValue): FormValue {
-  if (Array.isArray(value) || field.optional_value === true) return value;
-  if (field.type === "bool") return value === "true" ? "true" : "false";
-  if (value === null || value === "" || value === leaveOutChoice(field)) {
-    return said(field.default) !== "" ? said(field.default) : null;
-  }
-  return value;
-}
-
 /** Whether a value launches something other than the row's shipped default. */
 export function differs(field: PanelField, value: FormValue): boolean {
-  return !same(settled(field, value), settled(field, shippedValue(field)));
+  return !same(launchedValue(field, value), launchedValue(field, shippedValue(field)));
 }
 
 /** A row's value in a few words, for a summary: a pick is its word alone, any other row
@@ -133,18 +127,42 @@ export function valueWords(field: PanelField, value: FormValue): string {
   const label = rowLabel(field);
   if (Array.isArray(value)) return `${label} ${value.length === 0 ? "none" : value.length}`;
   if (field.optional_value === true) return `${label} ${value === null ? "off" : value === "" ? "on" : value}`;
-  const now = settled(field, value);
+  const now = launchedValue(field, value);
   if (field.type === "bool") return `${label} ${now === "true" ? "on" : "off"}`;
   if (now === null) return `${label} empty`;
   return field.type === "enum" ? String(now) : `${label} ${now}`;
 }
 
+/** Whether a value is one of the row's values that can do harm. */
+export function isDanger(field: PanelField, value: FormValue): boolean {
+  return typeof value === "string" && Array.isArray(field.danger) && field.danger.includes(value);
+}
+
+/** The rows among `fields` whose value in `values` can do harm, by name: what a list of an
+ * earlier launch's values, or of a preset's, marks. A row `values` lacks is not named. */
+export function dangerNames(fields: readonly PanelField[], values: Readonly<Record<string, FormValue>>): string[] {
+  return fields.filter((field) => Object.hasOwn(values, field.name) && isDanger(field, values[field.name]))
+    .map((field) => field.name);
+}
+
+/** One value in a summary, marked when it can do harm. */
+export interface Word {
+  text: string;
+  danger: boolean;
+}
+
 /** What a closed group or subgroup says of its rows: each value that differs from the
- * shipped default, else `defaults`. */
+ * shipped default, with the ones that can do harm marked; none when every row is at its
+ * default. */
+export function summaryWords(fields: readonly PanelField[], set: Readonly<Record<string, FormValue>>): Word[] {
+  return fields.filter((field) => differs(field, valueNow(field, set)))
+    .map((field) => ({ text: valueWords(field, valueNow(field, set)), danger: isDanger(field, valueNow(field, set)) }));
+}
+
+/** The summary as one line: its words, else `defaults`. */
 export function summaryOf(fields: readonly PanelField[], set: Readonly<Record<string, FormValue>>): string {
-  const words = fields.filter((field) => differs(field, valueNow(field, set)))
-    .map((field) => valueWords(field, valueNow(field, set)));
-  return words.length === 0 ? DEFAULTS : words.join(" · ");
+  const words = summaryWords(fields, set);
+  return words.length === 0 ? DEFAULTS : words.map((word) => word.text).join(" · ");
 }
 
 // --- the groups ----------------------------------------------------------------------------
@@ -155,6 +173,8 @@ export interface PanelRow {
   label: string;
   /** The harness does not list the row's flag in its help. */
   hidden: boolean;
+  /** The row's value now can do harm. */
+  danger: boolean;
   field: PanelField;
 }
 
@@ -163,6 +183,8 @@ export interface PanelSub {
   name: string;
   rows: PanelRow[];
   summary: string;
+  /** The summary's values, each marked when it can do harm; none at the defaults. */
+  words: Word[];
 }
 
 export interface PanelGroup {
@@ -170,10 +192,12 @@ export interface PanelGroup {
   title: string;
   subs: PanelSub[];
   summary: string;
+  words: Word[];
 }
 
-function rowOf(field: PanelField): PanelRow {
-  return { name: field.name, label: rowLabel(field), hidden: field.hidden === true, field };
+function rowOf(field: PanelField, set: Readonly<Record<string, FormValue>>): PanelRow {
+  return { name: field.name, label: rowLabel(field), hidden: field.hidden === true,
+           danger: isDanger(field, valueNow(field, set)), field };
 }
 
 /**
@@ -195,9 +219,11 @@ export function panelGroups(fields: readonly PanelField[], set: Readonly<Record<
     const subs: PanelSub[] = [];
     for (const name of [...names, ""]) {
       const rows = mine.filter((field) => said(field.sub) === name);
-      if (rows.length > 0) subs.push({ name, rows: rows.map(rowOf), summary: summaryOf(rows, set) });
+      if (rows.length === 0) continue;
+      subs.push({ name, rows: rows.map((field) => rowOf(field, set)), summary: summaryOf(rows, set),
+                  words: summaryWords(rows, set) });
     }
-    out.push({ key: shape.key, title: shape.title, subs, summary: summaryOf(mine, set) });
+    out.push({ key: shape.key, title: shape.title, subs, summary: summaryOf(mine, set), words: summaryWords(mine, set) });
   }
   return out;
 }
@@ -211,13 +237,15 @@ export interface Found extends PanelRow {
 
 /**
  * The rows whose label, name or help text holds `query`, whatever its case, in the panel's
- * order. An empty query finds nothing; a row the panel does not draw is never found.
+ * order, each marked by its value in `set`. An empty query finds nothing; a row the panel
+ * does not draw is never found.
  */
-export function findRows(fields: readonly PanelField[], query: string): Found[] {
+export function findRows(fields: readonly PanelField[], query: string,
+                         set: Readonly<Record<string, FormValue>> = {}): Found[] {
   const asked = query.trim().toLowerCase();
   if (asked === "") return [];
   const out: Found[] = [];
-  for (const group of panelGroups(fields, {})) {
+  for (const group of panelGroups(fields, set)) {
     for (const sub of group.subs) {
       for (const row of sub.rows) {
         const texts = [row.label, row.name, said(row.field.doc)];
@@ -317,4 +345,100 @@ export function keptOptions(options: Readonly<Record<string, FormValue>>,
                             fields: readonly PanelField[]): Record<string, FormValue> {
   const names = new Set(panelFields(fields).map((field) => field.name));
   return Object.fromEntries(Object.entries(options).filter(([name]) => names.has(name)));
+}
+
+// --- what was changed ----------------------------------------------------------------------
+
+/** The word that opens the panel. */
+export const OPTIONS = "Options";
+
+/** The word in front of the line under the box that names the changed rows. */
+export const CHANGED = "Changed";
+
+/** The control on that line that puts every changed row back. */
+export const RESET = "Reset";
+
+/** One changed row as the line under the box names it. */
+export interface Change {
+  name: string;
+  label: string;
+  /** Its value now can do harm. */
+  danger: boolean;
+}
+
+/**
+ * The rows the user changed: each row of the panel whose value in `options` is not the one
+ * the form is filled with. The form's fill is the baseline, whatever gave it: a value the
+ * user's own defaults or a preset set is not a change, and neither is one carried over from
+ * an earlier launch, which is not in `options` until the user edits it. The rows whose
+ * value can do harm come first, then the rest, each in the panel's order.
+ */
+export function changes(fields: readonly PanelField[], options: Readonly<Record<string, FormValue>>): Change[] {
+  const out: Change[] = [];
+  for (const group of panelGroups(fields, options)) {
+    for (const sub of group.subs) {
+      for (const row of sub.rows) {
+        if (!Object.hasOwn(options, row.name) || same(options[row.name], shownValue(row.field))) continue;
+        out.push({ name: row.name, label: row.label, danger: row.danger });
+      }
+    }
+  }
+  return [...out.filter((change) => change.danger), ...out.filter((change) => !change.danger)];
+}
+
+/** The word that opens the panel, with the number of changed rows once there is one. */
+export function optionsWord(count: number): string {
+  return count > 0 ? `${OPTIONS} · ${count}` : OPTIONS;
+}
+
+// --- a value that can do harm, picked by hand -----------------------------------------------
+
+/** A value that can do harm, picked in a row's control and not turned on yet. */
+export interface Pending {
+  name: string;
+  value: string;
+}
+
+/** Whether a row's change to `next` waits for a second act: `next` can do harm and the
+ * row's value now is another. A value that arrives any other way is never asked for. */
+export function asksFirst(field: PanelField, now: FormValue, next: FormValue): boolean {
+  return isDanger(field, next) && !same(now, next);
+}
+
+// --- off the usual permissions --------------------------------------------------------------
+
+/** What gave a permission row its value: the user in the panel, an earlier launch whose
+ * value was carried over, or the applied preset. */
+export type OffSource = "typed" | "filled" | "preset";
+
+/** A permission row the launch would start off the user's usual value. */
+export interface OffRow {
+  name: string;
+  label: string;
+  source: OffSource;
+}
+
+/**
+ * The permission rows the launch would start off the user's usual value, each with what
+ * gave it its value, which decides where the page names it before the button is pressed:
+ * a row set in the panel (`options`) is on the line of changed rows, one carried over from
+ * an earlier launch (`filled`) is on that launch's item, and any other got its value from
+ * the form's own fill, which only a preset moves off the usual. `base` is the form read
+ * with no preset. The launch request says it is off the usual exactly when this names a row.
+ */
+export function offRows(fields: readonly PanelField[], base: readonly PanelField[],
+                        options: Readonly<Record<string, FormValue>>,
+                        filled: Readonly<Record<string, FormValue>> = {}): OffRow[] {
+  const byName = new Map(fields.map((field) => [field.name, field]));
+  return offPosture(fields, base, { ...filled, ...options }).map((name) => ({
+    name, label: rowLabel(byName.get(name) as PanelField),
+    source: Object.hasOwn(options, name) ? "typed" : Object.hasOwn(filled, name) ? "filled" : "preset",
+  }));
+}
+
+/** The line under the box for the rows a preset sets off the usual: `Preset planner sets
+ * Permission mode, Allowed tools off your defaults`; null when it sets none. */
+export function presetOffLine(preset: string, rows: readonly OffRow[]): string | null {
+  const labels = rows.filter((row) => row.source === "preset").map((row) => row.label);
+  return labels.length === 0 ? null : `Preset ${preset} sets ${labels.join(", ")} off your defaults`;
 }

@@ -20,7 +20,9 @@
 import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
 
 import type { LaunchRow } from "./feed.ts";
-import { followedOf, HARNESS, launchBody, leaveOutChoice, NO_PRESET, outcomeOf, parsePreview, requestOf, shownValue } from "./panel.ts";
+import {
+  followedOf, HARNESS, launchBody, leaveOutChoice, NO_PRESET, outcomeOf, parsePreview, requestOf, same, shownValue,
+} from "./panel.ts";
 import type { Form, LaunchBody, Preview, Status } from "./panel.ts";
 
 type Fields = Record<string, unknown>;
@@ -530,9 +532,13 @@ export const FIRST_TURN = ["brief", "brief_file", "handoff"] as const;
  * has text. Every other such row the form has is left out, whatever the form filled it
  * with or withheld, so nothing the box does not show is sent as the first turn. Any other
  * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
+ * The request says it starts off the user's usual permissions exactly when one of its
+ * permission rows does, against `base` (see `offPosture`), which is `fields` for a form
+ * read with no preset.
  */
 export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
-                              set: Readonly<Record<string, FormValue>>, run: Run): LaunchBody {
+                              set: Readonly<Record<string, FormValue>>, run: Run,
+                              base: readonly FieldDescriptor[] = fields): LaunchBody {
   const values = formValues(fields, set);
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
@@ -544,7 +550,55 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   request.values.target = run.target;
   if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);
   else if (slotted) request.leave_out.push("slot");
-  return launchBody(NO_PRESET, request, false);
+  return launchBody(NO_PRESET, request, offPosture(fields, base, set).length > 0);
+}
+
+// --- the permission rows ---------------------------------------------------------------------
+
+/** A row's value as the launch takes it: a row left empty launches with its shipped default. */
+export function launchedValue(field: FieldDescriptor, value: FormValue): FormValue {
+  if (Array.isArray(value) || field.optional_value === true) return value;
+  if (field.type === "bool") return value === "true" ? "true" : "false";
+  if (value === null || value === "" || value === leaveOutChoice(field)) {
+    return typeof field.default === "string" && field.default !== "" ? field.default : null;
+  }
+  return value;
+}
+
+/**
+ * The permission rows the launch would start off the user's usual value, by name, in the
+ * fields' order. `fields` and `set` are the form and the rows set over it, as the request
+ * is built from them; `base` is the same harness's form read with no preset, whose fill is
+ * each row's usual value: the user's own default for it, else the shipped one. A row sent
+ * with another value, or left out where the user's default is not the shipped one, is off.
+ */
+export function offPosture(fields: readonly FieldDescriptor[], base: readonly FieldDescriptor[],
+                           set: Readonly<Record<string, FormValue>>): string[] {
+  const values = formValues(fields, set);
+  const usual = new Map(base.map((field) => [field.name, field]));
+  return fields.filter((field) => field.posture === true && field.name in values).filter((field) => {
+    const mine = usual.get(field.name) ?? { ...field, value: undefined, value_items: undefined };
+    return !same(launchedValue(field, values[field.name]), launchedValue(mine, shownValue(mine)));
+  }).map((field) => field.name);
+}
+
+// --- the values that can do harm -----------------------------------------------------------
+
+/** The second sentence under a value that can do harm, picked by hand. */
+export const CONFIRMED = "Confirmed for this launch only.";
+
+/** What each value that can do harm does, by row and value: the first sentence under it. */
+export const DANGER_SAYS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  permission_mode: { bypassPermissions: "Every tool runs without asking, whatever the mode and the rules say." },
+  sandbox: { "danger-full-access": "Commands run with no sandbox: they can read and change anything your account can." },
+};
+
+/** The two sentences under a value that can do harm: what it does, from the map, else the
+ * row's help text, then that it holds for this launch alone. */
+export function dangerSentences(field: FieldDescriptor, value: string): [string, string] {
+  const said = DANGER_SAYS[field.name];
+  if (said !== undefined && Object.hasOwn(said, value)) return [said[value], CONFIRMED];
+  return [typeof field.doc === "string" ? field.doc : "", CONFIRMED];
 }
 
 // --- the launch, and the lines under the box -----------------------------------------------
