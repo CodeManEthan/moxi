@@ -232,6 +232,76 @@ def test_a_window_with_no_duration_does_not_project():
         None, "the window's duration is unknown", 0)
 
 
+# --- when a window opened ---------------------------------------------------------------
+
+def test_a_window_with_a_fixed_reset_opened_its_duration_before_it():
+    put(*(codex(p, 300, NOW + 2 * HOUR, NOW - m * MIN)
+          for p, m in ((20.0, 90), (30.0, 40), (35.0, 5))),
+        claude(17.0, 10080, NOW + 2 * DAY, NOW - DAY),
+        claude(18.0, 10080, NOW + 2 * DAY, NOW - HOUR))
+    result = limits.limits(now=NOW, pull=False)
+    assert row(result, "codex", "5h").opened == NOW - 3 * HOUR
+    assert row(result, "claude", "7d").opened == NOW - 5 * DAY
+    data = row(result, "codex", "5h").as_dict()
+    assert data["opened"] == limits.iso(NOW - 3 * HOUR)
+
+
+def test_a_reset_that_moves_with_the_clock_gives_no_start():
+    # an unused window reports a reset one duration after each reading, so the start it
+    # implies is the newest reading's own time, after the period's first reading
+    put(*(codex(0.0, 300, NOW - m * MIN + 5 * HOUR, NOW - m * MIN) for m in (31, 21, 11, 1)))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert (five.state, five.used_percent, five.opened) == ("fresh", 0.0, None)
+
+
+def test_one_reading_at_zero_percent_gives_no_start():
+    put(codex(0.0, 300, NOW + 4 * HOUR, NOW - MIN))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert (five.state, five.opened) == ("fresh", None)
+
+
+def test_one_reading_above_zero_percent_gives_the_start():
+    put(codex(3.0, 300, NOW + 4 * HOUR, NOW - MIN))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert five.opened == NOW - HOUR
+
+
+def test_two_readings_at_zero_percent_of_one_reset_give_the_start():
+    put(codex(0.0, 300, NOW + 4 * HOUR, NOW - 20 * MIN),
+        codex(0.0, 300, NOW + 4 * HOUR, NOW - MIN))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert five.opened == NOW - HOUR
+
+
+def test_a_start_at_or_after_the_periods_first_reading_is_not_given():
+    put(codex(4.0, 300, NOW + 4 * HOUR + 50 * MIN, NOW - 10 * MIN),
+        codex(5.0, 300, NOW + 4 * HOUR + 55 * MIN, NOW - MIN))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert five.opened is None                # 5 minutes ago, and it was read 10 ago
+
+
+def test_a_reading_from_before_the_reset_is_not_of_the_period():
+    put(codex(90.0, 300, NOW - 30 * MIN, NOW - 2 * HOUR),          # the window before
+        codex(2.0, 300, NOW + 4 * HOUR + 30 * MIN, NOW - 10 * MIN))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert five.opened == NOW - 30 * MIN
+    assert [r.used_percent for r in limits.period(
+        [codex(90.0, 300, NOW - 30 * MIN, NOW - 2 * HOUR),
+         codex(2.0, 300, NOW + 4 * HOUR + 30 * MIN, NOW - 10 * MIN)],
+        codex(2.0, 300, NOW + 4 * HOUR + 30 * MIN, NOW - 10 * MIN))] == [2.0]
+
+
+def test_no_duration_or_no_reset_gives_no_start():
+    other = claude(10.0, None, NOW + HOUR, NOW - MIN, kind="other", limit_id="other")
+    assert limits.opened([other], other) is None
+    put(other, codex(10.0, 300, None, NOW - MIN))
+    result = limits.limits(now=NOW, pull=False)
+    assert row(result, "claude", "other").opened is None
+    assert row(result, "codex", "5h").opened is None
+    assert row(result, "codex", "7d").opened is None          # no reading at all
+    assert row(result, "codex", "7d").as_dict()["opened"] is None
+
+
 # --- the history cap ------------------------------------------------------------------
 
 def test_limits_prunes_when_the_last_prune_is_over_an_hour_old():

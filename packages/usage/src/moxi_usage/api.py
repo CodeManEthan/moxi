@@ -18,8 +18,9 @@ Limits (`moxi_usage.limits`):
 * `limits(*, harness=None, now=None, pull=True)`: one `Row` per plan window of Claude
   and Codex, or of one `harness`, at `now` (epoch seconds; None is the clock): its
   state (`fresh`, `reset` or `unavailable`, with a reason), percent used, reset time,
-  the age of its reading and, when the window is filling, `full_at`, the time it
-  reaches 100% at the recent rate. With `pull`, a Codex reading older than
+  the age of its reading, when the window is filling, `full_at`, the time it
+  reaches 100% at the recent rate, and `opened`, when the window started (None when the
+  readings cannot say). With `pull`, a Codex reading older than
   `limits.codex_pull_after_s` is refreshed through turns when turns is installed. Returns
   `Limits`, whose `pull` says what the pull did. What a reading did not say, and every
   fact of a window with no reading, is `UNKNOWN`; the state's reason says which.

@@ -999,13 +999,63 @@ def test_limits_sends_each_window_with_its_dollars_as_a_list():
     assert windows[("claude", "5h")]["state"] == "unavailable"
 
 
-def test_a_failed_pull_says_why_on_the_codex_rows():
+def test_limits_carry_when_each_window_opened():
+    now = time.time()
+    put_readings(Reading("codex", "codex", 300, "primary", 42.0, now + 3600, now - 60,
+                         "rollout", "thread-1"),
+                 Reading("codex", "codex", 10080, "secondary", 0.0, now + 7 * 86400,
+                         now - 60, "rollout", "thread-1"))
+    windows = {(r["harness"], r["label"]): r for r in get("/api/limits")["rows"]}
+    assert windows[("codex", "5h")]["opened"] == limits.iso(now + 3600 - 300 * 60)
+    assert windows[("codex", "7d")]["opened"] is None      # one reading that shows no use
+    assert windows[("claude", "5h")]["opened"] is None
+    assert "opened" not in windows[("claude", "5h")]["unknown"]
+
+
+@pytest.fixture
+def pulls(monkeypatch):
+    """A pull through turns that brings nothing, and counts each time it is asked."""
+    asked = []
+
+    def pull(*, timeout_s):
+        asked.append(timeout_s)
+        return None
+
+    monkeypatch.setattr(limits, "_puller", lambda: (pull, None))
+    return asked
+
+
+def test_the_limits_route_makes_no_pull_and_the_poller_does(pulls, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", 3600.0)
+    put_readings(codex_reading(10.0, observed=time.time() - 3600))      # stale: a pull is due
     body = get("/api/limits")
-    assert body["pull"] == {"tried": False, "ok": False, "reason": "the test makes no pull",
-                            "via": None, "added": 0}
-    codex = [row for row in body["rows"] if row["harness"] == "codex"]
+    assert pulls == [] and body["pull"] is None
+    assert all(row["note"] is None for row in body["rows"])
+
+    async def go():
+        stream = Stream(served(), "limits")
+        try:
+            return (await stream.next(5))[1]
+        finally:
+            await stream.close()
+            pagehandlers._current.poller.cancel()
+
+    value = asyncio.run(go())
+    assert pulls == [limits.PULL_TIMEOUT]
+    assert (value["pull"]["tried"], value["pull"]["ok"]) == (True, False)
+    assert get("/api/limits")["pull"] is None and len(pulls) == 1
+
+
+def test_a_failed_pull_says_why_on_the_topics_codex_rows():
+    value = pagehandlers.gather_limits()
+    assert value["pull"] == {"tried": False, "ok": False, "reason": "the test makes no pull",
+                             "via": None, "added": 0}
+    codex = [row for row in value["rows"] if row["harness"] == "codex"]
     assert codex and all(row["note"] == "no newer reading: the test makes no pull"
                          for row in codex)
+    body = get("/api/limits")                    # the route asked for none, so says nothing
+    assert body["pull"] is None
+    assert all(row["note"] is None for row in body["rows"])
 
 
 # --- the stream and its limits poller -------------------------------------------------------

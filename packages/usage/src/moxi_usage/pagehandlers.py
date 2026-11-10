@@ -24,7 +24,8 @@ when it ends: `{running, last_pass, note}`, where `note` is the report's note or
 stopped the pass.
 
 **The stream.** One stream route carries two topics, `limits` (`/api/limits`'s value
-without `now`) and `index`. The `limits` topic is fed by one poller, an asyncio task
+without `now`, gathered with the Codex pull that route leaves out) and `index`. The
+`limits` topic is fed by one poller, an asyncio task
 started by the first call to the stream route and run for the page server's life; loopback
 stops an idle server once nothing is open, and a Codex pull stays bounded by
 `limits.codex_pull_after_s`. It gathers at once and then every `PERIOD` seconds, and its
@@ -583,7 +584,7 @@ def _window(row: Mapping[str, Any]) -> dict[str, Any]:
         "source": _str(row.get("source")), "session_id": _str(row.get("session_id")),
         "plan_type": _str(row.get("plan_type")), "full_at": _str(row.get("full_at")),
         "projection": _str(row.get("projection")), "fit": _int(row.get("fit")) or 0,
-        "note": _str(row.get("note")),
+        "opened": _str(row.get("opened")), "note": _str(row.get("note")),
         "dollars": [{"name": name, "value": value} for name, value
                     in dollars(extra if isinstance(extra, Mapping) else {})],
         "unknown": [name for name in _words(row.get("unknown")) if name in _WINDOW_KEYS],
@@ -603,23 +604,26 @@ def _limits_value(answer: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _limits() -> tuple[float, dict[str, Any]]:
+def _limits(*, pull: bool) -> tuple[float, dict[str, Any]]:
     try:
-        found = api.limits(pull=True)
+        found = api.limits(pull=pull)
     except _OWN_WORDS as exc:
         raise lb.Refused(str(exc)) from None
     return float(found.now), _limits_value(found.as_dict())
 
 
 def gather_limits() -> dict[str, Any]:
-    """The `limits` topic's value: `/api/limits`'s without `now`."""
-    return _limits()[1]
+    """The `limits` topic's value, `/api/limits`'s without `now`, gathered with a Codex
+    pull through turns when the newest Codex reading is older than
+    `limits.codex_pull_after_s`."""
+    return _limits(pull=True)[1]
 
 
 def limits(call: Any) -> dict[str, Any]:
-    """`GET /api/limits`: each plan window now, with a Codex pull through turns when the
-    newest Codex reading is older than `limits.codex_pull_after_s`."""
-    now, value = _limits()
+    """`GET /api/limits`: each plan window now, from the readings stored. It makes no
+    Codex pull, so it does not wait on turns: the poller pulls, and the `limits` topic
+    carries what a pull brought."""
+    now, value = _limits(pull=False)
     return {"now": now, **value}
 
 

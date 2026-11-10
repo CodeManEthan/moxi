@@ -31,6 +31,12 @@ Then one row per window, a window being `(harness, limit_id, window_minutes)`:
   a reset: a reading is in the winner's period when its `resets_at` lies within half the
   window's duration of the winner's. `full_at` is given only when it falls before the
   reset, else None with "resets first".
+* **The start.** `opened` is the reset less the window's duration: the start of a window
+  of that length ending at that reset. A window is never said to have opened at or after
+  a time it was already read at, nor from one reading that shows no use: `opened` is None
+  when the reset or the duration is unknown, when that start is not earlier than the
+  period's first reading, and for a window at 0% whose period holds one reading. An
+  unused Codex window reports a reset that moves with the clock, and both cases catch it.
 
 Readings older than `limits.history_days` are pruned here when the last prune is over an
 hour old. Nothing here reads the clock but `limits()` with no `now`.
@@ -97,8 +103,9 @@ class Row:
     is `UNKNOWN` where the reading did not say, and all of it where no reading was found;
     the state and `reason` say which. `age_s` is `now - observed_at`. `full_at` is
     the projection's time the window reaches 100%, None with `projection` saying why
-    there is none; `fit` counts the readings it fitted. `reason` and `note` are None when
-    there is nothing to say; `note` says why no newer reading came when one was wanted.
+    there is none; `fit` counts the readings it fitted. `opened` is when the window
+    started, None when the readings cannot say (module doc). `reason` and `note` are
+    None when there is nothing to say; `note` says why no newer reading came when one was wanted.
     `extra` holds what else the reading said (a spend limit's dollars, say);
     `dollars(extra)` picks the dollar figures out of it.
     """
@@ -120,6 +127,7 @@ class Row:
     full_at: float | None = None
     projection: str | None = None
     fit: int = 0
+    opened: float | None = None
     note: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -138,7 +146,8 @@ class Row:
             "observed_at": iso(self.observed_at), "age_s": self.age_s,
             "source": self.source, "session_id": self.session_id,
             "plan_type": self.plan_type, "full_at": iso(self.full_at),
-            "projection": self.projection, "fit": self.fit, "note": self.note,
+            "projection": self.projection, "fit": self.fit, "opened": iso(self.opened),
+            "note": self.note,
             "extra": dict(self.extra),
         }
         unknown = [name for name, value in out.items() if value is UNKNOWN]
@@ -273,7 +282,7 @@ def window_row(harness: str, found: list[Reading], *, now: float,
                observed_at=winner.observed_at, age_s=now - winner.observed_at,
                source=winner.source, session_id=_said(winner.session_id),
                plan_type=_said(winner.plan_type), full_at=full_at, projection=projection,
-               fit=fit, extra=_load_extra(winner.extra))
+               fit=fit, opened=opened(found, winner), extra=_load_extra(winner.extra))
 
 
 def _said(value: Any) -> Any:
@@ -323,8 +332,8 @@ def project(found: list[Reading], winner: Reading, *, now: float,
             minutes: float) -> tuple[float | None, str | None, int]:
     """`(full_at, why_none, readings_fitted)` for one window's winning reading.
 
-    Fits the readings of the winner's period (`resets_at` within half the window of the
-    winner's) observed in the last `minutes` minutes, by least squares of percent over
+    Fits the readings of the winner's period (`period`) observed in the last `minutes`
+    minutes, by least squares of percent over
     time. Needs at least `MIN_FIT` of them, at two times or more, and a rising line.
     `full_at` is given only when it falls after `now` and before the winner's reset.
     """
@@ -332,12 +341,9 @@ def project(found: list[Reading], winner: Reading, *, now: float,
         return None, "the window's duration is unknown", 0
     if winner.resets_at is None:
         return None, "the reading has no reset time", 0
-    half = winner.window_minutes * 60 / 2
     since = now - minutes * 60
-    points = sorted({(r.observed_at, r.used_percent) for r in found
-                     if r.observed_at >= since and r.used_percent is not None
-                     and r.resets_at is not None
-                     and abs(r.resets_at - winner.resets_at) <= half})
+    points = sorted({(r.observed_at, r.used_percent) for r in period(found, winner)
+                     if r.observed_at >= since and r.used_percent is not None})
     count = len(points)
     if count < MIN_FIT:
         return None, (f"{count} reading{'s' if count != 1 else ''} of this period in the "
@@ -358,6 +364,37 @@ def project(found: list[Reading], winner: Reading, *, now: float,
     if full_at >= winner.resets_at:
         return None, "resets first", count
     return full_at, None, count
+
+
+def period(found: list[Reading], winner: Reading) -> list[Reading]:
+    """The readings of the winner's period, the oldest first: those of `found` whose
+    `resets_at` lies within half the window's duration of the winner's, so none from the
+    other side of a reset. Empty when the winner's duration or reset is unknown."""
+    if winner.window_minutes is None or winner.resets_at is None:
+        return []
+    half = winner.window_minutes * 60 / 2
+    return sorted((r for r in found if r.resets_at is not None
+                   and abs(r.resets_at - winner.resets_at) <= half),
+                  key=lambda r: r.observed_at)
+
+
+def opened(found: list[Reading], winner: Reading) -> float | None:
+    """When the winning reading's window started: its reset less its duration, or None.
+
+    None when the reset or the duration is unknown; when that start is not earlier than
+    the first reading of the winner's period, since a window did not open at or after a
+    time it was already read at; and for a window at 0% whose period holds one reading,
+    since one reading that shows no use does not say the window has started.
+    """
+    readings = period(found, winner)
+    if not readings:
+        return None
+    start = winner.resets_at - winner.window_minutes * 60
+    if start >= readings[0].observed_at:
+        return None
+    if len(readings) == 1 and winner.used_percent is not None and winner.used_percent <= 0:
+        return None
+    return start
 
 
 def label(minutes: int | None, limit_id: str, slot: str | None = None) -> str:
@@ -574,5 +611,6 @@ def iso(epoch: Any) -> Any:
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-__all__ = ["limits", "Limits", "Row", "Pull", "pick", "row_state", "project", "label",
-           "dollars", "harness_rows", "window_row", "FRESH", "RESET", "UNAVAILABLE"]
+__all__ = ["limits", "Limits", "Row", "Pull", "pick", "row_state", "project", "period",
+           "opened", "label", "dollars", "harness_rows", "window_row", "FRESH", "RESET",
+           "UNAVAILABLE"]

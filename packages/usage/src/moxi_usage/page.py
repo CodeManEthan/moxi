@@ -1,6 +1,7 @@
 """usage's page: the routes its page server answers, declared as data.
 
-    GET  /api/limits    each plan window now (`limits()`), with the server's `now`
+    GET  /api/limits    each plan window now (`limits()`, with no pull), with the
+                        server's `now`
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
     GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
                         how many there are and how many come after, each with its context
@@ -17,8 +18,9 @@
     GET  /api/events    the stream: topics `limits` and `index`
 
 Each read answers from `moxi_usage.api` and reads the index as it is: no read runs a
-pass, so none waits on the index's lock, and `/api/prices` reads no index at all. The one
-act starts a pass. A report route takes the filters `since` and `until` (`YYYY-MM-DD`,
+pass, so none waits on the index's lock, and `/api/prices` reads no index at all.
+`/api/limits` makes no Codex pull, so no read waits on another module: the stream's
+poller pulls and publishes the `limits` topic. The one act starts a pass. A report route takes the filters `since` and `until` (`YYYY-MM-DD`,
 both days included), `harness`, `project`, `folder` (a folder's whole path: the files
 whose `cwd` it is, whatever project key they carry), `model` and `utc`; days are cut in
 the page server's local zone, or in UTC with `utc`. Each route declares exactly the query
@@ -375,7 +377,8 @@ STATUS = {
 }
 
 #: One plan window. Times are ISO 8601 UTC; `dollars` holds the dollar figures the
-#: reading gave beside the window. The age of a reading is `now - observed_at`.
+#: reading gave beside the window. The age of a reading is `now - observed_at`. `opened`
+#: is when the window started, null when the readings cannot say.
 WINDOW = lb.Out("table", items={
     "harness": _TEXT,
     "limit_id": _TEXT,
@@ -393,12 +396,13 @@ WINDOW = lb.Out("table", items={
     "full_at": _MAYBE,
     "projection": _MAYBE,
     "fit": _INT,
+    "opened": _MAYBE,
     "note": _MAYBE_SAYS,
     "dollars": _named(_FLOAT),
     "unknown": _WORDS,
 })
 #: The windows, the page server's local date, and what the last Codex pull did when one
-#: was wanted.
+#: was wanted: always null on `/api/limits`, which makes none.
 LIMITS = {
     "today": _TEXT,
     "rows": lb.Out("list", items=WINDOW),
