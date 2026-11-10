@@ -78,10 +78,15 @@ class Session:
         return self.client.mcp_token(token_hash or self.hash)
 
     def drop(self, rig) -> None:
-        """The connection ends; the session's process lives on."""
+        """The connection ends; the session's process lives on. Returns once the daemon
+        has released the binding: the name leaves `bindings` partway through that step,
+        before the history row and the tool tokens lose the binding, all under the
+        daemon's lock, so the lock is taken once after the name is gone."""
         self.client.close()
         self.client = None
         assert wait_until(lambda: f"{self.name}@{self.scope}" not in rig.daemon.bindings)
+        with rig.daemon._lock:
+            pass
 
     def end(self) -> None:
         """The session ends: its claim file goes, as a clean shutdown removes it."""
