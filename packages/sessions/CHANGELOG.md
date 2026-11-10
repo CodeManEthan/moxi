@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.8 (2026-11-10)
+
+- Interface 5, which is interface 4 plus `session_facts(keys)`: for up to 200
+  `(harness, session)` pairs, each session's name, folder and start, in the order asked.
+  The name is the one a list's row carries, read by the same code: the name typed for
+  the session in the harness, never a title the harness made up, and None for a Codex or
+  an OpenCode session. A pair that is no main session of any root has no item, and the
+  answer's `roots` names the roots that were not listed whole. It raises ValueError for
+  more than 200 pairs, a key that is not a pair and a harness that is not one, and never
+  for a session that cannot be read.
+- What it reads: each root's listing, then of each session it answers the first lines
+  and one turn, the last; no turn of a Codex or an OpenCode session. It keeps a name or
+  None for at most 5,000 sessions, in memory, and no other text of the turn. A session a
+  list has read is named with no further read, and a list reads the last turn of a
+  session that was only named, so a row loses nothing to the cheaper read.
+
 ## 0.2.7 (2026-11-10)
 
 - New command `moxi sessions list [--harness H] [--since TIME] [--folder PATH]

@@ -22,8 +22,8 @@ CODEX_NAMES = {"TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS", "META_KEYS", "HISTO
                "CHECKED_VERSIONS"}
 
 
-def test_the_announcement_offers_interfaces_2_3_and_4():
-    assert module.INTERFACES == frozenset({2, 3, 4})
+def test_the_announcement_offers_interfaces_2_to_5():
+    assert module.INTERFACES == frozenset({2, 3, 4, 5})
     assert module.API == "moxi_sessions.api"
     assert module.CLI == "moxi_sessions.cli:main"
     assert module.SETTINGS == "settings.toml"
@@ -56,7 +56,8 @@ def test_load_finds_the_module_and_its_api():
     assert modules.load("sessions", interface=3).ok
     assert modules.load("sessions", interface=4).ok
     assert not modules.load("sessions", interface=1).ok
-    assert not modules.load("sessions", interface=5).ok
+    assert modules.load("sessions", interface=5).ok
+    assert not modules.load("sessions", interface=6).ok
 
 
 def test_interface_3_adds_retention():
