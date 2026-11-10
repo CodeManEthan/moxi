@@ -22,6 +22,18 @@
   a line that writes the key or the kind with an escape, or is in UTF-16 or UTF-32, is
   left to the decode.
 
+- The page lists the sessions at its own address: the ones started in a terminal that
+  changed in the last hour, then a group per day and `Earlier`, each row named by its
+  typed name or its folder and start, with the newest typed message as its second line.
+  A day folds past eight rows, and the sessions a program started sit behind one line
+  under their day. A find field (a session id or part of a folder's name) and three
+  filters, Folder, Harness and When, narrow the list, with the count beside them. The
+  list is read again every 30 seconds while its tab is visible. A harness whose sessions
+  could not be read, and Codex sessions left out because they are compressed, each get a
+  line under the list.
+- The form that asked for a harness and a session id is gone: type the id in the find
+  field. A session's own address shows it as before.
+
 ## 0.2.7 (2026-11-10)
 
 - New command `moxi sessions list [--harness H] [--since TIME] [--folder PATH]

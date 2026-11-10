@@ -40,25 +40,25 @@ export const isHarness = (value: unknown): value is Harness =>
 
 // -- routes ---------------------------------------------------------------------------------
 
-/** What the page's route names: the id form, one session, or nothing it knows. */
+/** What the page's route names: the list, one session, or nothing it knows. */
 export type PageRoute =
-  | { view: "form" }
+  | { view: "list" }
   | { view: "session"; target: Target }
   | { view: "unknown"; line: string };
 
 /** The line for a route the page has no view for. */
-export const UNKNOWN_ROUTE = "There is no such view here. Open a session by its harness and id.";
+export const UNKNOWN_ROUTE = "There is no such view here. Find the session in the list by its id or folder.";
 /** The line for a route that names an agent under a harness whose subagents are sessions
  * of their own. */
 export const AGENT_ONLY_CLAUDE = "Only a Claude Code subagent opens under its parent's session. "
   + "An OpenCode or Codex subagent is a session of its own: open it by its own id.";
 
-/** The route `route` (the part of the URL after `/m/sessions/`) names: `""` for the id
- * form, `<harness>/<session>`, or `claude/<session>/<agent>`. Each part is
+/** The route `route` (the part of the URL after `/m/sessions/`) names: `""` for the
+ * list, `<harness>/<session>`, or `claude/<session>/<agent>`. Each part is
  * percent-decoded. */
 export function parseRoute(route: string): PageRoute {
   const path = route.split(/[?#]/)[0].replace(/^\/+|\/+$/g, "");
-  if (path === "") return { view: "form" };
+  if (path === "") return { view: "list" };
   const parts = path.split("/");
   if (parts.length < 2 || parts.length > 3 || parts.some((part) => part === "")) {
     return { view: "unknown", line: UNKNOWN_ROUTE };
@@ -79,27 +79,6 @@ export function parseRoute(route: string): PageRoute {
 export function routeOf(target: Target): string {
   const parts = [target.harness, target.session, ...(target.agent !== null ? [target.agent] : [])];
   return parts.map((part) => encodeURIComponent(part)).join("/");
-}
-
-// -- the id form ----------------------------------------------------------------------------
-
-export const NO_ID = "Type a session id.";
-export const NOT_AN_ID = "A session id holds no /, ? or #. Type the id alone, not a path or a link.";
-/** What the id form says about the lookup it doesn't do. */
-export const FORM_LINE = "Open one session by the id its harness gave it: a Claude Code session id, "
-  + "a Codex thread id, or an OpenCode session id (ses_…). This page lists no sessions.";
-
-/** The id form's answer: the route to open, or the problem to show instead. */
-export type FormOutcome = { route: string } | { problem: string };
-
-/** The route the id form opens for `harness` and the typed `id`, or why it opens none: an
- * empty id, or one holding `/`, `?` or `#`, which would name another route. */
-export function formRoute(harness: string, id: string): FormOutcome {
-  const session = id.trim();
-  if (!isHarness(harness)) return { problem: "Choose a harness." };
-  if (session === "") return { problem: NO_ID };
-  if (/[/?#]/.test(session)) return { problem: NOT_AN_ID };
-  return { route: routeOf({ harness, session, agent: null }) };
 }
 
 // -- the routes' queries --------------------------------------------------------------------

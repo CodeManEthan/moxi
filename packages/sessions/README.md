@@ -313,40 +313,67 @@ The guard is a nudge, not a boundary. Its known gaps:
 
 ## The page
 
-With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), sessions has a page in the shell
-that shows one session: its directory, title and last activity, then its last five turns,
-oldest first. Each message shows as text, cut at 2,000 characters with a way to show the
-rest; each tool call as one line naming the tool and what it was called on; each tool
-result as its size and whether it failed; compactions, aborted turns and rollbacks as
-labelled rules; and each request's model and token counts. "Earlier" shows the turns
-before. The page lists the session's subagents, and opening one shows its turns the same
-way.
+With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), sessions has a page in the shell.
+At its own address it lists the sessions; at a session's address it shows that session.
 
-The page lists no sessions. It opens a session by harness and id: at the page's own
-address it asks for both, and a session's address is `<harness>/<session id>`, or
+**The list.** The sessions started in a terminal that changed in the last hour come first,
+under `Active recently` (the setting `list.recent_s`). Then one group per day, for the
+newest seven days that hold a session, and `Earlier` for the rest, with how many there are
+and how far back they go; its `Show` brings the next older days. A day shows its first
+eight sessions, and `N more · Show` adds the next thirty. The sessions a program started
+are not in those rows: a day that has any ends with `N started by a program · Show`, which
+shows them under the line and hides them again.
+
+A row is named by the name typed for the session in its harness, with its folder beside
+it; without one, by the folder and when it started. Its second line is the newest message
+a person typed in the session, with its time and `You:`, and `2 subagents` before it when
+there are any. A session with no such message, and every Codex and OpenCode session, is
+one line. Most rows are one line.
+
+Above the list, the find field takes a session id or the start of one, or part of a
+folder's name, from two characters on, and its matches replace the groups. Under it are
+three filters: Folder (the folders the sessions ran in, which you can narrow by typing),
+Harness (the harnesses that have sessions) and When (today, the last 7 or 30 days, or a
+range of days), and the count: `62 sessions`, or `15 of 62 sessions` once something
+narrows the list. The list is read when the page opens, when its tab is shown again, and
+every 30 seconds while the tab is visible; groups you showed more of stay as they were.
+
+Under the list a dim line names each harness whose sessions could not be read, with the
+reason, and says how many Codex sessions are left out because their files are compressed.
+On a machine with no session the page says so in place of the list.
+
+**One session.** A session's address is `<harness>/<session id>`, or
 `claude/<session id>/<agent id>` for a Claude Code subagent. An OpenCode child session and
-a Codex subagent thread each open at their own id. The page server runs in the shell's
-environment, so the roots it reads are the ones that environment and sessions' settings
-name, which can differ from your terminal's. A session that can't be found or read shows
-why.
+a Codex subagent thread each open at their own id. The page shows the session's directory,
+title and last activity, then its last five turns, oldest first. Each message shows as
+text, cut at 2,000 characters with a way to show the rest; each tool call as one line
+naming the tool and what it was called on; each tool result as its size and whether it
+failed; compactions, aborted turns and rollbacks as labelled rules; and each request's
+model and token counts. "Earlier" shows the turns before. The page lists the session's
+subagents, and opening one shows its turns the same way. A session that can't be found or
+read shows why.
 
-Other modules' pages can place the same view with the shell's `place()`, as the `window`
-block, with the attributes `harness` (`claude`, `codex` or `opencode`), `session` and, for
-a Claude Code subagent, `agent`. It links to the page at the session's address. A
+The page server runs in the shell's environment, so the roots it reads are the ones that
+environment and sessions' settings name, which can differ from your terminal's.
+
+Other modules' pages can place the one-session view with the shell's `place()`, as the
+`window` block, with the attributes `harness` (`claude`, `codex` or `opencode`), `session`
+and, for a Claude Code subagent, `agent`. It links to the page at the session's address. A
 subagent chosen in the block opens in the block, with Back to return.
 
-The page server also answers the list as four reads, which the page does not show yet:
-`/api/list` (the counts and the groups, with the first 30 recent rows and the first 8 of
-each day), `/api/more` (the next 30 rows of a group, or the next older days), `/api/session`
-(one session opened) and `/api/folders`. They take the list's filters as query keys and
-read the setting `list.recent_s` at each request. Of a message they send at most 64 KiB,
-saying when it was cut; of the newest thing said on a row and of a subagent's last
-message, 300 bytes. The server keeps what the list read in memory for as long as it runs,
-and keeps no more of a message than it sends.
+The list is four reads of the page server: `/api/list` (the counts and the groups, with
+the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 rows of a
+group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
+They take the list's filters as query keys and read the setting `list.recent_s` at each
+request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
+thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
+the list read in memory for as long as it runs, and keeps no more of a message than it
+sends.
 
 The page only reads. It sends no tool call's input and no tool's output, and sends at most
 64 KiB of any one message, saying when it cut one. It reads a session when it is shown and
-when you ask it to, and runs nothing in the background. Without the extra, nothing of
+when you ask it to, and the list as said above; the page server runs nothing in the
+background. Without the extra, nothing of
 sessions changes.
 
 ## Install

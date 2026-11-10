@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ACTIVE_RECENTLY, addMore, countLine, dateWords, dayAfter, dayLabel, dayWords, EARLIER, earlierLine, FIND_MAX,
+  ACTIVE_RECENTLY, addMore, CLEAR, countLine, filterLine, FIND_PLACEHOLDER, folderMenu, GONE, harnessMenu, statusLine,
+  unlistedLine, WAITING, whenMenu, whenOf, whenWords, dateWords, dayAfter, dayLabel, dayWords, EARLIER, earlierLine, FIND_MAX,
   foldersPath, groupLabel, harnessWords, HIDE, isFiltered, keyOf, lastSegment, listPath, listView, LOCAL, morePath,
   NO_FILTERS, NO_MATCH, NO_SESSIONS, NO_SESSIONS_SENTENCE, noticeOf, queryOf, refresh, REST_MAX, rowName, rowView,
   sessionPath, SHOW, showMore, showMoreProgram, START_ONE, subagentsLead, timeWords, toggleOpen, toggleProgram,
@@ -480,7 +481,7 @@ test("the count is N sessions, and N of M sessions with a filter or the find fie
 test("a machine with no session reads No sessions yet, with the link only where the launcher is", () => {
   const state = stateOf([recent([])], { all: 0, total: 0, harnesses: [] });
   assert.deepEqual(draw(state), {
-    count: null, groups: [], notices: [],
+    count: null, groups: [], notices: [], unlisted: null,
     empty: { line: "No sessions yet.", sentence: NO_SESSIONS_SENTENCE, start: null },
   });
   assert.equal(draw(state, { launcher: true }).empty.start, "Start one from Home");
@@ -844,4 +845,152 @@ test("the find field's results replace the groups, page by thirty, and give way 
   assert.deepEqual([draw(state).groups[0].rows.length, draw(state).groups[0].more], [40, null]);
   state = refresh(state, { ...routes.list(), now: NOW + 2 }, NONE).state;
   assert.deepEqual(state.groups.map((one) => one.key), ["recent", "2026-11-07"]);
+});
+
+// -- found rows' times ---------------------------------------------------------------------------
+
+test("in the find field's results a row's time says its day unless that is today", () => {
+  const query = queryOf({ ...NO_FILTERS, find: "proj" }, TODAY, UTC);
+  const said = (session, when) => row(session, at(when), { prompt: typed(at(when), "Do it.") });
+  const found = { key: "found", count: 4, before: null,
+                  rows: [said("a", "2026-11-08 19:09"), said("b", "2026-11-07 22:50"), said("c", "2026-11-06 22:10"),
+                         said("d", "2025-11-06 22:10")] };
+  const rows = draw(stateOf([found], { total: 4 }, query)).groups[0].rows;
+  assert.deepEqual(rows.map((one) => one.time), ["19:09", "yesterday 22:50", "Nov 6 22:10", "Nov 6, 2025 22:10"]);
+  assert.deepEqual(rows.map((one) => one.name), [
+    "proj-a · started today 18:59", "proj-a · started yesterday 22:40", "proj-a · started Nov 6 22:00",
+    "proj-a · started Nov 6, 2025 22:00"]);
+});
+
+// -- compressed Codex sessions -------------------------------------------------------------------
+
+test("compressed Codex sessions left out of the list get one line, and none at zero or when not counted", () => {
+  const some = [day("2026-11-07", [row("b1", at("2026-11-07 22:50"))])];
+  assert.equal(draw(stateOf(some, { unreadable: 3 })).unlisted, "3 Codex sessions are compressed and not listed.");
+  assert.equal(draw(stateOf(some, { unreadable: 1 })).unlisted, "1 Codex session is compressed and not listed.");
+  assert.equal(draw(stateOf(some, { unreadable: 1234 })).unlisted, "1,234 Codex sessions are compressed and not listed.");
+  assert.equal(draw(stateOf(some, { unreadable: 0 })).unlisted, null);
+  assert.equal(draw(stateOf(some, { unreadable: null })).unlisted, null);
+  assert.equal(unlistedLine(stateOf([recent([])], { all: 0, total: 0, unreadable: 2 })),
+               "2 Codex sessions are compressed and not listed.");
+});
+
+// -- the filter line -----------------------------------------------------------------------------
+
+test("the filter line reads Folder all, Harness all, When any time, and has no Clear until one is set", () => {
+  const state = stateOf([day("2026-11-07", [row("b1", at("2026-11-07 22:50"))])]);
+  assert.deepEqual(filterLine(state, NO_FILTERS), {
+    filters: [{ key: "folder", label: "Folder", value: "all", set: false },
+              { key: "harness", label: "Harness", value: "all", set: false },
+              { key: "when", label: "When", value: "any time", set: false }],
+    clear: null,
+  });
+  // The find field is not a filter of the line.
+  assert.equal(filterLine(state, { ...NO_FILTERS, find: "proj" }).clear, null);
+});
+
+test("a set filter shows its value and the line gains Clear", () => {
+  const state = stateOf([day("2026-11-07", [row("b1", at("2026-11-07 22:50"))])]);
+  const line = filterLine(state, { folder: "/work/proj-a/", harness: "codex", when: { kind: "last", days: 7 }, find: "" });
+  assert.deepEqual(line.filters.map((one) => [one.value, one.set]), [["proj-a", true], ["Codex", true], ["last 7 days", true]]);
+  assert.equal(line.clear, CLEAR);
+  assert.equal(filterLine(state, { ...NO_FILTERS, harness: "codex" }).clear, "Clear");
+});
+
+test("there is no filter line while no session was counted", () => {
+  assert.equal(filterLine(stateOf([recent([])], { all: 0, total: 0, harnesses: [] }), NO_FILTERS), null);
+});
+
+test("When is worded as today, the last N days, or a range with either end open", () => {
+  assert.equal(whenWords({ kind: "any" }, TODAY), "any time");
+  assert.equal(whenWords({ kind: "today" }, TODAY), "today");
+  assert.equal(whenWords({ kind: "last", days: 30 }, TODAY), "last 30 days");
+  assert.equal(whenWords({ kind: "range", from: "2026-11-03", to: "2026-11-06" }, TODAY), "Nov 3 to Nov 6");
+  assert.equal(whenWords({ kind: "range", from: "2026-11-03", to: "2026-11-03" }, TODAY), "Nov 3");
+  assert.equal(whenWords({ kind: "range", from: "2025-12-30", to: null }, TODAY), "from Dec 30, 2025");
+  assert.equal(whenWords({ kind: "range", from: null, to: "2026-11-06" }, TODAY), "up to Nov 6");
+  assert.equal(whenWords({ kind: "range", from: null, to: null }, TODAY), "any time");
+  assert.equal(whenWords({ kind: "range", from: "", to: "nonsense" }, TODAY), "any time");
+  assert.deepEqual(whenOf({ kind: "range", from: "", to: "2026-11-06" }), { kind: "range", from: null, to: "2026-11-06" });
+});
+
+test("the Harness menu lists only harnesses with sessions, with their counts, and the one that is set", () => {
+  const harnesses = [{ harness: "claude", count: 40 }, { harness: "codex", count: 0 }, { harness: "opencode", count: 1200 }];
+  const state = stateOf([day("2026-11-07", [row("b1", at("2026-11-07 22:50"))])], { harnesses });
+  assert.deepEqual(harnessMenu(state, NO_FILTERS), [
+    { value: null, label: "All harnesses", dim: null, tail: null, checked: true },
+    { value: "claude", label: "Claude Code", dim: null, tail: "40", checked: false },
+    { value: "opencode", label: "OpenCode", dim: null, tail: "1,200", checked: false },
+  ]);
+  const set = harnessMenu(state, { ...NO_FILTERS, harness: "codex" });
+  assert.deepEqual(set.map((one) => [one.label, one.tail, one.checked]),
+                   [["All harnesses", null, false], ["Claude Code", "40", false], ["Codex", null, true], ["OpenCode", "1,200", false]]);
+  const gone = harnessMenu(stateOf([recent([])], { harnesses: [] }), { ...NO_FILTERS, harness: "codex" });
+  assert.deepEqual(gone.map((one) => [one.label, one.checked]), [["All harnesses", false], ["Codex", true]]);
+});
+
+test("the When menu offers any time, today, the last 7 and the last 30 days", () => {
+  assert.deepEqual(whenMenu(NO_FILTERS).map((one) => [one.label, one.checked]),
+                   [["Any time", true], ["Today", false], ["Last 7 days", false], ["Last 30 days", false]]);
+  assert.deepEqual(whenMenu({ ...NO_FILTERS, when: { kind: "last", days: 30 } }).map((one) => one.checked), [false, false, false, true]);
+  assert.deepEqual(whenMenu({ ...NO_FILTERS, when: { kind: "range", from: "2026-11-01", to: null } }).map((one) => one.checked),
+                   [false, false, false, false]);
+  assert.deepEqual(whenMenu(NO_FILTERS)[2].value, { kind: "last", days: 7 });
+});
+
+test("the Folder menu names each folder by its last segment, with the path before it and its newest change", () => {
+  const folders = { shape: 1, more: 0, folders: [
+    { folder: "/work/proj-a", count: 3, changed: at("2026-11-08 19:09") },
+    { folder: "/home/alice/proj-a/", count: 1, changed: at("2026-11-06 10:00") },
+    { folder: "/proj-b", count: 2, changed: null },
+  ] };
+  const menu = folderMenu(folders, { ...NO_FILTERS, folder: "/work/proj-a" }, "", TODAY, UTC);
+  assert.deepEqual(menu.all, { value: null, label: "All folders", dim: null, tail: null, checked: false });
+  assert.deepEqual(menu.items, [
+    { value: "/work/proj-a", label: "proj-a", dim: "/work", tail: "19:09", checked: true },
+    { value: "/home/alice/proj-a/", label: "proj-a", dim: "/home/alice", tail: "Nov 6", checked: false },
+    { value: "/proj-b", label: "proj-b", dim: null, tail: null, checked: false },
+  ]);
+  assert.equal(menu.line, null);
+  assert.equal(folderMenu(folders, NO_FILTERS, "", TODAY, UTC).all.checked, true);
+});
+
+test("the Folder menu narrows by any part of the path, and says when nothing matches or folders were left off", () => {
+  const folders = { shape: 1, more: 0, folders: [
+    { folder: "/work/proj-a", count: 3, changed: null }, { folder: "/home/alice/proj-b", count: 1, changed: null }] };
+  assert.deepEqual(folderMenu(folders, NO_FILTERS, " ALICE ", TODAY, UTC).items.map((one) => one.label), ["proj-b"]);
+  assert.deepEqual(folderMenu(folders, NO_FILTERS, "proj", TODAY, UTC).items.map((one) => one.label), ["proj-a", "proj-b"]);
+  assert.equal(folderMenu(folders, NO_FILTERS, "zz", TODAY, UTC).line, "No folder matches.");
+  assert.equal(folderMenu({ ...folders, more: 12 }, NO_FILTERS, "", TODAY, UTC).line,
+               "12 more folders not listed; narrow the list with the other filters");
+  assert.equal(folderMenu({ ...folders, more: 1 }, NO_FILTERS, "", TODAY, UTC).line,
+               "1 more folder not listed; narrow the list with the other filters");
+  // Before the answer there is nothing to say.
+  assert.deepEqual([folderMenu(null, NO_FILTERS, "", TODAY, UTC).items, folderMenu(null, NO_FILTERS, "", TODAY, UTC).line], [[], null]);
+});
+
+test("the find field's placeholder says what it finds by", () => {
+  assert.equal(FIND_PLACEHOLDER, "Find a session by its id or folder");
+});
+
+// -- reading and failing -------------------------------------------------------------------------
+
+test("the list says it is reading before its first answer, and nothing once it has one", () => {
+  const feed = (over) => ({ loading: false, gone: false, failure: null, refused: null, value: null, ...over });
+  assert.deepEqual(statusLine(feed({ loading: true })), { state: "waiting", line: WAITING });
+  assert.equal(statusLine(feed({ value: {} })), null);
+  assert.equal(statusLine(feed({ loading: true, value: {} })), null);
+});
+
+test("a read that fails, is refused or finds sessions gone says why, with a list read before it or not", () => {
+  const feed = (over) => ({ loading: false, gone: false, failure: null, refused: null, value: null, ...over });
+  const failure = { status: 500, why: "sessions' page server answered 500" };
+  assert.deepEqual(statusLine(feed({ failure, value: {} })),
+                   { state: "failed", line: "Moxi couldn't read the list: sessions' page server answered 500" });
+  assert.deepEqual(statusLine(feed({ failure }), "more of the list"),
+                   { state: "failed", line: "Moxi couldn't read more of the list: sessions' page server answered 500" });
+  assert.deepEqual(statusLine(feed({ refused: "find is too long" }), "the folders"),
+                   { state: "refused", line: "Moxi couldn't read the folders: find is too long" });
+  assert.deepEqual(statusLine(feed({ gone: true, failure })), { state: "gone", line: GONE });
+  assert.equal(GONE, "sessions is no longer installed.");
 });

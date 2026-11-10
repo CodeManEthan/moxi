@@ -1,7 +1,7 @@
 {
   "name": "moxi-sessions-web",
   "private": true,
-  "description": "The sessions module's web sources: its page, which opens one session by harness and id, and the window block other pages place.",
+  "description": "The sessions module's web sources: its page, which lists the sessions and shows one session, and the window block other pages place.",
   "license": "MIT",
   "type": "module",
   "scripts": {

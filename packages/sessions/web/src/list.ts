@@ -11,7 +11,8 @@
 // Every string here goes into the page as text.
 
 import { charCount, cutAt, fmtCount, HARNESS_LABELS, isHarness, routeOf } from "./views.ts";
-import type { Group, ListAnswer, ListRow, MoreAnswer, Root } from "./list-feed.ts";
+import type { FeedState } from "./views.ts";
+import type { FoldersAnswer, Group, ListAnswer, ListRow, MoreAnswer, Root } from "./list-feed.ts";
 
 // -- days and times -------------------------------------------------------------------------
 
@@ -678,6 +679,9 @@ export interface ListView {
   groups: GroupView[];
   empty: EmptyView | null;
   notices: Notice[];
+  /** The line for Codex sessions left out because their files are compressed; null when
+   * there is none, or they were not counted. */
+  unlisted: string | null;
 }
 
 export const ACTIVE_RECENTLY = "Active recently";
@@ -690,6 +694,9 @@ export const NO_SESSIONS_SENTENCE = "Moxi lists every Claude Code, Codex and Ope
   + "whether it was started here or in a terminal. It looked and found none.";
 export const START_ONE = "Start one from Home";
 export const NO_MATCH = "No sessions match.";
+/** What the list says before its first answer. */
+export const WAITING = "Reading the sessions…";
+export const GONE = "sessions is no longer installed.";
 
 /** A group's label. */
 export function groupLabel(key: string, today: string): string | null {
@@ -729,6 +736,15 @@ export function noticeOf(root: Root): Notice {
              line: `Moxi couldn't read ${count(root.parts, "part", "parts")} of ${whose}; the counts leave them out` };
   }
   return { harness: root.harness, line: `Moxi couldn't read ${whose}`, reason: root.reason };
+}
+
+/** The line for the Codex sessions the list leaves out because their files are
+ * compressed; null when none is, or when Codex's root was not listed. */
+export function unlistedLine(state: ListState): string | null {
+  const n = state.unreadable;
+  if (n === null || n <= 0) return null;
+  return n === 1 ? "1 Codex session is compressed and not listed."
+    : `${fmtCount(n)} Codex sessions are compressed and not listed.`;
 }
 
 function groupView(group: GroupState, state: ListState, zone: Zone): GroupView | null {
@@ -778,5 +794,179 @@ export function listView(state: ListState, { launcher = false, zone = LOCAL }: {
   } else if (groups.length === 0 && state.all > 0 && isFiltered(state.query)) {
     empty = { line: NO_MATCH, sentence: null, start: null };
   }
-  return { count: countLine(state), groups: empty === null ? groups : [], empty, notices };
+  return { count: countLine(state), groups: empty === null ? groups : [], empty, notices, unlisted: unlistedLine(state) };
+}
+
+// -- the find field and the filter line -----------------------------------------------------
+
+export const FIND_PLACEHOLDER = "Find a session by its id or folder";
+export const FIND_LABEL = "Find a session";
+export const CLEAR = "Clear";
+export const RANGE_FROM = "From";
+export const RANGE_TO = "To";
+export const NARROW_FOLDERS = "Narrow the folders";
+export const NO_FOLDERS = "No folder matches.";
+
+/** Which filter a menu is of. */
+export type FilterKey = "folder" | "harness" | "when";
+
+/** One filter of the line: its label, the value it is set to in words, and whether it is
+ * set (a set filter is drawn in the text colour). */
+export interface FilterView {
+  key: FilterKey;
+  label: string;
+  value: string;
+  set: boolean;
+}
+
+/** The filter line: the three filters in order, and `Clear` when one is set. */
+export interface FilterLine {
+  filters: FilterView[];
+  clear: string | null;
+}
+
+const isDay = (day: string | null): day is string => day !== null && dayParts(day) !== null;
+
+/** The `When` filter with a range's unusable ends dropped; a range with neither end is
+ * any time. */
+export function whenOf(when: When): When {
+  if (when.kind !== "range") return when;
+  const from = isDay(when.from) ? when.from : null;
+  const to = isDay(when.to) ? when.to : null;
+  return from === null && to === null ? { kind: "any" } : { kind: "range", from, to };
+}
+
+/** The `When` filter in words, as the filter line shows its value. */
+export function whenWords(when: When, today: string): string {
+  const set = whenOf(when);
+  if (set.kind === "today") return "today";
+  if (set.kind === "last") return `last ${fmtCount(set.days)} days`;
+  if (set.kind === "range") {
+    if (set.from !== null && set.to !== null) {
+      return set.from === set.to ? dateWords(set.from, today) : `${dateWords(set.from, today)} to ${dateWords(set.to, today)}`;
+    }
+    return set.from !== null ? `from ${dateWords(set.from, today)}` : `up to ${dateWords(set.to as string, today)}`;
+  }
+  return "any time";
+}
+
+/**
+ * The filter line for the filters as the person left them: `Folder all · Harness all ·
+ * When any time`, each with its value once set, and `Clear` when any is. Null while the
+ * list has counted no session: there is nothing to narrow.
+ */
+export function filterLine(state: ListState, filters: Filters): FilterLine | null {
+  if (state.all === 0) return null;
+  const folder = filters.folder !== null && filters.folder !== "" ? filters.folder : null;
+  const harness = filters.harness !== null && filters.harness !== "" ? filters.harness : null;
+  const when = whenOf(filters.when);
+  return {
+    filters: [
+      { key: "folder", label: "Folder", value: folder !== null ? lastSegment(folder) : "all", set: folder !== null },
+      { key: "harness", label: "Harness", value: harness !== null ? harnessWords(harness) : "all", set: harness !== null },
+      { key: "when", label: "When", value: whenWords(when, state.today), set: when.kind !== "any" },
+    ],
+    clear: folder !== null || harness !== null || when.kind !== "any" ? CLEAR : null,
+  };
+}
+
+/** One choice of a filter's menu. */
+export interface MenuItem<V> {
+  value: V;
+  label: string;
+  /** Dim words after the label. */
+  dim: string | null;
+  /** Dim words at the right end: a count, or when the newest session changed. */
+  tail: string | null;
+  checked: boolean;
+}
+
+/** The Harness menu: `All harnesses`, then each harness that has sessions under the
+ * other filters, with how many. The harness the filter is set to is listed even when it
+ * has none now, so it can be seen and unset. */
+export function harnessMenu(state: ListState, filters: Filters): MenuItem<string | null>[] {
+  const set = filters.harness !== null && filters.harness !== "" ? filters.harness : null;
+  const rows = state.harnesses.filter((row) => row.count > 0 || row.harness === set);
+  const listed = set === null || rows.some((row) => row.harness === set) ? rows : [...rows, { harness: set, count: 0 }];
+  return [
+    { value: null, label: "All harnesses", dim: null, tail: null, checked: set === null },
+    ...listed.map((row) => ({ value: row.harness, label: harnessWords(row.harness), dim: null,
+                              tail: row.count > 0 ? fmtCount(row.count) : null, checked: row.harness === set })),
+  ];
+}
+
+/** The When menu's choices; a range is typed into the two fields under them. */
+export function whenMenu(filters: Filters): MenuItem<When>[] {
+  const when = whenOf(filters.when);
+  const last = (days: number): MenuItem<When> => ({
+    value: { kind: "last", days }, label: `Last ${days} days`, dim: null, tail: null,
+    checked: when.kind === "last" && when.days === days,
+  });
+  return [
+    { value: { kind: "any" }, label: "Any time", dim: null, tail: null, checked: when.kind === "any" },
+    { value: { kind: "today" }, label: "Today", dim: null, tail: null, checked: when.kind === "today" },
+    last(7),
+    last(30),
+  ];
+}
+
+/** The Folder menu: `All folders`, then the folders the listed sessions ran in. */
+export interface FolderMenu {
+  all: MenuItem<null>;
+  items: MenuItem<string>[];
+  /** A dim line under them: no folder matches the narrowing text, or how many folders
+   * the answer left off. */
+  line: string | null;
+}
+
+/**
+ * The Folder menu from `/api/folders`' answer, narrowed to the folders whose path holds
+ * `narrow` (without regard to case). A folder is its last segment, the path before it in
+ * dim, and when its newest session changed: the time today, else the date.
+ */
+export function folderMenu(answer: FoldersAnswer | null, filters: Filters, narrow: string, today: string,
+                           zone: Zone = LOCAL): FolderMenu {
+  const set = filters.folder !== null && filters.folder !== "" ? filters.folder : null;
+  const text = narrow.trim().toLowerCase();
+  const folders = (answer?.folders ?? []).filter((row) => text === "" || row.folder.toLowerCase().includes(text));
+  const items = folders.map((row): MenuItem<string> => {
+    const name = lastSegment(row.folder);
+    const cut = row.folder.replace(/\/+$/, "");
+    const parent = cut.endsWith(name) ? cut.slice(0, cut.length - name.length) : "";
+    const day = typeof row.changed === "number" ? zone.day(row.changed) : null;
+    return {
+      value: row.folder,
+      label: name,
+      dim: parent !== "" && parent !== "/" ? parent.replace(/\/+$/, "") : null,
+      tail: day === null ? null : day === today ? zone.clock(row.changed as number) : dateWords(day, today),
+      checked: row.folder === set,
+    };
+  });
+  const more = answer?.more ?? 0;
+  const line = answer !== null && items.length === 0 ? NO_FOLDERS
+    : more > 0 ? `${count(more, "more folder", "more folders")} not listed; narrow the list with the other filters` : null;
+  return { all: { value: null, label: "All folders", dim: null, tail: null, checked: set === null }, items, line };
+}
+
+// -- reading and failing --------------------------------------------------------------------
+
+/** A line the list shows about its own reading, and whether it is a problem (drawn in
+ * the text colour) or only says the list is on its way (dim). */
+export interface StatusLine {
+  state: "waiting" | "gone" | "refused" | "failed";
+  line: string;
+}
+
+/**
+ * What the list says about a read of `what` (the list itself, more of it, or the folders
+ * for the menu): nothing once the read gave a value and no later one failed; that it is
+ * reading, before the first answer; else why there is no answer. A list read before a
+ * failure stays drawn under the line.
+ */
+export function statusLine(feed: FeedState<unknown>, what: "the list" | "more of the list" | "the folders" = "the list"): StatusLine | null {
+  if (feed.gone) return { state: "gone", line: GONE };
+  if (feed.refused !== null) return { state: "refused", line: `Moxi couldn't read ${what}: ${feed.refused}` };
+  if (feed.failure !== null) return { state: "failed", line: `Moxi couldn't read ${what}: ${feed.failure.why}` };
+  if (feed.loading && feed.value === null) return { state: "waiting", line: WAITING };
+  return null;
 }
