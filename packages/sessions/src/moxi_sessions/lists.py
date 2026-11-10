@@ -604,7 +604,9 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
       subagents could not be listed; `more` alone is None when some of them could not
       be, since how many there are is then not known.
     * `resume`: `{command, folder}`, the harness's command for picking the session up
-      again and where to run it; None for a harness with none.
+      again and the folder to run it in; `folder` is None where the command runs
+      anywhere. None for a harness with no command, and for one whose command must be
+      run in the session's folder when that folder was not read.
 
     None when the catalog holds no such main session."""
     cat = _catalog(cat)

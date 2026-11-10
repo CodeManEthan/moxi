@@ -124,8 +124,9 @@ follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (up to 8, ea
 `{description, agent_type, started, last_at, last}`, `last` being its newest message cut
 at 300 bytes; null when they could not be listed), `more` (how many were not listed; null
 with `subagents`, and when some of them could not be listed) and `resume` (`{command, folder}`: the harness's command for picking the
-session up again and the folder to run it in, null where it runs anywhere; null for a
-harness with none). It says nothing of whether the session is working. An id that is not
+session up again and the folder to run it in, null where it runs anywhere; `resume`
+itself is null for a harness with no command, and for one whose command must be run in
+the session's folder when that folder was not read). It says nothing of whether the session is working. An id that is not
 a main session's (a subagent's, a spawned Codex thread's, an unknown one) is refused.
 
 *`/api/folders`*: `folders` (`{folder, count, changed}`, newest change first, at most 200,

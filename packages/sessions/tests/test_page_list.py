@@ -509,7 +509,7 @@ def test_an_opened_session_with_nothing_read_is_nulls(roots):
     for key in ("folder", "started", "name", "model", "activity", "prompt", "reply"):
         assert silent[key] is None, key
     assert silent["subagents"] == [] and silent["more"] == 0
-    assert silent["resume"] == {"command": f"claude --resume {sid(3)}", "folder": None}
+    assert silent["resume"] is None        # its command needs a folder that was not read
 
     codex = read("/api/session", f"harness=codex&session={tid(1)}")
     assert codex["reply"] == {"at": codex["reply"]["at"], "text": "Done.",

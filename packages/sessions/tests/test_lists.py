@@ -630,7 +630,6 @@ def test_a_codex_and_an_opencode_session_open_with_their_resume_commands(roots):
 def test_each_harness_has_its_resume_command():
     assert resume(CLAUDE, "abc", "/work/proj-a") == {"command": "claude --resume abc",
                                                      "folder": "/work/proj-a"}
-    assert resume(CLAUDE, "abc") == {"command": "claude --resume abc", "folder": None}
     assert resume(CODEX, "abc", "/work/proj-a") == {"command": "codex resume abc",
                                                     "folder": None}
     assert resume(OPENCODE, "ses_1", "/work/proj-a") == {
@@ -639,8 +638,27 @@ def test_each_harness_has_its_resume_command():
 
 def test_an_id_a_shell_would_read_is_quoted():
     assert resume(CODEX, "a b; rm x")["command"] == "codex resume 'a b; rm x'"
-    assert resume(CLAUDE, "it's")["command"] == "claude --resume 'it'\"'\"'s'"
+    assert resume(CLAUDE, "it's", "/w")["command"] == "claude --resume 'it'\"'\"'s'"
     assert resume(CODEX, "") is None and resume(CODEX, None) is None
+
+
+def test_a_command_that_needs_the_sessions_folder_is_not_given_without_it(roots):
+    assert resume(CLAUDE, "abc") is None and resume(CLAUDE, "abc", "") is None
+    assert resume(OPENCODE, "ses_1") is None
+    assert resume(CODEX, "abc") == {"command": "codex resume abc", "folder": None}
+
+    silent = ClaudeTranscript(roots[CLAUDE], session_id=sid(1))
+    silent.other("mode", mode="default")
+    silent.write()
+    headless = CodexRollout(roots[CODEX], thread_id=tid(1), meta=False)
+    headless.user("Do the thing.")
+    headless.write()
+
+    row = opened(roots, sid(1))
+    assert row["folder"] is None and row["resume"] is None
+    thread = opened(roots, tid(1), CODEX)
+    assert thread["folder"] is None
+    assert thread["resume"] == {"command": f"codex resume {tid(1)}", "folder": None}
 
 
 def test_a_harness_left_out_of_the_table_has_no_resume_command(roots, monkeypatch):
