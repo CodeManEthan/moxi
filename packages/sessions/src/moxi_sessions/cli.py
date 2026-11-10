@@ -1,8 +1,10 @@
 """`moxi sessions`: where a session's records are, which root each harness is read from,
-and one session's turns.
+the newest sessions, and one session's turns.
 
     moxi sessions find SESSION [--harness claude|codex|opencode] [--root PATH] [--json]
     moxi sessions root [--json]
+    moxi sessions list [--harness H] [--since TIME] [--folder PATH] [--limit N] [--text]
+                       [--json]
     moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]
 
 `find` prints where the session's records are (a Claude Code transcript, every rollout
@@ -11,6 +13,22 @@ probed and why each held none, and exits 1 then. `root` prints the root each har
 read from when a caller names none, and where that root came from. With `--json`, each
 prints one JSON object whose first key is `shape`, the shape version, as every JSON
 document sessions writes has.
+
+`list` prints the main sessions of the three harnesses, newest change first, 30 unless
+`--limit` asks for another number: one line a session, with when it started, when it last
+changed, its harness, the name typed for it (else its folder) and its id; `-` stands for
+a fact that was not read. `--harness`, `--since TIME` (changed at or after it, in the
+forms `read --around` takes) and `--folder PATH` (an absolute path the session's record
+names) narrow it. It prints nothing a person or a model said unless `--text` is given;
+then each session's line is followed by the newest thing said in it, on one line, cut at
+300 bytes. Names, and with `--text` the messages, are redacted as `read` redacts when the
+secrets module is installed; with `--text` and no secrets it says so once, on stderr.
+`--json` prints the list as one JSON object: the counts, the roots that could not be
+listed, and `rows`, whose `activity` and `prompt` carry their `text` only with `--text`.
+A root that could not be listed is named on stderr, and the other roots are listed; so
+is a root with folders or files under it that could not be listed, with how many. A
+harness that is not on the machine (its root is the default one and does not exist) is
+not a failure: nothing is printed for it.
 
 `read` prints part of one session the way sessions' page shows it (`moxi_sessions.view`):
 the last `--turns` turns (5 unless asked, at most 50), or with `--around TIME` the turns
@@ -44,6 +62,9 @@ from .source import root, root_origin
 TURNS_DEFAULT = 5
 TURNS_MAX = 50
 
+#: The sessions `list` shows unless asked.
+LIST_DEFAULT = 30
+
 #: What `find` calls a harness's record when it finds none.
 RECORD = {CLAUDE: "transcript", CODEX: "rollout", "opencode": "session row"}
 
@@ -70,6 +91,26 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> i
                                          "a caller names none, and where it came from.")
     roots.add_argument("--json", action="store_true", help="print one JSON object")
 
+    lister = verbs.add_parser(
+        "list", help="print the newest sessions",
+        description="Print the main sessions of the three harnesses, newest change "
+                    "first: when each started and last changed, its harness, its name "
+                    "or folder and its id. No message text without --text.")
+    lister.add_argument("--harness", choices=HARNESSES,
+                        help="only this harness's sessions")
+    lister.add_argument("--since", metavar="TIME",
+                        help="only sessions changed at or after TIME: ISO 8601 "
+                             "(2026-11-06T14:03:22Z; no zone is local time) or epoch "
+                             "seconds")
+    lister.add_argument("--folder", metavar="PATH",
+                        help="only sessions whose record names this folder, an absolute "
+                             "path")
+    lister.add_argument("--limit", type=int, default=LIST_DEFAULT, metavar="N",
+                        help=f"how many sessions (default {LIST_DEFAULT})")
+    lister.add_argument("--text", action="store_true",
+                        help="also print the newest thing said in each session")
+    lister.add_argument("--json", action="store_true", help="print one JSON object")
+
     reader = verbs.add_parser(
         "read", help="print part of one session",
         description="Print a session's last turns, the turns around a time, or the whole "
@@ -95,6 +136,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> i
             return _find(args, prog)
         if args.verb == "read":
             return _read(args, prog)
+        if args.verb == "list":
+            return _list(args, prog)
         return _root(args)
     except ConfigError as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
@@ -144,6 +187,83 @@ def _root(args) -> int:
         print(f"{origin.harness}: {origin.path}")
         print(f"  from: {origin.detail}")
     return 0
+
+
+# --- list -----------------------------------------------------------------------------
+
+def _when(seconds) -> str:
+    return view.stamp(seconds) if isinstance(seconds, (int, float)) else "-"
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _list(args, prog: str) -> int:
+    from . import lists, settings           # the list's modules, only for this verb
+
+    since = None
+    if args.since is not None:
+        try:
+            since = parse_time(args.since)
+        except ValueError as exc:
+            print(f"{prog} list: {exc}", file=sys.stderr)
+            return 2
+    try:
+        answer = lists.newest_sessions(recent_s=settings.recent_s(), limit=args.limit,
+                                       harness=args.harness, since=since,
+                                       folder=args.folder)
+    except ValueError as exc:
+        print(f"{prog} list: {exc}", file=sys.stderr)
+        return 2
+    redactor = view.redactor()
+    redact = redactor.redact
+    if args.text and redact is None:
+        print(f"{prog} list: not redacted: {redactor.reason}; install the secrets module "
+              "to redact what this prints", file=sys.stderr)
+    rows = [_list_row(row, redact, args.text) for row in answer.pop("rows")]
+    if args.json:
+        print(json.dumps(document(**answer, limit=args.limit, text=args.text,
+                                  redacted=redact is not None, rows=rows), indent=2))
+        return 0
+    for unread in answer["roots"]:
+        where = unread["root"] or "its root"
+        if unread["reason"] is not None:
+            print(f"{prog} list: {unread['harness']}: {where} could not be listed: "
+                  f"{unread['reason']}", file=sys.stderr)
+        else:
+            print(f"{prog} list: {unread['harness']}: {unread['parts']} of the folders "
+                  f"and files under {where} could not be listed; the sessions in them "
+                  "are not counted", file=sys.stderr)
+    for row in rows:
+        print("  ".join((_when(row["started"]), _when(row["changed"]), row["harness"],
+                         row["name"] or row["folder"] or "-", row["session"])))
+        said = row["activity"]
+        if args.text and said is not None:
+            who = f"{said['who']}: " if said["who"] else ""
+            print(f"    {who}{_one_line(said['text'])}")
+    if answer["total"] > len(rows):
+        print(f"{prog} list: the newest {len(rows)} of {answer['total']} sessions "
+              "(--limit for more)", file=sys.stderr)
+    return 0
+
+
+def _list_row(row: dict, redact, text: bool) -> dict:
+    """A list's row as the verb prints it: the name redacted; the newest thing said and
+    the prompt redacted and with their text only when `text` is asked."""
+    out = dict(row)
+    if redact is not None and isinstance(row["name"], str):
+        out["name"] = redact(row["name"])
+    said = row["activity"]
+    if said is not None:
+        out["activity"] = {"at": said["at"], "who": said["who"]}
+        if text:
+            out["activity"]["text"] = redact(said["text"]) if redact else said["text"]
+    prompt = view.cut_message(row["prompt"], redact)
+    if prompt is not None and not text:
+        prompt = {"at": prompt["at"]}
+    out["prompt"] = prompt
+    return out
 
 
 # --- read -----------------------------------------------------------------------------

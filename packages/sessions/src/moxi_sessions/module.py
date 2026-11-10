@@ -1,15 +1,16 @@
 """The announcement of Moxi's sessions module, which moxi.modules reads.
 
-It offers interfaces 2 and 3, the read API in `moxi_sessions.api` (interface 3 is 2 plus
-`retention()`), the verb `moxi sessions`, a setup that prints how long each harness keeps
-its transcripts, and, with the `ui` extra, a page in the browser UI shell that shows one
-session's last turns and a block other pages may place for the same view. With the
+It offers interfaces 2, 3 and 4, the read API in `moxi_sessions.api` (interface 3 is 2
+plus `retention()`; interface 4 is 3 plus the list of sessions, `sessions_list`), the verb
+`moxi sessions`, a setup that prints how long each harness keeps its transcripts, and,
+with the `ui` extra, a page in the browser UI shell that shows one session's last turns
+and a block other pages may place for the same view. With the
 `secrets` extra, `moxi sessions read` redacts what it prints. With the `turns` extra, turns
 enforces sessions' transcript-read guard, off until the install's question or its switch
 turns it on.
 """
 
-INTERFACES = frozenset({2, 3})
+INTERFACES = frozenset({2, 3, 4})
 API = "moxi_sessions.api"
 CLI = "moxi_sessions.cli:main"
 SUMMARY = ("Read each harness's own session records in one shape: find a session and its "
