@@ -1,6 +1,6 @@
 [project]
 name = "moxi-usage"
-version = "0.2.0"
+version = "0.2.1"
 description = "How much of each plan window is used, how full a session's context is, and what the tokens cost, from each harness's own records."
 readme = "README.md"
 requires-python = ">=3.12"

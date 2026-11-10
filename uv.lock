@@ -1496,7 +1496,7 @@ dev = [
 
 [[package]]
 name = "moxi-usage"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/usage" }
 dependencies = [
     { name = "moxi" },

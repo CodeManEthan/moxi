@@ -134,6 +134,12 @@ line through them says when it reaches 100%, given only when that comes after no
 before the reset. Of what else a reading says, the line prints only a spend limit's
 dollars; `--json` keeps all of it.
 
+A row also says when its window opened (`opened` in `--json` and from Python): the reset
+time less the window's duration. It is null when either is unknown, when that time is
+not earlier than the first reading of the period, and for a window at 0% with one
+reading: a window is not said to have opened at a time it had already been read at, nor
+from one reading that shows no use.
+
 ## The token index
 
 Every request every harness wrote is kept in one SQLite file, `STATE/usage/index.db`, so a
@@ -190,7 +196,15 @@ by the project each session was recorded under, or by its directory when none wa
 tier, prompt-size bound and price period), the tokens of fresh input, cache read, the two
 cache writes and output, the price each paid and the dollars, which add up to the cost. By
 model it is a reconciliation table; by day, month or (with `--session`) a session's agents
-it gives cost by token class and by price tier. `requests` gives one line per request of a
+it gives cost by token class and by price tier. With `--json` its total carries `saving`,
+what caching saved over the report: the cache reads at each price group's own input
+price (`reads_at_input`), what those reads did cost (`reads_cost`), what the cache writes
+cost over the input price (`write_extra`), and `saved`, the first less the other two,
+with how many of the input tokens were read from cache (`read_tokens` of
+`input_tokens`). It is an estimate: the same tokens with no cache, at the same table's
+prices. `saved` is 0 or less where caching cost more than it saved. `saving` is null when
+the report holds no cache read, and when a price group that holds cache reads or writes
+is unpriced or lacks a price the sums need. `requests` gives one line per request of a
 session's agent (`main` unless `--agent` names another): its tokens by class, cost,
 context against the model's window, its turn, and a line where a compaction fell. It
 exits 1 when no request of that agent is in range.
@@ -361,9 +375,40 @@ view: the limits, one meter per window, and the cost of today and the last 7 day
 how old the index behind it is, flagged once its last pass is over 10 minutes old. Without
 the extra, nothing of usage changes.
 
-Its reads include `GET /api/terms` (the `terms` report), `GET /api/requests` (the
-`requests` report) and `GET /api/prices` (the model table's rates, for some models or a
-search; it reads no index). The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
+The page server's reads, each a `GET` under `/api`:
+
+| route | query | answers |
+|---|---|---|
+| `limits` | none | each plan window now, from the stored readings, with `opened` |
+| `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period, and the sessions that used it |
+| `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
+| `sessions` | `top` (1 to 200), `skip`, filters | sessions, dearest first: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` |
+| `session` | `session`, filters | one session by agent and model, with its `context` |
+| `projects` | `by` (`project`, `folder`), filters | tokens and cost by project, or by folder alone, with the account's `home` folder |
+| `models` | filters | tokens and cost by model, with where each price came from |
+| `terms` | `by` (`model`, `day`, `month`, `agent`), `session`, filters | every term of each cost, and `saving` on the total |
+| `requests` | `session`, `agent`, filters | one row per request of a session's agent |
+| `prices` | `models`, `providers`, `q` | the model table's rates, for some models or a search; it reads no index |
+| `restart-point` | `model` | `{model, tokens, reason}`: the context size past which carrying on with a main session of that model costs more than restarting it, or null with the reason |
+| `status` | none | the index: its lanes, held rows and last pass |
+| `cost` | none | today and the six days before it, by day and model |
+
+The filters are `since`, `until` (dates, both included), `harness`, `project`, `folder`,
+`model` and `utc`. `folder` is a folder's whole path and keeps the sessions run in it,
+whatever project they were recorded under; a folder above matches nothing under it.
+Every answer but `prices` and `restart-point` carries `today`, the page server's local
+date. `POST /api/pass` starts a pass, and `GET /api/events` is the stream, with the
+topics `limits` and `index`.
+
+`limits` makes no Codex pull, so it never waits on turns: the stream's poller pulls and
+publishes the `limits` topic. `window` and `restart-point` write nothing: `window` opens
+the readings store only when it exists, and `restart-point` reads the measure's file and
+the model table. A session's `context` is the whole prompt of the newest request of its
+main file and the window it ran against, null when that is not known. `window`'s sessions
+are given for the harness's main limit when its start is known and there is an index to
+read, else null.
+
+The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
 "Read new sessions" runs one in the page server, which the page also asks for when it opens
 and the last pass is over 10 minutes old. With no index yet, or one an older usage wrote,
 the page says to run `moxi usage index`, and it builds or migrates nothing itself. Days are
@@ -428,7 +473,17 @@ ctx.tokens, ctx.window, ctx.percent, ctx.text()
 point = api.restart_point()                    # rows per model and population, marks
 api.threshold("claude-opus-5-5", "1.5x", "main").tokens   # None when unavailable
 status = api.report("status", fresh=False)    # the index itself, one row per lane
+
+# interface 2: modules.load("usage", interface=2)
+row.opened                                     # when the window started, or None
+api.report("daily", folder="/work/app")        # the sessions run in one folder
+api.report("projects", by="folder")            # by folder alone, whatever the project
+api.report("terms").total["saving"]            # what caching saved, or None
 ```
+
+usage offers interfaces 1 and 2. Interface 2 is interface 1 plus those four: a limits
+row's `opened`, `report`'s `folder` filter, the `projects` report by folder, and `saving`
+on a `terms` total. A module that needs one of them loads usage with `interface=2`.
 
 Every result has `as_dict()` for JSON: an unknown fact is left out and named in the
 object's `"unknown"` list.

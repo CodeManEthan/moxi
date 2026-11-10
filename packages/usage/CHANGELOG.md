@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.2.1 (2026-11-10)
+
+- Interface 2, which is interface 1 plus four things. usage still offers interface 1.
+  - `report` takes `folder`, a folder's whole path: it keeps the files whose `cwd` it
+    is, whatever project key they carry. A path that is not absolute is refused.
+  - `report("projects", by="folder")` groups by `cwd` alone.
+  - A `terms` report's total carries `saving`, what caching saved over the report:
+    `{input_tokens, read_tokens, reads_at_input, reads_cost, write_extra, saved}`. It is
+    an estimate, the same tokens with no cache at the same prices. It is None when the
+    report holds no cache read, and when a price group that holds cache reads or writes
+    is unpriced or lacks a price the sums need. `moxi usage terms --json` prints it.
+  - A limits row carries `opened`, when its window started, or None when the readings
+    cannot say. `moxi usage limits --json` prints it.
+- The page server's reads changed. The page still shows what it showed.
+  - New `GET /api/window?harness=&limit_id=&minutes=`: one fresh plan window, with when
+    it opened, the first and last reading of its period, and the sessions of that
+    harness with requests since it opened (how many, their requests and cost since then,
+    and the ten dearest). It writes nothing and makes no pull.
+  - New `GET /api/restart-point?model=`: `{model, tokens, reason}`, the context size past
+    which carrying on with a main session of that model costs more than restarting it,
+    from the restart-point measure; `tokens` is null with the reason when there is no
+    measure, no row for the model, or a price the model table lacks. It writes nothing.
+  - `/api/limits` makes no Codex pull and so no longer waits on turns; its `pull` is
+    always null. The stream's poller still pulls, and the `limits` topic carries what
+    the pull did. A row carries `opened`.
+  - `/api/sessions` takes `skip` and answers with `skip` and `count` beside `top` and
+    `more`. `top` is at most 200 (it was 1,000). Sessions come dearest first, then by
+    tokens, harness and session id. Each row carries `context`, the whole prompt of the
+    newest request of the session's main file and the window it ran against, or null.
+    A row no longer carries `title`.
+  - `/api/session` carries the session's `context`.
+  - `/api/projects` takes `by=project|folder` and answers with `by` and `home`, the
+    account's home folder.
+  - Every report route takes `folder`.
+  - `/api/terms` carries `saving` on its total.
+  - Every report's answer, `/api/status`, `/api/window`, and `/api/limits` with its
+    topic carry `today`, the page server's local date. The `limits` topic is published
+    once more a day, when that date changes.
+
 ## 0.2.0 (2026-11-08)
 
 - Config keys `index.wait_seconds`, `limits.codex_pull_after` and `ceiling.on` are now
