@@ -84,6 +84,10 @@ const METER = { width: 96, height: 9 };
 
 // When this document last asked for a pass as a page opened, in epoch seconds.
 let askedAt = 0;
+// The read of a window that was refused and so closed its row, kept for its line at the
+// foot until another piece opens. It outlives one placement: the shell may place the page
+// again just after the row closed and the address was rewritten.
+let refusedWindow: Feed<OpenedWindow> | null = null;
 
 const STYLES = css`
   :host { display: block; max-width: 680px; min-width: 0; margin: 0 auto; padding: 4px 0 16px;
@@ -122,6 +126,7 @@ const STYLES = css`
   .det p { padding: 3px 0; }
   .det .ul { display: flex; justify-content: space-between; gap: 18px; padding: 0 0 3px;
              font-variant-numeric: tabular-nums; }
+  .det .ul > :last-child { flex: none; white-space: nowrap; }
   .det .ul .n { color: var(--moxi-text); }
   .m { display: block; align-self: center; width: 96px; height: 9px; }
   .m .base { fill: var(--moxi-border-strong); }
@@ -275,9 +280,6 @@ export class UsagePage extends LitElement {
   #window: Feed<OpenedWindow> | null = null;
   #windowPath: string | null = null;
   #windowKey: string | null = null;
-  /** The read of a window that was refused and so closed its row, kept for its line at
-   * the foot until another piece opens. */
-  #refused: Feed<OpenedWindow> | null = null;
   #asked: string | null = null;
   #askedAllTime: string | null = null;
   #resize: ResizeObserver | null = null;
@@ -334,7 +336,6 @@ export class UsagePage extends LitElement {
     for (const feed of [this.#limits, this.#status, this.#daily]) feed?.close();
     this.#limits = this.#status = this.#daily = null;
     this.#closeWindow();
-    this.#refused = null;
     this.#closeBelow();
     for (const stop of this.#stops) stop();
     this.#stops = [];
@@ -367,7 +368,7 @@ export class UsagePage extends LitElement {
   open(address: Address): void {
     const next = settled(address, this.#folders());
     if (sameAddress(next, this.#at)) return;
-    this.#refused = null;
+    refusedWindow = null;
     this.#setAt(next);
     this.requestUpdate();
   }
@@ -395,7 +396,7 @@ export class UsagePage extends LitElement {
       return;
     }
     if (this.#window !== null && this.#window.refused !== null) {
-      this.#refused = this.#window;
+      refusedWindow = this.#window;
       this.#window = null;
       this.#closeWindow();
       this.#setAt(NOTHING_OPEN);
@@ -453,6 +454,7 @@ export class UsagePage extends LitElement {
       const at = settled(named, this.#folders());
       if (sameAddress(at, named)) this.#at = at;
       else this.#setAt(at);
+      if (at.piece !== "none") refusedWindow = null;
     }
     this.#followWindow();
     const status = this.#status;
@@ -541,7 +543,7 @@ export class UsagePage extends LitElement {
     other("The range's figures", this.#figures);
     other(this.#folders() ? "The folders" : "The projects", this.#places);
     other("The models", this.#models);
-    const windowRead = this.#window ?? this.#refused;
+    const windowRead = this.#window ?? refusedWindow;
     if (windowRead !== null) others.push({ what: "The opened limit", read: windowRead, report: false });
     const at = this.#at;
     const openedSource = at.piece === "limit" ? openedRow(limits.value?.rows ?? [], at) : null;

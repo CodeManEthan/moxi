@@ -423,7 +423,7 @@ def test_todays_views_read_under_the_pages_range_and_filters(page):
     pick(panel, "model", HAIKU)
     expect(rows).to_have_count(1)
     # The range and the filters outlive a placement of the page.
-    panel.get_by_role("link", name="Models").click()
+    page.evaluate("async () => (await import('/m/ui/client.js')).navigate('usage', 'models')")
     expect(page).to_have_url(re.compile(r"/m/usage/models$"))
     expect(filter_of(panel, "range").locator("button.pick")).to_have_text("last 7 days▾")
     expect(filter_of(panel, "model").locator("button.pick")).to_have_text(f"{HAIKU}▾")

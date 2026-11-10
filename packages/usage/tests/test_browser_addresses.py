@@ -395,7 +395,7 @@ def test_an_opened_row_says_its_window_its_readings_and_who_used_it(seeded, page
     expect(total.locator("span").first).to_have_text(re.compile(rf"^1 session, \d requests since {WHEN}$"))
     expect(total.locator("span").last).to_have_text(re.compile(r"^(at least )?\$\d+\.\d\d$"))
     # Nothing of the row shows a session's id.
-    assert FIRST not in panel.locator("[data-part=top]").inner_text()
+    assert FIRST not in panel.locator("div[data-part=top]").inner_text()
     # The lines are dim or in the text colour, and sit between the row and the next one.
     dim = panel.locator("[data-group=cost] .gk").evaluate("el => getComputedStyle(el).color")
     assert window.locator(".k").evaluate("el => getComputedStyle(el).color") == dim
@@ -473,7 +473,7 @@ def test_a_window_read_that_is_refused_closes_the_row_and_says_why_at_the_foot(s
     expect(opened(panel)).to_have_count(0)
     expect(lines_of(panel)).to_have_text([
         "The opened limit can't be read: there is no fresh reading of this window."])
-    # The line goes when another piece opens.
+    # The line outlives a new placement of the page, and goes when another piece opens.
     page.unroute("**/m/usage/api/window?*")
     limit(panel, OPUS).click()
     expect(opened(panel).locator("[data-opened=window]")).to_be_visible()
@@ -507,3 +507,4 @@ def test_a_sections_address_fits_a_phone(seeded, page, ui_width_check, route):
     ui_width_check(page, module="usage", route=route)
     expect(panel_of(page).locator("section[data-part=view]")).to_be_visible()
     ui_width_check(page)
+
