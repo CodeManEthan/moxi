@@ -1,7 +1,8 @@
 """The announcement of Moxi's sessions module, which moxi.modules reads.
 
-It offers interfaces 2, 3 and 4, the read API in `moxi_sessions.api` (interface 3 is 2
-plus `retention()`; interface 4 is 3 plus the list of sessions, `sessions_list`), the verb
+It offers interfaces 2 to 5, the read API in `moxi_sessions.api` (interface 3 is 2
+plus `retention()`; interface 4 is 3 plus the list of sessions, `sessions_list`;
+interface 5 is 4 plus `session_facts`, which names sessions asked for by key), the verb
 `moxi sessions`, a setup that prints how long each harness keeps its transcripts, and,
 with the `ui` extra, a page in the browser UI shell that lists the sessions and shows one
 session's last turns, and a block other pages may place for that view. With the
@@ -10,7 +11,7 @@ enforces sessions' transcript-read guard, off until the install's question or it
 turns it on.
 """
 
-INTERFACES = frozenset({2, 3, 4})
+INTERFACES = frozenset({2, 3, 4, 5})
 API = "moxi_sessions.api"
 CLI = "moxi_sessions.cli:main"
 SUMMARY = ("Read each harness's own session records in one shape: find a session and its "

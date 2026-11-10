@@ -1,10 +1,10 @@
-"""sessions' interfaces 2, 3 and 4, the module other Moxi modules import
+"""sessions' interfaces 2 to 5, the module other Moxi modules import
 (`moxi_sessions.api`).
 
 Interface 3 is interface 2 plus `retention()` and `Retention`; interface 4 is interface 3
 plus the list's reads (`sessions_list`, `sessions_more`, `sessions_newest`,
-`sessions_folders`, `session_opened`). A caller loads sessions with the
-newest interface whose names it uses.
+`sessions_folders`, `session_opened`); interface 5 is interface 4 plus `session_facts`.
+A caller loads sessions with the newest interface whose names it uses.
 
 The one shape (`moxi_sessions.shape`):
 
@@ -58,6 +58,16 @@ The list of sessions (interface 4; `moxi_sessions.lists` says what each answers)
 * `session_opened(*, harness, session, recent_s=None, now=None)`: one session's row
   with its last reply, its newest subagents and the command that picks it up again.
 
+Sessions named by key (interface 5):
+
+* `session_facts(keys)`: for up to 200 `(harness, session)` pairs, each session's name,
+  folder and start, `{sessions: [{harness, session, name, folder, started}], roots:
+  [{harness, root, reason}]}`: one item per pair that is a main session, in the order
+  asked, none for a pair no root holds; `roots` names the roots that were not listed
+  whole. The name is the one a list's row carries. It reads the head of each session
+  it answers, and the last turn of a Claude Code session; no turn of a Codex or an
+  OpenCode session.
+
 `recent_s` left out is the setting `list.recent_s`. These reads take no cache from the
 caller: each reads the roots the calling process's environment and sessions' config name,
 and keeps what it read in that process's memory. A page server answers from what its own
@@ -105,7 +115,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("projects_root",), "claude"),
     **dict.fromkeys(("retention", "Retention"), "retention"),
     **dict.fromkeys(("sessions_list", "sessions_more", "sessions_newest",
-                     "sessions_folders", "session_opened"), "lists"),
+                     "sessions_folders", "session_opened", "session_facts"), "lists"),
     **dict.fromkeys(("read_back",), "reader"),
     **dict.fromkeys(("Unreadable",), "errors"),
     **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),
