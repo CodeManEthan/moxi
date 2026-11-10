@@ -64,8 +64,9 @@ Sessions named by key (interface 5):
   folder and start, `{sessions: [{harness, session, name, folder, started}], roots:
   [{harness, root, reason}]}`: one item per pair that is a main session, in the order
   asked, none for a pair no root holds; `roots` names the roots that were not listed
-  whole. The name is the one a list's row carries. It reads the head and the last turn
-  of each session it answers.
+  whole. The name is the one a list's row carries. It reads the head of each session
+  it answers, and the last turn of a Claude Code session; no turn of a Codex or an
+  OpenCode session.
 
 `recent_s` left out is the setting `list.recent_s`. These reads take no cache from the
 caller: each reads the roots the calling process's environment and sessions' config name,
