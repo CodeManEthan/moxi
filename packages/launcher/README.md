@@ -330,9 +330,9 @@ each slot with its state, your terminal, or headless. With slots it starts at th
 free slot, without slots at your terminal, and the choice is not kept from one visit to
 the next. A launch from the box runs where its button says, whatever `[defaults]` sets
 for `target` and `slot`; every other row is filled from `[defaults]` as the page's form
-is, with no preset. The text in the box is the brief: an empty box starts a session
-with no first turn, and a brief or a brief file your `[defaults]` set is not sent. A
-slot or headless launch is previewed and handed to a detached job as on the page, and
+is, with no preset. The text in the box is the whole first turn: nothing your
+`[defaults]` set to be sent as a first turn goes with a launch from the box, so an
+empty box starts a session with no first turn. A slot or headless launch is previewed and handed to a detached job as on the page, and
 a line under the box says where it started, or why it failed or was refused. A
 terminal launch is not run: its command is copied for you to paste.
 

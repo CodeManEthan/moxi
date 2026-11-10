@@ -518,24 +518,28 @@ export const TARGETS_FRESH_MS = 5000;
 /** The rows the button sets, which no line under the box names. */
 export const PLACED = ["target", "slot"] as const;
 
+/** The rows whose text or file a launch sends as its session's first turn. */
+export const FIRST_TURN = ["brief", "brief_file", "handoff"] as const;
+
 /**
  * The launch as `/api/preview` and `/api/launch` take it: the whole form, as the launcher's
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
  * value; `slot` has one only for a slot picked by its number, and is otherwise left out
- * where the form has the row. The box's text is the brief: an empty box leaves the brief
- * out, so a brief the user's defaults set and `/api/form` withheld is not sent unseen. The
- * piece draws no `brief_file` row, so one the form is filled with is left out too, with
- * the box empty or not. Any other text `/api/form` withheld, which the piece does not
- * draw, is kept as the layers give it.
+ * where the form has the row. The box's text is the whole first turn: of the rows in
+ * `FIRST_TURN` the request holds `brief` alone, with the box's text, and only while the box
+ * has text. Every other such row the form has is left out, whatever the form filled it
+ * with or withheld, so nothing the box does not show is sent as the first turn. Any other
+ * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
  */
 export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
                               set: Readonly<Record<string, FormValue>>, run: Run): LaunchBody {
   const values = formValues(fields, set);
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
-  if ("brief_file" in values) values.brief_file = null;
+  const box = typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
+  for (const name of FIRST_TURN) if (name in values) values[name] = name === "brief" ? box : null;
   const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
-  const kept = new Set([...withheld].filter((name) => name !== "brief"));
+  const kept = new Set([...withheld].filter((name) => !(FIRST_TURN as readonly string[]).includes(name)));
   const request = requestOf(fields, values, withheld, kept);
   request.values.target = run.target;
   if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);

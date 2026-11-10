@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  buttonWords, copied, edited, followed, following, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  buttonWords, copied, edited, FIRST_TURN, followed, following, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
@@ -486,6 +486,35 @@ test("a brief file the form is filled with is left out, with the box empty and w
   assert.equal(typed.leave_out.includes("brief_file"), true);
   // A form with no such row sends nothing of it.
   assert.equal(launchRequest(FORM_FIELDS, null, SET, SLOT_2).leave_out.includes("brief_file"), false);
+});
+
+test("no first-turn row reaches the request but the brief, as the box's text", () => {
+  // Each row filled by the form, each withheld by it, and all of them at once.
+  const filled = (name) => field(name, { type: name === "brief" ? "string" : "path", value: `/form/${name}.md` });
+  const without = FORM_FIELDS.filter((item) => !FIRST_TURN.includes(item.name));
+  const withheld = { state: "up", detail: null, harness: "claude", refused: null,
+                     rows: FIRST_TURN.map((name) => ({ name, value: null, items: null, source: "defaults", withheld: true })) };
+  const cases = [...FIRST_TURN.map((name) => [name]), [...FIRST_TURN]];
+  for (const names of cases) {
+    const fields = [...without, ...names.map(filled)];
+    for (const form of [null, withheld]) {
+      const empty = launchRequest(fields, form, { ...SET, brief: null }, SLOT_2);
+      const typed = launchRequest(fields, form, SET, SLOT_2);
+      for (const name of FIRST_TURN) {
+        assert.equal(name in empty.values, false, `${name} sent from an empty box`);
+        assert.equal(empty.leave_out.includes(name), names.includes(name), `${name} left out of an empty box`);
+        if (name === "brief") continue;
+        assert.equal(name in typed.values, false, `${name} sent beside the box's text`);
+        assert.equal(typed.leave_out.includes(name), names.includes(name), `${name} left out beside the box's text`);
+      }
+      // The brief is the box's text where the form has the row, and never the form's own.
+      assert.equal(typed.values.brief, names.includes("brief") ? "fix the build" : undefined);
+      assert.equal(typed.leave_out.includes("brief"), false);
+      // A request built with no box text at all sends no brief the form is filled with.
+      const unset = launchRequest(fields, form, { project: null, cwd: "~/code" }, SLOT_2);
+      assert.equal(FIRST_TURN.some((name) => name in unset.values), false);
+    }
+  }
 });
 
 // --- the launch, and the lines under the box -----------------------------------------------

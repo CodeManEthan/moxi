@@ -426,6 +426,47 @@ def test_an_empty_box_sends_no_brief_file_though_the_defaults_name_one(
         file.unlink()
 
 
+def test_a_handoff_the_defaults_name_is_not_sent_with_the_box_empty_or_with_text_in_it(
+        fake, ui_page, ui_shell, harness, tmp_path):
+    words = "the last watch left the lamps lit"
+    typed = "ring the harbour bell"
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text(words)
+    file = presets.path(env=ui_shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f'[defaults]\nhandoff = "{handoff}"\n')
+
+    def unsent(argv: list[str]) -> bool:
+        return words not in " ".join(argv) and str(handoff) not in " ".join(argv)
+
+    try:
+        # The box empty, in a slot: the session starts with no first turn.
+        piece = kit.open_home(ui_page)
+        box = piece.locator("textarea")
+        expect(box).to_have_value("")
+        body = press(ui_page, piece)
+        assert not {"handoff", "brief"} & set(body["values"]), body
+        assert {"handoff", "brief"} <= set(body["leave_out"]), body
+        expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "))
+        row = kit.newest_launch(ui_shell)
+        assert (row.brief, row.handoff_path) == (None, None) and unsent(row.argv), row
+        # Text in the box, in the background: the first turn is that text alone.
+        box.fill(typed)
+        pick_run(piece, "Headless")
+        body = press(ui_page, piece)
+        assert body["values"]["brief"] == typed and "handoff" not in body["values"], body
+        assert "handoff" in body["leave_out"], body
+        expect(said(piece, "started")).to_have_text(re.compile(r"^Started headless · "))
+        [run] = wait_for(lambda: [run for run in harness.runs() if typed in " ".join(run["argv"])],
+                         10, what="the fake harness's run with the typed brief")
+        assert unsent(run["argv"]), run["argv"]
+        row = kit.newest_launch(ui_shell)
+        assert (row.brief, row.handoff_path) == (typed, None), row
+        assert all(unsent(run["argv"]) for run in harness.runs())
+    finally:
+        file.unlink()
+
+
 def test_the_text_in_the_box_is_the_brief_sent_whatever_the_defaults_set(
         fake, ui_page, ui_shell, harness, default_brief):
     typed = "count the open doors"
