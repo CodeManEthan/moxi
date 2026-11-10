@@ -10,7 +10,7 @@ that stopped short is made by the next write, whatever that write is.
 
 - every step of the round's flow is done or skipped, and every stage of its plan is
   finished;
-- no question is open or parked.
+- no question holds the close (`holds.on_close`): none is open or parked.
 
 Whether the round closes reads its own log alone: a question parked until another
 round closes keeps this one open whether or not that round has closed. How such a
@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 
-from . import flows, questions, stages, steps, write
+from . import flows, holds, questions, stages, steps, write
 from . import state as states
 
 #: The event that closes a round.
@@ -68,11 +68,11 @@ def _plan_done(state: states.State, closed: Closed) -> Iterator[str]:
 
 
 def _nothing_open(state: states.State, closed: Closed) -> Iterator[str]:
-    """Nothing is open: no question is open or parked."""
-    for question in state.questions:
+    """Nothing is open: no question holds the close. Which ones do is the hold
+    rule's to say; this names each as it reads now."""
+    for question in holds.on_close(state):
         reads = questions.current(question, state, closed=closed)
-        if reads in (questions.OPEN, questions.PARKED):
-            yield f"question {question.id}, {reads}"
+        yield f"question {question.id}, {reads}"
 
 
 #: The parts of the close condition, in the order their lines are given. Each takes

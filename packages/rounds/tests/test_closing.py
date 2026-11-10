@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from moxi_rounds import (api, asking, closing, dropping, freezing, log, opening, ruling,
-                         state, verdicts)
+from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, opening,
+                         ruling, state, verdicts)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -586,6 +586,22 @@ def test_a_question_parked_until_a_round_still_open_is_named_as_parked(opened, c
     rule("park:Q1", until="round:proj-a/another")
 
     assert "close waits for: question Q1, parked\n" in run(capsys, "show", ROUND)
+
+
+def test_the_questions_the_close_waits_for_are_the_ones_the_hold_rule_gives(
+        folder, monkeypatch):
+    fold(folder, question("Q1", blocks='"none"'), question("Q2"), question("Q3"))
+    verdict(folder)
+    rule("park:Q2", until="round:proj-a/another")
+    rule("withdraw:Q3")
+    found = folded(folder)
+    assert closing.waits(found) == tuple(
+        f"question {one.id}, {one.state}" for one in holds.on_close(found))
+    assert closing.waits(found) == ("question Q1, open", "question Q2, parked")
+
+    monkeypatch.setattr(holds, "on_close", lambda state: ())
+
+    assert closing.waits(found) == () and closing.is_due(found)
 
 
 def test_what_a_close_waits_for_is_read_from_the_state_alone(folder):
