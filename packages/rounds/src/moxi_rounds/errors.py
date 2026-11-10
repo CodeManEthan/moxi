@@ -12,6 +12,7 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
 - `Locked` (exit 3): another process held a lock past the wait. `file` is the lock file
   and `holder` the pid written in it.
 - `BadName` (exit 2): a round's name is not `<project>/<slug>`.
+- `BadArgument` (exit 2): a verb was given a value it can't take.
 - `UnknownProject` (exit 3): the projects list holds no project of that key.
 - `NoFolder` (exit 3): a project's rounds folder can't be worked out. `problem` says why,
   and the fix names the setting that gives it one.
@@ -136,6 +137,13 @@ class BadName(RoundsError):
                          "letters, digits and -")
 
 
+class BadArgument(RoundsError):
+    """A verb was given a value it can't take; `reason` says which and `fix` what to
+    give instead."""
+
+    exit_code = exits.USAGE
+
+
 class UnknownProject(RoundsError):
     """The projects list holds no project whose key is `project`."""
 
@@ -167,4 +175,4 @@ class NoFolder(RoundsError):
 
 
 __all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked",
-           "BadName", "UnknownProject", "NoFolder"]
+           "BadName", "BadArgument", "UnknownProject", "NoFolder"]
