@@ -54,8 +54,10 @@ def finish(path, stage):
 
 
 def remove(path, stage):
-    """A stage leaves the plan as a change to the stage records it."""
-    log.append(path, "stage.changed", {"id": stage, "removed": True}, actor="planner")
+    """A stage leaves the plan by a verdict that applied what a design left out."""
+    log.append(path, "verdict.recorded",
+               {"kind": "design", "verdict": "publishable", "design": 1,
+                "applied": [{"what": "stage", "id": stage}]}, actor="critic")
 
 
 def unstage(path, stage):

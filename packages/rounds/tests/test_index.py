@@ -78,6 +78,13 @@ def files(*folders_: Path) -> dict[str, tuple[bytes, int]]:
             for folder in folders_ for path in sorted(folder.rglob("*")) if path.is_file()}
 
 
+@pytest.fixture(autouse=True)
+def kinds_of_their_own(monkeypatch):
+    """These tests are of how the index keeps and reads rows, with kinds of their
+    own: the step a round is at, which every open round has, is left out of them."""
+    monkeypatch.delitem(index.ITEMS, index.STEP)
+
+
 def stages_done(folded):
     """A stand-in kind of item: each finished stage, with its tip."""
     return [(event["stage"], {"tip": event["tip"], "n": event["n"]})

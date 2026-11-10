@@ -10,6 +10,9 @@
   opens the other choices; a launch from Home runs where the button says, whatever
   `[defaults]` set for `target` and `slot`. The lines under the box say how the launch
   went. New component `prompt` (`<moxi-launcher-prompt>`).
+- Home's launch line names the slot the launch takes when the page reads the slots twice
+  at once: a press that reads the slots again waits for the newest read asked, where it
+  used to go on with the old listing when a later read passed its own.
 - `moxi launcher state` is now `moxi launcher show`, with no alias.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_launcher.api.check`: `environ` is now `env`;

@@ -196,6 +196,9 @@ def test_client_js_is_the_contract_and_imports_nothing():
         assert f"export interface {name} " in decl
     assert '"moxi-ui-form": FormElement;' in decl
     assert '"moxi-ui-form"' in text
+    # So is the row of a list.
+    assert "export interface RowElement " in decl and '"moxi-ui-row": RowElement;' in decl
+    assert '"moxi-ui-row"' in text and '"moxi-row-toggle"' in text
     # client.js holds no Lit; each component bundles its own.
     assert "lit-html" not in text and "LitElement" not in text
 

@@ -645,6 +645,20 @@ def test_the_button_follows_the_slots_when_the_tab_is_shown_again_and_when_the_m
     expect(go).to_have_text("Launch in slot 6")
 
 
+TARGETS = "/m/launcher/api/targets"
+
+
+def open_home_read(page):
+    """Home opened in `page` of a shell of its own, with the piece's own reads of the slots
+    answered: the one it makes as it opens, and the one at its first word of the
+    launches. A read after this is one the test made the page ask."""
+    read = []
+    page.on("requestfinished", lambda request: request.url.endswith(TARGETS) and read.append(request))
+    piece = kit.open_home(page)
+    wait_for(lambda: page.wait_for_timeout(20) or len(read) >= 2, 5, what="the piece's own two reads")
+    return piece
+
+
 def test_a_press_on_an_old_reading_reads_again_and_names_the_slot_the_launch_takes(
         ui_shells, ui_contexts, tmp_path_factory, on_path):
     # A shell of its own: a launch another test left under way would write the log, and
@@ -654,7 +668,7 @@ def test_a_press_on_an_old_reading_reads_again_and_names_the_slot_the_launch_tak
     ui_shell = ui_shells(**fake.options())
     ui_page = ui_contexts(ui_shell).pages[0]
     ui_page.clock.install()
-    piece = kit.open_home(ui_page)
+    piece = open_home_read(ui_page)
     go = piece.locator(".go")
     expect(go).to_have_text("Launch in slot 2")
     # Slot 2 is taken behind the page's back, and its reading grows old.
@@ -671,9 +685,6 @@ def test_a_press_on_an_old_reading_reads_again_and_names_the_slot_the_launch_tak
     assert kit.newest_launch(ui_shell).slot == "3"
 
 
-TARGETS = "/m/launcher/api/targets"
-
-
 def test_a_reading_is_as_old_as_its_asking_so_a_press_after_a_slow_answer_reads_again(
         ui_shells, ui_contexts, tmp_path_factory, on_path):
     fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
@@ -681,7 +692,7 @@ def test_a_reading_is_as_old_as_its_asking_so_a_press_after_a_slow_answer_reads_
     ui_shell = ui_shells(**fake.options())
     ui_page = ui_contexts(ui_shell).pages[0]
     ui_page.clock.install()
-    piece = kit.open_home(ui_page)
+    piece = open_home_read(ui_page)
     go = piece.locator(".go")
     expect(go).to_have_text("Launch in slot 2")
     taken = {"state": "occupied", "launchable": False}
@@ -713,13 +724,49 @@ def test_a_reading_is_as_old_as_its_asking_so_a_press_after_a_slow_answer_reads_
     expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 4 · "))
 
 
+def test_a_press_whose_read_a_later_read_passes_names_the_slot_the_later_read_gives(
+        ui_shells, ui_contexts, tmp_path_factory, on_path):
+    fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
+    fake.script(placed=2, slots=kit.free(2, 3))
+    ui_shell = ui_shells(**fake.options())
+    ui_page = ui_contexts(ui_shell).pages[0]
+    ui_page.clock.install()
+    piece = open_home_read(ui_page)
+    go = piece.locator(".go")
+    expect(go).to_have_text("Launch in slot 2")
+    # Slot 2 is taken behind the page's back, and its reading grows old.
+    fake.script(placed=3, start_wait_s=2,
+                slots={"2": {"state": "occupied", "launchable": False}, **kit.free(3)})
+    ui_page.clock.fast_forward("00:06")
+    held = []
+
+    def hold(route) -> None:
+        held.append(route)
+
+    ui_page.route(f"**{TARGETS}", hold)
+    go.click()
+    wait_for(lambda: ui_page.wait_for_timeout(20) or len(held) == 1, 5, what="the press's read")
+    # Another read is asked while the press's own is on its way, and is answered after it.
+    ui_page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    wait_for(lambda: ui_page.wait_for_timeout(20) or len(held) == 2, 5, what="the later read")
+    with ui_page.expect_response(lambda response: response.url.endswith(TARGETS)) as first:
+        held[0].continue_()
+    first.value.finished()
+    held[1].continue_()
+    expect(said(piece, "starting")).to_have_text("Starting in slot 3…")
+    wait_for(lambda: placed(fake, 3), 15, what="the held start to end")
+    ui_page.clock.fast_forward("00:03")
+    expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 3 · "))
+    assert kit.newest_launch(ui_shell).slot == "3"
+
+
 def test_a_read_that_failed_is_not_a_fresh_reading_so_the_next_press_reads_again(
         ui_shells, ui_contexts, tmp_path_factory, on_path):
     # A shell of its own, where no other test's launch makes the page read.
     fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
     fake.script(placed=2, slots=kit.free(2, 3))
     ui_page = ui_contexts(ui_shells(**fake.options())).pages[0]
-    piece = kit.open_home(ui_page)
+    piece = open_home_read(ui_page)
     go = piece.locator(".go")
     expect(go).to_have_text("Launch in slot 2")
     failed = []

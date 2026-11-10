@@ -118,7 +118,7 @@ way), and it adds four commands:
   `--text` is given; then the newest thing said in each session follows its line, cut at
   300 bytes. A root that can't be listed is named on stderr and the others are listed.
 - `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]`
-  prints part of one session, the way the page below shows it: the last five turns, or
+  prints part of one session, the way the page below shows a transcript: the last five turns, or
   `--turns` of them (at most 50); with `--around TIME` (ISO 8601 such as
   `2026-11-06T14:03:22Z`, a time with no zone read as local time, or epoch seconds) the
   turns around that time; with `--all` the whole session. Each line starts with its time
@@ -163,6 +163,52 @@ A row holds the session's harness, id, path, last change and size, how many suba
 has, its folder and start, the name typed for it in the harness (never a title the
 harness made up), its model, the newest thing said in it and the newest prompt a person
 typed. A fact that was not read is None, never zero or an empty text.
+
+A row's `prompt` is the newest message in the whole session that the record marks as
+typed by a person, and nothing else. Claude Code writes that mark (`origin.kind` is
+`human`). A reply is not a prompt, and neither is text the record marks as injected (a
+hook's or a plugin's text, a channel delivery, a task notification) or a message with no
+mark, such as a slash command. A session with no marked message has no `prompt`; on a
+machine where most sessions are started and fed by other programs, most rows have none.
+A session a program started has none either.
+
+For the prompt, a Claude Code session a row shows is read from its start once,
+whatever its size. What that read keeps, in memory, is the file's device, inode, size
+and modification time, the place just after the last complete line it read, a SHA-256 of
+the 4,096 bytes before that place, and the prompt. From then on:
+
+- A file whose device, inode, size and modification time are the kept ones is not read.
+- A file that grew is read from the kept place only, as long as the 4,096 bytes before
+  it are still the ones that were hashed. The last typed message in the new lines is the
+  prompt; when they hold none, the kept prompt stands.
+- Any other file is read from its start again: one that shrank, one written again or
+  replaced by another file of the same name, one shorter than 4,096 bytes.
+
+A last line with no newline yet is not read for the prompt until its newline is
+written, so a message can show as the newest thing said a moment before it shows as the
+prompt. The prompts of at most 5,000 files are kept, the least recently used dropped
+first. A read that fails gives no prompt for that answer, keeps nothing new, and is
+made again for the next.
+
+So the prompt a row carries is the one a read of the whole file would give, with two
+limits:
+
+- A file written again so that its device, inode, size and modification time are all as
+  before is taken as unchanged and is not read. The last turn's facts have the same
+  limit.
+- A change that keeps the file's length and touches only bytes more than 4,096 before
+  the kept place is not seen: the lines after that place are read, and the kept prompt
+  stands.
+
+Claude Code writes a session by adding lines at the end of its file, which is neither
+of them.
+
+**Left out.** Codex rows have no `prompt`. A Codex rollout does say which messages were
+submitted as a person's text (the `user.text` item kind), but sessions does not read
+that kind as a typed mark, so it cannot say a Codex message was typed. To give Codex
+rows a `prompt`, sessions would need to read `user.text` as the mark and leave out the
+rollouts of `exec` runs, where a program passes the text. OpenCode rows have no `prompt`
+because OpenCode's record does not say who submitted a message.
 
 A harness that is not on the machine is not a failure. When a harness's root is its
 default one and does not exist, the list holds nothing for that harness: no count and no
@@ -314,41 +360,131 @@ The guard is a nudge, not a boundary. Its known gaps:
 
 ## The page
 
-With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), sessions has a page in the shell
-that shows one session: its directory, title and last activity, then its last five turns,
-oldest first. Each message shows as text, cut at 2,000 characters with a way to show the
-rest; each tool call as one line naming the tool and what it was called on; each tool
-result as its size and whether it failed; compactions, aborted turns and rollbacks as
-labelled rules; and each request's model and token counts. "Earlier" shows the turns
-before. The page lists the session's subagents, and opening one shows its turns the same
-way.
+With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), sessions has a page in the shell.
+At its own address it lists the sessions; at a session's address it shows that session.
 
-The page lists no sessions. It opens a session by harness and id: at the page's own
-address it asks for both, and a session's address is `<harness>/<session id>`, or
+**The list.** The sessions started in a terminal that changed in the last hour come first,
+under `Active recently` (the setting `list.recent_s`). Then one group per day, for the
+newest seven days that hold a session, and `Earlier` for the rest, with how many there are
+and how far back they go; its `Show` brings the next older days. A day shows its first
+eight sessions, and `N more · Show` adds the next thirty. The sessions a program started
+are not in those rows: a day that has any ends with `N started by a program · Show`, which
+shows them under the line and hides them again.
+
+A row is named by the name typed for the session in its harness, with its folder beside
+it; without one, by the folder and when it started. Its second line is the newest message
+a person typed in the session, with its time and `You:`, and `2 subagents` before it when
+there are any. A session with no such message, and every Codex and OpenCode session, is
+one line. One-line rows are expected: on the machine this was built on, 50 of the 133
+rows of a week's sessions started in a terminal had a second line.
+
+Above the list, the find field takes a session id or the start of one, or part of a
+folder's name, from two characters on, and its matches replace the groups. Under it are
+three filters: Folder (the folders the sessions ran in, which you can narrow by typing),
+Harness (the harnesses that have sessions) and When (today, the last 7 or 30 days, or a
+range of days), and the count: `62 sessions`, or `15 of 62 sessions` once something
+narrows the list. The list is read when the page opens, when its tab is shown again, and
+every 30 seconds while the tab is visible; groups you showed more of stay as they were.
+
+A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
+can be open at once. The session is read when its row is opened. Opened, a row shows the
+newest message a person typed (`You`) and the model's newest message after it (`Reply`),
+each with its time and cut at 600 characters; up to eight of its subagents, the ones that
+changed last, each with what it was asked, its type, when it ran and the newest thing it
+said; the `Session` line (the harness, the model, from the start to the last change); and
+`Resume`, the harness's own command for picking the session up again, with the folder to
+run it in where the harness needs one, and `Copy`, which puts the command on the
+clipboard. A folder under your home folder is written with `~`, here and in the Folder
+menu; any other folder is written whole. A piece the record does not give is not drawn. Under them `Read the
+transcript` goes to the session's address and `Copy id` copies its id. An opened row is
+read again after a newer list only when that list shows the session changed. Leaving the
+list for a transcript and coming back gives the list from its top, with no filter set
+and no row open.
+
+Under the list a dim line names each harness whose sessions could not be read, with the
+reason, and says how many Codex sessions are left out because their files are compressed.
+On a machine with no session the page says so in place of the list.
+
+**One session.** A session's address is `<harness>/<session id>`, or
 `claude/<session id>/<agent id>` for a Claude Code subagent. An OpenCode child session and
-a Codex subagent thread each open at their own id. The page server runs in the shell's
-environment, so the roots it reads are the ones that environment and sessions' settings
-name, which can differ from your terminal's. A session that can't be found or read shows
-why.
+a Codex subagent thread each open at their own id. Over the session, the first line has
+`Sessions`, which goes back to the list, the session's name as the list names it (a name
+typed for it, else its folder and when it started) and `Refresh`. The second has the
+harness, the model and from when to when, and `Details`, which shows and hides the rest:
+the harness's name, the session's id, its title, directory, last activity, version,
+parent session, entrypoint and the file it was read from. A subagent, and a session
+another one started, is not in the list, so it keeps a heading that names it by its id or
+title, with those facts in the open. Under the header come the session's last five turns,
+oldest first. Each message shows as
+text, cut at 2,000 characters with a way to show the rest; each tool call as one line
+naming the tool and what it was called on; each tool result as its size and whether it
+failed; compactions, aborted turns and rollbacks as labelled rules; and each request's
+model and token counts. A result that failed starts with `Failed`, and the message Claude
+Code writes for a request that failed starts with `Error`, each in heavier text: the page
+marks what went wrong with a word, not a colour. "Earlier" shows the turns before. The page lists the session's
+subagents, and opening one shows its turns the same way. While the turns are read the page
+says so. A session that can't be found or read shows why, and only that: the list's line
+for a harness whose sessions were not all read is not repeated over a transcript.
 
-Other modules' pages can place the same view with the shell's `place()`, as the `window`
-block, with the attributes `harness` (`claude`, `codex` or `opencode`), `session` and, for
-a Claude Code subagent, `agent`. It links to the page at the session's address. A
+The page server runs in the shell's environment, so the roots it reads are the ones that
+environment and sessions' settings name, which can differ from your terminal's.
+
+Other modules' pages can place the one-session view with the shell's `place()`, as the
+`window` block, with the attributes `harness` (`claude`, `codex` or `opencode`), `session`
+and, for a Claude Code subagent, `agent`. It links to the page at the session's address. A
 subagent chosen in the block opens in the block, with Back to return.
 
-The page server also answers the list as four reads, which the page does not show yet:
-`/api/list` (the counts and the groups, with the first 30 recent rows and the first 8 of
-each day), `/api/more` (the next 30 rows of a group, or the next older days), `/api/session`
-(one session opened) and `/api/folders`. They take the list's filters as query keys and
-read the setting `list.recent_s` at each request. Of a message they send at most 64 KiB,
-saying when it was cut; of the newest thing said on a row and of a subagent's last
-message, 300 bytes. The server keeps what the list read in memory for as long as it runs,
-and keeps no more of a message than it sends.
+The list is four reads of the page server: `/api/list` (the counts and the groups, with
+the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 rows of a
+group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
+`/api/list` and `/api/session` also carry `home`, the home folder of the account the page
+server runs as, which is what the page writes as `~`, and `today`, the server's local date.
+The header over one session asks `/api/session` for that one session beside its turns,
+which does not search every session's first lines as a `find` does. On a page server's
+first open the name comes a fraction of a second after the turns, while the server lists
+the sessions it can show.
+They take the list's filters as query keys and read the setting `list.recent_s` at each
+request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
+thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
+the list read in memory for as long as it runs, and keeps no more of a message than it
+sends.
 
 The page only reads. It sends no tool call's input and no tool's output, and sends at most
 64 KiB of any one message, saying when it cut one. It reads a session when it is shown and
-when you ask it to, and runs nothing in the background. Without the extra, nothing of
+when you ask it to, and the list as said above; the page server runs nothing in the
+background. Without the extra, nothing of
 sessions changes.
+
+**Left out.** The page shows what sessions reads from the harnesses' own records and
+nothing else. A piece whose fact sessions does not read is not drawn: no empty place, no
+zero and no greyed control stands in for it. What is left out, and what each needs:
+
+- A second line on Codex rows: sessions would need to read the rollout's `user.text` item
+  kind as the mark of a typed message (see "Listing sessions"). A second line on OpenCode
+  rows: OpenCode's record has no such mark to read.
+- An address for the list's filters, its find and how far it was paged, so that they are
+  kept across a visit to a transcript and another page can link to the list already
+  narrowed. Today the address names the list or one session and nothing more.
+- Find over names and typed prompts: it needs an index of them in sessions, which is a
+  store with what was typed in it. Find takes an id or a folder's name.
+- Running sessions as a group of their own, with the slot and the template each was
+  started from, the effort on the `Session` line, and `Resume` that starts the session
+  from the page: they need the launcher's read of what it launched.
+- A running session's state (working, how many subagents and shells are busy, a line for
+  trouble, the turn that is open) and a session that waits for an answer: they need
+  turns to say them by session.
+- A Project filter in place of Folder, and the project beside a row's name: they need the
+  projects module to answer many folders' projects in one read.
+- Whether a session's cache is warm or cold and until when, with a way to keep it warm:
+  it needs the cache module's state by session.
+- Cost, the number of prompts and the context's size, on a row or on a transcript: they
+  need the usage module's figures by session.
+- Mail counts, such as one message held for a session: they need comms' count of mail
+  held by name.
+- A time zone and a clock of your choice for the page's times: it needs a setting in the
+  core. Times are written as the shell writes them.
+- The phone: the shell's phone view does not offer this page. It needs sessions' reads
+  opened to the phone.
 
 ## Install
 

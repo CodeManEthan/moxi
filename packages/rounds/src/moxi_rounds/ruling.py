@@ -37,6 +37,13 @@ aside, until a stage is finished or a round is closed when `until` says so;
 back. Those three are acts on the process. A question that is already ruled or
 withdrawn takes none of the four.
 
+**Skips and the flow.** `skip:<step>`, or `skip:<step>:<stage>` for a step of one
+stage, says the step is not done; `skips` has what may be skipped and what a skip of
+the questions step lets its stage past. `flow:<name>` moves the round to another flow,
+with that flow's steps as the config has them then; `stepping` has the rules. A change
+of flow is corrected by another change of flow, and is neither replaced nor taken
+back. Both are acts on the process, of a round.
+
 **One event.** A ruling is one `ruling.recorded` event and no other, whatever it
 changes. A ruling of a question names the question and holds what it becomes (its
 state, what a parked one waits for, what it holds up), and the fold changes the question
@@ -69,7 +76,8 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
-from . import corrections, ending, folders, log, pointers, questions, shown, write
+from . import (corrections, ending, folders, log, pointers, questions, shown, skips,
+               stages, stepping, write)
 from . import options as choices
 from . import settings as own
 from . import state as states
@@ -103,7 +111,8 @@ class Asked:
     what a parking waits for, `scoped` whether a scope was given, `chose` the key
     of the option an answer names, and `supersedes` the id of the ruling this one
     replaces. `at` is the time the ruling is recorded at, when the call fixed one
-    before taking the lock; None when the append stamps it."""
+    before taking the lock; None when the append stamps it. `settings` are rounds'
+    settings as the call read them."""
 
     name: str
     standing: bool
@@ -116,6 +125,7 @@ class Asked:
     chose: str | None = None
     supersedes: str | None = None
     at: str | None = None
+    settings: object = None
 
 
 @dataclass(frozen=True)
@@ -189,7 +199,11 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
       when left out.
     - `item`: what is ruled, or None for a plain ruling: a question's id for its
       answer; `park:`, `narrow:` or `withdraw:` and the question; or `revoke:` and
-      the id of a ruling, to take that ruling back; on a project, `readback=` and a
+      the id of a ruling, to take that ruling back; `skip:` and a step, with `:` and
+      a stage for a step of one stage; `flow:` and a flow's name, to move the round
+      to that flow; `unstage:` and a stage, to take it out of the plan; `unafter:`,
+      a stage, `=` and a stage it waits for, to take that wait off; on a project,
+      `readback=` and a
       time, his word that he read the list of rulings not yet shown through then.
     - `until`: with `park:`, what the question waits for: a stage of the round, `B2`,
       or another round, `round:<project>/<slug>`.
@@ -205,7 +219,11 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     `NoFolder` for a project with no rounds folder, `NoRound` for a round that was never
     opened, and `Refused` when a gate does not hold, the pointer's among them: a stage named that
     the round does not have, an item
-    that names no question, a question already ruled or withdrawn, a key the
+    that names no question, a question already ruled or withdrawn, a skip of a step
+    that is never skipped or that the round's flow does not have, a flow the config
+    does not have or that the round follows already, a stage to take out that has
+    an open or finished build or that left already, a wait a stage does not have, a
+    key the
     question does not offer, a second ruling of a thing that does not name the first,
     a correction of a ruling that is of the other log, that the log does not hold,
     that no longer stands, or that rules another thing, or a read-back through a time
@@ -261,7 +279,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     form = _form(item, Asked(name=name, standing=standing, text=text, stages=staged,
                              slug=slug, record=record, until=until,
                              scoped=scope is not None, chose=chose,
-                             supersedes=supersedes, at=at))
+                             supersedes=supersedes, at=at, settings=settings))
     # The command that records it, with the sentence only where the form has one.
     again = (f"moxi rounds rule {name}{'' if item is None else ' ' + item}"
              f"{'' if chose is None else ' --chose ' + chose}"
@@ -632,6 +650,91 @@ def _revoke(item: str, asked: Asked) -> Form | None:
                                                            ruling_id))
 
 
+# -- skips, and the flow -----------------------------------------------------------------
+
+def _of_the_round(asked: Asked, what: str) -> None:
+    """Refuse what a ruling on a round's own process can't be given; `what` names the
+    ruling, with its article."""
+    if asked.slug is None:
+        raise BadArgument(f"{what} is of a round, and {asked.name} is a project",
+                          "name the round, as <project>/<slug>")
+    if asked.stages is not None:
+        raise BadArgument("--stages is for a plain ruling", "leave --stages out")
+    if asked.standing:
+        raise BadArgument(f"--standing is for a plain ruling; {what} is the round's "
+                          "own", "leave --standing out")
+    if asked.text is not None and not asked.text.strip():
+        raise BadArgument("--text says nothing", "give the sentence, or leave --text "
+                                                 "out")
+
+
+def _skip(item: str, asked: Asked) -> Form | None:
+    """A skip: the step is not done, for the round or for one stage. A skip of the
+    questions step lists, in its own event, the questions it lets its stage past."""
+    parsed = skips.parse(item)
+    if parsed is None:
+        return None
+    step, stage = parsed
+    _of_the_round(asked, "a skip")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(skips.gates(step, stage, name=asked.name,
+                                        supersedes=asked.supersedes)),
+                found=lambda view: skips.fields(step, stage, view, asked.supersedes))
+
+
+def _flow(item: str, asked: Asked) -> Form | None:
+    """A move of the round to another flow, any the config has: the event holds the
+    new name and its steps, and is the whole of the move."""
+    if not item.startswith(stepping.FLOW):
+        return None
+    flow = item[len(stepping.FLOW):]
+    if not flow.strip():
+        raise BadArgument(f"{item!r} names no flow",
+                          f"say {stepping.FLOW}NAME, the flow the round is to follow")
+    _of_the_round(asked, "a change of flow")
+    if asked.supersedes is not None:
+        raise BadArgument("a change of flow replaces none before it: the round "
+                          "follows the flow it was moved to last",
+                          "leave --supersedes out")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(stepping.gates(
+                    flow, name=asked.name, settings=asked.settings,
+                    again=f"moxi rounds rule {asked.name} {stepping.FLOW}NAME "
+                          "--record PTR")),
+                found=lambda view: stepping.fields(flow, view, asked.settings))
+
+
+# -- a stage out of the plan, and a wait off a stage -------------------------------------
+
+def _unstage(item: str, asked: Asked) -> Form | None:
+    """A stage taken out of the plan, which only a stage with no open or finished
+    build leaves. The ruling's event is the whole of it."""
+    stage_id = stages.parse_unstage(item)
+    if stage_id is None:
+        return None
+    _of_the_round(asked, "a stage taken out of the plan")
+    if asked.supersedes is not None:
+        raise BadArgument("a stage leaves the plan once, and no ruling replaces the "
+                          "one that took it out", "leave --supersedes out")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(stages.unstage_gates(stage_id, name=asked.name)))
+
+
+def _unafter(item: str, asked: Asked) -> Form | None:
+    """One stage taken off what another waits for. The ruling's event is the whole of
+    it."""
+    parsed = stages.parse_unafter(item)
+    if parsed is None:
+        return None
+    _of_the_round(asked, "a wait taken off a stage")
+    if asked.supersedes is not None:
+        raise BadArgument("a wait is taken off once, and no ruling replaces the one "
+                          "that took it off; anyone adds it again with mark --after",
+                          "leave --supersedes out")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(stages.unafter_gates(*parsed, name=asked.name)))
+
+
 # -- his word that he read the list -------------------------------------------------------
 
 def _readback(item: str, asked: Asked) -> Form | None:
@@ -668,7 +771,8 @@ def _readback(item: str, asked: Asked) -> Form | None:
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
-    _answer, _park, _narrow, _withdraw, _revoke, _readback)
+    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _flow, _unstage,
+    _unafter)
 
 
 def _form(item: str | None, asked: Asked) -> Form:
