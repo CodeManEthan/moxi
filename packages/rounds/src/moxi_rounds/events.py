@@ -89,8 +89,12 @@ TYPES = _types(
     # round it stands for, the stages it comes after, and its slices.
     EventType("stage.declared",
               ("id", "repo", "branch", "round", "after", "slices", "why")),
-    # A stage left the plan or lost a wait, with the verdict or ruling that allowed it.
-    EventType("stage.changed", ("id", "removed", "after", "verdict", "ruling")),
+    # A stage changed: it waits for more stages (`after`, the ones added), it waits for
+    # fewer (`gone`, the ones taken off) or it left the plan (`removed`), the last two
+    # with the verdict that applied them. The operator's ruling that does either is its
+    # own event and writes none of these.
+    EventType("stage.changed", ("id", "removed", "after", "gone", "verdict", "ruling"),
+              required=("id",)),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,
     # the repos and paths or the stages it applies to, its kind (of substance, or an act
     # on the process) and the item it rules, the key of the option an answer chose, and

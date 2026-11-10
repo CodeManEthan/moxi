@@ -13,6 +13,7 @@
     moxi rounds rule PROJECT readback=TIME --record PTR [--as NAME]
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
+    moxi rounds mark ROUND B<n> --after LIST [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
@@ -35,6 +36,11 @@ follows the flow its log recorded, whatever the config says since. `mark --flow 
 moves it up: to a later tier that has every step it follows, or to the config's
 current steps of its own flow when those have every step it follows. Any other move is
 the operator's, `flow:NAME`, and a change of flow is corrected by another.
+A stage is out of the plan by the item `unstage:B<n>`, while it has no open or finished
+build; it does not come back, and the same work planned again takes a new id.
+`mark ROUND B<n> --after LIST` makes a stage wait for more stages, which anyone may do,
+and the item `unafter:B<n>=B<m>` takes one off. Neither of those two rulings is taken
+back.
 A ruling is corrected by a later one: `--supersedes` names the earlier ruling of the
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
@@ -194,7 +200,8 @@ def _declare_rule(verbs) -> None:
             "up, or withdraws it. A later ruling corrects an earlier one: with "
             "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back. "
             "The ITEM skip:STEP says a step is not done, and flow:NAME moves the "
-            "round to another flow. "
+            "round to another flow. unstage:B<n> takes a stage out of the plan, and "
+            "unafter:B<n>=B<m> takes one stage off what another waits for. "
             "The ruling is printed as it was recorded, to show him. On a project, "
             "the ITEM readback=TIME records that he read the list of rulings not yet "
             "shown to him through TIME.")
@@ -212,7 +219,10 @@ def _declare_rule(verbs) -> None:
                              "step of the round (verify-design, ratify, retro) or "
                              "skip:STEP:B<n> for a step of one stage (docket, "
                              "check, verify-build, a step of your own); flow:NAME, "
-                             "the flow the round follows from then on; or, on a "
+                             "the flow the round follows from then on; "
+                             "unstage:B<n>, a stage with no open or finished build "
+                             "that leaves the plan for good; unafter:B<n>=B<m>, a "
+                             "stage B<n> that waits for B<m> no longer; or, on a "
                              "project, "
                              "readback=TIME, the time the list of rulings he read "
                              "was shown through, as 2026-01-02T03:04:05Z")
@@ -277,6 +287,8 @@ def _recorded(ruled) -> list[str]:
     the question it answers; and what whoever recorded it does next, which is to show
     him the sentence and then mark the ruling as shown. A read-back is his own word
     and is not shown to him."""
+    from . import stages
+
     lines = [f"Recorded as {ruled.id}: "
              f"{ruled.event['rules'] if ruled.text is None else ruled.text}"]
     if ruled.read_back is not None:
@@ -295,6 +307,15 @@ def _recorded(ruled) -> list[str]:
         lines.append(f"{ruled.name} follows the flow {ruled.event['flow']} "
                      f"({steps or 'no steps'}) from now on; it followed "
                      f"{ruled.event.get('was')}")
+    rules = ruled.event.get("rules") or ""
+    if rules.startswith(stages.UNSTAGE):
+        lines.append(f"{rules[len(stages.UNSTAGE):]} left the plan of {ruled.name} "
+                     "and does not come back; the same work planned again takes a "
+                     "new id")
+    if rules.startswith(stages.UNAFTER):
+        stage, _equals, waited = rules[len(stages.UNAFTER):].partition("=")
+        lines.append(f"{stage} waits for {waited} no longer; anyone adds the wait "
+                     f"again: moxi rounds mark {ruled.name} {stage} --after {waited}")
     return [*lines,
             'show him this under "Recorded as" in your next message, then:',
             f"  moxi rounds mark {ruled.holder} {ruled.id} --shown --record "
@@ -453,7 +474,8 @@ def _carry(args, out) -> int:
 
 def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
-            "question of a round hold up more stages, reopen a parked one, move a "
+            "question of a round hold up more stages, reopen a parked one, make a "
+            "stage wait for more stages, move a "
             "round up to a heavier flow, or say that rulings were shown to the "
             "operator as recorded, with a pointer to where.")
     parser = verbs.add_parser("mark", help=said, description=said)
@@ -462,7 +484,8 @@ def _declare_mark(verbs) -> None:
                              "that holds the rulings, or the project's key for "
                              "rulings of its register")
     parser.add_argument("id", metavar="ID", nargs="?",
-                        help="what is marked: a question, Q<n>; with --shown, the "
+                        help="what is marked: a question, Q<n>; with --after, a "
+                             "stage, B<n>; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
                              "several separated by commas; left out with --flow, "
                              "which marks the round")
@@ -473,6 +496,12 @@ def _declare_mark(verbs) -> None:
                            "only the operator narrows it (rule narrow:Q<n>=LIST)")
     form.add_argument("--reopen", action="store_true",
                       help="make a parked question open again")
+    form.add_argument("--after", metavar="LIST",
+                      help="the stages the stage B<n> waits for from now on, as "
+                           "B1,B3, beside the ones it waits for already; each must "
+                           "be a stage of the round, and none may wait for B<n>; "
+                           "only the operator takes one off (rule "
+                           "unafter:B<n>=B<m>)")
     form.add_argument("--flow", metavar="NAME",
                       help="move the round up to this flow: one later in the tiers "
                            "that has every step the round follows, or the round's "
@@ -498,9 +527,12 @@ def _mark(args, out) -> int:
         return _mark_flow(args, out)
     if args.id is None:
         raise BadArgument("nothing says what is marked",
-                          "name the question, Q<n>, or with --shown the rulings")
+                          "name the question, Q<n>, with --after the stage, B<n>, "
+                          "or with --shown the rulings")
     if args.shown:
         return _mark_shown(args, out)
+    if args.after is not None:
+        return _mark_after(args, out)
     if args.record is not None:
         raise BadArgument("--record is the pointer to where rulings were shown, and "
                           "a change to a question that anyone may make carries none",
@@ -512,6 +544,21 @@ def _mark(args, out) -> int:
     found = marked.question
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
+    _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_after(args, out) -> int:
+    """`mark --after`: make a stage wait for more stages, which anyone may do."""
+    from . import stages
+
+    if args.record is not None:
+        raise BadArgument("--record is a pointer to the operator's word, and a wait "
+                          "added to a stage is anyone's and carries none",
+                          "leave --record out")
+    marked = stages.wait(args.target, args.id, args.after, actor=_actor(args))
+    print(f"{marked.stage.id}   after: {', '.join(marked.stage.after)}   added: "
+          f"{', '.join(marked.added)}", file=out)
     _warn_of(marked.failed, args.prog, args.verb)
     return codes.OK
 

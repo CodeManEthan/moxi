@@ -97,7 +97,8 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
 NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
                              "question.changed", "ruling.shown", "round.dropped",
-                             "flow.changed", "design.frozen", "stage.declared"})
+                             "flow.changed", "design.frozen", "stage.declared",
+                             "stage.changed"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -786,3 +787,54 @@ def test_a_frozen_event_that_numbers_no_version_freezes_none():
                                         declared=copy.deepcopy(DECLARED))])
 
     assert (found.versions, found.stages) == ([], [])
+
+
+def declared(n, stage_id, after=()):
+    return event(n, "stage.declared", id=stage_id, repo="proj-a",
+                 branch=f"branch-{stage_id.lower()}", after=list(after))
+
+
+def test_a_change_to_a_stage_adds_to_what_it_waits_for_and_takes_off():
+    start = [opened(), declared(2, "B1"), declared(3, "B2"),
+             declared(4, "B3", after=["B1"])]
+    more = event(5, "stage.changed", id="B3", after=["B2", "B1"])
+    fewer = event(6, "stage.changed", id="B3", gone=["B1"], verdict="a verdict")
+
+    before = state.fold(start)
+    added = state.fold([*start, more])
+    taken = state.fold([*start, more, fewer])
+
+    assert [one.after for one in added.stages] == [(), (), ("B1", "B2")]
+    assert [one.after for one in taken.stages] == [(), (), ("B2",)]
+    assert added.stages[:2] == before.stages[:2]
+    assert dataclasses.replace(added.stages[2], after=("B1",)) == before.stages[2]
+
+
+def test_a_stage_that_left_keeps_its_record():
+    start = [opened(), declared(2, "B1"), declared(3, "B2", after=["B1"])]
+    left = event(4, "stage.changed", id="B1", removed=True, verdict="a verdict")
+
+    assert state.fold([*start, left]).stages == state.fold(start).stages
+
+
+def test_a_change_to_a_stage_the_log_never_declared_changes_no_stage():
+    start = [opened(), declared(2, "B1")]
+    odd = [event(3, "stage.changed", id="B9", after=["B1"]),
+           event(4, "stage.changed", after=["B1"]),
+           event(5, "stage.changed", id="B1", after="B2", gone=7)]
+
+    assert state.fold([*start, *odd]).stages == state.fold(start).stages
+
+
+def test_a_ruling_that_takes_a_wait_off_a_stage_is_the_whole_of_that_change():
+    start = [opened(), declared(2, "B1"), declared(3, "B2"),
+             declared(4, "B3", after=["B1", "B2"])]
+    ruled = event(5, "ruling.recorded", id="C1", kind="process", record="comms:12",
+                  rules="unafter:B3=B1")
+    none = event(6, "ruling.recorded", id="C2", kind="process", record="comms:12",
+                 rules="unafter:B9=B1")
+
+    found = state.fold([*start, ruled, none])
+
+    assert [one.after for one in found.stages] == [(), (), ("B2",)]
+    assert [one.rules for one in found.rulings] == ["unafter:B3=B1", "unafter:B9=B1"]

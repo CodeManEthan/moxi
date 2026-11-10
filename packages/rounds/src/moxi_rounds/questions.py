@@ -64,6 +64,9 @@ UNTIL_ROUND = "round:"
 #: What starts the item of a ruling that takes a stage out of the plan; the stage's id
 #: follows.
 UNSTAGE = "unstage:"
+#: What starts the item of a ruling that takes one stage off what another waits for:
+#: the stage's id, `=`, and the id of the stage it waits for no longer.
+UNAFTER = "unafter:"
 
 Blocks = str | tuple[str, ...]
 

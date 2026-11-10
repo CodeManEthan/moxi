@@ -365,6 +365,10 @@ def _ruling_recorded(state: State, event: dict) -> None:
     # His ruling of the flow is the whole of the move, as the lead's event is of his.
     if (event.get("rules") or "").startswith(_FLOW):
         _flow_changed(state, event)
+    # His ruling that a stage waits for one stage fewer is the whole of that change.
+    if (event.get("rules") or "").startswith(_UNAFTER):
+        stage_id, _equals, waited = event["rules"][len(_UNAFTER):].partition("=")
+        _waits(state, stage_id, gone=(waited,))
     # The key an answer chose is kept in the ruling. The question reads it from its
     # newest answer, so an answer that names no key leaves none chosen.
     for place, question in enumerate(state.questions):
@@ -469,6 +473,8 @@ _ALL = "all"
 #: What starts the item of a ruling that moves the round to another flow; the flow's
 #: name follows.
 _FLOW = "flow:"
+#: What starts the item of a ruling that takes one stage off what another waits for.
+_UNAFTER = "unafter:"
 #: What starts the item of a ruling that skips the questions step for one stage; the
 #: stage's id follows.
 _SKIP_QUESTIONS = "skip:docket:"
@@ -581,6 +587,23 @@ def _stage_declared(state: State, event: dict, *, version: int | None = None) ->
         actor=event["actor"], at=event["at"]))
 
 
+def _waits(state: State, stage_id, *, more: tuple[str, ...] = (),
+           gone: tuple[str, ...] = ()) -> None:
+    """The stage waits for `more` beside what it waits for, and no longer for `gone`.
+    An id the log never declared changes nothing."""
+    for place, stage in enumerate(state.stages):
+        if stage.id == stage_id:
+            state.stages[place] = replace(stage, after=tuple(
+                one for one in dict.fromkeys((*stage.after, *more)) if one not in gone))
+
+
+def _stage_changed(state: State, event: dict) -> None:
+    """A stage waits for more stages, or for fewer. A stage that left the plan keeps
+    its record: `questions.left_stages` says which did, from the history."""
+    _waits(state, event.get("id"), more=_ids(event.get("after")),
+           gone=_ids(event.get("gone")))
+
+
 def _design_frozen(state: State, event: dict) -> None:
     """A version of the design is frozen, and what its block added to the record is
     added: the event is the whole of the freezing, so nothing else is written for it
@@ -620,10 +643,7 @@ def _design_frozen(state: State, event: dict) -> None:
             "blocks": one.get("blocks", _ALL), "state": OPEN,
             "options": one.get("options"), **who})
     for stage_id, more in (added.get("after") or {}).items():
-        for place, stage in enumerate(state.stages):
-            if stage.id == stage_id:
-                state.stages[place] = replace(stage, after=tuple(dict.fromkeys(
-                    (*stage.after, *_ids(more)))))
+        _waits(state, stage_id, more=_ids(more))
     for question_id, blocks in (added.get("blocks") or {}).items():
         _change(state, {"blocks": blocks, **who}, question_id=question_id, ruling=None)
     for question_id, change in (added.get("options") or {}).items():
@@ -642,7 +662,7 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "question.asked": _question_asked,
     "question.changed": _question_changed,
     "stage.declared": _stage_declared,
-    "stage.changed": _kept,
+    "stage.changed": _stage_changed,
     "ruling.recorded": _ruling_recorded,
     "ruling.shown": _ruling_shown,
     "build.commissioned": _kept,

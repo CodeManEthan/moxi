@@ -24,7 +24,7 @@ def folder(tmp_path, add_project, capsys):
     """The folder of `a-round` of `proj-a`, opened on a flow that has a design step."""
     add_project("proj-a", notes_root=tmp_path / "notes")
     opening.open_round(ROUND, description="a placeholder round", actor="planner",
-                       flow="small")
+                       flow="full")
     capsys.readouterr()
     return tmp_path / "notes" / "rounds" / "a-round"
 

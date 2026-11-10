@@ -36,7 +36,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
-from . import ending, questions
+from . import ending, flows, questions
 from . import state as states
 from .errors import Unmet
 
@@ -59,6 +59,11 @@ SKIP = "skip:"
 #: What starts the item of a ruling that moves the round to another flow; the flow's
 #: name follows.
 FLOW = "flow:"
+
+#: What starts the items of the rulings that take a stage out of the plan, and one
+#: stage off what another waits for.
+UNSTAGE = questions.UNSTAGE
+UNAFTER = questions.UNAFTER
 
 #: The thing a ruling that stands on its own rules: any such ruling may replace another.
 ALONE = ""
@@ -154,6 +159,26 @@ def _move_it_again(ruling: states.Ruling, state: states.State, name: str) -> Unm
         f"moxi rounds rule {name} {FLOW}{moved.get('was') or 'NAME'} --record PTR")
 
 
+def _declare_it_again(ruling: states.Ruling, state: states.State, name: str) -> Unmet:
+    stage = (ruling.rules or "")[len(UNSTAGE):]
+    designed = flows.has(state.steps, "design")
+    how = ("in its design, frozen again" if designed else
+           "when the work is commissioned")
+    return Unmet(
+        f"{ruling.id} took {stage} out of the plan of {name}, and a stage that left "
+        "does not come back, so the ruling is neither taken back nor replaced: the "
+        f"same work is declared again under a new id, {how}",
+        f"moxi rounds {'fold' if designed else 'show'} {name}")
+
+
+def _mark_it_after(ruling: states.Ruling, state: states.State, name: str) -> Unmet:
+    stage, _equals, waited = (ruling.rules or "")[len(UNAFTER):].partition("=")
+    return Unmet(
+        f"{ruling.id} took {waited} off what {stage} waits for, and that is neither "
+        "taken back nor replaced: the wait is added again, which anyone may do",
+        f"moxi rounds mark {name} {stage} --after {waited}")
+
+
 def _read_back_again(ruling: states.Ruling, state: states.State, name: str) -> Unmet:
     return Unmet(
         f"{ruling.id} is his word that he read the list of rulings through "
@@ -182,6 +207,10 @@ KINDS: tuple[Kind, ...] = (
     # with nothing more said.
     Kind("a skip", _starts(SKIP), undo=lambda ruling: {}),
     Kind("a change of flow", _starts(FLOW), instead=_move_it_again, again=False),
+    Kind("a stage taken out of the plan", _starts(UNSTAGE), instead=_declare_it_again,
+         again=False),
+    Kind("a wait taken off a stage", _starts(UNAFTER), instead=_mark_it_after,
+         again=False),
 )
 
 
@@ -341,6 +370,7 @@ def _said(rules: str | None) -> str:
 
 
 __all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP", "FLOW",
+           "UNSTAGE", "UNAFTER",
            "ALONE", "ID", "Kind",
            "KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",
            "ended", "can_be_taken_back", "taking_back", "replaces"]

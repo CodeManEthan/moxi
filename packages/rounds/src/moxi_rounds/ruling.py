@@ -77,7 +77,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from . import (corrections, ending, folders, log, pointers, questions, shown, skips,
-               stepping, write)
+               stages, stepping, write)
 from . import options as choices
 from . import settings as own
 from . import state as states
@@ -201,7 +201,9 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
       answer; `park:`, `narrow:` or `withdraw:` and the question; or `revoke:` and
       the id of a ruling, to take that ruling back; `skip:` and a step, with `:` and
       a stage for a step of one stage; `flow:` and a flow's name, to move the round
-      to that flow; on a project, `readback=` and a
+      to that flow; `unstage:` and a stage, to take it out of the plan; `unafter:`,
+      a stage, `=` and a stage it waits for, to take that wait off; on a project,
+      `readback=` and a
       time, his word that he read the list of rulings not yet shown through then.
     - `until`: with `park:`, what the question waits for: a stage of the round, `B2`,
       or another round, `round:<project>/<slug>`.
@@ -219,7 +221,9 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     the round does not have, an item
     that names no question, a question already ruled or withdrawn, a skip of a step
     that is never skipped or that the round's flow does not have, a flow the config
-    does not have or that the round follows already, a key the
+    does not have or that the round follows already, a stage to take out that has
+    an open or finished build or that left already, a wait a stage does not have, a
+    key the
     question does not offer, a second ruling of a thing that does not name the first,
     a correction of a ruling that is of the other log, that the log does not hold,
     that no longer stands, or that rules another thing, or a read-back through a time
@@ -700,6 +704,37 @@ def _flow(item: str, asked: Asked) -> Form | None:
                 found=lambda view: stepping.fields(flow, view, asked.settings))
 
 
+# -- a stage out of the plan, and a wait off a stage -------------------------------------
+
+def _unstage(item: str, asked: Asked) -> Form | None:
+    """A stage taken out of the plan, which only a stage with no open or finished
+    build leaves. The ruling's event is the whole of it."""
+    stage_id = stages.parse_unstage(item)
+    if stage_id is None:
+        return None
+    _of_the_round(asked, "a stage taken out of the plan")
+    if asked.supersedes is not None:
+        raise BadArgument("a stage leaves the plan once, and no ruling replaces the "
+                          "one that took it out", "leave --supersedes out")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(stages.unstage_gates(stage_id, name=asked.name)))
+
+
+def _unafter(item: str, asked: Asked) -> Form | None:
+    """One stage taken off what another waits for. The ruling's event is the whole of
+    it."""
+    parsed = stages.parse_unafter(item)
+    if parsed is None:
+        return None
+    _of_the_round(asked, "a wait taken off a stage")
+    if asked.supersedes is not None:
+        raise BadArgument("a wait is taken off once, and no ruling replaces the one "
+                          "that took it off; anyone adds it again with mark --after",
+                          "leave --supersedes out")
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(stages.unafter_gates(*parsed, name=asked.name)))
+
+
 # -- his word that he read the list -------------------------------------------------------
 
 def _readback(item: str, asked: Asked) -> Form | None:
@@ -736,7 +771,8 @@ def _readback(item: str, asked: Asked) -> Form | None:
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
-    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _flow)
+    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _flow, _unstage,
+    _unafter)
 
 
 def _form(item: str | None, asked: Asked) -> Form:

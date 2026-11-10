@@ -16,6 +16,10 @@ leaves out, a recorded stage it leaves out, a stage another waits for no longer,
 question that holds up fewer stages in the block than on record. `plan` is the function
 that says which is which.
 
+Three things a block may not say of a stage, each refused: a recorded stage's id with
+another repo, branch or child round; the id of a stage that left the plan; and, in a
+round whose flow does not verify its design, a second stage in one repo.
+
 Options are no declaration. A block that gives a question options adds the keys the
 question does not have and retires each key it leaves out; a block that gives it none
 changes none. A key that was retired is never used again: the block's entry for it is
@@ -40,7 +44,8 @@ from pathlib import Path
 
 from moxi import files
 
-from . import design_block, ending, folders, options, questions, stepping, versions, write
+from . import (design_block, ending, folders, options, questions, stages, stepping,
+               versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
@@ -78,9 +83,10 @@ class Plan:
     reworded: tuple[str, ...] = ()
 
 
-#: More checks of a block against the record, each `check(state, block) -> problems`.
-#: A check that refuses a declaration (a stage whose repo changed, say) is added here.
-CHECKS: list[Callable[[states.State, design_block.DesignBlock], list[Problem]]] = []
+#: More checks of a block against the record, each `check(state, block) -> problems`:
+#: what a block may not say of a stage, and whatever a later check adds here.
+CHECKS: list[Callable[[states.State, design_block.DesignBlock], list[Problem]]] = [
+    *stages.CHECKS]
 
 
 @dataclass(frozen=True)
@@ -307,7 +313,9 @@ def freeze(name: str, *, actor: str, settings=None, wait_s: float = write.WAIT_S
     flow has no design step or its folder holds no design, and `BadBlock` when the
     design's block can't be read or can't be frozen onto the record: a question's id
     that the round already used for one since ruled or withdrawn, a stage named that
-    is none, options that break a question's rules, a prepared answer. A refusal
+    is none, options that break a question's rules, a prepared answer, a recorded
+    stage given another repo, branch or child round, a stage that left the plan, or a
+    second stage in one repo where the flow does not verify the design. A refusal
     leaves the log and the versions as they were.
     """
     project, slug = folders.split(name)

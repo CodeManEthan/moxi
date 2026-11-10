@@ -765,7 +765,9 @@ def test_a_ruling_that_corrects_nothing_is_refused_on_a_round_that_has_ended(
     ("revoke:C1", "a taking back", "revoke:C1"),
     ("skip:retro", "a skip", "skip:retro"),
     ("skip:docket:B2", "a skip", "skip:docket:B2"),
-    ("flow:full", "a change of flow", "flow:full")])
+    ("flow:full", "a change of flow", "flow:full"),
+    ("unstage:B2", "a stage taken out of the plan", "unstage:B2"),
+    ("unafter:B3=B2", "a wait taken off a stage", "unafter:B3=B2")])
 def test_each_ruling_has_its_kind_and_the_thing_it_rules(rules, name, item):
     assert corrections.kind_of(rules).name == name
     assert corrections.item_of(rules) == item

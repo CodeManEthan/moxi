@@ -257,10 +257,19 @@ def _history(found: Shown) -> list:
 
 def history_of(event: dict) -> str | None:
     """What an event of the history is of, in a word or a few: the id it gave or
-    names, its stage, or for a change of flow the flow left and the one taken up."""
+    names, its stage, for a change of flow the flow left and the one taken up, or
+    for a change to a stage what changed."""
     of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
+    if event.get("type") == "stage.changed" and isinstance(of, str):
+        more, gone = event.get("after"), event.get("gone")
+        if event.get("removed") is True:
+            of += ", left the plan"
+        if isinstance(more, list) and more:
+            of += f", also after {', '.join(map(str, more))}"
+        if isinstance(gone, list) and gone:
+            of += f", no longer after {', '.join(map(str, gone))}"
     if event.get("type") == "design.frozen":
         of = f"v{event.get('version')}"
     return of if isinstance(of, str) and of else None
