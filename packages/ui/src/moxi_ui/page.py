@@ -122,6 +122,7 @@ _COMPONENT = Out("table", items={
     "name": Out("string"), "element": Out("string"), "script": Out("string"),
     "url": Out("string"), "title": Out("string"), "doc": Out("string"),
     "contract": Out("int"), "place": Out("string"), "home": Out("bool"),
+    "home_as": _STRING, "group": _STRING, "order": _INT,
     "attributes": Out("list", items=_ATTRIBUTE)})
 _MODULE = Out("table", items={
     "name": Out("string"), "state": Out("string"),

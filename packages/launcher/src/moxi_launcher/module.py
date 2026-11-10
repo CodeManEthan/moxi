@@ -77,6 +77,7 @@ PAGE = "moxi_launcher.page:PAGE"
 #: Each script is a file the page's web build writes beside the page's assets.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
+             "group": "daily", "order": 10,
              "doc": "Launch, resume and watch sessions"},
     "sessions": {"script": "sessions.js", "title": "Sessions", "contract": 1,
                  "place": "block", "home": True,

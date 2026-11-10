@@ -40,6 +40,7 @@ PAGE = "moxi_usage.page:PAGE"
 #: What usage offers the browser UI shell: its panel, and two blocks for the home view.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Usage", "contract": 1, "place": "page",
+             "group": "daily", "order": 30,
              "doc": "Tokens and cost by day, session, project and model, with the limits"},
     "limits": {"script": "limits.js", "title": "Limits", "contract": 1, "place": "block",
                "home": True,

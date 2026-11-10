@@ -1018,3 +1018,10 @@ def test_usage_works_without_the_ui(tmp_path):
     assert out["loaded"] == []
     assert out["refused"].startswith("usage's page needs the ui module")
     assert out["findings"] == []
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_usage import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("daily", 30)

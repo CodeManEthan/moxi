@@ -601,3 +601,10 @@ def test_a_read_writes_nothing(roots, tmp_path):
         listing(harness, session)
     window("claude", SESSION, "&agent=a0190b0000000001")
     assert _tree(tmp_path) == before
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_sessions import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("daily", 20)

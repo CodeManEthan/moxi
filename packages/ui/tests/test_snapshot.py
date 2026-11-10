@@ -69,6 +69,62 @@ def test_good_components_are_placed_and_a_module_without_a_page_places_none():
     assert placed == [] and "declares no PAGE" in refused[0]["reason"]
 
 
+def _one(decl, name="today"):
+    placed, refused = check_components("usage", {name: decl}, page=True, assets=ASSETS)
+    assert refused == []
+    return placed[0]
+
+
+def test_a_page_keeps_its_group_and_order_and_a_wrong_one_reads_as_the_default():
+    def page(**extra):
+        return _one(_ok(script="page.js", place="page", **extra), name="page")
+
+    kept = page(group="daily", order=0)
+    assert (kept["group"], kept["order"], kept["home_as"]) == ("daily", 0, None)
+    assert (page(order=999)["order"], page(group="setup")["group"]) == (999, "setup")
+    absent = page()
+    assert (absent["group"], absent["order"]) == ("setup", 500)
+    for group in ("Daily", "dayly", "", 3, None, ["daily"]):
+        assert page(group=group, order=7)["group"] == "setup"
+    for order in (-1, 1000, 2.0, "10", True, None, [1]):
+        assert page(group="daily", order=order)["order"] == 500
+
+
+@pytest.mark.parametrize("home_as", ["main", "row"])
+def test_a_home_block_keeps_its_home_as_and_order(home_as):
+    kept = _one(_ok(home=True, home_as=home_as, order=10))
+    assert (kept["home_as"], kept["order"], kept["group"]) == (home_as, 10, None)
+    assert _one(_ok(home=True, home_as=home_as))["order"] == 500
+    assert _one(_ok(home=True, home_as=home_as, order="first"))["order"] == 500
+
+
+def test_a_component_the_fields_do_not_apply_to_carries_none():
+    plain = _one(_ok(home=True, group="daily", order=3))
+    assert (plain["home_as"], plain["group"], plain["order"]) == (None, None, None)
+    assert _one(_ok(home=True, home_as=None))["home_as"] is None
+
+
+@pytest.mark.parametrize("decl, reason", [
+    (_ok(home=True, home_as="side"), "its home_as is 'side'"),
+    (_ok(home=True, home_as=True), "its home_as is True"),
+    (_ok(home=True, home_as=["row"]), "its home_as is"),
+    (_ok(home_as="row"), "not a block placed at home"),
+    (_ok(home=False, home_as="main"), "not a block placed at home"),
+    (_ok(home=True, home_as="row", place="inline"), "not a block placed at home"),
+])
+def test_a_home_as_that_does_not_fit_refuses_the_component(decl, reason):
+    placed, refused = check_components("usage", {"today": decl}, page=True, assets=ASSETS)
+    assert placed == [] and reason in refused[0]["reason"]
+
+
+def test_the_modules_shape_sends_the_three_fields():
+    from moxi_ui.page import _COMPONENT
+
+    row = _one(_ok(home=True, home_as="row", order=900))
+    assert set(row) == set(_COMPONENT.items)
+    assert {"home_as", "group", "order"} <= set(_COMPONENT.items)
+
+
 def _fake_run(listing, exports, calls):
     def run(argv, *, timeout_s, cwd, env=None):
         calls.append((argv, cwd, env))
