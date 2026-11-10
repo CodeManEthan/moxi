@@ -34,6 +34,10 @@ PORT = 4321
 A = "aaaaaaaa-1111-4111-8111-111111111111"
 B = "bbbbbbbb-2222-4222-8222-222222222222"
 UNEXPECTED = "cache's page server hit an unexpected error ({}); its log has the details"
+#: The page server's local date in these tests, but where a test moves it.
+TODAY = "2027-01-15"
+#: The page server's own reading of the date, kept before any test replaces it.
+LOCAL_DATE = pagehandlers._today
 
 
 def loopback():
@@ -44,9 +48,11 @@ def loopback():
 
 @pytest.fixture(autouse=True)
 def fresh_handlers(monkeypatch):
-    """Each test logs each failure class anew and starts its own feed."""
+    """Each test logs each failure class anew and starts its own feed, on a date that
+    stays put until the test moves it."""
     monkeypatch.setattr(pagehandlers, "_logged", set())
     monkeypatch.setattr(pagehandlers, "_current", None)
+    monkeypatch.setattr(pagehandlers, "_today", lambda: TODAY)
 
 
 def record(session=A, *, last_request=None, **extra) -> dict:
@@ -70,6 +76,43 @@ def put(rec: dict, text: str | None = None) -> None:
 
 def row(rec: dict) -> dict:
     return {key: rec.get(key) for key in pagehandlers.KEYS}
+
+
+def put_reading(tick_at: float | None = None, listed_at: float | None = 0.0,
+                stale_after: float = 30, text: str | None = None) -> dict:
+    """Write the watcher's reading, as the watcher does: whole, by a rename. `listed_at`
+    0.0 means at `tick_at`. Returns what the page should send for it."""
+    tick_at = time.time() - 1 if tick_at is None else tick_at
+    listed_at = tick_at if listed_at == 0.0 else listed_at
+    doc = {"v": 1, "pid": 4242, "tick_at": tick_at, "listed_at": listed_at,
+           "stale_after": stale_after}
+    path = records.reading_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc) if text is None else text)
+    os.replace(tmp, path)
+    return {"tick_at": tick_at, "listed_at": listed_at, "stale_after": stale_after}
+
+
+def value(rows: list[dict], reading: dict | None = None, today: str = TODAY) -> dict:
+    """The topic's value when the page server is up."""
+    return {"state": "up", "detail": None, "today": today, "reading": reading,
+            "clocks": rows}
+
+
+def conforms(sent, shape) -> bool:
+    """Whether `sent` is of the declared `shape`, key for key, as strict projection holds
+    it: a table has exactly its declared keys."""
+    if sent is None:
+        return shape.nullable
+    if shape.type == "table":
+        return (isinstance(sent, dict) and set(sent) == set(shape.items)
+                and all(conforms(sent[k], shape.items[k]) for k in shape.items))
+    if shape.type == "list":
+        return isinstance(sent, list) and all(conforms(v, shape.items) for v in sent)
+    if shape.type == "float":
+        return isinstance(sent, (int, float)) and not isinstance(sent, bool)
+    return isinstance(sent, {"string": str, "int": int, "bool": bool}[shape.type])
 
 
 # --- driving the app ----------------------------------------------------------------------
@@ -190,7 +233,7 @@ def test_the_export_lists_the_built_assets():
 
 
 def test_no_declared_shape_carries_a_path_or_a_process():
-    keys = set(page.ROW.items) | set(page.CLOCKS)
+    keys = set(page.ROW.items) | set(page.CLOCKS) | set(page.READING.items)
     assert not keys & {"pid", "read_at", "v", "path"}
 
 
@@ -203,9 +246,10 @@ def test_clocks_sends_every_record_in_exactly_the_declared_shape():
     before = time.time()
     status, body = run(get(served(), "/api/clocks"))
     assert status == 200
-    assert set(body) == {"now", "state", "detail", "clocks"}
+    assert set(body) == {"now", "state", "detail", "today", "reading", "clocks"}
     assert before <= body["now"] <= time.time()
-    assert (body["state"], body["detail"]) == ("up", None)
+    assert (body["state"], body["detail"], body["today"]) == ("up", None, TODAY)
+    assert body["reading"] is None
     expected = [row(rec) for rec in sorted(written, key=lambda r: r["session"])]
     assert body["clocks"] == expected
     for sent in body["clocks"]:
@@ -218,6 +262,49 @@ def test_clocks_sends_every_record_in_exactly_the_declared_shape():
 def test_clocks_with_no_records_is_up_and_empty():
     status, body = run(get(served(), "/api/clocks"))
     assert status == 200 and body["state"] == "up" and body["clocks"] == []
+    assert body["reading"] is None
+
+
+def test_clocks_carries_the_watchers_reading_cut_to_its_declared_keys():
+    sent = put_reading(listed_at=time.time() - 40)
+    put(record())
+    status, body = run(get(served(), "/api/clocks"))
+    assert status == 200 and body["state"] == "up"
+    assert body["reading"] == sent
+    assert list(body["reading"]) == list(page.READING.items)
+
+
+def test_clocks_carries_a_reading_that_never_listed():
+    sent = put_reading(listed_at=None)
+    status, body = run(get(served(), "/api/clocks"))
+    assert status == 200 and body["reading"] == sent and sent["listed_at"] is None
+
+
+@pytest.mark.parametrize("text", ['{"v": 1, "pid": 4242, "tick_at"', "[]",
+                                  '{"v": 1, "pid": 1, "tick_at": "x", "listed_at": null, '
+                                  '"stale_after": 30}'],
+                         ids=["cut", "not-a-table", "malformed"])
+def test_a_reading_that_cannot_be_read_is_null_and_the_read_is_up(text):
+    put_reading(text=text)
+    rec = record()
+    put(rec)
+    status, body = run(get(served(), "/api/clocks"))
+    assert status == 200 and body["state"] == "up" and body["reading"] is None
+    assert body["clocks"] == [row(rec)]
+
+
+def test_clocks_carries_the_page_servers_local_date(monkeypatch):
+    status, body = run(get(served(), "/api/clocks"))
+    assert body["today"] == TODAY
+    monkeypatch.setattr(pagehandlers, "_today", lambda: "2027-01-16")
+    assert run(get(served(), "/api/clocks"))[1]["today"] == "2027-01-16"
+
+
+def test_today_is_the_local_date():
+    import datetime as dt
+
+    before = dt.date.today().isoformat()
+    assert LOCAL_DATE() in {before, dt.date.today().isoformat()}
 
 
 @pytest.mark.parametrize("error", [PermissionError(13, "Permission denied: '/x/y'"),
@@ -228,12 +315,14 @@ def test_a_failed_listing_is_a_200_with_state_error_and_a_fixed_detail(monkeypat
         raise error
 
     monkeypatch.setattr(api, "clock_records", fail)
+    put_reading()
     with caplog.at_level(logging.ERROR, logger="moxi.cache.page"):
         status, body = run(get(served(), "/api/clocks"))
         again = run(get(served(), "/api/clocks"))[1]
     assert {**again, "now": 0} == {**body, "now": 0}
     assert status == 200
     assert body["state"] == "error" and body["clocks"] == []
+    assert body["reading"] is None and body["today"] == TODAY
     assert body["detail"] == UNEXPECTED.format(type(error).__name__)
     assert "/x/y" not in json.dumps(body)
     logged = [r for r in caplog.records if r.exc_info and r.exc_info[0] is type(error)]
@@ -263,13 +352,11 @@ def test_the_first_event_is_the_current_value_and_a_rewrite_comes_within_3_s():
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", {"state": "up", "detail": None,
-                                                       "clocks": [row(rec)]})
+            assert await stream.next(3) == ("clocks", value([row(rec)]))
             assert stream.status == 200
             moved = dict(rec, last_request=rec["last_request"] + 30)
             put(moved)
-            assert await stream.next(3) == ("clocks", {"state": "up", "detail": None,
-                                                       "clocks": [row(moved)]})
+            assert await stream.next(3) == ("clocks", value([row(moved)]))
         finally:
             await stream.close()
 
@@ -295,6 +382,115 @@ def test_one_event_per_change_and_none_for_a_rewrite_that_changes_nothing(monkey
             await stream.close()
 
     run(go())
+
+
+def test_the_topic_carries_the_reading_and_today():
+    sent = put_reading()
+
+    async def go():
+        stream = Stream(served())
+        try:
+            assert await stream.next(3) == ("clocks", value([], sent))
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_one_event_per_watcher_tick_with_no_record(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", 0.1)
+    first = put_reading(tick_at=1_800_000_000.0)
+
+    async def go():
+        stream = Stream(served())
+        try:
+            assert await stream.next(3) == ("clocks", value([], first))
+            for tick in (10, 20):
+                moved = put_reading(tick_at=1_800_000_000.0 + tick)
+                assert await stream.next(3) == ("clocks", value([], moved))
+                assert await stream.none_within(0.4)
+            put_reading(tick_at=1_800_000_020.0)       # rewritten, nothing changed
+            assert await stream.none_within(0.4)
+            stopped = put_reading(tick_at=1_800_000_030.0, listed_at=1_800_000_020.0)
+            assert await stream.next(3) == ("clocks", value([], stopped))
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_an_event_when_the_date_changes(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", 0.1)
+    rec = record()
+    put(rec)
+    dates = ["2027-01-15"]
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dates[0])
+
+    async def go():
+        stream = Stream(served())
+        try:
+            assert await stream.next(3) == ("clocks", value([row(rec)]))
+            assert await stream.none_within(0.4)
+            dates[0] = "2027-01-16"
+            assert await stream.next(3) == ("clocks", value([row(rec)], today="2027-01-16"))
+            assert await stream.none_within(0.4)
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_a_reading_that_goes_is_published_as_null(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", 0.1)
+    sent = put_reading()
+
+    async def go():
+        stream = Stream(served())
+        try:
+            assert (await stream.next(3))[1]["reading"] == sent
+            records.reading_path().unlink()
+            assert await stream.next(3) == ("clocks", value([]))
+        finally:
+            await stream.close()
+
+    run(go())
+
+
+def test_every_answer_passes_its_declared_shape(monkeypatch):
+    """The read and the topic, up with and without a reading, a reading that never
+    listed, records with null values, and the error, each hold exactly to the shapes the
+    routes declare."""
+    read_shape = lb_table({"now": None, **page.CLOCKS})
+    topic_shape = lb_table(page.CLOCKS)
+    for case in CASES:
+        put(case["record"])
+    answers = []
+    answers.append(run(get(served(), "/api/clocks")))
+    put_reading(listed_at=None)
+    answers.append(run(get(served(), "/api/clocks")))
+    put_reading()
+    answers.append(run(get(served(), "/api/clocks")))
+
+    def fail():
+        raise RuntimeError("boom")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(api, "clock_records", fail)
+        answers.append(run(get(served(), "/api/clocks")))
+    for status, body in answers:
+        assert status == 200
+        assert conforms(body, read_shape), body
+        topic = {k: v for k, v in body.items() if k != "now"}
+        assert conforms(topic, topic_shape)
+    assert [body["state"] for _, body in answers] == ["up", "up", "up", "error"]
+    assert pagehandlers.gather()["reading"] is not None
+    assert conforms(pagehandlers.gather(), topic_shape)
+
+
+def lb_table(items: dict):
+    lb = loopback()
+    return lb.Out("table", items={k: (lb.Out("float") if v is None else v)
+                                  for k, v in items.items()})
 
 
 def test_a_second_stream_gets_the_current_value_first(monkeypatch):
@@ -338,7 +534,7 @@ def test_the_topic_publishes_the_error_and_then_up_once_the_listing_recovers(mon
         try:
             _, data = await stream.next(3)
             assert data == {"state": "error", "detail": UNEXPECTED.format("PermissionError"),
-                            "clocks": []}
+                            "today": TODAY, "reading": None, "clocks": []}
             raising.pop(0)
             _, data = await stream.next(3)
             assert data["detail"] == UNEXPECTED.format("RuntimeError")
@@ -346,7 +542,7 @@ def test_the_topic_publishes_the_error_and_then_up_once_the_listing_recovers(mon
             assert status == 200 and body["state"] == "error"
             raising.pop(0)
             _, data = await stream.next(3)
-            assert data == {"state": "up", "detail": None, "clocks": [row(rec)]}
+            assert data == value([row(rec)])
         finally:
             await stream.close()
 
@@ -361,15 +557,14 @@ def test_the_poller_outlives_a_gather_that_raises(monkeypatch, caplog):
         calls.append(1)
         if len(calls) <= 2:
             raise RuntimeError("the gather broke")
-        return {"state": "up", "detail": None, "clocks": []}
+        return value([])
 
     monkeypatch.setattr(pagehandlers, "gather", gather)
 
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("clocks", {"state": "up", "detail": None,
-                                                       "clocks": []})
+            assert await stream.next(3) == ("clocks", value([]))
         finally:
             await stream.close()
 

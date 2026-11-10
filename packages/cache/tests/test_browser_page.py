@@ -5,6 +5,7 @@ check on the page and the chip."""
 
 from __future__ import annotations
 
+import re
 import sys
 
 import pytest
@@ -27,8 +28,9 @@ UNEXPECTED = "cache's page server hit an unexpected error (ValueError); its log 
 
 @pytest.fixture
 def shell(ui_shell):
-    """The module's shell, with no clock record left by an earlier test."""
+    """The module's shell, with no clock record or reading left by an earlier test."""
     page_kit.clear(ui_shell)
+    page_kit.clear_reading(ui_shell)
     return ui_shell
 
 
@@ -50,6 +52,14 @@ def rows(panel):
 
 def row_chip(panel, session):
     return panel.locator(f'li[data-session="{session}"] span.cell moxi-cache-chip span.chip')
+
+
+def test_the_shell_hands_on_the_watchers_reading_and_the_date(shell):
+    sent = page_kit.put_reading(shell, listed=None)
+    data = page_kit.published(shell, lambda d: d["state"] == "up" and d["reading"] == sent)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["today"])
+    page_kit.clear_reading(shell)
+    page_kit.published(shell, lambda d: d["state"] == "up" and d["reading"] is None)
 
 
 def test_the_page_keeps_the_contract(shell, ui_page, ui_component_check):
