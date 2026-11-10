@@ -737,6 +737,7 @@ def _fold(args, out) -> int:
 def _frozen(plan) -> list[str]:
     """What a freezing prints of what it did to the record: what it added, what waits,
     and what of the block it left as the record has it."""
+    from . import state as states
     from . import versions
 
     added = plan.added
@@ -763,6 +764,15 @@ def _frozen(plan) -> list[str]:
               "again" for question, key in plan.refused]
     lines += [f"kept: {question} keeps the sentence on record, which is not the "
               "block's" for question in plan.reworded]
+    for one in plan.kept_off:
+        does = ("does not hold up" if one.what == states.BLOCKS
+                else "does not wait for")
+        why = (f"{one.ruling} took it off" if one.ruling is not None
+               else "the block listed it before this edit")
+        lines.append(f"kept off: {one.id} still {does} {one.stage}: {why}")
+    if plan.kept_off:
+        lines.append("what is kept off is held again by mark, with --blocks for a "
+                     "question and --after for a stage")
     return lines
 
 

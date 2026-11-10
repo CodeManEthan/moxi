@@ -215,6 +215,13 @@ block leaves out or narrows is recorded as pending, and changes nothing until a 
 that finds that version publishable applies it, or the operator rules it. A block that
 can't be read is refused with the file, the line and the fix for every problem in it.
 
+A freezing adds what the edit added, stage by stage: of the stages a question holds up
+and the stages a stage waits for, the ones the block's list gained since the version
+before. A hold on every stage counts as the stages that block declares. So a stage the
+operator's ruling took off (`narrow:`, `unafter:`) stays off while the block lists it
+as it did before, whatever else of the entry changed; `fold` prints a `kept off:` line
+for each, with the ruling. `mark` holds it again, with `--blocks` or `--after`.
+
 ### Verifying it
 
 A checker reads the frozen version, writes a report in the round's folder and records

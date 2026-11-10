@@ -8,7 +8,8 @@ import hashlib
 import pytest
 
 from moxi_rounds import (asking, dropping, freezing, holds, index, log, marking, opening,
-                         options, questions, ruling, showing, state, versions, write)
+                         options, questions, ruling, showing, stages, state, versions,
+                         write)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadBlock, NoRound, Refused
 
@@ -301,6 +302,281 @@ def test_a_sentence_that_differs_from_the_record_changes_nothing_and_is_named(
     assert "kept: Q1 keeps the sentence on record" in capsys.readouterr().out
     assert folded(folder).questions[0].text == ASKED
     assert last(folder)["added"] == {}
+
+
+# -- what a ruling took off, and a fold leaves off ---------------------------------------
+
+def ruled(item: str, **more) -> str:
+    """Record the operator's ruling `item` and return its id."""
+    return ruling.rule(ROUND, item=item, record="comms:1234567", actor="planner",
+                       **more).id
+
+
+def held(folder, question_id: str = "Q1"):
+    return questions.find(folded(folder), question_id).blocks
+
+
+def waits(folder, stage_id: str):
+    return stages.find(folded(folder), stage_id).after
+
+
+def test_a_fold_does_not_put_back_what_a_ruling_took_off_an_entry_nobody_edited(folder):
+    entries = (question("Q1"), stage("B1"), stage("B2", after='["B1"]'))
+    design(folder, *entries)
+    fold()
+    narrowed = ruled("narrow:Q1=B2")
+    unwaited = ruled("unafter:B2=B1")
+    design(folder, *entries, prose="One more word of prose.")
+
+    frozen = fold()
+
+    assert (frozen.plan.added, frozen.plan.pending) == ({}, ())
+    assert frozen.plan.kept_off == (
+        freezing.KeptOff("after", "B2", "B1", unwaited),
+        freezing.KeptOff("blocks", "Q1", "B1", narrowed))
+    assert held(folder) == ("B2",) and waits(folder, "B2") == ()
+    assert "added" not in last(folder) or last(folder)["added"] == {}
+
+
+def test_two_folds_after_a_ruling_leave_off_what_one_does(folder):
+    entries = (question("Q1"), stage("B1"), stage("B2", after='["B1"]'))
+    design(folder, *entries)
+    fold()
+    ruled("narrow:Q1=B2")
+    ruled("unafter:B2=B1")
+
+    first = fold()
+    design(folder, *entries, prose="Other prose.")
+    second = fold()
+
+    assert first.plan.kept_off == second.plan.kept_off != ()
+    assert (second.plan.added, second.plan.pending) == ({}, ())
+    assert held(folder) == ("B2",) and waits(folder, "B2") == ()
+
+
+def test_a_change_to_the_rest_of_an_entry_puts_nothing_back(folder):
+    design(folder, question("Q1", blocks='["B1", "B2", "B3"]'), stage("B1"),
+           stage("B2"), stage("B3"), stage("B4", after='["B1", "B2"]'))
+    fold()
+    narrowed = ruled("narrow:Q1=B2,B3")
+    unwaited = ruled("unafter:B4=B1")
+    design(folder,
+           question("Q1", OTHER, blocks='["B1", "B2"]',
+                    options='{ a = "one", b = "two" }'),
+           stage("B1"), stage("B2"), stage("B3"), stage("B4", after='["B1", "B3"]'))
+
+    frozen = fold()
+
+    assert frozen.plan.kept_off == (
+        freezing.KeptOff("after", "B4", "B1", unwaited),
+        freezing.KeptOff("blocks", "Q1", "B1", narrowed))
+    assert frozen.plan.added == {
+        "after": {"B4": ["B3"]},
+        "options": {"Q1": {"options": {"a": "one", "b": "two"}}}}
+    assert frozen.plan.pending == (
+        state.Pending("after", "B4", gone=("B2",)),
+        state.Pending("blocks", "Q1", gone=("B3",), blocks=("B1", "B2")))
+    assert frozen.plan.reworded == ("Q1",)
+    assert held(folder) == ("B2", "B3") and waits(folder, "B4") == ("B2", "B3")
+
+
+def test_a_stage_a_list_gained_is_added_though_a_ruling_narrowed_the_rest(folder):
+    design(folder, question("Q1", blocks='["B1", "B2"]'), stage("B1"), stage("B2"),
+           stage("B3"), stage("B4", after='["B1"]'))
+    fold()
+    narrowed = ruled("narrow:Q1=B2")
+    unwaited = ruled("unafter:B4=B1")
+    design(folder, question("Q1", blocks='["B1", "B2", "B3"]'), stage("B1"),
+           stage("B2"), stage("B3"), stage("B4", after='["B1", "B2"]'))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"after": {"B4": ["B2"]},
+                                 "blocks": {"Q1": ["B2", "B3"]}}
+    assert frozen.plan.kept_off == (
+        freezing.KeptOff("after", "B4", "B1", unwaited),
+        freezing.KeptOff("blocks", "Q1", "B1", narrowed))
+    assert frozen.plan.pending == ()
+    assert held(folder) == ("B2", "B3") and waits(folder, "B4") == ("B2",)
+
+
+def test_a_hold_on_every_stage_counts_as_the_stages_its_block_declares(folder):
+    design(folder, question("Q1"), stage("B1"), stage("B2"))
+    fold()
+    narrowed = ruled("narrow:Q1=B2")
+    design(folder, question("Q1"), stage("B1"), stage("B2"), stage("B3"))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"stages": ["B3"], "blocks": {"Q1": ["B2", "B3"]}}
+    assert frozen.plan.kept_off == (freezing.KeptOff("blocks", "Q1", "B1", narrowed),)
+    assert held(folder) == ("B2", "B3")
+    assert [one.id for one in holds.on_stage(folded(folder), "B3")] == ["Q1"]
+    assert holds.on_stage(folded(folder), "B1") == ()
+
+
+def test_a_list_made_a_hold_on_every_stage_gains_the_stages_it_did_not_name(folder):
+    design(folder, question("Q1", blocks='["B1", "B2"]'), stage("B1"), stage("B2"),
+           stage("B3"))
+    fold()
+    narrowed = ruled("narrow:Q1=B2")
+    design(folder, question("Q1"), stage("B1"), stage("B2"), stage("B3"))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"blocks": {"Q1": ["B2", "B3"]}}
+    assert frozen.plan.kept_off == (freezing.KeptOff("blocks", "Q1", "B1", narrowed),)
+    assert held(folder) == ("B2", "B3")
+
+
+def test_a_hold_on_no_stage_names_none_before_and_gains_none_after(folder):
+    design(folder, question("Q1", blocks='"none"'), question("Q2", OTHER),
+           stage("B1"), stage("B2"))
+    fold()
+    narrowed = ruled("narrow:Q2=none")
+    design(folder, question("Q1", blocks='["B1"]'), question("Q2", OTHER),
+           stage("B1"), stage("B2"))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"blocks": {"Q1": ["B1"]}}
+    assert frozen.plan.kept_off == (
+        freezing.KeptOff("blocks", "Q2", "B1", narrowed),
+        freezing.KeptOff("blocks", "Q2", "B2", narrowed))
+    assert held(folder, "Q2") == "none"
+    design(folder, question("Q1", blocks='["B1"]'),
+           question("Q2", OTHER, blocks='"none"'), stage("B1"), stage("B2"))
+    frozen = fold()
+    assert (frozen.plan.added, frozen.plan.pending, frozen.plan.kept_off) == (
+        {}, (), ())
+
+
+def test_a_narrowing_that_was_taken_back_keeps_nothing_off(folder):
+    entries = (question("Q1"), stage("B1"), stage("B2"))
+    design(folder, *entries)
+    fold()
+    narrowed = ruled("narrow:Q1=B2")
+    assert fold().plan.kept_off != ()
+    ruled(f"revoke:{narrowed}")
+    assert held(folder) == "all"
+
+    frozen = fold()
+
+    assert (frozen.plan.added, frozen.plan.pending, frozen.plan.kept_off) == (
+        {}, (), ())
+    assert held(folder) == "all"
+
+
+def test_a_narrowing_that_replaced_another_is_the_one_named(folder):
+    design(folder, question("Q1"), stage("B1"), stage("B2"), stage("B3"))
+    fold()
+    first = ruled("narrow:Q1=B1,B2")
+    second = ruled("narrow:Q1=B2", supersedes=first)
+
+    frozen = fold()
+
+    assert frozen.plan.kept_off == (
+        freezing.KeptOff("blocks", "Q1", "B1", second),
+        freezing.KeptOff("blocks", "Q1", "B3", second))
+    assert frozen.plan.added == {}
+
+
+def test_a_narrowing_that_names_every_stage_is_left_a_list_until_a_stage_is_gained(
+        folder):
+    design(folder, question("Q1"), stage("B1"), stage("B2"))
+    fold()
+    ruled("narrow:Q1=B1,B2")
+
+    frozen = fold()
+
+    assert (frozen.plan.added, frozen.plan.kept_off) == ({}, ())
+    assert held(folder) == ("B1", "B2")
+    design(folder, question("Q1"), stage("B1"), stage("B2"), stage("B3"))
+    assert fold().plan.added == {"stages": ["B3"], "blocks": {"Q1": "all"}}
+    assert held(folder) == "all"
+
+
+def test_the_lead_holds_again_what_a_ruling_took_off_and_a_fold_then_adds_nothing(
+        folder):
+    entries = (question("Q1"), stage("B1"), stage("B2", after='["B1"]'))
+    design(folder, *entries)
+    fold()
+    ruled("narrow:Q1=B2")
+    ruled("unafter:B2=B1")
+    fold()
+
+    marking.widen(ROUND, "Q1", "B1,B2", actor="planner")
+    stages.wait(ROUND, "B2", "B1", actor="planner")
+
+    assert set(held(folder)) == {"B1", "B2"} and waits(folder, "B2") == ("B1",)
+    frozen = fold()
+    assert frozen.plan.kept_off == ()
+    assert set(held(folder)) == {"B1", "B2"} and waits(folder, "B2") == ("B1",)
+
+
+def test_an_edit_that_lists_again_a_stage_it_had_left_out_adds_it(folder):
+    design(folder, question("Q1"), stage("B1"), stage("B2"), stage("B3", after='["B1"]'))
+    fold()
+    ruled("narrow:Q1=B2,B3")
+    ruled("unafter:B3=B1")
+    design(folder, question("Q1", blocks='["B2", "B3"]'), stage("B1"), stage("B2"),
+           stage("B3"))
+    assert fold().plan.kept_off == ()
+    design(folder, question("Q1", blocks='["B1", "B2", "B3"]'), stage("B1"),
+           stage("B2"), stage("B3", after='["B1"]'))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"after": {"B3": ["B1"]},
+                                 "blocks": {"Q1": ["B1", "B2", "B3"]}}
+    assert frozen.plan.kept_off == ()
+    assert set(held(folder)) == {"B1", "B2", "B3"} and waits(folder, "B3") == ("B1",)
+
+
+def test_a_first_version_adds_the_whole_of_each_list(folder):
+    asking.ask(ROUND, ASKED, origin="comms:11", actor="planner", blocks="none")
+    design(folder, question("Q1", blocks='["B1"]'), stage("B1"),
+           stage("B2", after='["B1"]'))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"stages": ["B1", "B2"], "blocks": {"Q1": ["B1"]}}
+    assert frozen.plan.kept_off == ()
+    assert held(folder) == ("B1",) and waits(folder, "B2") == ("B1",)
+
+
+def test_an_entry_the_version_before_did_not_have_adds_its_whole_list(folder):
+    design(folder, question("Q1"), stage("B1"), stage("B2"))
+    fold()
+    ruled("narrow:Q1=B2")
+    design(folder, stage("B1"), stage("B2"))
+    fold()
+    design(folder, question("Q1"), stage("B1"), stage("B2"))
+
+    frozen = fold()
+
+    assert frozen.plan.added == {"blocks": {"Q1": "all"}}
+    assert frozen.plan.kept_off == ()
+    assert held(folder) == "all"
+
+
+def test_the_command_prints_a_line_for_each_stage_kept_off_with_its_ruling(
+        folder, capsys):
+    entries = (question("Q1"), stage("B1"), stage("B2", after='["B1"]'))
+    design(folder, *entries)
+    fold()
+    narrowed = ruled("narrow:Q1=none")
+    unwaited = ruled("unafter:B2=B1")
+    capsys.readouterr()
+
+    assert main(["fold", ROUND, "--as", "scout"]) == 0
+
+    assert capsys.readouterr().out.splitlines()[3:] == [
+        f"kept off: B2 still does not wait for B1: {unwaited} took it off",
+        f"kept off: Q1 still does not hold up B1: {narrowed} took it off",
+        f"kept off: Q1 still does not hold up B2: {narrowed} took it off",
+        "what is kept off is held again by mark, with --blocks for a question and "
+        "--after for a stage"]
 
 
 # -- what a fold does not take away ------------------------------------------------------

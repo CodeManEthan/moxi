@@ -16,6 +16,16 @@ leaves out, a recorded stage it leaves out, a stage another waits for no longer,
 question that holds up fewer stages in the block than on record. `plan` is the function
 that says which is which.
 
+**It adds what the edit added, stage by stage.** Of the stages a question holds up
+and the stages a stage waits for, a freezing adds the ones the block's list gained
+since the version before; for a first version, and for an entry the version before
+did not have, that is the whole list. A list that holds up every stage counts as the
+stages its own block declares, and one that holds up none as no stage. So a stage
+the list carries unchanged, which the record no longer has because a ruling took it
+off, stays off: the ruling outlasts a block nobody edited there, however else the
+entry changed. `Plan.kept_off` names each such stage with its ruling. Holding it
+again is an act of its own, by the verbs that widen a hold or add a wait.
+
 Three things a block may not say of a stage, each refused: a recorded stage's id with
 another repo, branch or child round; the id of a stage that left the plan; and, in a
 round whose flow does not verify its design, a second stage in one repo.
@@ -57,8 +67,8 @@ from pathlib import Path
 
 from moxi import files
 
-from . import (brake, design_block, ending, folders, options, pointers, questions,
-               stages, stepping, tracing, versions, write)
+from . import (brake, corrections, design_block, ending, folders, options, pointers,
+               questions, stages, stepping, tracing, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
@@ -68,6 +78,19 @@ DESIGN = "design"
 
 #: The states in which a question is still asked, so that its record can change.
 _ASKED = (questions.OPEN, questions.PARKED)
+
+
+@dataclass(frozen=True)
+class KeptOff:
+    """One stage a block lists that a freezing does not add back: `what` is
+    `state.BLOCKS` (the question `id` does not hold up `stage` again) or `state.AFTER`
+    (the stage `id` does not wait for `stage` again), and `ruling` the id of the
+    ruling that took it off and stands, None when none is found."""
+
+    what: str
+    id: str
+    stage: str
+    ruling: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +109,8 @@ class Plan:
       question and is not used again.
     - `reworded`: the ids of the questions whose sentence in the block is not the one
       on record, which the record keeps.
+    - `kept_off`: each stage a list of the block carries from the version before
+      that the record no longer has there, and that is not added back.
     """
 
     declared: dict
@@ -94,6 +119,7 @@ class Plan:
     problems: tuple[Problem, ...] = ()
     refused: tuple[tuple[str, str], ...] = ()
     reworded: tuple[str, ...] = ()
+    kept_off: tuple[KeptOff, ...] = ()
 
 
 #: More checks of a block against the record, each `check(state, block) -> problems`:
@@ -165,6 +191,11 @@ def _same(one, other) -> bool:
     return set(one) == set(other)
 
 
+def _blocks_of(stored):
+    """A hold as an event stores it, as a block's entry gives it."""
+    return stored if isinstance(stored, str) else tuple(stored or ())
+
+
 def _taken_off(have, asked, known) -> tuple[str, ...]:
     """The stages a block's entry takes off a hold: of the ones the hold `have` covers
     among the stages `known` now, those the entry `asked` does not name."""
@@ -174,6 +205,34 @@ def _taken_off(have, asked, known) -> tuple[str, ...]:
     return tuple(one for one in held if one not in keeps)
 
 
+def _named(blocks, declared) -> tuple[str, ...]:
+    """The stages a block's entry holds up, one by one: every stage `declared` by its
+    own block for an entry that holds up all, none for one that holds up none."""
+    if blocks == questions.ALL:
+        return tuple(declared)
+    return () if isinstance(blocks, str) or blocks is None else tuple(blocks)
+
+
+def _by_id(entries) -> dict[str, dict]:
+    return {one["id"]: one for one in entries or ()
+            if isinstance(one, dict) and isinstance(one.get("id"), str)}
+
+
+def _narrowed_by(state: states.State, question_id: str, stage_id: str) -> str | None:
+    """The id of the ruling that stands and narrowed the question off the stage."""
+    ruling = corrections.standing(state, corrections.NARROW + question_id)
+    if ruling is None:
+        return None
+    left = (ruling.rules or "").partition("=")[2].split(",")
+    return None if stage_id in left else ruling.id
+
+
+def _unwaited_by(state: states.State, stage_id: str, waited: str) -> str | None:
+    """The id of the ruling that stands and took the wait for `waited` off the stage."""
+    ruling = corrections.standing(state, f"{corrections.UNAFTER}{stage_id}={waited}")
+    return None if ruling is None else ruling.id
+
+
 def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
     """What freezing `block` would do to the round whose log folded to `state`."""
     problems: list[Problem] = []
@@ -181,7 +240,12 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
     pending: list[states.Pending] = []
     refused: list[tuple[str, str]] = []
     reworded: list[str] = []
+    kept_off: list[KeptOff] = []
     recorded = {stage.id: stage for stage in state.stages}
+    # What the version before declared: a list adds only what it gained since.
+    before = versions.declarations(state)
+    stages_before = _by_id(before.get(states.STAGE))
+    questions_before = _by_id(before.get(states.QUESTION))
     known = set(recorded) | {stage.id for stage in block.stages}
 
     def add(kind: str, key: str | None, value) -> None:
@@ -205,13 +269,18 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
         if have is None:
             add("stages", None, stage.id)
             continue
-        more = [one for one in stage.after if one not in have.after]
+        listed = (stages_before.get(stage.id) or {}).get("after") or ()
+        missing = [one for one in stage.after if one not in have.after]
+        more = [one for one in missing if one not in listed]
+        kept_off += [KeptOff(states.AFTER, stage.id, one,
+                             _unwaited_by(state, stage.id, one))
+                     for one in missing if one in listed]
         gone = tuple(one for one in have.after if one not in stage.after)
         if more:
             add("after", stage.id, more)
         if gone:
             pending.append(states.Pending(states.AFTER, stage.id, gone=gone))
-    declared_now = {stage.id for stage in block.stages}
+    declared_now = tuple(stage.id for stage in block.stages)
     done = questions.finished_stages(state) | questions.left_stages(state)
     pending += [states.Pending(states.STAGE, stage_id) for stage_id in recorded
                 if stage_id not in declared_now and stage_id not in done]
@@ -241,15 +310,29 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
         if have.text != asked.text:
             reworded.append(asked.id)
         if not _same(asked.blocks, have.blocks):
+            was = questions_before.get(asked.id)
+            listed = () if was is None else _named(
+                was.get("blocks", questions.ALL), stages_before)
+            held = _named(have.blocks, ())
+            missing = [] if have.blocks == questions.ALL else [
+                one for one in _named(asked.blocks, declared_now)
+                if one not in held]
+            more = [one for one in missing if one not in listed]
+            kept = [one for one in missing if one in listed]
+            kept_off += [KeptOff(states.BLOCKS, asked.id, one,
+                                 _narrowed_by(state, asked.id, one)) for one in kept]
+            edited = was is None or not _same(
+                asked.blocks, _blocks_of(was.get("blocks", questions.ALL)))
             if questions.holds_every(asked.blocks, have.blocks):
-                add("blocks", asked.id, questions.stored(asked.blocks))
+                if not kept and (more or edited):
+                    add("blocks", asked.id, questions.stored(asked.blocks))
+                elif more:
+                    add("blocks", asked.id, [*held, *more])
             else:
                 # The block's entry holds up fewer stages, which waits. Any stage it
-                # names that the record does not is added all the same.
-                if not isinstance(asked.blocks, str) and not isinstance(have.blocks, str):
-                    wider = tuple(dict.fromkeys((*have.blocks, *asked.blocks)))
-                    if set(wider) != set(have.blocks):
-                        add("blocks", asked.id, list(wider))
+                # gained that the record does not hold is added all the same.
+                if more:
+                    add("blocks", asked.id, [*held, *more])
                 pending.append(states.Pending(
                     states.BLOCKS, asked.id, blocks=asked.blocks,
                     gone=_taken_off(have.blocks, asked.blocks,
@@ -267,7 +350,7 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
         problems += check(state, block)
     return Plan(declared=_declared(block), added=added, pending=tuple(pending),
                 problems=tuple(problems), refused=tuple(refused),
-                reworded=tuple(reworded))
+                reworded=tuple(reworded), kept_off=tuple(kept_off))
 
 
 def _options(asked: design_block.Question, have: states.Question, add,
@@ -476,4 +559,4 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
                   failed=written.failed)
 
 
-__all__ = ["DESIGN", "CHECKS", "Plan", "Frozen", "plan", "freeze"]
+__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "plan", "freeze"]
