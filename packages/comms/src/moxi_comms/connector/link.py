@@ -147,7 +147,7 @@ class Link:
         """Provision when missing, then bind once. Returns the state it left."""
         self._provision()
         client = self._client_type(self.socket_path, on_push=self._on_push,
-                                   on_close=self._on_close)
+                                   on_close=lambda: self._on_close(client))
         try:
             client.connect()
             answer = client.bind(name=self.identity, global_=True, adapter=KIND)
@@ -226,8 +226,13 @@ class Link:
             self.generation += 1
         self._wakeup()
 
-    def _on_close(self) -> None:
+    def _on_close(self, client) -> None:
+        """`client`'s connection ended. Only the binding's own connection says anything
+        about the link: an attempt's connection that the daemon refused (the name held)
+        closes after the state is set, and must not turn HELD into OFFLINE."""
         with self._lock:
+            if client is not self._client:
+                return
             self._client = None
             self.token = None
             self.buffer.clear()

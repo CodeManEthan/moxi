@@ -6,6 +6,7 @@ POSIX call hold on Windows too.
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -1160,15 +1161,23 @@ def test_the_windows_reader_reads_a_child_as_it_was_started():
 
 def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
     env = {k: v for k, v in os.environ.items() if k.upper() != _mark.NAME}
-    code = ("import os, moxi._mark as m; "
-            "print(m.started_by, os.environ[m.NAME] == m.program)")
+    code = ("import json, os, moxi._mark as m; "
+            "print(json.dumps([m.started_by, os.environ[m.NAME], m.program]))")
+    # The mark proc.run hands on: one already in this environment, else this program's
+    # name (`pytest` in a serial run, `python` in an xdist worker).
+    ours = _mark.marked()[_mark.NAME]
     done = proc.run([PY, "-c", code], timeout_s=30, env=None, capture=True)
     assert done.returncode == 0
-    # proc.run marks a child it starts, so this child started with the mark.
-    assert done.stdout.decode().split() == [_mark.program, "True"]
+    # proc.run marks a child it starts, so this child started with the mark, and keeps
+    # it as it came, the parent's value, not its own program's name.
+    started_by, kept, _ = json.loads(done.stdout)
+    assert started_by == ours and kept == ours
     plain = subprocess.run([PY, "-c", code], env=env, capture_output=True, text=True,
                            timeout=30)
-    assert plain.stdout.split() == ["None", "True"], plain.stderr
+    assert plain.returncode == 0, plain.stderr
+    started_by, kept, program = json.loads(plain.stdout)
+    # Started without the mark: it notes that, and sets the mark to its own name.
+    assert started_by is None and kept == program
 
 
 @pytest.mark.parametrize("start", ["run", "spawn", "detached"])
