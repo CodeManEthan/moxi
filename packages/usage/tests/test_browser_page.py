@@ -1,7 +1,9 @@
-"""usage's page in a browser, through a real shell that starts usage's real page server:
+"""The views usage's page had before its frame was redrawn, which stay mounted under the
+frame until each has its place in the new page, and usage's two blocks, in a browser,
+through a real shell that starts usage's real page server:
 the contract check on the page and its two blocks (the cost block saying how old the index
 is), each view drawn over a small index and fitting a phone, the daily view's figures by
-token class, a session opened under its row's harness, the strip with no index, a read over a stale index that runs no pass, and "Read new sessions" bringing
+token class, a session opened under its row's harness, the command with no index, a read over a stale index that runs no pass, and "Read new sessions" bringing
 new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
 the session view's request and context charts and their readout, a subagent's charts, the
 cost terms view's Total against its group lines and the models view, the daily cost by class
@@ -120,7 +122,8 @@ def open_view(page, route: str = ""):
 
 
 def strip_of(panel):
-    return panel.locator("section[data-part=strip] .strip")
+    """The frame's foot: when the sessions were last read, and "Read new sessions"."""
+    return panel.locator("[data-part=foot]")
 
 
 def session_rows(panel):
@@ -130,7 +133,7 @@ def session_rows(panel):
 # --- the contract --------------------------------------------------------------------------
 
 def test_the_page_keeps_the_contract(indexed, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "usage", "page", {"route": ""})
+    check = ui_component_check(ui_page, "usage", "page", {"route": ""}, tokens=("text",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/status" in url for url in check.requests), check.requests
 
@@ -214,13 +217,13 @@ def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_
 
 # --- the index's states --------------------------------------------------------------------
 
-def test_with_no_index_the_strip_gives_the_command_that_builds_it(own_shell):
+def test_with_no_index_the_page_gives_the_command_that_builds_it(own_shell):
     _shell, page = own_shell
     panel = open_view(page)
-    strip = strip_of(panel)
-    expect(strip).to_have_attribute("data-state", "none")
-    expect(strip.locator("code")).to_have_text("moxi usage index")
-    expect(strip.get_by_role("button", name="Read new sessions")).to_have_count(0)
+    block = panel.locator("[data-part=nothing]")
+    expect(block).to_have_attribute("data-state", "none")
+    expect(block.locator("code")).to_have_text("moxi usage index")
+    expect(panel.get_by_role("button", name="Read new sessions")).to_have_count(0)
 
 
 def test_a_read_over_a_stale_index_runs_no_pass(own_shell):
@@ -386,7 +389,8 @@ def dollars(text: str) -> str:
 
 def test_the_page_keeps_the_contract_on_the_cost_terms_view(charted, charted_page,
                                                              ui_component_check):
-    check = ui_component_check(charted_page, "usage", "page", {"route": "terms"})
+    check = ui_component_check(charted_page, "usage", "page", {"route": "terms"},
+                               tokens=("text",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/terms?" in url for url in check.requests), check.requests
 
