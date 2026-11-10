@@ -12,9 +12,11 @@ from conftest import write_config
 from moxi_sessions.opencode import Snapshot
 from moxi_sessions.shape import UNKNOWN
 from moxi_sessions.source import (
-    HEAD_LINES, Header, Source, claude_header, codex_head, codex_header, codex_root,
-    file_header, opencode_header, opencode_root, root, root_origin, sidecar_labels, unpack)
+    HEAD_LINES, Header, Source, claude_head_name, claude_header, codex_head, codex_header,
+    codex_root, file_header, head_complete, opencode_header, opencode_root, root,
+    root_origin, sidecar_labels, unpack)
 from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
+from moxi_sessions.testing.claude import START
 from moxi_sessions.testing.codex import write_imports
 
 
@@ -93,6 +95,63 @@ def test_a_subagents_header_carries_its_parent_and_sidecar_labels(tmp_path):
 
 # --- Codex headers -----------------------------------------------------------------------
 
+def test_a_claude_header_starts_at_the_first_line_that_has_a_time(tmp_path):
+    t = ClaudeTranscript(tmp_path, start=START + 30)
+    t.title("named at launch")                    # a line with no time
+    t.user()
+    t.assistant()
+    t.write()
+    header = header_of(Source("claude", str(t.path), t.session_id))
+    assert header.started == START + 30
+    assert header.as_dict()["started"] == START + 30
+
+    bare = ClaudeTranscript(tmp_path, session_id="0190b000-0000-7000-8000-00000000c1a1")
+    bare.other("mode", mode="default")
+    bare.write()
+    header = header_of(Source("claude", str(bare.path), bare.session_id))
+    assert header.started is UNKNOWN and "started" in header.as_dict()["unknown"]
+
+
+def head_name(t: ClaudeTranscript) -> str | None:
+    with t.path.open("rb") as handle:
+        return claude_head_name(handle, t.path.stat().st_size)
+
+
+def test_a_claude_head_name_is_the_newest_typed_title_among_the_first_lines(tmp_path):
+    t = ClaudeTranscript(tmp_path)
+    t.title("first name")
+    t.user()
+    t.title("made up by the harness", ai=True)
+    t.title("second name")
+    t.title("made up again", ai=True)
+    t.write()
+    assert head_name(t) == "second name"
+
+
+def test_a_claude_head_with_no_typed_title_has_no_name(tmp_path):
+    t = ClaudeTranscript(tmp_path)
+    t.title("made up by the harness", ai=True)
+    t.user("the words custom-title in a prompt are not a title")
+    for _ in range(HEAD_LINES):
+        t.other("attachment")
+    t.title("named past the head")
+    t.write()
+    assert head_name(t) is None
+
+
+def test_a_head_is_complete_once_the_file_has_outgrown_it(tmp_path):
+    t = ClaudeTranscript(tmp_path)
+    for _ in range(HEAD_LINES - 1):
+        t.other("attachment")
+    t.write()
+    with t.path.open("rb") as handle:
+        assert head_complete(handle, t.path.stat().st_size) is False
+    t.other("attachment")
+    t.flush()
+    with t.path.open("rb") as handle:
+        assert head_complete(handle, t.path.stat().st_size) is True
+
+
 def test_a_codex_header_holds_line_ones_facts_and_the_import_marks(tmp_path):
     root = tmp_path / "codex" / "sessions"
     r = CodexRollout(root, source="vscode", provider="openai",
@@ -105,6 +164,7 @@ def test_a_codex_header_holds_line_ones_facts_and_the_import_marks(tmp_path):
     assert header.cwd == "/work/project" and header.parent == "parent-thread"
     assert header.meta["model_provider"] == "openai"
     assert header.meta["unlisted_keys"] == ("forked_from_id", "new_key")
+    assert header.started == START and header.meta["timestamp"].startswith("2026-10-30T")
     marks = header.import_marks
     assert (marks.originator, marks.turn_id, marks.listed) == (False, False, True)
     assert header.as_dict()["import_marks"]["listed"] is True
@@ -129,7 +189,7 @@ def test_a_codex_header_without_line_one_knows_nothing_of_it(tmp_path):
     r.write()
     header = header_of(Source("codex", str(r.path), r.thread_id))
     assert header.meta is None and header.codex_source is UNKNOWN
-    assert header.session_id == r.thread_id
+    assert header.session_id == r.thread_id and header.started is UNKNOWN
 
 
 # --- OpenCode headers --------------------------------------------------------------------
@@ -143,11 +203,12 @@ def test_an_opencode_header_is_its_session_row(tmp_path):
         row, child_row = snap.session(s.id), snap.session(child.id)
     header = opencode_header(Source("opencode", str(path), s.id), row)
     assert header.title == "parent" and header.parent is None and header.agent_id is None
-    assert header.session_row is row
+    assert header.session_row is row and header.started == row.time_created == START
     child_header = opencode_header(Source("opencode", str(path), child.id), child_row)
     assert child_header.parent == s.id and child_header.agent_id == child.id
     whole = opencode_header(Source("opencode", str(path), None), None)
     assert whole.session_id is None and whole.session_row is None
+    assert whole.started is UNKNOWN
     assert json.dumps(header.as_dict())
 
 
