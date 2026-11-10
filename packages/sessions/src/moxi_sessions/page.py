@@ -5,7 +5,12 @@
     GET  /api/subagents  a session's subagents (`subagents()`): `listed`, `none`,
                          `unreadable` or `unsupported`, with the reason
 
-Both are reads, and neither writes anything. A session is named by `harness` and
+    GET  /api/list       the sessions of the three harnesses, counted and cut into groups
+    GET  /api/more       the next rows of one group of that list
+    GET  /api/session    one session of the list, opened
+    GET  /api/folders    the folders the listed sessions ran in
+
+All are reads, and none writes anything. A session is named by `harness` and
 `session`, the harness's own id, which `find()` resolves under the harness's root as the
 page server's environment and sessions' config give it. `agent` names a Claude Code
 subagent, which shares its parent's session id. An OpenCode child session and a Codex
@@ -36,6 +41,108 @@ a mark, and no route here is the gateway's. A refusal's reason is not marked: it
 a root or a file, which is useful at the desk, so a route opened to the gateway would need
 its reasons kept free of paths first.
 
+**The list.** The four list routes read through one catalog the page server keeps for
+its life (`moxi_sessions.catalog.shared()`), so what one request read the next reuses.
+They list main sessions only: a subagent is counted on its session's row. Their answers
+are stated here, once. `null` stands for a fact that was not read, never for zero or an
+empty text; a time is epoch seconds; each answer starts with `shape`.
+
+The filters, each optional, are the same on `/api/list` and `/api/more`: `harness`;
+`since` (changed at or after it) and `until` (changed before it), epoch seconds as a
+number; `folder`, an absolute path a session's own record names (compared as written,
+but for the slashes at its end); `find`, text of 2 characters or more that a session's id
+starts with or the last segment of its folder contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,
+`find` and `/api/folders` read the head of every session not read yet, once for the
+server's life; no other request does.
+
+*A row* (`LIST_ROW`): `harness`, `session`, `path`, `changed` (the last change, null for
+an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (how many;
+null where the session's subagents folder could not be listed),
+`folder`, `started`, `by_program` (true where the record says a program started the
+session, else null), `name` (one typed for the session in the harness, else null),
+`model`, `activity` (`{at, who, text}`: the newest thing said, `who` being `you`, `agent`
+or null, `text` cut at 300 bytes; or null), `prompt` (`{at, text, truncated}`: the newest
+prompt a person typed, `text` cut at `TEXT_MAX` bytes; or null) and `recent` (true for a
+session not started by a program that changed within the setting `list.recent_s` of
+`now`).
+
+*`/api/list`*: `now` (the time the answer was cut at), `today` (the server's local date,
+`YYYY-MM-DD`), `all` (the sessions before the filters) and `total` (after them), both of
+both kinds; `unreadable` (compressed Codex rollouts left out, null when Codex's root was
+not listed); `roots` (`{harness, root, reason, parts}` per harness whose root was not
+read whole, below); `harnesses` (`{harness, count}` for each harness whose root was
+listed, under every filter but `harness`); and `groups`, in order.
+
+An item of `roots` is one of two. For a root that could not be listed, `reason` says why
+and `parts` is null; `root` is null when the config naming it could not be read. For a
+root that was listed but holds folders or files that could not be, `reason` is null and
+`parts` is how many: their sessions are in no count, so `all`, `total` and that harness's
+count are short by them, and the item is how the answer says its counts are not of every
+session.
+
+A harness that is not on the machine is told apart from one that could not be read. A
+harness whose root is its default one (no key of sessions' config names it) and does not
+exist is in neither `roots` nor `harnesses`. A root the config names that does not exist,
+and any root that exists and cannot be listed, is in `roots` with the reason, and that
+harness has no item in `harnesses`: no count is given for what was not read. With no
+harness on the machine and nothing failing, `all` is 0 and `roots` is empty.
+
+The groups, without `find`:
+
+* `{key: "recent", count, rows, before}`: the sessions with `recent` true, the first 30 as
+  rows. Always there, with `count` 0 when it is empty. These are sessions started in a
+  terminal: one a program started is in its day, however lately it changed.
+* `{key: "YYYY-MM-DD", count, rows, before, program: {count}}` for each of the newest
+  seven local calendar days that hold a session not in `recent`: `count` and `rows` (the
+  first 8) are the sessions started in a terminal, `program.count` the ones a program
+  started. A session whose record does not say how it started is listed with the ones
+  started in a terminal.
+* `{key: "earlier", count, oldest, before}`, only when a session is left: `count` of both
+  kinds, `oldest` the oldest change among them (null when none has a change time), no
+  rows.
+
+With `find`, the one group is `{key: "found", count, rows, before}`: the matches of both
+kinds, the first 30 as rows. A `before` is the place to ask `/api/more` from, null when
+the rows hold the whole group; `earlier`'s is where its first day starts. `total` is the
+sum of every `count` and every `program.count`.
+
+*`/api/more`* takes `group` (`recent`, `found`, a day's key, `undated` or `earlier`),
+`kind` (`main`, the default, or `program`, which only a day has), `before` (a place an
+answer gave; left out, the group's start), `now`, and the filters. `now` is the `now` of
+the list answer the page is paging from, so the groups are cut where that list cut them;
+left out, the server's clock is used. It answers one of:
+
+* `recent`, a day, `found`: `{group, kind, rows, before}`, the next 30 rows; `kind` is
+  `main` for the sessions started in a terminal, `program` for the ones a program
+  started, and null for `found`, whose rows are of both.
+* `earlier`: `{groups, before, left}`: the next older days, as many as hold 30 sessions
+  between them, each in the list's day shape; `left` is how many sessions remain after
+  them. Sessions with no change time come last, as the day `undated`.
+
+A session that does not change between two calls is answered once and never skipped; one
+that changes moves to the front and is in the next `/api/list`.
+
+*`/api/session`* takes `harness` and `session` and answers the row's keys plus `reply`
+(`{at, text, truncated}`: the model's newest message when no user message of any kind
+follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (the 8 that changed
+last, newest first, each `{description, agent_type, started, last_at, last}`, `last`
+being its newest message cut at 300 bytes; null when they could not be listed), `more`
+(how many were not listed; null with `subagents`, and when some of them could not be
+listed) and `resume` (`{command, folder}`: the harness's command for picking the session
+up again and the folder to run it in, null where it runs anywhere; `resume` itself is
+null for a harness with no command, and for one whose command must be run in the
+session's folder when that folder was not read). It says nothing of whether the session
+is working. An id that is not a main session's (a subagent's, a spawned Codex thread's,
+an unknown one) is refused.
+
+*`/api/folders`*: `folders` (`{folder, count, changed}`, newest change first, at most 200,
+`count` of both kinds) and `more`, how many folders were left off.
+
+A filter, group, kind or `before` that is not one, and a config that cannot be read, are
+refused with the reason. Text a person or model wrote, a typed name, a subagent's
+description and a root's reason are marked `redact`; folders, paths and roots are marked
+`path`.
+
 The page's assets are what the repository's web build writes from `packages/sessions/web/`
 into this package's `web/`: `page.js`, the page, and `window.js`, the block other pages
 may place.
@@ -52,6 +159,7 @@ from __future__ import annotations
 
 from moxi import modules
 
+from .lists import MAIN, PROGRAM
 from .shape import HARNESSES
 from .view import TEXT_MAX  # the most of one message's text an answer carries, in bytes
 
@@ -65,6 +173,13 @@ ID_MAX = 256
 #: The most turns one answer holds, and how many it holds unless asked.
 TURNS_MAX = 50
 TURNS_DEFAULT = 5
+#: The longest `since`, `until` or `now`, `find`, `folder`, group key and list place a
+#: request takes. A place is a change time, a harness and a session id.
+SECONDS_MAX = 32
+FIND_MAX = 256
+FOLDER_MAX = 4096
+GROUP_MAX = 32
+PLACE_MAX = ID_MAX + 64
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
@@ -237,6 +352,103 @@ SUBAGENTS = {
     "unreadable_parts": lb.Out("list", items=UNREADABLE_PART),
 }
 
+#: `{at, who, text}`: the newest thing said in a session, or null.
+SAID = lb.Out("table", nullable=True,
+              items={"at": _MAYBE_FLOAT, "who": _MAYBE, "text": _SAYS})
+
+#: `{at, text, truncated}`: one message, its text cut at `TEXT_MAX` bytes, or null.
+MESSAGE = lb.Out("table", nullable=True,
+                 items={"at": _MAYBE_FLOAT, "text": _SAYS, "truncated": _BOOL})
+
+_ROW = {
+    "harness": _TEXT,
+    "session": _TEXT,
+    "path": _PATH,
+    "changed": _MAYBE_FLOAT,
+    "size": _MAYBE_INT,
+    "subagents": _MAYBE_INT,
+    "folder": _MAYBE_PATH,
+    "started": _MAYBE_FLOAT,
+    "by_program": _MAYBE_BOOL,
+    "name": _MAYBE_SAYS,
+    "model": _MAYBE,
+    "activity": SAID,
+    "prompt": MESSAGE,
+    "recent": _BOOL,
+}
+
+#: One session of a list (see the module's "A row").
+LIST_ROW = lb.Out("table", items=_ROW)
+_ROWS = lb.Out("list", items=LIST_ROW)
+
+#: One group of a list. Every group has `key`, `count` and `before`; `recent`, a day and
+#: `found` have `rows`; a day has `program`; `earlier` has `oldest`.
+GROUP = lb.Out("table", items={
+    "key": _TEXT,
+    "count": _INT,
+    "rows": _ROWS,
+    "before": _MAYBE,
+    "program": lb.Out("table", items={"count": _INT}),
+    "oldest": _MAYBE_FLOAT,
+})
+_GROUPS = lb.Out("list", items=GROUP)
+
+#: `/api/list` (see the module).
+LIST = {
+    "shape": _INT,
+    "now": lb.Out("float"),
+    "today": _TEXT,
+    "all": _INT,
+    "total": _INT,
+    "unreadable": _MAYBE_INT,
+    "roots": lb.Out("list", items=lb.Out("table", items={
+        "harness": _TEXT, "root": _MAYBE_PATH, "reason": _MAYBE_SAYS,
+        "parts": _MAYBE_INT})),
+    "harnesses": lb.Out("list", items=lb.Out("table", items={
+        "harness": _TEXT, "count": _INT})),
+    "groups": _GROUPS,
+}
+
+#: `/api/more`: `group`, `kind`, `rows` and `before` for `recent`, a day and `found`;
+#: `groups`, `before` and `left` for `earlier`.
+MORE = {
+    "shape": _INT,
+    "group": _TEXT,
+    "kind": _MAYBE,
+    "rows": _ROWS,
+    "groups": _GROUPS,
+    "before": _MAYBE,
+    "left": _INT,
+}
+
+#: One subagent of an opened session.
+SESSION_SUBAGENT = lb.Out("table", items={
+    "description": _MAYBE_SAYS,
+    "agent_type": _MAYBE,
+    "started": _MAYBE_FLOAT,
+    "last_at": _MAYBE_FLOAT,
+    "last": _MAYBE_SAYS,
+})
+
+#: `/api/session`: a row, and what an opened session shows under it.
+SESSION = {
+    "shape": _INT,
+    **_ROW,
+    "reply": MESSAGE,
+    "subagents": lb.Out("list", items=SESSION_SUBAGENT, nullable=True),
+    "more": _MAYBE_INT,
+    "resume": lb.Out("table", nullable=True,
+                     items={"command": _TEXT, "folder": _MAYBE_PATH}),
+}
+
+#: `/api/folders`.
+FOLDERS = {
+    "shape": _INT,
+    "folders": lb.Out("list", items=lb.Out("table", items={
+        "folder": _PATH, "count": _INT, "changed": _MAYBE_FLOAT})),
+    "more": _INT,
+}
+
 _HARNESS = lb.Field("enum", values=HARNESSES)
 _ID = lb.Field("string", max=ID_MAX)
 _MAYBE_ID = lb.Field("string", required=False, max=ID_MAX)
@@ -250,18 +462,45 @@ WINDOW_QUERY = {
 }
 SUBAGENTS_QUERY = {"harness": _HARNESS, "session": _ID}
 
+#: A time in a query: epoch seconds, written as a number. A query has no float, so it is
+#: a string the handler reads.
+_SECONDS = lb.Field("string", required=False, max=SECONDS_MAX)
+#: The list's filters but `folder`.
+_FILTERS = {
+    "harness": lb.Field("enum", required=False, values=HARNESSES),
+    "since": _SECONDS,
+    "until": _SECONDS,
+    "find": lb.Field("string", required=False, max=FIND_MAX),
+}
+LIST_QUERY = {**_FILTERS, "folder": lb.Field("string", required=False, max=FOLDER_MAX)}
+MORE_QUERY = {
+    "group": lb.Field("string", max=GROUP_MAX),
+    "kind": lb.Field("enum", required=False, values=(MAIN, PROGRAM)),
+    "before": lb.Field("string", required=False, max=PLACE_MAX),
+    "now": _SECONDS,
+    **LIST_QUERY,
+}
+SESSION_QUERY = {"harness": _HARNESS, "session": _ID}
+FOLDERS_QUERY = dict(_FILTERS)
+
 
 def _target(name: str) -> str:
     return f"moxi_sessions.pagehandlers:{name}"
 
 
 #: What the page server may hold before ui's doctor warns. Measured on Linux (Python
-#: 3.14) with the routes served in process and the server's modules loaded, over a 54 MB
-#: Claude Code transcript with 20 subagents, a 500-turn Codex rollout and a 500-turn
-#: OpenCode session, each window read at 5 and 50 turns and each subagent listing taken
-#: five times: RSS 35 MB before the first read and at most 43 MB after, and 7 open fds.
-#: The budget is about twice that, with room for the listener's own sockets.
-BUDGET = {"rss": "96M", "fds": 32}
+#: 3.14) with the routes served in process and the server's modules loaded: RSS 28 MB
+#: before the first read. Then, in one process: a 54 MB Claude Code transcript with 20
+#: subagents, a 500-turn Codex rollout and a 500-turn OpenCode session, each window read
+#: at 5 and 50 turns and each subagent listing taken five times (at most 43 MB); a list,
+#: a list by folder and the folders over a root of 5,000 small Claude Code sessions, 300
+#: of them changed in the last seven days, and twenty of those sessions opened (47 MB);
+#: every earlier day of that list paged to its end, so the last turn of each of the 5,000
+#: sessions is kept (52 MB). 7 open fds throughout. The budget is about twice that, with
+#: room for the listener's own sockets. A kept last turn holds at most `TEXT_MAX` bytes
+#: of the session's newest typed prompt; the seeded prompts were a few bytes each, so a
+#: root of long prompts holds more than this one did.
+BUDGET = {"rss": "104M", "fds": 32}
 
 PAGE = lb.Page(
     assets="web",
@@ -271,9 +510,19 @@ PAGE = lb.Page(
                  returns=WINDOW),
         lb.Route("/api/subagents", "read", _target("subagents"), query=SUBAGENTS_QUERY,
                  returns=SUBAGENTS),
+        lb.Route("/api/list", "read", _target("listing"), query=LIST_QUERY,
+                 returns=LIST),
+        lb.Route("/api/more", "read", _target("more"), query=MORE_QUERY, returns=MORE),
+        lb.Route("/api/session", "read", _target("session"), query=SESSION_QUERY,
+                 returns=SESSION),
+        lb.Route("/api/folders", "read", _target("folders"), query=FOLDERS_QUERY,
+                 returns=FOLDERS),
     ),
 )
 
-__all__ = ["AT", "BUDGET", "HEADER", "ID_MAX", "LIMIT_WINDOW", "PAGE", "RECORD",
+__all__ = ["AT", "BUDGET", "FIND_MAX", "FOLDERS", "FOLDERS_QUERY", "FOLDER_MAX", "GROUP",
+           "GROUP_MAX", "HEADER", "ID_MAX", "LIMIT_WINDOW", "LIST", "LIST_QUERY",
+           "LIST_ROW", "MESSAGE", "MORE", "MORE_QUERY", "PAGE", "PLACE_MAX", "RECORD",
+           "SAID", "SECONDS_MAX", "SESSION", "SESSION_QUERY", "SESSION_SUBAGENT",
            "SUBAGENT", "SUBAGENTS", "SUBAGENTS_QUERY", "TEXT_MAX", "TURNS_DEFAULT",
            "TURNS_MAX", "UNREADABLE_PART", "WINDOW", "WINDOW_QUERY"]
