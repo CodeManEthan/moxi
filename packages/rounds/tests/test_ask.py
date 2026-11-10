@@ -110,7 +110,7 @@ def test_help_says_what_ask_does(capsys):
 
 # -- the origin --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("pointer", ["comms:4611686018427393782",
+@pytest.mark.parametrize("pointer", ["comms:1234567",
                                      "https://example.com/thread/7#note",
                                      "file:design.md#read-times", "file:reports/pass-1.md#l2"])
 def test_an_origin_of_each_shape_is_recorded_as_given(rounds, pointer):

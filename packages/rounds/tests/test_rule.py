@@ -236,7 +236,7 @@ def test_an_id_is_one_past_the_highest_the_log_holds(rounds):
 # -- the pointer -------------------------------------------------------------------------
 
 @pytest.mark.parametrize("pointer", [
-    "comms:4611686018427393782", "0a1b2c3d@2026-01-02T03:04Z",
+    "comms:1234567", "0a1b2c3d@2026-01-02T03:04Z",
     "https://example.com/pages/7#answers", "file:design.md#rulings"])
 def test_a_pointer_of_each_shape_is_recorded_as_given(rounds, pointer):
     assert run("proj-a/a-round", record=pointer) == 0

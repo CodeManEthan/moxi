@@ -8,7 +8,7 @@ from moxi_rounds import pointers
 
 RIGHT = [
     ("comms:12", pointers.COMMS),
-    ("comms:4611686018427393782", pointers.COMMS),
+    ("comms:1234567", pointers.COMMS),
     ("0a1b2c3d@2026-01-02T03:04Z", pointers.SESSION),
     ("0A1B2C3D4E5F@2026-01-02T03:04:05Z", pointers.SESSION),
     ("https://example.com/pages/7?tab=2#answers", pointers.URL),
