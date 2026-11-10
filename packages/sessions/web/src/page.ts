@@ -42,7 +42,8 @@ import "./list-view.ts";
 const TAG = "moxi-sessions-page";
 
 // The transcript at the list's width, with no accent, warning or error colour: a line
-// that says something went wrong is in the text colour, and what only informs is dim.
+// that says something went wrong is in the text colour, and what only informs is dim. A
+// record that failed says so in a word in the heavier weight (`failureWord`).
 const STYLES = [BASE, VIEW, css`
   :host([data-view="session"]) { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
   .crumb, .vhead { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; min-width: 0;
@@ -65,7 +66,7 @@ const STYLES = [BASE, VIEW, css`
   .problem, a, button.link { color: var(--moxi-text); }
   .warn { color: var(--moxi-text-dim); }
   .msg[data-role="user"] { border-left-color: var(--moxi-border-strong); }
-  .line.result[data-error="true"] { color: var(--moxi-text); }
+  .line.result[data-error="true"], .word { color: var(--moxi-text); }
   .rule[data-marker="compaction"], .rule[data-marker="turn_aborted"], .rule[data-marker="rollback"],
   .rule[data-marker="synthetic"] { color: var(--moxi-text-dim); }
 `];

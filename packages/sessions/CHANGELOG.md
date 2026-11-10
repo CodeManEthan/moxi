@@ -45,8 +45,10 @@
   session, entrypoint, the file read) is behind `Details`. A subagent and a session
   another one started keep a heading by id or title, with those facts in the open. The
   turns, "Earlier", `Refresh` and the subagents are as before, without the accent,
-  warning and error colours. A read on its way and a read that failed each say so in
-  words, and a harness whose sessions were not all read has its line under the header.
+  warning and error colours. A tool result that failed starts with `Failed` and the
+  message Claude Code writes for a request that failed starts with `Error`, each in the
+  heavier weight, here and in the window block. A read on its way and a read that failed
+  each say so in words, and a harness whose sessions were not all read has its line under the header.
 - `/api/list` and `/api/session` carry `home`, the home folder of the account the page
   server runs as (null when it has none), marked as a path. The page writes a folder
   under it with `~`: the resume line's folder, the path in the Folder menu and the

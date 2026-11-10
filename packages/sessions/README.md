@@ -371,7 +371,9 @@ oldest first. Each message shows as
 text, cut at 2,000 characters with a way to show the rest; each tool call as one line
 naming the tool and what it was called on; each tool result as its size and whether it
 failed; compactions, aborted turns and rollbacks as labelled rules; and each request's
-model and token counts. "Earlier" shows the turns before. The page lists the session's
+model and token counts. A result that failed starts with `Failed`, and the message Claude
+Code writes for a request that failed starts with `Error`, each in heavier text: the page
+marks what went wrong with a word, not a colour. "Earlier" shows the turns before. The page lists the session's
 subagents, and opening one shows its turns the same way. While the turns are read the page
 says so. A session that can't be found or read shows why, and when its harness's sessions
 were not all read the line that says so under the list stands under the header too.

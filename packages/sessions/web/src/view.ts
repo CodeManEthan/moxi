@@ -9,7 +9,8 @@
 // Each message's text is cut at 2,000 characters, with a button that shows the rest the
 // page server sent, and a line when the server itself cut the text at 64 KiB. A refusal
 // (a session the page server can't find or read, a `before` it can't use) shows its
-// reason.
+// reason. A tool result that failed and a message its harness wrote for a failed request
+// each start with a word that says so, in the heavier weight.
 //
 // What selecting a subagent or the parent session does is the component's: the page
 // navigates to its route, the block opens it in place. The page also draws its own header
@@ -192,6 +193,11 @@ export abstract class SessionView extends LitElement {
         : html`<p class="dim" data-line="no-records">No records in these turns.</p>`}`;
   }
 
+  /** A record's word for what went wrong, in the heavier weight, before its line. */
+  #word(word: string | null) {
+    return word !== null ? html`<strong class="word" data-line="word">${word}</strong> ` : nothing;
+  }
+
   #item(item: Item) {
     const unknown = unknownLine(item.unknown) ?? nothing;
     switch (item.type) {
@@ -200,7 +206,7 @@ export abstract class SessionView extends LitElement {
         const text = textView(item.row, open);
         return html`<li class="msg" data-kind="message" data-key=${item.key} data-role=${item.role}
           data-reasoning=${item.reasoning ? "true" : "false"} title=${unknown}>
-          <div class="who"><span>${item.label}</span>${item.tags.map((tag) => html`<span class="tag">${tag}</span>`)}</div>
+          <div class="who">${this.#word(item.word)}<span>${item.label}</span>${item.tags.map((tag) => html`<span class="tag">${tag}</span>`)}</div>
           ${text.shown !== null ? html`<p class="text" data-line="text">${text.shown}</p>`
             : html`<p class="dim" data-line="text">(hidden)</p>`}
           ${text.long ? html`<p><button type="button" class="link" data-action="expand" aria-expanded=${open ? "true" : "false"}
@@ -212,9 +218,9 @@ export abstract class SessionView extends LitElement {
         return html`<li class="line call" data-kind="tool_call" title=${unknown}><code>${item.line}</code></li>`;
       case "result":
         return html`<li class="line result" data-kind="tool_result" data-error=${item.error ? "true" : "false"}
-          title=${unknown}>${item.line}</li>`;
+          title=${unknown}>${this.#word(item.word)}${item.line}</li>`;
       case "rule":
-        return html`<li class="rule" data-kind="marker" data-marker=${item.marker} title=${unknown}><span>${item.line}</span></li>`;
+        return html`<li class="rule" data-kind="marker" data-marker=${item.marker} title=${unknown}><span>${this.#word(item.word)}${item.line}</span></li>`;
       case "request":
         return html`<li class="line request" data-kind="request" title=${unknown}>${item.line}</li>`;
       default:

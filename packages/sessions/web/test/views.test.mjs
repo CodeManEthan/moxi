@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AGENT_ONLY_CLAUDE, CUT, charCount, cutAt, entryView, fmtBytes, fmtCount, fmtDuration, fmtTime,
-  headerFields, headingOf, HIDDEN, itemOf, keepEarlier, LIMIT_LINE, listingView, markerLine,
+  AGENT_ONLY_CLAUDE, CUT, charCount, cutAt, entryView, ERROR, ERROR_FLAG, FAILED, failureWord, fmtBytes, fmtCount,
+  fmtDuration, fmtTime, headerFields, headingOf, HIDDEN, itemOf, keepEarlier, LIMIT_LINE, listingView, markerLine,
   NO_SUBAGENTS, pages, parseRoute, requestLine, routeOf, sentLine, START_LINE, subagentsPath,
   textView, UNKNOWN_ROUTE, unknownLine, windowPath, windowView,
 } from "../src/views.ts";
@@ -168,6 +168,49 @@ test("a tool call is one line, its summary; a result is its size and error flag"
   assert.deepEqual([result.type, result.line, result.error], ["result", "Result: 2.0 KB", false]);
   const failed = itemOf({ kind: "tool_result", raw_kind: "user", at: at(3), unknown: [], is_error: true, size_bytes: 10 });
   assert.deepEqual([failed.line, failed.error], ["Result: error, 10 B", true]);
+});
+
+test("a record that failed is called by a word, and no other record is", () => {
+  const result = (over) => ({ kind: "tool_result", raw_kind: "user", at: at(3), unknown: [], size_bytes: 10, ...over });
+  const marker = (name) => ({ kind: "marker", raw_kind: "system", at: at(4), unknown: [], marker: name });
+  const failing = [
+    [result({ is_error: true }), FAILED, "result"],
+    [message("API Error: 529", { role: "assistant", synthetic: true, flags: [ERROR_FLAG] }), ERROR, "rule"],
+    [message("API Error: 529", { role: "assistant", flags: [ERROR_FLAG, "isMeta"] }), ERROR, "message"],
+  ];
+  for (const [row, word, type] of failing) {
+    assert.equal(failureWord(row), word);
+    const item = itemOf(row);
+    assert.deepEqual([item.type, item.word], [type, word]);
+  }
+  assert.deepEqual([FAILED, ERROR], ["Failed", "Error"]);
+  // The word stands before the record's own line, which is as it was.
+  assert.equal(itemOf(failing[0][0]).line, "Result: error, 10 B");
+  assert.equal(itemOf(failing[1][0]).line, "Synthetic: API Error: 529");
+
+  const ordinary = [
+    result({ is_error: false }), result({ is_error: null }), result({}),
+    message("hello"), message("done", { role: "assistant", flags: ["isMeta"] }),
+    message("thinking", { role: "assistant", reasoning: true }),
+    message("No response requested.", { role: "assistant", synthetic: true }),
+    { kind: "message", raw_kind: "user", at: at(0), unknown: [], role: "user", text: "no flags sent" },
+    marker("compaction"), marker("turn_aborted"), marker("rollback"), marker("turn_end"),
+  ];
+  for (const row of ordinary) {
+    assert.equal(failureWord(row), null);
+    assert.equal(itemOf(row).word, null);
+  }
+  // A call, a request and a note have no word: none of them says how anything ended.
+  for (const row of [
+    { kind: "tool_call", raw_kind: "assistant", at: at(1), unknown: [], name: "Read", call_id: "c1", summary: "Read /work/a" },
+    { kind: "request", raw_kind: "assistant", at: at(5), unknown: [], request_id: "r1", model: "claude-model-x" },
+    { kind: "limits", raw_kind: "event_msg", at: at(6), unknown: [], limit_id: "codex", windows: [] },
+    { kind: "malformed", raw_kind: "malformed", at: at(7), unknown: [], why: "not JSON" },
+    { kind: "other", raw_kind: "system/api_error", at: at(8), unknown: [], recognised: true },
+  ]) {
+    assert.equal(failureWord(row), null);
+    assert.equal("word" in itemOf(row), false);
+  }
 });
 
 test("markers are labelled rules", () => {
