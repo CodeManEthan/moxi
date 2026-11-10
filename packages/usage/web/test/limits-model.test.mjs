@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseLimits } from "../src/feed.ts";
-import { harnessName, limitLabel, limitRoute, limitsModel, spanWords } from "../src/limits-model.ts";
+import { harnessName, limitLabel, limitRoute, limitsModel, percentWords, spanWords } from "../src/limits-model.ts";
 
 /** A clock that reads every moment in UTC, on 24 hours. */
 const UTC = {
@@ -69,8 +69,30 @@ test("the tick is the share of the window behind now, and is absent with no know
   assert.deepEqual(tick({ opened: null }), { fill: 49, tick: null, title: "49% used" });
   assert.equal(tick({ resets_at: null }).tick, null);
   assert.equal(tick({ opened: "2026-11-08T21:34:00Z" }).tick, null);
-  assert.equal(tick({ used_percent: 48.6 }).title, "49% used, 52% of the window gone");
   assert.equal(tick({ used_percent: 104 }).fill, 100);
+});
+
+test("a percent is a whole number rounded down, and never says more than is used", () => {
+  const first = (extra, now = NOW) => model([row(extra)], now).groups[0].rows[0];
+  assert.equal(first({ used_percent: 48.6 }).used, "48% used");
+  assert.equal(first({ used_percent: 48.6 }).meter.title, "48% used, 52% of the window gone");
+  assert.equal(first({ used_percent: 0 }).used, "0% used");
+  assert.equal(first({ used_percent: 0.4 }).used, "under 1% used");
+  assert.equal(first({ used_percent: 0.4 }).meter.fill, 0);
+  assert.equal(first({ used_percent: 99.6 }).used, "99% used");
+  assert.equal(first({ used_percent: 99.6 }).meter.fill, 99);
+  assert.equal(first({ used_percent: 100 }).used, "100% used");
+  assert.equal(first({ used_percent: 104 }).used, "100% used");
+  // The clock a minute into a five-hour window, and a minute from its end.
+  assert.equal(first({}, at("2026-11-08T16:35:00Z")).meter.title, "49% used, under 1% of the window gone");
+  assert.equal(first({}, at("2026-11-08T21:33:00Z")).meter.title, "49% used, 99% of the window gone");
+  assert.deepEqual([percentWords(0), percentWords(0.01), percentWords(1), percentWords(99.99), percentWords(100)],
+                   ["0%", "under 1%", "1%", "99%", "100%"]);
+});
+
+test("a scoped limit's lead names it inside the sentence", () => {
+  const found = model([row(), claudeOpus({ full_at: "2026-11-10T22:29:00Z" })]);
+  assert.equal(found.warning.lead, "Claude's weekly Opus limit fills Tue at 22:29");
 });
 
 test("a row states only what its reading carries", () => {
@@ -121,8 +143,8 @@ test("the heading's read time is the newest row's, and a row read at another min
 
 test("one early row: it leads its group and the warning names it alone", () => {
   const found = model([row(), claudeWeek({ full_at: "2026-11-09T17:51:00Z" }), claudeOpus(), codex(), codexWeek()]);
-  assert.deepEqual(found.warning, { lead: "Claude weekly fills tomorrow at 17:51", before: "two days before it resets",
-                                    more: null, text: "Claude weekly fills tomorrow at 17:51, two days before it resets" });
+  assert.deepEqual(found.warning, { lead: "Claude's weekly limit fills tomorrow at 17:51", before: "two days before it resets",
+                                    more: null, text: "Claude's weekly limit fills tomorrow at 17:51, two days before it resets" });
   assert.deepEqual(labels(found.groups[0]), ["Weekly", "5-hour", "Weekly Opus"]);
   assert.equal(found.groups[0].rows[0].fills, "fills tomorrow 17:51");
   assert.equal(found.groups[0].rows[0].resets, "resets Wed 23:58");
@@ -133,13 +155,13 @@ test("two early rows: the soonest leads and the line names the other", () => {
   const found = model([row(), claudeWeek({ full_at: "2026-11-09T17:51:00Z" }),
                        claudeOpus({ full_at: "2026-11-10T22:29:00Z" }), codex(), codexWeek()]);
   assert.equal(found.warning.text,
-               "Claude weekly fills tomorrow at 17:51, two days before it resets · weekly Opus fills Tue 22:29");
+               "Claude's weekly limit fills tomorrow at 17:51, two days before it resets · weekly Opus fills Tue 22:29");
   assert.equal(found.warning.more, "weekly Opus fills Tue 22:29");
   assert.deepEqual(labels(found.groups[0]), ["Weekly", "Weekly Opus", "5-hour"]);
   const across = model([row(), claudeWeek({ full_at: "2026-11-09T17:51:00Z" }),
                         codex({ used_percent: 81, full_at: "2026-11-08T20:05:00Z" })]);
   assert.equal(across.warning.text,
-               "Codex 5-hour fills at 20:05, an hour before it resets · Claude weekly fills tomorrow 17:51");
+               "Codex's 5-hour limit fills at 20:05, an hour before it resets · Claude weekly fills tomorrow 17:51");
   assert.deepEqual(across.groups.map((group) => group.name), ["Codex", "Claude"]);
 });
 
@@ -148,9 +170,9 @@ test("three early rows: the soonest in full, the rest counted, the soonest group
                        claudeOpus({ full_at: "2026-11-10T22:29:00Z" }),
                        codex({ used_percent: 81, full_at: "2026-11-08T20:05:00Z" }), codexWeek()]);
   assert.deepEqual(found.warning, {
-    lead: "Codex 5-hour fills at 20:05", before: "an hour before it resets",
+    lead: "Codex's 5-hour limit fills at 20:05", before: "an hour before it resets",
     more: "2 more fill early, the next tomorrow 17:51",
-    text: "Codex 5-hour fills at 20:05, an hour before it resets · 2 more fill early, the next tomorrow 17:51" });
+    text: "Codex's 5-hour limit fills at 20:05, an hour before it resets · 2 more fill early, the next tomorrow 17:51" });
   assert.deepEqual(found.groups.map((group) => group.name), ["Codex", "Claude"]);
   assert.deepEqual(labels(found.groups[0]), ["5-hour", "Weekly"]);
   assert.deepEqual(labels(found.groups[1]), ["Weekly", "Weekly Opus", "5-hour"]);
@@ -173,7 +195,7 @@ test("how long before the reset is said in whole units, never more than it is", 
   assert.equal(spanWords(24 * 3600), "a day");
   assert.equal(spanWords(2 * 86400 + 6 * 3600), "two days");
   const close = model([row({ full_at: "2026-11-08T21:33:30Z" })]);
-  assert.deepEqual([close.warning.before, close.warning.text], [null, "Claude 5-hour fills at 21:33"]);
+  assert.deepEqual([close.warning.before, close.warning.text], [null, "Claude's 5-hour limit fills at 21:33"]);
   assert.equal(model([row({ full_at: "2026-11-08T20:00:00Z", resets_at: null })]).warning.before, null);
 });
 

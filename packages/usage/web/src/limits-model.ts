@@ -10,7 +10,7 @@ import type { Limits, Window } from "./feed.ts";
 
 /** The thin line beside a row's percent. */
 export interface LimitMeter {
-  /** The share used, 0 to 100: the line's heavy part. */
+  /** The share used, a whole number from 0 to 100, rounded down: the line's heavy part. */
   fill: number;
   /** How far through the window the clock is, 0 to 100; null when the window's start
    * or its reset is not known, and then no tick is drawn. */
@@ -60,7 +60,7 @@ export interface LimitGroup {
 /** The page's first line while a window fills before it resets. Drawn as the heavy
  * `lead`, then `, <before>` and ` · <more>`, each only when it is not null. */
 export interface Warning {
-  /** `Codex 5-hour fills at 20:05`. */
+  /** `Codex's 5-hour limit fills at 20:05`. */
   lead: string;
   /** `an hour before it resets`. */
   before: string | null;
@@ -104,7 +104,15 @@ export function limitRoute(harness: string, limitId: string, minutes: number): s
   return `limit/${encodeURIComponent(harness)}/${encodeURIComponent(limitId)}/${minutes}`;
 }
 
-const percent = (value: number): number => Math.round(Math.min(100, Math.max(0, value)));
+/** A share as a whole number, rounded down so the page never says more than is: 99.6
+ * is 99, and only a share that reached 100 is 100. */
+const percent = (value: number): number => Math.floor(Math.min(100, Math.max(0, value)));
+
+/** A share in words: `49%`, rounded down; `under 1%` for one above zero and below one,
+ * never `0%`; `100%` only at 100 or over. */
+export function percentWords(value: number): string {
+  return value > 0 && value < 1 ? "under 1%" : `${percent(value)}%`;
+}
 
 /** A row with the times its place and its words come from. */
 interface Drawn {
@@ -123,13 +131,14 @@ function drawn(source: Window, place: number, now: number, today: string | null,
   const full = fresh ? seconds(source.full_at) : null;
   const opened = seconds(source.opened);
   const minutes = source.window_minutes;
-  const used = fresh && source.used_percent !== null ? Math.round(source.used_percent) : null;
+  const share = fresh ? source.used_percent : null;
+  const used = share === null ? null : `${percentWords(share)} used`;
   let meter: LimitMeter | null = null;
-  if (used !== null) {
-    const tick = opened !== null && resets !== null && resets > opened
-      ? percent(100 * (now - opened) / (resets - opened)) : null;
-    meter = { fill: percent(used), tick,
-              title: tick === null ? `${used}% used` : `${used}% used, ${tick}% of the window gone` };
+  if (share !== null) {
+    const gone = opened !== null && resets !== null && resets > opened
+      ? 100 * (now - opened) / (resets - opened) : null;
+    meter = { fill: percent(share), tick: gone === null ? null : percent(gone),
+              title: gone === null ? `${used}` : `${used}, ${percentWords(gone)} of the window gone` };
   }
   const row: LimitRow = {
     key: `${source.harness}/${source.limit_id}/${minutes ?? ""}`,
@@ -138,7 +147,7 @@ function drawn(source: Window, place: number, now: number, today: string | null,
     minutes,
     state: fresh ? "fresh" : "reset",
     label: limitLabel(source),
-    used: used === null ? null : `${used}% used`,
+    used,
     meter,
     fills: full === null ? null : `fills ${whenWord(full, today, clock)}`,
     resets: fresh ? (resets === null ? null : `resets ${whenWord(resets, today, clock)}`)
@@ -184,7 +193,7 @@ function warning(early: Drawn[], today: string | null, clock: Clock): Warning | 
   const [first, second] = early;
   const full = first.full as number;
   const day = dayPart(full, today, clock);
-  const lead = `${harnessName(first.harness)} ${inSentence(first.row.label)} fills `
+  const lead = `${harnessName(first.harness)}'s ${inSentence(first.row.label)} limit fills `
     + `${day === null ? "" : `${day} `}at ${clock.time(full)}`;
   const span = first.resets === null ? null : spanWords(first.resets - full);
   const before = span === null ? null : `${span} before it resets`;
