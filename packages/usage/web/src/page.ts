@@ -34,6 +34,9 @@
 //                               Model, each a menu, and Cost / Tokens
 //   div[data-part=below]        the groups under the filter line:
 //     section[data-group=chart]    one bar a day or a month, its sentence and its table
+//     section[data-group=sessions] the range's dearest session and the count, and opened
+//                                  the week's dearest as two-line rows (moxi-ui-row), what
+//                                  they leave out, the earlier days, and the table
 //     section[data-group=projects|folders]  the dearest projects (or folders), and opened
 //                                  each with its share and cost, a row filtering Sessions
 //     section[data-group=models]   the dearest models, and opened each with share and cost
@@ -41,8 +44,8 @@
 //                                  opened the four classes and what caching saved
 //     section[data-group=prices]   how many models are priced and the table's date, and
 //                                  opened their prices and the acts that open under them
-//   moxi-usage-legacy           the views the page had before, each serving its section's
-//                               address until the section has its place under the filter line
+//   moxi-usage-legacy           one session's view as the page had it, serving that
+//                               session's address until it opens in its row
 //   div[data-part=foot]         when the sessions were last read, the files, the act
 //   div[data-part=lines]        dim lines: what the figures leave out, reads that failed
 //
@@ -60,23 +63,24 @@ import { css, html, LitElement, nothing, svg } from "lit";
 import { api, installed, subscribe } from "/m/ui/client.js";
 
 import {
-  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, SESSIONS, settled,
+  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress, SESSIONS, settled,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { chartDraw, chartGroup } from "./chart-model.ts";
 import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
-import { rangeDays, sumRows } from "./cost-model.ts";
+import { mostTo, rangeDays, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
 import {
   Feed, parseIndexEvent, parseLimits, parsePrices, parseReport, parseStatus, parseWindow, passOutcome,
 } from "./feed.ts";
 import type {
-  DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, Prices, ProjectRow, Report, Status, TermsRow, TermsTotal,
+  DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, Prices, ProjectRow, Report, SessionRow, Status, TermsRow,
+  TermsTotal,
 } from "./feed.ts";
 import {
   allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
-  modelsSectionPath, placesPath, placesSectionPath, termsSectionPath, watchState,
+  modelsSectionPath, placesPath, placesSectionPath, START, termsSectionPath, watchState,
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
 import {
@@ -93,6 +97,12 @@ import {
   BILL, DETAILS, FIND, KINDS_LABEL, PRICE_HEADS, PRICES_LABEL, pricesFor, pricesLeft, pricesSection, kindsSection,
 } from "./terms-model.ts";
 import type { Kinds, PricesModel, PricesPart } from "./terms-model.ts";
+import { OPEN, SessionList, sessionLine, sessionsClosed, sessionsTable, SESSIONS_LABEL, SHOW } from "./sessions-section.ts";
+import type { SessionLine, SessionsClosed, TablePart } from "./sessions-section.ts";
+import {
+  earlierLine, FIRST_TOP, firstHeading, PAGE, remainder, sessionLists, sessionName, sessionsPath,
+} from "./sessions-model.ts";
+import type { ListLine, SessionLists } from "./sessions-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
 import type { OpenedLimit } from "./window-model.ts";
 
@@ -236,6 +246,14 @@ const STYLES = css`
   .rows .act { color: var(--moxi-text-dim); }
   .acts .act + .act { margin-left: 18px; }
   .one .d { color: var(--moxi-text-dim); }
+  .sub1 { padding: 7px 0 0; font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .ses { min-width: 0; }
+  .ses .do { font-size: var(--moxi-font-size-sm); line-height: 18px; color: var(--moxi-text-dim); }
+  .more { display: flex; justify-content: space-between; gap: 18px; margin-top: 5px; padding: 9px 0 8px;
+          border-top: 1px solid var(--moxi-border); font-size: var(--moxi-font-size-sm); line-height: 18px;
+          color: var(--moxi-text-dim); }
+  .more .act { flex: none; color: var(--moxi-text); }
+  .more + .more { margin-top: 0; padding-top: 0; border-top: 0; }
   .tr2.p5 { grid-template-columns: minmax(0, 1fr) 74px 74px 86px 82px; font-size: var(--moxi-font-size-sm); }
   .tr2.th { color: var(--moxi-text-dim); align-items: end; }
   .tr2.th span { white-space: normal; }
@@ -316,7 +334,7 @@ export class UsagePage extends LitElement {
   /** The chart's table stands in its place. */
   asTable = false;
   /** The opened section whose table is shown under its rows. */
-  sectionTable: SectionKey | null = null;
+  sectionTable: SectionKey | "sessions" | null = null;
   /** What is open under the price table. */
   pricesPart: PricesPart | null = null;
   /** What `Find a model` searches for. */
@@ -343,6 +361,18 @@ export class UsagePage extends LitElement {
    * theirs is set. */
   #placesSection: Feed<Report<ProjectRow>> | null = null;
   #modelsSection: Feed<Report<ModelRow>> | null = null;
+  /** The Sessions section's closed row: the range's dearest session and the count. */
+  #sessionsTop: Feed<Report<SessionRow>> | null = null;
+  /** The opened section's lists: the first list, the earlier days' count and total from
+   * one row, and their rows once shown; each for the days and filters in `#listsKey`. */
+  #lists: SessionLists | null = null;
+  #listsKey: string | null = null;
+  #firstList: SessionList | null = null;
+  #earlierTop: Feed<Report<SessionRow>> | null = null;
+  #earlierList: SessionList | null = null;
+  /** Today's two dearest sessions under no filter, for the Cost row's `most to`. */
+  #mostToday: Feed<Report<SessionRow>> | null = null;
+  #mostPath: string | null = null;
   /** Token kinds' and Prices' cost terms, under every filter, and the price table's rates
    * of their models, read once the terms have answered. */
   #terms: Feed<Report<TermsRow, TermsTotal>> | null = null;
@@ -412,8 +442,10 @@ export class UsagePage extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const feed of [this.#limits, this.#status, this.#daily]) feed?.close();
-    this.#limits = this.#status = this.#daily = null;
+    for (const feed of [this.#limits, this.#status, this.#daily, this.#mostToday]) feed?.close();
+    this.#limits = this.#status = this.#daily = this.#mostToday = null;
+    this.#mostPath = null;
+    this.#closeLists();
     this.#closeWindow();
     this.#closeBelow();
     for (const stop of this.#stops) stop();
@@ -519,14 +551,15 @@ export class UsagePage extends LitElement {
   /** Every read under the filter line that is open, each once. */
   #belowFeeds(): { close(): void; refresh(): Promise<void> }[] {
     return [...new Set([this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
-                        this.#modelsSection, this.#terms, this.#prices])].filter((feed) => feed !== null);
+                        this.#modelsSection, this.#terms, this.#prices, this.#sessionsTop])].filter((feed) => feed !== null);
   }
 
   #closeBelow(): void {
     for (const feed of this.#belowFeeds()) feed.close();
     this.#chart = this.#figures = this.#allTime = this.#places = this.#models = null;
-    this.#placesSection = this.#modelsSection = this.#terms = this.#prices = null;
+    this.#placesSection = this.#modelsSection = this.#terms = this.#prices = this.#sessionsTop = null;
     this.#pricesPath = null;
+    this.#closeLists();
     this.#closePart();
     this.#asked = this.#askedAllTime = null;
   }
@@ -555,7 +588,8 @@ export class UsagePage extends LitElement {
     const paths = { chart: chartPath(state, today), figures: figuresPath(state, today),
                     places: placesPath(state, today, this.#folders()), models: modelsPath(state, today),
                     placesSection: placesSectionPath(state, today, this.#folders()),
-                    modelsSection: modelsSectionPath(state, today), terms: termsSectionPath(state, today) };
+                    modelsSection: modelsSectionPath(state, today), terms: termsSectionPath(state, today),
+                    sessions: sessionsPath(state, today, null, 1) };
     const asked = JSON.stringify(paths);
     if (asked !== this.#asked) {
       this.#asked = asked;
@@ -571,7 +605,17 @@ export class UsagePage extends LitElement {
       this.#modelsSection = paths.modelsSection === paths.models ? this.#models
         : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update);
       this.#terms = new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update);
+      this.#sessionsTop = new Feed<Report<SessionRow>>(() => api("usage", paths.sessions), parseReport, update);
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) void feed.refresh();
+    }
+    this.#followLists(state, today);
+    // Today's two dearest sessions, for the Cost row, under no filter.
+    const mostPath = sessionsPath(START, today, { since: today, until: today }, 2);
+    if (mostPath !== this.#mostPath) {
+      this.#mostPath = mostPath;
+      this.#mostToday?.close();
+      this.#mostToday = new Feed<Report<SessionRow>>(() => api("usage", mostPath), parseReport, update);
+      void this.#mostToday.refresh();
     }
     // The price table is read for the models the terms answer holds, again when they change.
     const terms = this.#terms?.value ?? null;
@@ -592,6 +636,51 @@ export class UsagePage extends LitElement {
     }
   }
 
+  /** The opened Sessions section's lists follow the address, the range and the filters:
+   * read when the section opens, again under new ones, and closed with the section. */
+  #followLists(state: PageState, today: string): void {
+    const lists = this.#at.piece === "sessions" ? sessionLists(state.range, today) : null;
+    if (lists === null) {
+      this.#closeLists();
+      return;
+    }
+    const firstPath = (top: number, skip: number): string => sessionsPath(state, today, lists.first, top, skip);
+    const earlier = lists.earlier;
+    const key = JSON.stringify([firstPath(1, 0), earlier === null ? null : sessionsPath(state, today, earlier, 1)]);
+    if (key === this.#listsKey) return;
+    this.#closeLists();
+    const update = () => this.requestUpdate();
+    const ask = (path: string) => api("usage", path);
+    this.#lists = lists;
+    this.#listsKey = key;
+    this.#firstList = new SessionList(ask, firstPath, FIRST_TOP, update);
+    void this.#firstList.refresh();
+    if (earlier !== null) {
+      const top = sessionsPath(state, today, earlier, 1);
+      this.#earlierTop = new Feed<Report<SessionRow>>(() => api("usage", top), parseReport, update);
+      void this.#earlierTop.refresh();
+    }
+  }
+
+  #closeLists(): void {
+    for (const feed of [this.#firstList, this.#earlierTop, this.#earlierList]) feed?.close();
+    this.#firstList = this.#earlierTop = this.#earlierList = null;
+    this.#lists = this.#listsKey = null;
+  }
+
+  /** `Show` under the earlier line: its rows, thirty at a time. */
+  #showEarlier(): void {
+    const lists = this.#lists;
+    const earlier = lists?.earlier ?? null;
+    if (earlier === null || this.#earlierList !== null) return;
+    const state = heldState();
+    const today = lists?.today ?? this.#today();
+    this.#earlierList = new SessionList((path) => api("usage", path),
+      (top, skip) => sessionsPath(state, today, earlier, top, skip), PAGE, () => this.requestUpdate());
+    void this.#earlierList.refresh();
+    this.requestUpdate();
+  }
+
   #indexEvent(data: unknown): void {
     const event = parseIndexEvent(data);
     if (event === null) return;
@@ -600,7 +689,8 @@ export class UsagePage extends LitElement {
     if (!event.running) {
       void this.#status?.refresh();
       void this.#daily?.refresh();
-      for (const feed of [...this.#belowFeeds(), this.#window]) void feed?.refresh();
+      for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#firstList, this.#earlierTop,
+                          this.#earlierList]) void feed?.refresh();
     }
     this.requestUpdate();
   }
@@ -653,6 +743,11 @@ export class UsagePage extends LitElement {
     }
     if (this.#modelsSection !== this.#models) other("The Models section", this.#modelsSection);
     other("Token kinds and Prices", this.#terms);
+    other("The Sessions section", this.#sessionsTop);
+    other("The sessions listed", this.#firstList?.feed ?? null);
+    other("The earlier sessions", this.#earlierTop);
+    other("The earlier sessions listed", this.#earlierList?.feed ?? null);
+    other("Today's dearest sessions", this.#mostToday);
     if (this.#prices !== null) others.push({ what: "The price table", read: this.#prices, report: false });
     const windowRead = this.#window ?? refusedWindow;
     if (windowRead !== null) others.push({ what: "The opened limit", read: windowRead, report: false });
@@ -664,7 +759,7 @@ export class UsagePage extends LitElement {
                            row: openedSource, now: limits.now() }),
     };
     const frame = frameModel({
-      limits, status, daily, event: this.#event, pass: this.#pass, most: null, range, others,
+      limits, status, daily, event: this.#event, pass: this.#pass, most: this.#most(today), range, others,
       unknownAddress: at.piece === "unknown", now: limits.now(),
     });
     const groups = frame.limits.groups;
@@ -677,6 +772,7 @@ export class UsagePage extends LitElement {
       : chartGroup(report, state.range, state.measure, today, this.asTable);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below || group?.nothing ? [] : [
+      this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
       this.#section(this.#folders() ? "folders" : "projects", this.#placesSection,
                     placesSection(this.#placesSection?.value ?? null, this.#folders())),
       this.#section("models", this.#modelsSection, modelsSection(this.#modelsSection?.value ?? null)),
@@ -948,6 +1044,91 @@ export class UsagePage extends LitElement {
         </div>` : nothing}
       </div>
     </section>`;
+  }
+
+  /** `most to <session> $4.21, <session> $3.67`: today's two dearest sessions, named. */
+  #most(today: string): string | null {
+    const rows = this.#mostToday?.value?.rows ?? [];
+    return mostTo(rows.map((row) => ({ name: sessionName(row, today).name, cost: row.cost })));
+  }
+
+  /** Sessions: the range's dearest session and how many there are; opened, the range's
+   * last seven days dearest first, what they leave out, the earlier days, and the table. */
+  #sessions(model: SessionsClosed | null, today: string) {
+    const open = this.#at.piece === "sessions";
+    if (model === null) {
+      const feed = this.#sessionsTop;
+      if (!open || feed === null || feed.value !== null || !feed.loading) return nothing;
+      return html`<section class="grp is-open" data-group="sessions">
+        <div class="gk">${SESSIONS_LABEL}</div>
+        <div class="gl"><p class="none" data-part="reading">${READING}</p></div>
+      </section>`;
+    }
+    const target = open ? NOTHING_OPEN : SESSIONS;
+    return html`<section class=${open ? "grp is-open" : "grp"} data-group="sessions">
+      <div class="gk">${SESSIONS_LABEL}</div>
+      <div class="gl">
+        <div class="one"><span data-part="closed">${model.closed ?? nothing}</span><a class="t" data-part="count"
+          href=${addressPath(target)} aria-expanded=${String(open)}
+          @click=${(event: MouseEvent) => this.#follow(event, target)}>${open ? CLOSE : model.count}</a></div>
+        ${open ? this.#sessionLists(today) : nothing}
+      </div>
+    </section>`;
+  }
+
+  #sessionLists(today: string) {
+    const lists = this.#lists;
+    const first = this.#firstList?.feed ?? null;
+    if (lists === null || first === null) return nothing;
+    if (first.value === null) {
+      return first.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing;
+    }
+    const projects = !this.#folders();
+    const firstRows = first.value.rows;
+    const earlier = earlierLine(lists, this.#earlierTop?.value ?? null);
+    const shown = this.#earlierList?.feed ?? null;
+    const heading = firstHeading(lists);
+    const parts: TablePart[] = [{ label: heading.replace(/, dearest first$/, ""), rows: firstRows },
+                                { label: "Earlier", rows: shown?.value?.rows ?? [] }];
+    const table = this.sectionTable === "sessions";
+    return html`
+      ${firstRows.length ? html`<div class="sub1" data-part="heading">${heading}</div>` : nothing}
+      <div class="ses" data-list="first">${firstRows.map((row) => this.#sessionRow(sessionLine(row, today, projects)))}</div>
+      ${this.#more(remainder(first.value, lists.week), "first", () => { void this.#firstList?.show(); })}
+      ${earlier === null ? nothing : this.#more(earlier, "earlier", shown === null ? () => this.#showEarlier() : null)}
+      ${shown === null ? nothing : shown.value === null
+        ? (shown.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing)
+        : html`<div class="ses" data-list="earlier">${shown.value.rows.map((row) =>
+            this.#sessionRow(sessionLine(row, today, projects)))}</div>
+          ${this.#more(remainder(shown.value, false), "earlier-more", () => { void this.#earlierList?.show(); })}`}
+      <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(table)}
+        @click=${() => { this.sectionTable = table ? null : "sessions"; }}>${table ? HIDE_TABLE : SECTION_TABLE}</button></p>
+      ${table ? this.#table(sessionsTable(parts, today, projects)) : nothing}`;
+  }
+
+  /** A line under a list: what it leaves out, and `Show`; with no act, the line alone. */
+  #more(line: ListLine | null, key: string, show: (() => void) | null) {
+    if (line === null) return nothing;
+    return html`<div class="more" data-part="more" data-more=${key}><span>${line.text}</span>${show === null ? nothing
+      : html`<button type="button" class="act" data-act="show" @click=${show}>${SHOW}</button>`}</div>`;
+  }
+
+  /** One session as a two-line row. A row with a session opens it and its act says so; a
+   * row with no session id has no act and does not open. */
+  #sessionRow(line: SessionLine) {
+    const at = this.#at;
+    const session = line.session;
+    const open = session !== null && at.piece === "sessions" && at.harness === session.harness
+      && at.session === session.id;
+    const target = session === null ? null : open ? SESSIONS : sessionAddress(session.harness, session.id);
+    return html`<moxi-ui-row ?toggles=${target !== null} ?open=${open} data-key=${line.key} name=${line.name}
+        where=${line.where ?? ""} fact=${line.cost} lead=${line.requests} lead-more=${line.span ?? ""}
+        rest=${line.models ?? ""} tail=${line.context ?? ""}
+        @moxi-row-toggle=${() => { if (target !== null) this.open(target); }}>
+      ${target === null ? nothing : html`<a slot="acts" class="do" data-action="open" href=${addressPath(target)}
+        aria-expanded=${String(open)} @click=${(event: MouseEvent) => this.#follow(event, target)}>${
+        open ? CLOSE : OPEN}</a>`}
+    </moxi-ui-row>`;
   }
 
   /** A section's name and its closed row: the answer, and the count that opens it, which

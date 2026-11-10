@@ -145,6 +145,11 @@ def view(panel, name: str):
     return panel.locator(f"section[data-part=view][data-view={name}]")
 
 
+def session_row(panel, session: str):
+    """A row of the Sessions section, by the harness and session it opens."""
+    return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
+
+
 def price_table(panel):
     return panel.locator("section[data-group=prices] [data-part=price-table]")
 
@@ -167,7 +172,7 @@ def test_the_page_alone_has_nothing_opened(seeded, page):
 
 #: Each section's address, the address the page keeps for it, and what it shows.
 SECTIONS = {
-    "sessions": ("sessions", f'section[data-view=sessions] tr[data-session="{FIRST}"]'),
+    "sessions": ("sessions", f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]'),
     f"sessions/claude/{FIRST}": (f"sessions/claude/{FIRST}",
                                  f'section[data-view=session] tr[data-agent="{AGENT}"]'),
     f"sessions/claude/{FIRST}/{AGENT}": (f"sessions/claude/{FIRST}/{AGENT}",
@@ -298,7 +303,7 @@ def test_a_reload_lands_on_the_piece_that_was_open(seeded, page):
 def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     panel = open_page(page, "sessions")
     entries = page.evaluate("history.length")
-    panel.locator(f'section[data-view=sessions] tr[data-session="{FIRST}"] a').click()
+    session_row(panel, FIRST).get_by_role("link", name="Open").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
     expect(view(panel, "session").locator(f'tr[data-agent="{AGENT}"]')).to_be_visible()
     view(panel, "session").locator(f'tr[data-agent="{AGENT}"] a').click()
@@ -350,7 +355,7 @@ def test_the_range_and_filters_are_kept_across_a_new_placement_and_stay_out_of_t
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
     panel = panel_of(page)
     expect_filters_set(panel)
-    expect(view(panel, "sessions").locator("tr[data-session]")).to_have_count(1)
+    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
     # Another address of the page keeps them too.
     page.evaluate("async () => (await import('/m/ui/client.js')).navigate('usage', 'models')")
     panel = panel_of(page)
@@ -364,7 +369,7 @@ def test_a_new_document_opens_on_the_last_thirty_days_with_no_filter(seeded, pag
     set_filters(panel)
     page.reload()
     panel = panel_of(page)
-    expect(view(panel, "sessions").locator("tr[data-session]")).to_have_count(2)
+    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(2)
     expect(range_button(panel)).to_have_text("last 30 days▾")
     expect(panel.locator("[data-part=filters] [data-filter=model] button.pick")).to_have_text("all▾")
     expect(panel.locator("[data-part=measure]").get_by_role("button", name="Cost")).to_have_attribute(
@@ -508,7 +513,9 @@ def test_an_opened_limit_row_fits_a_phone(seeded, page, ui_width_check):
 @pytest.mark.parametrize("route", ["sessions", f"sessions/claude/{FIRST}"], ids=["sessions", "session"])
 def test_a_sections_address_fits_a_phone(seeded, page, ui_width_check, route):
     ui_width_check(page, module="usage", route=route)
-    expect(panel_of(page).locator("section[data-part=view]")).to_be_visible()
+    expect(session_row(panel_of(page), FIRST)).to_be_visible()
+    if route != "sessions":
+        expect(panel_of(page).locator("section[data-part=view]")).to_be_visible()
     ui_width_check(page)
 
 

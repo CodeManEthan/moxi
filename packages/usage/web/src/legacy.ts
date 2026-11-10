@@ -1,7 +1,7 @@
 // <moxi-usage-legacy .address=... .filters=... .open=...>: the views the page had before
 // its frame was redrawn, kept mounted under the page's chart until each has its place in
-// the new page. It draws the view that serves the page's address (`legacyRoute`): the
-// sessions table, or one session with its main agent's requests charted or a subagent's.
+// the new page. It draws the view that serves the page's address (`legacyRoute`): one
+// session with its main agent's requests charted or a subagent's.
 // For any other address it draws nothing. A link here opens its piece through the page, which writes the address.
 // Every view reads under the page's range and filters, which the page passes in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
 // line, the chart, the index's state and "Read new sessions" are the page's.
@@ -12,7 +12,7 @@ import { api, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseIndexEvent, parseReport } from "./feed.ts";
 import type {
-  AgentRow, Report, RequestRow, RequestsTotal, SessionRow,
+  AgentRow, Report, RequestRow, RequestsTotal,
   TermsRow, TermsTotal,
 } from "./feed.ts";
 import { addressPath, NOTHING_OPEN, sessionAddress, SESSIONS } from "./address-model.ts";
@@ -256,30 +256,9 @@ export class UsageLegacy extends LitElement {
 
   #view_(route: PageRoute, report: AnyReport) {
     switch (route.view) {
-      case "sessions": return this.#sessions(report as Report<SessionRow>);
       case "session": return this.#session(report as Report<AgentRow>, route);
       default: return nothing;
     }
-  }
-
-  #sessions(report: Report<SessionRow>) {
-    return html`<div class="scroll"><table>
-      <thead><tr><th>Session</th><th class="wide">Harness</th><th class="wide">Project</th><th class="wide">Last used</th>
-        <th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
-      <tbody>${report.rows.map((row) => html`
-        <tr data-session=${row.session_id ?? ""}>
-          <td class="wrap">${row.session_id === null ? html`<span class="dim">no session</span>`
-            : this.#link(sessionAddress(row.harness, row.session_id), row.session_id)}
-            <div class="dim small">${row.models.join(", ")}</div></td>
-          <td class="wide">${row.harness}</td>
-          <td class="wrap wide">${row.project ?? row.cwd ?? ""}</td>
-          <td class="wide">${fmtMoment(row.last_ts)}</td>
-          <td class="num wide">${row.requests.toLocaleString("en-US")}</td>
-          <td class="num">${fmtTokens(row.tokens)}</td>
-          <td class="num">${costText(row)}${flag(flags(row))}</td>
-        </tr>`)}</tbody>
-    </table></div>
-    ${report.more ? html`<p class="dim small">${report.more} more session${report.more === 1 ? "" : "s"} cost less than these.</p>` : nothing}`;
   }
 
   #session(report: Report<AgentRow>, route: PageRoute) {

@@ -133,9 +133,9 @@ def test_projects_closed_names_the_dearest_three_and_its_count_opens_it(page):
     expect(rows_of(section)).to_have_count(0)
     # The sections follow the chart: Projects, Models, Token kinds, Prices.
     below = panel.locator("[data-part=below] > section")
-    expect(below).to_have_count(5)
+    expect(below).to_have_count(6)
     order = below.evaluate_all("nodes => nodes.map((node) => node.dataset.group)")
-    assert order == ["chart", "projects", "models", "kinds", "prices"], order
+    assert order == ["chart", "sessions", "projects", "models", "kinds", "prices"], order
 
     count.click()
     expect(page).to_have_url(re.compile(r"/m/usage/projects$"))
@@ -164,7 +164,7 @@ def test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder(p
     section.locator("[data-part=sentence] a", has_text="~/work/loose").click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
     expect(place_button(panel)).to_have_text("~/work/loose▾")
-    expect(panel.locator("section[data-part=view] tr[data-session]")).to_have_count(1)
+    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 
 def test_a_project_row_sets_the_project_filter_and_opens_sessions(page):
@@ -175,7 +175,7 @@ def test_a_project_row_sets_the_project_filter_and_opens_sessions(page):
         section.locator('a[data-row="project:proj-b"]').click()
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
     expect(place_button(panel)).to_have_text("proj-b▾")
-    expect(panel.locator("section[data-part=view] tr[data-session]")).to_have_count(1)
+    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
     # Sessions is open, so Projects is closed again.
     expect(rows_of(section)).to_have_count(0)
     # Under the filter Projects holds that project alone, the whole of what is shown.
@@ -259,7 +259,7 @@ def test_without_projects_folders_are_written_whole_with_no_row_for_no_project(s
     expect(page).to_have_url(re.compile(r"/m/usage/sessions$"))
     expect(panel.locator("[data-part=filters] [data-filter=place] .k")).to_have_text("Folder")
     expect(place_button(panel)).to_have_text("~/work/proj-b▾")
-    expect(panel.locator("section[data-part=view] tr[data-session]")).to_have_count(1)
+    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 
 def test_the_folders_table_has_no_project_column(small, ui_contexts):

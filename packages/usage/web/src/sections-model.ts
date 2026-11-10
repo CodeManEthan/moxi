@@ -100,7 +100,7 @@ function costCell(sum: Sum): string {
 
 /** A table whose rows end in their requests, tokens and cost, and a last column saying
  * why a row is not whole, there only when some row is not. */
-function figuresTable(heads: string[], lines: { key: string; cells: string[]; sum: Sum }[]): Table {
+export function figuresTable(heads: string[], lines: { key: string; cells: string[]; sum: Sum }[]): Table {
   const whys = lines.map((line) => whyNotWhole(line.sum));
   const flagged = whys.some((why) => why !== null);
   return {

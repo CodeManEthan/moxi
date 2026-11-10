@@ -148,12 +148,12 @@ export function sessionRoute(id: string, agent = "main"): string {
 }
 
 /** The view kept from before the page's sections that serves `address` until its
- * section is built: the sessions table and one session's view. Null for an address no
+ * section is built: one session's view. Null for an address no
  * such view serves. */
 export function legacyRoute(address: Address): string | null {
   switch (address.piece) {
     case "sessions":
-      return address.session === null ? "sessions" : sessionRoute(address.session, address.agent ?? "main");
+      return address.session === null ? null : sessionRoute(address.session, address.agent ?? "main");
     default:
       return null;
   }

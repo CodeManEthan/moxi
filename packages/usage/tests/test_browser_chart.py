@@ -328,7 +328,7 @@ def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_f
 
 def test_a_range_that_holds_nothing_says_so_in_the_charts_place(page):
     panel = open_page(page, "sessions")
-    expect(panel.locator("section[data-part=view] tr[data-session]")).to_have_count(3)
+    expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(2)
     box = filter_of(panel, "range")
     box.locator("button.pick").click()
     box.get_by_role("menuitemradio", name="From … to …").click()
@@ -343,7 +343,7 @@ def test_a_range_that_holds_nothing_says_so_in_the_charts_place(page):
     expect(panel.locator("[data-group=cost] [data-cost]")).to_have_count(3)
     expect(panel.locator("[data-part=foot]")).to_be_visible()
     expect(panel.get_by_text("Nothing was used in this range.")).to_have_count(1)
-    expect(panel.locator("section[data-part=view] tr[data-session]")).to_have_count(0)
+    expect(panel.locator("section[data-group=sessions]")).to_have_count(0)
 
 
 # --- the filters ---------------------------------------------------------------------------
@@ -416,9 +416,13 @@ def test_without_projects_the_filter_is_folder_and_filters_by_the_whole_path(sma
 
 def test_todays_views_read_under_the_pages_range_and_filters(page):
     panel = open_page(page, "sessions")
-    rows = panel.locator("section[data-part=view] tr[data-session]")
-    expect(rows).to_have_count(3)
+    rows = panel.locator("section[data-group=sessions] moxi-ui-row")
+    earlier = panel.locator("section[data-group=sessions] [data-more=earlier]")
+    # Over 30 days the week's two are listed and the one before them is counted.
+    expect(rows).to_have_count(2)
+    expect(earlier).to_have_text(re.compile(r"^Earlier · 1 session, "))
     pick(panel, "range", "Last 7 days")
+    expect(earlier).to_have_count(0)
     expect(rows).to_have_count(2)
     pick(panel, "model", HAIKU)
     expect(rows).to_have_count(1)

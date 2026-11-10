@@ -128,7 +128,12 @@ def strip_of(panel):
 
 
 def session_rows(panel):
-    return panel.locator("section[data-part=view] tr[data-session]")
+    return panel.locator("section[data-group=sessions] moxi-ui-row")
+
+
+def session_row(panel, session: str):
+    """A row of the Sessions section, by the harness and session it opens."""
+    return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
 
 
 # --- the contract --------------------------------------------------------------------------
@@ -160,7 +165,7 @@ def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
 #: Each view's route and what shows once its report has drawn.
 VIEWS = {
     "": "[data-group=chart] svg g[data-period]",
-    "sessions": f'section[data-part=view] tr[data-session="{FIRST}"]',
+    "sessions": f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]',
     f"sessions/claude/{FIRST}": f'section[data-part=view] tr[data-agent="{AGENT}"]',
 }
 
@@ -177,7 +182,7 @@ def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_c
 def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
-    session_rows(panel).locator(f'a[href="/m/usage/sessions/claude/{FIRST}"]').click()
+    session_row(panel, FIRST).get_by_role("link", name="Open").click()
     expect(ui_page).to_have_url(f"{indexed.url}/m/usage/sessions/claude/{FIRST}")
     agents = panel.locator("section[data-part=view] tr[data-agent]")
     expect(agents).to_have_count(2)
@@ -187,14 +192,14 @@ def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
 def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     harness = panel.locator("[data-part=filters] [data-filter=harness] button.pick")
-    row = panel.locator(f'section[data-part=view] tr[data-session="{FIRST}"]')
-    expect(row).to_be_visible()
-    tokens = row.locator("td.num").nth(-2).inner_text()
+    row = session_row(panel, FIRST)
+    expect(row).to_have_attribute("lead", re.compile(r"^\d+ requests?$"))
+    requests = row.get_attribute("lead").split()[0]
     with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
-        row.locator("a").click()
+        row.get_by_role("link", name="Open").click()
     assert "harness=claude" in sent.value.url, sent.value.url
     totals = panel.locator("section[data-part=view] [data-part=totals]")
-    expect(totals.locator("span", has_text="Tokens").locator("b")).to_have_text(tokens)
+    expect(totals.locator("span", has_text="Requests").locator("b")).to_have_text(requests)
     # The harness is the address's, not a filter of the page: with one harness holding
     # files the filter has no place, before and after.
     expect(harness).to_have_count(0)
@@ -256,7 +261,7 @@ def test_read_new_sessions_moves_the_last_pass_and_brings_them_in(own_shell):
     expect(last).not_to_have_attribute("data-last-pass", before)
     expect(strip).to_have_attribute("data-state", "up")
     expect(session_rows(panel)).to_have_count(2)
-    expect(panel.locator(f'section[data-part=view] tr[data-session="{LATER}"]')).to_have_count(1)
+    expect(session_row(panel, LATER)).to_have_count(1)
 
 
 # --- a session's requests, its cost terms and the rates ------------------------------------

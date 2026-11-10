@@ -598,7 +598,7 @@ test("the readout and the notes", () => {
 
 test("an address is served by the view kept from before, until its section is built", () => {
   const session = (agent) => ({ piece: "sessions", harness: "claude", session: "s 1", agent });
-  assert.equal(legacyRoute({ piece: "sessions", harness: null, session: null, agent: null }), "sessions");
+  assert.equal(legacyRoute({ piece: "sessions", harness: null, session: null, agent: null }), null);
   assert.equal(legacyRoute(session(null)), "session/s%201");
   assert.equal(legacyRoute(session("main")), "session/s%201");
   assert.equal(legacyRoute(session("a/1")), "session/s%201/a%2F1");
