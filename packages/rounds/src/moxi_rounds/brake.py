@@ -36,8 +36,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import (ending, folders, pointers, questions, report_block, stages, stepping,
-               versions, write)
+from . import (ending, folders, model_tiers, pointers, questions, report_block, stages,
+               stepping, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Unmet
@@ -96,11 +96,7 @@ class Asked:
 
 
 def _tier(state: states.State, key: str) -> str | None:
-    for entry in state.steps:
-        if isinstance(entry, dict) and entry.get("step") == VERIFIES:
-            tier = entry.get(key)
-            return tier if isinstance(tier, str) and tier else None
-    return None
+    return model_tiers.step_tier(state.steps, VERIFIES, key)
 
 
 def sent_back(state: states.State) -> bool:

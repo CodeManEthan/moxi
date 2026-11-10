@@ -224,6 +224,15 @@ The file also takes `models`, `worktree_dir`, `defaults.ratify`, `defaults.trace
 `check`, `finish`, `shared_paths`, `keep_branch`, `lock_ref` and `brief`. They are
 checked when the file is read, and nothing in this version acts on them.
 
+`models` maps each tier a step names to a model per harness. The order the tiers are
+written in is their order, strongest first:
+
+```toml
+[models]
+first  = { claude = "model-one", codex = "model-a" }
+second = { claude = "model-two", codex = "model-b" }
+```
+
 rounds reads no environment variable but the ones that place its directories,
 `MOXI_ROUNDS_HOME` and the rest, and `MOXI_HOME`.
 
