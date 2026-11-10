@@ -11,7 +11,8 @@
     GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
                         `cwd` alone with `by=folder`; with the account's `home` folder
     GET  /api/models    tokens and cost by model, with where each price came from
-    GET  /api/terms     every term of each cost, by model, day, month or a session's agent
+    GET  /api/terms     every term of each cost, by model, day, month or a session's agent,
+                        and what caching saved over the answer
     GET  /api/requests  one row per request of a session's agent (`session=ID&agent=ID`)
     GET  /api/prices    the model table's rates: some models (`models=`) or a search (`q=`)
     GET  /api/status    the index: its lanes, held rows and last pass
@@ -252,7 +253,17 @@ GROUP = lb.Out("table", items={
 #: and `kind`, as `by` says; the others are null.
 TERMS_ROW = {"model": _MAYBE, "period": _MAYBE, "agent": _MAYBE, "kind": _MAYBE,
              **ROW_SUMS, "groups": lb.Out("list", items=GROUP), "split": SPLIT}
-TERMS = _report(TERMS_ROW, total={**SUMS, "split": SPLIT}, by=_TEXT)
+#: What caching saved over a terms answer, an estimate: the same tokens with no cache,
+#: at the same prices. `read_tokens` of `input_tokens` (the whole prompts) were read
+#: from cache; `reads_at_input` is those reads at each price group's own input price,
+#: `reads_cost` what they did cost, `write_extra` what the cache writes cost over the
+#: input price, and `saved` the first less the other two, 0 or less where caching cost
+#: more than it saved. Null when the answer holds no cache read, and when a group that
+#: holds cache reads or writes is unpriced or lacks a price the sums need.
+SAVING = lb.Out("table", nullable=True, items={
+    "input_tokens": _INT, "read_tokens": _INT, "reads_at_input": _FLOAT,
+    "reads_cost": _FLOAT, "write_extra": _FLOAT, "saved": _FLOAT})
+TERMS = _report(TERMS_ROW, total={**SUMS, "split": SPLIT, "saving": SAVING}, by=_TEXT)
 
 #: One request of `/api/requests`: `n` is its place on the request axis, `context` its
 #: whole prompt (null when unknown), `window` the one it ran against (null when unknown).
@@ -511,6 +522,6 @@ __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESS
            "INDEX_TOPIC", "LANE", "LIMITS", "LIMIT_HARNESSES", "MODELS", "MODEL_ROW",
            "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
-           "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SESSION", "SESSIONS", "SESSION_ROW",
+           "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS", "SESSION_ROW",
            "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
            "USED_MAX", "WINDOW"]

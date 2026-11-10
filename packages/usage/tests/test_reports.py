@@ -912,6 +912,115 @@ def test_terms_show_a_prefix_row_with_a_digit_in_provenance(conn):
     assert group["cost"] == pytest.approx((1000 * 2 + 100 * 4) / 1e6)
 
 
+# --- what caching saved ----------------------------------------------------------------------
+
+def test_the_terms_total_says_what_caching_saved_against_its_own_terms(conn):
+    terms_index(conn)
+    filters = {"model": "m-a", "until": "2026-10-01"}
+    report = reports.terms(conn, tz="UTC", table=table(), **filters)
+    saving = report.total["saving"]
+    assert set(saving) == {"input_tokens", "read_tokens", "reads_at_input", "reads_cost",
+                           "write_extra", "saved"}
+    assert (saving["input_tokens"], saving["read_tokens"]) == (
+        report.total["input"], report.total["cache_read"]) == (2000, 700)
+    # each group's reads and writes at that group's own prices: r1 pays the row's, r2
+    # the fast tier's
+    groups = [g for row in report.rows for g in row["groups"]]
+    assert sorted(g["tier"] or "" for g in groups) == ["", "fast"]
+    paid = [{t["class"]: t for t in g["terms"]} for g in groups]
+    assert saving["reads_at_input"] == pytest.approx(sum(
+        p["cache_read"]["tokens"] * p["input"]["price"] / 1e6 for p in paid))
+    assert saving["reads_at_input"] == pytest.approx((200 * 3.0 + 500 * 6.0) / 1e6)
+    assert saving["reads_cost"] == pytest.approx(sum(p["cache_read"]["cost"] for p in paid))
+    assert saving["reads_cost"] == pytest.approx(sum(
+        e["cost"] for e in report.total["split"] if e["class"] == "cache_read"))
+    assert saving["write_extra"] == pytest.approx(sum(
+        p[cls]["tokens"] * (p[cls]["price"] - p["input"]["price"]) / 1e6
+        for p in paid for cls in ("cache_write_5m", "cache_write_1h")))
+    assert saving["write_extra"] == pytest.approx((200 * 0.75 + 100 * 3.0) / 1e6)
+    assert saving["saved"] == pytest.approx(
+        saving["reads_at_input"] - saving["reads_cost"] - saving["write_extra"])
+    # only the total says it, whatever the rows are keyed by
+    assert all("saving" not in row for row in report.rows)
+    for by in ("day", "month"):
+        again = reports.terms(conn, by=by, tz="UTC", table=table(), **filters)
+        assert again.total["saving"] == pytest.approx(saving)
+    agents = reports.terms(conn, by="agent", session="s1", tz="UTC", table=table(),
+                           **filters)
+    assert agents.total["saving"] == pytest.approx(saving)
+    data = report.as_dict()
+    assert data["total"]["saving"] == saving
+    json.dumps(data)
+
+
+def test_an_unpriced_group_with_no_cache_tokens_leaves_the_saving_stated(conn):
+    terms_index(conn)                      # mystery-9's one request holds no cache tokens
+    report = reports.terms(conn, harness="claude", tz="UTC", table=table())
+    assert report.unpriced_models == ["mystery-9"]
+    saving = report.total["saving"]
+    assert saving["read_tokens"] == 700 and saving["input_tokens"] == report.total["input"]
+    assert saving["saved"] == pytest.approx(
+        (200 * 3.0 + 500 * 6.0 - 200 * 0.3 - 500 * 0.6 - 200 * 0.75 - 100 * 3.0) / 1e6)
+
+
+def test_there_is_no_saving_with_no_cache_read(conn):
+    t = at("2026-10-01T12:00")
+    assert reports.terms(conn, tz="UTC", table=table()).total["saving"] is None
+    source(conn, "/p/a.jsonl", [request("r1", t), request("r2", t + 60, cache_write=300)])
+    report = reports.terms(conn, tz="UTC", table=table())
+    assert report.total["cache_write"] == 300 and report.total["saving"] is None
+    assert report.as_dict()["total"]["saving"] is None
+
+
+@pytest.mark.parametrize("fields", [{"cache_read": 200}, {"cache_write": 100}])
+def test_there_is_no_saving_when_a_group_with_cache_tokens_is_unpriced(conn, fields):
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [request("r1", t, cache_read=400)])
+    assert reports.terms(conn, tz="UTC", table=table()).total["saving"] is not None
+    # `half` has no cache price, and an unknown model none at all
+    for n, model in enumerate(("half", "mystery-9")):
+        source(conn, f"/p/b{n}.jsonl", [request(f"x{n}", t + 60, model=model, **fields)],
+               session_id=f"x{n}")
+        assert reports.terms(conn, tz="UTC", table=table()).total["saving"] is None
+        assert reports.terms(conn, model="m-a", tz="UTC",
+                             table=table()).total["saving"] is not None
+
+
+def test_a_saving_of_zero_or_less_is_stated_as_it_falls(conn):
+    t = at("2026-10-01T12:00")
+    # 10 reads save 27 millionths of a dollar and 1000 written tokens cost 750 more
+    source(conn, "/p/a.jsonl", [request("r1", t, input=2000, cache_read=10,
+                                        cache_write=1000)])
+    saving = reports.terms(conn, tz="UTC", table=table()).total["saving"]
+    assert saving["saved"] == pytest.approx((30 - 3 - 750) / 1e6) and saving["saved"] < 0
+    # a cache read that costs what input does saves exactly nothing
+    flat = models.Table(doc({"flat": {"input": 1.0, "output": 2.0, "cache_read": 1.0,
+                                      "provider": "other"}}))
+    source(conn, "/p/b.jsonl", [request("f1", t, model="flat", cache_read=500)],
+           session_id="s2")
+    saving = reports.terms(conn, model="flat", tz="UTC", table=flat).total["saving"]
+    assert saving["saved"] == 0 and saving["reads_at_input"] == saving["reads_cost"] > 0
+
+
+def test_a_provider_that_bills_writes_as_input_has_no_extra_for_them(conn):
+    t = at("2026-10-01T12:00")
+    source(conn, "/c/r.jsonl", [
+        request("t1", t, harness="codex", model="gpt-x", cache_read=400,
+                cache_write=UNKNOWN, cache_write_1h=UNKNOWN),
+        request("t2", t + 60, harness="codex", model="gpt-x", cache_read=100,
+                cache_write=300),
+        request("t3", t + 120, harness="codex", model="gpt-x", service_tier="priority",
+                cache_read=200, cache_write=100)],
+        lane="codex", harness="codex", session_id="s2")
+    report = reports.terms(conn, tz="UTC", table=table())
+    assert report.rules == [cost.rule_name("openai")]
+    saving = report.total["saving"]
+    assert saving["write_extra"] == 0
+    assert saving["reads_at_input"] == pytest.approx((500 * 1.0 + 200 * 2.0) / 1e6)
+    assert saving["reads_cost"] == pytest.approx((500 * 0.1 + 200 * 0.2) / 1e6)
+    assert saving["saved"] == pytest.approx((450 + 360) / 1e6)
+
+
 def test_terms_refuse_what_they_cannot_use(conn):
     terms_index(conn)
     with pytest.raises(reports.ReportError, match="needs a session"):

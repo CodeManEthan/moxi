@@ -102,3 +102,56 @@ def test_the_sum_of_terms_is_the_old_total_within_a_billionth_of_a_dollar():
         speed = rng.choice((None, "fast"))
         priced = cost.price(sums, TABLE.lookup("m-a"), ANTHROPIC, speed=speed)
         assert abs(priced.cost - old_total(sums, priced.prices)) < 1e-9
+
+
+# --- what caching saved ----------------------------------------------------------------------
+
+def test_a_groups_saving_is_its_reads_at_input_less_their_cost_and_the_writes_extra():
+    priced = cost.price(SUMS, TABLE.lookup("m-a"), ANTHROPIC)
+    found = cost.saving(priced)
+    # reads 400 at input 3 and at 0.3; 5m writes 350 at 3.75 - 3, 1h writes 250 at 6 - 3
+    assert found.reads_at_input == pytest.approx(400 * 3.0 / 1e6)
+    assert found.reads_cost == pytest.approx(400 * 0.3 / 1e6)
+    assert found.write_extra == pytest.approx((350 * 0.75 + 250 * 3.0) / 1e6)
+    assert found.saved == pytest.approx((1200 - 120 - 262.5 - 750) / 1e6)
+    terms = {t.cls: t for t in priced.terms}
+    assert found.reads_cost == pytest.approx(terms["cache_read"].cost)
+
+
+def test_a_groups_saving_reads_the_tiers_own_input_price():
+    priced = cost.price(SUMS, TABLE.lookup("m-a"), ANTHROPIC, speed="fast")
+    found = cost.saving(priced)
+    assert found.reads_at_input == pytest.approx(400 * 6.0 / 1e6)
+    assert found.reads_cost == pytest.approx(400 * 0.6 / 1e6)
+    assert found.write_extra == pytest.approx((350 * 1.5 + 250 * 6.0) / 1e6)
+
+
+def test_a_group_with_no_cache_tokens_saves_nothing_priced_or_not():
+    plain = cost.Sums(requests=1, input=1000, fresh=1000, output=100)
+    assert cost.saving(cost.price(plain, TABLE.lookup("m-a"), ANTHROPIC)) == cost.Saving()
+    assert cost.saving(cost.price(plain, TABLE.lookup("mystery-9"), None)) == cost.Saving()
+    assert cost.Saving().saved == 0
+
+
+def test_a_group_with_cache_tokens_and_no_way_to_price_them_has_no_saving():
+    # an unknown model, and a model with no price for the writes it holds
+    assert cost.saving(cost.price(SUMS, TABLE.lookup("mystery-9"), None)) is UNKNOWN
+    writes = cost.Sums(requests=1, input=1100, fresh=1000, cache_write=100, write_5m=100)
+    assert cost.saving(cost.price(writes, TABLE.lookup("half"), None)) is UNKNOWN
+    # a priced group whose reads have a price and whose input has none: with no fresh
+    # input the cost needs no input price, and the saving does
+    reads = cost.Sums(requests=1, input=400, cache_read=400)
+    paid = cost.Prices(input=UNKNOWN, output=8.0, cache_read=0.1, cache_write_5m=UNKNOWN,
+                       cache_write_1h=UNKNOWN)
+    priced = cost.price(reads, TABLE.lookup("gpt-x"), OPENAI, paid=paid)
+    assert priced.priced and cost.saving(priced) is UNKNOWN
+
+
+def test_where_a_write_bills_as_input_the_writes_add_nothing():
+    sums = cost.Sums(requests=2, input=2000, fresh=1300, cache_read=400, cache_write=300,
+                     write_5m=300, output=50, unknown_any=1, unknown_write=1)
+    priced = cost.price(sums, TABLE.lookup("gpt-x"), OPENAI)
+    assert priced.rule == cost.rule_name("openai")
+    found = cost.saving(priced)
+    assert found.write_extra == 0
+    assert found.saved == pytest.approx(400 * (1.0 - 0.1) / 1e6)

@@ -15,7 +15,8 @@ tz)` that returns a `Report`:
   session's `sessions` row over the same range and filters.
 * `terms`: every term of a cost (`moxi_usage.cost`), by model, day, month or, with
   `session=`, by the session's agents (`by=`): each row's price groups with their five
-  terms, and its cost split by token class and price tier.
+  terms, and its cost split by token class and price tier; its total says what caching
+  saved (`saving`), or None when it cannot.
 * `requests`: one row per request of one session's agent (`session=`, and `agent=`,
   `main` by default), in the order the agent made them, each priced on its own, with
   the session's compactions placed between them.
@@ -905,6 +906,8 @@ def _projects_by(by: Any) -> str:
 
 #: What a `terms` report's rows can be keyed by.
 TERMS_BY = ("model", "day", "month", "agent")
+#: The dollar sums of a `terms` total's `saving`, as `cost.Saving` names them.
+_SAVING_SUMS = ("reads_at_input", "reads_cost", "write_extra")
 
 
 def _terms_by(by: Any, session: str | None) -> str:
@@ -931,9 +934,20 @@ class _TermsRow(_Row):
         self.groups: dict[tuple, dict[str, Any]] = {}
         self.split: dict[tuple[str, str | None], list] = {}
         self.with_groups = True
+        #: What caching saved, summed for a total only: the three sums, or `UNKNOWN`
+        #: once a group that holds cache reads or writes could not give its part.
+        self.with_saving = False
+        self.saving: Any = [0.0, 0.0, 0.0]
 
     def add(self, priced: cost.Priced, extra: Mapping[str, Any]) -> None:
         super().add(priced, extra)
+        if self.with_saving and self.saving is not UNKNOWN:
+            part = cost.saving(priced)
+            if part is UNKNOWN:
+                self.saving = UNKNOWN
+            else:
+                for n, name in enumerate(_SAVING_SUMS):
+                    self.saving[n] += getattr(part, name)
         paid = priced.prices
         tier = None if paid is None else paid.tier
         if priced.priced:
@@ -988,12 +1002,27 @@ class _TermsRow(_Row):
                             self.split.items(),
                             key=lambda item: (order[item[0][0]], item[0][1] is not None,
                                               item[0][1] or ""))]
+        if self.with_saving:
+            row["saving"] = self._saving()
         return row
+
+    def _saving(self) -> dict[str, Any] | None:
+        """The total's saving, or None: with no cache read there is nothing to state,
+        and with a part unknown the sum is not the answer's."""
+        if self.saving is UNKNOWN or not self.sums["cache_read"]:
+            return None
+        reads_at_input, reads_cost, write_extra = self.saving
+        return {"input_tokens": self.sums["input"], "read_tokens": self.sums["cache_read"],
+                "reads_at_input": round(reads_at_input, 10),
+                "reads_cost": round(reads_cost, 10),
+                "write_extra": round(write_extra, 10),
+                "saved": round(reads_at_input - reads_cost - write_extra, 10)}
 
 
 def _terms_total() -> _TermsRow:
     total = _TermsRow({})
     total.with_groups = False
+    total.with_saving = True
     return total
 
 
@@ -1012,7 +1041,16 @@ def terms(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
     `rule` and `why`) and `split`: `{class, tier, tokens, cost}` summed over its priced
     groups, by class and then tier (None first). An unpriced group adds nothing to `split`.
     A row's cost is the sum of its groups' costs and of its split's. `total` carries the
-    sums and `split` over every row.
+    sums and `split` over every row, and `saving`: what caching saved over the answer, an
+    estimate of the same tokens with no cache at the same prices (`moxi_usage.cost`), as
+    `{input_tokens, read_tokens, reads_at_input, reads_cost, write_extra, saved}`.
+    `input_tokens` and `read_tokens` are the total's `input` and `cache_read`;
+    `reads_at_input` is each group's cache reads at that group's own input price,
+    `reads_cost` what those reads did cost, `write_extra` each group's cache writes at
+    their write price less its input price, and `saved` the first less the other two, so
+    it is 0 or less where caching cost more than it saved. `saving` is None when the
+    answer holds no cache read, and when a group that holds cache reads or writes is
+    unpriced or lacks a price one of those products needs.
 
     Each `by` groups its requests as the report it reads beside does, so their costs
     agree: `model` as `models`, `day` and `month` as `daily` and `monthly`, `agent` as

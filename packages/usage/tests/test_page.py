@@ -782,7 +782,46 @@ def test_terms_by_model_send_each_group_with_its_terms_and_agree_with_models(see
     [group] = mystery["groups"]
     assert group["cost"] is None and group["why"]
     assert all(t["cost"] is None and "cost" in t["unknown"] for t in group["terms"])
-    assert body["total"]["split"] and set(body["total"]) == {*page.SUMS, "split"}
+    assert body["total"]["split"] and set(body["total"]) == {*page.SUMS, "split", "saving"}
+
+
+def test_the_terms_total_carries_what_caching_saved_or_null(seeded):
+    whole = get("/api/terms", utc="true")
+    # the seeded index holds an unknown model with no cache tokens, which hides nothing
+    assert whole["unpriced_models"]
+    for body in (whole, get("/api/terms", by="day", utc="true"),
+                 get("/api/terms", by="month", utc="true")):
+        saving = body["total"]["saving"]
+        assert set(saving) == set(page.SAVING.items)
+        assert saving == pytest.approx(whole["total"]["saving"])
+        assert (saving["input_tokens"], saving["read_tokens"]) == (
+            body["total"]["input"], body["total"]["cache_read"])
+        assert saving["read_tokens"] > 0
+        assert saving["reads_cost"] == pytest.approx(sum(
+            item["cost"] for item in body["total"]["split"] if item["class"] == "cache_read"))
+        assert saving["saved"] == pytest.approx(
+            saving["reads_at_input"] - saving["reads_cost"] - saving["write_extra"])
+    one_session = get("/api/terms", by="agent", session="s1", harness="claude", utc="true")
+    assert one_session["total"]["saving"]["read_tokens"] == one_session["total"]["cache_read"]
+    # a range with no cache read
+    assert get("/api/terms", utc="true", since="2031-01-01")["total"]["saving"] is None
+
+
+def test_the_terms_total_has_no_saving_with_no_index():
+    body = get("/api/terms", utc="true")
+    assert body["rows"] == [] and body["total"]["saving"] is None
+
+
+def test_the_terms_total_has_no_saving_where_a_cached_group_is_unpriced(seeded):
+    conn = store.open_index()
+    try:
+        source(conn, "/p/cached.jsonl", [request("u1", at("2026-10-01T12:00"), model="half",
+                                                 cache_read=200)], session_id="s-half")
+    finally:
+        conn.close()
+    body = get("/api/terms", utc="true")
+    assert body["total"]["cache_read"] > 200 and body["total"]["saving"] is None
+    assert get("/api/terms", utc="true", model="m-b")["total"]["saving"] is not None
 
 
 def test_terms_by_day_and_by_a_sessions_agent(seeded):

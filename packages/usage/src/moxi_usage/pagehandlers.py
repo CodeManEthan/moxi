@@ -343,7 +343,8 @@ def _group(found: Mapping[str, Any]) -> dict[str, Any]:
 
 def terms(call: Any) -> dict[str, Any]:
     """`GET /api/terms`: every term of each cost, by model (the default), day, month or,
-    with `session`, agent; `session` alone narrows the other keys to that session."""
+    with `session`, agent; `session` alone narrows the other keys to that session. The
+    total's `saving` is what caching saved over the answer, or null."""
     by = call.query.get("by") or "model"
     given: dict[str, Any] = {"by": by}
     if call.query.get("session"):
@@ -354,8 +355,22 @@ def terms(call: Any) -> dict[str, Any]:
              **_row_sums(row), "groups": [_group(group) for group in row.get("groups") or ()],
              "split": _split(row.get("split"))} for row in answer["rows"]]
     total = answer.get("total") or {}
-    return {**_report(answer, rows, {**_sums(total), "split": _split(total.get("split"))}),
+    return {**_report(answer, rows, {**_sums(total), "split": _split(total.get("split")),
+                                     "saving": _saving(total.get("saving"))}),
             "by": by}
+
+
+def _saving(found: Any) -> dict[str, Any] | None:
+    """A terms total's `saving` as the route carries it: null unless the report gave
+    every figure of it."""
+    if not isinstance(found, Mapping):
+        return None
+    tokens = {name: _int(found.get(name)) for name in ("input_tokens", "read_tokens")}
+    dollars = {name: _num(found.get(name))
+               for name in ("reads_at_input", "reads_cost", "write_extra", "saved")}
+    if None in tokens.values() or None in dollars.values():
+        return None
+    return {**tokens, **dollars}
 
 
 def _mark(found: Mapping[str, Any]) -> dict[str, Any]:
