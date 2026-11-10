@@ -250,14 +250,14 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui
         assert status == 200
 
 
-def test_theme_name_switches_the_colours_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
+def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
     plain = {mode: _set_background(mode) for mode in ("light", "dark")}
     neon = {mode: _set_background(mode, "midnight-neon") for mode in ("light", "dark")}
     assert neon == {"light": "rgb(246, 244, 241)", "dark": "rgb(10, 9, 24)"}
     page = ui_contexts(color_scheme="light").pages[0]
     html = page.locator("html")
     form = _settings(page, "ui")
-    name = form.locator("select[data-control='theme.name']")
+    name = form.locator("select[data-control='theme.palette']")
     expect(name.locator("option")).to_have_text(["plain", "midnight-neon"])
     expect(name).to_have_value("plain")
 
@@ -275,12 +275,12 @@ def test_theme_name_switches_the_colours_on_the_root_and_inside_a_shadow_root(ui
         shows(neon["light"])
         page.emulate_media(color_scheme="dark")
         shows(neon["dark"])
-        assert _file(ui_shell, "ui")["theme"] == {"name": "midnight-neon"}
+        assert _file(ui_shell, "ui")["theme"] == {"palette": "midnight-neon"}
         # It stays after a reload, and under a fixed mode.
         page.reload()
         expect(html).to_have_attribute("data-theme-name", "midnight-neon")
         form = _settings(page, "ui")
-        name = form.locator("select[data-control='theme.name']")
+        name = form.locator("select[data-control='theme.palette']")
         shows(neon["dark"])
         form.locator("select[data-control='theme.mode']").select_option("light")
         expect(html).to_have_attribute("data-theme", "light", timeout=SETTINGS_MS)
@@ -292,7 +292,7 @@ def test_theme_name_switches_the_colours_on_the_root_and_inside_a_shadow_root(ui
         expect(html).to_have_attribute("data-theme", "light")
         shows(plain["light"])
     finally:
-        for key in ("theme.name", "theme.mode"):
+        for key in ("theme.palette", "theme.mode"):
             status, _ = ui_shell.session().post("/m/ui/api/settings/unset", {"module": "ui", "key": key})
             assert status == 200
 

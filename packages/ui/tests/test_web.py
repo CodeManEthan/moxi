@@ -79,22 +79,22 @@ def test_tokens_become_theme_css_41_tokens_on_the_root_and_a_block_per_other_the
     assert "midnight-neon: light calm-workbench, dark midnight-neon." in header
 
 
-def test_the_theme_names_the_setting_takes_are_the_themes_tokens_json_names():
-    assert list(config.THEME_NAMES) == list(TOKENS["$themes"])
-    key = config.schema().keys["theme.name"]
-    assert tuple(key.values) == config.THEME_NAMES and key.default == config.THEME_NAMES[0]
+def test_the_theme_palettes_the_setting_takes_are_the_themes_tokens_json_names():
+    assert list(config.THEME_PALETTES) == list(TOKENS["$themes"])
+    key = config.schema().keys["theme.palette"]
+    assert tuple(key.values) == config.THEME_PALETTES and key.default == config.THEME_PALETTES[0]
 
 
-def test_the_theme_name_falls_back_to_the_default():
-    assert config.theme_name() == "plain"
+def test_the_theme_palette_falls_back_to_the_default():
+    assert config.theme_palette() == "plain"
     path = Layout("ui").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('[theme]\nname = "midnight-neon"\n')
-    assert config.theme_name() == "midnight-neon" and config.theme_mode() == "system"
+    path.write_text('[theme]\npalette = "midnight-neon"\n')
+    assert config.theme_palette() == "midnight-neon" and config.theme_mode() == "system"
     path.write_text("this is not toml = = =\n")
-    assert config.theme_name() == "plain"
-    assert config.theme_name({"theme.name": "sepia"}) == "plain"
-    assert config.theme_name({"theme.name": "midnight-neon"}) == "midnight-neon"
+    assert config.theme_palette() == "plain"
+    assert config.theme_palette({"theme.palette": "sepia"}) == "plain"
+    assert config.theme_palette({"theme.palette": "midnight-neon"}) == "midnight-neon"
 
 
 # --- the document -----------------------------------------------------------------------
@@ -122,10 +122,10 @@ def test_the_document_takes_its_mode_and_its_theme_from_the_settings():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[theme]\nmode = "light"\n')
     assert b'<html lang="en" data-theme="light" data-theme-name="plain">' in document.answer()[2]
-    path.write_text('[theme]\nmode = "dark"\nname = "midnight-neon"\n')
+    path.write_text('[theme]\nmode = "dark"\npalette = "midnight-neon"\n')
     assert (b'<html lang="en" data-theme="dark" data-theme-name="midnight-neon">'
             in document.answer()[2])
-    path.write_text('[theme]\nname = "midnight-neon"\n')
+    path.write_text('[theme]\npalette = "midnight-neon"\n')
     assert (b'<html lang="en" data-theme="system" data-theme-name="midnight-neon">'
             in document.answer()[2])
     path.write_text("this is not toml = = =\n")

@@ -1,5 +1,5 @@
 """The shell's settings, read through `moxi.config`: `port`, `idle_s`, `theme.mode` and
-`theme.name`."""
+`theme.palette`."""
 
 from __future__ import annotations
 
@@ -54,15 +54,15 @@ def theme_mode(settings: Settings | None = None) -> str:
     return value if value in THEME_MODES else "system"
 
 
-#: The themes `theme.name` takes, the default first: the themes the web build's
+#: The themes `theme.palette` takes, the default first: the themes the web build's
 #: tokens.json names.
-THEME_NAMES = ("plain", "midnight-neon")
+THEME_PALETTES = ("plain", "midnight-neon")
 
 
-def theme_name(settings: Settings | None = None) -> str:
+def theme_palette(settings: Settings | None = None) -> str:
     """The pages' theme, the default when the file can't be read or holds no theme."""
     try:
-        value = (settings or current())["theme.name"]
+        value = (settings or current())["theme.palette"]
     except Exception:  # A broken config file must not stop the document from loading.
-        return THEME_NAMES[0]
-    return value if value in THEME_NAMES else THEME_NAMES[0]
+        return THEME_PALETTES[0]
+    return value if value in THEME_PALETTES else THEME_PALETTES[0]

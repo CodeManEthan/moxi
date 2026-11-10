@@ -20,7 +20,7 @@ default = "system"
 doc = "Light or dark: system follows the browser's light or dark scheme; light and dark fix the theme's light or dark colours. Each page the shell opens reads it."
 read = "use"
 
-[theme.name]
+[theme.palette]
 type = "enum"
 values = ["plain", "midnight-neon"]
 default = "plain"

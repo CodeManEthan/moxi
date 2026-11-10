@@ -5,8 +5,8 @@
 - The default theme is now plain: near-white paper or near-black, one text colour, greys
   and one blue accent, with states told in words. The colours until now, calm-workbench
   in light mode and midnight-neon in dark, are the theme `midnight-neon`, unchanged;
-  `moxi config set ui theme.name midnight-neon` brings them back.
-- New setting `theme.name` (`plain` or `midnight-neon`, default `plain`). The shell
+  `moxi config set ui theme.palette midnight-neon` brings them back.
+- New setting `theme.palette` (`plain` or `midnight-neon`, default `plain`). The shell
   document's root carries it as `data-theme-name`, beside `data-theme`, at the desk and on
   the phone. `theme.mode` still picks light, dark or the browser's scheme within the theme.
 - New colour tokens: `on-accent`, text on the accent's fill, and `danger`, a launch
@@ -21,7 +21,7 @@
 - `setTheme(mode, name?)` in `client.js` takes the theme's name as a second, optional
   argument.
 - The pair, sign-in and offline pages and the installed app's colour take the default
-  theme's colours, whatever `theme.name` says.
+  theme's colours, whatever `theme.palette` says.
 - Changed for callers: `moxi_ui.document.body` takes the theme's name after the mode.
 
 ## 0.2.3 (2026-11-08)

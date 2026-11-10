@@ -175,7 +175,7 @@ def test_the_gateways_document_carries_the_mode_and_the_theme_before_its_own_mar
             b' data-gateway="on" data-gateway-acts="off" data-gateway-reason="tcp">') in body
     path = Layout("ui").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('[theme]\nmode = "light"\nname = "midnight-neon"\n')
+    path.write_text('[theme]\nmode = "light"\npalette = "midnight-neon"\n')
     _status, _headers, body = document(Mount(mounted=True, reason=None))
     assert b'<html lang="en" data-theme="light" data-theme-name="midnight-neon" data-gateway="on"' in body
     path.write_text("this is not toml = = =\n")

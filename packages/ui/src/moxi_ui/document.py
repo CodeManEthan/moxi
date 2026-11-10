@@ -1,7 +1,7 @@
 """The shell document: the one HTML document a navigation with a valid cookie gets.
 
 It is the web build's `shell.html`, from the shell page's assets, with `data-theme` and
-`data-theme-name` on its root set from the `ui` settings `theme.mode` and `theme.name`
+`data-theme-name` on its root set from the `ui` settings `theme.mode` and `theme.palette`
 each time it is served. The document loads
 `theme.css`, `shell.css` and `client.js` from `/m/ui/`; `client.js` draws the menu and
 places the panel for the URL. It is static: no module's server starts for it, and it
@@ -47,7 +47,7 @@ def root(mode: str, name: str) -> bytes:
     `dark`) and the theme `name`. Raises `ValueError` for a mode or a theme there is not."""
     if mode not in config.THEME_MODES:
         raise ValueError(f"{mode!r} is not a theme mode")
-    if name not in config.THEME_NAMES:
+    if name not in config.THEME_PALETTES:
         raise ValueError(f"{name!r} is not a theme")
     return b'<html lang="en" data-theme="%s" data-theme-name="%s">' % (mode.encode("ascii"),
                                                                      name.encode("ascii"))
@@ -65,6 +65,6 @@ def body(mode: str, name: str) -> bytes:
 def answer(mode: str | None = None, name: str | None = None) -> Static:
     """The document's answer, its mode and theme read from the settings unless given."""
     data = body(config.theme_mode() if mode is None else mode,
-                config.theme_name() if name is None else name)
+                config.theme_palette() if name is None else name)
     return 200, response_headers(extra=[("Content-Type", "text/html; charset=utf-8"),
                                         ("Content-Length", str(len(data)))]), data

@@ -523,7 +523,7 @@ export function navigate(module: string, route = ""): void {
 
 /** Sets the shell document's theme mode and, when `name` is given, its theme, until the
  * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
- * and `theme.name`. A name theme.css has no block for shows the default theme. For the
+ * and `theme.palette`. A name theme.css has no block for shows the default theme. For the
  * settings view, after it writes either setting. */
 export function setTheme(mode: ThemeMode, name?: string): void {
   if (!MODES.includes(mode)) throw new TypeError(`theme mode ${JSON.stringify(mode)} is not system, light or dark`);

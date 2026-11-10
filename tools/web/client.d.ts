@@ -240,6 +240,6 @@ export declare function place(host: Element, module: string, name: string, attrs
 export declare function navigate(module: string, route?: string): void;
 /** Sets the shell document's theme mode and, when `name` is given, its theme, until the
  * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
- * and `theme.name`. A name theme.css has no block for shows the default theme. For the
+ * and `theme.palette`. A name theme.css has no block for shows the default theme. For the
  * settings view, after it writes either setting. */
 export declare function setTheme(mode: ThemeMode, name?: string): void;
