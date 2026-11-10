@@ -504,7 +504,8 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
         return [Unmet(f"this is no change of records only: {one}; a change to what "
                       "the gates read is frozen as a plain version, which a "
                       "re-check then reads", again)
-                for one in brake.differences(before, planned(view).declared)]
+                for one in brake.differences(before, planned(view).declared,
+                                             settled=brake.settled(view.state))]
 
     def freeze_file(view) -> tuple[int, Path]:
         if view.facts.error is not None:

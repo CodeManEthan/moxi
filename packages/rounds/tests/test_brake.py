@@ -8,10 +8,10 @@ import json
 
 import pytest
 
-from moxi_rounds import (brake, dropping, freezing, index, log, opening, state,
-                         verdicts, versions)
+from moxi_rounds import (brake, dropping, freezing, index, log, opening, questions, ruling,
+                         state, verdicts, versions)
 from moxi_rounds.cli import main
-from moxi_rounds.errors import BadArgument, Refused
+from moxi_rounds.errors import BadArgument, BadBlock, Refused
 
 ROUND = "proj-a/a-round"
 ASKED = "Do agent-read times follow the settings?"
@@ -475,6 +475,123 @@ def test_a_change_of_records_only_is_compared_with_the_version_before_not_the_re
     # Q3 is in the record, and the version before declared it: leaving it out differs.
     with pytest.raises(Refused, match="the question Q3 is gone"):
         records_only(folder)
+
+
+def settle(item: str, **more):
+    """Record the operator's ruling `item` on the round."""
+    return ruling.rule(ROUND, item=item, record="comms:1234567", actor="planner", **more)
+
+
+SETTLED = {"ruled": {"item": "Q1", "text": "They do."},
+           "withdrawn": {"item": "withdraw:Q1"}}
+
+
+@pytest.mark.parametrize("how", SETTLED)
+def test_a_block_without_a_question_since_settled_is_a_change_of_records_only(
+        folder, how):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+    settle(**SETTLED[how])
+
+    # The answered question can't stay in the block, and leaving it out changes
+    # nothing a gate reads.
+    with pytest.raises(BadBlock):
+        fold(folder)
+    frozen = records_only(folder, *PLAN[1:])
+
+    assert (frozen.version, str(frozen.standing)) == (2, "publishable@v2")
+    assert standing(folder) == "publishable@v2"
+    assert asked(folder).pass_ is None
+    assert [one["id"] for one in versions.declarations(folded(folder))["question"]] == [
+        "Q2"]
+
+
+def test_a_block_without_a_settled_question_stays_one_of_records_only_after(folder):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+    settle(**SETTLED["ruled"])
+    records_only(folder, *PLAN[1:])
+
+    frozen = records_only(folder, *PLAN[1:])
+
+    assert (frozen.version, str(frozen.standing)) == (3, "publishable@v3")
+
+
+@pytest.mark.parametrize("how", ["open", "parked"])
+def test_a_block_without_a_question_still_asked_is_no_change_of_records_only(
+        folder, how):
+    fold(folder)
+    if how == "parked":
+        settle("park:Q1")
+    assert questions.find(folded(folder), "Q1").state == how
+    before = raw(folder)
+
+    with pytest.raises(Refused) as refused:
+        records_only(folder, *PLAN[1:])
+
+    assert [one.reason for one in refused.value.unmet] == [
+        "this is no change of records only: the question Q1 is gone; a change to what "
+        "the gates read is frozen as a plain version, which a re-check then reads"]
+    assert raw(folder) == before
+    assert not versions.file(folder, 2).exists()
+
+
+def test_a_settled_question_left_out_beside_a_changed_stage_is_refused_for_the_stage(
+        folder):
+    fold(folder)
+    settle(**SETTLED["ruled"])
+    before = raw(folder)
+
+    with pytest.raises(Refused) as refused:
+        records_only(folder, PLAN[1], PLAN[2], stage("B2"))
+
+    assert [one.reason for one in refused.value.unmet] == [
+        "this is no change of records only: B2 waited for B1 and now waits for "
+        "nothing; a change to what the gates read is frozen as a plain version, which "
+        "a re-check then reads"]
+    assert raw(folder) == before
+
+
+def test_a_settled_question_left_out_beside_another_still_asked_is_refused_for_that(
+        folder):
+    fold(folder)
+    settle(**SETTLED["ruled"])
+
+    with pytest.raises(Refused) as refused:
+        records_only(folder, *PLAN[2:])
+
+    assert [one.reason.split(";")[0] for one in refused.value.unmet] == [
+        "this is no change of records only: the question Q2 is gone"]
+
+
+@pytest.mark.parametrize(("settled", "said"), [
+    ((), ["the question Q1 is gone", "the question Q2 is gone"]),
+    (("Q1",), ["the question Q2 is gone"]),
+    (("Q1", "Q2"), []),
+    # Only a question that is gone is passed over: one that stays is still compared.
+    (("Q3",), ["the question Q1 is gone", "the question Q2 is gone"]),
+])
+def test_only_a_settled_question_that_is_gone_is_no_difference(settled, said):
+    before = {"question": [{"id": "Q1", "blocks": ["B1"]}, {"id": "Q2"}],
+              "stage": [{"id": "B1"}]}
+    now = {"question": [], "stage": [{"id": "B1"}]}
+
+    assert brake.differences(before, now, settled=settled) == said
+
+
+def test_a_settled_question_still_in_the_block_is_compared_as_any_other():
+    before = {"question": [{"id": "Q1", "blocks": ["B1"]}]}
+    now = {"question": [{"id": "Q1", "blocks": "all"}, {"id": "Q2"}]}
+
+    assert brake.differences(before, now, settled=("Q1", "Q2")) == [
+        "the question Q2 is new", "Q1 held up B1 and now holds up all"]
+
+
+def test_a_stage_that_is_gone_is_a_difference_whatever_is_settled():
+    before = {"stage": [{"id": "B1"}, {"id": "B2"}]}
+
+    assert brake.differences(before, {"stage": [{"id": "B1"}]}, settled=("B2",)) == [
+        "the stage B2 is gone"]
 
 
 def test_a_block_that_only_adds_options_is_a_change_of_records_only(folder):

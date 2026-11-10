@@ -285,7 +285,9 @@ Verification is bounded, so that passes do not feed themselves:
 4. A version that changes records only needs no pass: `fold --records-only --record
    PTR`, with a pointer to where the lead wrote what changed. It is refused when the
    block's questions, its stages, what a question holds up or what a stage waits for
-   differ from the version before. The design keeps the standing it had.
+   differ from the version before. A question since ruled or withdrawn that the
+   block leaves out is no difference: no gate reads it. The design keeps the standing
+   it had.
 5. After two verdicts in a row that send the design back, no pass is asked for. `next`
    says what to do instead: state the rule the findings break, write the section again
    from it and freeze the design; then `mark ROUND thread:NAME --close --record PTR`,

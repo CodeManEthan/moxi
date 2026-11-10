@@ -63,7 +63,8 @@ leaves it with no standing until a re-check reads what changed. `fold --records-
 asked for, and the design keeps the standing it had, a design that was sent back
 standing at the lead's decision from then on. It is refused when the block's
 questions, its stages, what a question holds up or what a stage waits for differ from
-the version before.
+the version before. A question since ruled or withdrawn that the block leaves out is
+no difference.
 `verdict` records the verdict of a report, run by whoever wrote it: it reads the
 report's data block and records it against the version of the design the report says
 its pass read, whatever was frozen or edited since. A report of a design is the kind

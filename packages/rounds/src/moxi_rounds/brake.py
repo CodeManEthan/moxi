@@ -18,7 +18,8 @@ bounded by five rules, and the functions here are those rules:
    the two frozen files to compare.
 4. **A change of records only needs no pass.** It is frozen with the lead's pointer to
    its record, and is one only when what the gates read is as the version before
-   declared it: `differences` lists what is not.
+   declared it: `differences` lists what is not. A question since ruled or withdrawn
+   (`settled`) that the block leaves out is no difference, since no gate reads it.
 5. **Two verdicts in a row that send the design back.** `asked` then asks for no pass
    and says what to do instead: state the rule, write the section again from it,
    freeze the design, and record the lead's decision on the thread with `decide`,
@@ -206,17 +207,28 @@ def _held(blocks) -> str:
     return blocks if isinstance(blocks, str) else ", ".join(blocks or ())
 
 
-def differences(before: dict, now: dict) -> list[str]:
+def settled(state: states.State) -> frozenset[str]:
+    """The questions of `state` that are ruled or withdrawn. No gate reads one, and a
+    design's block may not carry one, so the block that leaves one out differs from
+    the version before in nothing a gate reads."""
+    return frozenset(one.id for one in state.questions
+                     if one.state in (questions.RULED, questions.WITHDRAWN))
+
+
+def differences(before: dict, now: dict, *, settled=()) -> list[str]:
     """Where what the gates read differs between two versions' declarations, each as
     a line: a question or a stage that only one of them has, a question that holds up
     other stages, a stage that builds elsewhere or waits for other stages. A
     question's sentence, its options, a stage's slices and what else a block declares
-    are read by no gate and are not compared."""
+    are read by no gate and are not compared. Neither is a question of `settled`, the
+    ids the record holds as ruled or withdrawn, that the newer block left out: a
+    question still asked that is gone is a difference, as is any stage."""
     found = []
     for kind, what in ((states.QUESTION, "question"), (states.STAGE, "stage")):
         was, new = _by_id(before, kind), _by_id(now, kind)
         found += [f"the {what} {one} is new" for one in new if one not in was]
-        found += [f"the {what} {one} is gone" for one in was if one not in new]
+        found += [f"the {what} {one} is gone" for one in was if one not in new
+                  and not (kind == states.QUESTION and one in settled)]
         for one in new:
             if one not in was:
                 continue
@@ -354,4 +366,5 @@ def decide(name: str, thread: str, decision: str, *, record: str | None, actor: 
 __all__ = ["VERIFIES", "FULL", "RECHECK", "EXTRA_FULL_PASS", "SENT_BACK_IN_A_ROW", "CLOSE",
            "ACCEPT_RISK", "DECISIONS", "THREAD", "PREFIX", "Asked", "sent_back",
            "frozen_since", "had_full_pass", "flags", "asked", "files", "differences",
+           "settled",
            "Decided", "decide"]
