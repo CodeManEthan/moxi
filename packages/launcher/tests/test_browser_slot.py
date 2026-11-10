@@ -1,6 +1,7 @@
-"""A past slot session resumed from the launcher's page, in a browser, through a real shell
-whose page server runs the resume on real slots: the resume button, the job it starts,
-and the new launch's row arriving by push.
+"""Real slots in a browser, through a real shell whose page server launches on them: a
+past slot session resumed from the launcher's page (the resume button, the job it starts,
+and the new launch's row arriving by push), and a launch from the box on Home, which
+starts the fake harness in a slot and names that slot under the box.
 
 slots runs on a tmux server of its own. The test shell's `MOXI_HOME` is under its own
 temporary home, slots' socket follows `MOXI_HOME`, and the server is started here on that
@@ -11,6 +12,7 @@ Skipped where slots is not installed or tmux 3.2 or later is not on `PATH`.
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import sys
 
@@ -69,3 +71,20 @@ def test_a_past_slot_session_resumes_in_its_slot_and_the_new_row_arrives_by_push
     [run] = wait_for(lambda: [run for run in harness.runs() if run["cwd"] == str(work)], 20,
                      what="the fake harness's run in the slot")
     assert "--resume" in run["argv"] and sid in run["argv"], run["argv"]
+
+
+def test_a_launch_from_home_starts_in_a_real_slot_and_names_it(ui_shell, own_slots, ui_page,
+                                                               harness):
+    piece = kit.open_home(ui_page)
+    go = piece.locator(".go")
+    expect(go).to_have_attribute("data-target", "slot")
+    expect(go).to_have_text(re.compile(r"^Launch in (a new slot|slot \d+)$"))
+    go.click()
+    started = piece.locator('.said [data-line="started"]')
+    expect(started).to_have_text(re.compile(r"^Started in slot \d+ · "), timeout=30_000)
+    row = kit.newest_launch(ui_shell)
+    assert row.target == "slot" and row.slot, row
+    assert f"Started in slot {row.slot} " in started.inner_text()
+    # The fake harness ran in the slot, in the folder the line above the box named.
+    wait_for(lambda: [run for run in harness.runs() if run["cwd"] == row.cwd], 20,
+             what="the fake harness's run in the slot")
