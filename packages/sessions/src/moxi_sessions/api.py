@@ -1,7 +1,9 @@
-"""sessions' interfaces 2 and 3, the module other Moxi modules import (`moxi_sessions.api`).
+"""sessions' interfaces 2, 3 and 4, the module other Moxi modules import
+(`moxi_sessions.api`).
 
-Interface 3 is interface 2 plus `retention()` and `Retention`; a caller that uses them
-loads sessions with interface 3.
+Interface 3 is interface 2 plus `retention()` and `Retention`; interface 4 is interface 3
+plus the list (`sessions_list` and the names with it). A caller loads sessions with the
+newest interface whose names it uses.
 
 The one shape (`moxi_sessions.shape`):
 
@@ -39,6 +41,26 @@ Each harness's transcript retention (interface 3):
   Code's `cleanupPeriodDays`, Codex's compression switch and its archive folder, and that
   sessions reads no setting for OpenCode (`Retention`, with the lines a setup prints).
   It reads and changes nothing else.
+
+The list of sessions (interface 4; `moxi_sessions.lists` says what each answers):
+
+* `sessions_list(cat=None, *, recent_s, now=None, harness=None, since=None, until=None,
+  folder=None, find=None)`: the main sessions of the three harnesses as plain data: the
+  counts, and the groups a list is cut into (the sessions active recently, one group per
+  day for seven days, the rest as a count) with the first rows of each.
+* `sessions_more(cat=None, *, group, recent_s, kind=None, before=None, now=None, ...)`:
+  the next rows of one group, from the place an answer gave.
+* `sessions_newest(cat=None, *, recent_s, now=None, limit=30, ...)`: the same sessions
+  as one run, newest change first, with no groups.
+* `sessions_folders(cat=None, *, harness=None, since=None, until=None, find=None,
+  limit=200)`: the folders those sessions ran in, with how many each holds.
+* `session_opened(cat=None, *, harness, session, recent_s, now=None)`: one session's row
+  with its last reply, its first subagents and the command that picks it up again.
+* `list_recent_s()`: the setting `list.recent_s`, the `recent_s` a caller with no
+  number of its own passes.
+* `Catalog`, what the list reads through and keeps its reads in. With `cat` None each
+  function reads through the process's own; a caller that wants a list over other roots,
+  or one that forgets with it, makes a `Catalog` and passes it.
 
 Writing records for tests:
 
@@ -95,17 +117,29 @@ _HOMES: dict[str, str] = {
                      "document"), "shape"),
 }
 
-__all__ = list(_HOMES)
+#: The names the API spells differently from their home: the home module and the name
+#: there.
+_RENAMED: dict[str, tuple[str, str]] = {
+    "sessions_list": ("lists", "list_sessions"),
+    "sessions_more": ("lists", "more_sessions"),
+    "sessions_newest": ("lists", "newest_sessions"),
+    "sessions_folders": ("lists", "list_folders"),
+    "session_opened": ("lists", "open_session"),
+    "list_recent_s": ("settings", "recent_s"),
+    "Catalog": ("catalog", "Catalog"),
+}
+
+__all__ = [*_HOMES, *_RENAMED]
 
 
 def __getattr__(name: str) -> Any:
-    home = _HOMES.get(name)
+    home, there = _RENAMED.get(name, (_HOMES.get(name), name))
     if home is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     if home == "":
         value = importlib.import_module(f"{__package__}.{name}")
     else:
-        value = getattr(importlib.import_module(f"{__package__}.{home}"), name)
+        value = getattr(importlib.import_module(f"{__package__}.{home}"), there)
     globals()[name] = value              # later lookups find it without coming here
     return value
 

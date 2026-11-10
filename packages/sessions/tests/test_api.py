@@ -1,4 +1,4 @@
-"""The announcement and interface 2, as other modules reach them through `moxi.modules`."""
+"""The announcement and the interfaces, as other modules reach them through `moxi.modules`."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ CODEX_NAMES = {"TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS", "META_KEYS", "HISTO
                "CHECKED_VERSIONS"}
 
 
-def test_the_announcement_offers_interfaces_2_and_3():
-    assert module.INTERFACES == frozenset({2, 3})
+def test_the_announcement_offers_interfaces_2_3_and_4():
+    assert module.INTERFACES == frozenset({2, 3, 4})
     assert module.API == "moxi_sessions.api"
     assert module.CLI == "moxi_sessions.cli:main"
     assert module.SETTINGS == "settings.toml"
@@ -52,7 +52,9 @@ def test_load_finds_the_module_and_its_api():
     assert found.ok, found
     assert found.api is api
     assert modules.load("sessions", interface=3).ok
+    assert modules.load("sessions", interface=4).ok
     assert not modules.load("sessions", interface=1).ok
+    assert not modules.load("sessions", interface=5).ok
 
 
 def test_interface_3_adds_retention():
@@ -60,6 +62,48 @@ def test_interface_3_adds_retention():
     assert {"retention", "Retention"} <= set(api.__all__)
     assert api.retention is retention.retention and api.Retention is retention.Retention
     assert list(inspect.signature(api.retention).parameters) == ["env"]
+
+
+def test_interface_4_adds_the_list():
+    from moxi_sessions import catalog, lists, settings
+    assert {"sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
+            "session_opened", "list_recent_s", "Catalog"} <= set(api.__all__)
+    assert api.sessions_list is lists.list_sessions
+    assert api.sessions_more is lists.more_sessions
+    assert api.sessions_newest is lists.newest_sessions
+    assert api.sessions_folders is lists.list_folders
+    assert api.session_opened is lists.open_session
+    assert api.list_recent_s is settings.recent_s and api.Catalog is catalog.Catalog
+    sig = inspect.signature(api.sessions_list)
+    assert list(sig.parameters) == ["cat", "recent_s", "now", "harness", "since", "until",
+                                    "folder", "find"]
+    assert sig.parameters["cat"].default is None
+    assert sig.parameters["recent_s"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["recent_s"].default is inspect.Parameter.empty
+    assert list(inspect.signature(api.session_opened).parameters) == [
+        "cat", "harness", "session", "recent_s", "now"]
+
+
+def test_the_list_answers_through_the_api_over_a_callers_own_roots(tmp_path):
+    projects = tmp_path / "projects"
+    rollouts = tmp_path / "codex-sessions"
+    rollouts.mkdir()
+    t = api.testing.ClaudeTranscript(projects, cwd="/work/proj-a")
+    t.user("Do the thing.", origin="human")
+    t.assistant("Done.")
+    t.write()
+    cat = api.Catalog({"claude": projects, "codex": rollouts,
+                       "opencode": api.testing.OpenCodeDb(tmp_path / "opencode").write()})
+
+    answer = api.sessions_list(cat, recent_s=api.list_recent_s())
+
+    assert api.list_recent_s() == 3600
+    assert (answer["all"], answer["total"]) == (1, 1)
+    row = answer["groups"][0]["rows"][0]
+    assert answer["groups"][0]["key"] == "recent" and row["folder"] == "/work/proj-a"
+    assert api.sessions_newest(cat, recent_s=3600)["rows"] == [row]
+    assert api.session_opened(cat, harness="claude", session=row["session"],
+                              recent_s=3600)["reply"]["text"] == "Done."
 
 
 def test_interface_2_keeps_what_cache_reads():
@@ -95,10 +139,13 @@ def test_interface_2_finds_and_lists():
     assert list(inspect.signature(api.subagents).parameters) == ["source"]
 
 
-def test_the_schema_holds_the_three_roots_and_the_guards_switch_and_escapes():
+def test_the_schema_holds_the_roots_the_guards_switch_and_escapes_and_the_recent_time():
     schema = Schema.from_resource("moxi_sessions", "settings.toml")
     assert list(schema.keys) == ["claude.projects", "codex.sessions", "opencode.database",
-                                 "guard.transcript_read", "guard.transcript_read_escapes"]
+                                 "guard.transcript_read", "guard.transcript_read_escapes",
+                                 "list.recent_s"]
+    key = schema.keys["list.recent_s"]
+    assert (key.type, key.default, key.read, key.env) == ("int", 3600, "use", None)
     for name in ("claude.projects", "codex.sessions", "opencode.database"):
         key = schema.keys[name]
         assert (key.type, key.default, key.read, key.env) == ("path", "", "use", None)

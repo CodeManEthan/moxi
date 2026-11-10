@@ -31,3 +31,9 @@ items = "str"
 default = ["sessions"]
 doc = "The verbs of this environment's moxi whose commands the transcript-read guard lets name a transcript path (moxi sessions by default); add a module's verb when that module reads transcripts for its agents."
 read = "use"
+
+[list.recent_s]
+type = "int"
+default = 3600
+doc = "How many seconds after its last change a session counts as active recently: the list shows it in its first group, and a list row says so."
+read = "use"

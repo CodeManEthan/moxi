@@ -69,6 +69,9 @@ FOUND_ROWS = 30
 MORE_ROWS = 30
 EARLIER_SESSIONS = 30
 
+#: How many rows the ungrouped list carries unless asked.
+NEWEST_ROWS = 30
+
 #: How many days a list shows after `recent`.
 DAYS = 7
 
@@ -316,6 +319,23 @@ def _now(now: float | None) -> float:
     return time.time() if now is None else float(now)
 
 
+def _counted(cat: Catalog, f: _Filters, now: float
+             ) -> tuple[dict[str, Any], list[Entry]]:
+    """What every list answers before its rows (`now`, `today`, the counts, the roots
+    that failed), and the entries under the filters, in the list's order."""
+    gathered = cat.gather()
+    pool = _pool(cat, gathered, f)
+    entries = _of(pool, f.harness)
+    counts = Counter(e.harness for e in pool)
+    return {
+        "now": now, "today": local_day(now), "all": len(gathered.entries),
+        "total": len(entries), "unreadable": gathered.unreadable,
+        "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason}
+                  for r in gathered.roots],
+        "harnesses": [{"harness": h, "count": counts[h]} for h in HARNESSES],
+    }, entries
+
+
 def list_sessions(cat: Catalog | None = None, *, recent_s: float,
                   now: float | None = None, harness: str | None = None,
                   since: float | None = None, until: float | None = None,
@@ -350,17 +370,7 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
     f = _filters(harness, since, until, folder, find)
     now = _now(now)
     cutoff = _cutoff(now, recent_s)
-    gathered = cat.gather()
-    pool = _pool(cat, gathered, f)
-    entries = _of(pool, f.harness)
-    counts = Counter(e.harness for e in pool)
-    answer: dict[str, Any] = {
-        "now": now, "today": local_day(now), "all": len(gathered.entries),
-        "total": len(entries), "unreadable": gathered.unreadable,
-        "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason}
-                  for r in gathered.roots],
-        "harnesses": [{"harness": h, "count": counts[h]} for h in HARNESSES],
-    }
+    answer, entries = _counted(cat, f, now)
     if f.find is not None:
         rows, before = _page(cat, entries, FOUND_ROWS, cutoff)
         answer["groups"] = [{"key": FOUND, "count": len(entries), "rows": rows,
@@ -382,6 +392,30 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
                        "oldest": min(times) if times else None,
                        "before": None if last is None else position(last)})
     answer["groups"] = groups
+    return answer
+
+
+def newest_sessions(cat: Catalog | None = None, *, recent_s: float,
+                    now: float | None = None, limit: int = NEWEST_ROWS,
+                    harness: str | None = None, since: float | None = None,
+                    until: float | None = None, folder: str | None = None
+                    ) -> dict[str, Any]:
+    """The sessions under the filters as one run, of both kinds, newest change first,
+    with no groups: what `list_sessions` answers before its groups (`now`, `today`,
+    `all`, `total`, `unreadable`, `roots`, `harnesses`), then `rows`, the first `limit`
+    of them as a list's rows, and `before`, the place after them, None when `rows` holds
+    them all. It reads the head and the last turn of the rows it returns and of no other
+    session, unless `folder` is asked.
+
+    Raises ValueError for a filter that is not one, and for a `limit` under 1."""
+    cat = _catalog(cat)
+    f = _filters(harness, since, until, folder, None)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError(f"limit is a number of sessions, 1 or more, not {limit!r}")
+    now = _now(now)
+    answer, entries = _counted(cat, f, now)
+    answer["rows"], answer["before"] = _page(cat, entries, limit,
+                                             _cutoff(now, recent_s))
     return answer
 
 
@@ -583,6 +617,7 @@ def open_session(cat: Catalog | None = None, *, harness: str, session: str,
 
 
 __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIONS",
-           "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FIND_MIN", "RECENT", "FOUND",
-           "EARLIER", "UNDATED", "PERSON", "PROGRAM", "position", "parse_position",
-           "local_day", "list_sessions", "more_sessions", "list_folders", "open_session"]
+           "NEWEST_ROWS", "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FIND_MIN", "RECENT",
+           "FOUND", "EARLIER", "UNDATED", "PERSON", "PROGRAM", "position",
+           "parse_position", "local_day", "list_sessions", "newest_sessions",
+           "more_sessions", "list_folders", "open_session"]

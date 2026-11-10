@@ -184,9 +184,10 @@ def test_the_gate_matrix_passes():
     assert LB.gate_matrix(ROUTES)
 
 
-def test_the_page_declares_two_reads_and_nothing_the_gateways():
+def test_the_page_declares_six_reads_and_nothing_the_gateways():
     routes = {r["path"]: r for r in LB.export(ROUTES)["routes"]}
-    assert set(routes) == {"/api/window", "/api/subagents"}
+    assert set(routes) == {"/api/window", "/api/subagents", "/api/list", "/api/more",
+                           "/api/session", "/api/folders"}
     assert all(r["kind"] == "read" for r in routes.values())
     assert not any(r["gateway"] or r["stream"] or r["confirmed"] for r in routes.values())
     assert set(routes["/api/window"]["query"]) == {"harness", "session", "agent", "turns",
@@ -210,8 +211,12 @@ def _marks(shape: dict, at: str = "") -> dict[str, str]:
 
 
 def test_every_path_is_marked_path_and_all_content_redact():
+    """One session's two routes; the list's four are walked leaf by leaf in
+    `test_page_list`."""
     marks: dict[str, str] = {}
     for route in LB.export(ROUTES)["routes"]:
+        if route["path"] not in ("/api/window", "/api/subagents"):
+            continue
         for key, shape in route["returns"].items():
             marks.update({f"{route['path']} {k}": v for k, v in _marks(shape, key).items()})
     assert {k for k, v in marks.items() if v == "path"} == {
@@ -236,7 +241,7 @@ def test_the_announcement_offers_the_page_and_imports_none_of_it():
 
     assert module.PAGE == "moxi_sessions.page:PAGE"
     assert "ui" in module.OPTIONAL
-    assert module.INTERFACES == frozenset({2, 3})
+    assert module.INTERFACES == frozenset({2, 3, 4})
     probe = ("import sys, moxi_sessions.module, moxi_sessions.cli, moxi_sessions.api\n"
              "print(sorted(m for m in sys.modules if m.startswith(('moxi_ui', "
              "'moxi_sessions.page'))))")
@@ -276,7 +281,9 @@ def test_each_component_is_a_built_asset_of_the_page():
     assert {"page.js", "window.js"} <= set(exported["assets"])
     for decl in module.COMPONENTS.values():
         assert decl["script"] in exported["assets"]
-    assert {r["path"] for r in exported["routes"]} == {"/api/window", "/api/subagents"}
+    assert {r["path"] for r in exported["routes"]} == {
+        "/api/window", "/api/subagents", "/api/list", "/api/more", "/api/session",
+        "/api/folders"}
     assert LB.gate_matrix(page.PAGE)
 
 
