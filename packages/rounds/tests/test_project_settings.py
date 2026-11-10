@@ -121,6 +121,27 @@ def test_a_round_reads_its_home_project_and_a_build_its_repo(write_config):
     assert settings.build_setting(read, "proj-a", "into") is None
 
 
+def test_a_project_table_is_found_ignoring_case_as_the_projects_list_finds_a_key(
+        write_config):
+    write_config("""\
+        [projects.PROJ-A]
+        flow = "fix"
+        into = "release"
+    """)
+    read = settings.load()
+    assert settings.round_setting(read, "proj-a", "flow") == "fix"
+    assert settings.build_setting(read, "Proj-A", "into") == "release"
+    assert settings.project_table(read, "proj-b") == {}
+
+
+def test_two_tables_that_name_one_project_in_two_cases_are_refused():
+    error = refusal('[projects.proj-a]\nflow = "fix"\n\n[projects.PROJ-A]\n'
+                    'flow = "small"\n')
+    assert error.key == "projects.PROJ-A"
+    assert "names the project that [projects.proj-a] names" in error.problem
+    assert "[projects.proj-a]" in error.fix
+
+
 def test_the_keys_for_a_round_and_for_a_build_share_none():
     assert not set(settings.ROUND_KEYS) & set(settings.BUILD_KEYS)
     assert set(settings.ROUND_KEYS) | {"check_on"} >= {

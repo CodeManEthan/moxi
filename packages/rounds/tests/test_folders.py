@@ -118,6 +118,16 @@ def test_a_project_is_found_in_any_case_and_named_as_it_is_stored(
     assert folders.home("PROJ-A").project == "proj-a"
 
 
+def test_a_table_named_in_another_case_than_the_stored_key_places_the_folder(
+        add_project, without_notes, write_config, tmp_path):
+    add_project("proj-a")
+    write_config(f"""
+        [projects.PROJ-A]
+        dir = "{tmp_path / 'elsewhere'}"
+    """)
+    assert folders.home("proj-a") == folders.Home("proj-a", tmp_path / "elsewhere")
+
+
 def test_settings_already_read_are_used_as_given(add_project, without_notes, write_config,
                                                  tmp_path):
     from moxi_rounds import settings

@@ -11,6 +11,11 @@ what a flow and a project table may hold is checked here.
 A setting is read for a round or for a build. `round_setting` reads one of `ROUND_KEYS`
 for the round's home project; `build_setting` reads one of `BUILD_KEYS` for the build's
 repo. Each takes the project's own table first, then `defaults`.
+
+A project's table is `[projects.<key>]`, and its name finds the project the way the
+projects list finds one: ignoring case. So `project_table` gives the same table for
+`proj-a` however the table's name or the key is written, and two tables whose names
+differ only in case are refused, since both would be the one project's.
 """
 
 from __future__ import annotations
@@ -55,7 +60,15 @@ def check(settings):
     flows.check(settings)
     _check_sitting_at(settings.file, "defaults.sitting_at",
                       settings["defaults.sitting_at"])
+    named: dict[str, str] = {}
     for name, table in settings["projects"].items():
+        first = named.setdefault(name.casefold(), name)
+        if first != name:
+            raise ConfigError(
+                settings.file, f"projects.{name}",
+                f"names the project that [projects.{first}] names: a project's key is "
+                "matched ignoring case, so the two tables are one project's",
+                f"keep the project's settings in one table, [projects.{first}]")
         _check_project(settings.file, name, table)
     return settings
 
@@ -101,10 +114,20 @@ def build_setting(settings, repo: str, key: str):
     return finish_actions(value) if key == "finish" else value
 
 
+def project_table(settings, project: str) -> dict:
+    """The table of `settings` for the project `project`, empty when it has none. A
+    table's name matches the key ignoring case, as the projects list matches a key."""
+    wanted = project.casefold()
+    for name, table in settings["projects"].items():
+        if name.casefold() == wanted:
+            return table
+    return {}
+
+
 def _setting(settings, project, key):
     import copy
 
-    table = settings["projects"].get(project, {})
+    table = project_table(settings, project)
     if key in table:
         return table[key]
     if f"defaults.{key}" in settings:
@@ -305,4 +328,5 @@ _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
            "ROUND_KEYS", "BUILD_KEYS", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
-           "round_setting", "build_setting", "finish_actions", "has_notes_folder"]
+           "round_setting", "build_setting", "project_table", "finish_actions",
+           "has_notes_folder"]
