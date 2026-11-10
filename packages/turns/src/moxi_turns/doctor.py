@@ -54,7 +54,7 @@ GUARD_PLACES = {"claude": "in the runner", "codex": "behind the hook"}
 IMPORT_WARN_MS = 10.0
 
 
-def Row(name: str, ok: bool, detail: str, fix: str | None = None) -> moxi_doctor.Row:  # noqa: N802
+def Row(name: str, ok: bool, detail: str, fix: str | None = None) -> moxi_doctor.Row:  # noqa: N802 -- the adapter row protocol uses this constructor name
     """An adapter's row in its old spelling: `ok` or not, read as `ok` or `fail`."""
     return moxi_doctor.Row(MODULE, name, "ok" if ok else "fail", detail, fix)
 

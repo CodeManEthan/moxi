@@ -375,7 +375,7 @@ def _handler_for(handle):
         def log_message(self, fmt, *args) -> None:  # noqa: D401 - quiet by design
             log.debug("leg: " + fmt, *args)
 
-        def do_POST(self) -> None:  # noqa: N802 - http.server's name
+        def do_POST(self) -> None:  # noqa: N802 -- http.server's name
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length < 0 or length > MAX_BODY:
@@ -398,7 +398,7 @@ def _handler_for(handle):
                 log.exception("leg request %s failed", self.path)
                 self._send(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:  # noqa: N802 -- http.server's name
             self._send(405, {"ok": False, "error": "POST only"})
 
         def _send(self, status: int, obj: dict[str, Any]) -> None:

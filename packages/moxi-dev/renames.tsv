@@ -603,6 +603,9 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	return ((isinstance(node, as
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	or (isinstance(node, ast.Name) and node.id in self.environ))	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	if not (self.os or self.environ or self.getenv):	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named	use	moxi.names.is_skill_folder`	moxi.names.is_skill_dir`
+moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	if words & {"environ", "environment"}:	keep	environ	environ
+moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	if words & {"environ", "environment"}:	keep	environment	environment
+moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	if words & {"folder", "folders", "directory", "directories"}:	keep	folders	folders
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("--table", type=Path, default=default, metavar="PATH")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("root", nargs="?", type=Path, default=Path.cwd(), metavar="ROOT")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG	keep	HOME	HOME
@@ -634,6 +637,7 @@ moxi-dev	packages/moxi-dev/tests/test_fence.py	"XDG_DATA_HOME": "/d"}, "/h", win
 moxi-dev	packages/moxi-dev/tests/test_fence.py	assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", windows=False) == \	keep	windows	windows
 moxi-dev	packages/moxi-dev/tests/test_fence.py	dirs({}, "/h", windows=False)	keep	windows	windows
 moxi-dev	packages/moxi-dev/tests/test_fence.py	assert uv_env["HOME"] == str(fence.home)	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_naming.py	assert {hit.message.split("'")[1] for hit in hits} == {"environment", "child_environ"}	keep	environment	environment
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/model.py", "Clock", "name", "age_seconds", "age_s"))	keep	age_seconds	age_seconds
 moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row("packages/p/src/p/paths.py", "-", "name", "HOME", "HOME_ENV"),	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	"keep", "HOME", "HOME"))	keep	HOME	HOME

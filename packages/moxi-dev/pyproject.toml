@@ -22,7 +22,7 @@ classifiers = [
 # which names moxi-dev alone, brings them into a contributor's environment. packaging
 # reads the requirements and versions the release step compares.
 dependencies = ["moxi>=0.1.6,<0.2", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry",
-                "packaging"]
+                "packaging", "ruff>=0.17,<0.18"]
 
 [project.scripts]
 moxi-dev = "moxi_dev.cli:main"

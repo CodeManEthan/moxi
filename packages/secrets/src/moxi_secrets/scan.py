@@ -49,7 +49,7 @@ class Hit:
 
     __slots__ = ("set", "rule", "description", "start", "end", "line", "fingerprint")
 
-    def __init__(self, set, rule, description, start, end, line, fingerprint):  # noqa: A002
+    def __init__(self, set, rule, description, start, end, line, fingerprint):  # noqa: A002 -- set is the stored field name
         for name, value in zip(self.__slots__,
                                (set, rule, description, start, end, line, fingerprint)):
             object.__setattr__(self, name, value)

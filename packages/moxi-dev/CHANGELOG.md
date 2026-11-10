@@ -2,6 +2,15 @@
 
 ## 0.1.1 (2026-11-08)
 
+- `moxi-dev check` now runs Ruff's N, A and FBT rules over the repository, reports Ruff
+  in its summary, and accepts `--only ruff`. moxi-dev depends on Ruff 0.17, and the root
+  configuration excludes vendored code, ignores N818 and permits MX exception marks.
+- MX2 checks environment-variable constants for the `_ENV` suffix, one constant per
+  variable, the owning package and direct literals in source code.
+- MX3 checks the house words for environment mappings, caught exceptions, directories,
+  database connections, open files, print callbacks and actor parameters.
+- Exception marks for N, A and FBT now need ` -- <why>`, as MX marks already did.
+
 - `moxi-dev rename` can apply a real table: it is fast; reads tests, conftest and
   scripts; resolves submodule imports, lazy `__getattr__` re-export tables and imports
   inside functions; renames dataclass field keywords; makes `kwonly` rows work with an
