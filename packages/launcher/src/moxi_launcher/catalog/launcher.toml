@@ -133,6 +133,15 @@ group = "config"
 sub = "Pass-through"
 label = "Extra harness flags"
 
+[name]
+type = "string"
+default = ""
+doc = "The session's name; the name template's when unset."
+group = "seat"
+sub = "Name & notes"
+label = "Session name"
+carry = false
+
 [notes_dir]
 type = "path"
 default = ""

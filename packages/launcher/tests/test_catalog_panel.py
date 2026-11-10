@@ -38,7 +38,7 @@ ASSIGNED = {
     ("seat", "Role"): {"agent"},
     ("seat", "Comms"): {"identity", "scope", "director", "posture"},
     ("seat", "Instructions"): {"instructions", "instructions_file"},
-    ("seat", "Name & notes"): {"native_name", "notes_dir"},
+    ("seat", "Name & notes"): {"name", "native_name", "notes_dir"},
     ("seat", None): {"handoff"},
     ("runs-in", "Remote"): {"remote_control"},
     ("lifecycle", "Context"): {"warn_at", "recycle_at_limit", "limit_at"},
@@ -50,7 +50,8 @@ ASSIGNED = {
 #: The settable rows with no group: another control of the page sets each.
 ELSEWHERE = {"cwd", "project", "target", "slot", "brief", "brief_file"}
 #: The rows never filled from an earlier launch.
-NOT_CARRIED = {"cwd", "project", "scratch", "brief", "brief_file", "handoff", "target", "slot"}
+NOT_CARRIED = {"cwd", "project", "scratch", "brief", "brief_file", "handoff", "target", "slot",
+               "name"}
 LABELS = {
     "harness": "Harness", "model": "Model", "effort": "Effort / reasoning",
     "cwd": "Folder", "project": "Project", "scratch": "Scratch folder",
@@ -59,7 +60,7 @@ LABELS = {
     "instructions_file": "Standing instructions (file)", "brief": "Brief",
     "brief_file": "Brief from a file", "handoff": "Handoff file as first turn",
     "target": "Where it runs", "slot": "Slot", "extra_flags": "Extra harness flags",
-    "notes_dir": "Notes folder", "warn_at": "Warn at context mark",
+    "name": "Session name", "notes_dir": "Notes folder", "warn_at": "Warn at context mark",
     "keep_warm": "Keep warm", "recycle_on_expiry": "Recycle on cache expiry",
     "recycle_at_limit": "Recycle at limit", "limit_at": "Limit mark",
     "agent": "Agent role", "tools": "Built-in tool set", "allowed_tools": "Allowed tools",

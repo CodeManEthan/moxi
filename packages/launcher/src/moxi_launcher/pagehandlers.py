@@ -6,8 +6,8 @@ form's values (`presets.layered`), the launch
 log (`store.log`), the runs with their events (`store.runs`, `store.run_events`), the
 past-sessions list (`resume.sessions`), a session's state (`state.state`, or
 `state.of_launch` for every live launch), the places the page server's own actor last
-launched in (`store.places`) and where a launch may run now (slots' `list_slots`, joined
-with the launch log). Each holds `busy("read")` for its own length only.
+launched in (`store.places`), where a launch may run now (slots' `list_slots`, joined
+with the launch log) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
 and start time its row recorded, or, with no pid, on the endpoint that claimed it
@@ -34,6 +34,14 @@ lays them for `resolve`, so the form and the launch can't disagree. A brief or s
 instructions that `[defaults]` or the preset writes inline is named `withheld`, and its
 text is not sent. A preset that can't be laid for the harness is answered with no rows and
 the resolver's refusal.
+
+**The session name** is read from `/api/name`, which renders the name template for the
+project, seat, model and comms name the form holds now, as a launch that sets no `name`
+is named. With `template` it renders that text, unsaved, and answers the save check's
+refusal, or what saving it writes: a launcher setting's key and value, `name.template`,
+or with `keep=project` the whole `name.templates` table with the project's entry set.
+No route here writes it: the page saves through the UI shell's own settings route, the
+one place a setting locked for a run of the shell is refused.
 
 **A launch from the page** goes in two steps. The request carries the whole form: each
 field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
@@ -96,6 +104,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -113,8 +122,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, presets, relaunch, settings, slots, state, store, target,
-               targets)
+from . import (api, catalog, first, job, names, presets, relaunch, settings, slots, state,
+               store, target, targets)
 from . import resume as resuming
 from .compose import common
 from .live import alive, live
@@ -551,15 +560,6 @@ def read_places(call: Any) -> dict[str, Any]:
 NO_SLOTS = {"target": "terminal", "slot": None}
 
 
-def _taken_label(row: store.LaunchRow) -> str:
-    """What a taken slot is called: its launch's identity, else the name of the folder it
-    runs in and the time it started, on this machine's clock."""
-    if row.identity:
-        return row.identity
-    started = store.parse_time(row.created_at).astimezone()
-    return f"{Path(row.cwd).name or row.cwd} {started:%H:%M}"
-
-
 def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None:
     """The launch that occupies `slot`: the request id slots keeps for its last start,
     when the launch log holds that launch."""
@@ -568,7 +568,7 @@ def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | No
     if conn is None or not isinstance(request_id, str):
         return None
     row = store.get(conn, request_id)
-    return None if row is None else {"request_id": request_id, "label": _taken_label(row)}
+    return None if row is None else {"request_id": request_id, "label": names.shown(row)}
 
 
 def _usable_slots() -> Any:
@@ -618,6 +618,93 @@ def read_targets(call: Any) -> dict[str, Any]:
         except Exception as err:
             return _failed(err, "reading where a launch may run failed", slots=[],
                            new_slot=False, unread=_slots_there(), default=dict(NO_SLOTS))
+
+
+# -- /api/name ------------------------------------------------------------------------------
+
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_text(text: str) -> str:
+    # A JSON string's escapes are all TOML basic-string escapes.
+    return json.dumps(text, ensure_ascii=False)
+
+
+def spelled_table(table: Mapping[str, str]) -> str:
+    """A table of strings as the command line takes one: one TOML inline table."""
+    parts = [f"{key if _BARE_KEY.fullmatch(key) else _toml_text(key)} = {_toml_text(value)}"
+             for key, value in table.items()]
+    return "{" + ", ".join(parts) + "}"
+
+
+def _unnamed(**answer: Any) -> dict[str, Any]:
+    return {"name": None, "template": names.DEFAULT, "from": names.GLOBAL, "refused": None,
+            "save": None, **answer}
+
+
+def _keep_checked(query: Mapping[str, Any]) -> None:
+    if "keep" in query and "template" not in query:
+        raise lb.Refused("keep is asked with template, the text to keep")
+    if query.get("keep") == names.PROJECT and not query.get("project"):
+        raise lb.Refused("keep=project is asked with project, the key the template is kept "
+                         "for")
+
+
+def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/name`'s answer: the name a launch would take now, from the template of its
+    project (`project`), else the one for every launch. `seat`, else `agent`, fills
+    `<agent>`; `project`, else the folder name of `cwd`, fills `<project>`; `identity`
+    and `scope` fill nothing without comms. With `template`, that text is rendered in
+    the stored template's place and checked: refused, the answer holds the refusal and
+    no name; else `save` holds what saving it writes, for the project when `keep` is
+    `project`. Settings that can't be read are answered as a refusal. A `keep` with no
+    `template`, or for a project with no `project`, is refused (422)."""
+    _keep_checked(query)
+    project = query.get("project") or None
+    keep, editing = query.get("keep"), "template" in query
+    comms = _available()("comms")
+    pieces = names.Pieces(
+        project=project or names.folder(query.get("cwd")),
+        agent=query.get("seat") or query.get("agent") or "",
+        model=query.get("model") or "",
+        identity=(query.get("identity") or "") if comms else "",
+        scope=(query.get("scope") or "") if comms else "")
+    try:
+        current = settings.current()
+    except REFUSALS as error:
+        return _up(**_unnamed(refused=_refusal(error)))
+    refused = save = None
+    if editing:
+        template = query["template"]
+        source = names.PROJECT if keep == names.PROJECT else names.GLOBAL
+        refused = names.refusal(template)
+        if refused is not None:
+            return _up(**_unnamed(template=template, refused=_refusal(refused),
+                                  **{"from": source}))
+        save = {"key": names.TEMPLATE, "value": template}
+        if source == names.PROJECT:
+            table = {**(current[names.TEMPLATES] or {}), str(project): template}
+            save = {"key": names.TEMPLATES, "value": spelled_table(table)}
+    else:
+        picked = names.chosen(current, project)
+        template, source = picked.template, picked.source
+    taken: frozenset[str] = frozenset()
+    if "<instance>" in template:
+        with _store() as conn:
+            taken = frozenset() if conn is None else names.taken(conn)
+    name = names.render(template, pieces, now=names.now(), taken=taken)
+    return _up(name=name, template=template, refused=None, save=save, **{"from": source})
+
+
+def read_name(call: Any) -> dict[str, Any]:
+    """`GET /api/name`: the session name a launch would take, or a template being edited
+    would give it."""
+    _keep_checked(call.query)
+    with call.busy("read"):
+        try:
+            return name_now(call.query)
+        except Exception as err:
+            return _failed(err, "reading the session name failed", **_unnamed())
 
 
 # -- live launches and their state ------------------------------------------------------------
@@ -1295,9 +1382,9 @@ __all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "NO_SLOTS", "PRO
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
            "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
            "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
-           "launched", "launches", "live", "live_states", "on_path", "page_key", "places",
-           "preview", "previewed", "read_catalog", "read_form", "read_launches",
-           "read_places", "read_presets", "read_runs", "read_sessions", "read_state",
+           "launched", "launches", "live", "live_states", "name_now", "on_path", "page_key",
+           "places", "preview", "previewed", "read_catalog", "read_form", "read_launches",
+           "read_name", "read_places", "read_presets", "read_runs", "read_sessions", "read_state",
            "read_targets", "refusal", "resumable", "resume", "resumed", "run_entry",
-           "session_state", "spelled", "targets_now", "ticket", "tokens", "unreadable",
+           "session_state", "spelled", "spelled_table", "targets_now", "ticket", "tokens", "unreadable",
            "verify"]

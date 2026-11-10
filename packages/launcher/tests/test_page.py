@@ -34,7 +34,7 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/preview", "/api/launch", "/api/resume",
+          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/name", "/api/preview", "/api/launch", "/api/resume",
           "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
@@ -793,6 +793,8 @@ def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
     launched(log, "named", "2026-01-01T09:00:00.000000Z", identity="planner",
              cwd="/src/proj-a")
     launched(log, "bare", "2026-01-01T10:30:00.000000Z", cwd="/src/proj-b")
+    launched(log, "called", "2026-01-01T11:00:00.000000Z", identity="planner",
+             cwd="/src/proj-a", values={"name": "proj-a-opus-Jan-01 11:00"})
     at = store.parse_time("2026-01-01T10:30:00.000000Z").astimezone()
 
     def taken(request_id, state="occupied"):
@@ -802,13 +804,14 @@ def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
 
     fake_slots(slots={"1": taken("named"), "2": taken("bare"), "3": taken("unknown"),
                       "4": {"state": "occupied", "launchable": False},
-                      "5": taken("named", state="ended"),
+                      "5": taken("named", state="ended"), "7": taken("called"),
                       "6": {"state": "occupied", "launchable": False,
                             "last": {"at": 1.0, "label": "by hand", "meta": None}}})
     by = {s["number"]: s["taken_by"] for s in targets_answer()["slots"]}
     assert by == {1: {"request_id": "named", "label": "planner"},
                   2: {"request_id": "bare", "label": f"proj-b {at:%H:%M}"},
-                  3: None, 4: None, 5: None, 6: None}
+                  3: None, 4: None, 5: None, 6: None,
+                  7: {"request_id": "called", "label": "proj-a-opus-Jan-01 11:00"}}
 
 
 def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, tmp_path):

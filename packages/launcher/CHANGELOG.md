@@ -20,6 +20,20 @@
   `group`, `sub`, `label`, `danger`, `carry` and `modes` (the commands the row composes
   into), and `shown` and `typed`, which say whether this install draws the row and
   whether it takes a typed value.
+- Every launch has a session name. New catalog row `name` (`--name`, or `name` in a
+  preset); a launch that sets none is named from a template, the new settings
+  `name.template` (shipped `<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates`
+  (a project's own, by project key). The name is recorded in the launch's values, a
+  relaunch or resume keeps it, and Claude Code shows it as the display name unless
+  `native_name` is set, so every Claude launch now passes `-n`. **`--name` changed
+  meaning for `moxi launcher run`:** it was passed on to the harness with a warning and
+  is now the launcher's row; a Codex launch is no longer handed it. New module
+  `moxi_launcher.names` (the template's pieces, date formats, cleanup and save check,
+  `shown(row)`, what a launch is called), which needs no UI shell. `api.preview` names
+  the launch as `api.launch` does. The page server answers `GET /api/name`: the name a
+  launch of the form would take, a template being edited rendered unsaved with the save
+  check's refusal, and what saving it writes. A taken slot's label in `GET /api/targets`
+  is the launch's name.
 - New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
   run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
   so a caller on an install without the UI shell can read what is alive.

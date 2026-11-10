@@ -16,6 +16,9 @@
     GET  /api/targets   where a launch may run now: each slot with whether it is free and
                         which launch took it, whether a new slot can be made, and the
                         choice a launch starts with
+    GET  /api/name      the session name a launch of the form would take from its name
+                        template, or from a template being edited, with what saving
+                        that template would write
     POST /api/preview   what a launch would start, its refusals, and a ticket to launch it
     POST /api/launch    the launch a ticket was issued for, run as a detached job (202)
     POST /api/resume    a past session resumed: a slot one as a detached job (202), a
@@ -49,7 +52,7 @@ from __future__ import annotations
 
 from moxi import modules
 
-from . import catalog
+from . import catalog, names
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -63,6 +66,9 @@ LIMIT_MAX = 200
 LIMIT = 50
 #: The longest id or time a query takes, in characters.
 QUERY_MAX = 128
+#: The longest folder and the longest name template a query takes, in characters.
+PATH_MAX = 4096
+TEMPLATE_MAX = 512
 
 
 def _text(nullable: bool = False, mark: str | None = None) -> Out:
@@ -233,6 +239,16 @@ TARGETS = {**STANDING, "slots": Out("list", items=SLOT), "new_slot": Out("bool")
            "default": _table(target=_text(), slot=Out("int", nullable=True))}
 
 
+#: The name a launch would take. `name` is the template rendered now, null while
+#: `refused`; `template` is the text rendered and `from` whose it is, `project` or
+#: `global`. `refused` is why a template being edited can't be saved. `save` is what
+#: saving it writes, a launcher setting's key and its value as the command line spells
+#: it; null while refused, and when no template is being edited.
+NAME = {**STANDING, "name": _text(nullable=True), "template": _text(), "from": _text(),
+        "refused": Out("table", items=REFUSAL.items, nullable=True),
+        "save": _table(nullable=True, key=_text(), value=_text())}
+
+
 def _values_table() -> dict[str, Field]:
     """A launch request's `values`: every row a user may set, of the launcher and of each
     harness, by name, each optional. A list row, or one given more than once, takes a list
@@ -321,6 +337,16 @@ PAGE = lb.Page(
                  returns=RUNS),
         lb.Route("/api/places", "read", _target("read_places"), returns=PLACES),
         lb.Route("/api/targets", "read", _target("read_targets"), returns=TARGETS),
+        lb.Route("/api/name", "read", _target("read_name"),
+                 query={**{key: Field("string", required=False, max=QUERY_MAX)
+                           for key in ("seat", "project", "model", "identity", "scope",
+                                       "agent")},
+                        "cwd": Field("string", required=False, max=PATH_MAX),
+                        "harness": Field("enum", required=False, values=catalog.HARNESSES),
+                        "template": Field("string", required=False, max=TEMPLATE_MAX),
+                        "keep": Field("enum", required=False,
+                                      values=(names.PROJECT, names.GLOBAL))},
+                 returns=NAME),
         lb.Route("/api/preview", "act", _target("preview"), body=REQUEST, returns=PREVIEW),
         lb.Route("/api/launch", "act", _target("launch"),
                  body={**REQUEST, "ticket": Field("string", max=1024)}, returns=LAUNCHED),
@@ -338,6 +364,6 @@ PAGE = lb.Page(
 )
 
 __all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_ROW", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
-           "PAGE", "PAST", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
+           "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
            "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE",
-           "TARGETS", "VALUES"]
+           "TARGETS", "TEMPLATE_MAX", "VALUES"]

@@ -39,7 +39,10 @@ The flags are the catalog's rows: the launcher's own (`--harness`, `--cwd`, `--p
 `--instructions`, `--identity` and the rest) and the harness's (`--model`,
 `--permission-mode`, `--sandbox`, `--add-dir` and so on). `moxi launcher catalog` lists
 every row this install offers, and marks the rows the launcher sets itself and the rows
-whose module is not installed. A flag the catalog does not know is passed on to the
+whose module is not installed. `--name` is the launcher's own row, the session's name
+(below); it used to be passed on to the harness with a warning, which for Claude Code
+set its display name. Claude Code still shows the name you give, and Codex, which has
+no name flag, is no longer handed it. A flag the catalog does not know is passed on to the
 harness, last on its argv, after one warning line; the words after `--` are passed on as
 given. A passed-on flag that would set a row the launcher owns (the session id, a resume)
 or a permission row is refused, so the permission check always sees it. So is one that
@@ -91,6 +94,43 @@ and your own instructions can say more about each. Unset, the default, there is 
 
 `moxi launcher preview` takes the same words as `run` and prints the command and the
 environment variables the launch would set, starting nothing.
+
+### The session's name
+
+Every launch has a name. `--name TEXT` (or `name` in a preset) sets it; a launch that
+sets none is named from a template, `<project>-<model>-<date:mmm-dd hh:mm>` as shipped,
+which gives `docs-opus-Nov-08 12:45`. The name is recorded with the launch, a taken
+slot in the browser is labelled with it, and Claude Code shows it as the session's display name
+unless `--native-name` (or `native_name` in `[defaults]` or a preset) sets another.
+Codex has no display name, so there it is the launcher's label only. A relaunch or a
+resume keeps the name its launch had.
+
+A template is text with pieces in angle brackets, filled in the order written:
+
+| piece | filled with |
+|---|---|
+| `<project>` | the project key, else the name of the folder the session starts in |
+| `<agent>` | the seat's name when the launch names a seat, else its agent role |
+| `<model>` | the model the launch names; empty on the harness's default |
+| `<identity>`, `<scope>` | the comms name, and its scope beside one; empty without comms |
+| `<instance>` | the lowest number that makes the name differ from every running launch's |
+| `<date[:format]>`, `<time[:format]>` | the local date (`yyyymmdd`) and time (`hhmm`), or as the format says |
+
+A format is read by its tokens, in either case: `yyyy`, `yy`, `mmm` (`Nov`), `mm` (the
+month, or the minutes after an `hh`), `dd`, `hh` (24 hours), `ss`; a format holding `%`
+is taken as `strftime`'s. The filled name is then cleaned: anything outside printable
+ASCII becomes a dash, dashes in a row become one (an empty piece leaves two), the name
+starts with a letter or a digit and is cut at 63 characters; a name with nothing left is
+`launch`.
+
+`name.template` holds the template for every launch, and `name.templates` one of its own
+per project, by project key:
+
+    moxi config set launcher name.template '<identity>-<date:mmm-dd-yyyy hh:mm>'
+    moxi config set launcher name.templates '{docs = "<project> <time:hh:mm>"}'
+
+A template that names another piece, or holds a `<` or `>` outside a piece, is not used:
+the launch is named by the shipped template and warns, naming the setting.
 
 ## Presets
 
@@ -452,6 +492,9 @@ Set with `moxi config set launcher <key> <value>`:
   words.
 - `records.keep_days` (90): how long ended runs, their events, exits and released holds
   are kept.
+- `name.template` (`<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates` (empty):
+  the template a launch's session name is made from, and a project's own by project key
+  (see "The session's name").
 
 ## Install
 
