@@ -501,6 +501,114 @@ def test_a_session_that_changes_between_two_calls_is_not_answered_twice(roots):
     assert again["count"] == 50
 
 
+def paged(cat, first: dict, **asked) -> list[str]:
+    """The ids `more_sessions` answers after `first`'s place, call by call to the end."""
+    out, before = [], first["before"]
+    while before is not None:
+        answer = more_sessions(cat, before=before, recent_s=HOUR, **asked)
+        out += ids(answer["rows"])
+        before = answer["before"]
+    return out
+
+
+def test_a_file_changing_while_a_days_main_rows_are_paged_is_not_answered_twice(roots):
+    noon = NOW - 2 * DAY - 3 * HOUR                 # two days back, in UTC
+    day = local_day(noon)
+    files = {n: claude(roots, n, noon - n) for n in range(1, 51)}
+    for n in range(51, 56):
+        claude(roots, n, noon - n, program=True)
+    cat = catalog(roots)
+
+    shown = group(list_sessions(cat, recent_s=HOUR, now=NOW), day)
+    changed_at(files[3].path, NOW + 1)              # shown already; now recent
+    changed_at(files[20].path, NOW + 2)             # not shown yet; now recent
+    changed_at(files[45].path, noon + 60)           # not shown yet; now first in the day
+    rest = paged(cat, shown, group=day, now=NOW + 3)
+
+    assert ids(shown["rows"]) == [sid(n) for n in range(1, 9)]
+    assert rest == [sid(n) for n in range(9, 51) if n not in (20, 45)]
+    again = list_sessions(cat, recent_s=HOUR, now=NOW + 3)
+    assert ids(group(again, RECENT)["rows"]) == [sid(20), sid(3)]
+    assert ids(group(again, day)["rows"])[:2] == [sid(45), sid(1)]
+    assert (group(again, day)["count"], group(again, day)["program"]["count"]) == (48, 5)
+
+
+def test_a_file_changing_while_a_days_program_rows_are_paged_is_not_answered_twice(
+        roots):
+    noon = NOW - 2 * DAY - 3 * HOUR
+    day = local_day(noon)
+    claude(roots, 99, noon)
+    files = {n: claude(roots, n, noon - n, program=True) for n in range(1, 51)}
+    cat = catalog(roots)
+
+    first = more_sessions(cat, group=day, kind="program", recent_s=HOUR, now=NOW)
+    changed_at(files[3].path, NOW + 1)              # answered already
+    changed_at(files[40].path, NOW + 2)             # not answered yet
+    rest = paged(cat, first, group=day, kind="program", now=NOW + 3)
+
+    assert ids(first["rows"]) == [sid(n) for n in range(1, 31)]
+    assert rest == [sid(n) for n in range(31, 51) if n != 40]
+    # A program's session is never recent: both are counted under the day they moved to.
+    again = list_sessions(cat, recent_s=HOUR, now=NOW + 3)
+    assert group(again, RECENT)["count"] == 0
+    assert group(again, local_day(NOW))["program"]["count"] == 2
+    assert group(again, day)["program"]["count"] == 48
+    moved = more_sessions(cat, group=local_day(NOW), kind="program", recent_s=HOUR,
+                          now=NOW + 3)
+    assert ids(moved["rows"]) == [sid(40), sid(3)]
+
+
+def test_a_file_changing_while_found_is_paged_is_not_answered_twice(roots):
+    files = {n: claude(roots, n, NOW - 2 * DAY - n, program=n % 2 == 0,
+                       cwd="/work/proj-find") for n in range(1, 51)}
+    claude(roots, 99, NOW - 5, cwd="/work/proj-b")              # no match
+    cat = catalog(roots)
+
+    found = group(list_sessions(cat, recent_s=HOUR, now=NOW, find="find"), FOUND)
+    changed_at(files[5].path, NOW + 1)              # shown already
+    changed_at(files[40].path, NOW + 2)             # not shown yet
+    rest = paged(cat, found, group=FOUND, find="find", now=NOW + 3)
+
+    assert found["count"] == 50
+    assert ids(found["rows"]) == [sid(n) for n in range(1, 31)]
+    assert rest == [sid(n) for n in range(31, 51) if n != 40]
+    again = group(list_sessions(cat, recent_s=HOUR, now=NOW + 3, find="find"), FOUND)
+    assert again["count"] == 50 and ids(again["rows"])[:3] == [sid(40), sid(5), sid(1)]
+
+
+def test_a_file_changing_while_earlier_is_paged_is_in_no_later_day(roots):
+    files = {}
+    for back in range(1, 8):                        # the seven days a list shows
+        claude(roots, 9000 + back, NOW - back * DAY)
+    for back in range(8, 12):                       # four earlier days of 16 sessions
+        for n in range(16):
+            files[(back, n)] = claude(roots, back * 100 + n, NOW - back * DAY - n)
+    cat = catalog(roots)
+
+    earlier = group(list_sessions(cat, recent_s=HOUR, now=NOW), EARLIER)
+    first = more_sessions(cat, group=EARLIER, before=earlier["before"], recent_s=HOUR,
+                          now=NOW)
+    changed_at(files[(8, 2)].path, NOW + 1)         # in a day answered already
+    changed_at(files[(10, 3)].path, NOW + 2)        # in a day not answered yet
+    second = more_sessions(cat, group=EARLIER, before=first["before"], recent_s=HOUR,
+                           now=NOW + 3)
+
+    days = [local_day(NOW - back * DAY) for back in range(8, 12)]
+    assert earlier["count"] == 64
+    assert [(g["key"], g["count"]) for g in first["groups"]] == [(days[0], 16),
+                                                                 (days[1], 16)]
+    assert first["left"] == 32
+    assert [(g["key"], g["count"]) for g in second["groups"]] == [(days[2], 15),
+                                                                  (days[3], 16)]
+    assert (second["left"], second["before"]) == (0, None)
+    third = second["groups"][0]
+    rows = ids(third["rows"]) + paged(cat, third, group=days[2], now=NOW + 3)
+    assert rows == [sid(1000 + n) for n in range(16) if n != 3]
+    again = list_sessions(cat, recent_s=HOUR, now=NOW + 3)
+    assert ids(group(again, RECENT)["rows"]) == [sid(1003), sid(802)]
+    assert group(again, EARLIER)["count"] == 62
+
+
 def test_a_new_session_between_two_calls_moves_no_row(roots):
     for n in range(1, 41):
         claude(roots, n, NOW - n)
