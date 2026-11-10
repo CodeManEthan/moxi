@@ -520,6 +520,16 @@ export function toggleOpen(state: ListState, key: string): ListState {
   return { ...state, opened };
 }
 
+/** The row shown for `key` (`<harness>/<session>`), among a group's rows or a day's opened
+ * program sessions; null when the list shows none. */
+export function shownRow(state: ListState, key: string): ListRow | null {
+  for (const group of state.groups) {
+    for (const row of group.rows) if (keyOf(row) === key) return row;
+    for (const row of group.program?.rows ?? []) if (keyOf(row) === key) return row;
+  }
+  return null;
+}
+
 // -- the drawing ----------------------------------------------------------------------------
 
 /** Line two's text is handed to the row up to this many characters; the row cuts what
@@ -588,6 +598,9 @@ export interface RowView {
   /** The row's one act, at the right end of line two. */
   act: "Open" | "Close" | null;
   open: boolean;
+  /** The day the row's times are of where they give a clock time alone: its group's day,
+   * and today for a group that is no day. What the opened row shows is worded against it. */
+  on: string;
 }
 
 /**
@@ -620,6 +633,7 @@ export function rowView(row: ListRow, on: string, today: string, open = false, z
     lines,
     act: lines === 1 ? null : open ? "Close" : "Open",
     open,
+    on,
   };
 }
 

@@ -14,7 +14,11 @@
 //
 // A row is a `<moxi-ui-row>` with `toggles`: a click on its lines, Enter or Space on its
 // first line, or its `Open` act opens it in place, and the list keeps which rows are
-// open. What an opened row shows is `opened()`'s to draw, in the row's default slot.
+// open. An opened row shows, in the row's default slot, what the opened row's model
+// (`opened.ts`) makes of `/api/session`: the route is read when the row is opened and not
+// before, and again after a newer list only when that list shows the session changed.
+// Several rows can be open at once. `Read the transcript` goes to the session's route,
+// and `Copy` puts the harness's resume command on the clipboard.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -24,17 +28,21 @@ import { api, gateway, installed, navigate } from "/m/ui/client.js";
 import type { ApiResult } from "/m/ui/client.js";
 
 import { Feed } from "./feed.ts";
-import { parseFolders, parseList, parseMore } from "./list-feed.ts";
-import type { FoldersAnswer, ListAnswer, MoreAnswer } from "./list-feed.ts";
+import { parseFolders, parseList, parseMore, parseSession } from "./list-feed.ts";
+import type { FoldersAnswer, ListAnswer, MoreAnswer, SessionAnswer } from "./list-feed.ts";
 import {
   addMore, CLEAR, filterLine, FIND_LABEL, FIND_PLACEHOLDER, FIND_WAIT_MS, folderMenu, foldersPath, harnessMenu,
   listPath, listView, LOCAL, morePath, NARROW_FOLDERS, NO_FILTERS, queryOf, RANGE_FROM, RANGE_TO, refresh,
-  REFRESH_MS, showMore, showMoreProgram, statusLine, toggleOpen, toggleProgram, whenMenu, whenOf,
+  REFRESH_MS, sessionPath, showMore, showMoreProgram, shownRow, statusLine, toggleOpen, toggleProgram, whenMenu,
+  whenOf,
 } from "./list.ts";
 import type {
   EmptyView, FilterKey, FilterLine, Filters, GroupView, LineView, ListState, MenuItem, MoreRequest, Query, RowView,
   StatusLine, When,
 } from "./list.ts";
+
+import { COPIED, COPIED_MS, openedView, readAgain } from "./opened.ts";
+import type { SaidView } from "./opened.ts";
 
 const TAG = "moxi-sessions-list";
 
@@ -99,6 +107,22 @@ const STYLES = css`
   .grp .gl { grid-column: 2; min-width: 0; }
   moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
   .do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  /* A row opened in place: label, what it says, and an act at the right end. */
+  .det { margin: 9px 0 3px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border); font-size: 13px; line-height: 18px;
+         cursor: auto; }
+  .det .r { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline; }
+  .det .k, .det .d { color: var(--moxi-text-dim); }
+  .det .f { min-width: 0; overflow-wrap: anywhere; }
+  .det .tm { color: var(--moxi-text-dim); font-variant-numeric: tabular-nums; margin-right: 8px; }
+  .det .x { font-size: 13px; line-height: 18px; color: var(--moxi-text); padding-left: 18px; }
+  .det code { font: 12px/18px var(--moxi-font-mono); color: var(--moxi-text); }
+  .det .sub { display: block; }
+  .det .sub + .sub { margin-top: 5px; }
+  .det .st { padding: 3px 0; }
+  .det .st.dim { color: var(--moxi-text-dim); }
+  .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 76px; }
+  .det .foot a { color: var(--moxi-text); }
+  .det .foot button { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
   .one { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 7px 0; }
   .one .t, .one.d { color: var(--moxi-text-dim); }
   .one .t { flex: none; }
@@ -148,6 +172,11 @@ export class SessionsList extends LitElement {
   #menu: FilterKey | null = null;
   #folders: Feed<FoldersAnswer> | null = null;
   #narrow = "";
+  /** The read of each opened row's session, by the row's key. */
+  #sessions = new Map<string, Feed<SessionAnswer>>();
+  /** Which `Copy` reads `Copied`: the row's key and what was copied. */
+  #copied: string | null = null;
+  #copyTimer: ReturnType<typeof setTimeout> | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #findTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -174,6 +203,10 @@ export class SessionsList extends LitElement {
     this.#feed?.close();
     this.#folders?.close();
     this.#feed = this.#folders = null;
+    for (const feed of this.#sessions.values()) feed.close();
+    this.#sessions.clear();
+    if (this.#copyTimer !== null) clearTimeout(this.#copyTimer);
+    this.#copyTimer = null;
     document.removeEventListener("visibilitychange", this.#shown);
     document.removeEventListener("click", this.#pressed);
     if (this.#timer !== null) clearInterval(this.#timer);
@@ -208,8 +241,30 @@ export class SessionsList extends LitElement {
       this.#state = state;
       this.#moreStatus = null;
       for (const read of reads) this.#readMore(read);
+      this.#readOpened();
     }
     this.requestUpdate();
+  }
+
+  /** After a newer list: reads again the session of each opened row the list shows
+   * changed, and of one whose last read gave no answer. The others' answers stand. */
+  #readOpened(): void {
+    const state = this.#state;
+    if (state === null) return;
+    for (const key of state.opened) {
+      const row = shownRow(state, key);
+      const feed = this.#sessions.get(key) ?? null;
+      if (row !== null && feed === null) this.#readSession(row.harness, row.session);
+      else if (feed !== null && readAgain(feed, row)) void feed.refresh();
+    }
+  }
+
+  /** Reads the session a row was opened for. */
+  #readSession(harness: string, session: string): void {
+    const feed = new Feed<SessionAnswer>(() => api("sessions", sessionPath(harness, session)), parseSession,
+                                         () => this.requestUpdate());
+    this.#sessions.set(`${harness}/${session}`, feed);
+    void feed.refresh();
   }
 
   /** Reads `request` and the reads that follow it, after the reads already asked for. */
@@ -242,9 +297,28 @@ export class SessionsList extends LitElement {
 
   // -- acts --------------------------------------------------------------------------------
 
-  #toggleRow(key: string): void {
+  #toggleRow(row: RowView): void {
     if (this.#state === null) return;
-    this.#state = toggleOpen(this.#state, key);
+    this.#state = toggleOpen(this.#state, row.key);
+    this.#sessions.get(row.key)?.close();
+    this.#sessions.delete(row.key);
+    if (this.#state.opened.includes(row.key)) this.#readSession(row.harness, row.session);
+    this.requestUpdate();
+  }
+
+  /** Puts `text` on the clipboard; the act named `what` then reads `Copied` for a while. */
+  async #copy(what: string, text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
+    this.#copied = what;
+    if (this.#copyTimer !== null) clearTimeout(this.#copyTimer);
+    this.#copyTimer = setTimeout(() => {
+      this.#copied = this.#copyTimer = null;
+      this.requestUpdate();
+    }, COPIED_MS);
     this.requestUpdate();
   }
 
@@ -319,9 +393,46 @@ export class SessionsList extends LitElement {
 
   // -- drawing -----------------------------------------------------------------------------
 
-  /** What an opened row shows under its lines, in the row's default slot. Nothing yet. */
-  protected opened(_row: RowView): unknown {
-    return nothing;
+  /** What an opened row shows under its lines, in the row's default slot. */
+  protected opened(row: RowView): unknown {
+    const state = this.#state;
+    if (state === null) return nothing;
+    const view = openedView(row, this.#sessions.get(row.key) ?? null, { today: state.today, roots: state.roots });
+    const said = (line: SaidView | null, name: string) => (line === null ? nothing
+      : html`<div class="r" data-line=${name}><span class="k">${line.label}</span><span class="f">${
+          line.time !== null ? html`<span class="tm">${line.time}</span>` : nothing}${line.text}</span><span></span></div>`);
+    const copy = (what: string, text: string, words: string, tone: string) => {
+      const key = `${row.key} ${what}`;
+      return html`<button type="button" class=${tone} data-action=${`copy-${what}`}
+        @click=${() => void this.#copy(key, text)}>${this.#copied === key ? COPIED : words}</button>`;
+    };
+    const { status, subagents, session, resume, transcript } = view;
+    return html`<div class="det" data-part="opened">
+      ${status !== null ? html`<p class=${status.state === "waiting" ? "st dim" : "st"} data-line=${status.state}
+        role="status">${status.line}</p>` : nothing}
+      ${said(view.prompt, "you")}${said(view.reply, "reply")}
+      ${subagents !== null ? html`<div class="r" data-line="subagents"><span class="k">${subagents.label}</span><span class="f">
+        ${subagents.items.map((sub) => html`<span class="sub" data-line="subagent"><span>${sub.name}</span>${
+          sub.facts !== null ? html` <span class="d">· ${sub.facts}</span>` : nothing}${
+          sub.last !== null ? html`<br><span class="d">${sub.last}</span>` : nothing}</span>`)}
+        ${subagents.notice !== null ? html`<span class="sub d" data-line="subagents-unread">${subagents.notice}</span>` : nothing}
+        </span><span></span></div>` : nothing}
+      ${session !== null ? html`<div class="r" data-line="session"><span class="k">${session.label}</span><span class="f">${
+        session.lead}${session.rest !== null ? html` <span class="d">· ${session.rest}</span>` : nothing}</span><span></span></div>`
+        : nothing}
+      ${resume !== null ? html`<div class="r" data-line="resume"><span class="k">${resume.label}</span><span class="f"><code>${
+        resume.command}</code>${resume.where !== null ? html`<br><span class="d" data-line="where">${resume.where}</span>` : nothing
+        }</span>${copy("resume", resume.command, resume.copy, "x")}</div>` : nothing}
+      <div class="foot">
+        ${transcript !== null ? html`<a href=${`/m/sessions/${transcript.route}`} data-action="transcript"
+          @click=${(event: MouseEvent) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            navigate("sessions", transcript.route);
+          }}>${transcript.text}</a>` : nothing}
+        ${copy("id", view.copyId.id, view.copyId.text, "d")}
+      </div>
+    </div>`;
   }
 
   render() {
@@ -457,7 +568,7 @@ export class SessionsList extends LitElement {
   }
 
   #row(row: RowView) {
-    const toggle = (): void => this.#toggleRow(row.key);
+    const toggle = (): void => this.#toggleRow(row);
     return html`<moxi-ui-row toggles data-key=${row.key} name=${row.name} where=${ifDefined(row.where ?? undefined)}
         fact=${ifDefined(row.fact ?? undefined)} lead=${ifDefined(row.lead ?? undefined)}
         time=${ifDefined(row.time ?? undefined)} said-by=${ifDefined(row.saidBy ?? undefined)}

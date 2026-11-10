@@ -338,6 +338,20 @@ range of days), and the count: `62 sessions`, or `15 of 62 sessions` once someth
 narrows the list. The list is read when the page opens, when its tab is shown again, and
 every 30 seconds while the tab is visible; groups you showed more of stay as they were.
 
+A row opens in place, by its `Open` or by a click, Enter or Space on its line, and several
+can be open at once. The session is read when its row is opened. Opened, a row shows the
+newest message a person typed (`You`) and the model's newest message after it (`Reply`),
+each with its time and cut at 600 characters; up to eight of its subagents, the ones that
+changed last, each with what it was asked, its type, when it ran and the newest thing it
+said; the `Session` line (the harness, the model, from the start to the last change); and
+`Resume`, the harness's own command for picking the session up again, with the folder to
+run it in where the harness needs one, and `Copy`, which puts the command on the
+clipboard. A piece the record does not give is not drawn. Under them `Read the
+transcript` goes to the session's address and `Copy id` copies its id. An opened row is
+read again after a newer list only when that list shows the session changed. Leaving the
+list for a transcript and coming back gives the list from its top, with no filter set
+and no row open.
+
 Under the list a dim line names each harness whose sessions could not be read, with the
 reason, and says how many Codex sessions are left out because their files are compressed.
 On a machine with no session the page says so in place of the list.

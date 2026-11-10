@@ -6,7 +6,7 @@ import {
   unlistedLine, WAITING, whenMenu, whenOf, whenWords, dateWords, dayAfter, dayLabel, dayWords, EARLIER, earlierLine, FIND_MAX,
   foldersPath, groupLabel, harnessWords, HIDE, isFiltered, keyOf, lastSegment, listPath, listView, LOCAL, morePath,
   NO_FILTERS, NO_MATCH, NO_SESSIONS, NO_SESSIONS_SENTENCE, noticeOf, queryOf, refresh, REST_MAX, rowName, rowView,
-  sessionPath, SHOW, showMore, showMoreProgram, START_ONE, subagentsLead, timeWords, toggleOpen, toggleProgram,
+  sessionPath, SHOW, showMore, showMoreProgram, shownRow, START_ONE, subagentsLead, timeWords, toggleOpen, toggleProgram,
   UNDATED,
 } from "../src/list.ts";
 
@@ -299,8 +299,9 @@ test("line two is the typed message: its time, You: and its text, with Open as t
     name: "kestrel-web · started today 18:45", where: null, fact: null,
     lead: null, time: "19:09", saidBy: "you",
     rest: "Run the visual regression suite and report every diff over 0.5%.",
-    lines: 2, act: "Open", open: false,
+    lines: 2, act: "Open", open: false, on: TODAY,
   });
+  assert.equal(rowView(row("s1", NOW), "2026-11-06", TODAY, false, UTC).on, "2026-11-06");
 });
 
 test("a row with no typed message is one line with no act, whatever was said in it last", () => {
@@ -993,4 +994,14 @@ test("a read that fails, is refused or finds sessions gone says why, with a list
                    { state: "refused", line: "Moxi couldn't read the folders: find is too long" });
   assert.deepEqual(statusLine(feed({ gone: true, failure })), { state: "gone", line: GONE });
   assert.equal(GONE, "sessions is no longer installed.");
+});
+
+test("a shown row is found by its key among a group's rows and a day's opened program rows", () => {
+  const state = stateOf([recent([row("s1", NOW)]), day("2026-11-07", [row("s2", NOW - 90000)], { program: { count: 1 } })]);
+  assert.equal(shownRow(state, "claude/s2").session, "s2");
+  assert.equal(shownRow(state, "claude/p1"), null);
+  const opened = toggleProgram(state, "2026-11-07");
+  const added = addMore(opened.state, opened.read, { shape: 1, group: "2026-11-07", kind: "program", before: null,
+                                                     rows: [row("p1", NOW - 90100, { by_program: true })] });
+  assert.equal(shownRow(added.state, "claude/p1").session, "p1");
 });

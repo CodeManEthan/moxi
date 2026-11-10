@@ -31,6 +31,11 @@
   list is read again every 30 seconds while its tab is visible. A harness whose sessions
   could not be read, and Codex sessions left out because they are compressed, each get a
   line under the list.
+- A row of the list opens in place: the newest typed message and the reply after it, the
+  session's subagents, a `Session` line (harness, model, start to last change), the
+  harness's own resume command with `Copy`, and under them `Read the transcript`, which
+  goes to the session's address, and `Copy id`. The session is read when its row is
+  opened, and again only when a newer list shows it changed.
 - The form that asked for a harness and a session id is gone: type the id in the find
   field. A session's own address shows it as before.
 
