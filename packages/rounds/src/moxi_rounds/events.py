@@ -74,11 +74,12 @@ TYPES = _types(
     # A stage left the plan or lost a wait, with the verdict or ruling that allowed it.
     EventType("stage.changed", ("id", "removed", "after", "verdict", "ruling")),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,
-    # the repos and paths or the stages it applies to, its kind and the item it rules,
-    # and the ruling it replaces or takes back.
+    # the repos and paths or the stages it applies to, its kind (of substance, or an act
+    # on the process) and the item it rules, and the ruling it replaces or takes back.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
-               "supersedes", "revokes")),
+               "supersedes", "revokes"),
+              required=("id", "record", "kind")),
     # Rulings were put in front of the operator: their ids, and the pointer to where.
     EventType("ruling.shown", ("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it

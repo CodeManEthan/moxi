@@ -1,4 +1,5 @@
-"""Fixtures: rounds' config file and the projects list in the test's own Moxi home.
+"""Fixtures: rounds' config file and the projects list in the test's own Moxi home, and
+a second process to hold a lock.
 
 The test kit points `MOXI_ROUNDS_HOME` and `MOXI_PROJECTS_HOME` into each test's tmp, so
 the config file and the projects every call reads and writes are the test's own.
@@ -6,6 +7,8 @@ the config file and the projects every call reads and writes are the test's own.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -63,3 +66,31 @@ def without_notes(monkeypatch):
     installed = modules.available
     monkeypatch.setattr(modules, "available",
                         lambda name: name != "notes" and installed(name))
+
+
+_HOLDER = textwrap.dedent("""
+    import sys
+    from moxi import files
+    with files.lock(sys.argv[1]):
+        print("held", flush=True)
+        sys.stdin.read()
+""")
+
+
+@pytest.fixture
+def holder():
+    """`holder(path)`: a real process that holds the lock on `path` until the test ends.
+    Returns the process. A thread can't stand in: the lock refuses a second taker in
+    its own process outright."""
+    procs = []
+
+    def start(path):
+        proc = subprocess.Popen([sys.executable, "-c", _HOLDER, str(path)],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        procs.append(proc)
+        assert proc.stdout.readline().strip() == "held"
+        return proc
+
+    yield start
+    for proc in procs:
+        proc.communicate(timeout=30)

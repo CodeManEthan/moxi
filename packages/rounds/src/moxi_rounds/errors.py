@@ -14,6 +14,7 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
 - `BadName` (exit 2): a round's name is not `<project>/<slug>`.
 - `BadArgument` (exit 2): a verb was given a value it can't take.
 - `UnknownProject` (exit 3): the projects list holds no project of that key.
+- `NoRound` (exit 3): the project has no round of that name.
 - `NoFolder` (exit 3): a project's rounds folder can't be worked out. `problem` says why,
   and the fix names the setting that gives it one.
 """
@@ -156,6 +157,17 @@ class UnknownProject(RoundsError):
                          "the keys with `moxi projects list`")
 
 
+class NoRound(RoundsError):
+    """No round is named `name`: its folder holds no log."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(f"there is no round {name}",
+                         f"open it with `moxi rounds open {name} --description TEXT`")
+
+
 class NoFolder(RoundsError):
     """The rounds folder of the project `project` can't be worked out; `problem` says
     why. `known` is False when the notes module was there to ask and the asking failed,
@@ -175,4 +187,4 @@ class NoFolder(RoundsError):
 
 
 __all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked",
-           "BadName", "BadArgument", "UnknownProject", "NoFolder"]
+           "BadName", "BadArgument", "UnknownProject", "NoRound", "NoFolder"]

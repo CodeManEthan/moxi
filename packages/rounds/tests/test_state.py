@@ -94,7 +94,8 @@ def test_every_event_type_has_a_handler_and_no_handler_is_for_another_type():
     assert set(state._HANDLERS) == set(events.TYPES)
 
 
-NOT_APPLIED_HERE = sorted(set(events.TYPES) - {"round.opened"})
+NOT_APPLIED_HERE = sorted(set(events.TYPES)
+                          - {"round.opened", "ruling.recorded"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -106,6 +107,40 @@ def test_a_type_with_no_part_in_the_state_changes_only_the_history(name):
 
     assert after.history == [*before.history, later]
     assert dataclasses.replace(after, history=before.history) == before
+
+
+def test_a_ruling_is_added_to_the_rulings_and_changes_nothing_else():
+    before = state.fold([opened()])
+    first = event(2, "ruling.recorded", id="C1", text="a ruling", record="comms:12",
+                  kind="substance", stages="all")
+    second = {**event(3, "ruling.recorded", id="C2", record="comms:13", kind="process",
+                      rules="skip:retro", reason="he said so", stages=["B2", "B3"]),
+              "actor": "curator", "at": "2026-01-03T00:00:00Z"}
+
+    after = state.fold([opened(), first, second])
+
+    assert after.rulings == [
+        state.Ruling(id="C1", text="a ruling", record="comms:12", reason=None,
+                     kind="substance", rules=None, stages="all", scope=(),
+                     actor="planner", at=AT),
+        state.Ruling(id="C2", text=None, record="comms:13", reason="he said so",
+                     kind="process", rules="skip:retro", stages=("B2", "B3"), scope=(),
+                     actor="curator", at="2026-01-03T00:00:00Z")]
+    assert dataclasses.replace(after, rulings=[], history=before.history) == before
+
+
+def test_a_projects_rulings_are_its_register_with_each_entrys_scope():
+    entry = event(1, "ruling.recorded", id="S1", text="a ruling", record="comms:12",
+                  kind="substance",
+                  scope=[{"repo": "proj-a", "path": "packages/ui/**"}, {"repo": "proj-b"}])
+
+    found = state.fold([entry])
+    found.rulings[0].scope[0]["path"] = "changed"
+
+    assert found.status is None
+    assert found.rulings[0].stages is None
+    assert found.rulings[0].scope[1] == {"repo": "proj-b"}
+    assert entry["scope"][0] == {"repo": "proj-a", "path": "packages/ui/**"}
 
 
 def test_a_type_this_code_does_not_know_changes_only_the_history():

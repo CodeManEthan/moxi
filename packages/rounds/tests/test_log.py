@@ -102,8 +102,9 @@ def test_an_append_starts_an_empty_file_at_one(path):
 def test_a_projects_log_is_appended_and_read_the_same_way(tmp_path):
     path = log.project_log(tmp_path)
 
-    log.append(path, "ruling.recorded", {"id": "S1", "text": "a placeholder ruling",
-                                         "record": "comms:12"}, actor="planner")
+    log.append(path, "ruling.recorded",
+               {"id": "S1", "text": "a placeholder ruling", "record": "comms:12",
+                "kind": "substance"}, actor="planner")
 
     assert [event["type"] for event in log.read(path)] == ["ruling.recorded"]
 
@@ -156,13 +157,15 @@ def test_a_log_past_one_megabyte_is_still_one_file(path):
     log.append(path, "round.opened", OPENED, actor="planner")
     for number in range(6):
         log.append(path, "ruling.recorded",
-                   {"id": f"C{number + 1}", "text": "x" * 300_000, "record": "comms:12"},
+                   {"id": f"C{number + 1}", "text": "x" * 300_000, "record": "comms:12",
+                    "kind": "substance"},
                    actor="planner")
     first_megabyte = path.read_bytes()[:1_000_000]
 
     # One line that is itself past the size the core's append rolls at by default.
     last = log.append(path, "ruling.recorded",
-                      {"id": "C7", "text": "y" * 1_200_000, "record": "comms:12"},
+                      {"id": "C7", "text": "y" * 1_200_000, "record": "comms:12",
+                       "kind": "substance"},
                       actor="planner")
 
     assert last["n"] == 8

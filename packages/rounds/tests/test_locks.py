@@ -3,9 +3,6 @@ taken in, and what a verb does when one is held past its wait."""
 
 from __future__ import annotations
 
-import subprocess
-import sys
-import textwrap
 import time
 
 import pytest
@@ -18,33 +15,6 @@ from moxi_rounds.errors import Locked, RoundsError
 OPENED = {"description": "a placeholder round", "flow": "fix",
           "steps": [{"step": "build", "by": "builder"}]}
 DONE = {"stage": "B1", "tip": "0" * 40}
-
-HOLDER = textwrap.dedent("""
-    import sys
-    from moxi import files
-    with files.lock(sys.argv[1]):
-        print("held", flush=True)
-        sys.stdin.read()
-""")
-
-
-@pytest.fixture
-def holder():
-    """`holder(path)`: a real process that holds the lock on `path` until the test ends.
-    Returns the process."""
-    procs = []
-
-    def start(path):
-        proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(path)],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-        procs.append(proc)
-        assert proc.stdout.readline().strip() == "held"
-        return proc
-
-    yield start
-    for proc in procs:
-        proc.communicate(timeout=30)
-
 
 @pytest.fixture
 def where(tmp_path):
