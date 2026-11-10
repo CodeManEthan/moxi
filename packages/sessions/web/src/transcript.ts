@@ -7,7 +7,8 @@
 // opened row's `Session` line. Both come from the answer an opened row reads
 // (`/api/session`), asked for the route's one session beside its turns: it carries the
 // session's own row, the day the server calls today and the account's home folder, and
-// it reads no other session's record, so the name is drawn as soon as the turns are.
+// it does not search every session's first lines as the list's find does, so the name is
+// drawn with the turns.
 //
 // A session the list does not hold has no such answer: a subagent, which is not a session
 // of the list, and a thread or child session another one started. Its route keeps the

@@ -49,8 +49,8 @@
   message Claude Code writes for a request that failed starts with `Error`, each in the
   heavier weight, here and in the window block. A read on its way and a read that failed
   each say so in words. The header's name and facts come from `/api/session`, the read an
-  opened row of the list makes, asked beside the turns: it reads no other session, so
-  on a page server's first open the name is drawn with the turns rather than seconds
+  opened row of the list makes, asked beside the turns: it does not search every
+  session's first lines as the list's find does, so on a page server's first open the name is drawn with the turns rather than seconds
   after them. A transcript says only its own reason for a read that failed; the list's
   line for a harness whose sessions were not all read is not drawn over it.
 - `/api/list` and `/api/session` carry `home`, the home folder of the account the page

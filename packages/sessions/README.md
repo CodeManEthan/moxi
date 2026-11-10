@@ -439,8 +439,9 @@ the first 30 recent rows and the first 8 of each day), `/api/more` (the next 30 
 group, or the next older days), `/api/session` (one session opened) and `/api/folders`.
 `/api/list` and `/api/session` also carry `home`, the home folder of the account the page
 server runs as, which is what the page writes as `~`, and `today`, the server's local date.
-The header over one session asks `/api/session` for that one session beside its turns, so
-it reads no other session's record and the name is drawn with the turns.
+The header over one session asks `/api/session` for that one session beside its turns,
+which does not search every session's first lines as a `find` does, so the name is drawn
+with the turns.
 They take the list's filters as query keys and read the setting `list.recent_s` at each
 request. Of a message they send at most 64 KiB, saying when it was cut; of the newest
 thing said on a row and of a subagent's last message, 300 bytes. The server keeps what
