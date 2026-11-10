@@ -263,10 +263,11 @@ def test_the_foot_says_when_the_sessions_were_read_and_the_files_by_harness(seed
     expect(foot.locator(".last")).to_have_text(
         re.compile(rf"^Sessions read {TIME} · 2 files: Claude 2$"))
     expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
-    # The foot closes the page: the views the page had before sit between Cost and it.
+    # The foot closes the page: the chart and the views the page had before sit between
+    # Cost and it.
     order = panel.evaluate("""el => [...el.shadowRoot.children].map((node) =>
         node.dataset && node.dataset.part || node.localName)""")
-    assert order[-3:] == ["top", "moxi-usage-legacy", "foot"], order
+    assert order[-5:] == ["top", "filters", "below", "moxi-usage-legacy", "foot"], order
     expect(lines_of(panel)).to_have_count(0)
 
 

@@ -145,3 +145,19 @@ test("the menu's figures follow the report it is given, and are absent before it
   assert.deepEqual(rangeMenu({ kind: "7d" }, filtered, null).slice(0, 4).map((item) => item.figure),
                    ["$1.50", "$1.50", "$1.50", "at least $1.50"]);
 });
+
+test("a report whose day is not a day has no Cost row and no preset figure", () => {
+  for (const today of ["", "not a day", "2026-11-08T06:00:00Z", undefined]) {
+    const daily = report(DAILY.rows, { today });
+    assert.deepEqual(costRows(daily), []);
+    const menu = rangeMenu({ kind: "30d" }, daily, null);
+    assert.deepEqual(menu.map((item) => item.figure), [null, null, null, null, null, null]);
+    assert.equal(menu.length, 6);
+  }
+});
+
+test("a preset counted back from a value that is not a day throws nothing and names no day", () => {
+  assert.deepEqual(rangeDays({ kind: "30d" }, ""), { since: "", until: "" });
+  assert.equal(rangeBy({ kind: "30d" }, ""), "day");
+  assert.equal(rangeDays({ kind: "all" }, ""), null);
+});

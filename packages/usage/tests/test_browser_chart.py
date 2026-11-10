@@ -251,10 +251,10 @@ def test_the_chart_draws_a_bar_a_day_with_todays_value_in_words_and_each_value_o
     expect(now).to_have_count(1)
     value = chart.locator("[data-part=value]")
     expect(value).to_have_text(re.compile(rf"^{MONEY}$"))
-    expect(chart.locator("g[data-period]").last.locator("title")).to_have_text(f"today: {value.inner_text()}")
+    expect(chart.locator("g[data-period]").last.locator("title")).to_have_text(f"today: {value.text_content()}")
     assert bars_of(panel).locator("title").count() == 3
     expect(chart.locator("[data-part=top]")).to_have_text(re.compile(r"^\$[\d.]+$"))
-    labels = chart.locator("text:not([data-part])").all_inner_texts()
+    labels = chart.locator("text:not([data-part])").all_text_contents()
     assert labels[-1] == "today" and len(labels) >= 2, labels
     # Today's bar is told from the others by its weight, with no colour of its own.
     fills = chart.locator("rect.bar").evaluate_all(
@@ -314,13 +314,13 @@ def test_a_range_whose_total_is_not_whole_outlines_its_day_and_says_why_at_the_f
     assert dash.bounding_box()["height"] >= 4
     line = panel.locator("[data-part=lines] [data-line=range]")
     expect(line).to_have_text(re.compile(
-        rf"^This range's total is not whole: [\d.]+k tokens have no price \({UNPRICED}\)$"))
+        rf"^This range's total is not whole: (.+; )?[\d.]+k tokens have no price \({UNPRICED}\)$"))
     # The table says the same of the day.
     panel.locator("[data-group=chart]").get_by_role("button", name="Table").click()
     table = panel.locator("[data-group=chart]").get_by_role("table")
     expect(table.locator("thead th").last).to_have_text("Not whole")
     expect(table.locator("tbody tr").last.locator("td").last).to_have_text(
-        re.compile(rf"tokens have no price \({UNPRICED}\)$"))
+        re.compile(r"nothing here could be priced$"))
     # Back on a whole range the line goes.
     pick(panel, "range", "Last 7 days")
     expect(line).to_have_count(0)

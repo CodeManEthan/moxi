@@ -6,7 +6,7 @@
 
 import { CAPTION, COST_DAYS, costRows, countWords, PRICES_LINK, sessionsRead, whyNotWhole } from "./cost-model.ts";
 import type { CostRow, Sum } from "./cost-model.ts";
-import { addDays, dayPart, LOCAL, whenWord } from "./days.ts";
+import { addDays, dayPart, isDay, LOCAL, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import type { DayRow, IndexEvent, Lane, Limits, PassOutcome, Report, Status } from "./feed.ts";
 import { harnessName, limitLabel, limitsModel } from "./limits-model.ts";
@@ -132,9 +132,10 @@ export const NO_TURNS = "turns is not installed";
 /** How old the last pass may be when the page opens before the page asks for one, in s. */
 export const STALE_AFTER = 600;
 
-/** The newest of the days the page's answers carried. */
+/** The newest of the days the page's answers carried; a value that is not a day is
+ * left out. */
 export function newestDay(...days: (string | null | undefined)[]): string | null {
-  const held = days.filter((day): day is string => typeof day === "string" && day !== "").sort();
+  const held = days.filter(isDay).sort();
   return held.length ? held[held.length - 1] : null;
 }
 
@@ -148,7 +149,7 @@ export function hasBelow(status: Read<Status>): boolean {
 
 /** The path of the Cost rows' report: the daily report over the 90 days to `today`. */
 export function costPath(today: string): string {
-  return `api/daily?since=${addDays(today, 1 - COST_DAYS)}&until=${today}`;
+  return `api/daily?since=${addDays(today, 1 - COST_DAYS) ?? today}&until=${today}`;
 }
 
 /** Whether only `moxi usage index` can bring the index up: there is none, or another

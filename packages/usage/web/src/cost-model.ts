@@ -3,7 +3,7 @@
 // days; a sum that is not whole reads `at least`, and one nothing in which could be
 // priced reads `no price`, never a zero.
 
-import { addDays, dateWord, daysFrom, LOCAL, whenWord } from "./days.ts";
+import { addDays, dateWord, daysFrom, isDay, LOCAL, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import type { DayRow, Report } from "./feed.ts";
 import { fmtCost, fmtTokens } from "./views.ts";
@@ -44,6 +44,14 @@ export function sumRows(rows: Summed[]): Sum {
     unpriced_models: [...new Set(rows.flatMap((row) => row.unpriced_models ?? []))].sort(),
     harness_cost: harness.length ? harness.reduce((total, row) => total + (row.harness_cost as number), 0) : null,
   };
+}
+
+/** The sum of a daily report's rows over the `days` that end on `until`, or over those
+ * that end `back` days before it. */
+function sumBack(rows: DayRow[], until: string, days: number, back = 0): Sum {
+  const last = addDays(until, -back);
+  const first = addDays(until, 1 - days - back);
+  return last === null || first === null ? sumRows([]) : sumDays(rows, first, last);
 }
 
 /** The sum of a daily report's rows from `since` to `until`, both days included. */
@@ -106,13 +114,14 @@ const PERIODS: readonly [CostRow["key"], string, number, string][] = [
 ];
 
 /** The Cost rows from one daily report over the 90 days to its `today`, under no filter.
- * Empty until the report has answered with its day. */
+ * Empty until the report has answered with its day, and when what it carries as its day
+ * is not one: no period can then be counted back from it. */
 export function costRows(daily: Report<DayRow> | null): CostRow[] {
   const today = daily?.today;
-  if (!daily || !today) return [];
+  if (!daily || !isDay(today)) return [];
   return PERIODS.map(([key, label, days, earlier]) => {
-    const now = sumDays(daily.rows, addDays(today, 1 - days), today);
-    const before = sumDays(daily.rows, addDays(today, 1 - 2 * days), addDays(today, -days));
+    const now = sumBack(daily.rows, today, days);
+    const before = sumBack(daily.rows, today, days, days);
     return { key, label, figure: `${costWords(now)} over ${countWords(now.requests, "request")}`,
              why: whyNotWhole(now), before: `${earlier} ${costWords(before)}`, beforeWhy: whyNotWhole(before) };
   });
@@ -149,11 +158,13 @@ const PRESET_LABELS: Record<Preset, string> = {
 /** The longest range charted by day; a longer one, and all time, is charted by month. */
 export const DAYS_MAX = 92;
 
-/** A range's first and last day, both included; null for all time. */
+/** A range's first and last day, both included; null for all time. A preset counted
+ * back from a `today` that is not a day is that value alone: a report asked with it is
+ * refused, and no chart has a day to draw. */
 export function rangeDays(range: Range, today: string): { since: string; until: string } | null {
   if (range.kind === "all") return null;
   if (range.kind === "custom") return { since: range.since, until: range.until };
-  return { since: addDays(today, 1 - PRESET_DAYS[range.kind]), until: today };
+  return { since: addDays(today, 1 - PRESET_DAYS[range.kind]) ?? today, until: today };
 }
 
 /** Whether a range's chart has a bar a day or a bar a month. */
@@ -185,14 +196,14 @@ export interface RangeItem {
 /**
  * The Range menu. `daily` is the 90-day daily report under the filters in force (the
  * Cost rows' own when no filter is set); `allTime` the monthly report over no range,
- * asked when the menu first opens. A figure is null until its report has answered.
+ * asked when the menu first opens. A figure is null until its report has answered, and
+ * a preset's when the report's day is not a day.
  */
 export function rangeMenu(range: Range, daily: Report<DayRow> | null, allTime: Report<DayRow> | null): RangeItem[] {
-  const today = daily?.today ?? null;
+  const today = daily?.today;
   const presets = (Object.keys(PRESET_DAYS) as Preset[]).map((key): RangeItem => ({
     key, label: PRESET_LABELS[key],
-    figure: daily === null || today === null ? null
-      : costWords(sumDays(daily.rows, addDays(today, 1 - PRESET_DAYS[key]), today)),
+    figure: !daily || !isDay(today) ? null : costWords(sumBack(daily.rows, today, PRESET_DAYS[key])),
     picked: range.kind === key, ruled: false,
   }));
   return [...presets,

@@ -39,9 +39,15 @@ export function seconds(iso: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms / 1000 : null;
 }
 
-/** `day` moved by `n` days. */
-export function addDays(day: string, n: number): string {
-  return new Date(stamp(day) + n * DAY_MS).toISOString().slice(0, 10);
+/** Whether `day` is a day as the page's answers write one, `YYYY-MM-DD`. */
+export function isDay(day: unknown): day is string {
+  return typeof day === "string" && !Number.isNaN(stamp(day));
+}
+
+/** `day` moved by `n` days; null when `day` is not a day, since no day can be said. */
+export function addDays(day: string, n: number): string | null {
+  const at = stamp(day) + n * DAY_MS;
+  return Number.isNaN(at) ? null : new Date(at).toISOString().slice(0, 10);
 }
 
 /** How many days `day` is after `from`; negative when it is before. */
@@ -49,10 +55,13 @@ export function daysFrom(from: string, day: string): number {
   return Math.round((stamp(day) - stamp(from)) / DAY_MS);
 }
 
-/** Every day from `since` to `until`, both included, oldest first. */
+/** Every day from `since` to `until`, both included, oldest first; none when either is
+ * not a day. */
 export function daysOf(since: string, until: string): string[] {
   const count = daysFrom(since, until) + 1;
-  return Array.from({ length: Math.max(0, count) }, (_, i) => addDays(since, i));
+  if (Number.isNaN(count)) return [];
+  return Array.from({ length: Math.max(0, count) }, (_, i) => addDays(since, i))
+    .filter((day): day is string => day !== null);
 }
 
 /** A date alone: `Oct 10`. */

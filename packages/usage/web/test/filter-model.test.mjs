@@ -175,3 +175,15 @@ test("Cost / Tokens says which one the chart shows", () => {
                                                   { key: "tokens", label: "Tokens", picked: false }]);
   assert.deepEqual(filterLine(facts({ state: state({ measure: "tokens" }) })).measures.map((m) => m.picked), [false, true]);
 });
+
+test("no read and no line throws while no day is held", () => {
+  const filteredState = state({ range: { kind: "7d" }, model: "m-a" });
+  assert.equal(allTimePath(filteredState), "api/daily?by=month&model=m-a");
+  assert.deepEqual(stateKeys(filteredState, ""), [["since", ""], ["until", ""], ["model", "m-a"]]);
+  assert.deepEqual(stateKeys(filteredState, "", ["since", "until"]), [["model", "m-a"]]);
+  assert.equal(chartPath(state(), ""), "api/daily?by=day&since=&until=");
+  assert.equal(figuresPath(filteredState, ""), "api/daily?since=&until=&model=m-a");
+  const line = filterLine(facts({ today: "", figures: report([day(TODAY, 2)], { today: "" }) }));
+  assert.deepEqual(line.range.items.map((item) => item.figure), [null, null, null, null, null, null]);
+  assert.deepEqual([line.custom.since, line.custom.until], ["", ""]);
+});

@@ -108,6 +108,9 @@ test("the last pass is worded against the newest day any answer carried", () => 
   assert.equal(next.foot.line, "Sessions read yesterday 19:10 · 81 files: Claude 72, Codex 8, OpenCode 1");
   assert.equal(newestDay(null, undefined, "2026-11-08", "2026-11-07"), "2026-11-08");
   assert.equal(newestDay(null, undefined), null);
+  assert.equal(newestDay("", "soon", "2026-11-08T23:00:00Z", "2026-11-07"), "2026-11-07");
+  assert.equal(newestDay("", "soon"), null);
+  assert.equal(costPath(""), "api/daily?since=&until=");
 });
 
 test("an index with no request: the block with when it last looked, and the act", () => {

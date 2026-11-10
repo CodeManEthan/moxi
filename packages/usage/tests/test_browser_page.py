@@ -2,12 +2,11 @@
 frame until each has its place in the new page, and usage's two blocks, in a browser,
 through a real shell that starts usage's real page server:
 the contract check on the page and its two blocks (the cost block saying how old the index
-is), each view drawn over a small index and fitting a phone, the daily view's figures by
-token class, a session opened under its row's harness, the command with no index, a read over a stale index that runs no pass, and "Read new sessions" bringing
-new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
+is), each view drawn over a small index and fitting a phone, a session opened under its
+row's harness, the command with no index, a read over a stale index that runs no pass,
+and "Read new sessions" bringing new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
 the session view's request and context charts and their readout, a subagent's charts, the
-cost terms view's Total against its group lines and the models view, the daily cost by class
-naming each tier, the Rates section and its search, and Reconcile and Rates keeping every
+cost terms view's Total against its group lines and the models view, the Rates section and its search, and Reconcile and Rates keeping every
 column on a phone, scrolling in their wrappers with the Model column in view.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
@@ -158,7 +157,7 @@ def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
 
 #: Each view's route and what shows once its report has drawn.
 VIEWS = {
-    "": "section[data-part=view] svg g[data-period]",
+    "": "[data-group=chart] svg g[data-period]",
     "sessions": f'section[data-part=view] tr[data-session="{FIRST}"]',
     "projects": "section[data-part=view] tr[data-project]",
     "models": f'section[data-part=view] tr[data-model="{MODEL}"]',
@@ -176,20 +175,6 @@ def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_c
     ui_width_check(ui_page)
 
 
-def test_the_daily_view_gives_each_token_class_as_a_figure_and_each_segment_a_title(
-        indexed, ui_page):
-    panel = open_view(ui_page)
-    view = panel.locator("section[data-part=view]")
-    expect(view.locator("[data-part=classes] [data-class]")).to_have_count(5)
-    # Two sessions of three requests (output 1000, 1500, 2000) and a subagent of two (400).
-    expect(view.locator("[data-part=classes] [data-class=output] b")).to_have_text("9.80k")
-    segments = view.locator("svg g[data-period] rect[data-key]")
-    expect(segments.first).to_be_attached()
-    assert segments.count() == view.locator("svg g[data-period] rect[data-key] > title").count()
-    expect(view.locator("svg g[data-period] rect[data-key=output] > title").first).to_contain_text(
-        "output: ")
-
-
 def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
@@ -202,15 +187,16 @@ def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
 
 def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
-    harness = panel.locator("select[aria-label=Harness]")
+    harness = panel.locator("[data-part=filters] [data-filter=harness] button.pick")
     row = panel.locator(f'section[data-part=view] tr[data-session="{FIRST}"]')
     expect(row).to_be_visible()
-    expect(harness).to_have_value("")
+    # One harness holds files, so its filter has no place until one is set.
+    expect(harness).to_have_count(0)
     tokens = row.locator("td.num").nth(-2).inner_text()
     with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
         row.locator("a").click()
     assert "harness=claude" in sent.value.url, sent.value.url
-    expect(harness).to_have_value("claude")
+    expect(harness).to_have_text("Claude▾")
     totals = panel.locator("section[data-part=view] [data-part=totals]")
     expect(totals.locator("span", has_text="Tokens").locator("b")).to_have_text(tokens)
 
@@ -577,22 +563,6 @@ def test_the_cost_terms_total_is_its_group_lines_and_the_models_views_total(
     cost = panel.locator("section[data-part=view] [data-part=totals]").locator(
         "span", has_text="Cost").locator("b")
     expect(cost).to_have_text(terms_total)
-
-
-def test_the_daily_cost_by_class_names_class_and_tier_on_each_segment(charted, charted_page):
-    panel = open_view(charted_page)
-    view = panel.locator("section[data-part=view]")
-    view.get_by_role("button", name="Cost by class").click()
-    expect(view.get_by_role("button", name="Cost by class")).to_have_attribute(
-        "aria-pressed", "true")
-    expect(view.locator("[data-part=class-costs] [data-class=output]")).to_be_visible()
-    fast = view.locator('svg g[data-period] rect[data-key="output:fast"] > title')
-    expect(fast).to_have_count(1)
-    expect(fast).to_contain_text("output, fast: $")
-    segments = view.locator("svg g[data-period] rect[data-key]")
-    assert segments.count() == view.locator("svg g[data-period] rect[data-key] > title").count()
-    expect(view.locator("svg g[data-period] rect[data-key=output] > title")).to_contain_text(
-        "output: $")
 
 
 def test_rates_list_every_reconcile_model_and_a_search_finds_a_seeded_row(

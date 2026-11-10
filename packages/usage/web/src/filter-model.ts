@@ -61,9 +61,9 @@ export function filtered(state: PageState): boolean {
 export type FilterKey = "since" | "until" | "harness" | "project" | "folder" | "model";
 
 /** The query keys the state gives a report, in a fixed order; `leave` names keys to
- * leave out. All time sends no day. */
+ * leave out. All time sends no day, and with the days left out `today` is not read. */
 export function stateKeys(state: PageState, today: string, leave: FilterKey[] = []): [string, string][] {
-  const days = rangeDays(state.range, today);
+  const days = leave.includes("since") && leave.includes("until") ? null : rangeDays(state.range, today);
   const keys: [FilterKey, string][] = [];
   if (days !== null) keys.push(["since", days.since], ["until", days.until]);
   if (state.harness) keys.push(["harness", state.harness]);
@@ -88,13 +88,13 @@ export function chartPath(state: PageState, today: string): string {
  * Cost rows' own and their report serves. */
 export function figuresPath(state: PageState, today: string): string | null {
   if (!filtered(state)) return null;
-  return withQuery("api/daily", [["since", addDays(today, 1 - COST_DAYS)], ["until", today],
+  return withQuery("api/daily", [["since", addDays(today, 1 - COST_DAYS) ?? today], ["until", today],
                                  ...stateKeys(state, today, ["since", "until"])]);
 }
 
 /** The report behind `All time`'s figure: every month, under the filters. */
 export function allTimePath(state: PageState): string {
-  return withQuery("api/daily", [["by", "month"], ...stateKeys({ ...state, range: { kind: "all" } }, "")]);
+  return withQuery("api/daily", [["by", "month"], ...stateKeys(state, "", ["since", "until"])]);
 }
 
 /** The projects of the range under the other filters, or its folders. */

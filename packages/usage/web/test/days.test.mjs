@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addDays, dateWord, dayPart, dayWord, daysFrom, daysOf, LOCAL, monthWord, seconds, whenWord,
+  addDays, dateWord, dayPart, dayWord, daysFrom, daysOf, isDay, LOCAL, monthWord, seconds, whenWord,
 } from "../src/days.ts";
 
 /** A clock that reads every moment in UTC, on 24 hours. */
@@ -98,4 +98,16 @@ test("the page's own clock is this browser's zone and ui's way of writing a time
   const two = (n) => String(n).padStart(2, "0");
   assert.equal(LOCAL.day(moment), `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`);
   assert.equal(LOCAL.time(moment), d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+});
+
+test("a value that is not a day can't be moved: no day is said, and nothing is thrown", () => {
+  for (const not of ["", "today", "2026-11", "2026-11-08T00:00:00Z", "2026-13-40"]) {
+    assert.equal(isDay(not), false, not);
+    assert.equal(addDays(not, -29), null, not);
+    assert.deepEqual(daysOf(not, TODAY), [], not);
+    assert.deepEqual(daysOf(TODAY, not), [], not);
+  }
+  assert.equal(isDay(TODAY), true);
+  assert.equal(isDay(null), false);
+  assert.equal(addDays(TODAY, -29), "2026-10-10");
 });
