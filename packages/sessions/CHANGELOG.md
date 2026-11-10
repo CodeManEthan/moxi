@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.7 (2026-11-10)
 
 - New command `moxi sessions list [--harness H] [--since TIME] [--folder PATH]
   [--limit N] [--text] [--json]`: the main sessions of the three harnesses, newest change
