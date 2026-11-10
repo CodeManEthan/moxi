@@ -602,9 +602,9 @@ test("an address is served by the view kept from before, until its section is bu
   assert.equal(legacyRoute(session(null)), "session/s%201");
   assert.equal(legacyRoute(session("main")), "session/s%201");
   assert.equal(legacyRoute(session("a/1")), "session/s%201/a%2F1");
-  assert.equal(legacyRoute({ piece: "projects" }), "projects");
-  assert.equal(legacyRoute({ piece: "folders" }), "projects");
-  assert.equal(legacyRoute({ piece: "models" }), "models");
+  assert.equal(legacyRoute({ piece: "projects" }), null);
+  assert.equal(legacyRoute({ piece: "folders" }), null);
+  assert.equal(legacyRoute({ piece: "models" }), null);
   assert.equal(legacyRoute({ piece: "kinds" }), "terms");
   assert.equal(legacyRoute({ piece: "prices" }), "terms");
   assert.equal(legacyRoute({ piece: "none" }), null);

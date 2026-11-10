@@ -168,10 +168,10 @@ SECTIONS = {
                                  f'section[data-view=session] tr[data-agent="{AGENT}"]'),
     f"sessions/claude/{FIRST}/{AGENT}": (f"sessions/claude/{FIRST}/{AGENT}",
                                          "section[data-view=session] svg[data-chart=requests] g[data-n]"),
-    "projects": ("projects", "section[data-view=projects] tr[data-project]"),
+    "projects": ("projects", "section[data-group=projects] [data-part=rows] .tr2"),
     # Projects is installed, so the section's other name is rewritten to this one.
-    "folders": ("projects", "section[data-view=projects] tr[data-project]"),
-    "models": ("models", f'section[data-view=models] tr[data-model="{MODEL}"]'),
+    "folders": ("projects", "section[data-group=projects] [data-part=rows] .tr2"),
+    "models": ("models", f'section[data-group=models] [data-part=rows] [data-row="{MODEL}"]'),
     "kinds": ("kinds", "section[data-view=terms] tr[data-line=total]"),
     "prices": ("prices", "section[data-view=terms] tr[data-line=total]"),
 }
@@ -350,7 +350,7 @@ def test_the_range_and_filters_are_kept_across_a_new_placement_and_stay_out_of_t
     # Another address of the page keeps them too.
     page.evaluate("async () => (await import('/m/ui/client.js')).navigate('usage', 'models')")
     panel = panel_of(page)
-    expect(view(panel, "models")).to_be_visible()
+    expect(panel.locator("section[data-group=models] [data-part=rows]")).to_be_visible()
     expect_filters_set(panel)
     assert path_of(page) == "/m/usage/models"
 

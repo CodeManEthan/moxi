@@ -427,7 +427,7 @@ def test_todays_views_read_under_the_pages_range_and_filters(page):
     expect(page).to_have_url(re.compile(r"/m/usage/models$"))
     expect(filter_of(panel, "range").locator("button.pick")).to_have_text("last 7 days▾")
     expect(filter_of(panel, "model").locator("button.pick")).to_have_text(f"{HAIKU}▾")
-    expect(panel.locator("section[data-part=view] tr[data-model]")).to_have_count(1)
+    expect(panel.locator("section[data-group=models] [data-part=rows] .tr2")).to_have_count(1)
 
 
 # --- the contract and a phone's width ------------------------------------------------------

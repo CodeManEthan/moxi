@@ -6,7 +6,7 @@ is), each view drawn over a small index and fitting a phone, a session opened un
 row's harness, the command with no index, a read over a stale index that runs no pass,
 and "Read new sessions" bringing new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
 the session view's request and context charts and their readout, a subagent's charts, the
-cost terms view's Total against its group lines and the models view, the Rates section and its search, and Reconcile and Rates keeping every
+cost terms view's Total against its group lines, the Rates section and its search, and Reconcile and Rates keeping every
 column on a phone, scrolling in their wrappers with the Model column in view.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
@@ -159,14 +159,11 @@ def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
 VIEWS = {
     "": "[data-group=chart] svg g[data-period]",
     "sessions": f'section[data-part=view] tr[data-session="{FIRST}"]',
-    "projects": "section[data-part=view] tr[data-project]",
-    "models": f'section[data-part=view] tr[data-model="{MODEL}"]',
     f"sessions/claude/{FIRST}": f'section[data-part=view] tr[data-agent="{AGENT}"]',
 }
 
 
-@pytest.mark.parametrize("route", list(VIEWS), ids=["daily", "sessions", "projects", "models",
-                                                    "session"])
+@pytest.mark.parametrize("route", list(VIEWS), ids=["daily", "sessions", "session"])
 def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_check, route):
     ui_width_check(ui_page, module="usage", route=route)
     panel = panel_of(ui_page)
@@ -367,12 +364,6 @@ def reconcile(panel):
     return panel.locator("section[data-part=view] table[data-part=reconcile]").first
 
 
-def dollars(text: str) -> str:
-    found = re.search(r"\$[\d,.]+", text)
-    assert found, text
-    return found.group(0)
-
-
 def test_the_page_keeps_the_contract_on_the_cost_terms_view(charted, charted_page,
                                                              ui_component_check):
     check = ui_component_check(charted_page, "usage", "page", {"route": "prices"},
@@ -538,8 +529,7 @@ def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charte
         SUBAGENT_MODEL)
 
 
-def test_the_cost_terms_total_is_its_group_lines_and_the_models_views_total(
-        charted, charted_page):
+def test_the_cost_terms_total_is_its_group_lines(charted, charted_page):
     panel = open_view(charted_page, "prices")
     table = reconcile(panel)
     total = table.locator("tr[data-line=total] td[data-cost]")
@@ -556,13 +546,6 @@ def test_the_cost_terms_total_is_its_group_lines_and_the_models_views_total(
     # The subtotal line repeats its groups: the total is the group lines alone.
     assert shown == pytest.approx(sum(groups), abs=1e-9)
     assert sum(groups) + subtotal != pytest.approx(shown, abs=1e-9)
-    terms_total = dollars(total.inner_text())
-
-    panel = open_view(charted_page, "models")
-    expect(panel.locator(f'section[data-part=view] tr[data-model="{MODEL}"]')).to_be_visible()
-    cost = panel.locator("section[data-part=view] [data-part=totals]").locator(
-        "span", has_text="Cost").locator("b")
-    expect(cost).to_have_text(terms_total)
 
 
 def test_rates_list_every_reconcile_model_and_a_search_finds_a_seeded_row(

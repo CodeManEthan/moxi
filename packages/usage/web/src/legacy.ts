@@ -2,7 +2,7 @@
 // its frame was redrawn, kept mounted under the page's chart until each has its place in
 // the new page. It draws the view that serves the page's address (`legacyRoute`): the
 // sessions table, one session with its main agent's requests charted or a subagent's,
-// the projects table, the models table, or the cost terms (the class split, the
+// or the cost terms (the class split, the
 // Reconcile table and the rates) for Token kinds and Prices. For any other address it
 // draws nothing. A link here opens its piece through the page, which writes the address.
 // Every view reads under the page's range and filters, which the page passes in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
@@ -14,7 +14,7 @@ import { api, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseIndexEvent, parsePrices, parseReport } from "./feed.ts";
 import type {
-  AgentRow, ModelRow, Prices, ProjectRow, Report, RequestRow, RequestsTotal, SessionRow,
+  AgentRow, Prices, Report, RequestRow, RequestsTotal, SessionRow,
   TermsRow, TermsTotal,
 } from "./feed.ts";
 import { addressPath, NOTHING_OPEN, sessionAddress, SESSIONS } from "./address-model.ts";
@@ -23,10 +23,10 @@ import { BASE, flag, SERIES } from "./parts.ts";
 import {
   agents, agentTreemap, cellLabel, contextChart, costText, filterKeys, flags, fmtCost, fmtMoment,
   fmtTokens, layerLine, legacyRoute, localDay, MARGIN, NO_FILTERS, overrideLine, parseRoute, pricesPath,
-  provenanceLine, RATE_FIELDS, rateAsks, rateLine, readout, reconcileLines, REQUEST_CLASSES,
+  RATE_FIELDS, rateAsks, rateLine, readout, reconcileLines, REQUEST_CLASSES,
   requestNotes, requestRules, requestsChart, requestsPath, reportState, searchPath, seriesClass,
   sessionTermsPath, splitBars, splitKeys, splitLabel, classIndex, TERM_CLASSES,
-  tickText, UNKNOWN_MODEL, viewPath,
+  tickText, viewPath,
 } from "./views.ts";
 import type { ContextChart, Filters, PageRoute, RequestMeasure, RequestsChart, Rules } from "./views.ts";
 
@@ -271,8 +271,6 @@ export class UsageLegacy extends LitElement {
     switch (route.view) {
       case "sessions": return this.#sessions(report as Report<SessionRow>);
       case "session": return this.#session(report as Report<AgentRow>, route);
-      case "projects": return this.#projectsView(report as Report<ProjectRow>);
-      case "models": return this.#modelsView(report as Report<ModelRow>);
       case "terms": return this.#termsView(report as Report<TermsRow, TermsTotal>);
       default: return nothing;
     }
@@ -340,21 +338,6 @@ export class UsageLegacy extends LitElement {
             <td class="num">${costText({ ...report.total, cost: agent.cost, harness_cost: agent.harness_cost })}${flag(agent.flags)}</td>
           </tr>`)}</tbody>
       </table></div>`;
-  }
-
-  #projectsView(report: Report<ProjectRow>) {
-    return html`<div class="scroll"><table>
-      <thead><tr><th>Project</th><th class="wide">Models</th><th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
-      <tbody>${report.rows.map((row) => html`
-        <tr data-project=${row.project ?? row.cwd ?? ""}>
-          <td class="wrap">${row.project ?? html`<span class="dim">no project</span>`}
-            ${row.cwd && row.cwd !== row.project ? html`<div class="dim small"><code>${row.cwd}</code></div>` : nothing}</td>
-          <td class="wrap wide">${row.models.join(", ")}</td>
-          <td class="num wide">${row.requests.toLocaleString("en-US")}</td>
-          <td class="num">${fmtTokens(row.tokens)}</td>
-          <td class="num">${costText(row)}${flag(flags(row))}</td>
-        </tr>`)}</tbody>
-    </table></div>`;
   }
 
   /** What a view's second feed shows while it has no value: reading, refused or failed. */
@@ -550,24 +533,6 @@ export class UsageLegacy extends LitElement {
       ${context.unknownWindow ? html`<p class="dim small" data-part="unknown-window">${context.unknownWindow}</p>` : nothing}
       <p class="readout" data-part="readout">${hovered ? readout(hovered) : html`<span class="dim">Point at a request to read it.</span>`}</p>
       ${requestNotes(rows, total).map((note) => html`<p class="dim small" data-part="note">${note}</p>`)}`;
-  }
-
-  #modelsView(report: Report<ModelRow>) {
-    return html`<div class="scroll"><table>
-      <thead><tr><th>Model</th><th>Priced by</th><th class="num wide">Requests</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
-      <tbody>${report.rows.map((row) => html`
-        <tr data-model=${row.model ?? ""}>
-          <td class="wrap"><code>${row.model ?? UNKNOWN_MODEL}</code></td>
-          <td class="wrap small">${row.provenance.length ? row.provenance.map((p) => html`<div>${provenanceLine(p)}</div>`)
-            : html`<span class="dim">no price</span>`}
-            ${row.rules.length ? html`<div class="dim">${row.rules.join(", ")}</div>` : nothing}</td>
-          <td class="num wide">${row.requests.toLocaleString("en-US")}</td>
-          <td class="num">${fmtTokens(row.tokens)}</td>
-          <td class="num">${costText(row)}${flag(flags(row))}</td>
-        </tr>`)}</tbody>
-    </table></div>
-    <p class="dim small">Every term of these costs, and the rates of these models: ${this.#link({ piece: "prices" }, "Cost terms")}.
-      The full price table: <code>moxi usage prices</code>.</p>`;
   }
 }
 

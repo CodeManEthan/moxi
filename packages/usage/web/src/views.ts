@@ -148,17 +148,12 @@ export function sessionRoute(id: string, agent = "main"): string {
 }
 
 /** The view kept from before the page's sections that serves `address` until its
- * section is built: the sessions table, one session's view, the projects or models table,
+ * section is built: the sessions table, one session's view,
  * and the cost terms for Token kinds and Prices. Null for an address no such view serves. */
 export function legacyRoute(address: Address): string | null {
   switch (address.piece) {
     case "sessions":
       return address.session === null ? "sessions" : sessionRoute(address.session, address.agent ?? "main");
-    case "projects":
-    case "folders":
-      return "projects";
-    case "models":
-      return "models";
     case "kinds":
     case "prices":
       return "terms";

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   allTimePath, chartPath, customRange, figuresPath, filtered, filterLine, heldState, holdState,
-  modelsPath, placesPath, START, stateKeys, tilde, watchState,
+  modelsPath, modelsSectionPath, placesPath, placesSectionPath, START, stateKeys, tilde, watchState,
 } from "../src/filter-model.ts";
 
 const TODAY = "2026-11-08";
@@ -78,6 +78,19 @@ test("a filter's list is read under the range and the other filters, never its o
   assert.equal(placesPath(state({ folder: "/work/proj-b" }), TODAY, true),
                "api/projects?by=folder&since=2026-10-10&until=2026-11-08");
   assert.equal(modelsPath(set, TODAY), "api/models?since=2026-10-10&until=2026-11-08&harness=codex&project=proj-a");
+});
+
+test("a section is read under the range and every filter, its own among them", () => {
+  const set = state({ harness: "codex", project: "proj-a", model: "m-a" });
+  assert.equal(placesSectionPath(set, TODAY, false),
+               "api/projects?since=2026-10-10&until=2026-11-08&harness=codex&project=proj-a&model=m-a");
+  assert.equal(placesSectionPath(state({ folder: "/work/proj-b" }), TODAY, true),
+               "api/projects?by=folder&since=2026-10-10&until=2026-11-08&folder=%2Fwork%2Fproj-b");
+  assert.equal(modelsSectionPath(set, TODAY),
+               "api/models?since=2026-10-10&until=2026-11-08&harness=codex&project=proj-a&model=m-a");
+  // With no filter of its own set, a section's read is its filter's list.
+  assert.equal(placesSectionPath(state(), TODAY, false), placesPath(state(), TODAY, false));
+  assert.equal(modelsSectionPath(state(), TODAY), modelsPath(state(), TODAY));
 });
 
 test("the Range menu: four presets with their figures, the two days, then all time", () => {

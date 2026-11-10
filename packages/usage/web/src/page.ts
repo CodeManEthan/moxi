@@ -34,6 +34,9 @@
 //                               Model, each a menu, and Cost / Tokens
 //   div[data-part=below]        the groups under the filter line:
 //     section[data-group=chart]    one bar a day or a month, its sentence and its table
+//     section[data-group=projects|folders]  the dearest projects (or folders), and opened
+//                                  each with its share and cost, a row filtering Sessions
+//     section[data-group=models]   the dearest models, and opened each with share and cost
 //   moxi-usage-legacy           the views the page had before, each serving its section's
 //                               address until the section has its place under the filter line
 //   div[data-part=foot]         when the sessions were last read, the files, the act
@@ -53,7 +56,7 @@ import { css, html, LitElement, nothing, svg } from "lit";
 import { api, installed, subscribe } from "/m/ui/client.js";
 
 import {
-  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, settled,
+  addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, SESSIONS, settled,
 } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { chartDraw, chartGroup } from "./chart-model.ts";
@@ -65,15 +68,19 @@ import { Feed, parseIndexEvent, parseLimits, parseReport, parseStatus, parseWind
 import type { DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, ProjectRow, Report, Status } from "./feed.ts";
 import {
   allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
-  placesPath, watchState,
+  modelsSectionPath, placesPath, placesSectionPath, watchState,
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
-import { COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, shouldPass } from "./frame-model.ts";
+import {
+  COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, READING, shouldPass,
+} from "./frame-model.ts";
 import type { Cost, Foot, FootLine, Nothing, OtherRead } from "./frame-model.ts";
 import "./legacy.ts";
 import type { LimitGroup, LimitRow, Warning } from "./limits-model.ts";
 import { NO_FILTERS } from "./views.ts";
 import type { Filters } from "./views.ts";
+import { CLOSE, HIDE_TABLE, modelsSection, placesSection, SECTION_LABELS, TABLE as SECTION_TABLE } from "./sections-model.ts";
+import type { Section, SectionKey, SentencePart } from "./sections-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
 import type { OpenedLimit } from "./window-model.ts";
 
@@ -199,6 +206,18 @@ const STYLES = css`
   .tbl .n { text-align: right; }
   .quietline { padding: 150px 0 14px; font-size: 22px; line-height: 32px; text-align: center;
                letter-spacing: -0.005em; }
+  .grp.is-open .gk { color: var(--moxi-text); }
+  .rows { padding: 2px 0 6px; }
+  .tr2 { display: grid; grid-template-columns: minmax(0, 1fr) 150px minmax(64px, auto); padding: 5px 0;
+         font-size: 14px; line-height: 20px; white-space: nowrap; }
+  .tr2 .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tr2 .d { color: var(--moxi-text-dim); }
+  .tr2 .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .rows p { max-width: 520px; padding: 4px 0 6px; font-size: var(--moxi-font-size-sm); line-height: 18px;
+            color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .rows p a { color: var(--moxi-text); }
+  .rows p.acts { padding-top: 0; }
+  .rows .act { color: var(--moxi-text-dim); }
   .grps + .nothing .quietline { padding-top: 56px; }
   .first { font-size: 14px; line-height: 1.6; color: var(--moxi-text-dim); text-align: center; }
   .first p { max-width: 520px; margin: 0 auto; }
@@ -226,6 +245,7 @@ const STYLES = css`
     .filt .anchor { position: static; }
     .menu { max-width: calc(100% - 4px); }
     .menu button.it { grid-template-columns: 20px 1fr auto; }
+    .tr2 { grid-template-columns: minmax(0, 1fr) 64px minmax(64px, auto); }
     .capl, .note { display: block; }
     .capl span, .note span { display: block; }
     .quietline { padding-top: 56px; white-space: normal; }
@@ -242,6 +262,7 @@ export class UsagePage extends LitElement {
     menu: { state: true },
     custom: { state: true },
     asTable: { state: true },
+    sectionTable: { state: true },
     width: { state: true },
   };
 
@@ -255,6 +276,8 @@ export class UsagePage extends LitElement {
   custom = false;
   /** The chart's table stands in its place. */
   asTable = false;
+  /** The opened section whose table is shown under its rows. */
+  sectionTable: SectionKey | null = null;
   /** The element's own width, in px. */
   width = 680;
 
@@ -273,6 +296,10 @@ export class UsagePage extends LitElement {
   #allTime: Feed<Report<DayRow>> | null = null;
   #places: Feed<Report<ProjectRow>> | null = null;
   #models: Feed<Report<ModelRow>> | null = null;
+  /** The sections' reads, under every filter: the menus' own reads when no filter of
+   * theirs is set. */
+  #placesSection: Feed<Report<ProjectRow>> | null = null;
+  #modelsSection: Feed<Report<ModelRow>> | null = null;
   /** What is open: the piece the address names. */
   #at: Address = NOTHING_OPEN;
   /** The opened limit row's read, with the window it reads and the reading it was last
@@ -369,6 +396,7 @@ export class UsagePage extends LitElement {
     const next = settled(address, this.#folders());
     if (sameAddress(next, this.#at)) return;
     refusedWindow = null;
+    this.sectionTable = null;
     this.#setAt(next);
     this.requestUpdate();
   }
@@ -435,9 +463,16 @@ export class UsagePage extends LitElement {
     this.custom = false;
   }
 
+  /** Every read under the filter line that is open, each once. */
+  #belowFeeds(): { close(): void; refresh(): Promise<void> }[] {
+    return [...new Set([this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#placesSection,
+                        this.#modelsSection])].filter((feed) => feed !== null);
+  }
+
   #closeBelow(): void {
-    for (const feed of [this.#chart, this.#figures, this.#allTime, this.#places, this.#models]) feed?.close();
+    for (const feed of this.#belowFeeds()) feed.close();
     this.#chart = this.#figures = this.#allTime = this.#places = this.#models = null;
+    this.#placesSection = this.#modelsSection = null;
     this.#asked = this.#askedAllTime = null;
   }
 
@@ -463,17 +498,24 @@ export class UsagePage extends LitElement {
     const state = heldState();
     const today = this.#today();
     const paths = { chart: chartPath(state, today), figures: figuresPath(state, today),
-                    places: placesPath(state, today, this.#folders()), models: modelsPath(state, today) };
+                    places: placesPath(state, today, this.#folders()), models: modelsPath(state, today),
+                    placesSection: placesSectionPath(state, today, this.#folders()),
+                    modelsSection: modelsSectionPath(state, today) };
     const asked = JSON.stringify(paths);
     if (asked !== this.#asked) {
       this.#asked = asked;
-      for (const feed of [this.#chart, this.#figures, this.#places, this.#models]) feed?.close();
+      const allTime = this.#allTime;
+      for (const feed of this.#belowFeeds()) if (feed !== allTime) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
       this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update);
       this.#models = new Feed<Report<ModelRow>>(() => api("usage", paths.models), parseReport, update);
-      for (const feed of [this.#chart, this.#figures, this.#places, this.#models]) void feed?.refresh();
+      this.#placesSection = paths.placesSection === paths.places ? this.#places
+        : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update);
+      this.#modelsSection = paths.modelsSection === paths.models ? this.#models
+        : new Feed<Report<ModelRow>>(() => api("usage", paths.modelsSection), parseReport, update);
+      for (const feed of this.#belowFeeds()) if (feed !== allTime) void feed.refresh();
     }
     // All time's figure is asked when the Range menu first opens, and again under new filters.
     const allTime = allTimePath(state);
@@ -493,9 +535,7 @@ export class UsagePage extends LitElement {
     if (!event.running) {
       void this.#status?.refresh();
       void this.#daily?.refresh();
-      for (const feed of [this.#chart, this.#figures, this.#allTime, this.#places, this.#models, this.#window]) {
-        void feed?.refresh();
-      }
+      for (const feed of [...this.#belowFeeds(), this.#window]) void feed?.refresh();
     }
     this.requestUpdate();
   }
@@ -543,6 +583,10 @@ export class UsagePage extends LitElement {
     other("The range's figures", this.#figures);
     other(this.#folders() ? "The folders" : "The projects", this.#places);
     other("The models", this.#models);
+    if (this.#placesSection !== this.#places) {
+      other(this.#folders() ? "The Folders section" : "The Projects section", this.#placesSection);
+    }
+    if (this.#modelsSection !== this.#models) other("The Models section", this.#modelsSection);
     const windowRead = this.#window ?? refusedWindow;
     if (windowRead !== null) others.push({ what: "The opened limit", read: windowRead, report: false });
     const at = this.#at;
@@ -564,6 +608,12 @@ export class UsagePage extends LitElement {
     });
     const group = !frame.below || report === null ? null
       : chartGroup(report, state.range, state.measure, today, this.asTable);
+    // With nothing in the range or under the filters no section is drawn.
+    const sections = !frame.below || group?.nothing ? [] : [
+      this.#section(this.#folders() ? "folders" : "projects", this.#placesSection,
+                    placesSection(this.#placesSection?.value ?? null, this.#folders())),
+      this.#section("models", this.#modelsSection, modelsSection(this.#modelsSection?.value ?? null)),
+    ].filter((drawn) => drawn !== nothing);
     const days = rangeDays(state.range, today);
     // A session's address names its harness, and its view is read under it.
     const harness = at.piece === "sessions" && at.harness !== null ? at.harness : state.harness;
@@ -578,7 +628,8 @@ export class UsagePage extends LitElement {
       </div>` : nothing}
       ${frame.nothing === null ? nothing : this.#nothing(frame.nothing)}
       ${line === null ? nothing : this.#filters(line)}
-      ${group === null ? nothing : html`<div class="grps below" data-part="below">${this.#chartGroup(group)}</div>`}
+      ${group === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
+        group === null ? nothing : this.#chartGroup(group)}${sections}</div>`}
       ${frame.below ? html`<moxi-usage-legacy .address=${at} .open=${(address: Address) => this.open(address)} .filters=${filters}
         .said=${group !== null && group.nothing !== null}></moxi-usage-legacy>` : nothing}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
@@ -785,6 +836,63 @@ export class UsagePage extends LitElement {
       <tbody>${table.rows.map((row) => html`<tr data-row=${row.key}>${row.cells.map((cell, i) =>
         html`<td class=${table.columns[i]?.num ? "n" : ""}>${cell}</td>`)}</tr>`)}</tbody>
     </table></div>`;
+  }
+
+  /** Whether the address opens this section. */
+  #isOpen(key: SectionKey): boolean {
+    const piece = this.#at.piece;
+    return piece === key || (key !== "models" && (piece === "projects" || piece === "folders"));
+  }
+
+  /** A section: one row stating its answer, with its count as the link that opens it;
+   * opened, its rows, the sentence under them and its table. While its read is out an
+   * opened section says so; a closed one is absent until the read has answered. */
+  #section(key: SectionKey, feed: Feed<unknown> | null, model: Section | null) {
+    const open = this.#isOpen(key);
+    if (model === null) {
+      if (!open || feed === null || feed.value !== null || !feed.loading) return nothing;
+      return html`<section class="grp is-open" data-group=${key}>
+        <div class="gk">${SECTION_LABELS[key]}</div>
+        <div class="gl"><p class="none" data-part="reading">${READING}</p></div>
+      </section>`;
+    }
+    const target = open ? NOTHING_OPEN : { piece: key } as Address;
+    const shown = open && this.sectionTable === key;
+    return html`<section class=${open ? "grp is-open" : "grp"} data-group=${key}>
+      <div class="gk">${model.label}</div>
+      <div class="gl">
+        <div class="one"><span data-part="closed">${model.closed}</span><a class="t" data-part="count"
+          href=${addressPath(target)} aria-expanded=${String(open)}
+          @click=${(event: MouseEvent) => this.#follow(event, target)}>${open ? CLOSE : model.count}</a></div>
+        ${open ? html`<div class="rows" data-part="rows">${model.rows.map((row) => {
+          const cells = html`<span class="nm">${row.name}</span><span class="n d">${row.share ?? nothing}</span>
+            <span class="n" title=${row.why ?? nothing}>${row.cost}</span>`;
+          const patch = row.patch;
+          return patch === null ? html`<div class="tr2" data-row=${row.key}>${cells}</div>`
+            : html`<a class="tr2" data-row=${row.key} href=${addressPath(SESSIONS)}
+                @click=${(event: MouseEvent) => this.#filterTo(event, patch)}>${cells}</a>`;
+        })}
+          ${model.sentence === null ? nothing : html`<p data-part="sentence">${model.sentence.map((part) => this.#part(part))}</p>`}
+          <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(shown)}
+            @click=${() => { this.sectionTable = shown ? null : key; }}>${shown ? HIDE_TABLE : SECTION_TABLE}</button></p>
+          ${shown ? this.#table(model.table) : nothing}
+        </div>` : nothing}
+      </div>
+    </section>`;
+  }
+
+  #part(part: SentencePart) {
+    const patch = part.patch;
+    return patch === null ? part.text : html`<a href=${addressPath(SESSIONS)} data-folder=${patch.folder ?? ""}
+      @click=${(event: MouseEvent) => this.#filterTo(event, patch)}>${part.text}</a>`;
+  }
+
+  /** A row or folder of a section: sets its filter and opens Sessions. */
+  #filterTo(event: MouseEvent, patch: Partial<PageState>): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    holdState(patch);
+    this.open(SESSIONS);
   }
 
   #nothing(block: Nothing) {

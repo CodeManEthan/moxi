@@ -108,6 +108,17 @@ export function modelsPath(state: PageState, today: string): string {
   return withQuery("api/models", stateKeys(state, today, ["model"]));
 }
 
+/** The Projects (or Folders) section's report: the range under every filter, as
+ * everything under the filter line follows them. */
+export function placesSectionPath(state: PageState, today: string, folders: boolean): string {
+  return withQuery("api/projects", [...(folders ? [["by", "folder"] as [string, string]] : []), ...stateKeys(state, today)]);
+}
+
+/** The Models section's report: the range under every filter. */
+export function modelsSectionPath(state: PageState, today: string): string {
+  return withQuery("api/models", stateKeys(state, today));
+}
+
 // --- the line -----------------------------------------------------------------------------
 
 /** One entry of a menu. */
