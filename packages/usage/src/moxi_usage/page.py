@@ -2,8 +2,9 @@
 
     GET  /api/limits    each plan window now (`limits()`), with the server's `now`
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
-    GET  /api/sessions  tokens and cost by session, the `top` by cost, with how many more
-    GET  /api/session   one session by agent and model (`session=ID`)
+    GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
+                        how many there are and how many come after, each with its context
+    GET  /api/session   one session by agent and model (`session=ID`), with its context
     GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
                         `cwd` alone with `by=folder`; with the account's `home` folder
     GET  /api/models    tokens and cost by model, with where each price came from
@@ -55,7 +56,7 @@ lb = _ui.api.loopback
 #: The harnesses a report can be cut to.
 HARNESSES = ("claude", "codex", "opencode")
 #: The most rows `/api/sessions` sends, and how many it sends unless asked.
-TOP_MAX = 1000
+TOP_MAX = 200
 TOP_DEFAULT = 200
 
 _TEXT = lb.Out("string")
@@ -144,21 +145,29 @@ PERIOD_ROW = {"period": _MAYBE, "model": _MAYBE, **ROW_SUMS}
 DAILY = _report(PERIOD_ROW, by=_TEXT)
 COST = _report(PERIOD_ROW)
 
-#: One session: its main file's title, `cwd` and project, its models, and its first and
-#: last request in range. `session_id` is null for a file with no session id, which has
-#: no session view.
+#: How full a session's context was at its newest request: `tokens` is the whole prompt
+#: of the newest claimed request of the session's main file, `window` the one it ran
+#: against (the harness's own, else the model table's, else null). The whole value is
+#: null when the session has no such request or its prompt size is unknown.
+CONTEXT = lb.Out("table", nullable=True, items={"tokens": _INT, "window": _MAYBE_INT})
+
+#: One session: its main file's `cwd` and project, its models, its first and last
+#: request in range, and its context. `session_id` is null for a file with no session
+#: id: no route reads such a row by id, so it has no session view and a null `context`.
 SESSION_ROW = {
     "harness": _TEXT,
     "session_id": _MAYBE,
-    "title": _MAYBE_SAYS,
     "cwd": _MAYBE_PATH,
     "project": _MAYBE,
     "models": _WORDS,
     "first_ts": _WHEN,
     "last_ts": _WHEN,
+    "context": CONTEXT,
     **ROW_SUMS,
 }
-SESSIONS = _report(SESSION_ROW, top=_INT, more=_INT)
+#: `rows` is `[skip, skip + top)` of the sessions in order; `count` is all of them and
+#: `more` those after the rows sent.
+SESSIONS = _report(SESSION_ROW, top=_INT, skip=_INT, count=_INT, more=_INT)
 
 #: One agent and model of a session: `agent` is `main` for the main file, else the
 #: agent's id; `kind` its file's kind.
@@ -171,7 +180,7 @@ AGENT_ROW = {
     "last_ts": _WHEN,
     **ROW_SUMS,
 }
-SESSION = _report(AGENT_ROW)
+SESSION = _report(AGENT_ROW, context=CONTEXT)
 
 #: One project key, or for files with none, one `cwd`; by folder, one `cwd` and no key.
 PROJECT_ROW = {"project": _MAYBE, "cwd": _MAYBE_PATH, "models": _WORDS, **ROW_SUMS}
@@ -410,7 +419,8 @@ PAGE = lb.Page(
                         **FILTERS},
                  returns=DAILY),
         lb.Route("/api/sessions", "read", "moxi_usage.pagehandlers:sessions",
-                 query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},
+                 query={"top": lb.Field("int", required=False, max=TOP_MAX),
+                        "skip": lb.Field("int", required=False), **FILTERS},
                  returns=SESSIONS),
         lb.Route("/api/session", "read", "moxi_usage.pagehandlers:session",
                  query={"session": lb.Field("string", max=512), **FILTERS},
@@ -446,7 +456,7 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["AGENT_ROW", "COST", "DAILY", "FILTERS", "GROUP", "HARNESSES", "INDEX",
+__all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESSES", "INDEX",
            "INDEX_TOPIC", "LANE", "LIMITS", "MODELS", "MODEL_ROW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
            "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SESSION", "SESSIONS", "SESSION_ROW",

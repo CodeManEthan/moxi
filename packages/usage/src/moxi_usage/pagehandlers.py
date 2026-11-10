@@ -2,9 +2,10 @@
 
 **Reads.** Each read is a plain `def`, run on one of the page server's worker threads,
 and thin over `moxi_usage.api`: it calls `limits()` or `report()`, takes `as_dict()`, and
-cuts the answer to its route's declared shape. It runs no SQL of its own. Every report
-is read with `fresh=False`, so a read never runs a pass and never waits on the index's
-lock; its `index.note` says it read the index as it is. Each report's answer, the
+cuts the answer to its route's declared shape. It runs no SQL of its own; a session's
+context comes from `moxi_usage.reports.session_contexts`, one read per session sent.
+Every report is read with `fresh=False`, so a read never runs a pass and never waits on
+the index's lock; its `index.note` says it read the index as it is. Each report's answer, the
 status and the limits carry `today`, the page server's local date. Where the API's
 answer holds a map with open keys, the cut turns it into a list of `{name, value}` rows
 (a report's `filters`, a lane's `held_reasons`, the dollar figures `limits.dollars`
@@ -51,7 +52,7 @@ import moxi.config
 import moxi.store
 from moxi import aio, modules
 
-from . import api, store
+from . import api, reports, store
 from .limits import dollars
 from .page import TOP_DEFAULT, WINDOW
 
@@ -198,38 +199,70 @@ def daily(call: Any) -> dict[str, Any]:
 
 def _session_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {"harness": str(row.get("harness")), "session_id": _str(row.get("session_id")),
-            "title": _str(row.get("title")), "cwd": _str(row.get("cwd")),
-            "project": _str(row.get("project")), "models": _words(row.get("models")),
-            "first_ts": _num(row.get("first_ts")), "last_ts": _num(row.get("last_ts")),
-            **_row_sums(row)}
+            "cwd": _str(row.get("cwd")), "project": _str(row.get("project")),
+            "models": _words(row.get("models")), "first_ts": _num(row.get("first_ts")),
+            "last_ts": _num(row.get("last_ts")), "context": None, **_row_sums(row)}
 
 
 def _by_cost(row: Mapping[str, Any]) -> tuple:
-    cost = row["cost"]
-    return (cost is None, -(cost or 0.0), -row["tokens"])
+    """The sessions' order: cost, the dearest first and an unpriced one last; then
+    tokens, the most first; then harness and session id, a row with no id after those
+    with one, by its first request and folder."""
+    cost, sid, first = row["cost"], row["session_id"], row["first_ts"]
+    return (cost is None, -(cost or 0.0), -row["tokens"], row["harness"], sid is None,
+            sid or "", first is None, first or 0.0, row["cwd"] or "")
+
+
+def _context(found: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if found is None or _int(found.get("tokens")) is None:
+        return None
+    return {"tokens": _int(found["tokens"]), "window": _int(found.get("window"))}
+
+
+def _contexts(keys: list[tuple[str | None, str]]) -> dict[tuple[str | None, str], Any]:
+    try:
+        return reports.session_contexts(keys)
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
 
 
 def sessions(call: Any) -> dict[str, Any]:
-    """`GET /api/sessions`: the `top` sessions by cost (200 unless asked, at most 1,000),
-    the dearest first, and in `more` how many the range holds past them."""
-    top = call.query.get("top")
+    """`GET /api/sessions`: the sessions by cost, the dearest first, then by tokens, then
+    by harness and session id. `rows` is `top` of them (200 unless asked, at most 200)
+    after the first `skip` (none unless asked); `count` is how many there are and `more`
+    how many come after the rows sent. `skip` is a place in the order as the index stood
+    at this call, so a pass between two calls can move a row. Each row sent carries its
+    session's `context`, read once per row; a row with no session id has none."""
+    top, skip = call.query.get("top"), call.query.get("skip")
     top = TOP_DEFAULT if top is None else top
+    skip = 0 if skip is None else skip
     if top < 1:
         raise lb.Refused("top is a number of sessions, 1 or more")
+    if skip < 0:
+        raise lb.Refused("skip is a number of sessions, 0 or more")
     answer = _read("sessions", call.query)
     rows = sorted((_session_row(row) for row in answer["rows"]), key=_by_cost)
-    return {**_report(answer, rows[:top]), "top": top, "more": max(0, len(rows) - top)}
+    sent = rows[skip:skip + top]
+    found = _contexts([(row["harness"], row["session_id"]) for row in sent
+                       if row["session_id"] is not None])
+    for row in sent:
+        row["context"] = _context(found.get((row["harness"], row["session_id"])))
+    return {**_report(answer, sent), "top": top, "skip": skip, "count": len(rows),
+            "more": max(0, len(rows) - skip - len(sent))}
 
 
 def session(call: Any) -> dict[str, Any]:
     """`GET /api/session?session=ID`: one session by agent and model, over the same
-    filters, so it sums to that session's row of `/api/sessions`."""
-    answer = _read("session", call.query, session=call.query["session"])
+    filters, so it sums to that session's row of `/api/sessions`, and the session's
+    `context` as that row carries it, whatever the range. Without `harness`, the
+    context is that of the one harness holding a session of that id, null when two do."""
+    key = (call.query.get("harness"), call.query["session"])
+    answer = _read("session", call.query, session=key[1])
     rows = [{"agent": str(row.get("agent")), "kind": str(row.get("kind")),
              "title": _str(row.get("title")), "model": _str(row.get("model")),
              "first_ts": _num(row.get("first_ts")), "last_ts": _num(row.get("last_ts")),
              **_row_sums(row)} for row in answer["rows"]]
-    return _report(answer, rows)
+    return {**_report(answer, rows), "context": _context(_contexts([key]).get(key))}
 
 
 def projects(call: Any) -> dict[str, Any]:

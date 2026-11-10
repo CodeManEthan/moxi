@@ -1311,6 +1311,100 @@ def test_the_window_is_the_reported_one_else_the_reports_table_by_provider(conn)
     assert "cost" in data["rows"][3]["unknown"]
 
 
+def context_index(conn):
+    """A Codex thread with a reported window, a Claude session with a subagent and a
+    later child session, and one id two harnesses hold."""
+    t = at("2026-10-01T12:00")
+    source(conn, "/c/r.jsonl", [
+        request("t1", t, harness="codex", model="m-a", input=10_000, context_window=1000),
+        request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+                context_window=258_400)],
+        lane="codex", harness="codex", session_id="th1", rank=1)
+    source(conn, "/p/s1.jsonl", [request("r2", t + 600, input=40_000),
+                                 request("r1", t, input=30_000)], session_id="s1")
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+           session_id="s1", kind="subagent", agent_id="a")
+    db = "/oc/opencode.db"
+    source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input=600)],
+           lane="opencode", harness="opencode", part="ses_p", session_id="ses_p", rank=2)
+    source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],
+           lane="opencode", harness="opencode", part="ses_c", session_id="ses_c",
+           parent_session="ses_p", agent_id="ses_c", kind="subagent", rank=2)
+    source(conn, "/p/both.jsonl", [request("b1", t, input=111)], session_id="both")
+    source(conn, "/c/both.jsonl", [request("b2", t, harness="codex", input=222)],
+           lane="codex", harness="codex", session_id="both", rank=1)
+
+
+def test_a_sessions_context_is_the_newest_request_of_its_main_file(conn):
+    context_index(conn)
+
+    def of(harness, sid):
+        return reports.session_context(conn, harness, sid, table=table())
+
+    assert of("codex", "th1") == {"tokens": 51_680, "window": 258_400}
+    # the newest by time, not by place in the file, and never a subagent's
+    assert of("claude", "s1") == {"tokens": 40_000, "window": 200_000}
+    # a model the table does not know has no window; a child session is not the main file
+    assert of("opencode", "ses_p") == {"tokens": 600, "window": None}
+    assert of("opencode", "ses_c") is None
+    assert of("claude", "th1") is None and of("claude", "nobody") is None
+    assert of("claude", "") is None
+    # with no harness given: the one that holds the id, and nothing when two do
+    assert of(None, "s1") == of("claude", "s1")
+    assert of(None, "both") is None
+    assert of("claude", "both") == {"tokens": 111, "window": 200_000}
+    assert of("codex", "both") == {"tokens": 222, "window": 200_000}
+
+
+def test_a_context_is_none_when_the_newest_request_gave_no_prompt_size(conn):
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [request("r1", t, input=500),
+                                request("r2", t + 60, input=UNKNOWN)])
+    assert reports.session_context(conn, "claude", "s1", table=table()) is None
+
+
+def test_a_context_counts_only_a_claimed_request(conn):
+    t = at("2026-10-01T12:00")
+    # both files hold `shared`, the newest request of each; the earlier file's copy is
+    # the claimed one, so the later file's newest claimed request is its own
+    source(conn, "/p/old.jsonl", [request("first", t, input=100),
+                                  request("shared", t + 60, input=700)], session_id="old")
+    source(conn, "/p/new.jsonl", [request("mine", t + 30, input=300),
+                                  request("shared", t + 60, input=700)], session_id="new")
+    assert reports.session_context(conn, "claude", "old", table=table())["tokens"] == 700
+    assert reports.session_context(conn, "claude", "new", table=table())["tokens"] == 300
+
+
+def test_a_context_read_goes_by_the_sessions_files(conn):
+    context_index(conn)
+    plan = " | ".join(row[-1] for row in conn.execute(
+        "EXPLAIN QUERY PLAN " + reports._NEWEST_SQL, ("s1", "claude")))
+    assert "files_session" in plan, plan
+    assert "SEARCH r USING PRIMARY KEY (file_id=?)" in plan, plan
+    assert "requests_won_ts" not in plan and "SCAN" not in plan, plan
+
+
+def test_contexts_read_the_index_as_it_is_and_are_none_without_one(conn, monkeypatch):
+    context_index(conn)
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    keys = [("codex", "th1"), ("claude", "s1"), ("claude", "nobody"), ("codex", "th1")]
+    assert reports.session_contexts(keys) == {
+        ("codex", "th1"): {"tokens": 51_680, "window": 258_400},
+        ("claude", "s1"): {"tokens": 40_000, "window": 200_000},
+        ("claude", "nobody"): None}
+    assert reports.session_contexts([]) == {}
+    conn.execute(f"PRAGMA user_version = {store.INDEX_VERSION - 1}")
+    conn.commit()
+    assert reports.session_contexts(keys[:2]) == dict.fromkeys(keys[:2])
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.INDEX_VERSION - 1
+
+
+def test_contexts_build_no_index(monkeypatch):
+    assert not store.index_path().exists()
+    assert reports.session_contexts([("claude", "s1")]) == {("claude", "s1"): None}
+    assert not store.index_path().exists()
+
+
 def test_requests_price_a_request_its_session_group_leaves_unpriced(conn):
     # one file of `half`: one request with tokens in the term it has no price for, and
     # one without; the session report sums both into one group, which stays unpriced

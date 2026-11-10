@@ -209,7 +209,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
     assert {path: (r["kind"], set(r["query"]), r["stream"]) for path, r in routes.items()} == {
         "/api/limits": ("read", set(), False),
         "/api/daily": ("read", {"by", *FILTERS}, False),
-        "/api/sessions": ("read", {"top", *FILTERS}, False),
+        "/api/sessions": ("read", {"top", "skip", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
         "/api/projects": ("read", {"by", *FILTERS}, False),
         "/api/models": ("read", FILTERS, False),
@@ -263,7 +263,7 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
     for path in ("/api/limits", "/api/daily", "/api/session", "/api/models", "/api/cost",
                  "/api/terms", "/api/requests", "/api/prices", "/api/pass", "/api/events"):
         assert marked(path, "path") == set(), path
-    assert "rows[].title" in marked("/api/sessions", "redact")
+    assert marked("/api/sessions", "redact") == {"filters[].value", "index.note"}
     assert "rows[].title" in marked("/api/session", "redact")
 
 
@@ -378,24 +378,192 @@ def test_a_bad_argument_is_refused_with_the_reports_words(seeded):
     assert "before --since" in refused("/api/sessions", since="2026-10-03",
                                        until="2026-10-01")
     assert "1 or more" in refused("/api/sessions", top="0")
-    status, body = asyncio.run(ask(served(), "/api/sessions", {"top": "1001"}))
-    assert status == 400
+    assert "0 or more" in refused("/api/sessions", skip="-1")
+    for top in ("201", "1001"):
+        status, body = asyncio.run(ask(served(), "/api/sessions", {"top": top}))
+        assert status == 400
 
 
 def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
     body = get("/api/sessions", utc="true")
-    assert (body["top"], body["more"]) == (200, 0)
+    assert (body["top"], body["skip"], body["count"], body["more"]) == (200, 0, 3, 0)
     costs = [row["cost"] for row in body["rows"]]
     assert costs == sorted(costs, reverse=True) and len(costs) == 3
     first = body["rows"][0]
-    assert set(first) == {"harness", "session_id", "title", "cwd", "project", "models",
-                          "first_ts", "last_ts", *ROW_KEYS}
+    assert set(first) == {"harness", "session_id", "cwd", "project", "models",
+                          "first_ts", "last_ts", "context", *ROW_KEYS}
     s1 = next(row for row in body["rows"] if row["session_id"] == "s1")
-    assert (s1["title"], s1["cwd"], s1["harness"]) == ("Tidy the parser", "/w/app", "claude")
+    assert (s1["cwd"], s1["harness"]) == ("/w/app", "claude")
     assert s1["models"] == ["m-a", "m-b", "mystery-9"]
     two = get("/api/sessions", top="2", utc="true")
-    assert (len(two["rows"]), two["top"], two["more"]) == (2, 2, 1)
+    assert (len(two["rows"]), two["top"], two["count"], two["more"]) == (2, 2, 3, 1)
     assert two["rows"] == body["rows"][:2]
+
+
+@pytest.fixture
+def many(monkeypatch):
+    """Sessions whose order every part of the rule decides: two priced apart, five that
+    tie on cost and tokens (three with ids across two harnesses, two files with no
+    session id), and one no price reaches."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+
+    def claude(sid, *found, **fields):
+        source(conn, f"/p/{sid}.jsonl", list(found), session_id=sid, **fields)
+
+    conn = store.open_index()
+    try:
+        claude("dear", request("d1", t, input=9000), request("d2", t + 600, input=40_000),
+               cwd="/w/app")
+        claude("mid", request("m1", t + 60, input=5000), cwd="/w/app")
+        claude("tie-b", request("b1", t + 120), cwd="/w/tool")
+        claude("tie-a", request("a1", t + 180), cwd="/w/tool")
+        source(conn, "/c/tie.jsonl", [request("c1", t + 240, harness="codex")],
+               lane="codex", harness="codex", session_id="tie-a", rank=1, cwd="/w/tool")
+        claude("unpriced", request("u1", t + 300, model="mystery-9", input=90_000),
+               cwd="/w/app")
+        source(conn, "/p/loose-2.jsonl", [request("l2", t + 420)], session_id=None,
+               cwd="/w/loose-b")
+        source(conn, "/p/loose-1.jsonl", [request("l1", t + 360)], session_id=None,
+               cwd="/w/loose-a")
+    finally:
+        conn.close()
+
+
+def keys_of(body):
+    return [(row["harness"], row["session_id"] or row["cwd"]) for row in body["rows"]]
+
+
+ORDER = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-a"), ("claude", "tie-b"),
+         ("claude", "/w/loose-a"), ("claude", "/w/loose-b"), ("codex", "tie-a"),
+         ("claude", "unpriced")]
+
+
+def test_sessions_come_by_cost_then_tokens_then_harness_and_id(many):
+    body = get("/api/sessions", utc="true")
+    assert keys_of(body) == ORDER
+    assert (body["count"], body["more"], body["skip"]) == (8, 0, 0)
+    costs = [row["cost"] for row in body["rows"]]
+    assert costs[2:7] == [costs[2]] * 5 and costs[-1] is None
+    assert costs[0] > costs[1] > costs[2]
+    # an unpriced session is last however many tokens it holds
+    assert body["rows"][-1]["tokens"] > body["rows"][0]["tokens"]
+
+
+def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+    conn = store.open_index()
+    try:
+        # $0.0045 each: 1,000 in and 100 out of m-a; 4,500 in and no out of m-b
+        source(conn, "/p/few.jsonl", [request("f1", t)], session_id="a-few")
+        source(conn, "/p/more.jsonl", [request("m1", t, model="m-b", input=4500, output=0)],
+               session_id="z-more")
+    finally:
+        conn.close()
+    body = get("/api/sessions", utc="true")
+    assert [row["cost"] for row in body["rows"]] == [pytest.approx(0.0045)] * 2
+    assert [row["session_id"] for row in body["rows"]] == ["z-more", "a-few"]
+
+
+def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
+    whole = get("/api/sessions", utc="true")["rows"]
+    seen = []
+    for skip in (0, 3, 6):
+        body = get("/api/sessions", top="3", skip=str(skip), utc="true")
+        assert (body["top"], body["skip"], body["count"]) == (3, skip, 8)
+        assert body["rows"] == whole[skip:skip + 3]
+        assert body["more"] == 8 - skip - len(body["rows"])
+        seen += keys_of(body)
+    assert seen == ORDER
+    past = get("/api/sessions", top="3", skip="8", utc="true")
+    assert (past["rows"], past["count"], past["more"]) == ([], 8, 0)
+    assert get("/api/sessions", top="3", skip="50", utc="true")["more"] == 0
+    # the total is the range's whichever rows are sent
+    assert past["total"] == get("/api/sessions", utc="true")["total"]
+    assert get("/api/sessions", folder="/w/tool", top="1", skip="1")["count"] == 3
+
+
+def test_a_file_with_no_session_id_is_a_row_with_a_null_id_and_no_context(many):
+    body = get("/api/sessions", utc="true")
+    loose = [row for row in body["rows"] if row["session_id"] is None]
+    assert [(row["harness"], row["cwd"], row["requests"]) for row in loose] == [
+        ("claude", "/w/loose-a", 1), ("claude", "/w/loose-b", 1)]
+    assert all(row["context"] is None for row in loose)
+    assert not any("title" in row or "name" in row for row in body["rows"])
+    # nothing reads such a row by an id: the report's own key for it finds no session
+    assert get("/api/session", session="file:1")["context"] is None
+
+
+@pytest.fixture
+def windows(monkeypatch):
+    """Four sessions: a window the harness reported, one only the model table knows, a
+    model with none, and a newest request whose prompt size the harness did not report."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+    conn = store.open_index()
+    try:
+        source(conn, "/c/th1.jsonl", [
+            request("t1", t, harness="codex", model="m-a", input=20_000),
+            request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+                    context_window=258_400)],
+            lane="codex", harness="codex", session_id="th1", rank=1)
+        source(conn, "/p/s1.jsonl", [request("r1", t, input=30_000),
+                                     request("r2", t + 600, input=40_000)],
+               session_id="s1", cwd="/w/app")
+        source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+               session_id="s1", kind="subagent", agent_id="a", cwd="/w/app")
+        source(conn, "/p/s2.jsonl", [request("u1", t, model="mystery-9", input=1234)],
+               session_id="s2")
+        source(conn, "/p/s3.jsonl", [request("v1", t, input=500),
+                                     request("v2", t + 60, input=sessions.UNKNOWN)],
+               session_id="s3")
+    finally:
+        conn.close()
+
+
+def test_a_sessions_context_is_its_main_files_newest_request_against_its_window(windows):
+    body = get("/api/sessions", utc="true")
+    found = {row["session_id"]: row["context"] for row in body["rows"]}
+    assert found == {
+        "th1": {"tokens": 51_680, "window": 258_400},     # the window the harness reported
+        "s1": {"tokens": 40_000, "window": 200_000},      # the model table's; not the agent's
+        "s2": {"tokens": 1234, "window": None},           # no window anywhere
+        "s3": None,                                       # a prompt size nobody reported
+    }
+    # the newest request whatever the range and filters, on the rows sent only
+    ranged = get("/api/sessions", utc="true", until="2026-09-30")
+    assert ranged["rows"] == []
+    one = get("/api/sessions", utc="true", model="m-a", top="1")
+    assert len(one["rows"]) == 1 and one["rows"][0]["context"] is not None
+
+
+def test_one_context_read_is_made_per_row_sent(windows, monkeypatch):
+    asked = []
+    real = reports.session_context
+
+    def counted(conn, harness, session_id, **kwargs):
+        asked.append((harness, session_id))
+        return real(conn, harness, session_id, **kwargs)
+
+    monkeypatch.setattr(reports, "session_context", counted)
+    body = get("/api/sessions", utc="true", top="2", skip="1")
+    assert sorted(asked) == sorted((row["harness"], row["session_id"])
+                                   for row in body["rows"])
+    assert len(asked) == 2 and body["count"] == 4
+
+
+def test_one_session_carries_its_context_whatever_the_range(windows):
+    assert get("/api/session", session="s1", harness="claude")["context"] == {
+        "tokens": 40_000, "window": 200_000}
+    assert get("/api/session", session="th1")["context"] == {
+        "tokens": 51_680, "window": 258_400}
+    before = get("/api/session", session="s1", until="2026-09-30")
+    assert before["rows"] == [] and before["context"] == {"tokens": 40_000,
+                                                          "window": 200_000}
+    assert get("/api/session", session="s1", harness="codex")["context"] is None
+    assert get("/api/session", session="nobody")["context"] is None
+    assert get("/api/session", session="s3")["context"] is None
 
 
 def test_a_session_sums_to_its_sessions_row_over_the_same_filters(seeded):
@@ -1061,8 +1229,8 @@ def test_a_catch_up_pass_over_many_new_sources_reads_them_on_the_pool(monkeypatc
     assert pooled == [(many, 2)]
     assert end["running"] is False and end["note"] is None
     assert end["last_pass"] > first.finished_at
-    body = get("/api/sessions", top="1000")
-    assert len(body["rows"]) == many + 1
+    body = get("/api/sessions", top="1")
+    assert body["count"] == many + 1
     assert body["total"]["output"] == sum(10 + n for n in range(many + 1))
 
 

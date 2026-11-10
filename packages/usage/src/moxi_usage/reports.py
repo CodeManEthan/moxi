@@ -23,6 +23,9 @@ tz)` that returns a `Report`:
   held and duplicate counts, the held rows' reasons, the last pass and the schema
   version. It counts no tokens, so the sections below are about the others.
 
+Beside the reports, `session_context` and `session_contexts` read how full a session's
+context was at its newest request, one session at a time.
+
 **What a report reads.** Only the requests that hold their key's claim (`won = 1`), joined
 to their files, through the `requests_won_ts` index for a time range (the `session`
 report goes by its own files instead). It never reads the `claimed` view, which works the
@@ -701,6 +704,82 @@ def _session_facts(conn: sqlite3.Connection,
     return found
 
 
+def _window(reported: Any, facts: Any) -> Any:
+    """The window a request ran against: the one its harness reported, else the model
+    table's for its model, provider and time, else `UNKNOWN`."""
+    if isinstance(reported, int) and not isinstance(reported, bool) and reported > 0:
+        return reported
+    window = facts.window
+    if isinstance(window, (int, float)) and not isinstance(window, bool) and window > 0:
+        return window
+    return UNKNOWN
+
+
+#: The newest claimed request of a session's main file. It goes by the session's files
+#: and their requests' primary key; the `+` keeps SQLite off the won-and-time index.
+_NEWEST_SQL = (
+    f"SELECT r.input, {MODEL_SQL}, r.provider, r.ts, r.context_window"
+    " FROM files f JOIN requests r ON r.file_id = f.id"
+    " WHERE f.session_id = ? AND f.harness = ? AND f.kind = 'main'"
+    " AND f.parent_session IS NULL AND +r.won = 1"
+    " ORDER BY r.ts IS NULL, r.ts DESC, f.id DESC, r.seq DESC LIMIT 1")
+
+
+def session_context(conn: sqlite3.Connection, harness: str | None, session_id: str, *,
+                    table: Table | None = None) -> dict[str, Any] | None:
+    """How full one session's context was at its newest request: `{tokens, window}`,
+    where `tokens` is the whole prompt of the newest claimed request of the session's
+    main file, whenever it was made, and `window` the one it ran against (the `requests`
+    report's rule: the harness's own, else the model table's, else None).
+
+    None when the session has no main file in the index, its main file holds no claimed
+    request, or that request's prompt size is unknown. `harness` None finds the one
+    harness that holds a main file of that id, and gives None when two do. One read by
+    the session's files; nothing is summed."""
+    if not session_id:
+        return None
+    if harness is None:
+        found = conn.execute(
+            "SELECT DISTINCT harness FROM files WHERE session_id = ? AND kind = 'main'"
+            " AND parent_session IS NULL LIMIT 2", (session_id,)).fetchall()
+        if len(found) != 1:
+            return None
+        harness = found[0][0]
+    cursor = conn.cursor()
+    cursor.row_factory = None
+    row = cursor.execute(_NEWEST_SQL, (session_id, harness)).fetchone()
+    if row is None or row[0] is None:
+        return None
+    tokens, name, provider, ts, reported = row
+    window = _window(reported, _table(table).lookup(name, provider=provider, at=ts))
+    return {"tokens": tokens, "window": None if window is UNKNOWN else int(window)}
+
+
+def session_contexts(keys: Iterable[tuple[str | None, str]], *,
+                     env: Mapping[str, str] | None = None, table: Table | None = None,
+                     ) -> dict[tuple[str | None, str], dict[str, Any] | None]:
+    """`session_context` for each `(harness, session id)` of `keys`, from the index as
+    it is: one read per key, no pass, and nothing written. Every key is None when there
+    is no index or it is at another version, as a report over it would be empty."""
+    from . import store
+
+    wanted = list(dict.fromkeys(keys))
+    out: dict[tuple[str | None, str], dict[str, Any] | None] = dict.fromkeys(wanted)
+    if not wanted or not store.index_path(env).exists():
+        return out
+    conn = store.connect(env=env, create=False)
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] != store.INDEX_VERSION:
+            return out
+        current = _table(table)
+        for harness, session_id in wanted:
+            out[harness, session_id] = session_context(conn, harness, session_id,
+                                                       table=current)
+    finally:
+        conn.close()
+    return out
+
+
 #: A file's agent in its session: `main` for the session's main file, else the file's
 #: agent id (a child session's is its own session id).
 _AGENT_SQL = ("CASE WHEN f.kind = 'main' AND f.parent_session IS NULL THEN 'main'"
@@ -1057,12 +1136,7 @@ def requests(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
                 start = last_turn is not None
                 turn += 1
                 last_turn = turn_id
-        window = facts.window
-        if isinstance(reported, int) and reported > 0:
-            window = reported
-        elif not (isinstance(window, (int, float)) and not isinstance(window, bool)
-                  and window > 0):
-            window = UNKNOWN
+        window = _window(reported, facts)
         rows.append({
             "n": len(rows) + 1, "ts": ts, "model": name,
             "tier": None if priced.prices is None else priced.prices.tier,
