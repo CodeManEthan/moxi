@@ -33,12 +33,12 @@ test("a row shows only once its component has reported", () => {
   assert.deepEqual(keys([entry("a.one", 100, null)]), []);
 });
 
-test("rows keep their fixed places while none needs him", () => {
+test("rows keep their fixed places while none needs the user", () => {
   const said = { parts: [{ text: "x" }] };
   assert.deepEqual(keys([entry("a", 100, said), entry("b", 200, said), entry("c", 900, said)]), ["a", "b", "c"]);
 });
 
-test("a row that needs him sits above every row that does not, lower needs first, then by order", () => {
+test("a row that needs the user sits above every row that does not, lower needs first, then by order", () => {
   const said = (needs) => ({ parts: [{ text: "x" }], needs });
   const rows = [entry("quiet", 100, said(0)), entry("runs-out", 150, said(40)), entry("broken-late", 900, said(30)),
                 entry("blocked", 300, said(10)), entry("broken-early", 200, said(30)), entry("silent", 50, null)];

@@ -13,7 +13,7 @@ export interface RowReport {
   parts: RowPart[];
   /** The dim right end; "" for none. */
   time: string;
-  /** 0: does not need him. */
+  /** 0: does not need the user. */
   needs: number;
   opens: boolean;
   /** Only with `opens`: shown opened with no click. */
@@ -48,7 +48,7 @@ export interface RowEntry {
 }
 
 /**
- * The rows Home shows, top first: those that reported, the ones that need him above every
+ * The rows Home shows, top first: those that reported, the ones that need the user above every
  * one that does not, lower `needs` first, then by `order`. `entries` come in their fixed
  * places, which settles a tie.
  */
@@ -63,7 +63,7 @@ export function shownRows<T extends RowEntry>(entries: readonly T[]): T[] {
     .map((item) => item.entry);
 }
 
-/** Whether any row needs him. */
+/** Whether any row needs the user. */
 export function anyNeeds(entries: readonly RowEntry[]): boolean {
   return entries.some((entry) => (entry.report?.needs ?? 0) > 0);
 }

@@ -107,6 +107,14 @@ def test_the_kept_run_is_read_back_from_its_file(tmp_path):
     assert again.value() == value and not again.stale()
 
 
+def test_the_kept_runs_file_is_a_declared_store_a_purge_removes():
+    from moxi_ui import module
+
+    assert module.STORES["checks"] == {
+        "root": "state", "path": CHECKS_FILE, "kind": "file", "private": True,
+        "retention": "keep", "rebuildable": True, "lazy": True}
+
+
 @pytest.mark.parametrize("text", [
     "", "not json", "[]", '{"at": "yesterday", "rows": [], "error": null}',
     '{"at": "2026-01-01T00:00:00Z", "rows": [{"module": "ui"}], "error": null}',

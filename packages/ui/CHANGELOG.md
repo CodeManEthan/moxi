@@ -40,7 +40,7 @@
 - A module's `page` component may name its place in the band: `group` (`daily` or
   `setup`) and `order` (0 to 999, lower first; then by title). A page that names neither
   is in `setup` at 500. The shell's own Home is first and its Modules last.
-- The modules view is also at `/m/ui/modules`. It and the settings view carry no title of
+- The modules view moved to `/m/ui/modules`. It and the settings view carry no title of
   their own; the top line names the page. The document's title is `Moxi` while the panel
   holds a message and no page.
 - `ComponentInfo` in `client.js` carries `home_as`, `group` and `order`.
@@ -56,6 +56,10 @@
 - New component `health`, the shell's own row on Home: whether the doctor's checks pass,
   from the run the shell keeps. Opened, it lists the checks that fail or warn with their
   fixes, and `Check again` runs the doctor.
+- The kept doctor run: `GET /m/ui/api/checks` answers with it and starts a new run when
+  it is old, `POST /m/ui/api/checks/run` starts one now, and the topic `ui.checks`
+  carries it. The shell keeps it in `checks.json` in its state directory, a declared
+  store that `moxi uninstall ui --purge` removes.
 
 ## 0.2.3 (2026-11-08)
 

@@ -1,5 +1,5 @@
 """Home in a browser: the main spot and its sentence, the rows Home draws from what row
-components report (nothing to report, a late report, needing him, opening in place, held
+components report (nothing to report, a late report, needing the user, opening in place, held
 open, a script that does not load), the Health row on a kept run and on a real one, a
 small install, the colours and the layout at 360 px.
 
@@ -156,7 +156,7 @@ def test_a_row_shows_from_a_first_report_that_comes_long_after_home_opened(ui_pa
     _expect_shown(ui_page, [TWO, HEALTH])
 
 
-def test_a_row_that_needs_him_rises_above_the_rest_and_the_sentence_goes(ui_page):
+def test_a_row_that_needs_the_user_rises_above_the_rest_and_the_sentence_goes(ui_page):
     quiet = {"parts": [{"text": "nothing much"}]}
     _say(ui_page, "row-one", quiet)
     _say(ui_page, "row-two", quiet)
@@ -164,7 +164,7 @@ def test_a_row_that_needs_him_rises_above_the_rest_and_the_sentence_goes(ui_page
     expect(_home(ui_page).get_by_text(SENTENCE)).to_be_visible()
     _say(ui_page, "row-two", {"parts": [{"text": "waits for you"}], "needs": 20})
     _expect_shown(ui_page, [TWO, ONE, HEALTH])
-    # The spot keeps its room and says nothing while a row needs him.
+    # The spot keeps its room and says nothing while a row needs the user.
     expect(_home(ui_page).get_by_text(SENTENCE)).to_have_count(0)
     assert _home(ui_page).locator(".spot").bounding_box()["height"] == 150
     # A lower number is the more pressing, whatever the row's fixed place.
@@ -264,7 +264,7 @@ def test_a_main_piece_takes_the_spot_in_place_of_the_sentence(ui_shells, ui_cont
     expect(piece).to_have_text("The fixture's main piece")
     expect(home.get_by_text(SENTENCE)).to_have_count(0)
     _expect_shown(page, [HEALTH])
-    # A row that needs him leaves the piece where it is.
+    # A row that needs the user leaves the piece where it is.
     _say(page, "row-one", {"parts": [{"text": "waits"}], "needs": 20})
     _expect_shown(page, [ONE, HEALTH])
     expect(piece).to_be_visible()
@@ -274,6 +274,26 @@ def test_a_main_piece_takes_the_spot_in_place_of_the_sentence(ui_shells, ui_cont
     expect(blocks.and_(page.locator("[data-block='fixture.block']"))).to_be_visible()
     named = blocks.evaluate_all("all => all.map((one) => one.dataset.block)")
     assert not {"fixture.main", "fixture.row-one", "fixture.row-two", "ui.health"} & set(named)
+
+
+def test_the_sentence_waits_for_a_main_piece_and_shows_when_it_does_not_load(
+        ui_shells, ui_contexts, tmp_path_factory):
+    site = fixture_kit.install(tmp_path_factory.mktemp("slow-site"), main=True)
+    shell = ui_shells(site=[site])
+    context = ui_contexts(shell, sign_in=False)
+    held: list = []
+    # The piece's script is kept on its way, and any later try for it fails at once.
+    context.route(re.compile(r"/m/fixture/main\.js"),
+                  lambda route: route.abort() if held else held.append(route))
+    page = shell.sign_in(context.new_page())
+    home = _home(page)
+    _expect_shown(page, [HEALTH])
+    # While the script is on its way the spot says nothing.
+    expect(home.locator(".spot")).to_have_text("")
+    assert len(held) == 1
+    held[0].abort()
+    # It did not load: the sentence shows.
+    expect(home.locator(".spot")).to_have_text(SENTENCE)
 
 
 def test_with_the_core_and_ui_alone_home_is_the_sentence_and_health(ui_shells, ui_contexts,
@@ -376,6 +396,48 @@ def test_a_failing_check_of_a_real_run_shows_on_health_and_check_again_runs_the_
     expect(health.get_by_role("button", name="Check again")).to_have_count(0)
     expect(mine).to_have_count(0, timeout=DOCTOR_MS)
     expect(health.get_by_role("status")).to_have_count(0, timeout=DOCTOR_MS)
+
+
+_SHOW = """(hidden) => {
+  Object.defineProperty(document, "visibilityState", {configurable: true,
+                        get: () => hidden ? "hidden" : "visible"});
+  Object.defineProperty(document, "hidden", {configurable: true, get: () => hidden});
+  document.dispatchEvent(new Event("visibilitychange"));
+}"""
+
+
+def test_health_asks_again_when_the_document_is_shown_and_an_old_run_starts_a_new_one(
+        ui_shells, ui_contexts, fixture_site, tmp_path_factory):
+    home_dir = tmp_path_factory.mktemp("old")
+    old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+    _kept(home_dir, {"at": old, "rows": [PASS], "error": None})
+    shell = ui_shells(home=home_dir, site=[fixture_site], checks=True)
+    fixture_kit.fail_check(shell)
+    context = ui_contexts(shell, sign_in=False)
+    # The read Health makes when it is placed does not arrive, so the old run stays kept.
+    context.route("**/m/ui/api/checks", lambda route: route.abort())
+    page = context.new_page()
+    shell.sign_in(page)
+    row = _line(page, HEALTH)
+    expect(row.locator(".fact")).to_have_text("All checks pass")
+    context.unroute("**/m/ui/api/checks")
+    # Hidden asks nothing; shown again asks, and the old run starts a new one.
+    asked: list[str] = []
+    page.on("request", lambda r: asked.append(r.url) if r.url.endswith("/api/checks") else None)
+    page.evaluate(_SHOW, True)
+    with page.expect_response(lambda r: r.url.endswith("/m/ui/api/checks")) as first:
+        page.evaluate(_SHOW, False)
+    assert len(asked) == 1 and first.value.json()["running"] is True
+    expect(row.locator(".fact .heavy")).to_have_text(re.compile(r"^\d+ checks? failing$"),
+                                                     timeout=DOCTOR_MS)
+    # The run it kept is fresh now: shown again, Health asks and no run starts.
+    page.evaluate(_SHOW, True)
+    with page.expect_response(lambda r: r.url.endswith("/m/ui/api/checks")) as second:
+        page.evaluate(_SHOW, False)
+    answer = second.value.json()
+    assert answer["running"] is False and answer["at"] > old
+    status, kept = shell.session().get("/m/ui/api/checks")
+    assert status == 200 and kept["at"] == answer["at"] and kept["running"] is False
 
 
 def test_a_run_that_could_not_run_says_why_and_offers_check_again(ui_shells, ui_contexts,

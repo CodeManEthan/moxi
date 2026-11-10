@@ -39,7 +39,7 @@ test("warnings only: the count and the first warning's detail; it opens and need
   assert.equal(text(two), "2 warnings · First");
 });
 
-test("a failing check: the count heavy, the warnings, the first fail's detail, and it needs him", () => {
+test("a failing check: the count heavy, the warnings, the first fail's detail, and it needs the user", () => {
   const line = healthLine(run([row("projects", "roots", "warn", "A folder is missing"), row("ui", "shell", "ok"),
                                row("turns", "guard", "fail", "A guard could not check a call")]), true);
   assert.deepEqual(line.parts, [{ text: "1 check failing", heavy: true }, { text: ", 1 warning" },

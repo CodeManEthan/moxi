@@ -2,8 +2,9 @@
 // component that has something to report.
 //
 // The spot holds the main piece the installed modules announce (`home_as: "main"`), the
-// one with the lowest `order`. With none it says `Nothing needs you.`, unless a row needs
-// him, when it stays empty. The phone gets no spot at all: its Home is the rows, under
+// one with the lowest `order`. With none, or with one that did not load, it says
+// `Nothing needs you.`, unless a row needs the user, when it stays empty; while a piece
+// is loading it says nothing. The phone gets no spot at all: its Home is the rows, under
 // the shell's line that says the phone only reads.
 //
 // A row component (`home_as: "row"`) is placed in a host that stays hidden, as soon as the
@@ -91,12 +92,15 @@ export class UiHome extends LitElement {
     modules: { state: true },
     rows: { state: true },
     main: { state: true },
+    loading: { state: true },
   };
 
   modules: ModuleView[] | null = null;
   rows: Row[] = [];
   /** The main piece shown: its module and name, or null while there is none. */
   main: string | null = null;
+  /** True while a main piece is announced and has neither been placed nor failed. */
+  loading = false;
   #spot = document.createElement("div");
   #wanted = "";
   #placing = 0;
@@ -180,8 +184,12 @@ export class UiHome extends LitElement {
     const mine = (this.#placing += 1);
     this.#spot.replaceChildren();
     this.main = null;
+    this.loading = piece !== null;
     if (piece === null) return;
-    if (await seat(this.#spot, piece, () => mine === this.#placing)) this.main = wanted;
+    const placed = await seat(this.#spot, piece, () => mine === this.#placing);
+    if (mine !== this.#placing) return;
+    this.loading = false;
+    if (placed) this.main = wanted;
   }
 
   render() {
@@ -189,7 +197,7 @@ export class UiHome extends LitElement {
     const shown = shownRows(this.rows);
     const phone = gateway();
     return html`
-      ${phone ? nothing : html`<section class="spot">${this.#spot}${this.main === null && !anyNeeds(this.rows)
+      ${phone ? nothing : html`<section class="spot">${this.#spot}${this.main === null && !this.loading && !anyNeeds(this.rows)
         ? html`<p class="quiet">Nothing needs you.</p>` : nothing}</section>`}
       <nav class=${phone ? "rows phone" : "rows"} aria-label="Now" ?hidden=${shown.length === 0}>
         ${repeat(this.rows, (row) => row.key, (row) => html`<div

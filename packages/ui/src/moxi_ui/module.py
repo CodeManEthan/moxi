@@ -18,9 +18,12 @@ OPTIONAL = {"testing": "Playwright and pytest for moxi_ui.testing, the plugin a 
             "tunnel": "The tunnel, which gives the gateway the address a phone reaches."}
 GATED = {}
 #: The gateway's state: its devices, its key and its audit log (one file per UTC day, kept
-#: 30 days by the gateway itself).
+#: 30 days by the gateway itself). And the doctor run the shell keeps, which the next run
+#: writes again.
 STORES = {"gateway": {"root": "state", "path": "gateway", "kind": "dir", "private": True,
-                      "retention": "keep", "rebuildable": False, "lazy": True}}
+                      "retention": "keep", "rebuildable": False, "lazy": True},
+          "checks": {"root": "state", "path": "checks.json", "kind": "file", "private": True,
+                     "retention": "keep", "rebuildable": True, "lazy": True}}
 #: The one variable of ui's prefix it reads outside moxi.paths and moxi.config, and why.
 INTERNAL_ENV = {"MOXI_UI_LOCKED_SETTINGS": "set by whoever starts the shell, for one run: "
                                            "the settings its pages may not change"}
