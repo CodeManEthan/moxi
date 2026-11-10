@@ -125,7 +125,9 @@ def test_a_write_leaves_no_lock_file_in_the_rounds_folder(where):
     write.record(where, actor="planner", event=shown, with_project=True)
     write.record(write.Where("proj-a", where.folder), actor="planner", event=shown)
 
-    assert files_under(where.folder) == ["a-round/round.jsonl", "project.jsonl"]
+    assert files_under(where.folder) == [
+        "a-round/round-note.md", "a-round/round.jsonl", "project.jsonl",
+        "questions.md", "rulings.md"]
     assert files_under(paths.locks_dir()) == ["projects/proj-a.lock",
                                                "rounds/proj-a/a-round.lock"]
     assert not where.folder.is_relative_to(paths.locks_dir())

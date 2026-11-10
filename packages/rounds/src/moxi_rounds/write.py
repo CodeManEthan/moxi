@@ -138,9 +138,18 @@ class Written:
 
 Gate = Callable[[View], "Unmet | Iterable[Unmet] | None"]
 
+def _render(written: Written) -> None:
+    """Write the generated files of the logs the write touched."""
+    # Imported here: what renders a log reads it as the verbs do, and they import
+    # this module.
+    from . import rendering
+
+    rendering.on_append(written)
+
+
 #: The callbacks every write calls after its append, in order, each with the `Written`.
 #: A module that keeps something derived from the logs adds its function here.
-ON_APPEND: tuple[Callable[[Written], None], ...] = (index.on_append,)
+ON_APPEND: tuple[Callable[[Written], None], ...] = (index.on_append, _render)
 
 
 def record(where: Where, *, actor: str,

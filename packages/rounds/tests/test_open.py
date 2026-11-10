@@ -60,10 +60,11 @@ def test_an_opened_round_folds_to_open_with_its_description_flow_and_steps(
     assert err == ""
 
 
-def test_an_opening_writes_one_event_and_nothing_else_in_the_rounds_folder(rounds):
+def test_an_opening_writes_one_event_and_the_note_made_from_it_and_no_more(rounds):
     assert run("proj-a/a-round", "--flow", "fix") == 0
 
-    assert files_under(rounds) == ["a-round", "a-round/round.jsonl"]
+    assert files_under(rounds) == ["a-round", "a-round/round-note.md",
+                                   "a-round/round.jsonl"]
     assert [(event["n"], event["type"]) for event in log.read(
         log.round_log(rounds / "a-round"))] == [(1, "round.opened")]
     assert write.round_lock("proj-a", "a-round").read_bytes() == b""
@@ -99,7 +100,8 @@ def test_a_round_opens_in_a_folder_that_is_already_there(rounds):
 
     assert run("proj-a/a-round") == 0
 
-    assert files_under(rounds / "a-round") == ["design.md", "round.jsonl"]
+    assert files_under(rounds / "a-round") == ["design.md", "round-note.md",
+                                               "round.jsonl"]
     assert (rounds / "a-round" / "design.md").read_text(encoding="utf-8") == "a draft\n"
 
 
@@ -243,7 +245,8 @@ def test_a_folder_that_already_holds_a_log_is_refused_and_left_as_it_was(rounds,
     assert "proj-a/a-round is already there" in err
     assert "run: moxi rounds show proj-a/a-round" in err
     assert log.round_log(rounds / "a-round").read_bytes() == before
-    assert files_under(rounds) == ["a-round", "a-round/round.jsonl"]
+    assert files_under(rounds) == ["a-round", "a-round/round-note.md",
+                                   "a-round/round.jsonl"]
 
 
 def test_an_empty_log_file_counts_as_a_log(rounds):
