@@ -14,8 +14,8 @@ from moxi_sessions import resume as resume_module
 from moxi_sessions.catalog import Catalog, Gathered
 from moxi_sessions.lists import (DAY_ROWS, EARLIER, FOUND, MORE_ROWS, RECENT, RECENT_ROWS,
                                  SUBAGENTS_MAX, UNDATED, list_folders, list_sessions,
-                                 local_day, more_sessions, open_session, parse_position,
-                                 position)
+                                 local_day, more_sessions, newest_sessions, open_session,
+                                 parse_position, position)
 from moxi_sessions.resume import resume
 from moxi_sessions.shape import CLAUDE, CODEX, OPENCODE
 from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
@@ -650,3 +650,32 @@ def test_a_harness_left_out_of_the_table_has_no_resume_command(roots, monkeypatc
     assert resume(CODEX, "abc") is None
     assert resume("other", "abc") is None
     assert opened(roots, tid(1), CODEX)["resume"] is None
+
+
+# --- the sessions as one run ----------------------------------------------------------------
+
+def test_the_newest_sessions_are_one_run_of_both_kinds_with_the_lists_counts(roots):
+    claude(roots, 1, NOW - 10 * 60)
+    claude(roots, 2, NOW - 20 * 60, program=True)
+    codex(roots, 3, NOW - 3 * DAY, cwd="/work/proj-b")
+    claude(roots, 4, NOW - 40 * DAY)
+    cat = catalog(roots)
+
+    answer = newest_sessions(cat, recent_s=HOUR, now=NOW, limit=3)
+
+    assert [r["session"] for r in answer["rows"]] == [sid(1), sid(2), tid(3)]
+    assert [r["recent"] for r in answer["rows"]] == [True, False, False]
+    assert (answer["all"], answer["total"]) == (4, 4)
+    assert answer["before"] == position(cat.gather().entries[2])
+    whole = list_sessions(cat, recent_s=HOUR, now=NOW)
+    for key in ("now", "today", "all", "total", "unreadable", "roots", "harnesses"):
+        assert answer[key] == whole[key], key
+    assert cat.head_reads == 4 and cat.tail_reads == 4
+
+    some = newest_sessions(cat, recent_s=HOUR, now=NOW, harness=CLAUDE,
+                           folder="/work/proj-a", since=NOW - DAY)
+    assert [r["session"] for r in some["rows"]] == [sid(1), sid(2)]
+    assert (some["total"], some["before"]) == (2, None)
+    for limit in (0, -1, True, "3"):
+        with pytest.raises(ValueError, match="limit is a number of sessions"):
+            newest_sessions(cat, recent_s=HOUR, now=NOW, limit=limit)

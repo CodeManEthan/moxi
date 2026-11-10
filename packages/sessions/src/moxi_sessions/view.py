@@ -134,6 +134,17 @@ def cut_text(text: str) -> tuple[str, int, bool]:
     return data[:TEXT_MAX].decode("utf-8", "ignore"), len(data), True
 
 
+def cut_message(said: dict[str, Any] | None, redact: Redact | None = None
+                ) -> dict[str, Any] | None:
+    """A list's `{at, text}` (a prompt, a reply) as it is sent or printed:
+    `{at, text, truncated}`, the text redacted when `redact` is given and then cut at
+    `TEXT_MAX` bytes. None stays None."""
+    if said is None:
+        return None
+    text, _, truncated = cut_text(redact(said["text"]) if redact else said["text"])
+    return {"at": said["at"], "text": text, "truncated": truncated}
+
+
 def _windows(windows: Any) -> list[dict[str, Any]]:
     out = []
     for item in windows or ():
@@ -513,6 +524,7 @@ def lines(row: Mapping[str, Any]) -> list[str]:
     return [f"{when}  {said} {row.get('raw_kind', '')}"]
 
 
-__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "around", "cut_text",
+__all__ = ["TEXT_MAX", "SETS", "Redact", "Redactor", "Shown", "around", "cut_message",
+           "cut_text",
            "header_row", "last", "lines", "redactor", "stamp", "summary", "view_row",
            "whole"]

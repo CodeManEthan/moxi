@@ -51,8 +51,8 @@ from .page import TEXT_MAX, TURNS_DEFAULT, lb  # noqa: F401  (TEXT_MAX: the rows
 from .read import window as read_window
 from .shape import CLAUDE, OPENCODE, SHAPE
 from .source import Source
-from .view import (INT as _INT, STRING as _STRING, cut_text, header_row, put as _put,
-                   view_row)
+from .view import (INT as _INT, STRING as _STRING, cut_message, header_row,
+                   put as _put, view_row)
 
 #: A byte offset, as a file's `before` is written.
 _OFFSET = re.compile(r"\A[0-9]{1,18}\Z")
@@ -217,16 +217,8 @@ def _filters(query: Any, *, folder: bool = True) -> dict[str, Any]:
     return out
 
 
-def _message(said: dict[str, Any] | None) -> dict[str, Any] | None:
-    """A prompt or a reply as it is sent: its text cut at `TEXT_MAX` bytes."""
-    if said is None:
-        return None
-    text, _, truncated = cut_text(said["text"])
-    return {"at": said["at"], "text": text, "truncated": truncated}
-
-
 def _row(row: dict[str, Any]) -> dict[str, Any]:
-    return {**row, "prompt": _message(row["prompt"])}
+    return {**row, "prompt": cut_message(row["prompt"])}
 
 
 def _group(group: dict[str, Any]) -> dict[str, Any]:
@@ -278,7 +270,7 @@ def session(call: Any) -> dict[str, Any]:
     if opened is None:
         raise lb.Refused(f"the list holds no {harness} session {name}: a subagent, or a "
                          "thread another thread started, is not in the list")
-    out = {"shape": SHAPE, **_row(opened), "reply": _message(opened["reply"])}
+    out = {"shape": SHAPE, **_row(opened), "reply": cut_message(opened["reply"])}
     if opened["subagents"] is not None:
         out["subagents"] = [
             {**sub, "last": None if sub["last"] is None else cut(sub["last"],

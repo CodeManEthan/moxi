@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- New command `moxi sessions list [--harness H] [--since TIME] [--folder PATH]
+  [--limit N] [--text] [--json]`: the main sessions of the three harnesses, newest change
+  first, 30 unless asked, one line each: when it started, when it last changed, its
+  harness, its name or folder and its id. It prints what was said in a session only with
+  `--text`, redacted when the secrets module is installed.
+- Interface 4, which is interface 3 plus the list: `sessions_list` (the sessions counted
+  and cut into the ones active recently, seven days and the rest), `sessions_more`,
+  `sessions_newest`, `sessions_folders`, `session_opened`, `list_recent_s` and `Catalog`.
+  A list reads each root's listing, then only the sessions it returns, and keeps what it
+  read in memory.
+- `Header` has `started`, when the session's record begins, and a Codex header's `meta`
+  holds line 1's `timestamp`.
+- New setting `list.recent_s` (3600): how many seconds after its last change a session
+  counts as active recently.
+- With the `ui` extra, the page server answers four more reads, `/api/list`, `/api/more`,
+  `/api/session` and `/api/folders`. The page does not show them yet.
+- `moxi_sessions.resume` holds each harness's command for picking a session up again,
+  checked against Claude Code 2.1.322, Codex 0.153.0 and OpenCode 1.18.34.
+
 ## 0.2.6 (2026-11-08)
 
 - Docs name turns' `guards.run` key.
