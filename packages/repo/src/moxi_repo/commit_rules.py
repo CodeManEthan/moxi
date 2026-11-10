@@ -3,14 +3,17 @@
 It runs on commit-msg, fail closed, order 10, and is in no repo until someone adds it:
 
     moxi repo git-hooks add PATH repo/commit-rules \\
-        --set refused-trailer=KEY --set tag-pattern=REGEX
+        --set refused-trailer=KEY --set tag-pattern=REGEX --set 'rule=TEXT'
 
-Its two settings live in that repo's git config, each with any number of values:
+Its three settings live in that repo's git config, each with any number of values:
 
 - `refused-trailer`: trailer keys this repo refuses, matched ignoring case;
 - `tag-pattern`: regular expressions (Python's `re`) a tag matches. With none, there is no
   tag check. A repo that has none when the piece is first added to it starts with the
   module config's `commit_rules.tag_patterns`; later changes to that config change no repo.
+- `rule`: the repo's own rules for a committer, free text, one line each. The piece
+  checks none of them; `moxi repo rules` prints them under the lines it makes from the
+  other two settings (`rule_lines`).
 
 What it checks, refusing with the rule named:
 
@@ -43,12 +46,13 @@ COMMIT_RULES = {
     "fail": "closed",
     "order": 10,
     "doc": "Check a commit message's trailer shape, and refuse tags in its subject and body.",
-    "settings": {"refused-trailer": "multi", "tag-pattern": "multi"},
+    "settings": {"refused-trailer": "multi", "tag-pattern": "multi", "rule": "multi"},
 }
 
 PIECE_ID = "repo/commit-rules"
 REFUSED_TRAILER = "refused-trailer"
 TAG_PATTERN = "tag-pattern"
+RULE = "rule"
 
 #: The separator git reads between a trailer's key and value when `trailer.separators`
 #: sets none.
@@ -117,6 +121,20 @@ def pattern_problem(pattern: str) -> str | None:
         return (f"{pattern!r} matches the empty string, so it would check nothing; "
                 "make it match at least one character")
     return None
+
+
+def rule_lines(settings: dict[str, list[str]]) -> list[str]:
+    """What `moxi repo rules` prints for this piece in a repo with these settings: the
+    trailer keys it refuses on one line, a line for each tag pattern, then each of the
+    repo's own `rule` values as written. An empty value gives no line."""
+    lines = []
+    refused = [key for key in settings.get(REFUSED_TRAILER, ()) if key]
+    if refused:
+        lines.append(f"- trailers this repo refuses: {', '.join(refused)}")
+    lines += [f"- no text matching: {pattern}" for pattern in settings.get(TAG_PATTERN, ())
+              if pattern]
+    lines += [f"- {rule}" for rule in settings.get(RULE, ()) if rule]
+    return lines
 
 
 def check_message(text: str, *, refused=(), patterns=(), comment: str = "#",
@@ -344,4 +362,4 @@ def _trailer_block(paragraphs, shape: _Shape, known: set[str]
 
 
 __all__ = ["COMMIT_RULES", "PIECE_ID", "check_message", "commit_msg", "git_settings",
-           "pattern_problem"]
+           "pattern_problem", "rule_lines"]
