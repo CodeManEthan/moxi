@@ -10,10 +10,12 @@ writing verb:
 4. do the verb's act outside the log, when it has one;
 5. append the verb's events, call the after-append callbacks, and release the lock.
 
-**The locks.** A round's lock file is `locks/<project>/<slug>.lock` and a project log's
-is `locks/<project>.project.lock`, both in rounds' state directory and never in a rounds
-folder, so a lock file is never backed up or pushed with the logs. A log is never its own
-lock file. A verb on a round takes the round's lock; one that also writes the project's
+**The locks.** A round's lock file is `locks/rounds/<project>/<slug>.lock` and a project
+log's is `locks/projects/<project>.lock`, both in rounds' state directory and never in a
+rounds folder, so a lock file is never backed up or pushed with the logs. The two kinds
+are in folders of their own because a project's key may hold dots: whatever the keys are,
+no project's lock file is another project's folder of round locks, or inside one. A log
+is never its own lock file. A verb on a round takes the round's lock; one that also writes the project's
 log (`with_project=True`) takes the project's second, always in that order, so two verbs
 can't each hold one and wait for the other. A verb on a project alone takes only the
 project's. A lock that is still held after `wait_s` seconds stops the verb with `Locked`,
@@ -58,15 +60,20 @@ ROUND = "round"
 #: The project's log, as the log an `Entry` goes to.
 PROJECT = "project"
 
+#: The folder of the locks folder that holds each project's folder of round locks.
+ROUND_LOCKS_DIR = "rounds"
+#: The folder of the locks folder that holds each project log's lock file.
+PROJECT_LOCKS_DIR = "projects"
+
 
 def round_lock(project: str, slug: str, env=None) -> Path:
     """The lock file of the round `<project>/<slug>`, in rounds' state directory."""
-    return paths.locks_dir(env) / project / f"{slug}.lock"
+    return paths.locks_dir(env) / ROUND_LOCKS_DIR / project / f"{slug}.lock"
 
 
 def project_lock(project: str, env=None) -> Path:
     """The lock file of the project's log, in rounds' state directory."""
-    return paths.locks_dir(env) / f"{project}.project.lock"
+    return paths.locks_dir(env) / PROJECT_LOCKS_DIR / f"{project}.lock"
 
 
 @dataclass(frozen=True)
@@ -302,5 +309,6 @@ def _append(view: View, entries: list[Entry], result: object, *, actor: str,
     return dataclasses.replace(done, failed=tuple(failed)) if failed else done
 
 
-__all__ = ["WAIT_S", "ROUND", "PROJECT", "ON_APPEND", "round_lock", "project_lock",
+__all__ = ["WAIT_S", "ROUND", "PROJECT", "ROUND_LOCKS_DIR", "PROJECT_LOCKS_DIR",
+           "ON_APPEND", "round_lock", "project_lock",
            "Where", "Entry", "View", "Written", "Gate", "record"]

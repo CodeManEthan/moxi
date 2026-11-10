@@ -113,8 +113,41 @@ def test_a_rounds_lock_and_a_projects_lock_are_in_the_state_directory(tmp_path):
     env = {"MOXI_ROUNDS_STATE_HOME": str(tmp_path / "state")}
     locks = tmp_path / "state" / "rounds" / "locks"
 
-    assert write.round_lock("proj-a", "a-round", env) == locks / "proj-a" / "a-round.lock"
-    assert write.project_lock("proj-a", env) == locks / "proj-a.project.lock"
+    assert (write.round_lock("proj-a", "a-round", env)
+            == locks / "rounds" / "proj-a" / "a-round.lock")
+    assert write.project_lock("proj-a", env) == locks / "projects" / "proj-a.lock"
+
+
+def test_no_projects_key_puts_one_lock_at_or_inside_another(holder):
+    # A key may hold dots, so one project's key can end in the very words another
+    # project's lock file is named with.
+    keys = ["x", "x.project.lock", "x.lock", "projects", "rounds"]
+    locks = ([write.project_lock(key) for key in keys]
+             + [write.round_lock(key, slug) for key in keys for slug in ("a-round", "x")])
+
+    assert len(set(locks)) == len(locks)
+    for one in locks:
+        for other in locks:
+            assert one is other or not one.is_relative_to(other)
+
+    held = [holder(path) for path in locks]
+
+    assert all(path.is_file() and path.read_text().split() == [str(proc.pid)]
+               for path, proc in zip(locks, held, strict=True))
+
+
+def test_a_project_keyed_like_anothers_lock_file_is_written_beside_it(tmp_path, holder):
+    folders = {key: tmp_path / key for key in ("x", "x.project.lock")}
+    for key, folder in folders.items():
+        holder(write.project_lock(key))
+        (folder / "a-round").mkdir(parents=True)
+
+    for key, folder in folders.items():
+        written = write.record(write.Where(key, folder, "a-round"), actor="planner",
+                               opens=True, wait_s=0,
+                               event=lambda view, result: write.Entry("round.opened",
+                                                                      OPENED))
+        assert written.events[0]["n"] == 1
 
 
 def test_a_write_leaves_no_lock_file_in_the_rounds_folder(where):
@@ -123,7 +156,8 @@ def test_a_write_leaves_no_lock_file_in_the_rounds_folder(where):
     write.record(write.Where("proj-a", where.folder), actor="planner", event=shown)
 
     assert files_under(where.folder) == ["a-round/round.jsonl", "project.jsonl"]
-    assert files_under(paths.locks_dir()) == ["proj-a.project.lock", "proj-a/a-round.lock"]
+    assert files_under(paths.locks_dir()) == ["projects/proj-a.lock",
+                                               "rounds/proj-a/a-round.lock"]
     assert not where.folder.is_relative_to(paths.locks_dir())
 
 
@@ -161,8 +195,8 @@ def taken(monkeypatch):
 def test_a_verb_that_writes_both_logs_takes_the_rounds_lock_first(where, taken):
     write.record(where, actor="planner", event=shown, with_project=True)
 
-    assert taken == [("take", "a-round.lock"), ("take", "proj-a.project.lock"),
-                     ("free", "proj-a.project.lock"), ("free", "a-round.lock")]
+    assert taken == [("take", "a-round.lock"), ("take", "proj-a.lock"),
+                     ("free", "proj-a.lock"), ("free", "a-round.lock")]
 
 
 def test_a_verb_on_a_round_alone_takes_only_the_rounds_lock(where, taken):
@@ -174,7 +208,7 @@ def test_a_verb_on_a_round_alone_takes_only_the_rounds_lock(where, taken):
 def test_a_verb_on_a_project_alone_takes_only_the_projects_lock(where, taken):
     write.record(write.Where("proj-a", where.folder), actor="planner", event=shown)
 
-    assert taken == [("take", "proj-a.project.lock"), ("free", "proj-a.project.lock")]
+    assert taken == [("take", "proj-a.lock"), ("free", "proj-a.lock")]
 
 
 def test_a_verb_refused_on_the_projects_lock_lets_the_rounds_lock_go(
