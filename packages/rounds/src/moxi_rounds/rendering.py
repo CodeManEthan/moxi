@@ -9,7 +9,12 @@ agents to read beside the logs.
 Each file is written whole, in one step, after every write to the log it is made from
 (`on_append`, one of the write path's after-append callbacks): the note after a write to
 its round, the two project files after a write to the project's log. Nothing reads one
-back. A file is made from its log alone, so a hand edit is lost at the next write, and
+back.
+
+A note also says which of its round's rulings the operator has read back, and that is
+in the project's log. So a read-back, when it is recorded, writes again the note of
+every round of the project, open or ended, each under its round's lock. A round another
+process holds for longer than `NOTE_WAIT_S` is left to it and named as not written. A file is made from its log alone, so a hand edit is lost at the next write, and
 the same log gives the same bytes: the only date in a file is that of the log's newest
 event. Someone's own notes on a round go in any other file of its folder, which nothing
 here touches.
@@ -43,8 +48,9 @@ from pathlib import Path
 from moxi import files
 
 from . import questions as asked
-from . import log, ruling, showing
+from . import folders, log, readback, ruling, showing, write
 from . import state as states
+from .errors import Locked, NoLog, Unreadable
 
 #: The names of the three files.
 NOTE_FILE = "round-note.md"
@@ -58,6 +64,11 @@ _STATES = (asked.OPEN, asked.PARKED, asked.LEFT, asked.RULED, asked.WITHDRAWN,
 #: A header value that reads as itself with no quotes around it.
 _PLAIN = re.compile(r"[A-Za-z][A-Za-z0-9._-]*")
 _NOT_TEXT = frozenset({"true", "false", "null", "yes", "no", "on", "off", "y", "n"})
+
+#: How long a read-back waits for the lock of each round whose note it writes again,
+#: in seconds. Short: the read-back holds the project's lock meanwhile, and a verb that
+#: holds a round and waits for the project would otherwise wait on it in turn.
+NOTE_WAIT_S = 2.0
 
 Closed = Callable[[str], bool]
 
@@ -74,36 +85,71 @@ class Part:
 # -- the write path's callback -----------------------------------------------------------
 
 def on_append(written) -> None:
-    """Write the generated files of the logs a write just touched. Called by the write
-    path with its `Written`, the lock still held.
+    """Write the generated files of the logs a write just touched, and after a
+    read-back the note of every other round of the project. Called by the write path
+    with its `Written`, the lock still held. It appends to no log.
 
     Each file is tried whatever became of the one before it; the first failure is
     raised once all were tried."""
     where = written.where
     folder = Path(where.folder)
     wrote_project = len(written.project_events) > len(written.view.project_events)
-    work: list[tuple[Path, Callable[[], str]]] = []
+    work: list[Callable[[], None]] = []
+
+    def put(path: Path, text: Callable[[], str]) -> Callable[[], None]:
+        # For people and agents to read, so not private as a log is.
+        return lambda: files.atomic_write(path, text(), mode=0o644)
+
     # A note is written only beside its log: a folder with none is not a round of
     # ours, and a note there may be another tool's.
     if where.slug is not None and log.exists(log.round_log(folder / where.slug)):
-        work.append((folder / where.slug / NOTE_FILE, lambda: note(
+        work.append(put(folder / where.slug / NOTE_FILE, lambda: note(
             where.project, where.slug, written.round_events, written.project_events)))
     # A round's verb that only read the project's log holds no lock on it, so that
     # log's files are left for whoever writes it. A project with no log has no files.
     if (where.slug is None or wrote_project) and written.project_events:
-        work.append((folder / RULINGS_FILE, lambda: rulings(
+        work.append(put(folder / RULINGS_FILE, lambda: rulings(
             where.project, written.project_events)))
-        work.append((folder / QUESTIONS_FILE, lambda: questions(
+        work.append(put(folder / QUESTIONS_FILE, lambda: questions(
             where.project, written.project_events)))
+    if _read_back(written.project_events[len(written.view.project_events):]):
+        # What each round's note says is shown has changed, in every round there is.
+        work += [lambda slug=slug: _note_again(where.project, folder, slug,
+                                               written.project_events)
+                 for slug in folders.slugs(folder) if slug != where.slug]
     failed = []
-    for path, text in work:
+    for step in work:
         try:
-            # For people and agents to read, so not private as a log is.
-            files.atomic_write(path, text(), mode=0o644)
+            step()
         except Exception as error:
             failed.append(error)
     if failed:
         raise failed[0]
+
+
+def _read_back(appended: Iterable[dict]) -> bool:
+    """Whether any of the events just appended to a project's log is a read-back."""
+    return any(readback.read_back(one) is not None
+               for one in states.fold(appended).rulings)
+
+
+def _note_again(project: str, folder: Path, slug: str,
+                project_events: Iterable[dict]) -> None:
+    """Write the note of a round this write did not touch, from its log as it stands,
+    under the round's lock so that no verb on the round writes it meanwhile. A round
+    whose log is gone or can't be read is passed over: no note can be made from it,
+    and the doctor names it. Raises `Locked` for a round held past the wait."""
+    path = write.round_lock(project, slug)
+    try:
+        with files.lock(path, timeout_s=NOTE_WAIT_S):
+            try:
+                events = log.read_round(log.round_log(folder / slug))
+            except (NoLog, Unreadable):
+                return
+            files.atomic_write(folder / slug / NOTE_FILE,
+                               note(project, slug, events, project_events), mode=0o644)
+    except files.LockTimeout as stop:
+        raise Locked(path, stop.holder, NOTE_WAIT_S) from None
 
 
 # -- a round's note ----------------------------------------------------------------------
@@ -351,5 +397,5 @@ def _scope(scope: Iterable[dict]) -> list[str] | None:
             else str(one.get("repo")) for one in scope] or None
 
 
-__all__ = ["NOTE_FILE", "RULINGS_FILE", "QUESTIONS_FILE", "Part", "PARTS", "on_append",
-           "note", "rulings", "questions"]
+__all__ = ["NOTE_FILE", "RULINGS_FILE", "QUESTIONS_FILE", "NOTE_WAIT_S", "Part", "PARTS",
+           "on_append", "note", "rulings", "questions"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from moxi_rounds import (asking, log, marking, opening, rendering, ruling, showing,
+from moxi_rounds import (asking, dropping, log, marking, opening, rendering, ruling, showing,
                          shown, state, write)
 from moxi_rounds.cli import main
 
@@ -506,6 +506,130 @@ def test_a_write_to_one_log_leaves_the_files_of_the_others_as_they_were(rounds):
     kept = stamps(note(rounds), note(rounds, "b-round"))
     rule("proj-a", text=LASTING, at=T4)
     assert stamps(note(rounds), note(rounds, "b-round")) == kept
+
+
+def read_back(time, *, at=LATER):
+    return ruling.rule("proj-a", item=f"readback={time}", record="comms:90",
+                       actor="planner", at=at)
+
+
+def test_a_read_back_writes_again_the_note_of_every_round_open_or_ended(rounds):
+    rule(text=RULED, at=T3)
+    rule(B, text=LASTING, at=T4)
+    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T5)
+    for slug in ("a-round", "b-round"):
+        assert "  - not shown\n" in note(rounds, slug).read_text(encoding="utf-8")
+
+    assert not read_back(T4).failed
+
+    for slug in ("a-round", "b-round"):
+        text = note(rounds, slug).read_text(encoding="utf-8")
+        assert text == from_the_logs(rounds, slug)[0]
+        assert f"  - shown: read back through {T4}\n" in text
+        assert "not shown" not in text
+    # No log but the project's gained an event.
+    assert [len(log.read(log.round_log(rounds / slug)))
+            for slug in ("a-round", "b-round")] == [2, 3]
+
+
+def test_a_read_back_leaves_a_note_saying_not_shown_only_of_a_later_ruling(rounds):
+    rule(text=RULED, at=T3)
+    rule(text=LASTING, at=T5)
+
+    read_back(T3)
+
+    text = note(rounds).read_text(encoding="utf-8")
+    assert text.count(f"shown: read back through {T3}") == 1
+    assert text.count("  - not shown\n") == 1
+
+
+def test_a_read_back_writes_into_no_folder_that_holds_no_log(rounds):
+    rule(text=RULED, at=T3)
+    theirs = rounds / "c-round" / "round-note.md"
+    theirs.parent.mkdir()
+    theirs.write_bytes(b"kept by another tool\n")
+    (rounds / "d-round").mkdir()
+    (rounds / "drafts").mkdir()
+    before = stamps(theirs)
+
+    assert not read_back(T3).failed
+
+    assert stamps(theirs) == before
+    assert [path.name for path in theirs.parent.iterdir()] == ["round-note.md"]
+    assert list((rounds / "d-round").iterdir()) == []
+    assert list((rounds / "drafts").iterdir()) == []
+
+
+def test_a_read_back_passes_over_a_round_whose_log_cant_be_read(rounds):
+    rule(text=RULED, at=T3)
+    with log.round_log(rounds / "b-round").open("ab") as file:
+        file.write(b"not an event\n")
+    before = stamps(note(rounds, "b-round"), log.round_log(rounds / "b-round"))
+
+    assert not read_back(T3).failed
+
+    assert stamps(note(rounds, "b-round"), log.round_log(rounds / "b-round")) == before
+    assert f"shown: read back through {T3}" in note(rounds).read_text(encoding="utf-8")
+
+
+def test_a_note_a_read_back_cant_write_keeps_the_read_back_and_the_other_notes(
+        rounds, capsys):
+    rule(text=RULED, at=T3)
+    rule(B, text=LASTING, at=T4)
+    note(rounds).unlink()
+    (note(rounds) / "in-the-way").mkdir(parents=True)
+
+    assert main(["rule", "proj-a", f"readback={T4}", "--record", "comms:90",
+                 "--as", "planner"]) == 0
+    assert "warning: recorded" in capsys.readouterr().err
+
+    assert log.read(log.project_log(rounds))[-1]["rules"] == f"readback={T4}"
+    assert f"shown: read back through {T4}" in note(rounds, "b-round").read_text(
+        encoding="utf-8")
+    assert (rounds / "rulings.md").read_text(encoding="utf-8") == \
+        from_the_logs(rounds)[1]
+
+
+def test_a_read_back_does_not_wait_long_for_a_round_another_process_holds(
+        rounds, holder, monkeypatch):
+    rule(text=RULED, at=T3)
+    rule(B, text=LASTING, at=T4)
+    monkeypatch.setattr(rendering, "NOTE_WAIT_S", 0.2)
+    holder(write.round_lock("proj-a", "a-round"))
+    before = stamps(note(rounds))
+
+    read = read_back(T4)
+
+    # The round another verb is writing is left to it, and said to be left.
+    assert [type(error).__name__ for _callback, error in read.failed] == ["Locked"]
+    assert stamps(note(rounds)) == before
+    assert f"shown: read back through {T4}" in note(rounds, "b-round").read_text(
+        encoding="utf-8")
+    assert log.read(log.project_log(rounds))[-1]["rules"] == f"readback={T4}"
+
+
+def test_a_ruling_that_is_no_read_back_leaves_every_note_as_it_was(rounds):
+    rule(text=RULED, at=T3)
+    kept = stamps(note(rounds), note(rounds, "b-round"))
+
+    rule("proj-a", text=LASTING, at=T4)
+    marking_shown = main(["mark", "proj-a", "S1", "--shown", "--record", "comms:91",
+                          "--as", "planner"])
+
+    assert marking_shown == 0
+    assert stamps(note(rounds), note(rounds, "b-round")) == kept
+
+
+def test_a_mark_of_a_standing_ruling_writes_the_register_again(rounds, capsys):
+    rule("proj-a", text=LASTING, at=T4)
+    assert "- not shown\n" in (rounds / "rulings.md").read_text(encoding="utf-8")
+
+    assert main(["mark", "proj-a", "S1", "--shown", "--record", "comms:91",
+                 "--as", "planner"]) == 0
+
+    text = (rounds / "rulings.md").read_text(encoding="utf-8")
+    assert text == from_the_logs(rounds)[1]
+    assert "- shown: comms:91\n" in text and "not shown" not in text
 
 
 def test_a_hand_edit_is_gone_after_the_next_write(rounds):
