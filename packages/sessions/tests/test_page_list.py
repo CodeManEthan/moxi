@@ -286,17 +286,54 @@ def test_a_row_carries_what_was_read_and_null_for_what_was_not(roots):
     assert opencode["prompt"] is None
 
 
-def test_a_root_that_cannot_be_listed_is_named_and_the_others_answer(roots, tmp_path,
-                                                                     monkeypatch):
+def test_a_configured_root_that_does_not_exist_is_named_and_the_others_answer(
+        roots, tmp_path, own_config):
+    seed(roots)
+    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "nowhere"}"\n')
+
+    answer = read("/api/list")
+
+    assert answer["all"] == 11 and answer["unreadable"] is None
+    assert [(r["harness"], r["root"]) for r in answer["roots"]] == [
+        ("codex", str(tmp_path / "nowhere"))]
+    assert "does not exist" in answer["roots"][0]["reason"]
+    assert [h["harness"] for h in answer["harnesses"]] == ["claude", "opencode"]
+
+
+def test_a_harness_that_is_not_on_the_machine_is_no_failure_and_has_no_row(
+        roots, tmp_path, monkeypatch):
     seed(roots)
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "nowhere"))
 
     answer = read("/api/list")
 
-    assert answer["all"] == 11 and answer["unreadable"] == 0
-    assert [(r["harness"], r["root"]) for r in answer["roots"]] == [
-        ("codex", str(tmp_path / "nowhere" / "sessions"))]
-    assert "does not exist" in answer["roots"][0]["reason"]
+    assert answer["all"] == 11 and answer["roots"] == []
+    assert answer["unreadable"] is None
+    assert [h["harness"] for h in answer["harnesses"]] == ["claude", "opencode"]
+
+
+def test_a_machine_with_no_harness_answers_the_empty_list(tmp_path, monkeypatch):
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_DATA_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / "nowhere"))
+
+    answer = read("/api/list")
+
+    assert (answer["all"], answer["total"]) == (0, 0)
+    assert answer["roots"] == [] and answer["harnesses"] == []
+    assert [(g["key"], g["count"]) for g in answer["groups"]] == [("recent", 0)]
+    assert read("/api/folders") == {"shape": answer["shape"], "folders": [], "more": 0}
+
+
+def test_a_default_root_that_exists_and_cannot_be_read_is_named(roots):
+    seed(roots)
+    database = roots["opencode"] / "opencode.db"
+    database.write_text("not a database")
+
+    answer = read("/api/list")
+
+    assert [r["harness"] for r in answer["roots"]] == ["opencode"]
+    assert answer["roots"][0]["reason"]
+    assert [h["harness"] for h in answer["harnesses"]] == ["claude", "codex"]
 
 
 def test_a_config_that_cannot_be_read_is_refused_with_the_reason(roots, own_config):

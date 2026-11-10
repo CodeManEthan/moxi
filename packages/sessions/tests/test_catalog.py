@@ -20,6 +20,8 @@ from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
 from moxi_sessions.testing.claude import START
 from moxi_sessions.testing.codex import spawn_meta
 
+from conftest import write_config
+
 
 def sid(n: int) -> str:
     return f"0190b000-0000-7000-8000-{n:012x}"
@@ -144,6 +146,7 @@ def test_codex_leaves_spawned_threads_out_and_keeps_a_fork(roots):
     assert entries[tid(1)].subagents == 2 and entries[tid(4)].subagents == 0
     assert entries[tid(1)].harness == CODEX and entries[tid(1)].path == str(main.path)
     assert gathered.unreadable == 0
+    assert gathered.listed == (CLAUDE, CODEX, OPENCODE)
 
 
 def test_compressed_rollouts_are_counted_and_not_listed(roots):
@@ -204,6 +207,91 @@ def test_a_root_that_cannot_be_listed_is_reported_and_the_others_answer(roots, t
     failure = gathered.roots[0]
     assert failure.harness == CODEX and failure.root == str(tmp_path / "nowhere")
     assert "does not exist" in failure.reason
+    assert gathered.listed == (CLAUDE, OPENCODE)
+    assert gathered.unreadable is None           # no count of a root that was not read
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """A home with no harness in it, and an environment that names no root: each
+    harness's root is its default one, and none exists."""
+    home = tmp_path / "bare-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_DATA_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    return home
+
+
+def test_a_machine_with_no_harness_gathers_nothing_and_no_failure(home):
+    gathered = Catalog().gather()
+
+    assert gathered.entries == () and gathered.roots == () and gathered.listed == ()
+    assert gathered.unreadable is None
+
+
+def test_a_harness_whose_default_root_does_not_exist_is_absent_not_a_failure(home):
+    t = ClaudeTranscript(home / ".claude" / "projects", session_id=sid(1))
+    t.user()
+    t.write()
+
+    gathered = Catalog().gather()
+
+    assert [e.session for e in gathered.entries] == [sid(1)]
+    assert gathered.roots == () and gathered.listed == (CLAUDE,)
+
+
+def test_a_root_the_environment_names_that_does_not_exist_is_absent(home, monkeypatch,
+                                                                    tmp_path):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "nowhere"))
+
+    gathered = Catalog().gather()
+
+    assert gathered.roots == () and gathered.listed == ()
+
+
+@pytest.mark.parametrize("harness, key", [(CLAUDE, "claude.projects"),
+                                          (CODEX, "codex.sessions"),
+                                          (OPENCODE, "opencode.database")])
+def test_a_configured_root_that_does_not_exist_is_a_failure(home, own_config, tmp_path,
+                                                            harness, key):
+    table, name = key.split(".")
+    write_config(own_config, f'[{table}]\n{name} = "{tmp_path / "nowhere"}"\n')
+
+    gathered = Catalog().gather()
+
+    failure, = gathered.roots
+    assert failure.harness == harness and failure.root == str(tmp_path / "nowhere")
+    assert failure.reason
+    assert gathered.listed == ()
+
+
+def test_a_default_root_that_exists_and_cannot_be_read_is_a_failure(home):
+    (home / ".claude").mkdir()
+    (home / ".claude" / "projects").write_text("not a folder")
+    database = home / ".local" / "share" / "opencode" / "opencode.db"
+    database.parent.mkdir(parents=True)
+    database.write_text("not a database")
+
+    gathered = Catalog().gather()
+
+    assert [f.harness for f in gathered.roots] == [CLAUDE, OPENCODE]
+    assert all(f.reason for f in gathered.roots)
+    assert gathered.listed == ()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a folder without permission")
+def test_a_default_root_without_permission_is_a_failure(home):
+    locked = home / ".codex" / "sessions"
+    locked.mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        gathered = Catalog().gather()
+    finally:
+        locked.chmod(0o700)
+
+    failure, = gathered.roots
+    assert failure.harness == CODEX and "unreadable" in failure.reason
 
 
 def test_a_gather_is_reused_for_two_seconds(roots):

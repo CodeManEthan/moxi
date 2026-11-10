@@ -12,6 +12,10 @@
   `sessions_newest`, `sessions_folders`, `session_opened`, `list_recent_s` and `Catalog`.
   A list reads each root's listing, then only the sessions it returns, and keeps what it
   read in memory.
+- A list tells a harness that is not on the machine from a root that could not be read.
+  A harness whose default root does not exist gives nothing: no count, no reason. A root
+  a setting names that does not exist, and any root that exists and cannot be read, is
+  named with its reason, and no count is given for that harness.
 - `Header` has `started`, when the session's record begins, and a Codex header's `meta`
   holds line 1's `timestamp`.
 - New setting `list.recent_s` (3600): how many seconds after its last change a session

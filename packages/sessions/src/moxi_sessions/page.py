@@ -67,10 +67,20 @@ session not started by a program that changed within the setting `list.recent_s`
 
 *`/api/list`*: `now` (the time the answer was cut at), `today` (the server's local date,
 `YYYY-MM-DD`), `all` (the sessions before the filters) and `total` (after them), both of
-both kinds; `unreadable` (compressed Codex rollouts left out); `roots`
-(`{harness, root, reason}` per root that could not be listed, `root` null when the config
-naming it could not be read); `harnesses` (`{harness, count}` for each of the three, under
-every filter but `harness`); and `groups`, in order. Without `find`:
+both kinds; `unreadable` (compressed Codex rollouts left out, null when Codex's root was
+not listed); `roots` (`{harness, root, reason}` per root that could not be listed, `root`
+null when the config naming it could not be read); `harnesses` (`{harness, count}` for
+each harness whose root was listed, under every filter but `harness`); and `groups`, in
+order.
+
+A harness that is not on the machine is told apart from one that could not be read. A
+harness whose root is its default one (no key of sessions' config names it) and does not
+exist is in neither `roots` nor `harnesses`. A root the config names that does not exist,
+and any root that exists and cannot be listed, is in `roots` with the reason, and that
+harness has no item in `harnesses`: no count is given for what was not read. With no
+harness on the machine and nothing failing, `all` is 0 and `roots` is empty.
+
+The groups, without `find`:
 
 * `{key: "recent", count, rows, before}`: the sessions with `recent` true, the first 30 as
   rows. Always there, with `count` 0 when it is empty.
@@ -376,7 +386,7 @@ LIST = {
     "today": _TEXT,
     "all": _INT,
     "total": _INT,
-    "unreadable": _INT,
+    "unreadable": _MAYBE_INT,
     "roots": lb.Out("list", items=lb.Out("table", items={
         "harness": _TEXT, "root": _MAYBE_PATH, "reason": _SAYS})),
     "harnesses": lb.Out("list", items=lb.Out("table", items={

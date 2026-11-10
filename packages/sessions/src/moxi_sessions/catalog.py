@@ -14,10 +14,17 @@ details a list shows of one.
   `Gathered.unreadable`.
 
 Entries are ordered by their last change, newest first, then by harness and session id
-(`Entry.order`). A root that cannot be listed gives no entries and one `RootFailure` with
-the reason; the other roots still answer. One gather runs at a time, callers that arrive
-meanwhile take its result, and a result is reused for `REUSE_S` seconds. A gather takes no
-filter, so every filter shares it.
+(`Entry.order`). One gather runs at a time, callers that arrive meanwhile take its result,
+and a result is reused for `REUSE_S` seconds. A gather takes no filter, so every filter
+shares it.
+
+**A harness that is not there, and a root that could not be read.** A gather tells the two
+apart. A harness whose root nobody named (the harness's default, or the one the
+environment gives) and which does not exist is absent: the harness is not on the machine,
+so it gives no entries and no failure. A root somebody named (a key of sessions' config,
+or a root handed to the catalog) that does not exist, and any root that exists and cannot
+be listed, is a `RootFailure` with the reason; the other roots still answer.
+`Gathered.listed` names the harnesses whose root was listed.
 
 **The details.** `Catalog.details(entry)` reads what a row shows of one session, a
 `Details`. A fact that was not read is None; nothing is filled in for it.
@@ -67,7 +74,8 @@ from .errors import Unreadable
 from .find import Listed, Listing, sources
 from .read import window
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN, Marker, Message, Request
-from .source import claude_header, claude_named_head, codex_head, codex_header
+from .source import (claude_header, claude_named_head, codex_head, codex_header,
+                     root_origin)
 
 #: How long a gather's result is reused, in seconds.
 REUSE_S = 2.0
@@ -126,7 +134,8 @@ class Entry:
 @dataclass(frozen=True)
 class RootFailure:
     """A harness whose root could not be listed, with the root (None when the config
-    that names it could not be read) and the reason."""
+    that names it could not be read) and the reason. A harness that is not on the machine
+    has none."""
 
     harness: str
     root: str | None
@@ -135,13 +144,16 @@ class RootFailure:
 
 @dataclass(frozen=True)
 class Gathered:
-    """One gather: `entries` in the list's order, `roots` the roots that could not be
-    listed, `unreadable` the number of compressed Codex rollouts left out, and `at`, the
-    catalog's clock when the gather ended."""
+    """One gather: `entries` in the list's order; `roots`, the roots that could not be
+    listed; `listed`, the harnesses whose root was listed (a harness in neither is not on
+    the machine); `unreadable`, the number of compressed Codex rollouts left out, None
+    when Codex's root was not listed; and `at`, the catalog's clock when the gather
+    ended."""
 
     entries: tuple[Entry, ...]
     roots: tuple[RootFailure, ...] = ()
-    unreadable: int = 0
+    listed: tuple[str, ...] = ()
+    unreadable: int | None = None
     at: float = 0.0
 
 
@@ -365,6 +377,17 @@ def read_tail(listed: Listed, program: bool | None = None) -> Tail | None:
 
 # --- the entries -----------------------------------------------------------------------------
 
+def _absent(path: Path) -> bool:
+    """Whether nothing is at `path`. A path that cannot be looked at is not absent."""
+    try:
+        os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _entry(listed: Listed, subagents: int, changed_ns: int | None = None) -> Entry:
     """A listing entry as a main session; a file's change time is its mtime."""
     source = listed.source
@@ -411,7 +434,8 @@ class Catalog:
     """The sessions of the three roots and what was read of them (see the module).
 
     `roots` names a root per harness (a projects root, a sessions root, a database); a
-    harness it leaves out takes its configured or default root. A page server keeps one
+    harness it leaves out takes its configured or default root. A root named here that
+    does not exist is a failure, as a configured one is. A page server keeps one
     catalog for its life (`shared()`); a test makes its own. `clock` is the time a
     gather's reuse is measured on. `head_reads` and `tail_reads` count the heads and the
     last turns the catalog has read, failed reads included.
@@ -480,22 +504,32 @@ class Catalog:
     def _gather(self) -> Gathered:
         entries: list[Entry] = []
         failures: list[RootFailure] = []
-        unreadable = 0
+        listed: list[str] = []
+        unreadable = None
         for harness in HARNESSES:
-            try:
-                listing = sources(harness, root=self._roots.get(harness), heads=False)
-            except ConfigError as exc:
-                failures.append(RootFailure(harness, None, str(exc)))
-                continue
+            if harness in self._roots:
+                root, named = Path(self._roots[harness]), True
+            else:
+                try:
+                    origin = root_origin(harness)
+                except ConfigError as exc:
+                    failures.append(RootFailure(harness, None, str(exc)))
+                    continue
+                root, named = origin.path, origin.configured
+            if not named and _absent(root):
+                continue                 # the harness is not on this machine
+            listing = sources(harness, root=root, heads=False)
             if not listing.ok:
                 failures.append(RootFailure(harness, listing.root,
                                             listing.reason or "could not be listed"))
-            elif harness == CLAUDE:
+                continue
+            listed.append(harness)
+            if harness == CLAUDE:
                 entries += _claude_entries(listing)
             elif harness == OPENCODE:
                 entries += _opencode_entries(listing)
             else:
-                unreadable += sum(1 for e in listing if e.compressed)
+                unreadable = sum(1 for e in listing if e.compressed)
                 entries += self._codex_entries(listing)
         entries.sort(key=lambda e: e.order)
         seen: set[tuple[str, str]] = set()
@@ -505,7 +539,8 @@ class Catalog:
             if (entry.harness, entry.session) not in seen:
                 seen.add((entry.harness, entry.session))
                 kept.append(entry)
-        result = Gathered(tuple(kept), tuple(failures), unreadable, self._clock())
+        result = Gathered(tuple(kept), tuple(failures), tuple(listed), unreadable,
+                          self._clock())
         with self._lock:
             self._gathered = result
         return result

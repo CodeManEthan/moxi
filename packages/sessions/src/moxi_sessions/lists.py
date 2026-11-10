@@ -332,7 +332,7 @@ def _counted(cat: Catalog, f: _Filters, now: float
         "total": len(entries), "unreadable": gathered.unreadable,
         "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason}
                   for r in gathered.roots],
-        "harnesses": [{"harness": h, "count": counts[h]} for h in HARNESSES],
+        "harnesses": [{"harness": h, "count": counts[h]} for h in gathered.listed],
     }, entries
 
 
@@ -348,10 +348,13 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
     * `now`; `today`, the local date of `now` as `YYYY-MM-DD`.
     * `all`, the sessions before the filters, and `total`, the ones after them; both
       count sessions of both kinds.
-    * `unreadable`, the compressed Codex rollouts left out; `roots`, a
-      `{harness, root, reason}` per root that could not be listed.
-    * `harnesses`: `{harness, count}` for each of the three, counted under every filter
-      but the harness.
+    * `unreadable`, the compressed Codex rollouts left out, None when Codex's root was
+      not listed; `roots`, a `{harness, root, reason}` per root that could not be listed.
+    * `harnesses`: `{harness, count}` for each harness whose root was listed, counted
+      under every filter but the harness. A harness that is not on the machine (its root
+      is the default one and does not exist) is in neither `roots` nor `harnesses`; one
+      whose root failed is in `roots` alone. With no harness there and nothing failing,
+      `all` is 0 and both are empty.
     * `groups`, in order. With no `find`: `recent` as `{key, count, rows, before}`; each
       day as `{key, count, rows, before, program}`, where `count` and `rows` are the
       sessions a person started and `program` is `{count}`; then, when any session is

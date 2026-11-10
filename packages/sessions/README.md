@@ -131,8 +131,9 @@ way), and it adds four commands:
 With `--json`, each command prints one JSON object that starts with the shape version.
 `read --json` holds the same rows the page is sent, under `records`, with the header and
 whether earlier or later turns were left out. `list --json` holds the counts (`all`,
-`total`, one per harness), the roots that could not be listed and the sessions under
-`rows`; a row's `activity` and `prompt` carry their `text` only with `--text`.
+`total`, one per harness that was read), the roots that could not be listed and the
+sessions under `rows`; a row's `activity` and `prompt` carry their `text` only with
+`--text`.
 
 **Redaction.** When the secrets module is installed (the `secrets` extra), `read` passes
 each message's text, each tool call's line and each title through secrets' `credentials`
@@ -161,6 +162,12 @@ A row holds the session's harness, id, path, last change and size, how many suba
 has, its folder and start, the name typed for it in the harness (never a title the
 harness made up), its model, the newest thing said in it and the newest prompt a person
 typed. A fact that was not read is None, never zero or an empty text.
+
+A harness that is not on the machine is not a failure. When a harness's root is its
+default one and does not exist, the list holds nothing for that harness: no count and no
+reason. When a root you set (`claude.projects`, `codex.sessions`, `opencode.database`)
+does not exist, or any root exists and cannot be read, the answer names it under `roots`
+with the reason, gives no count for that harness, and still lists the others.
 
 Filters: `harness`, `since` and `until` on the last change, `folder` (the folder the
 session's own record names) and `find` (the start of an id, or part of the folder's last

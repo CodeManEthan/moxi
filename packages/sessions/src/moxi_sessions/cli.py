@@ -25,7 +25,9 @@ then each session's line is followed by the newest thing said in it, on one line
 secrets module is installed; with `--text` and no secrets it says so once, on stderr.
 `--json` prints the list as one JSON object: the counts, the roots that could not be
 listed, and `rows`, whose `activity` and `prompt` carry their `text` only with `--text`.
-A root that could not be listed is named on stderr, and the other roots are listed.
+A root that could not be listed is named on stderr, and the other roots are listed. A
+harness that is not on the machine (its root is the default one and does not exist) is
+not a failure: nothing is printed for it.
 
 `read` prints part of one session the way sessions' page shows it (`moxi_sessions.view`):
 the last `--turns` turns (5 unless asked, at most 50), or with `--around TIME` the turns

@@ -679,3 +679,47 @@ def test_the_newest_sessions_are_one_run_of_both_kinds_with_the_lists_counts(roo
     for limit in (0, -1, True, "3"):
         with pytest.raises(ValueError, match="limit is a number of sessions"):
             newest_sessions(cat, recent_s=HOUR, now=NOW, limit=limit)
+
+
+# -- a harness that is not there, and a root that was not read ---------------------------------
+
+@pytest.fixture
+def bare_home(tmp_path, monkeypatch):
+    """A home with no harness in it, and an environment that names no root."""
+    home = tmp_path / "bare-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_DATA_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    return home
+
+
+def test_a_machine_with_no_harness_answers_an_empty_list_and_no_failure(bare_home):
+    answer = list_sessions(Catalog(), recent_s=HOUR, now=NOW)
+
+    assert (answer["all"], answer["total"]) == (0, 0)
+    assert answer["roots"] == [] and answer["harnesses"] == []
+    assert answer["unreadable"] is None
+    assert answer["groups"] == [{"key": RECENT, "count": 0, "rows": [], "before": None}]
+
+
+def test_a_harness_that_is_not_there_has_no_row_and_no_failure(bare_home):
+    claude({CLAUDE: bare_home / ".claude" / "projects"}, 1, NOW - 60)
+
+    answer = list_sessions(Catalog(), recent_s=HOUR, now=NOW)
+
+    assert answer["all"] == 1 and answer["roots"] == []
+    assert answer["harnesses"] == [{"harness": CLAUDE, "count": 1}]
+    assert answer["unreadable"] is None
+
+
+def test_a_root_that_failed_has_no_count_and_no_zero(roots, tmp_path):
+    claude(roots, 1, NOW - 60)
+    roots[CODEX] = tmp_path / "nowhere"
+
+    answer = list_sessions(Catalog(roots), recent_s=HOUR, now=NOW)
+
+    assert [r["harness"] for r in answer["roots"]] == [CODEX]
+    assert answer["harnesses"] == [{"harness": CLAUDE, "count": 1},
+                                   {"harness": OPENCODE, "count": 0}]
+    assert answer["unreadable"] is None

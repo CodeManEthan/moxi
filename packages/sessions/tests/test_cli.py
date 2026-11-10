@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 
 import pytest
@@ -231,6 +232,16 @@ def listed(env):
     catalog.reset()
 
 
+@pytest.fixture
+def bare(env):
+    """The home with no harness in it, and a process that has listed nothing."""
+    shutil.rmtree(env / ".codex")
+    shutil.rmtree(env / ".claude")
+    catalog.reset()
+    yield env
+    catalog.reset()
+
+
 def changed_at(path, at: float) -> None:
     stamp = int(at * 1_000_000_000)
     os.utime(path, ns=(stamp, stamp))
@@ -380,15 +391,48 @@ def test_list_without_secrets_says_so_once_when_it_prints_text(listed, capsys,
     assert json.loads(run(capsys, "list", "--json")[1])["redacted"] is False
 
 
-def test_list_names_a_root_it_could_not_list_and_lists_the_others(listed, capsys,
-                                                                  monkeypatch, tmp_path):
+def test_list_names_a_configured_root_it_could_not_list_and_lists_the_others(
+        listed, capsys, own_config, tmp_path):
     claude_session(listed, 1, time.time() - HOUR)
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "nowhere"))
+    write_config(own_config, f'[codex]\nsessions = "{tmp_path / "nowhere"}"\n')
 
     code, out, err = run(capsys, "list")
 
     assert code == 0 and out.splitlines()[0].endswith(sid(1))
-    assert f"codex: {tmp_path / 'nowhere' / 'sessions'} could not be listed" in err
+    assert f"codex: {tmp_path / 'nowhere'} could not be listed" in err
+    data = json.loads(run(capsys, "list", "--json")[1])
+    assert [r["harness"] for r in data["roots"]] == ["codex"]
+    assert [h["harness"] for h in data["harnesses"]] == ["claude", "opencode"]
+    assert data["unreadable"] is None
+
+
+def test_list_says_nothing_of_a_harness_that_is_not_on_the_machine(bare, capsys):
+    claude_session(bare, 1, time.time() - HOUR)       # the home has Claude Code alone
+
+    code, out, err = run(capsys, "list")
+
+    assert (code, err) == (0, "") and out.splitlines()[0].endswith(sid(1))
+    data = json.loads(run(capsys, "list", "--json")[1])
+    assert data["roots"] == [] and data["harnesses"] == [{"harness": "claude",
+                                                          "count": 1}]
+
+
+def test_list_on_a_machine_with_no_harness_prints_nothing(bare, capsys):
+    assert run(capsys, "list") == (0, "", "")
+    data = json.loads(run(capsys, "list", "--json")[1])
+    assert (data["all"], data["roots"], data["harnesses"], data["rows"]) == (0, [], [], [])
+
+
+def test_list_names_a_default_root_that_exists_and_cannot_be_read(listed, capsys):
+    claude_session(listed, 1, time.time() - HOUR)
+    sessions = listed / ".codex" / "sessions"
+    sessions.rmdir()
+    sessions.write_text("not a folder")
+
+    code, out, err = run(capsys, "list")
+
+    assert code == 0 and out.splitlines()[0].endswith(sid(1))
+    assert f"codex: {sessions} could not be listed" in err
 
 
 def test_list_refuses_arguments_that_are_not_ones(listed, capsys):
