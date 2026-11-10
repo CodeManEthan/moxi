@@ -49,10 +49,9 @@ empty text; a time is epoch seconds; each answer starts with `shape`.
 
 The filters, each optional, are the same on `/api/list` and `/api/more`: `harness`;
 `since` (changed at or after it) and `until` (changed before it), epoch seconds as a
-number; `folder`, an absolute path a session's own record names (compared as written, but for
-the slashes at its end); `find`, text of
-2 characters or more that a session's id starts with or the last segment of its folder
-contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,
+number; `folder`, an absolute path a session's own record names (compared as written,
+but for the slashes at its end); `find`, text of 2 characters or more that a session's id
+starts with or the last segment of its folder contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,
 `find` and `/api/folders` read the head of every session not read yet, once for the
 server's life; no other request does.
 
@@ -125,14 +124,16 @@ that changes moves to the front and is in the next `/api/list`.
 
 *`/api/session`* takes `harness` and `session` and answers the row's keys plus `reply`
 (`{at, text, truncated}`: the model's newest message when no user message of any kind
-follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (the 8 that changed last, newest first, each
-`{description, agent_type, started, last_at, last}`, `last` being its newest message cut
-at 300 bytes; null when they could not be listed), `more` (how many were not listed; null
-with `subagents`, and when some of them could not be listed) and `resume` (`{command, folder}`: the harness's command for picking the
-session up again and the folder to run it in, null where it runs anywhere; `resume`
-itself is null for a harness with no command, and for one whose command must be run in
-the session's folder when that folder was not read). It says nothing of whether the session is working. An id that is not
-a main session's (a subagent's, a spawned Codex thread's, an unknown one) is refused.
+follows it, `text` cut at `TEXT_MAX` bytes; else null), `subagents` (the 8 that changed
+last, newest first, each `{description, agent_type, started, last_at, last}`, `last`
+being its newest message cut at 300 bytes; null when they could not be listed), `more`
+(how many were not listed; null with `subagents`, and when some of them could not be
+listed) and `resume` (`{command, folder}`: the harness's command for picking the session
+up again and the folder to run it in, null where it runs anywhere; `resume` itself is
+null for a harness with no command, and for one whose command must be run in the
+session's folder when that folder was not read). It says nothing of whether the session
+is working. An id that is not a main session's (a subagent's, a spawned Codex thread's,
+an unknown one) is refused.
 
 *`/api/folders`*: `folders` (`{folder, count, changed}`, newest change first, at most 200,
 `count` of both kinds) and `more`, how many folders were left off.

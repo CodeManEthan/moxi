@@ -6,10 +6,15 @@ up for it. Each line says whether its command must be run in the session's folde
 it must and the folder is not known, the answer is None too: a command is not handed out
 without the place it works in.
 
-* Claude Code: `claude --resume <id>`. Claude Code looks a session up under the folder it
-  is run in, so the command is run in the session's folder.
-* Codex: `codex resume <id>`. Codex finds a thread by its id from any folder.
+* Claude Code: `claude --resume <id>`, run in the session's folder.
+* Codex: `codex resume <id>`, run in any folder.
 * OpenCode: `opencode --session <id>`, run in the session's folder.
+
+The help texts name the option or the subcommand; none says where the command is run.
+That part of each line rests on how the harness files its sessions: Claude Code keeps a
+transcript under a folder named for the directory the session ran in, and a Codex rollout
+is filed by its date and found by its thread id. OpenCode's line is taken to be like
+Claude Code's. No session was resumed to check a line.
 """
 
 from __future__ import annotations

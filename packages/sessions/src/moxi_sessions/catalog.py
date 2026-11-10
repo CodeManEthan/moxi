@@ -166,10 +166,10 @@ class Unread:
 @dataclass(frozen=True)
 class Gathered:
     """One gather: `entries` in the list's order; `roots`, the roots that could not be
-    listed or were listed in part; `listed`, the harnesses whose root was listed (a harness in neither is not on
-    the machine); `unreadable`, the number of compressed Codex rollouts left out, None
-    when Codex's root was not listed; and `at`, the catalog's clock when the gather
-    ended."""
+    listed or were listed in part; `listed`, the harnesses whose root was listed (a
+    harness in neither is not on the machine); `unreadable`, the number of compressed
+    Codex rollouts left out, None when Codex's root was not listed; and `at`, the
+    catalog's clock when the gather ended."""
 
     entries: tuple[Entry, ...]
     roots: tuple[Unread, ...] = ()
@@ -208,7 +208,7 @@ class Head:
 class Said:
     """A message a row shows: `at` (epoch seconds, None when the record has no time), who
     said it, its text, and `truncated`, whether the text kept is less than the message's
-    (a prompt's; `activity` is always its first bytes and does not say).
+    (set for a prompt; `activity` is cut to its first bytes and does not say).
 
     `who` is `you` for a user message the record says the person at the prompt typed
     (`Message.injected` is false), `agent` for the model's, and None for a user message
@@ -234,9 +234,10 @@ class Details:
     * `activity`: the newest message of the last turn that is a user message with text or
       the model's reply, its text cut to `ACTIVITY_BYTES` bytes at a character boundary.
     * `prompt`: the newest user message the record says the person typed, with `who`
-      `you`, its text cut to `TEXT_MAX` bytes with `truncated` set: the most any caller
-      is sent of it, so nothing more is kept. Where the last turn holds none, up to `PROMPT_TURNS` turns before it are
-      read. None, with no further turn read, for a session a program started.
+      `you`, its text cut to `TEXT_MAX` bytes with `truncated` set: the most a caller is
+      sent of it, so no more is kept. Where the last turn holds none, up to
+      `PROMPT_TURNS` turns before it are read. None, with no further turn read, for a
+      session a program started.
     """
 
     folder: str | None = None

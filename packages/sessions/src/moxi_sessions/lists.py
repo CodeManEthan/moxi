@@ -11,9 +11,10 @@ no catalog and read through the calling process's own.
 **The filters.** `harness`, `since` (changed at or after it) and `until` (changed before
 it) are tested on a catalog entry and open no file. `folder` (a session whose own head
 names that folder) and `find` (the session's id starts with the text, or the last segment
-of its folder contains it, without regard to case) need every session's head: asking for either reads each head not read
-yet, once for the catalog's life. Nothing else reads every head. Every count an answer
-gives is exact for the sessions it stands for.
+of its folder contains it, without regard to case) need every session's head: asking for
+either reads each head not read yet, once for the catalog's life. Nothing else reads
+every head. Every count an answer gives is exact for the sessions it stands for; where a
+part of a root could not be listed, the answer's `roots` says so.
 
 A folder is compared as written but for the slashes at its end, so `/work/proj-a/` asks
 for `/work/proj-a`; nothing else is folded, and no link is followed.
@@ -435,8 +436,8 @@ def newest_sessions(cat: Catalog | None = None, *, recent_s: float,
     with no groups: what `list_sessions` answers before its groups (`now`, `today`,
     `all`, `total`, `unreadable`, `roots`, `harnesses`), then `rows`, the first `limit`
     of them as a list's rows, and `before`, the place after them, None when `rows` holds
-    them all. It reads the head and the last turn of the rows it returns and of no other
-    session, unless `folder` is asked.
+    them all. Beyond the Codex heads every gather reads, it reads the head and the last
+    turn of the rows it returns and of no other session, unless `folder` is asked.
 
     Raises ValueError for a filter that is not one, and for a `limit` under 1."""
     cat = _catalog(cat)
