@@ -342,7 +342,8 @@ git commit -m 'notes: add today' -m 'Commit-Check: 3fa1c2d4e5b6'
 - **The salt** is the piece's one setting, `salt`: 16 random hex characters written into
   the repo's git config when the piece is first registered there, and kept from then on,
   so a line copied from another repo doesn't match. Removing the piece and adding it again
-  gives the repo a new one.
+  gives the repo a new one. `--set salt=VALUE` takes 16 hex characters and nothing else;
+  `--set salt=` is refused, since the piece refuses every commit without one.
 - **Where it is read**: every trailer paragraph after the subject's, a paragraph whose
   every line is a trailer (`Key: value`) or continues one, so the line may sit beside
   other trailers or in a paragraph of its own. The key is matched ignoring case. A

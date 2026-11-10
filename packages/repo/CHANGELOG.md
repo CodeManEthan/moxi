@@ -15,7 +15,8 @@
   committed, or holds two, a malformed one or one for another tree or another repo. A
   commit the committer makes, one made during a rebase, cherry-pick or revert, and a
   clean merge pass without the line. Its setting `salt` is written when the piece is
-  first registered in a repo. It is in no repo until you add it.
+  first registered in a repo; a `--set salt=` value that isn't 16 hex characters is
+  refused. It is in no repo until you add it.
 - New config key `commit_proof.everywhere` (bool, default false): `git-hooks add` and
   `refresh` register the commit-proof piece in each repo they touch that lacks it.
 - `moxi_repo.api`: `rules(path)`; `everywhere()` takes a piece id; `EVERYWHERE` maps each

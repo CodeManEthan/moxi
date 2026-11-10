@@ -155,6 +155,26 @@ def test_the_salt_is_written_when_the_piece_is_first_registered_and_then_kept(de
     assert salt_of(beta) == "0123456789abcdef"
 
 
+def test_a_salt_given_with_set_that_is_not_sixteen_hex_characters_is_refused(demo, capsys):
+    repo = with_piece(demo)
+    first = salt_of(repo)
+    for bad in ("", "0123abcd", "0123456789abcdeg", "0123456789abcdef0"):
+        code, _out, err = run(capsys, "git-hooks", "add", str(repo), PIECE,
+                              "--set", f"salt={bad}")
+        assert code != 0, bad
+        assert f"{PIECE}: --set salt: " in err, bad
+        assert "a salt is 16 hex characters" in err and "nothing was written" in err, bad
+        assert salt_of(repo) == first, bad
+    # The same holds where the piece is not registered yet: nothing is registered.
+    fresh = demo.repo("beta-code")
+    assert run(capsys, "git-hooks", "add", str(fresh), PIECE, "--set", "salt=zz")[0] != 0
+    assert PIECE not in gitconf.read(gitconf.resolve(fresh)).pieces
+    assert run(capsys, "git-hooks", "add", str(repo), PIECE,
+               "--set", "salt=fedcba9876543210")[0] == 0
+    assert salt_of(repo) == "fedcba9876543210"
+    assert api.SETTING_CHECKS[PIECE]("salt", ["0123456789ABCDEF"]) is None
+
+
 def test_the_config_key_registers_it_in_each_repo_add_and_refresh_touch(demo, capsys):
     alpha, beta, off = demo.repo("alpha-notes"), demo.repo("beta-code"), demo.repo("gamma")
     outside = demo.repo("outside")

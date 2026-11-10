@@ -128,6 +128,16 @@ def _seed_commit_proof() -> dict[str, list[str]]:
     return {SALT: [new_salt()]}
 
 
+def _check_commit_proof(name: str, values: list[str]) -> str | None:
+    from moxi_repo.commit_proof import SALT, salt_problem
+
+    if name != SALT:
+        return None
+    # Without a salt the piece refuses every commit, so clearing it is refused too.
+    why = salt_problem(values[-1] if values else "")
+    return None if why is None else f"--set {SALT}: {why}"
+
+
 #: Settings a piece starts with in a repo where it is first registered: piece id ->
 #: fn() -> {setting: [values]}. A key the same call gives with `--set` (the clearing form
 #: included) is not seeded.
@@ -135,9 +145,10 @@ SEEDS: dict[str, Callable[[], dict[str, list[str]]]] = {
     COMMIT_RULES: _seed_commit_rules, COMMIT_PROOF: _seed_commit_proof}
 
 #: Checks of a piece's setting values before anything is written: piece id ->
-#: fn(setting, values) -> why they are refused, or None.
+#: fn(setting, values) -> why they are refused, or None. `--set KEY=`, which removes the
+#: key, reaches the check as no values.
 SETTING_CHECKS: dict[str, Callable[[str, list[str]], str | None]] = {
-    COMMIT_RULES: _check_commit_rules}
+    COMMIT_RULES: _check_commit_rules, COMMIT_PROOF: _check_commit_proof}
 
 
 def _commit_rules_lines(repo: Repo, settings: dict[str, list[str]], *, top: Path,
@@ -485,7 +496,7 @@ def _changes(piece: pieces.Piece, state: State,
     check = SETTING_CHECKS.get(piece.id)
     if check is not None:
         for name, values in changes.items():
-            why = check(name, values) if values else None
+            why = check(name, values or [])
             if why is not None:
                 raise Usage(f"{piece.id}: {why}; nothing was written")
     return changes

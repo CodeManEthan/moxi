@@ -59,6 +59,9 @@ COMMIT_PROOF = {
 
 PIECE_ID = "repo/commit-proof"
 SALT = "salt"
+#: The length of a salt, in hex characters.
+SALT_CHARS = 16
+_SALT = re.compile(r"[0-9a-fA-F]{%d}" % SALT_CHARS)
 #: The trailer key of the line, and what the hash starts with.
 KEY = "Commit-Check"
 _PREFIX = b"commit-check"
@@ -74,7 +77,14 @@ def new_salt() -> str:
     """A salt for a repo: 16 random hex characters."""
     import secrets
 
-    return secrets.token_hex(8)
+    return secrets.token_hex(SALT_CHARS // 2)
+
+
+def salt_problem(value: str) -> str | None:
+    """Why `value` can't be a repo's salt, or None when it is 16 hex characters."""
+    if _SALT.fullmatch(value):
+        return None
+    return f"{value!r} is not a salt: a salt is {SALT_CHARS} hex characters (0-9, a-f)"
 
 
 def proof_value(salt: str, tree: str) -> str:
@@ -255,4 +265,4 @@ def commit_msg(ctx) -> Outcome:
 
 __all__ = ["COMMIT_PROOF", "PIECE_ID", "KEY", "check_message", "clean_merge", "commit_msg",
            "index_tree", "merge_heads", "new_salt", "proof_line", "proof_value",
-           "read_lines", "replaying", "rule_lines", "salt_of"]
+           "read_lines", "replaying", "rule_lines", "salt_of", "salt_problem"]
