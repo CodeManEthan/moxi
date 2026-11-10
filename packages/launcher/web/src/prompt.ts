@@ -186,8 +186,6 @@ export class LauncherPrompt extends LitElement {
   #form: Form | null = null;
   /** Counts `/api/form` reads, so only the latest one's answer is drawn. */
   #asked = 0;
-  /** The box has been typed in, so the form's brief no longer fills it. */
-  #typed = false;
   /** Whether projects is there, worked out once when the piece connects. */
   #withProjects = false;
   /** The user's home folder as the page server names it, drawn as `~`. */
@@ -294,8 +292,6 @@ export class LauncherPrompt extends LitElement {
     if (this.#form === null) return;
     if (this.#catalog !== null && this.#catalog.state === "up") this.unread = "";
     this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, NO_PRESET);
-    // A brief the user's defaults give is shown in the box until he types his own.
-    if (!this.#typed && this.brief === "") this.brief = valueOf(this.fields, {}, "brief");
   }
 
   /** Reads the places and sets the line, once for each time the piece is connected. */
@@ -560,10 +556,7 @@ export class LauncherPrompt extends LitElement {
     if (next === this.flight) return;
     this.flight = next;
     if (!following(next)) this.#stopFollow();
-    if (next.started && this.brief === this.#sent) {
-      this.brief = "";
-      this.#typed = true;
-    }
+    if (next.started && this.brief === this.#sent) this.brief = "";
   }
 
   #stopFollow(): void {
@@ -573,7 +566,6 @@ export class LauncherPrompt extends LitElement {
 
   /** An edit of the box. The lines of a launch that has ended go with it. */
   #edit(text: string): void {
-    this.#typed = true;
     this.brief = text;
     const next = edited(this.flight);
     if (next !== this.flight) {

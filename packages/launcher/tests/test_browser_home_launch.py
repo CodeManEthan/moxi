@@ -346,6 +346,56 @@ def test_an_empty_box_starts_a_session_with_no_first_turn(fake, ui_page, ui_shel
     assert kit.newest_launch(ui_shell).brief is None
 
 
+#: A brief the user's defaults set, which the launch form does not show.
+DEFAULT_BRIEF = "tidy every folder"
+
+
+@pytest.fixture
+def default_brief(ui_shell):
+    """The shell's presets file with the user's defaults setting a brief; removed when the
+    test ends."""
+    file = presets.path(env=ui_shell.env)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f'[defaults]\nbrief = "{DEFAULT_BRIEF}"\n')
+    yield
+    file.unlink()
+
+
+def test_an_empty_box_sends_no_brief_though_the_defaults_set_one(
+        fake, ui_page, ui_shell, harness, default_brief):
+    piece = kit.open_home(ui_page)
+    box = piece.locator("textarea")
+    expect(box).to_have_value("")
+    # In the background: with no brief there is nothing to run, and the launcher says so.
+    pick_run(piece, "Headless")
+    body = press(ui_page, piece)
+    assert "brief" not in body["values"] and "brief" in body["leave_out"], body
+    expect(said(piece, "refused")).to_contain_text("needs a brief")
+    expect(said(piece, "started")).to_have_count(0)
+    # In a slot: the session starts with no first turn.
+    pick_run(piece, "Slot 2")
+    piece.locator(".go").click()
+    expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "))
+    row = kit.newest_launch(ui_shell)
+    assert row.brief is None and DEFAULT_BRIEF not in " ".join(row.argv), row
+    assert not [run for run in harness.runs() if DEFAULT_BRIEF in " ".join(run["argv"])]
+
+
+def test_the_text_in_the_box_is_the_brief_sent_whatever_the_defaults_set(
+        fake, ui_page, ui_shell, harness, default_brief):
+    typed = "count the open doors"
+    piece = kit.open_home(ui_page)
+    piece.locator("textarea").fill(typed)
+    pick_run(piece, "Headless")
+    body = press(ui_page, piece)
+    assert body["values"]["brief"] == typed, body
+    expect(said(piece, "started")).to_have_text(re.compile(r"^Started headless · "))
+    [run] = wait_for(lambda: [run for run in harness.runs() if typed in " ".join(run["argv"])],
+                     10, what="the fake harness's run with the typed brief")
+    assert DEFAULT_BRIEF not in " ".join(run["argv"]), run["argv"]
+    assert kit.newest_launch(ui_shell).brief == typed
+
+
 def test_a_launch_that_fails_says_why_keeps_the_box_and_gives_the_button_back(
         fake, ui_page, ui_shell):
     fake.script(placed=2, slots=kit.free(2, 3), start="refused",

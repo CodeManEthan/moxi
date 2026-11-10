@@ -450,14 +450,16 @@ test("an install with no slot row sends no slot either way", () => {
   assert.equal("slot" in sent.values || sent.leave_out.includes("slot"), false);
 });
 
-test("an empty box leaves the brief out, and a text the form withheld is kept unless the box replaces it", () => {
+test("an empty box leaves out a brief the form withheld, and the box's text replaces it", () => {
   const form = { state: "up", detail: null, harness: "claude", refused: null, rows: [
     { name: "brief", value: null, items: null, source: "defaults", withheld: true },
     { name: "instructions", value: null, items: null, source: "defaults", withheld: true }] };
   assert.equal(launchRequest(FORM_FIELDS, null, { ...SET, brief: null }, SLOT_2).leave_out.includes("brief"), true);
-  const kept = launchRequest(FORM_FIELDS, form, { ...SET, brief: null }, SLOT_2);
-  assert.equal("brief" in kept.values || kept.leave_out.includes("brief"), false);
-  assert.equal("instructions" in kept.values || kept.leave_out.includes("instructions"), false);
+  const empty = launchRequest(FORM_FIELDS, form, { ...SET, brief: null }, SLOT_2);
+  assert.equal("brief" in empty.values, false);
+  assert.equal(empty.leave_out.includes("brief"), true);
+  // Standing instructions the form withheld are no part of the box, and are kept.
+  assert.equal("instructions" in empty.values || empty.leave_out.includes("instructions"), false);
   assert.equal(launchRequest(FORM_FIELDS, form, SET, SLOT_2).values.brief, "fix the build");
 });
 

@@ -506,8 +506,10 @@ export const PLACED = ["target", "slot"] as const;
  * The launch as `/api/preview` and `/api/launch` take it: the whole form, as the launcher's
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
  * value; `slot` has one only for a slot picked by its number, and is otherwise left out
- * where the form has the row. A text `/api/form` withheld and the piece does not draw is
- * kept as the layers give it, unless the box replaces it.
+ * where the form has the row. The box's text is the brief: an empty box leaves the brief
+ * out, so a brief the user's defaults set and `/api/form` withheld is not sent unseen. Any
+ * other text `/api/form` withheld, which the piece does not draw, is kept as the layers
+ * give it.
  */
 export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
                               set: Readonly<Record<string, FormValue>>, run: Run): LaunchBody {
@@ -515,7 +517,8 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
   const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
-  const request = requestOf(fields, values, withheld, withheld);
+  const kept = new Set([...withheld].filter((name) => name !== "brief"));
+  const request = requestOf(fields, values, withheld, kept);
   request.values.target = run.target;
   if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);
   else if (slotted) request.leave_out.push("slot");
