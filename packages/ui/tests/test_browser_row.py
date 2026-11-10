@@ -1,6 +1,7 @@
 """`<moxi-ui-row>` in a browser: what each attribute draws and that an unset one draws
 nothing, one-line and two-line rows, which end of line one is cut when it is narrow, the
-opened state, and the toggle a row sends only when it carries `toggles`.
+opened state, the toggle a row sends only when it carries `toggles`, and where such a
+row's tab stop and button are.
 
 The rows are put in the shell's panel by the test: the element is the client's, so no
 module's page is needed to draw one."""
@@ -53,6 +54,9 @@ _JS_ROWS = """([rows, width]) => {
   box.addEventListener("moxi-row-toggle", (event) => {
     window.__toggles.push([event.target.id, event.detail, event.bubbles, event.composed]);
   });
+  // Each key that reached the page, and whether the row took it from the page.
+  window.__keys = [];
+  box.addEventListener("keydown", (event) => window.__keys.push([event.key, event.defaultPrevented]));
   document.getElementById("moxi-panel").replaceChildren(box);
 }"""
 
@@ -242,33 +246,52 @@ def test_a_narrow_line_one_cuts_the_where_then_the_name_and_the_fact_last(ui_pag
     assert row.locator(".l1").evaluate("(node) => node.scrollWidth <= node.clientWidth")
 
 
+def _stop(row) -> dict:
+    """Where a row's tab stop is: the focus attributes of its lines and of line one."""
+    return row.evaluate("""(node) => Object.fromEntries([".head", ".l1"].map((sel) => {
+      const part = node.shadowRoot.querySelector(sel);
+      return [sel, ["tabindex", "role", "aria-expanded"].map((name) => part.getAttribute(name))];
+    }))""")
+
+
+def _focused(row):
+    """The class of the row's part that holds the focus, or None."""
+    return row.evaluate("(node) => node.shadowRoot.activeElement?.className ?? null")
+
+
 def test_a_row_does_not_toggle_without_the_attribute(ui_page):
-    _place(ui_page, [("still", {"name": "proj-a", "time": "19:07", "rest": "Done."}, ["Open"], None)])
+    _place(ui_page, [("still", {"name": "proj-a", "time": "19:07", "rest": "Done."}, ["Open"], None),
+                     ("shown", {"name": "proj-b", "rest": "Done.", "open": ""}, [], "The opened content.")])
     row = ui_page.locator("#still")
     head = row.locator(".head")
     assert _style(head, "cursor") != "pointer"
-    assert head.get_attribute("tabindex") is None
+    # No tab stop, no role and no expanded state, with `open` set or not.
+    for each in (row, ui_page.locator("#shown")):
+        assert _stop(each) == {".head": [None, None, None], ".l1": [None, None, None]}
     head.click()
     row.locator(".l1").click()
-    # The row is no tab stop: the first Tab from before it lands on its act.
+    # The row is no tab stop: neither its lines nor line one can take the focus.
     ui_page.evaluate("() => { document.activeElement?.blur(); window.getSelection().removeAllRanges(); }")
-    row.evaluate("(node) => node.shadowRoot.querySelector('.head').focus()")
-    assert row.evaluate("(node) => node.shadowRoot.activeElement") is None
+    for part in (".head", ".l1"):
+        row.evaluate("(node, part) => node.shadowRoot.querySelector(part).focus()", part)
+        assert _focused(row) is None
     ui_page.keyboard.press("Enter")
+    ui_page.keyboard.press("Space")
     assert _toggles(ui_page) == []
     assert not row.evaluate("(node) => node.hasAttribute('open')")
 
 
-def test_a_row_with_toggles_sends_one_event_for_a_click_or_enter_outside_its_acts(ui_page):
+def test_a_row_with_toggles_sends_one_event_for_a_click_or_key_outside_its_acts(ui_page):
     _place(ui_page, [("first", {"name": "proj-a", "time": "19:07", "rest": "Done.", "toggles": ""},
                       ["Open"], "The opened content."),
                      ("second", {"name": "proj-b", "toggles": ""}, [], None)])
     row = ui_page.locator("#first")
     head = row.locator(".head")
+    one = row.locator(".l1")
     assert _style(head, "cursor") == "pointer"
-    assert head.get_attribute("tabindex") == "0"
 
-    row.locator(".l1").click()
+    # The whole of the lines is the click area, line two as well as line one.
+    one.click()
     assert _toggles(ui_page) == [["first", None, True, True]]
     row.locator(".rest").click()
     assert len(_toggles(ui_page)) == 2
@@ -280,23 +303,28 @@ def test_a_row_with_toggles_sends_one_event_for_a_click_or_enter_outside_its_act
     row.get_by_role("link", name="Open").click()
     assert len(_toggles(ui_page)) == 2
 
-    # The keyboard: the row's lines take the focus and show a ring; Enter toggles, Space
-    # does not, and Enter on an act is the act's.
-    ui_page.evaluate("() => window.__toggles.length = 0")
-    head.focus()
+    # The keyboard: line one takes the focus and shows a ring; Enter and Space toggle,
+    # and a key on an act is the act's.
+    ui_page.evaluate("() => { window.__toggles.length = 0; window.__keys.length = 0; }")
+    one.focus()
     ui_page.keyboard.press("Tab")
     assert row.evaluate("(node) => document.activeElement.textContent") == "Open"
     ui_page.keyboard.press("Enter")
-    assert _toggles(ui_page) == []
-    ui_page.keyboard.press("Shift+Tab")
-    assert row.evaluate("(node) => node.shadowRoot.activeElement?.className") == "head"
-    assert _style(head, "outline-style") == "solid"
-    assert _style(head, "outline-width") == "2px"
     ui_page.keyboard.press("Space")
     assert _toggles(ui_page) == []
-    ui_page.keyboard.press("Enter")
+    ui_page.keyboard.press("Shift+Tab")
+    assert _focused(row) == "l1"
+    assert _style(one, "outline-style") == "solid"
+    assert _style(one, "outline-width") == "2px"
+    assert _style(one, "outline-color") == _token(ui_page, "accent")
+    ui_page.evaluate("() => window.__keys.length = 0")
+    ui_page.keyboard.press("Space")
     assert _toggles(ui_page) == [["first", None, True, True]]
-    # Tab goes on from the act to the next row's lines.
+    ui_page.keyboard.press("Enter")
+    assert len(_toggles(ui_page)) == 2
+    # Both keys are taken from the page, so Space does not scroll it.
+    assert ui_page.evaluate("() => window.__keys") == [[" ", True], ["Enter", True]]
+    # Tab goes on from the act to the next row's line one.
     ui_page.keyboard.press("Tab")
     ui_page.keyboard.press("Tab")
     ui_page.keyboard.press("Enter")
@@ -311,8 +339,106 @@ def test_a_row_with_toggles_sends_one_event_for_a_click_or_enter_outside_its_act
     before = len(_toggles(ui_page))
     row.locator("p.body").click()
     assert len(_toggles(ui_page)) == before
+    # Nor is a key pressed there.
+    row.locator("p.body").evaluate("(node) => { node.tabIndex = 0; node.focus(); }")
+    ui_page.keyboard.press("Enter")
+    ui_page.keyboard.press("Space")
+    assert len(_toggles(ui_page)) == before
     row.evaluate("(node) => node.removeAttribute('open')")
     expect(row.locator("p.body")).to_be_hidden()
+
+
+def test_line_one_of_a_row_with_toggles_is_a_button_whose_expanded_state_follows_open(ui_page):
+    _place(ui_page, [("row", {"name": "proj-a", "where": "slot 3", "fact": "cold", "time": "19:07",
+                              "rest": "Done.", "toggles": ""}, ["Open"], "The opened content.")])
+    row = ui_page.locator("#row")
+    # Line one is the stop and the button; the lines as a whole are neither.
+    assert _stop(row) == {".head": [None, None, None], ".l1": ["0", "button", "false"]}
+    button = row.get_by_role("button", name="proj-a slot 3 cold")
+    expect(button).to_have_attribute("aria-expanded", "false")
+    expect(button).to_have_class("l1")
+    # The act is outside the button, so it is still a link of its own.
+    expect(row.get_by_role("link", name="Open")).to_be_visible()
+    assert row.evaluate("(node) => node.shadowRoot.querySelector('.l1').contains("
+                        "node.shadowRoot.querySelector('slot[name=acts]'))") is False
+
+    row.evaluate("(node) => node.setAttribute('open', '')")
+    expect(button).to_have_attribute("aria-expanded", "true")
+    row.evaluate("(node) => node.removeAttribute('open')")
+    expect(button).to_have_attribute("aria-expanded", "false")
+
+    # Without `toggles` it is a line again; with it, a button again.
+    row.evaluate("(node) => { node.setAttribute('open', ''); node.removeAttribute('toggles'); }")
+    assert _stop(row) == {".head": [None, None, None], ".l1": [None, None, None]}
+    expect(row.get_by_role("button")).to_have_count(0)
+    row.evaluate("(node) => node.setAttribute('toggles', '')")
+    assert _stop(row) == {".head": [None, None, None], ".l1": ["0", "button", "true"]}
+
+
+def test_a_row_with_toggles_and_no_line_one_keeps_its_lines_as_the_stop_with_no_role(ui_page):
+    _place(ui_page, [("row", {"time": "19:07", "rest": "Done.", "toggles": ""}, ["Open"], None)])
+    row = ui_page.locator("#row")
+    head = row.locator(".head")
+    expect(row.locator(".l1")).to_be_hidden()
+    assert _stop(row) == {".head": ["0", None, None], ".l1": [None, None, None]}
+    expect(row.get_by_role("button")).to_have_count(0)
+    row.evaluate("(node) => node.setAttribute('open', '')")
+    assert _stop(row) == {".head": ["0", None, None], ".l1": [None, None, None]}
+
+    row.locator(".rest").click()
+    assert _toggles(ui_page) == [["row", None, True, True]]
+    head.focus()
+    assert _focused(row) == "head"
+    ui_page.keyboard.press("Enter")
+    ui_page.keyboard.press("Space")
+    assert len(_toggles(ui_page)) == 3
+    assert ui_page.evaluate("() => window.__keys") == [["Enter", True], [" ", True]]
+    # The ring is on the lines, on the same token.
+    ui_page.keyboard.press("Tab")
+    ui_page.keyboard.press("Shift+Tab")
+    assert _focused(row) == "head"
+    assert _style(head, "outline-style") == "solid"
+    assert _style(head, "outline-color") == _token(ui_page, "accent")
+
+    # Given a name, line one takes the stop over; without it, the lines have it back.
+    row.evaluate("(node) => node.setAttribute('name', 'proj-a')")
+    assert _stop(row) == {".head": [None, None, None], ".l1": ["0", "button", "true"]}
+    row.evaluate("(node) => node.removeAttribute('name')")
+    assert _stop(row) == {".head": ["0", None, None], ".l1": [None, None, None]}
+
+
+def test_a_click_that_ends_a_selection_of_text_does_not_toggle(ui_page):
+    _place(ui_page, [("row", {"name": "a-session-name-to-copy", "time": "19:07",
+                              "rest": "A line of text long enough to drag over.", "toggles": ""},
+                      [], None)], width=600)
+    row = ui_page.locator("#row")
+
+    def drag(part):
+        box = row.locator(part).bounding_box()
+        y = box["y"] + box["height"] / 2
+        ui_page.mouse.move(box["x"] + 2, y)
+        ui_page.mouse.down()
+        ui_page.mouse.move(box["x"] + box["width"] - 2, y, steps=5)
+        ui_page.mouse.up()
+        return ui_page.evaluate("() => String(getSelection())")
+
+    # A drag over the name selects it, and the click that ends the drag is not a toggle.
+    assert drag(".name") in "a-session-name-to-copy" and len(drag(".name")) > 5
+    assert _toggles(ui_page) == []
+    assert len(drag(".rest")) > 5
+    assert _toggles(ui_page) == []
+    # A plain click clears the selection and toggles, on line one and on line two.
+    row.locator(".name").click()
+    assert ui_page.evaluate("() => String(getSelection())") == ""
+    assert _toggles(ui_page) == [["row", None, True, True]]
+    drag(".name")
+    row.locator(".rest").click()
+    assert len(_toggles(ui_page)) == 2
+    # The keys toggle whatever is selected: a selection is the pointer's business.
+    drag(".name")
+    row.locator(".l1").focus()
+    ui_page.keyboard.press("Enter")
+    assert len(_toggles(ui_page)) == 3
 
 
 def test_a_row_without_acts_leaves_them_no_room_and_one_with_acts_alone_shows_them(ui_page):

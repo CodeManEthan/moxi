@@ -20,7 +20,7 @@ test("the row reads its ten text attributes and five flags, and no other", () =>
 });
 
 test("a row with no attribute draws no line, does not toggle and is not open", () => {
-  assert.deepEqual(plan({}), { one: [], two: [], note: null, toggles: false, open: false });
+  assert.deepEqual(plan({}), { one: [], two: [], note: null, toggles: false, open: false, stop: null });
 });
 
 test("line one is the name, where and fact, each only when set", () => {
@@ -128,9 +128,9 @@ test("the note is line three, absent when unset or empty", () => {
 
 test("an empty or blank text attribute draws nothing", () => {
   const blank = Object.fromEntries(TEXT_ATTRIBUTES.map((name) => [name, name === "said-by" ? "you" : "  "]));
-  assert.deepEqual(plan(blank), { one: [], two: [], note: null, toggles: false, open: false });
+  assert.deepEqual(plan(blank), { one: [], two: [], note: null, toggles: false, open: false, stop: null });
   const empty = Object.fromEntries(TEXT_ATTRIBUTES.map((name) => [name, ""]));
-  assert.deepEqual(plan(empty), { one: [], two: [], note: null, toggles: false, open: false });
+  assert.deepEqual(plan(empty), { one: [], two: [], note: null, toggles: false, open: false, stop: null });
 });
 
 test("text is drawn as given, not trimmed or changed", () => {
@@ -147,12 +147,32 @@ test("a row toggles only with the attribute toggles, and is open only with open"
   assert.equal(plan({ toggles: "false" }).toggles, true);
 });
 
-test("Enter alone toggles a row; no other key does", () => {
+test("the tab stop is line one on a row that toggles, the lines when it has no line one", () => {
+  for (const one of [{ name: "proj-a" }, { where: "slot 3" }, { fact: "cold" }]) {
+    assert.equal(plan({ ...one, toggles: "" }).stop, "one");
+    assert.equal(plan({ ...one, rest: "Done.", toggles: "", open: "" }).stop, "one");
+  }
+  assert.equal(plan({ rest: "Done.", toggles: "" }).stop, "lines");
+  assert.equal(plan({ note: "A note.", toggles: "" }).stop, "lines");
+  assert.equal(plan({ name: "  ", rest: "Done.", toggles: "" }).stop, "lines");
+  assert.equal(plan({ toggles: "" }).stop, "lines");
+});
+
+test("a row without toggles has no tab stop, open or not", () => {
+  assert.equal(plan({ name: "proj-a", rest: "Done." }).stop, null);
+  assert.equal(plan({ name: "proj-a", open: "" }).stop, null);
+  assert.equal(plan({ rest: "Done.", open: "" }).stop, null);
+});
+
+test("Enter or Space alone toggles a row; no other key does", () => {
   assert.equal(isToggleKey({ key: "Enter" }), true);
-  for (const key of [" ", "Spacebar", "Escape", "Tab", "ArrowDown", "e", "NumpadEnter"]) {
+  assert.equal(isToggleKey({ key: " " }), true);
+  for (const key of ["Spacebar", "Space", "Escape", "Tab", "ArrowDown", "e", "NumpadEnter"]) {
     assert.equal(isToggleKey({ key }), false, key);
   }
-  for (const held of ["altKey", "ctrlKey", "metaKey", "shiftKey", "repeat"]) {
-    assert.equal(isToggleKey({ key: "Enter", [held]: true }), false, held);
+  for (const key of ["Enter", " "]) {
+    for (const held of ["altKey", "ctrlKey", "metaKey", "shiftKey", "repeat"]) {
+      assert.equal(isToggleKey({ key, [held]: true }), false, `${key} ${held}`);
+    }
   }
 });

@@ -8,9 +8,14 @@
 // is `note`. A piece whose attribute is unset is not drawn, and neither is a line with no
 // piece. The default slot's content shows under the lines while `open` is set.
 //
-// Only a row with `toggles` can be opened by its lines: it shows a pointer, takes the
-// focus, and sends `moxi-row-toggle` for a click or Enter outside `acts`. It does not
-// open itself; the page sets `open`.
+// Only a row with `toggles` can be opened by its lines: it shows a pointer over them and
+// sends `moxi-row-toggle` for a click on them outside `acts`, and for Enter or Space while
+// its tab stop holds the focus. The tab stop is line one, as a button whose
+// `aria-expanded` follows `open`; the acts stay outside the button, so a screen reader
+// still finds them. A row with no line one keeps the lines as the stop, with no role.
+// Space is taken from the page, so it does not scroll. A click that ends a selection of
+// text does not toggle, so a name can be copied. The row does not open itself; the page
+// sets `open`.
 
 import { isToggleKey, ROW_ATTRIBUTES, rowPlan, TOGGLE_EVENT } from "./row-model.ts";
 import type { Piece } from "./row-model.ts";
@@ -25,7 +30,7 @@ const CSS = `
 .head { padding: 7px 0; }
 :host([open]) .head { padding-bottom: 0; }
 :host([toggles]) .head { cursor: pointer; }
-.head:focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
+.head:focus-visible, .l1:focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
 .l1, .l2, .l3 { display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; }
 .l1 { justify-content: flex-start; line-height: 20px; }
 .l2, .l3 { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
@@ -109,7 +114,8 @@ export function defineRow(): void {
         this.#render();
       });
       this.#head.addEventListener("click", (event) => {
-        if (this.#outsideActs(event)) this.#toggle();
+        // A click that ends a drag over text leaves the text selected, not the row toggled.
+        if (this.#outsideActs(event) && String(getSelection() ?? "") === "") this.#toggle();
       });
       this.#head.addEventListener("keydown", (event) => {
         if (!isToggleKey(event) || !this.#outsideActs(event)) return;
@@ -149,9 +155,17 @@ export function defineRow(): void {
       this.#three.hidden = plan.note === null;
       this.#head.hidden = this.#one.hidden && this.#two.hidden && this.#three.hidden;
 
-      // Only a row that toggles takes the focus.
-      if (plan.toggles) this.#head.tabIndex = 0;
+      // Only a row that toggles takes the focus: on line one, as a button, or on the
+      // lines as a whole when there is no line one.
+      if (plan.stop === "lines") this.#head.tabIndex = 0;
       else this.#head.removeAttribute("tabindex");
+      if (plan.stop === "one") {
+        this.#one.tabIndex = 0;
+        this.#one.setAttribute("role", "button");
+        this.#one.setAttribute("aria-expanded", plan.open ? "true" : "false");
+      } else {
+        for (const name of ["tabindex", "role", "aria-expanded"]) this.#one.removeAttribute(name);
+      }
     }
   }
 

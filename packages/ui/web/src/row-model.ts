@@ -10,7 +10,7 @@ export const FLAG_ATTRIBUTES = ["fact-heavy", "lead-heavy", "rest-strong", "togg
 /** Every attribute the row reads. */
 export const ROW_ATTRIBUTES: readonly string[] = [...TEXT_ATTRIBUTES, ...FLAG_ATTRIBUTES];
 
-/** The event a row with `toggles` sends for a click or Enter on its lines. */
+/** The event a row with `toggles` sends for a click, Enter or Space on its lines. */
 export const TOGGLE_EVENT = "moxi-row-toggle";
 /** The middle dot between two phrases of line two. */
 export const DOT = "·";
@@ -35,6 +35,11 @@ export interface RowPlan {
   note: string | null;
   toggles: boolean;
   open: boolean;
+  /**
+   * What takes the focus: line one, as a button, on a row with `toggles`; the lines as a
+   * whole, with no role, when such a row has no line one; nothing without `toggles`.
+   */
+  stop: "one" | "lines" | null;
 }
 
 /**
@@ -84,12 +89,14 @@ export function rowPlan(get: (name: string) => string | null): RowPlan {
     two.push(...phrase);
   });
 
-  return { one, two, note: text("note"), toggles: flag("toggles"), open: flag("open") };
+  const toggles = flag("toggles");
+  const stop = !toggles ? null : one.length > 0 ? "one" : "lines";
+  return { one, two, note: text("note"), toggles, open: flag("open"), stop };
 }
 
-/** Whether a key pressed on a row's lines toggles it: Enter alone, held with nothing. */
+/** Whether a key pressed on a row's lines toggles it: Enter or Space alone, held with nothing. */
 export function isToggleKey(event: { key: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean;
                                      shiftKey?: boolean; repeat?: boolean }): boolean {
-  return event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+  return (event.key === "Enter" || event.key === " ") && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
     && !event.repeat;
 }

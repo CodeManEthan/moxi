@@ -44,7 +44,7 @@ line, and a row with nothing set takes no room.
 | `tail` | two | Dim text after the rest. |
 | `note` | three | A dim third line. |
 | `open` | | Flag. The default slot's content shows under the lines. |
-| `toggles` | | Flag. The row's lines can be clicked and take the focus; see below. |
+| `toggles` | | Flag. The row's lines can be clicked and line one takes the focus; see below. |
 
 A flag is on when the attribute is present, whatever its value. Text is drawn as text: a
 `<` in a value is a `<` on the page.
@@ -63,10 +63,20 @@ one phrase, parted by spaces and no dot.
 ## Opening a row
 
 Only a row with `toggles` can be opened by its lines. Such a row shows a pointer over its
-lines, its lines are a tab stop with a focus ring, and a click on them or Enter while
-they hold the focus sends `moxi-row-toggle`. The event bubbles, crosses shadow roots and
-carries no detail; its target is the row. A click or a key on something in `acts`, or in
-the opened content, is not the row's and sends nothing.
+lines, and a click anywhere on them sends `moxi-row-toggle`. The event bubbles, crosses
+shadow roots and carries no detail; its target is the row. A click or a key on something
+in `acts`, or in the opened content, is not the row's and sends nothing.
+
+With the keyboard, line one is the row's tab stop, with a focus ring. It is a button
+(`role="button"`) whose `aria-expanded` follows `open`, so a screen reader says the name,
+where and fact and whether the row is open. The acts are outside the button and stay
+links and buttons of their own. Enter or Space on the stop sends `moxi-row-toggle`. The
+row takes Space from the page, so the page does not scroll. A row with `toggles` and no
+line one keeps its lines as the tab stop, with no role and no `aria-expanded`.
+
+A click that ends a selection of text does not toggle: drag over a name to copy it and
+the row stays as it is. The next plain click clears the selection and toggles. Enter and
+Space toggle whatever is selected.
 
 The row does not open itself. The page hears the event and sets or removes `open`:
 
@@ -76,7 +86,8 @@ list.addEventListener("moxi-row-toggle", (event) => {
 });
 ```
 
-A row without `toggles` sends nothing and takes no focus, with `open` set or not.
+A row without `toggles` sends nothing, takes no focus and has no role and no
+`aria-expanded`, with `open` set or not.
 
 ## Width
 

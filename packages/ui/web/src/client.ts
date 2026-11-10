@@ -223,9 +223,10 @@ export interface FormElement extends HTMLElement {
  *   `tail`. The slot `acts` is the line's right end.
  * - line three: `note`.
  * - `open`: the default slot's content shows under the lines.
- * - `toggles`: the lines show a pointer and take the focus, and a click or Enter on them
- *   outside `acts` sends `moxi-row-toggle`, which bubbles and carries no detail. The row
- *   does not open itself: the page sets `open`.
+ * - `toggles`: the lines show a pointer, and a click on them outside `acts` sends
+ *   `moxi-row-toggle`, which bubbles and carries no detail. Line one is the tab stop, a
+ *   button whose `aria-expanded` follows `open`; Enter or Space on it sends the event
+ *   too. The row does not open itself: the page sets `open`.
  */
 export interface RowElement extends HTMLElement {}
 
