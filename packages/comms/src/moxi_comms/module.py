@@ -100,6 +100,7 @@ PAGE = "moxi_comms.page:PAGE"
 #: page may place.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Comms", "contract": 1, "place": "page",
+             "group": "daily", "order": 40,
              "doc": "Who can be messaged, and who waits on whom"},
     "roster": {"script": "roster.js", "title": "Agents", "contract": 1, "place": "block",
                "home": True, "doc": "Names held by live sessions, and standing names"},

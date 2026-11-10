@@ -603,3 +603,10 @@ def test_a_job_whose_process_is_gone_reads_interrupted(lo, monkeypatch):
 def test_an_id_that_names_no_job_is_refused(lo):
     assert get("/api/job", "job=nothing-here")[0] == 422
     assert get("/api/job", "job=..%2Fx")[0] == 422
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_loadout import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("setup", 10)

@@ -27,8 +27,16 @@ export interface ComponentInfo {
     doc: string;
     contract: number;
     place: "page" | "block" | "inline";
-    /** Whether the shell's home view may place it. */
+    /** Whether the shell's own views may place it. */
     home: boolean;
+    /** Where Home places a `home` block: its one main spot or a row under it. Null for a
+     * block of the modules view and for a component that is no home block. */
+    home_as: "main" | "row" | null;
+    /** A page's group in the band of pages; null on a component that is no page. */
+    group: "daily" | "setup" | null;
+    /** From 0 to 999, lower first: a page's place in its group, a main piece's rank or a
+     * row's place among rows. Null on any other component. */
+    order: number | null;
     attributes: AttributeInfo[];
 }
 /** An answer from `api`. `status` is 0 when no answer came (a network failure). `data`
@@ -75,6 +83,8 @@ export interface FieldEntry {
     named_by?: string[];
     /** When a change applies. */
     mark?: string;
+    /** The shell refuses a write to the entry for this run: it is shown off. */
+    locked?: boolean;
 }
 /**
  * One field of `<moxi-ui-form>`, in `moxi.config.Key`'s shape: the settings view gives it
@@ -116,6 +126,8 @@ export interface FieldDescriptor {
      * listed; `reason` then says why. */
     declarations?: string | null;
     reason?: string | null;
+    /** The shell refuses a write to the key for this run: it is shown off, still readable. */
+    locked?: boolean;
     /** A catalog row: may be given more than once (a list control). */
     repeatable?: boolean;
     /** A catalog row: a switch plus an optional value. */
@@ -238,7 +250,8 @@ export declare function place(host: Element, module: string, name: string, attrs
 /** Shows `module`'s panel at `route` (relative to `/m/<module>/`) in the shell's one
  * document, with a new history entry. */
 export declare function navigate(module: string, route?: string): void;
-/** Sets the shell document's theme mode until it is next loaded, when the shell sets it
- * from the `ui` setting `theme.mode`. For the settings view, after it writes that
- * setting. */
-export declare function setTheme(mode: ThemeMode): void;
+/** Sets the shell document's theme mode and, when `name` is given, its theme, until the
+ * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
+ * and `theme.palette`. A name theme.css has no block for shows the default theme. For the
+ * settings view, after it writes either setting. */
+export declare function setTheme(mode: ThemeMode, name?: string): void;

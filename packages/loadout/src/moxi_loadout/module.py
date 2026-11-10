@@ -47,6 +47,7 @@ PAGE = "moxi_loadout.page:PAGE"
 #: linking to the page.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Loadout", "contract": 1, "place": "page",
+             "group": "setup", "order": 10,
              "doc": "Your items for each harness, their states, the global file and installs"},
     "drift": {"script": "drift.js", "title": "Loadout drift", "contract": 1, "place": "block",
               "home": True, "doc": "How many of your items aren't ok, linking to the page"},

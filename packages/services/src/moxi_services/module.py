@@ -47,6 +47,7 @@ PAGE = "moxi_services.page:PAGE"
 #: and off, linking to the page.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Services", "contract": 1, "place": "page",
+             "group": "setup", "order": 30,
              "doc": "Every daemon and timer on the machine, grouped by project, with "
                     "its verdict, the acts on it, and add"},
     "summary": {"script": "summary.js", "title": "Services", "contract": 1,

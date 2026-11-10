@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { changeOf, check, heldOf, itemChange, plans, problem, resetOf, submitted } from "../src/form-model.ts";
+import { LOCKED, changeOf, check, heldOf, itemChange, plans, problem, resetOf, submitted } from "../src/form-model.ts";
 
 const all = () => true;
 
@@ -84,6 +84,52 @@ test("a switch table whose declarations are unavailable gives the file's entries
   }], all);
   assert.deepEqual(plan.control.toggles.map((t) => t.key), ["rows.alpha"]);
   assert.equal(plan.control.unavailable, reason);
+});
+
+test("a locked key is shown off with the one line, its value still there", () => {
+  const [plan, other] = plans([
+    { name: "port", type: "int", default: "8460", value: "8470", source: "file", mark: "applies at next start", locked: true },
+    { name: "idle_s", type: "int", default: "900", value: "60", source: "file", locked: false },
+  ], all);
+  assert.equal(LOCKED, "Locked for this run of the shell.");
+  assert.equal(plan.off, LOCKED);
+  // The element turns the control and Reset off for a field that is off.
+  assert.equal(plan.resettable, true);
+  assert.deepEqual(plan.control, { kind: "number", step: "1", text: "8470" });
+  assert.deepEqual(plan.notes, ["applies at next start", "set in the settings file; the default is 8460"]);
+  assert.equal(other.off, null);
+  // Locked comes before a missing module, and nothing of it is submitted.
+  const fields = [{ name: "hold", type: "bool", needs: "cache", needs_absent: true, locked: true,
+                    note: "works only with the cache module, which is not installed" }];
+  assert.equal(plans(fields, all)[0].off, LOCKED);
+  assert.deepEqual(submitted(fields, new Map(), all).values, {});
+});
+
+test("a locked entry's toggle is off, and the others of its table are not", () => {
+  const table = {
+    name: "rows", type: "table", switch_table: true, source: "file", locked: false,
+    entries: [
+      { name: "alpha", key: "rows.alpha", value: true, source: "file", mark: "applies now", locked: true },
+      { name: "beta", key: "rows.beta", value: false, source: "file", mark: "applies now", locked: false },
+    ],
+  };
+  const [plan] = plans([table], all);
+  assert.equal(plan.off, null);
+  assert.deepEqual(plan.control.toggles.map((t) => [t.key, t.off, t.checked, t.resettable]), [
+    ["rows.alpha", LOCKED, true, true], ["rows.beta", null, false, true]]);
+  assert.deepEqual(submitted([table], new Map(), all).values, { "rows.beta": "false" });
+  // A table marked locked for the entry it holds keeps its other entries open.
+  const holds = { ...table, locked: true };
+  assert.equal(plans([holds], all)[0].off, null);
+  assert.deepEqual(plans([holds], all)[0].control.toggles.map((t) => t.off), [LOCKED, null]);
+  assert.deepEqual(submitted([holds], new Map(), all).values, { "rows.beta": "false" });
+  // A table that is no switch table is one control over the whole table: off.
+  const box = { name: "extra", type: "table", value: "{a = 1}", source: "file", locked: true };
+  assert.equal(plans([box], all)[0].off, LOCKED);
+  // A locked table is off as a whole.
+  const whole = { ...table, locked: true, entries: table.entries.map((entry) => ({ ...entry, locked: true })) };
+  assert.equal(plans([whole], all)[0].off, LOCKED);
+  assert.deepEqual(submitted([whole], new Map(), all).values, {});
 });
 
 test("a table without switch_table is the TOML text box", () => {

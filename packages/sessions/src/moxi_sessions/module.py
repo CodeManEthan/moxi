@@ -51,6 +51,7 @@ PAGE = "moxi_sessions.page:PAGE"
 #: the harness and id), and the window block, the same view placed by attributes.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Sessions", "contract": 1, "place": "page",
+             "group": "daily", "order": 20,
              "doc": "One session's last turns and its subagents, by harness and session id"},
     "window": {"script": "window.js", "title": "Session", "contract": 1, "place": "block",
                "doc": "One session's last turns, with a link that opens it in the sessions "

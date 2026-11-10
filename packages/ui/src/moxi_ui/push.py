@@ -94,7 +94,7 @@ BUSY_RETRY = 5
 STATE_EVENT = "moxi.state"
 #: The shell's own topics, under the module name `ui`.
 OWN_MODULE = "ui"
-OWN_TOPICS = frozenset({"servers", "modules"})
+OWN_TOPICS = frozenset({"servers", "modules", "checks"})
 #: Fields of a `/servers` row left out of `ui.servers`, since they change every second.
 _VOLATILE = frozenset({"uptime_s", "failed_for_s", "sample", "open"})
 
@@ -181,16 +181,18 @@ def gateway_topics(mounts: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[st
 
 def own_shapes() -> dict[str, dict[str, Any]]:
     """The shapes of the shell's own topics (export data): `ui.servers`, its rows without
-    the volatile fields, and `ui.modules`, the modules view."""
+    the volatile fields, `ui.modules`, the modules view, and `ui.checks`, the kept doctor
+    run."""
     from moxi_ui.loopback.api import Out
 
-    from .page import MODULES_SHAPE, SERVER_ROW
+    from .page import CHECKS_SHAPE, MODULES_SHAPE, SERVER_ROW
 
     assert isinstance(SERVER_ROW.items, Mapping)
     row = Out("table", items={key: value for key, value in SERVER_ROW.items.items()
                               if key not in _VOLATILE})
     return {"servers": out_data(Out("table", items={"servers": Out("list", items=row)})),
-            "modules": out_data(Out("table", items=dict(MODULES_SHAPE)))}
+            "modules": out_data(Out("table", items=dict(MODULES_SHAPE))),
+            "checks": out_data(Out("table", items=dict(CHECKS_SHAPE)))}
 
 
 def _frame(name: str, data: bytes) -> bytes:
@@ -485,7 +487,7 @@ class Push:
                     self._upstream_for(module).changed()
 
     def publish(self, topic: str, value: Any) -> None:
-        """Set the shell's own topic `ui.<topic>` (`servers` or `modules`) to `value`,
+        """Set the shell's own topic `ui.<topic>` (one of `OWN_TOPICS`) to `value`,
         a JSON-able value, and send it to every stream that asked for it."""
         if topic not in OWN_TOPICS:
             raise KeyError(topic)

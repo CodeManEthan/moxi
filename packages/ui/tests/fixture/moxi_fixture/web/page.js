@@ -85,7 +85,7 @@ class FixturePage extends HTMLElement {
       this.status.textContent = `summary: ${answer.status}`;
       if (answer.data) this.summary.textContent = `Summary: ${answer.data.count} ${answer.data.note}`;
     });
-    button(row, "Modules", () => navigate("ui"));
+    button(row, "Modules", () => navigate("ui", "modules"));
     const tags = document.createElement("div");
     tags.className = "row";
     root.append(tags);

@@ -10,6 +10,8 @@ with the reason, and the TCP tests show what the phone gets instead: the desk po
 
 from __future__ import annotations
 
+import json
+import re
 import socket
 import threading
 import time
@@ -19,8 +21,10 @@ import pytest
 from playwright.sync_api import expect
 
 import phone_kit
+from moxi_ui.checks import CHECKS_FILE
 from moxi_ui.loopback.api import response_headers
 from moxi_ui.testing.phone import HOST, ORIGIN, PhoneBridge, set_gateway
+from moxi_ui.testing.shell import TestShell
 from squatter import Squatter
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
@@ -314,10 +318,28 @@ def _engine(ui_browser) -> str:
     return ui_browser.browser_type.name
 
 
+#: The doctor run the gateway shell kept: one failing check, one warning, one that
+#: passes. Their details and fixes hold what the phone must not get.
+KEPT_ROWS = [
+    {"module": "ui", "name": "shell", "state": "ok", "detail": "The shell answers", "fix": None},
+    {"module": "projects", "name": "roots", "state": "warn",
+     "detail": "The project proj-a points at /srv/proj-a, which doesn't exist",
+     "fix": "moxi projects set proj-a --root DIR"},
+    {"module": "turns", "name": "guard", "state": "fail",
+     "detail": "A guard could not check a call", "fix": "moxi config set turns guard.strict false"},
+]
+
+
 @pytest.fixture(scope="module")
 def gw(tmp_path_factory, fixture_site):
-    """A gateway-mode shell holding its TCP endpoint, and the bridge to it."""
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    """A gateway-mode shell holding its TCP endpoint, and the bridge to it. It kept a
+    doctor run (`KEPT_ROWS`) and runs none."""
+    home = tmp_path_factory.mktemp("gw")
+    state = TestShell(home, gateway=True).state_dir("ui")
+    state.mkdir(parents=True, exist_ok=True)
+    (state / CHECKS_FILE).write_text(json.dumps({
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rows": KEPT_ROWS, "error": None}))
+    shell = phone_kit.gateway_shell(home, fixture_site)
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     try:
         yield shell, bridge
@@ -461,6 +483,55 @@ def test_the_fixture_panel_hides_its_desk_only_acts_and_fits_360_px(gw, phones,
     expect(panel.get_by_role("button", name="Phone add")).to_be_visible()
     expect(panel.get_by_role("button", name="Confirmed add")).to_have_count(0)
     expect(panel.get_by_role("button", name="Add one")).to_have_count(0)
+
+
+def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_only_line(
+        gw, phones, ui_width_check):
+    shell, bridge = gw
+    page = _pair(phones(bridge), shell)
+    page.set_viewport_size({"width": 360, "height": 740})
+    home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
+    row = home.get_by_role("button", name=re.compile("Health"))
+    # The counts alone: the worst check's sentence can hold a path.
+    expect(row.locator(".fact")).to_have_text("1 check failing, 1 warning")
+    expect(row.locator(".time")).to_have_text(re.compile(r"^checked \d\d?:\d\d"))
+    # No spot and no sentence: the rows start under the shell's line, which says the
+    # phone only reads and sits first under the top line.
+    expect(home.locator(".spot")).to_have_count(0)
+    expect(home.get_by_text("Nothing needs you.")).to_have_count(0)
+    reads = page.locator("#moxi-reads")
+    expect(reads).to_have_text("This phone reads only here.")
+    expect(home).not_to_contain_text("This phone reads only")
+    top, line = page.locator(".moxi-top").bounding_box(), reads.bounding_box()
+    rows = home.locator(".rows").bounding_box()
+    assert top["y"] + top["height"] <= line["y"] and line["y"] + line["height"] <= rows["y"] < 100
+    assert line["x"] + 18 == rows["x"] + 2, "the line starts where the rows' labels do"
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    row.click()
+    health = home.locator("moxi-ui-health")
+    checks = health.locator(".check")
+    expect(checks).to_have_text([re.compile(r"^\s*turns · guard\s*failing\s*$"),
+                                 re.compile(r"^\s*projects · roots\s*warning\s*$")])
+    for row_ in KEPT_ROWS:
+        expect(home).not_to_contain_text(row_["detail"])
+        if row_["fix"]:
+            expect(home).not_to_contain_text(row_["fix"])
+    expect(health.locator(".foot")).to_contain_text("Every other check passes")
+    expect(health.get_by_role("link", name="All checks on Modules")).to_be_visible()
+    expect(health.get_by_role("button")).to_have_count(0)
+    ui_width_check(page)
+    # A fixture row that reports shows here as at the desk.
+    expect(home.locator("moxi-fixture-row-one")).to_be_attached()
+    page.evaluate("""() => window.dispatchEvent(new CustomEvent("moxi-fixture-row", {detail: {
+      row: "row-one", report: {parts: [{text: "2 running"}], time: "read 19:08"}}}))""")
+    expect(home.locator(".entry[data-row='fixture.row-one'] .fact")).to_have_text("2 running")
+    ui_width_check(page)
+    # The line stays on every page the phone opens.
+    page.locator("#moxi-pages-button").click()
+    page.locator("#moxi-pages a[data-module=fixture]").click()
+    expect(page.locator("#moxi-panel > moxi-fixture-page")).to_be_attached()
+    expect(reads).to_be_visible()
+    assert reads.bounding_box() == line
 
 
 def test_code_holding_a_real_session_gets_a_404_on_every_act_path(gw, phones):

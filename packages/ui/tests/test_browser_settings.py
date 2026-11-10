@@ -1,7 +1,7 @@
 """The settings view and `<moxi-ui-form>` in a browser: every type, the save path through
 `moxi config` (a saved int, a switch-table entry, a refused value, a typing slip, a
-reset), a file that won't parse, the theme mode picking a colour set, and the form in
-submit mode with catalog rows."""
+reset), a file that won't parse, the theme mode and the theme name picking a colour set,
+a key the shell was started with locked, and the form in submit mode with catalog rows."""
 
 from __future__ import annotations
 
@@ -195,17 +195,17 @@ def test_the_core_has_its_own_section(ui_page):
         expect(ui_page.locator(f"moxi-ui-page section.card[data-module={module}]")).to_be_attached()
 
 
-def _set_background(mode: str) -> str:
-    """The `bg` token of the colour set `mode` shows, as the browser computes it."""
+def _set_background(mode: str, theme: str = "plain") -> str:
+    """The `bg` token of the colour set `theme` shows in `mode`, as the browser computes it."""
     tokens = json.loads(TOKENS.read_text())
-    name = next(name for name, entry in tokens["$sets"].items() if entry["mode"] == mode)
+    name = tokens["$themes"][theme][mode]
     value = tokens["bg"]["$extensions"]["moxi"]["sets"][name]
     return "rgb({}, {}, {})".format(*(int(value[i:i + 2], 16) for i in (1, 3, 5)))
 
 
 def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
     light, dark = _set_background("light"), _set_background("dark")
-    assert (light, dark) == ("rgb(246, 244, 241)", "rgb(10, 9, 24)")
+    assert (light, dark) == ("rgb(250, 250, 248)", "rgb(21, 21, 21)")
     page = ui_contexts(color_scheme="light").pages[0]
     html = page.locator("html")
     form = _settings(page, "ui")
@@ -248,6 +248,135 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui
         status, _ = ui_shell.session().post("/m/ui/api/settings/unset",
                                             {"module": "ui", "key": "theme.mode"})
         assert status == 200
+
+
+def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root(ui_shell, ui_contexts):
+    plain = {mode: _set_background(mode) for mode in ("light", "dark")}
+    neon = {mode: _set_background(mode, "midnight-neon") for mode in ("light", "dark")}
+    assert neon == {"light": "rgb(246, 244, 241)", "dark": "rgb(10, 9, 24)"}
+    page = ui_contexts(color_scheme="light").pages[0]
+    html = page.locator("html")
+    form = _settings(page, "ui")
+    name = form.locator("select[data-control='theme.palette']")
+    expect(name.locator("option")).to_have_text(["plain", "midnight-neon"])
+    expect(name).to_have_value("plain")
+
+    def shows(colour: str) -> None:
+        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        # The select sits in <moxi-ui-form>'s shadow root, on --moxi-bg.
+        expect(name).to_have_css("background-color", colour)
+
+    try:
+        expect(html).to_have_attribute("data-theme-name", "plain")
+        shows(plain["light"])
+        # The other theme shows at once, in the browser's scheme, both ways.
+        name.select_option("midnight-neon")
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon", timeout=SETTINGS_MS)
+        shows(neon["light"])
+        page.emulate_media(color_scheme="dark")
+        shows(neon["dark"])
+        assert _file(ui_shell, "ui")["theme"] == {"palette": "midnight-neon"}
+        # It stays after a reload, and under a fixed mode.
+        page.reload()
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+        form = _settings(page, "ui")
+        name = form.locator("select[data-control='theme.palette']")
+        shows(neon["dark"])
+        form.locator("select[data-control='theme.mode']").select_option("light")
+        expect(html).to_have_attribute("data-theme", "light", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+        shows(neon["light"])
+        # Back to the default theme, the mode kept.
+        name.select_option("plain")
+        expect(html).to_have_attribute("data-theme-name", "plain", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme", "light")
+        shows(plain["light"])
+    finally:
+        for key in ("theme.palette", "theme.mode"):
+            status, _ = ui_shell.session().post("/m/ui/api/settings/unset", {"module": "ui", "key": key})
+            assert status == 200
+
+
+FORCED = """async (sent) => {
+  const headers = {"Content-Type": "application/json", Accept: "application/json",
+                   "X-Moxi-Key": localStorage.getItem("moxi-ui-key")};
+  const out = [];
+  for (const [what, body] of sent) {
+    const answer = await fetch("/m/ui/api/settings/" + what, {
+      method: "POST", headers, body: JSON.stringify(body), credentials: "same-origin"});
+    out.push([answer.status, await answer.json()]);
+  }
+  return out;
+}"""
+
+
+def test_a_locked_key_is_read_only_and_a_post_sent_past_the_view_is_refused(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site],
+                      env={"MOXI_UI_LOCKED_SETTINGS": "fixture.limit, fixture.rows.backup"})
+    # The lock is on the shell's routes: the command typed at a keyboard still writes.
+    assert shell.moxi("config", "set", "fixture", "limit", "7").returncode == 0
+    assert shell.moxi("config", "set", "fixture", "rows.spare", "false").returncode == 0
+    page = ui_contexts(shell).pages[0]
+    writes: list[str] = []
+    page.on("request", lambda r: writes.append(r.url) if WRITES.search(r.url) else None)
+    form = _settings(page)
+    line = "Locked for this run of the shell."
+    limit = _field(form, "limit")
+    box = form.locator("input[data-control=limit]")
+    expect(limit).to_have_class(re.compile(r"\boff\b"))
+    expect(box).to_be_disabled()
+    expect(box).to_have_value("7")
+    expect(limit.get_by_role("button", name="Reset to default")).to_be_disabled()
+    expect(limit.locator(".off-line")).to_have_text(line)
+    # A locked entry of a switch table: its toggle is off, with the same line.
+    entry = form.locator(".toggle", has=page.locator("[data-control='rows.backup']"))
+    expect(entry.get_by_role("checkbox")).to_be_disabled()
+    expect(entry.locator(".off-line")).to_have_text(line)
+    expect(form.locator(".off-line", has_text=line)).to_have_count(2)
+    # The table that holds it is not off: the entry beside the locked one is written.
+    expect(_field(form, "rows")).not_to_have_class(re.compile(r"\boff\b"))
+    spare = form.locator("input[type=checkbox][data-control='rows.spare']")
+    expect(spare).to_be_enabled()
+    spare.check()
+    expect(_msg(form, "rows.spare")).not_to_be_empty(timeout=SETTINGS_MS)
+    held = {"limit": 7, "rows": {"spare": True}}
+    assert _file(shell) == held
+    form = _settings(page)
+    # A neighbouring field saves.
+    workers = form.locator("input[data-control=workers]")
+    expect(workers).to_be_editable()
+    workers.fill("3")
+    workers.press("Tab")
+    expect(_msg(form, "workers")).to_contain_text("workers", timeout=SETTINGS_MS)
+    held["workers"] = 3
+    assert _file(shell) == held
+    assert len(writes) == 2
+    # Sent from the page's own context, with the session's cookie and key.
+    refused = {"refused": "fixture limit is locked for this run of the shell, so it can't "
+                          "be changed from a page"}
+    answers = page.evaluate(FORCED, [
+        ["set", {"module": "fixture", "key": "limit", "value": "12"}],
+        ["unset", {"module": "fixture", "key": "limit"}],
+        ["set", {"module": "fixture", "key": "rows.backup", "value": "true"}],
+        # The table's own key: a write to it would replace the locked entry.
+        ["set", {"module": "fixture", "key": "rows", "value": "{backup = true}"}],
+        ["set", {"module": "fixture", "key": "rows", "add": "backup"}],
+        ["set", {"module": "fixture", "key": "rows", "remove": "backup"}],
+        ["unset", {"module": "fixture", "key": "rows"}]])
+    assert answers[:2] == [[422, refused], [422, refused]]
+    assert answers[2][0] == 422 and "fixture rows.backup is locked" in answers[2][1]["refused"]
+    assert answers[3:] == [[422, {"refused": refused["refused"].replace("limit", "rows")}]] * 4
+    assert _file(shell) == held
+    status, data = shell.session().get("/m/ui/api/settings?module=fixture")
+    keys = {key["name"]: key for key in data["sections"][0]["keys"]}
+    assert status == 200 and keys["limit"]["value"] == "7" and keys["limit"]["locked"]
+    assert {key["name"] for key in keys.values() if key["locked"]} == {"limit", "rows"}
+    assert {entry["key"]: entry["locked"] for entry in keys["rows"]["entries"]} == {
+        "rows.backup": True, "rows.spare": False}
+    form = _settings(page)
+    expect(form.locator("input[data-control=limit]")).to_have_value("7")
+    expect(form.locator("input[data-control=limit]")).to_be_disabled()
 
 
 CATALOG = [

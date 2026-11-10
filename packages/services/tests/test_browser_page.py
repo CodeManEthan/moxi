@@ -120,8 +120,8 @@ def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
     expect(check.locator.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
 
 
-def test_the_link_on_the_home_opens_the_page_which_it_then_marks(seeded, ui_page):
-    ui_page.goto("/m/ui/")
+def test_the_blocks_link_on_the_modules_view_opens_the_page_which_it_then_marks(seeded, ui_page):
+    ui_page.goto("/m/ui/modules")
     link = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-services-summary h2 a")
     expect(link).to_have_text("Services")
     link.click()

@@ -36,6 +36,7 @@ PAGE = "moxi_projects.page:PAGE"
 #: a `moxi-change` with the key only (never the root), a project's card, and the add form.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Projects", "contract": 1, "place": "page",
+             "group": "daily", "order": 60,
              "doc": "Your projects: each one's key, root, kind and agents, and add"},
     "picker": {"script": "picker.js", "title": "Project picker", "contract": 1,
                "place": "inline",

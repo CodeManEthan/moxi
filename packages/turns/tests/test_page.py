@@ -689,3 +689,10 @@ def test_nothing_in_turns_imports_moxi_ui():
     for path in src.rglob("*.py"):
         text = path.read_text()
         assert "import moxi_ui" not in text and "from moxi_ui" not in text, path
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_turns import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("daily", 25)

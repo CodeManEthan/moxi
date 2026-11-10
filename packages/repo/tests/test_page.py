@@ -316,3 +316,10 @@ def test_a_spec_that_has_never_run_but_is_saved_shows_no_pass(demo):
     [snap] = listed["specs"]
     assert (snap["status"], snap["time"], snap["last_commit"], snap["remote"]) == (
         None, None, None, None)
+
+
+def test_the_page_states_its_group_and_order_among_the_pages():
+    from moxi_repo import module
+
+    page_decl = module.COMPONENTS["page"]
+    assert (page_decl["group"], page_decl["order"]) == ("setup", 20)

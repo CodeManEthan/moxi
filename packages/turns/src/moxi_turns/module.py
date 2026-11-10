@@ -53,6 +53,7 @@ PAGE = "moxi_turns.page:PAGE"
 #: What turns offers the browser UI shell: its panel, and no other component.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Live sessions", "contract": 1, "place": "page",
+             "group": "daily", "order": 25,
              "doc": "Every running session turns can reach: its turn, its agents and its "
                     "trouble, read-only"},
 }

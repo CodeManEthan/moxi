@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from moxi.paths import Layout
 from moxi_ui.loopback.api import app, export, guard, prove
-from moxi_ui import document, page
+from moxi_ui import config, document, page
 from moxi_ui.router import Router, shell_profile, shell_table, worker_layer
 from shell_kit import FETCH, NAVIGATE, SERVER_ID, TOKEN, Harness, _drive, scope
 
@@ -34,54 +34,119 @@ def _built(name: str) -> str:
 # --- the theme --------------------------------------------------------------------------
 
 
-def test_tokens_become_theme_css_39_tokens_each_colour_the_light_and_dark_sets_pair():
+def _block(css: str, selector: str) -> dict[str, str]:
+    """The `--moxi-` properties of the one block of `css` under `selector`."""
+    (block,) = re.findall(r"^" + re.escape(selector) + r" \{\n(.*?)^\}", css, re.M | re.S)
+    return dict(re.findall(r"^  --moxi-([a-z0-9-]+): (.*);$", block, re.M))
+
+
+def test_tokens_become_theme_css_41_tokens_on_the_root_and_a_block_per_other_theme():
     names = [name for name in TOKENS if not name.startswith("$")]
-    assert len(names) == 39
-    mode = {TOKENS["$sets"][name]["mode"]: name for name in TOKENS["$sets"]}
-    assert mode == {"light": "calm-workbench", "dark": "midnight-neon"}
+    assert len(names) == 41
+    themes = TOKENS["$themes"]
+    assert themes == {"plain": {"light": "plain-day", "dark": "plain-night"},
+                      "midnight-neon": {"light": "calm-workbench", "dark": "midnight-neon"}}
+    assert list(themes) == ["plain", "midnight-neon"], "the first theme is the default"
+    assert {name: entry["mode"] for name, entry in TOKENS["$sets"].items()} == {
+        "plain-day": "light", "plain-night": "dark",
+        "calm-workbench": "light", "midnight-neon": "dark"}
     css = _built("theme.css")
-    props = dict(re.findall(r"^  --moxi-([a-z0-9-]+): (.*);$", css, re.M))
-    assert sorted(props) == sorted(names)
     colours = [name for name in names if TOKENS[name]["$type"] == "color"]
-    assert len(colours) == 32
-    for name in colours:
+    assert len(colours) == 34
+
+    def pair(name: str, theme: str) -> str:
         values = TOKENS[name]["$extensions"]["moxi"]["sets"]
-        assert props[name] == f"light-dark({values[mode['light']]}, {values[mode['dark']]})"
+        return f"light-dark({values[themes[theme]['light']]}, {values[themes[theme]['dark']]})"
+
+    # The default theme, and every token that is no colour, on the root.
+    props = _block(css, ":root")
+    assert sorted(props) == sorted(names)
+    for name in colours:
+        assert props[name] == pair(name, "plain")
     for name in set(names) - set(colours):
         assert "light-dark" not in props[name]
+    # Each other theme's colours where the root names it; the default has no block.
+    assert re.findall(r'^:root\[data-theme-name="([^"]*)"\] \{$', css, re.M) == ["midnight-neon"]
+    other = _block(css, ':root[data-theme-name="midnight-neon"]')
+    assert sorted(other) == sorted(colours)
+    for name in colours:
+        assert other[name] == pair(name, "midnight-neon")
     assert ":root {\n  color-scheme: light dark;" in css
     assert ':root[data-theme="light"] { color-scheme: light; }' in css
     assert ':root[data-theme="dark"] { color-scheme: dark; }' in css
+    header = css[:css.index("*/")]
+    assert "The default theme, plain: light plain-day, dark plain-night." in header
+    assert "midnight-neon: light calm-workbench, dark midnight-neon." in header
+
+
+def test_the_theme_palettes_the_setting_takes_are_the_themes_tokens_json_names():
+    assert list(config.THEME_PALETTES) == list(TOKENS["$themes"])
+    key = config.schema().keys["theme.palette"]
+    assert tuple(key.values) == config.THEME_PALETTES and key.default == config.THEME_PALETTES[0]
+
+
+def test_the_theme_palette_falls_back_to_the_default():
+    assert config.theme_palette() == "plain"
+    path = Layout("ui").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[theme]\npalette = "midnight-neon"\n')
+    assert config.theme_palette() == "midnight-neon" and config.theme_mode() == "system"
+    path.write_text("this is not toml = = =\n")
+    assert config.theme_palette() == "plain"
+    assert config.theme_palette({"theme.palette": "sepia"}) == "plain"
+    assert config.theme_palette({"theme.palette": "midnight-neon"}) == "midnight-neon"
 
 
 # --- the document -----------------------------------------------------------------------
 
 
 def test_the_document_loads_the_theme_and_the_client_and_holds_no_inline_code():
-    status, headers, body = document.answer("dark")
+    status, headers, body = document.answer("dark", "midnight-neon")
     names = {k: v for k, v in headers}
     assert status == 200 and names[b"content-type"].startswith(b"text/html")
     assert names[b"cache-control"] == b"no-store"
     text = body.decode()
-    assert '<html lang="en" data-theme="dark">' in text
+    assert '<html lang="en" data-theme="dark" data-theme-name="midnight-neon">' in text
+    assert text.count("<html") == 1
     assert '<link rel="stylesheet" href="/m/ui/theme.css">' in text
     assert '<script type="module" src="/m/ui/client.js"></script>' in text
-    assert 'id="moxi-shell"' in text and 'id="moxi-panel"' in text and 'id="moxi-menu-button"' in text
+    assert 'id="moxi-shell"' in text and 'id="moxi-panel"' in text and 'id="moxi-pages-button"' in text
+    # The top line: Moxi, the page's name, Settings; the band of pages starts closed.
+    assert '<nav id="moxi-pages" class="moxi-pages" aria-label="Pages" hidden></nav>' in text
+    assert 'id="moxi-reads" class="moxi-reads" hidden' in text
+    assert 'id="moxi-settings"' in text and "moxi-menu" not in text and "<h1" not in text
     # The page's policy allows scripts and styles from the origin only.
     assert re.search(r"<script(?![^>]*\bsrc=)", text) is None
     assert "<style" not in text and "style=" not in text
 
 
-def test_the_document_takes_its_mode_from_the_setting():
-    assert b'data-theme="system"' in document.answer()[2]
+def test_the_document_takes_its_mode_and_its_theme_from_the_settings():
+    assert b'<html lang="en" data-theme="system" data-theme-name="plain">' in document.answer()[2]
     path = Layout("ui").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[theme]\nmode = "light"\n')
-    assert b'data-theme="light"' in document.answer()[2]
+    assert b'<html lang="en" data-theme="light" data-theme-name="plain">' in document.answer()[2]
+    path.write_text('[theme]\nmode = "dark"\npalette = "midnight-neon"\n')
+    assert (b'<html lang="en" data-theme="dark" data-theme-name="midnight-neon">'
+            in document.answer()[2])
+    path.write_text('[theme]\npalette = "midnight-neon"\n')
+    assert (b'<html lang="en" data-theme="system" data-theme-name="midnight-neon">'
+            in document.answer()[2])
     path.write_text("this is not toml = = =\n")
-    assert b'data-theme="system"' in document.answer()[2]
+    assert b'<html lang="en" data-theme="system" data-theme-name="plain">' in document.answer()[2]
     with pytest.raises(ValueError):
-        document.body("sepia")
+        document.body("sepia", "plain")
+    with pytest.raises(ValueError):
+        document.body("dark", "sepia")
+    with pytest.raises(ValueError):
+        document.body("dark", 'plain" onload="x')
+
+
+def test_the_pages_shown_before_sign_in_name_no_mode_and_no_theme():
+    for name in ("pair.html", "signin.html", "offline.html"):
+        text = _built(name)
+        assert '<html lang="en">' in text, name
+        assert "data-theme" not in text, name
 
 
 def test_a_navigation_with_a_cookie_gets_the_document(tmp_path):
@@ -143,7 +208,7 @@ def test_the_shells_own_components_are_placed_from_its_build():
     placed, refused = check_components("ui", module.COMPONENTS, page=True, assets=assets)
     assert refused == []
     assert {item["name"]: item["element"] for item in placed} == {
-        "page": "moxi-ui-page", "servers": "moxi-ui-servers"}
+        "page": "moxi-ui-page", "servers": "moxi-ui-servers", "health": "moxi-ui-health"}
     for item in placed:
         text = _built(item["script"])
         # Each imports only the shared client, by its absolute URL, and defines its

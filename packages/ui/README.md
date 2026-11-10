@@ -43,8 +43,29 @@ every logon. While the gateway is on, the shell also starts at login. The shell 
 each module's page server on the first request for its page.
 
 **Settings** (`moxi config ui`): `port` (8460), `idle_s` (900), `theme.mode` (`system`,
-`light` or `dark`), and the gateway's `gateway.enabled` (off) and `gateway.port` (8461).
+`light` or `dark`), `theme.palette` (`plain` or `midnight-neon`), and the gateway's
+`gateway.enabled` (off) and `gateway.port` (8461).
 A change to `port` takes effect once `moxi install ui` rewrites the unit.
+
+**Environment.** ui reads one variable of its own, `MOXI_UI_LOCKED_SETTINGS`, from the
+shell's environment: the settings its pages may not change for that run. Its value is a
+list of full keys, `<module>.<key>` (`ui.gateway.port`, `moxi.<key>` for the core's),
+separated by commas or spaces. An entry locks the key it names and every key under it, so
+`ui.gateway` locks both gateway keys and a module's name alone locks all of its settings.
+A key above a locked one is refused too, since writing a table would replace the entry it
+holds; the other entries of that table can still be changed.
+The settings view shows a locked field read-only with `Locked for this run of the shell.`,
+and the shell answers a write to one with a 422 before any command runs. Unset or empty,
+it locks nothing. It guards the shell's pages only: `moxi config set` in a terminal and an
+edit of the file still change the key, and the variable holds no value for it.
+
+## A module on Home
+
+Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A
+module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
+and an `order`; a row component reports its line with a `moxi-home-row` event and Home
+draws it. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
+has the fields, how rows are ordered and opened, and the `needs` and `order` scales.
 
 ## Confirmed acts in a page
 

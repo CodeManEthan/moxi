@@ -1,5 +1,66 @@
 # Changelog
 
+## Unreleased
+
+- New environment variable `MOXI_UI_LOCKED_SETTINGS`: a list of full setting keys
+  (`<module>.<key>`, separated by commas or spaces) that the shell's pages may not change
+  for that run. An entry locks its key and every key under it, and a write to a key
+  above it (the table that holds a locked entry) is refused as well. The settings routes answer
+  a write to one with a 422, the settings read marks each key and switch-table entry with
+  `locked`, and the form shows a locked field off with one line. Unset or empty, nothing
+  is locked.
+- Changed for callers: `moxi_ui.settings.change`, `read_section` and `descriptor` take
+  `locked`, the locked entries; a field descriptor and a switch-table entry carry `locked`.
+- The default theme is now plain: near-white paper or near-black, one text colour, greys
+  and one blue accent, with states told in words. The colours until now, calm-workbench
+  in light mode and midnight-neon in dark, are the theme `midnight-neon`, unchanged;
+  `moxi config set ui theme.palette midnight-neon` brings them back.
+- New setting `theme.palette` (`plain` or `midnight-neon`, default `plain`). The shell
+  document's root carries it as `data-theme-name`, beside `data-theme`, at the desk and on
+  the phone. `theme.mode` still picks light, dark or the browser's scheme within the theme.
+- New colour tokens: `on-accent`, text on the accent's fill, and `danger`, a launch
+  setting that can do harm.
+- `--moxi-font-sans` and `--moxi-font-mono` lead with Adwaita Sans and Adwaita Mono, the
+  earlier stacks after them; no font file ships. `--moxi-font-size` is 15px and
+  `--moxi-font-size-sm` 13px.
+- `tokens.json` names its themes in `$themes`, each a light set and a dark set of
+  `$sets`, the first the default. The build refuses a theme without one of each, a set in
+  two themes and a set in none. `theme.css` holds the default theme on `:root` and a
+  block of colours per other theme under `:root[data-theme-name="<name>"]`.
+- `setTheme(mode, name?)` in `client.js` takes the theme's name as a second, optional
+  argument.
+- The pair, sign-in and offline pages and the installed app's colour take the default
+  theme's colours, whatever `theme.palette` says.
+- Changed for callers: `moxi_ui.document.body` takes the theme's name after the mode.
+- The shell's bar and menu are now one top line: Moxi, the current page's name with a
+  caret, and Settings alone at the right. Pressing the name opens the band, a layer over
+  the page that lists every page by name; a pick, Escape or a click outside closes it.
+  Names that do not fit one row wrap onto further rows, and at 720 px and under the band
+  is one name per line.
+- A module's `page` component may name its place in the band: `group` (`daily` or
+  `setup`) and `order` (0 to 999, lower first; then by title). A page that names neither
+  is in `setup` at 500. The shell's own Home is first and its Modules last.
+- The modules view moved to `/m/ui/modules`. It and the settings view carry no title of
+  their own; the top line names the page. The document's title is `Moxi` while the panel
+  holds a message and no page.
+- `ComponentInfo` in `client.js` carries `home_as`, `group` and `order`.
+- `/m/ui/` is now Home: one main spot and a row per module with something to report. A
+  component takes a seat with `home_as` (`"main"` or `"row"`) and `order`; a row component
+  reports its line with a `moxi-home-row` event and Home draws it, puts the rows that need
+  you first and opens a row's component in place. `docs/home.md` has the contract and the
+  `needs` and `order` scales. With no main piece installed the spot says `Nothing needs
+  you.`
+- On the phone every page says `This phone reads only here.`, first under the top line.
+- A block with `home: True` and no `home_as` is on the modules view, at `/m/ui/modules`,
+  and no longer at `/m/ui/`.
+- New component `health`, the shell's own row on Home: whether the doctor's checks pass,
+  from the run the shell keeps. Opened, it lists the checks that fail or warn with their
+  fixes, and `Check again` runs the doctor.
+- The kept doctor run: `GET /m/ui/api/checks` answers with it and starts a new run when
+  it is old, `POST /m/ui/api/checks/run` starts one now, and the topic `ui.checks`
+  carries it. The shell keeps it in `checks.json` in its state directory, a declared
+  store that `moxi uninstall ui --purge` removes.
+
 ## 0.2.3 (2026-11-08)
 
 - The shell's console script `moxi-ui-serve` is now `moxi-ui-shell`. Run `moxi install

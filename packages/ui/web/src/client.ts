@@ -50,8 +50,16 @@ export interface ComponentInfo {
   doc: string;
   contract: number;
   place: "page" | "block" | "inline";
-  /** Whether the shell's home view may place it. */
+  /** Whether the shell's own views may place it. */
   home: boolean;
+  /** Where Home places a `home` block: its one main spot or a row under it. Null for a
+   * block of the modules view and for a component that is no home block. */
+  home_as: "main" | "row" | null;
+  /** A page's group in the band of pages; null on a component that is no page. */
+  group: "daily" | "setup" | null;
+  /** From 0 to 999, lower first: a page's place in its group, a main piece's rank or a
+   * row's place among rows. Null on any other component. */
+  order: number | null;
   attributes: AttributeInfo[];
 }
 
@@ -92,6 +100,8 @@ export interface FieldEntry {
   named_by?: string[];
   /** When a change applies. */
   mark?: string;
+  /** The shell refuses a write to the entry for this run: it is shown off. */
+  locked?: boolean;
 }
 
 /**
@@ -134,6 +144,8 @@ export interface FieldDescriptor {
    * listed; `reason` then says why. */
   declarations?: string | null;
   reason?: string | null;
+  /** The shell refuses a write to the key for this run: it is shown off, still readable. */
+  locked?: boolean;
   /** A catalog row: may be given more than once (a list control). */
   repeatable?: boolean;
   /** A catalog row: a switch plus an optional value. */
@@ -206,6 +218,7 @@ declare global {
 const KEY_STORAGE = "moxi-ui-key";
 const DEFINE_MS = 5_000;
 const MODES: readonly string[] = ["system", "light", "dark"];
+const THEME_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 interface ModuleRow {
   name: string;
@@ -520,12 +533,17 @@ export function navigate(module: string, route = ""): void {
   showPanel(module, target.route);
 }
 
-/** Sets the shell document's theme mode until it is next loaded, when the shell sets it
- * from the `ui` setting `theme.mode`. For the settings view, after it writes that
- * setting. */
-export function setTheme(mode: ThemeMode): void {
+/** Sets the shell document's theme mode and, when `name` is given, its theme, until the
+ * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
+ * and `theme.palette`. A name theme.css has no block for shows the default theme. For the
+ * settings view, after it writes either setting. */
+export function setTheme(mode: ThemeMode, name?: string): void {
   if (!MODES.includes(mode)) throw new TypeError(`theme mode ${JSON.stringify(mode)} is not system, light or dark`);
+  if (name !== undefined && !THEME_NAME.test(name)) {
+    throw new TypeError(`theme name ${JSON.stringify(name)} is not lower-case words joined by hyphens`);
+  }
   document.documentElement.dataset.theme = mode;
+  if (name !== undefined) document.documentElement.dataset.themeName = name;
 }
 
 // --- the gateway's worker ------------------------------------------------------------------

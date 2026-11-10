@@ -84,6 +84,13 @@ _NAME = re.compile(r"\A[a-z0-9]+(-[a-z0-9]+)*\Z")
 _ATTRIBUTE = re.compile(r"\A[a-z][a-z0-9]*(-[a-z0-9]+)*\Z")
 _PLACES = ("page", "block", "inline")
 _ATTRIBUTE_TYPES = ("string", "int", "bool", "enum")
+#: The band's groups of pages; a page that names neither is in the last.
+_GROUPS = ("daily", "setup")
+#: What a home component may be on Home: its one main piece, or a row.
+_HOME_AS = ("main", "row")
+#: The `order` a page or a home piece has when it gives none from 0 to `_ORDER_MAX`.
+_ORDER = 500
+_ORDER_MAX = 999
 _REASON_CAP = 500
 _log = logging.getLogger("moxi.ui.snapshot")
 
@@ -119,6 +126,13 @@ def _attribute(name: object, spec: object) -> tuple[dict[str, Any] | None, str |
         return None, f"its attribute {name} has a doc that is not one line"
     return {"name": name, "type": kind, "values": list(values or ()), "required": required,
             "doc": doc}, None
+
+
+def _order(value: object) -> int:
+    """`value` when it is a whole number from 0 to `_ORDER_MAX`, else `_ORDER`."""
+    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= _ORDER_MAX:
+        return value
+    return _ORDER
 
 
 def _component(module: str, name: object, decl: object,
@@ -166,6 +180,13 @@ def _component(module: str, name: object, decl: object,
         return None, f"its home is {home!r}, not true or false"
     if home and any(item["required"] for item in checked):
         return None, "it asks to be placed at home but has a required attribute"
+    home_as = decl.get("home_as")
+    if home_as is not None:
+        if home_as not in _HOME_AS:
+            return None, f"its home_as is {home_as!r}, not one of {', '.join(_HOME_AS)}"
+        if not home or place != "block":
+            return None, "it has home_as but is not a block placed at home"
+    group = decl.get("group")
     return {
         "name": name,
         "element": f"moxi-{module}-{name}",
@@ -176,6 +197,9 @@ def _component(module: str, name: object, decl: object,
         "contract": contract,
         "place": place,
         "home": home,
+        "home_as": home_as,
+        "group": (group if group in _GROUPS else _GROUPS[-1]) if place == "page" else None,
+        "order": _order(decl.get("order")) if place == "page" or home_as else None,
         "attributes": checked,
     }, None
 
@@ -189,6 +213,14 @@ def check_components(module: str, components: object, *, page: bool,
     from its export, or None when it has no export. Each placed component carries its
     element name and its script's URL; each refused one, `{"name", "reason"}`. A field
     this shell doesn't know is ignored, since a newer contract 1 may add optional ones.
+
+    A page carries its `group` in the band and its `order` there; a wrong or absent one
+    reads as `setup` and 500, so the page keeps its place in the band. A home block may
+    carry `home_as`, `main` or `row`, and then an `order` read the same way; any other
+    `home_as`, or one on a component that is not a home block, refuses the component.
+    A component the fields do not apply to carries them as None. Lower `order` comes
+    first. Home shows the one `main` piece with the lowest `order`: under 100 is for a
+    piece that is the reason most people open Moxi.
     """
     placed: list[dict[str, Any]] = []
     refused: list[dict[str, str]] = []

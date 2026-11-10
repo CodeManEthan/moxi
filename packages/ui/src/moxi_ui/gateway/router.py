@@ -216,13 +216,14 @@ def _module_of(raw: str) -> str | None:
 # --- the document -----------------------------------------------------------------------------
 
 
-def document(mount: Mount, mode: str | None = None) -> Static:
+def document(mount: Mount, mode: str | None = None, name: str | None = None) -> Static:
     """The gateway's shell document: the desktop's, its root carrying `data-gateway`,
     `data-gateway-acts` and, while acts aren't mounted, `data-gateway-reason`, as they stand
     now, and its head linking the manifest."""
     mode = config.theme_mode() if mode is None else mode
-    data = _document.body(mode)
-    root = b'<html lang="en" data-theme="%s">' % mode.encode("ascii")
+    name = config.theme_palette() if name is None else name
+    data = _document.body(mode, name)
+    root = _document.root(mode, name)
     attributes = b' data-gateway="on" data-gateway-acts="%s"' % (b"on" if mount.mounted else b"off")
     if not mount.mounted and mount.reason:
         attributes += b' data-gateway-reason="%s"' % mount.reason.encode("ascii")

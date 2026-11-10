@@ -18,10 +18,15 @@ OPTIONAL = {"testing": "Playwright and pytest for moxi_ui.testing, the plugin a 
             "tunnel": "The tunnel, which gives the gateway the address a phone reaches."}
 GATED = {}
 #: The gateway's state: its devices, its key and its audit log (one file per UTC day, kept
-#: 30 days by the gateway itself).
+#: 30 days by the gateway itself). And the doctor run the shell keeps, which the next run
+#: writes again.
 STORES = {"gateway": {"root": "state", "path": "gateway", "kind": "dir", "private": True,
-                      "retention": "keep", "rebuildable": False, "lazy": True}}
-INTERNAL_ENV = {}
+                      "retention": "keep", "rebuildable": False, "lazy": True},
+          "checks": {"root": "state", "path": "checks.json", "kind": "file", "private": True,
+                     "retention": "keep", "rebuildable": True, "lazy": True}}
+#: The one variable of ui's prefix it reads outside moxi.paths and moxi.config, and why.
+INTERNAL_ENV = {"MOXI_UI_LOCKED_SETTINGS": "set by whoever starts the shell, for one run: "
+                                           "the settings its pages may not change"}
 SETTINGS = "settings.toml"
 SETUP = None
 SEGMENT = None
@@ -40,7 +45,8 @@ HEALTH = {"shell": "moxi_ui.health:check"}
 DOCTOR = "moxi_ui.doctor:rows"
 #: The shell's own page, which it serves in process; no page server runs for it.
 PAGE = "moxi_ui.page:PAGE"
-#: The modules view: the ui panel and its home block.
+#: The ui panel (Home, the modules view and the settings), the modules view's block, and
+#: Home's Health row, which the shell shows last among the rows that need nothing.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Modules",
              "doc": "Every installed module, its page server and its settings",
@@ -48,4 +54,9 @@ COMPONENTS = {
     "servers": {"script": "servers.js", "title": "Page servers",
                 "doc": "Each module's page server and its state",
                 "contract": 1, "place": "block", "home": True},
+    "health": {"script": "health.js", "title": "Health",
+               "doc": "Whether the doctor's checks pass, and what to run for one that fails",
+               "contract": 1, "place": "block", "home": True, "home_as": "row", "order": 900,
+               "attributes": {"open": {"type": "bool",
+                                       "doc": "set by Home while the row is shown opened"}}},
 }

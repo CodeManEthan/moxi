@@ -163,6 +163,9 @@ class TestShell:
     shell's environment, which its page servers and the `moxi` commands it runs inherit
     (for example `{"GIT_CONFIG_NOSYSTEM": "1"}`); see `shell_env` for the ones it can't set.
     `gateway` runs the shell with its gateway, in gateway mode (see the module doc).
+    `checks` lets the shell run the doctor for its kept run. Without it (the default)
+    `/m/ui/api/checks` and its run act answer with what is kept and start no doctor, so
+    no test starts a process it did not ask for.
     """
 
     __test__ = False  # pytest: not a test class
@@ -171,7 +174,8 @@ class TestShell:
                  child_args: Sequence[str] = (), leave_out: Sequence[str] = (),
                  failed_for: float | None = None, port: int = 0,
                  env: Mapping[str, str] | None = None,
-                 start_timeout: float = START_TIMEOUT, gateway: bool = False):
+                 start_timeout: float = START_TIMEOUT, gateway: bool = False,
+                 checks: bool = False):
         self.home = Path(home)
         self.site = tuple(Path(path) for path in site)
         self.child_args = tuple(str(arg) for arg in child_args)
@@ -180,6 +184,7 @@ class TestShell:
         self.bind_port = int(port)
         self.start_timeout = start_timeout
         self.gateway = bool(gateway)
+        self.checks = bool(checks)
         self.env = shell_env(self.home, self.site, env, gateway=self.gateway)
         self.port: int | None = None
         self.info: Any = None
@@ -219,7 +224,7 @@ class TestShell:
         cwd = Layout("ui").runtime_dir(self.env, create=True)
         given: dict[str, Any] = {"child_args": list(self.child_args),
                                  "leave_out": list(self.leave_out), "port": self.bind_port,
-                                 "gateway": self.gateway}
+                                 "gateway": self.gateway, "checks": self.checks}
         if self.failed_for is not None:
             given["failed_for"] = self.failed_for
         options = json.dumps(given)
