@@ -11,8 +11,9 @@
 // On the phone, through the gateway, `gateway` is true, and a component hides what the
 // phone can't reach.
 //
-// It also defines `<moxi-ui-form>`, the one form renderer, and `<moxi-ui-confirm>`, the
-// confirm sheet, so every page can use them.
+// It also defines `<moxi-ui-form>`, the one form renderer, `<moxi-ui-confirm>`, the
+// confirm sheet, and `<moxi-ui-row>`, the two-line row of a list, so every page can use
+// them.
 
 import { defineConfirm } from "./confirm.ts";
 import { isConfirmed, mintKey, outcomeOf, pagePath, SIGNED_OUT } from "./confirm-model.ts";
@@ -21,6 +22,7 @@ import { bandText, endingReach, gatewayConfirm, gatewayInfo, reachOf } from "./g
 import type { Reach } from "./gateway-model.ts";
 import { fetchOpener, TabPush } from "./push.ts";
 import type { Opener } from "./push.ts";
+import { defineRow } from "./row.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
 import { boot } from "./shell.ts";
 
@@ -208,9 +210,29 @@ export interface FormElement extends HTMLElement {
   values(): Record<string, FormValue>;
 }
 
+/**
+ * `<moxi-ui-row>`, the two-line row of a list, defined by this script. It draws what its
+ * attributes carry and nothing for one that is unset:
+ *
+ * - line one: `name`; `where`, dim, after it; `fact` at the right end, dim, or in the text
+ *   colour at weight 600 with `fact-heavy`. When the line is too narrow the name and
+ *   where are cut before the fact is.
+ * - line two, a middle dot between each two phrases: `lead` (dim, or weight 600 with
+ *   `lead-heavy`); `lead-more`; `time` and `rest` as one phrase, with `You:` before the
+ *   rest when `said-by` is `you`, the rest dim or in the text colour with `rest-strong`;
+ *   `tail`. The slot `acts` is the line's right end.
+ * - line three: `note`.
+ * - `open`: the default slot's content shows under the lines.
+ * - `toggles`: the lines show a pointer and take the focus, and a click or Enter on them
+ *   outside `acts` sends `moxi-row-toggle`, which bubbles and carries no detail. The row
+ *   does not open itself: the page sets `open`.
+ */
+export interface RowElement extends HTMLElement {}
+
 declare global {
   interface HTMLElementTagNameMap {
     "moxi-ui-form": FormElement;
+    "moxi-ui-row": RowElement;
   }
 }
 
@@ -581,6 +603,7 @@ function registerWorker(): void {
 
 defineForm(installed);
 defineConfirm();
+defineRow();
 push.start();
 if (here.gateway) registerWorker();
 addEventListener("storage", (event) => {

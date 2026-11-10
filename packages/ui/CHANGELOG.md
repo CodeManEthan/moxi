@@ -60,6 +60,15 @@
   it is old, `POST /m/ui/api/checks/run` starts one now, and the topic `ui.checks`
   carries it. The shell keeps it in `checks.json` in its state directory, a declared
   store that `moxi uninstall ui --purge` removes.
+- New element `<moxi-ui-row>`, defined by `client.js` beside the form: the two-line row
+  of a list. Line one is `name`, `where` and a `fact` at the right end; line two is
+  `lead`, `lead-more`, `time` with `rest`, and `tail`, a middle dot between each two, then
+  the slot `acts`; line three is `note`. An unset attribute draws nothing, and a row with
+  a name alone is one line. `open` shows the default slot's content under the lines. A
+  row with `toggles` shows a pointer, takes the focus and sends `moxi-row-toggle` for a
+  click or Enter on its lines outside `acts`; the page sets `open`. When line one is too
+  narrow the where and the name are cut before the fact. `docs/row.md` has the list.
+  `client.d.ts` gains `RowElement`.
 
 ## 0.2.3 (2026-11-08)
 

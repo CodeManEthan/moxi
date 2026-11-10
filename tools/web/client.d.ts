@@ -185,9 +185,29 @@ export interface FormElement extends HTMLElement {
     /** The values `moxi-submit` would send now. */
     values(): Record<string, FormValue>;
 }
+/**
+ * `<moxi-ui-row>`, the two-line row of a list, defined by this script. It draws what its
+ * attributes carry and nothing for one that is unset:
+ *
+ * - line one: `name`; `where`, dim, after it; `fact` at the right end, dim, or in the text
+ *   colour at weight 600 with `fact-heavy`. When the line is too narrow the name and
+ *   where are cut before the fact is.
+ * - line two, a middle dot between each two phrases: `lead` (dim, or weight 600 with
+ *   `lead-heavy`); `lead-more`; `time` and `rest` as one phrase, with `You:` before the
+ *   rest when `said-by` is `you`, the rest dim or in the text colour with `rest-strong`;
+ *   `tail`. The slot `acts` is the line's right end.
+ * - line three: `note`.
+ * - `open`: the default slot's content shows under the lines.
+ * - `toggles`: the lines show a pointer and take the focus, and a click or Enter on them
+ *   outside `acts` sends `moxi-row-toggle`, which bubbles and carries no detail. The row
+ *   does not open itself: the page sets `open`.
+ */
+export interface RowElement extends HTMLElement {
+}
 declare global {
     interface HTMLElementTagNameMap {
         "moxi-ui-form": FormElement;
+        "moxi-ui-row": RowElement;
     }
 }
 /** Whether this page came through the gateway, on the phone. A component hides there what
