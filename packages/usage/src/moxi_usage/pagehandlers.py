@@ -4,11 +4,12 @@
 and thin over `moxi_usage.api`: it calls `limits()` or `report()`, takes `as_dict()`, and
 cuts the answer to its route's declared shape. It runs no SQL of its own. Every report
 is read with `fresh=False`, so a read never runs a pass and never waits on the index's
-lock; its `index.note` says it read the index as it is. Where the API's answer holds a
-map with open keys, the cut turns it into a list of `{name, value}` rows (a report's
-`filters`, a lane's `held_reasons`, the dollar figures `limits.dollars` finds in a
-window's `extra`) or leaves it out (a price's `source`, any lane fact not declared). An
-argument the API refuses (`ReportError`), an index written by a newer usage
+lock; its `index.note` says it read the index as it is. Each report's answer, the
+status and the limits carry `today`, the page server's local date. Where the API's
+answer holds a map with open keys, the cut turns it into a list of `{name, value}` rows
+(a report's `filters`, a lane's `held_reasons`, the dollar figures `limits.dollars`
+finds in a window's `extra`) or leaves it out (a price's `source`, any lane fact not
+declared). An argument the API refuses (`ReportError`), an index written by a newer usage
 (`StoreTooNew`) and a config usage can't read are a 422 with the error's text.
 
 **The pass.** `POST /api/pass` starts `report("status", fresh=True)`, which runs the pass,
@@ -43,6 +44,7 @@ import logging
 import math
 import threading
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import moxi.config
@@ -137,9 +139,22 @@ def _index(found: Mapping[str, Any]) -> dict[str, Any]:
             "note": _str(found.get("note"))}
 
 
+def _today() -> dt.date:
+    return dt.date.today()
+
+
+def _home() -> str | None:
+    """The account's home folder, or None when it cannot be said."""
+    try:
+        return str(Path.home())
+    except RuntimeError:
+        return None
+
+
 def _report(answer: Mapping[str, Any], rows: list[dict[str, Any]],
             total: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
+        "today": _today().isoformat(),
         "since": _num(answer.get("since")),
         "until": _num(answer.get("until")),
         "tz": str(answer.get("tz") or "local"),
@@ -161,7 +176,7 @@ def _read(kind: str, query: Mapping[str, Any], **given: Any) -> dict[str, Any]:
     """`report(kind)` over the index as it is, with the route's filters, as a dict."""
     args = {"since": _day(query.get("since")), "until": _day(query.get("until")),
             "harness": query.get("harness"), "project": query.get("project"),
-            "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
+            "folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
     args.update(given)
     try:
         return api.report(kind, fresh=False, **args).as_dict()
@@ -218,12 +233,15 @@ def session(call: Any) -> dict[str, Any]:
 
 
 def projects(call: Any) -> dict[str, Any]:
-    """`GET /api/projects`: tokens and cost by project key, or by `cwd` for none."""
-    answer = _read("projects", call.query)
+    """`GET /api/projects`: tokens and cost by project key, or by `cwd` for none; with
+    `by=folder`, by `cwd` alone, so a key an earlier pass stored groups nothing. `home`
+    is the account's home folder in both."""
+    by = call.query.get("by") or "project"
+    answer = _read("projects", call.query, by=by)
     rows = [{"project": _str(row.get("project")), "cwd": _str(row.get("cwd")),
              "models": _words(row.get("models")), **_row_sums(row)}
             for row in answer["rows"]]
-    return _report(answer, rows)
+    return {**_report(answer, rows), "by": by, "home": _home()}
 
 
 def _provenance(found: Mapping[str, Any]) -> dict[str, Any]:
@@ -245,10 +263,6 @@ def models(call: Any) -> dict[str, Any]:
              "provenance": [_provenance(found) for found in row.get("provenance") or ()],
              **_row_sums(row)} for row in answer["rows"]]
     return _report(answer, rows)
-
-
-def _today() -> dt.date:
-    return dt.date.today()
 
 
 def cost(call: Any) -> dict[str, Any]:
@@ -503,7 +517,8 @@ def _status(answer: Mapping[str, Any]) -> dict[str, Any]:
          "of_path": str(row.get("of_path")), "of_part": str(row.get("of_part") or "")}
         for row in total.get("duplicate_rows") or ()]
     cut["last_pass"] = _num(total.get("last_pass"))
-    return {"lanes": [_lane(row) for row in answer.get("rows") or ()], "total": cut,
+    return {"today": _today().isoformat(),
+            "lanes": [_lane(row) for row in answer.get("rows") or ()], "total": cut,
             "index": _index(answer.get("index") or {})}
 
 
@@ -545,6 +560,7 @@ def _window(row: Mapping[str, Any]) -> dict[str, Any]:
 def _limits_value(answer: Mapping[str, Any]) -> dict[str, Any]:
     pull = answer.get("pull")
     return {
+        "today": _today().isoformat(),
         "rows": [_window(row) for row in answer.get("rows") or ()],
         "pull": None if not isinstance(pull, Mapping) else {
             "tried": bool(pull.get("tried")), "ok": bool(pull.get("ok")),

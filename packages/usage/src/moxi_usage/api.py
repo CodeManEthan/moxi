@@ -52,11 +52,13 @@ The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
 Reports (`moxi_usage.reports`):
 
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
-  tz=None, fresh=True, session=None, by=None, agent=None)`: tokens and cost from the
-  token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`, `models`,
-  `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the index's
-  pass runs first. `tz` is the zone days are cut in, local time when None. Cost is worked out when
-  the report runs; tokens the table cannot price are counted in `unpriced_tokens`, never
+  tz=None, fresh=True, session=None, by=None, agent=None, folder=None)`: tokens and
+  cost from the token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`,
+  `models`, `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the
+  index's pass runs first. `tz` is the zone days are cut in, local time when None.
+  `folder` is a folder's whole path and keeps the files whose `cwd` it is, whatever
+  project key they carry; the `projects` kind with `by="folder"` groups by `cwd` alone.
+  Cost is worked out when the report runs; tokens the table cannot price are counted in `unpriced_tokens`, never
   as $0. The `session` kind is one session, the one `session` names (an id a `sessions`
   row gives, with `harness` to tell two harnesses apart), by agent and model; it needs
   `session`. The `terms` kind prints every term of each cost, by `model` (the default),

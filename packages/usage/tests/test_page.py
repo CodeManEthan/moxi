@@ -200,7 +200,7 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-FILTERS = {"since", "until", "harness", "project", "model", "utc"}
+FILTERS = {"since", "until", "harness", "project", "folder", "model", "utc"}
 
 
 def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways():
@@ -211,7 +211,7 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
         "/api/daily": ("read", {"by", *FILTERS}, False),
         "/api/sessions": ("read", {"top", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
-        "/api/projects": ("read", FILTERS, False),
+        "/api/projects": ("read", {"by", *FILTERS}, False),
         "/api/models": ("read", FILTERS, False),
         "/api/terms": ("read", {"by", "session", *FILTERS}, False),
         "/api/requests": ("read", {"session", "agent", *FILTERS}, False),
@@ -255,7 +255,7 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
         return {at for at, m in marks[path].items() if m == mark}
 
     assert marked("/api/sessions", "path") == {"rows[].cwd"}
-    assert marked("/api/projects", "path") == {"rows[].cwd"}
+    assert marked("/api/projects", "path") == {"rows[].cwd", "home"}
     assert marked("/api/status", "path") == {
         "lanes[].root", "lanes[].unreadable[].path", "lanes[].imports_path",
         "total.held_rows[].path", "total.duplicate_rows[].path",
@@ -428,6 +428,98 @@ def test_projects_send_a_key_or_a_cwd(seeded):
     assert {(row["project"], row["cwd"]) for row in body["rows"]} == {
         (None, "/w/app"), (None, "/w/oc")}
     assert set(body["rows"][0]) == {"project", "cwd", "models", *ROW_KEYS}
+    assert body["by"] == "project"
+
+
+@pytest.fixture
+def keyed(monkeypatch):
+    """An index holding project keys an earlier pass stored: two folders under one key, a
+    third folder under another key, and a folder with none."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+    conn = store.open_index()
+    try:
+        source(conn, "/p/a.jsonl", [request("r1", t)], session_id="s1", cwd="/w/app",
+               project="key-app")
+        source(conn, "/p/b.jsonl", [request("r2", t + 60), request("r3", t + 120)],
+               session_id="s2", cwd="/w/app-wt", project="key-app")
+        source(conn, "/p/c.jsonl", [request("r4", t + 180, model="m-b")], session_id="s3",
+               cwd="/w/tool", project="key-tool")
+        source(conn, "/c/d.jsonl", [request("t1", t + 240, harness="codex", model="gpt-x")],
+               lane="codex", harness="codex", session_id="s4", cwd="/w/app", rank=1)
+    finally:
+        conn.close()
+
+
+def test_projects_by_folder_group_by_cwd_alone_over_stored_keys(keyed):
+    by_key = get("/api/projects", utc="true")
+    assert {(r["project"], r["cwd"], r["requests"]) for r in by_key["rows"]} == {
+        ("key-app", None, 3), ("key-tool", None, 1), (None, "/w/app", 1)}
+    body = get("/api/projects", by="folder", utc="true")
+    assert body["by"] == "folder"
+    assert {(r["project"], r["cwd"], r["requests"]) for r in body["rows"]} == {
+        (None, "/w/app", 2), (None, "/w/app-wt", 2), (None, "/w/tool", 1)}
+    assert set(body["rows"][0]) == {"project", "cwd", "models", *ROW_KEYS}
+    assert body["total"] == by_key["total"]
+    app = next(row for row in body["rows"] if row["cwd"] == "/w/app")
+    assert app["models"] == ["gpt-x", "m-a"]
+    status, _ = asyncio.run(ask(served(), "/api/projects", {"by": "session"}))
+    assert status == 400
+
+
+def test_the_folder_filter_matches_a_cwd_whatever_key_its_file_carries(keyed):
+    def count(path, **query):
+        return get(path, utc="true", **query)["total"]["requests"]
+
+    assert count("/api/daily", folder="/w/app") == 2      # one keyed file, one with none
+    assert count("/api/daily", project="/w/app") == 1     # the project filter: unkeyed only
+    assert count("/api/daily", folder="/w/app-wt") == 2
+    assert count("/api/daily", folder="/w/app/") == 2     # a slash after it changes nothing
+    assert count("/api/daily", folder="/w/gone") == 0
+    assert count("/api/daily", folder="/w/app", harness="codex") == 1
+    assert count("/api/daily", folder="/w/app", project="key-app") == 1
+    assert count("/api/daily", folder="") == 5            # an empty one filters nothing
+    for path, query in (("/api/daily", {"by": "month"}), ("/api/sessions", {}),
+                        ("/api/projects", {}), ("/api/projects", {"by": "folder"}),
+                        ("/api/models", {}), ("/api/terms", {}),
+                        ("/api/terms", {"by": "day"})):
+        body = get(path, utc="true", folder="/w/tool", **query)
+        assert body["total"]["requests"] == 1, path
+        assert body["filters"] == [{"name": "folder", "value": "/w/tool"}], path
+    assert [row["session_id"] for row in get("/api/sessions", folder="/w/app")["rows"]] == [
+        "s1", "s4"]
+    assert count("/api/session", session="s1", folder="/w/app") == 1
+    assert count("/api/session", session="s1", folder="/w/tool") == 0
+    assert count("/api/terms", by="agent", session="s2", folder="/w/app-wt") == 2
+    assert count("/api/requests", session="s2", folder="/w/app-wt") == 2
+    assert count("/api/requests", session="s2", folder="/w/app") == 0
+    assert "whole path" in refused("/api/daily", folder="app")
+
+
+def test_projects_send_the_home_folder_in_both_groupings(keyed, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_home", lambda: "/home/alice")
+    assert get("/api/projects")["home"] == "/home/alice"
+    assert get("/api/projects", by="folder")["home"] == "/home/alice"
+    monkeypatch.setattr(pagehandlers, "_home", lambda: None)
+    assert get("/api/projects")["home"] is None
+
+
+def test_the_home_folder_is_the_accounts_or_none_when_it_cannot_be_said(monkeypatch):
+    assert pagehandlers._home() == str(Path.home())
+
+    def lost():
+        raise RuntimeError("no home")
+
+    monkeypatch.setattr(Path, "home", lost)
+    assert pagehandlers._home() is None
+
+
+def test_every_report_the_status_and_the_limits_carry_the_servers_date(seeded, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 3))
+    for path, query in (*READS, ("/api/projects", {"by": "folder"}),
+                        ("/api/daily", {"utc": "true"}), ("/api/limits", {})):
+        assert get(path, **query)["today"] == "2026-10-03", path
+    assert pagehandlers.gather_limits()["today"] == "2026-10-03"
 
 
 def test_models_send_the_price_provenance_without_its_source(seeded):
@@ -725,7 +817,7 @@ def test_limits_sends_each_window_with_its_dollars_as_a_list():
     before = time.time()
     body = get("/api/limits")
     assert before <= body["now"] <= time.time()
-    assert set(body) == {"now", "rows", "pull", "notes"}
+    assert set(body) == {"now", "today", "rows", "pull", "notes"}
     windows = {(r["harness"], r["label"]): r for r in body["rows"]}
     five = windows[("codex", "5h")]
     assert set(five) == set(page.WINDOW.items)
@@ -759,7 +851,7 @@ def test_the_poller_publishes_limits_only_when_they_change(monkeypatch):
         try:
             name, first = await stream.next(5)
             assert name == "limits" and stream.status == 200
-            assert set(first) == {"rows", "pull", "notes"}
+            assert set(first) == {"today", "rows", "pull", "notes"}
             assert await stream.none_within(0.6)
             put_readings(codex_reading(55.0, observed=time.time() - 5))
             _, later = await stream.next(5)

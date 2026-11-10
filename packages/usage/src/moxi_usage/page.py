@@ -4,7 +4,8 @@
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
     GET  /api/sessions  tokens and cost by session, the `top` by cost, with how many more
     GET  /api/session   one session by agent and model (`session=ID`)
-    GET  /api/projects  tokens and cost by project, or by `cwd` where there is none
+    GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
+                        `cwd` alone with `by=folder`; with the account's `home` folder
     GET  /api/models    tokens and cost by model, with where each price came from
     GET  /api/terms     every term of each cost, by model, day, month or a session's agent
     GET  /api/requests  one row per request of a session's agent (`session=ID&agent=ID`)
@@ -15,15 +16,21 @@
     GET  /api/events    the stream: topics `limits` and `index`
 
 Each read answers from `moxi_usage.api` and reads the index as it is: no read runs a
-pass, so none waits on the index's lock, and `/api/prices` reads no index at all. The one act starts a pass. A report route takes
-the filters `since` and `until` (`YYYY-MM-DD`, both days included), `harness`, `project`,
-`model` and `utc`; days are cut in the page server's local zone, or in UTC with `utc`.
-Each route declares exactly the query keys it reads.
+pass, so none waits on the index's lock, and `/api/prices` reads no index at all. The one
+act starts a pass. A report route takes the filters `since` and `until` (`YYYY-MM-DD`,
+both days included), `harness`, `project`, `folder` (a folder's whole path: the files
+whose `cwd` it is, whatever project key they carry), `model` and `utc`; days are cut in
+the page server's local zone, or in UTC with `utc`. Each route declares exactly the query
+keys it reads.
+
+Every report's answer, `/api/status` and `/api/limits` with its topic carry `today`, the
+page server's local date (`YYYY-MM-DD`), so the page words a time's day against the
+server's day and not the browser's.
 
 Where the API's answer holds a map with open keys, the route carries it as a list of
 `{name, value}` rows or leaves it out, so every shape here is fixed. Every value that can
-hold a path carries the mark `path`, and a session title the mark `redact`; only the
-gateway acts on a mark, and no route is the gateway's.
+hold a path carries the mark `path` (a `cwd`, the `home` folder), and a session title the
+mark `redact`; only the gateway acts on a mark, and no route is the gateway's.
 
 The page's assets are the built files in `web/` beside this module: the `page`, `limits`
 and `cost` components' scripts and the build's stamp.
@@ -78,6 +85,7 @@ FILTERS = {
     "until": _DATE,
     "harness": lb.Field("enum", required=False, values=HARNESSES),
     "project": _ANY,
+    "folder": _ANY,
     "model": _ANY,
     "utc": lb.Field("bool", required=False),
 }
@@ -112,10 +120,11 @@ INDEX = lb.Out("table", items={"passed": _BOOL, "last_pass": _WHEN, "note": _MAY
 
 def _report(row: dict[str, lb.Out], *, total: dict[str, lb.Out] | None = None,
             **extra: lb.Out) -> dict[str, lb.Out]:
-    """A report's whole answer: its range (epoch seconds, null for an open end), zone,
-    filters as given, rows, total (`SUMS` unless the report adds to it), unpriced models
-    and rules, and the index note."""
+    """A report's whole answer: the page server's local date, its range (epoch seconds,
+    null for an open end), zone, filters as given, rows, total (`SUMS` unless the report
+    adds to it), unpriced models and rules, and the index note."""
     return {
+        "today": _TEXT,
         "since": _WHEN,
         "until": _WHEN,
         "tz": _TEXT,
@@ -133,7 +142,7 @@ def _report(row: dict[str, lb.Out], *, total: dict[str, lb.Out] | None = None,
 #: month (`YYYY-MM`), null for requests with no time.
 PERIOD_ROW = {"period": _MAYBE, "model": _MAYBE, **ROW_SUMS}
 DAILY = _report(PERIOD_ROW, by=_TEXT)
-COST = _report(PERIOD_ROW, today=_TEXT)
+COST = _report(PERIOD_ROW)
 
 #: One session: its main file's title, `cwd` and project, its models, and its first and
 #: last request in range. `session_id` is null for a file with no session id, which has
@@ -164,9 +173,11 @@ AGENT_ROW = {
 }
 SESSION = _report(AGENT_ROW)
 
-#: One project key, or for files with none, one `cwd`.
+#: One project key, or for files with none, one `cwd`; by folder, one `cwd` and no key.
 PROJECT_ROW = {"project": _MAYBE, "cwd": _MAYBE_PATH, "models": _WORDS, **ROW_SUMS}
-PROJECTS = _report(PROJECT_ROW)
+#: `by` is the grouping asked for; `home` the account's home folder, null when the page
+#: server cannot say it, so the page can write a folder under it from `~`.
+PROJECTS = _report(PROJECT_ROW, by=_TEXT, home=_MAYBE_PATH)
 
 #: Where one model's price came from (the API's provenance without its `source`).
 PROVENANCE = lb.Out("table", items={
@@ -329,6 +340,7 @@ LANE = lb.Out("table", items={
 })
 _FILE = {"lane": _TEXT, "path": lb.Out("string", mark="path"), "part": _TEXT}
 STATUS = {
+    "today": _TEXT,
     "lanes": lb.Out("list", items=LANE),
     "total": lb.Out("table", items={
         "files": _INT,
@@ -376,8 +388,10 @@ WINDOW = lb.Out("table", items={
     "dollars": _named(_FLOAT),
     "unknown": _WORDS,
 })
-#: The windows, and what the last Codex pull did when one was wanted.
+#: The windows, the page server's local date, and what the last Codex pull did when one
+#: was wanted.
 LIMITS = {
+    "today": _TEXT,
     "rows": lb.Out("list", items=WINDOW),
     "pull": lb.Out("table", nullable=True, items={
         "tried": _BOOL, "ok": _BOOL, "reason": _MAYBE_SAYS, "via": _MAYBE, "added": _INT}),
@@ -402,7 +416,9 @@ PAGE = lb.Page(
                  query={"session": lb.Field("string", max=512), **FILTERS},
                  returns=SESSION),
         lb.Route("/api/projects", "read", "moxi_usage.pagehandlers:projects",
-                 query=FILTERS, returns=PROJECTS),
+                 query={"by": lb.Field("enum", required=False,
+                                       values=("project", "folder")), **FILTERS},
+                 returns=PROJECTS),
         lb.Route("/api/models", "read", "moxi_usage.pagehandlers:models",
                  query=FILTERS, returns=MODELS),
         lb.Route("/api/terms", "read", "moxi_usage.pagehandlers:terms",

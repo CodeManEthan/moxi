@@ -403,6 +403,89 @@ def test_projects_group_by_the_stored_key_then_by_cwd(conn):
         (None, "/w/gone", 2), ("key-app", None, 2)]
 
 
+def stored_keys(conn):
+    """Files that kept a project key from an earlier pass, beside files with none."""
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [request("r1", t)], cwd="/w/app", project="key-app")
+    source(conn, "/p/b.jsonl", [request("r2", t), request("r3", t + 60)], session_id="s2",
+           cwd="/w/app-wt", project="key-app")
+    source(conn, "/p/c.jsonl", [request("r4", t, input=5000)], session_id="s3",
+           cwd="/w/app")
+    source(conn, "/p/d.jsonl", [request("r5", t, model="m-b")], session_id="s4")
+
+
+def test_projects_by_folder_group_by_cwd_alone(conn):
+    stored_keys(conn)
+    report = reports.projects(conn, by="folder", table=table())
+    assert [(r["project"], r["cwd"], r["requests"]) for r in report.rows] == [
+        (None, "/w/app", 2), (None, "/w/app-wt", 2), (None, None, 1)]
+    assert one(report, cwd="/w/app")["models"] == ["m-a"]
+    by_key = reports.projects(conn, table=table())
+    assert [(r["project"], r["cwd"], r["requests"]) for r in by_key.rows] == [
+        (None, "/w/app", 1), ("key-app", None, 3), (None, None, 1)]
+    assert report.total == by_key.total
+    assert reports.projects(conn, by="project", table=table()).rows == by_key.rows
+    assert reports.projects(conn, by=None, table=table()).rows == by_key.rows
+    with pytest.raises(reports.ReportError, match="not a key of the projects report"):
+        reports.projects(conn, by="session", table=table())
+
+
+def test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
+    stored_keys(conn)
+
+    def count(**filters):
+        return reports.daily(conn, tz="UTC", table=table(), **filters).total["requests"]
+
+    assert count(folder="/w/app") == 2             # the keyed file and the one with none
+    assert count(project="/w/app") == 1            # the project filter finds only the latter
+    assert count(folder="/w/app-wt") == 2
+    assert count(folder="/w/app-wt/") == 2
+    assert count(folder="/w/app", project="key-app") == 1
+    assert count(folder="/w") == 0                 # a folder above matches nothing under it
+    assert count(folder=None) == count(folder="") == 5
+    assert reports.daily(conn, folder="/w/app/", table=table()).filters == {
+        "folder": "/w/app"}
+    for bad in ("app", "./app", "~/app"):
+        with pytest.raises(reports.ReportError, match="whole path"):
+            count(folder=bad)
+    for kind, fn in reports.REPORTS.items():
+        if kind == "status":
+            continue
+        given = {"session": "s2"} if kind in ("session", "requests") else {}
+        found = fn(conn, folder="/w/app-wt", table=table(), **given)
+        assert found.total["requests"] == 2, kind
+        assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0
+    with pytest.raises(reports.ReportError, match="takes no folder"):
+        reports.status(conn, folder="/w/app")
+
+
+def test_report_takes_a_folder_and_by_for_projects(conn, passes):
+    stored_keys(conn)
+    assert api.report("sessions", folder="/w/app", fresh=False).total["requests"] == 2
+    found = api.report("projects", by="folder", folder="/w/app-wt", fresh=False)
+    assert [(r["project"], r["cwd"]) for r in found.rows] == [(None, "/w/app-wt")]
+    assert found.filters == {"folder": "/w/app-wt"}
+    assert reports.read("projects", by="folder").total["requests"] == 5
+    with pytest.raises(ValueError, match="not a key of the projects report"):
+        api.report("projects", by="model")
+    with pytest.raises(ValueError, match="whole path"):
+        api.report("daily", folder="app", fresh=False)
+    with pytest.raises(ValueError, match="takes no folder"):
+        api.report("status", folder="/w/app", fresh=False)
+    assert passes == []
+
+
+def test_a_folder_on_no_index_is_still_checked_and_named(monkeypatch):
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    assert not store.index_path().exists()
+    found = api.report("projects", by="folder", folder="/w/app/")
+    assert found.rows == [] and found.filters == {"folder": "/w/app"}
+    with pytest.raises(ValueError, match="whole path"):
+        api.report("daily", folder="app")
+    with pytest.raises(ValueError, match="takes no folder"):
+        api.report("status", folder="/w/app")
+
+
 def test_no_report_reads_projects(conn, monkeypatch):
     source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"))], cwd="/w/app")
     monkeypatch.delitem(sys.modules, "moxi_projects", raising=False)
@@ -849,7 +932,7 @@ def test_report_takes_by_for_terms_and_agent_for_requests(conn, passes):
         "requests"] == 2
     for kind in api.KINDS:
         given = {"session": "s1"} if kind in ("session", "requests") else {}
-        if kind != "terms":
+        if kind not in ("terms", "projects"):
             with pytest.raises(ValueError, match="takes no by"):
                 api.report(kind, by="model", fresh=False, **given)
         if kind != "requests":
