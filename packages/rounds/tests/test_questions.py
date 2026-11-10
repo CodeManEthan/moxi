@@ -22,8 +22,8 @@ def asked(n, **more):
 
 
 def parked(n, **more):
-    return event(n, "question.changed", id="Q1", state="parked", ruling="C1",
-                 record="comms:13", **more)
+    return event(n, "ruling.recorded", id="C1", record="comms:13", kind="process",
+                 rules="park:Q1", question="Q1", state="parked", **more)
 
 
 # -- what it holds up --------------------------------------------------------------------
@@ -158,9 +158,9 @@ def test_the_index_keeps_the_questions_recorded_as_open_or_parked():
     found = state.fold([
         asked(1), asked(2, id="Q2", blocks=["B1", "B2"]), asked(3, id="Q3"),
         asked(4, id="Q4"),
-        event(5, "question.changed", id="Q2", state="parked", until="B2", ruling="C1"),
-        event(6, "question.changed", id="Q3", state="ruled", ruling="C2"),
-        event(7, "question.changed", id="Q4", state="withdrawn", ruling="C3")])
+        event(5, "ruling.recorded", id="C1", question="Q2", state="parked", until="B2"),
+        event(6, "ruling.recorded", id="C2", question="Q3", state="ruled"),
+        event(7, "ruling.recorded", id="C3", question="Q4", state="withdrawn")])
 
     assert index.ITEMS["question"] is questions.waiting
     assert list(questions.waiting(found)) == [

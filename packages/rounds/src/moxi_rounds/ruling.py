@@ -22,7 +22,7 @@ is a field of the event. A plain ruling, a sentence that rules no item, is of su
 project keys, each with a path glob or without.
 
 **Forms.** What is ruled is a `Form`: the kind, the item, the form's own event fields and
-its own gates, and the other events the ruling makes. `_plain` builds the form of a plain
+its own gates. `_plain` builds the form of a plain
 ruling. A ruling of an item is built by the first function of `_ITEM_FORMS` that knows
 the item.
 
@@ -34,9 +34,14 @@ answered; it then needs no sentence of its own, and the option's line is the sen
 recorded. `park:Q<n>` sets it
 aside, until a stage is finished or a round is closed when `until` says so;
 `narrow:Q<n>=LIST` makes it hold up fewer stages, or `none`; `withdraw:Q<n>` takes it
-back. Those three are acts on the process. Each appends the ruling and then the change
-to the question, which names the ruling. A question that is already ruled or withdrawn
-takes none of the four.
+back. Those three are acts on the process. A question that is already ruled or
+withdrawn takes none of the four.
+
+**One event.** A ruling is one `ruling.recorded` event and no other, whatever it
+changes. A ruling of a question names the question and holds what it becomes (its
+state, what a parked one waits for, what it holds up), and the fold changes the question
+from that event alone. So a verb stopped right after its append has recorded the whole
+ruling, and run again it is refused as already ruled.
 """
 
 from __future__ import annotations
@@ -95,16 +100,14 @@ class Form:
     `rules` (None for a ruling that stands on its own), the event `fields` that are the
     form's own, and the `gates` it adds, each as the write path calls one. `found`
     gives the fields that depend on what the logs hold: it is called with what was read
-    under the lock, once every gate holds. `changes` gives the other events the ruling
-    makes, to the records it rules: it is called with the same and the ruling's id, and
-    its events are appended after the ruling, to the log the ruling goes to."""
+    under the lock, once every gate holds. Whatever the ruling changes is said in its
+    own fields, which the fold reads: a form makes no other event."""
 
     kind: str
     rules: str | None = None
     fields: Mapping[str, object] = field(default_factory=dict)
     gates: tuple[write.Gate, ...] = ()
     found: Callable[[write.View], Mapping[str, object]] | None = None
-    changes: Callable[[write.View, str], Iterable[write.Entry]] | None = None
 
 
 @dataclass(frozen=True)
@@ -211,12 +214,9 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
             fields["reason"] = reason
         if scoped is not None:
             fields["scope"] = scoped
-        ruled = write.Entry("ruling.recorded", fields,
-                            log=write.PROJECT if standing else write.ROUND)
-        # The ruling goes first: were the verb stopped between the two, a ruling with
-        # its record unchanged is ruled again, where a changed record with no ruling
-        # could not be.
-        return [ruled, *(form.changes(view, fields["id"]) if form.changes else ())]
+        # One event is the whole ruling, so a stopped verb never leaves half of one.
+        return write.Entry("ruling.recorded", fields,
+                           log=write.PROJECT if standing else write.ROUND)
 
     # Whether a stage named here is a stage of the round is a gate for this list, once
     # the round's state holds its stages.
@@ -303,14 +303,9 @@ def _can_be_ruled(question_id: str, asked: Asked, *, answer: bool = False) -> wr
     return gate
 
 
-def _changes(question_id: str, asked: Asked, change: Mapping[str, object]):
-    """The change a ruling makes to its question, as `Form.changes`."""
-    def changes(view, ruling_id):
-        return [write.Entry("question.changed",
-                            {"id": question_id, **change, "ruling": ruling_id,
-                             "record": asked.record},
-                            log=write.PROJECT if asked.standing else write.ROUND)]
-    return changes
+def _becomes(question_id: str, **change: object) -> dict[str, object]:
+    """The fields that say which question a ruling changes and what it becomes."""
+    return {"question": question_id, **change}
 
 
 def _said(asked: Asked) -> dict[str, object]:
@@ -356,14 +351,14 @@ def _answer(item: str, asked: Asked) -> Form | None:
             fields["stages"] = questions.stored(question.blocks)
         return fields
 
-    fields: dict[str, object] = {} if asked.text is None else {"text": asked.text}
+    fields = _said(asked)
     gates = [_can_be_ruled(item, asked, answer=True)]
     if chose is not None:
         fields["chose"] = chose
         gates.append(offers_what_he_chose)
+    fields.update(_becomes(item, state=questions.RULED))
     return Form(kind=SUBSTANCE, rules=item, fields=fields, gates=tuple(gates),
-                found=found,
-                changes=_changes(item, asked, {"state": questions.RULED}))
+                found=found)
 
 
 def _park(item: str, asked: Asked) -> Form | None:
@@ -397,8 +392,9 @@ def _park(item: str, asked: Asked) -> Form | None:
                              f"moxi rounds rule {asked.name} {item} --record PTR "
                              "[--until B<n>|round:<project>/<slug>]")
             gates.append(waits_for_a_stage_of_the_round)
-    return Form(kind=PROCESS, rules=item, fields=_said(asked), gates=tuple(gates),
-                changes=_changes(question_id, asked, change))
+    return Form(kind=PROCESS, rules=item,
+                fields={**_said(asked), **_becomes(question_id, **change)},
+                gates=tuple(gates))
 
 
 def _narrow(item: str, asked: Asked) -> Form | None:
@@ -435,11 +431,11 @@ def _narrow(item: str, asked: Asked) -> Form | None:
             f"moxi rounds mark {asked.name} {question_id} --blocks "
             f"{questions.said(wanted)}")
 
-    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+    return Form(kind=PROCESS, rules=item,
+                fields={**_said(asked),
+                        **_becomes(question_id, blocks=questions.stored(wanted))},
                 gates=(_can_be_ruled(question_id, asked), names_stages_of_the_round,
-                       narrows),
-                changes=_changes(question_id, asked,
-                                 {"blocks": questions.stored(wanted)}))
+                       narrows))
 
 
 def _withdraw(item: str, asked: Asked) -> Form | None:
@@ -448,9 +444,10 @@ def _withdraw(item: str, asked: Asked) -> Form | None:
     if not item.startswith(_WITHDRAW) or not _QUESTION.fullmatch(question_id):
         return None
     _of_a_question(asked, act=True)
-    return Form(kind=PROCESS, rules=item, fields=_said(asked),
-                gates=(_can_be_ruled(question_id, asked),),
-                changes=_changes(question_id, asked, {"state": questions.WITHDRAWN}))
+    return Form(kind=PROCESS, rules=item,
+                fields={**_said(asked),
+                        **_becomes(question_id, state=questions.WITHDRAWN)},
+                gates=(_can_be_ruled(question_id, asked),))
 
 
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,

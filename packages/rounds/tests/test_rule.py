@@ -459,10 +459,10 @@ def question(path, question_id="Q1"):
     return found
 
 
-def last(path, count=2):
-    """The last `count` events of a log, without what the log itself sets."""
-    return [{key: event[key] for key in event if key not in ("v", "n", "at")}
-            for event in log.read(path)[-count:]]
+def last(path):
+    """The last event of a log, without what the log itself sets."""
+    event = log.read(path)[-1]
+    return {key: event[key] for key in event if key not in ("v", "n", "at")}
 
 
 @pytest.mark.parametrize("blocks, stages", [(None, "all"), ("B1,B2", ["B1", "B2"]),
@@ -473,11 +473,10 @@ def test_an_answer_is_a_ruling_of_substance_on_the_stages_the_question_held_up(
 
     assert run("proj-a/a-round", "Q1", "--as", "planner", text=ANSWER) == 0
 
-    assert last(round_log(staged)) == [
-        {"actor": "planner", "type": "ruling.recorded", "id": "C1", "text": ANSWER,
-         "stages": stages, "record": "comms:12", "kind": "substance", "rules": "Q1"},
-        {"actor": "planner", "type": "question.changed", "id": "Q1", "state": "ruled",
-         "ruling": "C1", "record": "comms:12"}]
+    assert last(round_log(staged)) == {
+        "actor": "planner", "type": "ruling.recorded", "id": "C1", "text": ANSWER,
+        "question": "Q1", "state": "ruled", "stages": stages, "record": "comms:12",
+        "kind": "substance", "rules": "Q1"}
     found = question(round_log(staged))
     assert (found.state, found.ruling) == ("ruled", "C1")
     assert found.blocks == ("all" if blocks is None else questions.parse_blocks(blocks))
@@ -548,11 +547,9 @@ def test_a_parking_is_an_act_on_the_process_and_needs_no_sentence(staged, capsys
 
     assert run("proj-a/a-round", "park:Q1", "--as", "planner", text=None) == 0
 
-    assert last(round_log(staged)) == [
-        {"actor": "planner", "type": "ruling.recorded", "id": "C1", "record": "comms:12",
-         "kind": "process", "rules": "park:Q1"},
-        {"actor": "planner", "type": "question.changed", "id": "Q1", "state": "parked",
-         "ruling": "C1", "record": "comms:12"}]
+    assert last(round_log(staged)) == {
+        "actor": "planner", "type": "ruling.recorded", "id": "C1", "question": "Q1",
+        "state": "parked", "record": "comms:12", "kind": "process", "rules": "park:Q1"}
     found = question(round_log(staged))
     assert (found.state, found.until, found.blocks) == ("parked", None, ("B1",))
     assert capsys.readouterr().out == "C1: park:Q1\n"
@@ -563,7 +560,7 @@ def test_a_sentence_given_with_an_act_is_kept(staged, capsys):
 
     assert run("proj-a/a-round", "withdraw:Q1", text="It no longer matters.") == 0
 
-    assert log.read(round_log(staged))[-2]["text"] == "It no longer matters."
+    assert log.read(round_log(staged))[-1]["text"] == "It no longer matters."
     assert capsys.readouterr().out == "C1: It no longer matters.\n"
     assert run("proj-a/a-round", "park:Q1", text="  ") == 2
 
@@ -641,11 +638,10 @@ def test_a_narrowing_makes_a_question_hold_up_fewer_stages_or_none(
 
     assert run("proj-a/a-round", f"narrow:Q1={new}", "--as", "planner", text=None) == 0
 
-    assert last(round_log(staged)) == [
-        {"actor": "planner", "type": "ruling.recorded", "id": "C1", "record": "comms:12",
-         "kind": "process", "rules": f"narrow:Q1={new}"},
-        {"actor": "planner", "type": "question.changed", "id": "Q1",
-         "blocks": recorded, "ruling": "C1", "record": "comms:12"}]
+    assert last(round_log(staged)) == {
+        "actor": "planner", "type": "ruling.recorded", "id": "C1", "question": "Q1",
+        "blocks": recorded, "record": "comms:12", "kind": "process",
+        "rules": f"narrow:Q1={new}"}
     found = question(round_log(staged))
     assert found.state == "open"
     assert found.blocks == (recorded if isinstance(recorded, str) else tuple(recorded))
@@ -708,11 +704,10 @@ def test_a_withdrawal_is_an_act_on_the_process(staged, capsys):
 
     assert run("proj-a/a-round", "withdraw:Q1", "--as", "planner", text=None) == 0
 
-    assert last(round_log(staged)) == [
-        {"actor": "planner", "type": "ruling.recorded", "id": "C1", "record": "comms:12",
-         "kind": "process", "rules": "withdraw:Q1"},
-        {"actor": "planner", "type": "question.changed", "id": "Q1",
-         "state": "withdrawn", "ruling": "C1", "record": "comms:12"}]
+    assert last(round_log(staged)) == {
+        "actor": "planner", "type": "ruling.recorded", "id": "C1", "question": "Q1",
+        "state": "withdrawn", "record": "comms:12", "kind": "process",
+        "rules": "withdraw:Q1"}
     assert question(round_log(staged)).state == "withdrawn"
 
 
@@ -775,11 +770,10 @@ def test_an_answer_to_a_projects_question_goes_in_the_projects_log(staged, capsy
 
     assert run("proj-a", "P1", "--as", "planner", text=ANSWER) == 0
 
-    assert last(log.project_log(staged)) == [
-        {"actor": "planner", "type": "ruling.recorded", "id": "S1", "text": ANSWER,
-         "record": "comms:12", "kind": "substance", "rules": "P1"},
-        {"actor": "planner", "type": "question.changed", "id": "P1", "state": "ruled",
-         "ruling": "S1", "record": "comms:12"}]
+    assert last(log.project_log(staged)) == {
+        "actor": "planner", "type": "ruling.recorded", "id": "S1", "text": ANSWER,
+        "question": "P1", "state": "ruled", "record": "comms:12", "kind": "substance",
+        "rules": "P1"}
     assert round_log(staged).read_bytes() == before
     assert question(log.project_log(staged), "P1").state == "ruled"
     assert capsys.readouterr().out == f"S1: {ANSWER}\n"
@@ -900,6 +894,79 @@ def test_work_that_fails_after_the_record_leaves_the_ruling_recorded(
     assert len(rulings(round_log(rounds))) == 1
 
 
+# -- a ruling stopped right after its record ---------------------------------------------
+
+def stopped_after_its_append(monkeypatch, target, **ruled):
+    """Rule, and stop the verb as soon as its event is in the log: before anything
+    that follows an append has run."""
+    def stop(written):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patched:
+        patched.setattr(write, "ON_APPEND", (stop,))
+        with pytest.raises(KeyboardInterrupt):
+            ruling.rule(target, record="comms:12", actor="planner", **ruled)
+
+
+@pytest.mark.parametrize("target, item, said, became, by", [
+    ("proj-a/a-round", "Q1", ANSWER, "ruled", "C1"),
+    ("proj-a/a-round", "withdraw:Q1", None, "withdrawn", "C1"),
+    ("proj-a", "P1", ANSWER, "ruled", "S1"),
+    ("proj-a", "withdraw:P1", None, "withdrawn", "S1")])
+def test_a_ruling_stopped_after_its_append_is_whole_and_is_refused_when_run_again(
+        staged, monkeypatch, target, item, said, became, by):
+    question_id = ask(target)
+    path = round_log(staged) if "/" in target else log.project_log(staged)
+    events_before = len(log.read(path))
+
+    stopped_after_its_append(monkeypatch, target, item=item, text=said)
+
+    with pytest.raises(Refused, match=f"{question_id} is already {became}, by {by}"):
+        ruling.rule(target, item=item, text=said, record="comms:12", actor="planner")
+    after = log.read(path)
+    assert len(after) == events_before + 1
+    assert [(event["id"], event["question"]) for event in rulings(path)] == [
+        (by, question_id)]
+    assert not [event for event in after if event["type"] == "question.changed"]
+    found = question(path, question_id)
+    assert (found.state, found.ruling) == (became, by)
+    assert [(change.state, change.ruling, change.record) for change in found.changes] == [
+        (became, by, "comms:12")]
+
+
+@pytest.mark.parametrize("item, until, state_, blocks, waits", [
+    ("park:Q1", "B2", "parked", ("B1", "B2"), "B2"),
+    ("narrow:Q1=B2", None, "open", ("B2",), None)])
+def test_a_parking_or_a_narrowing_stopped_after_its_append_has_changed_the_question(
+        staged, monkeypatch, item, until, state_, blocks, waits):
+    ask(blocks="B1,B2")
+    events_before = len(log.read(round_log(staged)))
+
+    stopped_after_its_append(monkeypatch, "proj-a/a-round", item=item, until=until)
+
+    assert len(log.read(round_log(staged))) == events_before + 1
+    found = question(round_log(staged))
+    assert (found.state, found.blocks, found.until, found.ruling) == (
+        state_, blocks, waits, "C1")
+
+
+def test_no_ruling_of_a_question_writes_a_second_event(staged):
+    for _ in range(4):
+        ask()
+    events_before = len(log.read(round_log(staged)))
+
+    for item, said in (("Q1", ANSWER), ("park:Q2", None), ("narrow:Q3=none", None),
+                       ("withdraw:Q4", None)):
+        ruling.rule("proj-a/a-round", item=item, text=said, record="comms:12",
+                    actor="planner")
+
+    added = log.read(round_log(staged))[events_before:]
+    assert [event["type"] for event in added] == ["ruling.recorded"] * 4
+    assert [(one.id, one.ruling) for one in
+            state.fold(log.read(round_log(staged))).questions] == [
+        ("Q1", "C1"), ("Q2", "C2"), ("Q3", "C3"), ("Q4", "C4")]
+
+
 # -- the option an answer chose ----------------------------------------------------------
 
 OPTIONS = ("a=prose yes, parsed rows no", "b=everything", "c=nothing")
@@ -916,12 +983,10 @@ def test_an_answer_names_the_key_he_chose(staged, capsys):
     assert run("proj-a/a-round", "Q1", "--chose", "b", "--as", "planner",
                text=ANSWER) == 0
 
-    assert last(round_log(staged)) == [
-        {"actor": "planner", "type": "ruling.recorded", "id": "C1", "text": ANSWER,
-         "chose": "b", "stages": "all", "record": "comms:12", "kind": "substance",
-         "rules": "Q1"},
-        {"actor": "planner", "type": "question.changed", "id": "Q1", "state": "ruled",
-         "ruling": "C1", "record": "comms:12"}]
+    assert last(round_log(staged)) == {
+        "actor": "planner", "type": "ruling.recorded", "id": "C1", "text": ANSWER,
+        "chose": "b", "question": "Q1", "state": "ruled", "stages": "all",
+        "record": "comms:12", "kind": "substance", "rules": "Q1"}
     found = question(round_log(staged))
     assert (found.state, found.ruling, found.chose) == ("ruled", "C1", "b")
     [recorded] = state.fold(log.read(round_log(staged))).rulings

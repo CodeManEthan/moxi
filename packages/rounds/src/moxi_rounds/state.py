@@ -9,7 +9,9 @@ same way, so a log with a later version's events still folds.
 The state holds what the round's first event set (its description, its flow's name and
 the steps recorded for it, its parent, and its status), the rulings recorded in the log,
 its questions, each with every change made to it, the options it offers and the key its
-answer chose, and the whole history. A log with no
+answer chose, and the whole history. A ruling of a question is one event: the ruling's
+own record names the question and says what it becomes, and the fold changes the
+question from it. A log with no
 opening event, a project's for one, has a status of None; the rulings of a project's log
 are its register, and its questions the project's list.
 """
@@ -51,12 +53,14 @@ class Ruling:
     at: str
     #: The key of the option an answer chose, or None.
     chose: str | None = None
+    #: The question it changes, or None for a ruling that changes none.
+    question: str | None = None
 
 
 @dataclass(frozen=True)
 class Change:
-    """One change to a question, as its event recorded it. A field the change did not
-    touch is None."""
+    """One change to a question, as its event recorded it: a ruling of the question, or
+    a change that is no ruling. A field the change did not touch is None."""
 
     #: The state the question moved to.
     state: str | None
@@ -64,7 +68,8 @@ class Change:
     blocks: str | tuple[str, ...] | None
     #: What a parked question waits for: a stage's id, or `round:<name>`.
     until: str | None
-    #: The ruling that made the change, and its pointer, when the operator ruled it.
+    #: The ruling that made the change, None for a change that is no ruling, and the
+    #: operator's pointer when the change carries one.
     ruling: str | None
     record: str | None
     #: Who recorded the change, and when.
@@ -164,7 +169,12 @@ def _ruling_recorded(state: State, event: dict) -> None:
         stages=tuple(stages) if isinstance(stages, list) else stages,
         # A copy, so the state's scope and the event's never share a dict.
         scope=tuple(copy.deepcopy(event.get("scope") or [])),
-        actor=event["actor"], at=event["at"], chose=event.get("chose")))
+        actor=event["actor"], at=event["at"], chose=event.get("chose"),
+        question=event.get("question")))
+    # A ruling of a question is the whole of its change: nothing else is written for
+    # it, so a verb stopped after this event has left the question ruled.
+    if event.get("question") is not None:
+        _change(state, event, question_id=event["question"], ruling=event.get("id"))
     # The key an answer chose is kept in the ruling. The question reads it from its
     # newest answer, so an answer that names no key leaves none chosen.
     for place, question in enumerate(state.questions):
@@ -201,14 +211,22 @@ def _question_asked(state: State, event: dict) -> None:
 
 
 def _question_changed(state: State, event: dict) -> None:
+    _change(state, event, question_id=event.get("id"), ruling=None)
+
+
+def _change(state: State, event: dict, *, question_id: str | None,
+            ruling: str | None) -> None:
+    """Apply to the question `question_id` what `event` says of it, and add the change
+    to its record. `ruling` is the id of the ruling the event is, None for an event
+    that is no ruling."""
     for place, question in enumerate(state.questions):
-        if question.id == event.get("id"):
+        if question.id == question_id:
             break
     else:
         # A change to a question the log never asked changes nothing.
         return
     change = Change(state=event.get("state"), blocks=_blocks(event.get("blocks")),
-                    until=event.get("until"), ruling=event.get("ruling"),
+                    until=event.get("until"), ruling=ruling,
                     record=event.get("record"), actor=event["actor"], at=event["at"],
                     options=_offered(event.get("options"), question.options,
                                      question.retired),

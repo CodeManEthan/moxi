@@ -177,13 +177,18 @@ def test_a_question_that_does_not_say_what_it_holds_up_holds_up_every_stage():
     assert (found.by, found.at) == ("planner", AT)
 
 
+def ruled_as(n, ruling_id, **more):
+    """A ruling of the question Q1, which is the whole of the change it makes."""
+    return event(n, "ruling.recorded", id=ruling_id, kind="process", question="Q1",
+                 **more)
+
+
 def test_a_question_keeps_every_change_made_to_it_in_order():
-    parked = {**event(3, "question.changed", id="Q1", state="parked", until="B2",
-                      ruling="C1", record="comms:13"), "at": "2026-01-03T00:00:00Z"}
+    parked = {**ruled_as(3, "C1", rules="park:Q1", state="parked", until="B2",
+                         record="comms:13"), "at": "2026-01-03T00:00:00Z"}
     widened = {**event(4, "question.changed", id="Q1", blocks="all"), "actor": "scout"}
     reopened = event(5, "question.changed", id="Q1", state="open")
-    ruled = event(6, "question.changed", id="Q1", state="ruled", ruling="C2",
-                  record="comms:14")
+    ruled = ruled_as(6, "C2", rules="Q1", state="ruled", record="comms:14")
     log_events = [opened(), asked(2, blocks=["B1"]), parked, widened, reopened, ruled]
 
     def after(count):
@@ -210,14 +215,54 @@ def test_a_change_touches_only_the_question_it_names():
     before = state.fold([opened(), asked(2), asked(3, id="Q2")])
 
     after = state.fold([opened(), asked(2), asked(3, id="Q2"),
-                        event(4, "question.changed", id="Q2", state="withdrawn",
-                              ruling="C1", record="comms:13"),
+                        event(4, "question.changed", id="Q2", state="parked"),
                         event(5, "question.changed", id="Q9", state="ruled")])
 
     assert after.questions[0] == before.questions[0]
-    assert [found.state for found in after.questions] == ["open", "withdrawn"]
+    assert [found.state for found in after.questions] == ["open", "parked"]
     assert dataclasses.replace(after, questions=before.questions,
                                history=before.history) == before
+
+
+def test_a_ruling_of_a_question_is_the_whole_of_its_change():
+    asked_two = [opened(), asked(2, blocks=["B1", "B2"]), asked(3, id="Q2")]
+    before = state.fold(asked_two)
+    narrowed = ruled_as(4, "C1", rules="narrow:Q1=B2", blocks=["B2"], record="comms:13")
+    withdrawn = ruled_as(5, "C2", rules="withdraw:Q1", state="withdrawn",
+                         record="comms:14")
+
+    after = state.fold([*asked_two, narrowed, withdrawn])
+
+    first, second = after.questions
+    assert (first.state, first.blocks, first.ruling) == ("withdrawn", ("B2",), "C2")
+    assert first.changes == (
+        state.Change(state=None, blocks=("B2",), until=None, ruling="C1",
+                     record="comms:13", actor="planner", at=AT),
+        state.Change(state="withdrawn", blocks=None, until=None, ruling="C2",
+                     record="comms:14", actor="planner", at=AT))
+    assert second == before.questions[1]
+    assert [(one.id, one.question) for one in after.rulings] == [("C1", "Q1"),
+                                                                 ("C2", "Q1")]
+    assert dataclasses.replace(after, questions=before.questions, rulings=[],
+                               history=before.history) == before
+
+
+def test_a_ruling_of_a_question_the_log_never_asked_changes_no_question():
+    before = state.fold([opened(), asked(2)])
+
+    after = state.fold([opened(), asked(2),
+                        {**ruled_as(3, "C1", state="ruled"), "question": "Q9"}])
+
+    assert after.questions == before.questions
+    assert [one.id for one in after.rulings] == ["C1"]
+
+
+def test_a_change_that_is_no_ruling_names_no_ruling():
+    [found] = state.fold([opened(), asked(2),
+                          event(3, "question.changed", id="Q1", state="parked",
+                                ruling="C7")]).questions
+
+    assert (found.state, found.ruling, found.changes[0].ruling) == ("parked", None, None)
 
 
 def test_a_question_keeps_its_options_its_retired_keys_and_the_key_chosen():
@@ -225,10 +270,9 @@ def test_a_question_keeps_its_options_its_retired_keys_and_the_key_chosen():
     retired = event(3, "question.changed", id="Q1", retired=["c"],
                     options={"d": "four"})
     answered = event(4, "ruling.recorded", id="C1", text="two", record="comms:13",
-                     kind="substance", rules="Q1", chose="b", stages=["B1"])
-    ruled = event(5, "question.changed", id="Q1", state="ruled", ruling="C1",
-                  record="comms:13")
-    log_events = [opened(), offered, retired, answered, ruled]
+                     kind="substance", rules="Q1", chose="b", stages=["B1"],
+                     question="Q1", state="ruled")
+    log_events = [opened(), offered, retired, answered]
 
     def after(count):
         [found] = state.fold(log_events[:count]).questions
@@ -242,15 +286,15 @@ def test_a_question_keeps_its_options_its_retired_keys_and_the_key_chosen():
         state.Change(state=None, blocks=None, until=None, ruling=None, record=None,
                      actor="planner", at=AT, options=(("d", "four"),),
                      retired=("c",)),)
-    assert (after(4).chose, after(4).state) == ("b", "open")
-    assert (after(5).chose, after(5).state, after(5).retired) == ("b", "ruled", ("c",))
+    assert (after(4).chose, after(4).state, after(4).retired) == ("b", "ruled", ("c",))
+    assert after(4).ruling == "C1"
     assert state.fold(log_events).rulings[0].chose == "b"
 
 
 def test_options_change_no_other_field_of_a_question():
     events_ = [opened(), asked(2, blocks=["B1"]),
-               event(3, "question.changed", id="Q1", state="parked", until="B2",
-                     ruling="C1", record="comms:13")]
+               ruled_as(3, "C1", rules="park:Q1", state="parked", until="B2",
+                        record="comms:13")]
     [before] = state.fold(events_).questions
 
     [after] = state.fold([*events_,

@@ -66,12 +66,13 @@ TYPES = _types(
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
                "options", "prepared"),
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
-    # A question changed: its state or what it holds up, with who changed it, and for a
-    # change the operator ruled the ruling's id and its pointer; what a parked one waits
-    # for; `options` added, each key with its one line, and the keys `retired`; a
-    # prepared answer.
+    # A question changed by something that is no ruling: its state or what it holds
+    # up, with who changed it and the operator's pointer when the change needs one;
+    # `options` added, each key with its one line, and the keys `retired`; a prepared
+    # answer. A ruling of a question writes none of these: its own event says what the
+    # question becomes.
     EventType("question.changed",
-              ("id", "state", "blocks", "until", "by", "ruling", "record", "options",
+              ("id", "state", "blocks", "until", "by", "record", "options",
                "retired", "prepared"),
               required=("id",)),
     # A stage joined the plan: its id, the repo and branch it builds on or the child
@@ -82,10 +83,14 @@ TYPES = _types(
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,
     # the repos and paths or the stages it applies to, its kind (of substance, or an act
     # on the process) and the item it rules, the key of the option an answer chose, and
-    # the ruling it replaces or takes back.
+    # the ruling it replaces or takes back. A ruling of a question is the whole of the
+    # change: it names the `question` and holds what the question becomes, its `state`,
+    # what a parked one waits for (`until`) and what it holds up from then on
+    # (`blocks`), each only when the ruling changes it.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
-               "chose", "supersedes", "revokes"),
+               "chose", "question", "state", "until", "blocks", "supersedes",
+               "revokes"),
               required=("id", "record", "kind")),
     # Rulings were put in front of the operator: their ids, and the pointer to where.
     EventType("ruling.shown", ("ids", "record")),
