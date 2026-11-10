@@ -295,7 +295,9 @@ Verification is bounded, so that passes do not feed themselves:
    one is asked for a re-check, and a second thread is decided only after two more.
    A verdict counts when it gave the design its standing: one for a version that was
    no longer current, or that already stood at `publishable` or `lead-decision`, is
-   recorded and not counted. The freezing that follows the two must change the
+   recorded and not counted. One text is counted once: a second report that sends
+   back the same version, or one frozen again unchanged, is recorded and shown and
+   not counted. The freezing that follows the two must change the
    design's text. The same decision run again is found, not recorded twice.
 
 A flag is shown with its verdict and refuses nothing.

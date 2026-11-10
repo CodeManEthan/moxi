@@ -705,6 +705,103 @@ def test_a_thread_is_not_decided_before_two_verdicts_in_a_row_sent_the_design_ba
     refused("one has, for v3")
 
 
+def run_of(folder) -> list[int]:
+    return [one.n for one in versions.sent_back(folded(folder))]
+
+
+def test_two_reports_that_send_back_one_version_count_as_one(folder):
+    fold(folder)
+    first = verdict(folder, pass_="full")
+    second = verdict(folder)
+
+    assert run_of(folder) == [first.event["n"]]
+    found = versions.standing(folded(folder))
+    # The second is recorded and is what the standing shows; it is not counted.
+    assert (str(found), found.verdict.n) == ("fold-first@v1", second.event["n"])
+    assert len(versions.design_verdicts(folded(folder))) == 2
+    assert asked(folder).pass_ == brake.RECHECK
+
+    fold(folder)
+    assert (asked(folder).pass_, asked(folder).version) == (brake.RECHECK, 2)
+    before = raw(folder)
+    with pytest.raises(Refused) as refused:
+        decide(folder)
+    assert "one has, for v1" in refused.value.unmet[0].reason
+    assert raw(folder) == before
+
+
+def test_a_third_report_on_one_version_is_not_counted_either(folder):
+    fold(folder)
+    first = verdict(folder, pass_="full")
+    verdict(folder)
+    verdict(folder)
+
+    assert run_of(folder) == [first.event["n"]]
+
+
+def test_a_report_that_sends_back_an_unchanged_text_again_is_not_counted(folder):
+    fold(folder)
+    first = verdict(folder, pass_="full")
+    again(folder)
+    again(folder)
+
+    verdict(folder, design=3)
+
+    assert run_of(folder) == [first.event["n"]]
+    assert standing(folder) == "fold-first@v3"
+    assert asked(folder).instead != ()
+
+
+def test_a_text_sent_back_through_a_later_version_is_counted_once(folder):
+    fold(folder)
+    again(folder)
+    first = verdict(folder, design=2, pass_="full")
+    again(folder)
+
+    verdict(folder, design=3)
+
+    assert run_of(folder) == [first.event["n"]]
+
+
+def test_a_changed_text_sent_back_after_two_reports_on_the_first_is_the_second(folder):
+    fold(folder)
+    first = verdict(folder, pass_="full")
+    verdict(folder)
+    fold(folder)
+
+    second = verdict(folder, design=2)
+
+    assert run_of(folder) == [first.event["n"], second.event["n"]]
+    fold(folder)
+    assert str(decide(folder).standing) == "lead-decision@v3"
+
+
+def test_the_text_of_an_older_version_frozen_again_is_counted_as_a_new_one(folder):
+    fold(folder)
+    text = (folder / "design.md").read_text(encoding="utf-8")
+    first = verdict(folder, pass_="full")
+    fold(folder)
+    (folder / "design.md").write_text(text, encoding="utf-8")
+    freezing.freeze(ROUND, actor="scout")
+
+    second = verdict(folder, design=3)
+
+    assert run_of(folder) == [first.event["n"], second.event["n"]]
+
+
+def test_a_report_on_a_version_the_lead_decided_then_one_on_the_next_starts_a_count(
+        folder):
+    sent_back_twice(folder)
+    decide(folder)
+    verdict(folder, design=3)
+    fold(folder)
+
+    counted = verdict(folder, design=4)
+    verdict(folder, design=4)
+
+    assert run_of(folder) == [counted.event["n"]]
+
+
 def test_a_thread_is_not_decided_before_the_design_was_frozen_again(folder):
     fold(folder)
     verdict(folder, pass_="full")

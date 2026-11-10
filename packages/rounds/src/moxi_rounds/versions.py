@@ -247,6 +247,9 @@ def _walk(state: states.State) -> _Walk:
     digests: dict[int, str | None] = {}
     # The versions that stood verified at some point.
     firm: set[int] = set()
+    # The versions whose text a counted verdict sent back: the version it read, and
+    # each one frozen after it with the same bytes.
+    sent: set[int] = set()
 
     def restart(*, decided: bool = False) -> None:
         walk.run, walk.rewritten = (), False
@@ -266,6 +269,8 @@ def _walk(state: states.State) -> _Walk:
                 stands[one.n] = Standing(NONE, one.n)
             only[one.n] = one.records_only
             digests[one.n] = one.digest
+            if same[one.n] and before in sent:
+                sent.add(one.n)
             walk.newest = one.n
             if stands[one.n].fold == one.n:
                 # Freezing a change of records only after the design was sent back is
@@ -278,8 +283,11 @@ def _walk(state: states.State) -> _Walk:
                 continue
             # A verdict counts when it gave the design its standing as it was
             # recorded: it read the version current then, and that version did not
-            # stand verified already.
-            counts = one.design == walk.newest and one.design not in firm
+            # stand verified already. One text is counted once: a second verdict
+            # that sends back a text a counted one already did is no fold that
+            # failed to answer a pass.
+            counts = (one.design == walk.newest and one.design not in firm
+                      and one.design not in sent)
             if (one.verdict != report_block.PUBLISHABLE
                     and stands[one.design].word in VERIFIED):
                 # A version that stands verified stays so: a pass that objects
@@ -294,12 +302,15 @@ def _walk(state: states.State) -> _Walk:
                 if not finds and stands[later].word in VERIFIED:
                     break
                 stands[later] = Standing(one.verdict or NONE, later, one)
+                if counts and not finds:
+                    sent.add(later)
                 later += 1
             if one.verdict == report_block.PUBLISHABLE:
                 if stands[walk.newest].verdict is one:
                     restart()
             elif counts:
                 walk.run, walk.rewritten = (*walk.run, one), False
+                sent.add(one.design)
         elif walk.newest is not None:
             stands[walk.newest] = Standing(LEAD_DECISION, walk.newest, decision=one)
             restart(decided=True)
@@ -323,7 +334,9 @@ def sent_back(state: states.State) -> tuple[states.Verdict, ...]:
     and after a verdict that left the design standing at publishable. It holds only a
     verdict that gave the design its standing as it was recorded: one for a version
     that was not the current one then, or that already stood verified, is in the
-    record and is not counted."""
+    record and is not counted. It holds one verdict for each text: a second that
+    sends back a version a counted one already sent back, or a version frozen after
+    that one with the same bytes, is in the record and is not counted either."""
     return _walk(state).run
 
 

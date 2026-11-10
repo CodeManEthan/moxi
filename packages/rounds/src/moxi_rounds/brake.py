@@ -28,7 +28,9 @@ bounded by five rules, and the functions here are those rules:
    a design frozen again after it is asked for a re-check, and a second thread is
    decided only after two more such verdicts. A verdict counts only when it gave the
    design its standing as it was recorded: one for a version that was no longer
-   current, or that already stood verified, does not. The freezing that must follow
+   current, or that already stood verified, does not. One text is counted once: a
+   second verdict that sends back a version a counted one sent back, or a version
+   frozen after it with the same bytes, does not count. The freezing that must follow
    the two is one that changed the design's text. `asked` and `decide` read the one
    count, `versions.sent_back`.
 
