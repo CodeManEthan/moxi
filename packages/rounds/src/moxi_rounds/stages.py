@@ -336,10 +336,18 @@ def closes_a_circle(after: Mapping[str, Sequence[str]], stage_id: str,
 def unmeetable(state: states.State, block: design_block.DesignBlock,
                adds: Mapping[str, Sequence[str]]) -> list[Problem]:
     """What a freezing refuses of the waits it would add, `adds` giving them by
-    stage: one for a stage that left the plan, and one that closes a circle with the
-    waits on record and the ones added before it. The words are the ones a wait
-    added by hand is refused with."""
+    stage: one for a stage that left the plan, one for a recorded stage the block
+    itself leaves out, and one that closes a circle with the waits on record and the
+    ones added before it. The words for the first and the last are the ones a wait
+    added by hand is refused with.
+
+    A stage the block leaves out leaves the plan once the version is found
+    publishable, so a wait for it added by the same block could not be met from then
+    on. A finished stage is the exception: its work is met, and it does not leave."""
     after = {key: list(value) for key, value in waits(state).items()}
+    declared = {stage.id for stage in block.stages}
+    recorded = {stage.id for stage in state.stages}
+    finished = questions.finished_stages(state)
     problems = []
     for stage in block.stages:
         for waited in adds.get(stage.id, ()):
@@ -349,6 +357,15 @@ def unmeetable(state: states.State, block: design_block.DesignBlock,
                 problems.append(Problem(
                     stage.line_of("after"), left,
                     f"take {waited} out of the after of {stage.id}"))
+            elif (waited in recorded and waited not in declared
+                  and waited not in finished):
+                problems.append(Problem(
+                    stage.line_of("after"),
+                    f"this block leaves {waited} out, which takes it out of the plan "
+                    f"once the version is found publishable, so {stage.id} waiting "
+                    f"for {waited} could never start",
+                    f"take {waited} out of the after of {stage.id}, or declare "
+                    f"{waited} in the block again"))
             elif circle is not None:
                 problems.append(Problem(
                     stage.line_of("after"), circle,

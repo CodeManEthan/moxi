@@ -714,6 +714,69 @@ def test_a_fold_refuses_a_circle_of_waits_in_the_words_of_the_wait_added_by_hand
     assert not (folder / "versions" / "design-v2.md").exists()
 
 
+LEFT_OUT = ("this block leaves B2 out, which takes it out of the plan once the version "
+            "is found publishable, so B1 waiting for B2 could never start")
+
+
+def test_a_fold_refuses_a_wait_for_a_stage_its_own_block_leaves_out(opened):
+    folder = opened("full")
+    design(folder, stage("B1"), stage("B2"), stage("B3"))
+    fold()
+    design(folder, stage("B1", after='["B3", "B2"]'), stage("B3"))
+    before = raw(folder)
+
+    with pytest.raises(BadBlock) as refused:
+        fold()
+
+    [problem] = refused.value.problems
+    assert problem.what == LEFT_OUT
+    assert problem.fix == ("take B2 out of the after of B1, or declare B2 in the block "
+                           "again")
+    assert problem.line == line_with(folder, 'after = ["B3", "B2"]')
+    assert raw(folder) == before
+    assert not (folder / "versions" / "design-v2.md").exists()
+
+
+@pytest.mark.parametrize("fixed", ["declared again", "wait taken out"])
+def test_either_fix_named_for_a_wait_on_a_stage_left_out_lets_the_fold_freeze(
+        opened, fixed):
+    folder = opened("full")
+    design(folder, stage("B1"), stage("B2"))
+    fold()
+    if fixed == "declared again":
+        design(folder, stage("B1", after='["B2"]'), stage("B2"))
+    else:
+        design(folder, stage("B1"))
+
+    fold()
+
+    assert stages.waits(folded(folder)).get("B1", ()) == (
+        ("B2",) if fixed == "declared again" else ())
+
+
+def test_a_fold_adds_a_wait_for_a_finished_stage_its_block_leaves_out(opened):
+    folder = opened("full")
+    design(folder, stage("B1"), stage("B2"))
+    fold()
+    log.append(log.round_log(folder), "finish.done", {"stage": "B2"}, actor="planner")
+    design(folder, stage("B1", after='["B2"]'))
+
+    fold()
+
+    assert tuple(stages.waits(folded(folder))["B1"]) == ("B2",)
+
+
+def test_a_wait_recorded_before_its_stage_was_left_out_is_not_refused(opened):
+    folder = opened("full")
+    design(folder, stage("B1", after='["B2"]'), stage("B2"))
+    fold()
+    design(folder, stage("B1", after='["B2"]'))
+
+    fold()
+
+    assert tuple(stages.waits(folded(folder))["B1"]) == ("B2",)
+
+
 def test_a_first_fold_refuses_a_circle_among_the_stages_it_declares(opened):
     folder = opened("full")
     design(folder, stage("B1", after='["B3"]'), stage("B2", after='["B1"]'),
