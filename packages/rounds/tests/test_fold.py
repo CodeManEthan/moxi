@@ -989,7 +989,7 @@ def test_stages_the_version_and_what_it_took_away_are_in_the_index(folder):
                                                    ("B2", "proj-a", ["B1"])]
     assert found.of(index.VERSION) == (index.Item(index.VERSION, "v2", {
         "version": 2, "digest": hashlib.sha256(data).hexdigest(), "at": AT,
-        "by": "scout", "records_only": False}),)
+        "by": "scout", "records_only": False, "standing": "none"}),)
     assert [(item.id, item.body["said"]) for item in found.of(index.PENDING)] == [
         ("v2:stage:B2", "the stage B2 is gone from the block")]
     assert [item.id for item in found.of(index.QUESTION)] == ["Q1"]

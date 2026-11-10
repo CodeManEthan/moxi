@@ -146,7 +146,8 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert listing["rounds"][0] == {
         "name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
         "status": "open", "flow": "fix",
-        "counts": {"open": 1, "parked": 1, "not_shown": 3}, "ended": None}
+        "counts": {"open": 1, "parked": 1, "not_shown": 3}, "standing": None,
+         "ended": None}
     [ended] = api.rounds(status="closed")["rounds"]
     assert (ended["name"], ended["status"]) == (D, "dropped")
     assert [one["name"] for one in api.rounds("proj-b")["rounds"]] == [C]

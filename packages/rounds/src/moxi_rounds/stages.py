@@ -10,16 +10,16 @@ is a new id.
 
 **Leaving the plan.** A stage leaves only while it has no build that is open or
 finished, and in one of two ways: the operator rules it out (`unstage:B<n>`), or a
-design verdict applies a removal the design's block made (`removed` gives that event,
-`cannot_leave` the reason a stage stays). A stage that left does not come back: its id
+design verdict applies a removal the design's block made (the verdict's own event
+says so; `cannot_leave` is the reason a stage stays). A stage that left does not come back: its id
 is refused from then on, and the same work planned again takes a new id. No ruling
 takes an `unstage` back.
 
 **What a stage waits for.** `after` lists the stages finished before it starts. Anyone
 adds to the list (`wait`), and a stage added must be a recorded one and must not wait,
 directly or through others, for the stage it is added to. Only the operator takes one
-off (`unafter:B<n>=B<m>`), or a design verdict that applies what a block left out
-(`unwaited`). `waits_for` gives the ones not finished yet.
+off (`unafter:B<n>=B<m>`), or a design verdict that applies what a block left out,
+in its own event. `waits_for` gives the ones not finished yet.
 
 **One stage to a repo** in a round whose flow does not verify its design: a design
 that would add a second stage in a repo is refused there, since the second could never
@@ -143,27 +143,6 @@ def cannot_leave(state: states.State, stage_id: str, *,
         return (f"{stage_id} has an open build, and a stage with one leaves only "
                 "after that build is dropped")
     return None
-
-
-# -- the events a design verdict writes --------------------------------------------------
-
-def removed(stage_id: str, *, verdict: str | None = None) -> write.Entry:
-    """The event that takes the stage `stage_id` out of the plan, for a removal that
-    `verdict` applies. The caller asks `cannot_leave` first: a stage with a build
-    stays."""
-    fields: dict[str, object] = {"id": stage_id, "removed": True}
-    if verdict is not None:
-        fields["verdict"] = verdict
-    return write.Entry("stage.changed", fields)
-
-
-def unwaited(stage_id: str, gone, *, verdict: str | None = None) -> write.Entry:
-    """The event that takes the stages `gone` off what the stage `stage_id` waits for,
-    for a narrowing that `verdict` applies."""
-    fields: dict[str, object] = {"id": stage_id, "gone": list(gone)}
-    if verdict is not None:
-        fields["verdict"] = verdict
-    return write.Entry("stage.changed", fields)
 
 
 # -- what a design's block may not say ---------------------------------------------------
@@ -398,6 +377,6 @@ def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
 
 __all__ = ["UNSTAGE", "UNAFTER", "PLANNED", "LEFT", "BUILDING", "FINISHED", "VERIFIES",
            "CHECKS", "Waiting", "find", "state_of", "in_plan", "build_of", "waits_for",
-           "cannot_leave", "removed", "unwaited", "keeps_what_it_is_of",
+           "cannot_leave", "keeps_what_it_is_of",
            "one_to_a_repo", "stays_out", "parse_unstage", "parse_unafter",
            "unstage_gates", "unafter_gates", "parse_after", "wait"]

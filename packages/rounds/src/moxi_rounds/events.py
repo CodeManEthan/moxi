@@ -60,10 +60,15 @@ TYPES = _types(
     # A report's verdict: what kind of report and pass, the verdict word, what it read
     # (a design version, or a stage with its head and merge-base), the user step it is
     # for, the model and author, the report file and its digest, and what its block
-    # listed.
+    # listed. A design report's verdict that finds its version publishable is also the
+    # whole of what it applies: `applied` lists what that version's block took away
+    # and this event takes out of the record, each as the freezing held it, and
+    # `not_applied` the ones it leaves, each with `why`. `flags` are what is noted of
+    # the report and refuses nothing.
     EventType("verdict.recorded",
               ("kind", "pass", "verdict", "design", "stage", "head", "merge_base", "step",
-               "model", "by", "report", "sha256", "findings", "waits", "decisions")),
+               "model", "by", "report", "sha256", "findings", "waits", "decisions",
+               "applied", "not_applied", "flags")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
     # operator's pointer when the question is his own; it is then the origin too.
@@ -90,9 +95,9 @@ TYPES = _types(
     EventType("stage.declared",
               ("id", "repo", "branch", "round", "after", "slices", "why")),
     # A stage changed: it waits for more stages (`after`, the ones added), it waits for
-    # fewer (`gone`, the ones taken off) or it left the plan (`removed`), the last two
-    # with the verdict that applied them. The operator's ruling that does either is its
-    # own event and writes none of these.
+    # fewer (`gone`, the ones taken off) or it left the plan (`removed`). A mark writes
+    # the first. The operator's ruling that does one of the other two is its own
+    # event, and so is a verdict that applies one: neither writes this event.
     EventType("stage.changed", ("id", "removed", "after", "gone", "verdict", "ruling"),
               required=("id",)),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,

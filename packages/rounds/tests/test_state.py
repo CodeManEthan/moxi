@@ -98,7 +98,7 @@ NOT_APPLIED_HERE = sorted(set(events.TYPES)
                           - {"round.opened", "ruling.recorded", "question.asked",
                              "question.changed", "ruling.shown", "round.dropped",
                              "flow.changed", "design.frozen", "stage.declared",
-                             "stage.changed"})
+                             "stage.changed", "verdict.recorded"})
 
 
 @pytest.mark.parametrize("name", NOT_APPLIED_HERE)
@@ -838,3 +838,51 @@ def test_a_ruling_that_takes_a_wait_off_a_stage_is_the_whole_of_that_change():
 
     assert [one.after for one in found.stages] == [(), (), ("B2",)]
     assert [one.rules for one in found.rulings] == ["unafter:B3=B1", "unafter:B9=B1"]
+
+
+def verdict(n, **more):
+    fields = {"kind": "design", "pass": "full", "verdict": "publishable", "design": 1,
+              "model": "a-model", "by": "critic", "report": "report.md",
+              "sha256": "0" * 64, "findings": [], **more}
+    return event(n, "verdict.recorded", **fields)
+
+
+def test_a_verdict_joins_the_verdicts_and_changes_nothing_else():
+    start = [opened(), asked(2), declared(3, "B1")]
+    found = {"id": "L1", "severity": "minor", "state": "open", "text": "a slip"}
+    later = verdict(4, verdict="fold-first", findings=[found], flags=["a-flag"])
+
+    before, after = state.fold(start), state.fold([*start, later])
+
+    assert after.verdicts == [state.Verdict(
+        n=4, kind="design", pass_="full", verdict="fold-first", design=1,
+        model="a-model", by="critic", report="report.md", sha256="0" * 64,
+        findings=(found,), flags=("a-flag",), applied=(), not_applied=(),
+        actor="planner", at=AT)]
+    assert dataclasses.replace(after, verdicts=[], history=before.history) == before
+    # The state's finding and the event's never share a dict.
+    assert after.verdicts[0].findings[0] is not found
+
+
+def test_a_verdict_takes_out_what_its_event_says_it_applies_and_nothing_more():
+    start = [opened(), asked(2), asked(3, id="Q2"), declared(4, "B1"), declared(5, "B2"),
+             declared(6, "B3", after=["B1", "B2"])]
+    later = verdict(7, applied=[
+        {"what": "question", "id": "Q1"}, {"what": "blocks", "id": "Q2", "blocks": ["B2"]},
+        {"what": "after", "id": "B3", "gone": ["B1"]}, {"what": "stage", "id": "B1"},
+        {"what": "question", "id": "Q9"}, {"what": "after", "id": "B9", "gone": ["B1"]},
+        {"what": "question"}, "not an entry"],
+        not_applied=[{"what": "stage", "id": "B2", "why": "it has an open build"}])
+
+    before, after = state.fold(start), state.fold([*start, later])
+
+    assert [(one.id, one.state, one.blocks) for one in after.questions] == [
+        ("Q1", "withdrawn", "all"), ("Q2", "open", ("B2",))]
+    assert [one.after for one in after.stages] == [(), (), ("B2",)]
+    # A stage that left keeps its record.
+    assert [one.id for one in after.stages] == [one.id for one in before.stages]
+    assert after.verdicts[0].not_applied == (
+        (state.Pending("stage", "B2"), "it has an open build"),)
+    assert [one.what for one in after.verdicts[0].applied] == [
+        "question", "blocks", "after", "stage", "question", "after"]
+    assert after.rulings == before.rulings and after.versions == before.versions

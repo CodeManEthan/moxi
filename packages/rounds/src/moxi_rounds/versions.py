@@ -8,8 +8,11 @@ from a round's folded state:
 - `current(state)`, `find(state, n)`: the newest version, and the one numbered `n`;
 - `digest(state, n=None)`: a version's digest, the current one's when no number is given;
 - `declarations(state, n=None)`: what a version's block declared;
-- `pending_removals(state, n)`: what version `n` took away, and `said(pending)` one of
-  those in a line;
+- `pending_removals(state, n)`: what version `n` took away, `outstanding(state, n)`
+  what of that would still change the record, and `said(pending)` one of those in a
+  line;
+- `standing(state)`: what the design's verification stands at, from the verdicts
+  recorded for its current version;
 - `unchanged(state, folder, name)`: the condition that `design.md` is as it was when the
   current version was frozen, for a gate that needs the design verified.
 
@@ -17,12 +20,20 @@ What a block takes away (a question, a stage, a stage another waited for, a stag
 question held up) changes nothing when it is frozen. It is kept with the version that
 carries it, and is applied by a verdict that finds that version publishable or by the
 operator's ruling.
+
+**The standing.** A design's standing is the newest verdict recorded for its current
+version: `publishable@v<N>` or `fold-first@v<N>`, and `none` while that version has no
+verdict, or no version was frozen. A verdict recorded for an earlier version stays in
+the record and is not the standing, so freezing a design again leaves it at `none`
+until a pass reads the new version.
 """
 
 from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+
+from dataclasses import dataclass
 
 from . import questions
 from . import state as states
@@ -80,6 +91,79 @@ def pending_removals(state: states.State, n: int) -> tuple[states.Pending, ...]:
     return () if version is None else version.pending
 
 
+def outstanding(state: states.State, n: int) -> tuple[states.Pending, ...]:
+    """What version `n` took away that would still change the record as it is now: a
+    question still asked, a stage still in the plan, the stages a stage still waits
+    for, and a hold that is still wider than the block's. The rest was applied
+    already, by a verdict or a ruling, or was overtaken (a question since ruled)."""
+    asked = (questions.OPEN, questions.PARKED)
+    left = questions.left_stages(state) | questions.finished_stages(state)
+    found = []
+    for one in pending_removals(state, n):
+        question = questions.find(state, one.id)
+        if one.what == states.QUESTION:
+            if question is not None and question.state in asked:
+                found.append(one)
+        elif one.what == states.BLOCKS:
+            if (question is not None and question.state in asked
+                    and one.blocks is not None
+                    and not questions.holds_every(one.blocks, question.blocks)):
+                found.append(one)
+        elif one.what == states.STAGE:
+            if one.id in questions.recorded_stages(state) and one.id not in left:
+                found.append(one)
+        elif one.what == states.AFTER:
+            waits = next((stage.after for stage in state.stages if stage.id == one.id),
+                         ())
+            still = tuple(stage for stage in one.gone if stage in waits)
+            if still:
+                found.append(states.Pending(states.AFTER, one.id, gone=still))
+    return tuple(found)
+
+
+# -- the standing ------------------------------------------------------------------------
+
+#: The kind of report whose verdict is of a design.
+DESIGN_REPORT = "design"
+
+#: The standing of a design no verdict was recorded for at its current version.
+NONE = "none"
+
+
+@dataclass(frozen=True)
+class Standing:
+    """What a design's verification stands at: `word` is `NONE` or the word of the
+    verdict that says so, `version` the current version's number (None for a design
+    never frozen), and `verdict` the verdict that gives it, or None."""
+
+    word: str
+    version: int | None = None
+    verdict: states.Verdict | None = None
+
+    def __str__(self) -> str:
+        return self.word if self.word == NONE else f"{self.word}@v{self.version}"
+
+
+def design_verdicts(state: states.State, n: int | None = None
+                    ) -> tuple[states.Verdict, ...]:
+    """The verdicts recorded of the design, oldest first; with `n`, the ones that read
+    version `n`."""
+    return tuple(one for one in state.verdicts if one.kind == DESIGN_REPORT
+                 and (n is None or one.design == n))
+
+
+def standing(state: states.State) -> Standing:
+    """The standing of the round's design: the newest verdict recorded for its current
+    version, and `NONE` when that version has none or no version was frozen."""
+    version = current(state)
+    if version is None:
+        return Standing(NONE)
+    read = design_verdicts(state, version.n)
+    if not read:
+        return Standing(NONE, version.n)
+    return Standing(read[-1].verdict or NONE, version.n, read[-1])
+
+
 def said(pending: states.Pending) -> str:
     """One thing a version took away, in a line."""
     if pending.what == states.QUESTION:
@@ -113,14 +197,26 @@ def newest(state: states.State):
     if version is not None:
         yield f"v{version.n}", {"version": version.n, "digest": version.digest,
                                 "at": version.at, "by": version.actor,
-                                "records_only": version.records_only}
+                                "records_only": version.records_only,
+                                "standing": str(standing(state))}
+
+
+def verdicts(state: states.State):
+    """Each verdict recorded of the design, as `(id, body)` for the index: the version
+    it read, its word, what the pass was, who wrote the report and with which model,
+    the report's file, and what is noted of it."""
+    for place, one in enumerate(design_verdicts(state), 1):
+        yield f"d{place}", {"version": one.design, "verdict": one.verdict,
+                            "pass": one.pass_, "by": one.by, "model": one.model,
+                            "report": one.report, "at": one.at,
+                            "flags": list(one.flags)}
 
 
 def waiting(state: states.State):
-    """What the current version took away and so waits for a verdict or a ruling, each
-    as `(id, body)` for the index."""
+    """What the current version took away and still waits for a verdict or a ruling,
+    each as `(id, body)` for the index."""
     version = current(state)
-    for one in () if version is None else version.pending:
+    for one in () if version is None else outstanding(state, version.n):
         yield f"v{version.n}:{one.what}:{one.id}", {
             "version": version.n, "what": one.what, "id": one.id,
             "gone": list(one.gone),
@@ -146,4 +242,6 @@ def unchanged(state: states.State, folder: Path | str, name: str) -> Unmet | Non
 
 
 __all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "declarations",
-           "pending_removals", "said", "stages", "newest", "waiting", "unchanged"]
+           "pending_removals", "outstanding", "said", "DESIGN_REPORT", "NONE",
+           "Standing", "design_verdicts", "standing", "stages", "newest", "verdicts",
+           "waiting", "unchanged"]

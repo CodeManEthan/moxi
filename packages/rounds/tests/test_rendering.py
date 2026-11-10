@@ -110,6 +110,10 @@ No question.
 
 No ruling.
 
+## Verdicts
+
+No verdict.
+
 ## History
 
 1 event, oldest first.
@@ -232,6 +236,10 @@ fix: {steps()}
   - takes back: C4
   - not shown
 
+## Verdicts
+
+No verdict.
+
 ## History
 
 10 events, oldest first.
@@ -264,7 +272,7 @@ def test_a_note_lists_what_showing_the_round_gives(rounds, capsys):
         assert f"- {one['id']}: {one['text']}" in text
         assert f"  {one['id']}: {one['text']}" in printed
     assert [part.title for part in rendering.PARTS] == [
-        "Flow", "Questions", "Rulings", "History"]
+        "Flow", "Questions", "Rulings", "Verdicts", "History"]
     headings = [line[3:] for line in text.splitlines() if line.startswith("## ")]
     assert headings == [part.title for part in rendering.PARTS]
 

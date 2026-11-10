@@ -38,6 +38,12 @@ design's block declared, and what of that was new to the record, which the fold 
 from it (a question, a stage, a stage another must follow, a wider hold, options).
 What the block took away is kept with the version as pending and changes nothing.
 
+A report's verdict is one event, kept in `verdicts`. One that finds a version of the
+design publishable also says what it takes out of the record, from what that version's
+block took away, and the fold takes it out from that event: a question is withdrawn, a
+question holds up fewer stages, a stage waits for fewer. A stage it takes out of the
+plan keeps its record, as one the operator rules out does.
+
 A round that was dropped is `DROPPED` from that event on, and the event is the whole of
 the drop in the round's log: it says who dropped the round, and where each question
 that was open or parked went, which the fold applies to the question as a change. A log
@@ -154,6 +160,8 @@ class Change:
     #: None. A change with one is kept as history and is no part of what the question
     #: reads as.
     undone_by: str | None = None
+    #: Whether a verdict made the change, applying what a design's block took away.
+    verdict: bool = False
 
 
 @dataclass(frozen=True)
@@ -268,6 +276,38 @@ class Version:
     at: str
 
 
+@dataclass(frozen=True)
+class Verdict:
+    """One report's verdict as its event recorded it. A field the report's kind does
+    not carry is None."""
+
+    #: The number of its event in the log, which names it there.
+    n: int | None
+    #: The kind of report, what the pass was, and the verdict's word.
+    kind: str | None
+    pass_: str | None
+    verdict: str | None
+    #: The version of the design it read, for a design report.
+    design: int | None
+    #: The model the report says wrote it, and who it says wrote it.
+    model: str | None
+    by: str | None
+    #: The report's file as it was given, and the SHA-256 of its bytes then.
+    report: str | None
+    sha256: str | None
+    #: Every finding of its block, each `{"id", "severity", "state", "text"}`.
+    findings: tuple[dict, ...]
+    #: What is noted of the report and refuses nothing.
+    flags: tuple[str, ...]
+    #: What it took out of the record, of what the version it read took away, and
+    #: what of that it left, each with the reason.
+    applied: tuple[Pending, ...]
+    not_applied: tuple[tuple[Pending, str], ...]
+    #: Who recorded it and when.
+    actor: str
+    at: str
+
+
 @dataclass
 class State:
     """What a log says, as of its last event."""
@@ -294,6 +334,8 @@ class State:
     stages: list[Stage] = field(default_factory=list)
     #: The design versions frozen, oldest first.
     versions: list[Version] = field(default_factory=list)
+    #: The verdicts recorded, oldest first.
+    verdicts: list[Verdict] = field(default_factory=list)
     #: Every event, oldest first.
     history: list[dict] = field(default_factory=list)
 
@@ -431,8 +473,7 @@ def without(state: State, question: Question, rulings: Iterable[str] = ()) -> Qu
     was a list of the narrowed question and said nothing of the stages already let go.
     """
     left_out = frozenset(rulings)
-    asked = next((event for event in state.history if event["type"] == "question.asked"
-                  and event.get("id") == question.id), {})
+    asked = _asked(state, question.id)
     reads, until = asked.get("state"), asked.get("until")
     blocks = _blocks(asked.get("blocks", _ALL))
     ruling = moved_to = None
@@ -449,12 +490,30 @@ def without(state: State, question: Question, rulings: Iterable[str] = ()) -> Qu
         if change.state is not None:
             reads, until = change.state, change.until
         if change.blocks is not None:
-            blocks = (_widest(blocks, change.blocks)
-                      if change.ruling is None and pending else change.blocks)
+            # What a verdict applies is what the design's block says, like a ruling's
+            # list; only a list anyone may give is one of the narrowed question.
+            widens = change.ruling is None and not change.verdict and pending
+            blocks = _widest(blocks, change.blocks) if widens else change.blocks
         ruling = ruling if change.ruling is None else change.ruling
         moved_to = moved_to if change.moved_to is None else change.moved_to
     return replace(question, state=reads, until=until, blocks=blocks, ruling=ruling,
                    moved_to=moved_to)
+
+
+def _asked(state: State, question_id: str | None) -> dict:
+    """The question as it was first asked: its own event, or for one a design
+    declared its entry in the version that first carried it, which asked it open."""
+    for event in state.history:
+        if event["type"] == "question.asked" and event.get("id") == question_id:
+            return event
+        added = event.get("added") if event["type"] == "design.frozen" else None
+        declared = event.get("declared")
+        if (isinstance(added, dict) and question_id in _ids(added.get("questions"))
+                and isinstance(declared, dict)):
+            for one in declared.get(QUESTION) or ():
+                if isinstance(one, dict) and one.get("id") == question_id:
+                    return {"state": OPEN, "blocks": one.get("blocks", _ALL)}
+    return {}
 
 
 def _widest(one, other):
@@ -530,10 +589,10 @@ def _question_changed(state: State, event: dict) -> None:
 
 
 def _change(state: State, event: dict, *, question_id: str | None,
-            ruling: str | None) -> None:
+            ruling: str | None, verdict: bool = False) -> None:
     """Apply to the question `question_id` what `event` says of it, and add the change
     to its record. `ruling` is the id of the ruling the event is, None for an event
-    that is no ruling."""
+    that is no ruling; `verdict` says the change is one a verdict applied."""
     for place, question in enumerate(state.questions):
         if question.id == question_id:
             break
@@ -543,7 +602,7 @@ def _change(state: State, event: dict, *, question_id: str | None,
     change = Change(state=event.get("state"), blocks=_blocks(event.get("blocks")),
                     until=event.get("until"), ruling=ruling,
                     record=event.get("record"), actor=event["actor"], at=event["at"],
-                    moved_to=event.get("moved_to"),
+                    moved_to=event.get("moved_to"), verdict=verdict,
                     options=_offered(event.get("options"), question.options,
                                      question.retired),
                     # Only a key the question offers is retired, and only once.
@@ -621,11 +680,7 @@ def _design_frozen(state: State, event: dict) -> None:
         n=version, digest=event.get("digest"),
         records_only=event.get("records_only") is True, record=event.get("record"),
         trace=copy.deepcopy(event.get("trace")), declared=declared,
-        pending=tuple(
-            Pending(what=one.get("what"), id=one.get("id"), gone=_ids(one.get("gone")),
-                    blocks=_blocks(one.get("blocks")))
-            for one in event.get("pending") or () if isinstance(one, dict)),
-        **who))
+        pending=_taken_away(event.get("pending")), **who))
     said = {kind: {one.get("id"): one for one in declared.get(kind) or ()
                    if isinstance(one, dict)} for kind in (QUESTION, STAGE)}
     for stage_id in _ids(added.get("stages")):
@@ -653,12 +708,55 @@ def _design_frozen(state: State, event: dict) -> None:
                     question_id=question_id, ruling=None)
 
 
+def _taken_away(listed) -> tuple[Pending, ...]:
+    """The entries of an event's list of what a block took away."""
+    return tuple(
+        Pending(what=one.get("what"), id=one.get("id"), gone=_ids(one.get("gone")),
+                blocks=_blocks(one.get("blocks")))
+        for one in (listed if isinstance(listed, list) else ())
+        if isinstance(one, dict) and isinstance(one.get("id"), str))
+
+
+def _verdict_recorded(state: State, event: dict) -> None:
+    """A report's verdict joins the record, and what it applies is taken out: the
+    event is the whole of the verdict, so nothing else is written for it and a verb
+    stopped after this event has left nothing half applied."""
+    who = {"actor": event["actor"], "at": event["at"]}
+    applied = _taken_away(event.get("applied"))
+    left = event.get("not_applied")
+    left = [one for one in (left if isinstance(left, list) else ())
+            if isinstance(one, dict)]
+    state.verdicts.append(Verdict(
+        n=event.get("n"), kind=event.get("kind"), pass_=event.get("pass"),
+        verdict=event.get("verdict"), design=event.get("design"),
+        model=event.get("model"), by=event.get("by"), report=event.get("report"),
+        sha256=event.get("sha256"),
+        findings=tuple(copy.deepcopy(one) for one in event.get("findings") or ()
+                       if isinstance(one, dict)),
+        flags=_ids(event.get("flags")), applied=applied,
+        not_applied=tuple(zip(_taken_away(left),
+                              (str(one.get("why") or "") for one in left
+                               if isinstance(one.get("id"), str)))),
+        **who))
+    for one in applied:
+        if one.what == QUESTION:
+            _change(state, {"state": _WITHDRAWN, **who}, question_id=one.id, ruling=None,
+                    verdict=True)
+        elif one.what == BLOCKS and one.blocks is not None:
+            _change(state, {"blocks": one.blocks, **who}, question_id=one.id,
+                    ruling=None, verdict=True)
+        elif one.what == AFTER:
+            _waits(state, one.id, gone=one.gone)
+        # A stage that left keeps its record: `questions.left_stages` says which
+        # did, from the history.
+
+
 #: The handler of each event type. Every type in `events.TYPES` has a row.
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
     "flow.changed": _flow_changed,
     "design.frozen": _design_frozen,
-    "verdict.recorded": _kept,
+    "verdict.recorded": _verdict_recorded,
     "question.asked": _question_asked,
     "question.changed": _question_changed,
     "stage.declared": _stage_declared,
@@ -681,5 +779,5 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
 }
 
 __all__ = ["OPEN", "DROPPED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS", "Ended", "Ruling",
-           "Change", "Question", "Stage", "Pending", "Version", "State", "fold",
+           "Change", "Question", "Stage", "Pending", "Version", "Verdict", "State", "fold",
            "without"]

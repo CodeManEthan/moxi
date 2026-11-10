@@ -92,6 +92,9 @@ class Round:
     status: str | None = None
     flow: str | None = None
     counts: tuple[tuple[str, int | None], ...] = ()
+    #: What the verification of its design stands at, for a round whose design was
+    #: frozen; None for one with no version.
+    standing: str | None = None
     unreadable: Unreadable | None = None
     #: How a round that is open no longer ended, as the index keeps it: the status it
     #: has since (`how`), whose act it was (`by`), the pointer it carried (`record`)
@@ -104,6 +107,7 @@ class Round:
                     "unreadable": _error(self.unreadable)}
         return {"name": self.name, "project": self.project, "folder": self.folder,
                 "status": self.status, "flow": self.flow, "counts": dict(self.counts),
+                "standing": self.standing,
                 "ended": None if self.ended is None else dict(self.ended)}
 
 
@@ -151,6 +155,8 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                 listed.append(Round(
                     summary.name, summary.project, str(summary.folder),
                     status=summary.status, flow=summary.flow, ended=summary.ended,
+                    standing=next((item.body.get("standing")
+                                   for item in summary.of(index.VERSION)), None),
                     counts=tuple((key, count(summary, one))
                                  for key, _called, count in COUNTS)))
     return Rounds(computed=now, project=None if project is None else found[0].home.project,
@@ -174,7 +180,8 @@ def rounds_as_text(listing: Rounds) -> str:
         if one.ended is not None:
             how = (f"{one.status} by {one.ended.get('by')} at {one.ended.get('at')}, "
                    f"record {one.ended.get('record')}")
-        lines.append(f"{one.name}   {how}   flow {one.flow}   {counts}")
+        design = "" if one.standing is None else f"   design: {one.standing}"
+        lines.append(f"{one.name}   {how}   flow {one.flow}{design}   {counts}")
     if not listing.rounds:
         kind = "has ended" if listing.ended else "is open"
         where = "" if listing.project is None else f" of {listing.project}"

@@ -3,8 +3,9 @@ agents to read beside the logs.
 
     <rounds folder>/<slug>/round-note.md   one round: the flow it follows now, the
                                            skips that stand, its design's newest
-                                           version and its stages, its questions by
-                                           state, its rulings and its history
+                                           version and standing, its stages, its
+                                           questions by state, its rulings, the
+                                           verdicts of its design and its history
     <rounds folder>/rulings.md             the project's register: its standing rulings
     <rounds folder>/questions.md           the questions on the project's own list
 
@@ -191,7 +192,7 @@ def _flow(shown_as: dict) -> list[str]:
         lines.append("")
     for one in shown_as["skips"]:
         lines += _item(f"skipped: {showing.skip_line(one)}")
-    planned = [*showing.version_lines(shown_as["versions"]),
+    planned = [*showing.version_lines(shown_as["versions"], shown_as["standing"]),
                *(f"stage {showing.stage_line(one)}" for one in shown_as["stages"])]
     if planned:
         lines.append("")
@@ -281,6 +282,29 @@ def _ruling_facts(one: dict, *, kind: bool) -> list[str]:
     return said
 
 
+def _verdicts(shown_as: dict) -> list[str]:
+    listed = shown_as["verdicts"]
+    if not listed:
+        return ["No verdict."]
+    lines = []
+    for one in listed:
+        lines += _item(f"{one['verdict']} for v{one['version']}: {one['pass']} pass "
+                       f"by {one['by']}, model {one['model']}")
+        said = [f"report: {one['report']}", f"sha256: {one['sha256']}",
+                f"recorded: {one['at']} by {one['recorded_by']}"]
+        if one["flags"]:
+            said.append(f"flags: {', '.join(one['flags'])}")
+        said += [f"finding {finding.get('id')}: {finding.get('severity')}, "
+                 f"{finding.get('state')}: {finding.get('text')}"
+                 for finding in one["findings"]]
+        said += [f"applied: {taken['said']}" for taken in one["applied"]]
+        said += [f"not applied: {taken['said']}: {taken['why']}"
+                 for taken in one["not_applied"]]
+        for line in said:
+            lines += _item(line, indent="  ")
+    return lines
+
+
 def _history(shown_as: dict) -> list[str]:
     events = shown_as["history"]
     lines = [f"{len(events)} event{'' if len(events) == 1 else 's'}, oldest first.", ""]
@@ -297,6 +321,7 @@ PARTS: tuple[Part, ...] = (
     Part("Flow", _flow),
     Part("Questions", _questions),
     Part("Rulings", _rulings),
+    Part("Verdicts", _verdicts),
     Part("History", _history))
 
 

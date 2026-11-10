@@ -2,6 +2,7 @@
 
     moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
     moxi rounds fold ROUND [--as NAME]
+    moxi rounds verdict ROUND REPORT.md [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
@@ -54,6 +55,13 @@ list of rulings not yet shown through `TIME`, the time that list was headed with
 declares. A question, a stage, a stage another waits for and a wider hold are added to
 the round at once; what the block takes away is recorded as pending and changes
 nothing until a verdict or the operator's ruling applies it.
+`verdict` records the verdict of a report, run by whoever wrote it: it reads the
+report's data block and records it against the version of the design the report says
+its pass read, whatever was frozen or edited since. A report of a design is the kind
+recorded. A verdict that finds its version publishable takes out of the round what
+that version's block took away; one that sends the design back takes out nothing. The
+design's standing is the newest verdict of its current version, and `none` after a
+design is frozen again.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
@@ -654,6 +662,41 @@ def _frozen(plan) -> list[str]:
     return lines
 
 
+# -- verdict -----------------------------------------------------------------------------
+
+def _declare_verdict(verbs) -> None:
+    said = ("Record the verdict of a report, from its data block: for a report of a "
+            "design, against the frozen version it says its pass read. A verdict "
+            "that finds that version publishable takes out of the round what the "
+            "version's block took away. The report's file is not changed.")
+    parser = verbs.add_parser("verdict", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND",
+                        help="the round's name, <project>/<slug>")
+    parser.add_argument("report", metavar="REPORT.md",
+                        help="the report's file, with its data block")
+    _writes(parser)
+
+
+def _verdict(args, out) -> int:
+    from . import verdicts, versions
+
+    done = verdicts.record(args.round, args.report, actor=_actor(args))
+    one = done.verdict
+    print(f"recorded for {done.name}: {one.verdict} for v{one.design} of its design, "
+          f"{one.pass_} pass by {one.by}, model {one.model}", file=out)
+    print(f"report: {one.report}", file=out)
+    print(f"sha256: {one.sha256}", file=out)
+    if one.flags:
+        print(f"flags: {', '.join(one.flags)}", file=out)
+    for taken in one.applied:
+        print(f"applied: {versions.said(taken)}", file=out)
+    for taken, why in one.not_applied:
+        print(f"not applied: {versions.said(taken)}: {why}", file=out)
+    print(f"standing: {done.standing}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
 # -- drop --------------------------------------------------------------------------------
 
 def _declare_drop(verbs) -> None:
@@ -803,13 +846,15 @@ def _list_questions(args, out) -> int:
 # -- the command -------------------------------------------------------------------------
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
-_DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_ask,
+_DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict,
+                                  _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
-_VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "ask": _ask, "rule": _rule,
+_VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict,
+                               "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "show": _show,
                                "list": _list}
 

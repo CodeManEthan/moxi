@@ -84,20 +84,23 @@ questions: none
 
 rulings: none
 
+verdicts: none
+
 history: 1 event
   1  {T1}  planner  round.opened
 """
     found = data(capsys, B)
     assert list(found) == ["name", "project", "slug", "folder", "notice", "status",
                            "ended", "description", "parent", "flow", "steps", "skips",
-                           "stages", "versions", "register_unreadable", "questions",
-                           "rulings", "history"]
-    assert {key: found[key] for key in list(found)[:15]} == {
+                           "stages", "versions", "standing", "register_unreadable",
+                           "questions",
+                           "rulings", "verdicts", "history"]
+    assert {key: found[key] for key in list(found)[:16]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",
         "ended": None, "description": "a placeholder round", "parent": None, "flow": "fix",
         "steps": steps, "skips": [], "stages": [], "versions": [],
-        "register_unreadable": None}
+        "standing": "none", "register_unreadable": None}
     assert found["questions"] == found["rulings"] == []
     assert found["history"] == log.read(log.round_log(rounds / "b-round"))
 

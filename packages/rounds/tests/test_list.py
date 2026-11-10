@@ -113,14 +113,17 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
     assert found["rounds"] == [
         {"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
          "status": "open", "flow": "fix",
-         "counts": {"open": 1, "parked": 0, "not_shown": 1}, "ended": None},
+         "counts": {"open": 1, "parked": 0, "not_shown": 1}, "standing": None,
+         "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
          "status": "open", "flow": "fix",
-         "counts": {"open": 0, "parked": 0, "not_shown": 0}, "ended": None},
+         "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
+         "ended": None},
         {"name": C, "project": "proj-b",
          "folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),
          "status": "open", "flow": "fix",
-         "counts": {"open": 0, "parked": 0, "not_shown": 0}, "ended": None}]
+         "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
+         "ended": None}]
 
 
 def test_a_project_named_keeps_the_rounds_to_its_own(rounds, capsys):

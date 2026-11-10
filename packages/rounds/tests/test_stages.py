@@ -104,6 +104,14 @@ def build(folder, stage_id, *more):
         log.append(path, name, fields, actor="coder")
 
 
+def applied(folder, *taken) -> None:
+    """Append a verdict that found the design publishable and took `taken` out of
+    the record, as recording such a verdict does."""
+    log.append(log.round_log(folder), "verdict.recorded",
+               {"kind": "design", "verdict": "publishable", "design": 1,
+                "applied": list(taken)}, actor="critic")
+
+
 def append(folder, entry) -> None:
     """Append an event a later verb writes, as that verb will."""
     log.append(log.round_log(folder), entry.type, dict(entry.fields), actor="critic")
@@ -496,7 +504,7 @@ def test_a_design_that_declares_a_stage_that_left_is_refused(opened, flow, how):
     if how == "ruling":
         rule("unstage:B1")
     else:
-        append(folder, stages.removed("B1", verdict="design-v1-pass-1"))
+        applied(folder, {"what": "stage", "id": "B1"})
     design(folder, stage("B1"), stage("B2"))
     before = raw(folder)
 
@@ -545,10 +553,8 @@ def test_a_removal_a_verdict_applies_takes_the_stage_out(opened):
     planned(folder, "B1", "B2")
     assert stages.cannot_leave(folded(folder), "B1") is None
 
-    append(folder, stages.removed("B1", verdict="design-v2-pass-1"))
+    applied(folder, {"what": "stage", "id": "B1"})
 
-    assert last(folder) == {"actor": "critic", "type": "stage.changed", "id": "B1",
-                            "removed": True, "verdict": "design-v2-pass-1"}
     found = folded(folder)
     assert stages.state_of(found, "B1") == stages.LEFT
     assert stages.cannot_leave(found, "B1") == ("B1 left the plan already, and a "
@@ -575,10 +581,8 @@ def test_a_narrowing_a_verdict_applies_takes_the_waits_off(opened):
     planned(folder, "B1", "B2")
     declare(folder, "B3", after=["B1", "B2"])
 
-    append(folder, stages.unwaited("B3", ["B1"], verdict="design-v2-pass-1"))
+    applied(folder, {"what": "after", "id": "B3", "gone": ["B1"]})
 
-    assert last(folder) == {"actor": "critic", "type": "stage.changed", "id": "B3",
-                            "gone": ["B1"], "verdict": "design-v2-pass-1"}
     assert stages.find(folded(folder), "B3").after == ("B2",)
 
 

@@ -272,6 +272,8 @@ def history_of(event: dict) -> str | None:
             of += f", no longer after {', '.join(map(str, gone))}"
     if event.get("type") == "design.frozen":
         of = f"v{event.get('version')}"
+    if event.get("type") == "verdict.recorded" and event.get("design") is not None:
+        of = f"{event.get('verdict')} for v{event.get('design')}"
     return of if isinstance(of, str) and of else None
 
 
@@ -284,10 +286,47 @@ def _history_lines(events: list) -> list[str]:
     return lines
 
 
+def _verdicts(found: Shown) -> list:
+    """The verdicts recorded of the design, oldest first: the version each read, its
+    word, what the pass was, who wrote the report and with which model, the report's
+    file and digest, its findings, what is noted of it, and what it took out of the
+    record or left there."""
+    return [{"n": one.n, "version": one.design, "verdict": one.verdict,
+             "pass": one.pass_, "by": one.by, "model": one.model,
+             "report": one.report, "sha256": one.sha256,
+             "findings": [dict(finding) for finding in one.findings],
+             "flags": list(one.flags),
+             "applied": [_taken_away(taken) for taken in one.applied],
+             "not_applied": [{**_taken_away(taken), "why": why}
+                             for taken, why in one.not_applied],
+             "recorded_by": one.actor, "at": one.at}
+            for one in versions.design_verdicts(found.state)]
+
+
+def verdict_lines(listed: list) -> list[str]:
+    """The design's verdicts in lines, each with its findings and what it applied."""
+    count = len(listed)
+    lines = [f"verdicts: {count or 'none'}"]
+    for one in listed:
+        flags = f"   flags: {', '.join(one['flags'])}" if one["flags"] else ""
+        lines += [f"  {one['verdict']} for v{one['version']}: {one['pass']} pass by "
+                  f"{one['by']}, model {one['model']}{flags}",
+                  f"    report: {one['report']}   sha256: {one['sha256']}   "
+                  f"recorded: {one['at']} by {one['recorded_by']}"]
+        lines += [f"    finding {finding.get('id')}: {finding.get('severity')}, "
+                  f"{finding.get('state')}: {finding.get('text')}"
+                  for finding in one["findings"]]
+        lines += [f"    applied: {taken['said']}" for taken in one["applied"]]
+        lines += [f"    not applied: {taken['said']}: {taken['why']}"
+                  for taken in one["not_applied"]]
+    return lines
+
+
 #: The kinds of record a round is shown with, in the order they are shown.
 SECTIONS: tuple[Section, ...] = (
     Section("questions", _questions, _question_lines),
     Section("rulings", _rulings, _ruling_lines),
+    Section("verdicts", _verdicts, verdict_lines),
     Section("history", _history, _history_lines))
 
 
@@ -308,7 +347,7 @@ def _head(found: Shown) -> dict:
             "description": state.description,
             "parent": state.parent, "flow": state.flow, "steps": state.steps,
             "skips": _skips(state), "stages": _stages(state),
-            "versions": _versions(state),
+            "versions": _versions(state), "standing": str(versions.standing(state)),
             "register_unreadable": (None if found.register_unreadable is None
                                     else found.register_unreadable.reason)}
 
@@ -350,23 +389,32 @@ def _versions(state: states.State) -> list[dict]:
     return [{"version": version.n, "digest": version.digest, "by": version.actor,
              "at": version.at, "records_only": version.records_only,
              "record": version.record, "trace": version.trace,
-             "pending": [{"what": one.what, "id": one.id, "gone": list(one.gone),
-                          "blocks": (one.blocks if one.blocks is None
-                                     else questions.stored(one.blocks)),
-                          "said": versions.said(one)} for one in version.pending]}
+             "pending": [_taken_away(one) for one in version.pending],
+             # What of it would still change the record: the rest was applied by a
+             # verdict or a ruling, or was overtaken.
+             "outstanding": [_taken_away(one)
+                             for one in versions.outstanding(state, version.n)]}
             for version in state.versions]
 
 
-def version_lines(listed: list[dict]) -> list[str]:
-    """The design's versions in lines: the newest with its digest and what it took
-    away, and how many came before it."""
+def _taken_away(one: states.Pending) -> dict:
+    return {"what": one.what, "id": one.id, "gone": list(one.gone),
+            "blocks": one.blocks if one.blocks is None else questions.stored(one.blocks),
+            "said": versions.said(one)}
+
+
+def version_lines(listed: list[dict], standing: str | None = None) -> list[str]:
+    """The design's versions in lines: the newest with its digest, the design's
+    `standing` when one is given, and what that version took away and still waits."""
     if not listed:
         return []
     newest = listed[-1]
     lines = [f"design: v{newest['version']}, frozen {newest['at']} by {newest['by']}, "
              f"sha256 {newest['digest']}"]
+    if standing is not None:
+        lines.append(f"standing: {standing}")
     lines += [f"pending in v{newest['version']}: {one['said']}"
-              for one in newest["pending"]]
+              for one in newest["outstanding"]]
     return lines
 
 
@@ -443,7 +491,7 @@ def as_text(found: Shown) -> str:
              f"({steps})",
              f"description: {shown_as['description']}", f"folder: {found.folder}"]
     lines += [f"skipped: {skip_line(one)}" for one in shown_as["skips"]]
-    lines += version_lines(shown_as["versions"])
+    lines += version_lines(shown_as["versions"], shown_as["standing"])
     lines += [f"stage {stage_line(one)}" for one in shown_as["stages"]]
     if shown_as["parent"] is not None:
         lines.append(f"parent: {shown_as['parent']}")
@@ -460,4 +508,4 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "version_lines", "history_of"]
+           "ended_line", "skip_line", "stage_line", "version_lines", "verdict_lines", "history_of"]

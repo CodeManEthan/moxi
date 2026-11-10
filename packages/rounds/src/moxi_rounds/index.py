@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 8
+DERIVED = 9
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -100,15 +100,17 @@ DERIVED = 8
 QUESTION = "question"
 RULING = "ruling"
 READ_BACK = "read-back"
-#: A round's plan is here too: each stage it has, the current version of its design,
-#: and what that version took away, which waits for a verdict or a ruling.
+#: A round's plan is here too: each stage it has, the current version of its design
+#: with the design's standing, what that version took away and still waits for a
+#: verdict or a ruling, and each verdict recorded of the design.
 STAGE = "stage"
 VERSION = "version"
 PENDING = "pending"
+VERDICT = "verdict"
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
     READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
-    PENDING: versions.waiting}
+    PENDING: versions.waiting, VERDICT: versions.verdicts}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""
@@ -513,6 +515,6 @@ def _drop(conn, project: str, slug: str) -> None:
         conn.execute(f"DELETE FROM {table} WHERE project = ? AND slug = ?", (project, slug))
 
 
-__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION",
+__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION", "VERDICT",
            "PENDING", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
            "refresh", "rebuild", "read", "rounds", "usable", "disagreements"]
