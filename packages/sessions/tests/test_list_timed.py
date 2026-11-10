@@ -89,7 +89,7 @@ def test_the_list_answers_5000_sessions_in_3_s_cold_and_1_s_once_read(big_home,
     start = time.perf_counter()
     cold = read("/api/list")
     cold_s = time.perf_counter() - start
-    heads, tails = cat.head_reads, cat.tail_reads
+    heads, tails, prompts = cat.head_reads, cat.tail_reads, cat.prompt_reads
 
     clock.now += catalog_module.REUSE_S + 1          # the gather's reuse has lapsed
     start = time.perf_counter()
@@ -97,9 +97,10 @@ def test_the_list_answers_5000_sessions_in_3_s_cold_and_1_s_once_read(big_home,
     again_s = time.perf_counter() - start
 
     print(f"\n/api/list over {SESSIONS} sessions: cold {cold_s * 1000:.0f} ms "
-          f"({heads} heads, {tails} last turns read); again after the reuse lapsed "
-          f"{again_s * 1000:.0f} ms ({cat.head_reads - heads} heads, "
-          f"{cat.tail_reads - tails} last turns read)")
+          f"({heads} heads, {tails} last turns read, {prompts} sessions read through "
+          f"for a prompt); again after the reuse lapsed {again_s * 1000:.0f} ms "
+          f"({cat.head_reads - heads} heads, {cat.tail_reads - tails} last turns, "
+          f"{cat.prompt_reads - prompts} sessions read through)")
     assert cold["all"] == cold["total"] == SESSIONS
     assert [g["key"] for g in cold["groups"]][0] == "recent"
     assert cold["groups"][0]["count"] == 10
@@ -108,6 +109,7 @@ def test_the_list_answers_5000_sessions_in_3_s_cold_and_1_s_once_read(big_home,
     assert late == LATE and cold["groups"][-1]["count"] == SESSIONS - LATE
     assert heads <= LATE + 8 and tails <= 10 + 8 * 8
     assert (cat.head_reads, cat.tail_reads) == (heads, tails)
+    assert 0 < prompts <= tails and cat.prompt_reads == prompts
     assert again["total"] == SESSIONS
     assert cold_s < 3.0
     assert again_s < 1.0

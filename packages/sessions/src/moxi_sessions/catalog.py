@@ -41,19 +41,27 @@ could not be listed has `subagents` None, not 0.
   `by_program` is True where a Claude head's `entrypoint` was read and starts with `sdk`,
   and None everywhere else: a session is listed with the ones started in a terminal
   unless its record says a program started it.
-* From the session's last turn (`window(entry, turns=1)`): `name`, `model`, `activity`
-  and `prompt`.
+* From the session's last turn (`window(entry, turns=1)`): `name`, `model` and
+  `activity`.
+* From the whole session, read backward from its end (`records_back`) until one is met:
+  `prompt`, the newest message the record marks as typed by a person. A reply, a message
+  the record marks as injected and a message with no mark are none of them a prompt, so
+  a session that holds no marked message has `prompt` None. Only a Claude Code record
+  carries a mark sessions reads (`TYPED`): a Codex or an OpenCode session is not read
+  for one and has `prompt` None. Neither is a session a program started.
 
 A read that fails leaves None where it would have filled and is not kept, so the next call
 reads again.
 
 **What is kept.** A catalog keeps what it read for as long as it lives, in memory only:
 
-* The last-turn facts of at most `TAIL_MAX` sessions, least recently used dropped. No
-  text among them is longer than a caller is sent: the newest thing said is cut to
-  `ACTIVITY_BYTES` bytes and the prompt to `TEXT_MAX`. A
-  file's are reused while its size and mtime are the ones they were read at, an OpenCode
-  session's while its `time_updated` is.
+* The last-turn facts and the prompt of at most `TAIL_MAX` sessions, least recently
+  used dropped. No text among them is longer than a caller is sent: the newest thing
+  said is cut to `ACTIVITY_BYTES` bytes and the prompt to `TEXT_MAX`. A file's are
+  reused while its size and mtime are the ones they were read at, an OpenCode session's
+  while its `time_updated` is. So a session is read through for its prompt once for each
+  state of its file: an unchanged file is not read again, and a changed one is read
+  through again from its end.
 * Each file's head facts, by path, device and inode. A head is read again when the file
   has grown and the earlier read left a fact open: one that ended at the file's end,
   where later lines can still add a folder, a start, an entrypoint or a name, or a Codex
@@ -85,7 +93,7 @@ from moxi.config import ConfigError
 from . import claude
 from .errors import Unreadable
 from .find import Listed, Listing, sources
-from .read import window
+from .read import records_back, window
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN, Marker, Message, Request
 from .view import TEXT_MAX
 from .source import (claude_header, claude_named_head, codex_head, codex_header,
@@ -100,8 +108,10 @@ TAIL_MAX = 5000
 #: The most bytes of a message `Details.activity` carries.
 ACTIVITY_BYTES = 300
 
-#: How many turns before the last one a read looks through for the person's prompt.
-PROMPT_TURNS = 4
+#: The harnesses whose record carries a mark sessions reads as "a person typed this
+#: message" (`Message.injected` is false on a user message). The others' sessions are
+#: not read for a prompt.
+TYPED = frozenset({CLAUDE})
 
 #: What an `entrypoint` starts with when a program started the session.
 PROGRAM_ENTRYPOINT = "sdk"
@@ -233,11 +243,14 @@ class Details:
     * `model`: the newest model the last turn names, Claude Code's `<synthetic>` left out.
     * `activity`: the newest message of the last turn that is a user message with text or
       the model's reply, its text cut to `ACTIVITY_BYTES` bytes at a character boundary.
-    * `prompt`: the newest user message the record says the person typed, with `who`
-      `you`, its text cut to `TEXT_MAX` bytes with `truncated` set: the most a caller is
-      sent of it, so no more is kept. Where the last turn holds none, up to
-      `PROMPT_TURNS` turns before it are read. None, with no further turn read, for a
-      session a program started.
+    * `prompt`: the newest user message of the whole session that the record marks as
+      typed by a person (`Message.injected` is false), with `who` `you`, its text cut to
+      `TEXT_MAX` bytes with `truncated` set: the most a caller is sent of it, so no more
+      is kept. Nothing else is a prompt: not a reply, not a message the record marks as
+      injected, not one it leaves unmarked. None for a session that holds no such
+      message; for a Codex or an OpenCode session, whose record carries no mark sessions
+      reads; for a session a program started; and for a file longer than the backward
+      read's limit whose part within the limit holds none.
     """
 
     folder: str | None = None
@@ -313,9 +326,9 @@ def read_head(listed: Listed, imports: Any = None) -> Head | None:
 
 @dataclass(frozen=True)
 class Tail:
-    """What a session's last turn says: `name` (the newest `custom` title marker),
-    `model`, `activity` and `prompt` as in `Details`, read for a session whose
-    `by_program` was `program`."""
+    """What a session's last turn says, `name` (the newest `custom` title marker),
+    `model` and `activity`, and the whole session's `prompt`, each as in `Details`, read
+    for a session whose `by_program` was `program`."""
 
     program: bool | None = None
     name: str | None = None
@@ -372,28 +385,34 @@ def _activity(records: Sequence[Any], program: bool | None) -> Said | None:
     return None
 
 
-def _prompt(records: Sequence[Any]) -> Said | None:
-    for record in reversed(records):
-        if _spoken(record) and record.role == "user" and record.injected is False:
-            text = cut(record.text, TEXT_MAX)
-            return Said(_time(record.time), YOU, text, text != record.text)
+def reads_prompt(harness: str, program: bool | None) -> bool:
+    """Whether a session of `harness` whose `by_program` is `program` is read for a
+    prompt: its record carries a typed mark, and no program started it."""
+    return harness in TYPED and program is not True
+
+
+def read_prompt(listed: Listed) -> Said | None:
+    """The newest message of the whole session that its record marks as typed by a
+    person; None when it holds none. The session is read backward from its end, and the
+    read stops at the first such message. A file longer than the backward read's limit
+    is read that far: None when that part holds none. Raises Unreadable when the session
+    cannot be read."""
+    with records_back(listed, kinds="message") as back:
+        for record in back:
+            if _spoken(record) and record.role == "user" and record.injected is False:
+                text = cut(record.text, TEXT_MAX)
+                return Said(_time(record.time), YOU, text, text != record.text)
     return None
 
 
 def read_tail(listed: Listed, program: bool | None = None) -> Tail | None:
-    """The last-turn facts of a session whose `by_program` is `program`; None when a read
-    of it failed."""
+    """The last-turn facts and the prompt of a session whose `by_program` is `program`;
+    None when a read of it failed."""
     try:
-        page = window(listed, turns=1)
-        records = page.records
+        records = window(listed, turns=1).records
         prompt = None
-        if program is not True:
-            prompt = _prompt(records)
-            for _ in range(PROMPT_TURNS):
-                if prompt is not None or not page.has_earlier or page.before is None:
-                    break
-                page = window(listed, turns=1, before=page.before)
-                prompt = _prompt(page.records)
+        if reads_prompt(listed.source.harness, program):
+            prompt = read_prompt(listed)
     except (Unreadable, OSError, ValueError):
         return None
     return Tail(program=program,
@@ -482,7 +501,8 @@ class Catalog:
     does not exist is a failure, as a configured one is. A page server keeps one
     catalog for its life (`shared()`); a test makes its own. `clock` is the time a
     gather's reuse is measured on. `head_reads` and `tail_reads` count the heads and the
-    last turns the catalog has read, failed reads included.
+    last turns the catalog has read, failed reads included; `prompt_reads` counts the
+    sessions read through for a prompt, which is part of a last turn's read.
     """
 
     def __init__(self, roots: Mapping[str, str | Path] | None = None, *,
@@ -499,6 +519,7 @@ class Catalog:
         self._tails: OrderedDict[tuple[str, str], tuple[tuple, Tail]] = OrderedDict()
         self.head_reads = 0
         self.tail_reads = 0
+        self.prompt_reads = 0
 
     # -- one call at a time -------------------------------------------------------------
 
@@ -701,6 +722,7 @@ class Catalog:
         tail = read_tail(listed, program)
         with self._lock:
             self.tail_reads += 1
+            self.prompt_reads += reads_prompt(entry.harness, program)
             if tail is not None:
                 self._tails[key] = (stamp, tail)
                 self._tails.move_to_end(key)
@@ -709,8 +731,8 @@ class Catalog:
         return tail
 
     def details(self, entry: Entry) -> Details:
-        """What a row shows of `entry`: its head facts and its last turn's, each read
-        now unless a kept read stands. Never raises for a session that cannot be read: a
+        """What a row shows of `entry`: its head facts, its last turn's and its prompt,
+        each read now unless a kept read stands. Never raises for a session that cannot be read: a
         fact that was not read is None."""
         head = self.head(entry) or Head()
         tail = self._tail(entry, head.by_program) or Tail()
@@ -745,7 +767,7 @@ def reset() -> None:
         _shared = None
 
 
-__all__ = ["REUSE_S", "TAIL_MAX", "ACTIVITY_BYTES", "PROMPT_TURNS", "YOU", "AGENT",
+__all__ = ["REUSE_S", "TAIL_MAX", "ACTIVITY_BYTES", "TYPED", "YOU", "AGENT",
            "Entry", "Unread", "Gathered", "Head", "Said", "Details", "Tail",
            "Catalog", "shared", "reset", "by_program", "cut", "row_head", "read_head",
-           "read_tail"]
+           "reads_prompt", "read_prompt", "read_tail"]

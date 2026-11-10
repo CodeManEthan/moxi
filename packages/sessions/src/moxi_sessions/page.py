@@ -60,9 +60,13 @@ an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (ho
 null where the session's subagents folder could not be listed),
 `folder`, `started`, `by_program` (true where the record says a program started the
 session, else null), `name` (one typed for the session in the harness, else null),
-`model`, `activity` (`{at, who, text}`: the newest thing said, `who` being `you`, `agent`
-or null, `text` cut at 300 bytes; or null), `prompt` (`{at, text, truncated}`: the newest
-prompt a person typed, `text` cut at `TEXT_MAX` bytes; or null) and `recent` (true for a
+`model`, `activity` (`{at, who, text}`: the newest thing said in the last turn, whoever
+said it, `who` being `you`, `agent` or null, `text` cut at 300 bytes; or null), `prompt`
+(`{at, text, truncated}`: the newest message of the whole session that its record marks
+as typed by a person, `text` cut at `TEXT_MAX` bytes; null where the session holds no
+such message, and for every Codex and OpenCode session, whose records carry no mark
+sessions reads; a reply, an injected message or one with no mark is never in it) and
+`recent` (true for a
 session not started by a program that changed within the setting `list.recent_s` of
 `now`).
 

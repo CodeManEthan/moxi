@@ -656,19 +656,111 @@ def test_the_prompt_is_found_behind_injected_turns(roots):
     assert found.activity.who == "agent"
 
 
-def test_the_prompt_is_not_looked_for_past_four_more_turns(roots):
+def test_the_prompt_is_found_however_far_back_it_is(roots):
     t = transcript(roots)
     t.user("the real prompt", origin="human")
     t.assistant()
-    for n in range(5):
+    for n in range(40):
         t.user(f"notice {n}", origin="task-notification")
         t.assistant()
+    t.write()
+
+    assert details(roots).prompt == Said(START, "you", "the real prompt")
+
+
+def test_the_prompt_is_the_newest_typed_message_whatever_follows_it(roots):
+    t = transcript(roots)
+    t.user("an older prompt", origin="human")
+    t.assistant("A reply to the older one.")
+    t.user("the newest prompt", origin="human")
+    t.assistant("A reply.")
+    t.user("a channel delivery", origin="channel", isMeta=True)
+    t.assistant("A later reply.")
+    t.user("a command's expansion", origin="plugin")
+    t.user("who sent this")
+    t.assistant("The last reply.")
+    t.write()
+
+    found = details(roots)
+
+    assert found.prompt == Said(START + 2, "you", "the newest prompt")
+    assert found.activity == Said(START + 8, "agent", "The last reply.")
+
+
+@pytest.mark.parametrize("origin", [None, "task-notification", "channel", "plugin",
+                                    "peer"])
+def test_a_message_not_marked_as_typed_is_never_a_prompt(roots, origin):
+    t = transcript(roots)
+    t.user("not typed, or not known to be", origin=origin)
+    t.assistant("A reply.")
     t.write()
 
     assert details(roots).prompt is None
 
 
+def test_a_session_with_no_typed_message_has_no_prompt(roots):
+    t = transcript(roots)
+    t.user("<command-name>/clear</command-name>")
+    for n in range(3):
+        t.user(f"notice {n}", origin="task-notification")
+        t.assistant(f"Reply {n}.")
+    t.write()
+
+    found = details(roots)
+
+    assert found.prompt is None
+    assert found.activity == Said(START + 6, "agent", "Reply 2.")
+
+
+def test_a_codex_session_is_not_read_for_a_prompt(roots, monkeypatch):
+    r = rollout(roots)
+    r.turn()
+    r.user("typed, the rollout's kinds say", kinds=["user.text"])
+    r.assistant("Did it.")
+    r.write()
+    monkeypatch.setattr(catalog_module, "records_back", refused)
+    cat = Catalog(roots)
+
+    found = cat.details(only(cat))
+
+    assert found.prompt is None and found.activity.text == "Did it."
+    assert (cat.tail_reads, cat.prompt_reads) == (1, 0)
+
+
+def test_an_opencode_session_is_not_read_for_a_prompt(roots, monkeypatch):
+    db = database(roots)
+    session = db.session()
+    session.user("hello")
+    db.write()
+    monkeypatch.setattr(catalog_module, "records_back", refused)
+    cat = Catalog(roots)
+
+    found = cat.details(only(cat))
+
+    assert found.prompt is None and found.activity.text == "hello"
+    assert (cat.tail_reads, cat.prompt_reads) == (1, 0)
+
+
+def refused(source, **kw):
+    raise AssertionError("the session was read through for a prompt")
+
+
+def test_a_file_longer_than_the_read_limit_has_no_prompt_from_beyond_it(roots,
+                                                                         monkeypatch):
+    t = transcript(roots)
+    t.user("typed long ago", origin="human")
+    for n in range(20):
+        t.user(f"notice {n} " + "x" * 500, origin="task-notification")
+    t.write()
+    real = catalog_module.records_back
+    monkeypatch.setattr(catalog_module, "records_back",
+                        lambda source, **kw: real(source, block=1024, limit=4096, **kw))
+
+    assert details(roots).prompt is None
+
+
 def test_a_program_session_has_no_prompt_no_speaker_and_reads_one_turn(roots, monkeypatch):
+    monkeypatch.setattr(catalog_module, "records_back", refused)
     t = transcript(roots, entrypoint="sdk-py")
     t.user("typed, the record says", origin="human")
     t.assistant()
@@ -738,6 +830,63 @@ def test_an_unchanged_session_is_read_once_and_a_changed_one_again(roots):
     clock.now += 5
     assert cat.details(only(cat)).activity.text == "two"
     assert cat.tail_reads == 2
+
+
+def test_a_session_is_read_through_for_its_prompt_once_for_each_state_of_its_file(
+        roots, monkeypatch):
+    t = transcript(roots)
+    t.user("the first prompt", origin="human")
+    t.assistant("A reply.")
+    t.write()
+    reads = []
+    real = catalog_module.records_back
+
+    def counted(source, **kw):
+        reads.append(source.size)
+        return real(source, **kw)
+
+    monkeypatch.setattr(catalog_module, "records_back", counted)
+    clock = Clock()
+    cat = Catalog(roots, clock=clock)
+
+    assert cat.details(only(cat)).prompt.text == "the first prompt"
+    for _ in range(3):
+        clock.now += 5                               # a new gather, the same file
+        assert cat.details(only(cat)).prompt.text == "the first prompt"
+    assert len(reads) == 1 and cat.prompt_reads == 1
+
+    t.user("a notice", origin="task-notification")
+    t.flush()
+    clock.now += 5
+    assert cat.details(only(cat)).prompt.text == "the first prompt"
+    assert len(reads) == 2                           # the file changed: read again
+
+    t.user("the second prompt", origin="human")
+    t.flush()
+    clock.now += 5
+    assert cat.details(only(cat)).prompt == Said(START + 3, "you", "the second prompt")
+    clock.now += 5
+    cat.details(only(cat))
+    assert len(reads) == 3 and cat.prompt_reads == 3
+    assert reads == sorted(set(reads))               # each read was of a longer file
+
+
+def test_a_failed_read_for_the_prompt_gives_nulls_and_is_tried_again(roots, monkeypatch):
+    t = transcript(roots, cwd="/work/proj-a")
+    t.user("one", origin="human")
+    t.write()
+    cat = Catalog(roots)
+    real = catalog_module.records_back
+
+    def broken(source, **kw):
+        raise Unreadable("the file cannot be read")
+
+    monkeypatch.setattr(catalog_module, "records_back", broken)
+    assert cat.details(only(cat)) == Details(folder="/work/proj-a", started=START)
+
+    monkeypatch.setattr(catalog_module, "records_back", real)
+    assert cat.details(only(cat)).prompt.text == "one"
+    assert (cat.tail_reads, cat.prompt_reads) == (2, 2)
 
 
 def test_an_unchanged_opencode_session_is_read_once_and_a_changed_one_again(roots):

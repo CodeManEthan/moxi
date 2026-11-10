@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.8 (2026-11-10)
+
+- A list row's `prompt` is the newest message in the whole session that the record marks
+  as typed by a person, and nothing else. It was looked for in the last five turns only;
+  now the session is read backward from its end until one is met, once for each state
+  of its file, and what was found is kept in memory. A session with no such message has
+  no `prompt`. Codex and OpenCode rows have none: sessions reads no typed mark from
+  their records (the README says what Codex would need).
+- `moxi_sessions.catalog`: `PROMPT_TURNS` is gone; `TYPED`, `read_prompt`,
+  `reads_prompt` and `Catalog.prompt_reads` are new.
+
 ## 0.2.7 (2026-11-10)
 
 - New command `moxi sessions list [--harness H] [--since TIME] [--folder PATH]

@@ -164,6 +164,21 @@ has, its folder and start, the name typed for it in the harness (never a title t
 harness made up), its model, the newest thing said in it and the newest prompt a person
 typed. A fact that was not read is None, never zero or an empty text.
 
+A row's `prompt` is the newest message in the whole session that the record marks as
+typed by a person, and nothing else. Claude Code writes that mark (`origin.kind` is
+`human`). A reply is not a prompt, and neither is text the record marks as injected (a
+hook's or a plugin's text, a channel delivery, a task notification) or a message with no
+mark, such as a slash command. A session with no marked message has no `prompt`; on a
+machine where most sessions are started and fed by other programs, most rows have none.
+A session a program started has none either.
+
+**Left out.** Codex rows have no `prompt`. A Codex rollout does say which messages were
+submitted as a person's text (the `user.text` item kind), but sessions does not read
+that kind as a typed mark, so it cannot say a Codex message was typed. To give Codex
+rows a `prompt`, sessions would need to read `user.text` as the mark and leave out the
+rollouts of `exec` runs, where a program passes the text. OpenCode rows have no `prompt`
+because OpenCode's record does not say who submitted a message.
+
 A harness that is not on the machine is not a failure. When a harness's root is its
 default one and does not exist, the list holds nothing for that harness: no count and no
 reason. When a root you set (`claude.projects`, `codex.sessions`, `opencode.database`)
@@ -187,7 +202,11 @@ the folder was not read; Codex's runs anywhere and comes with no folder.
 A list opens no transcript to find the sessions: it lists each root. To tell the sessions
 a program started from the others, it then reads the first lines of every session that
 changed in the last hour or on one of the seven days it returns, whether a row shows the
-session or not. It reads the last turn of each session its rows show. Every Codex
+session or not. It reads the last turn of each session its rows show, and for the
+prompt it reads a Claude Code session backward from its end until it meets a typed
+message, to the start when there is none. That read is made once for each state of the
+file: an unchanged session is not read again, and one that changed is read through again
+the next time a row shows it. Every Codex
 rollout's first line is read once, whatever its age, since that line says whether
 another thread spawned it. Asking by `folder` or `find`, or for the folders, reads every
 session's first lines once. What was read is kept in the reading process's memory for as
