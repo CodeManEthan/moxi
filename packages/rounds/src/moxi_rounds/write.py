@@ -39,12 +39,17 @@ A close or a callback that raises does not undo the events, which are on disk by
 the rest still runs, and `Written.failed` names it for the verb to report. Whatever
 such a callback keeps is rebuilt by the next verb's write.
 
+**Watching.** `with watching() as writes:` collects the `Written` of every write made
+inside it, in order. Whatever runs a verb for a person uses it to say what a write did
+beyond the verb's own lines: that it closed the round.
+
 A verb stopped between its act and its append is simply run again, so an act must be safe
 to repeat or leave something a rerun finds.
 """
 
 from __future__ import annotations
 
+import contextvars
 import dataclasses
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
@@ -145,6 +150,22 @@ class Written:
 
 
 Gate = Callable[[View], "Unmet | Iterable[Unmet] | None"]
+
+_WATCHED: contextvars.ContextVar[list[Written] | None] = contextvars.ContextVar(
+    "moxi_rounds_watched_writes", default=None)
+
+
+@contextmanager
+def watching() -> Iterator[list[Written]]:
+    """Collect every write made inside the block: the list given gains each one's
+    `Written` as it is made, in order."""
+    writes: list[Written] = []
+    token = _WATCHED.set(writes)
+    try:
+        yield writes
+    finally:
+        _WATCHED.reset(token)
+
 
 def _render(written: Written) -> None:
     """Write the generated files of the logs the write touched."""
@@ -350,9 +371,13 @@ def _append(view: View, entries: list[Entry], result: object, *, actor: str,
             callback(done)
         except Exception as error:  # the events are on disk; nothing here undoes them
             failed.append((callback, error))
-    return dataclasses.replace(done, failed=tuple(failed)) if failed else done
+    done = dataclasses.replace(done, failed=tuple(failed)) if failed else done
+    watched = _WATCHED.get()
+    if watched is not None:
+        watched.append(done)
+    return done
 
 
 __all__ = ["WAIT_S", "ROUND", "PROJECT", "ROUND_LOCKS_DIR", "PROJECT_LOCKS_DIR",
            "ON_APPEND", "round_lock", "project_lock",
-           "Where", "Entry", "View", "Written", "Gate", "record"]
+           "Where", "Entry", "View", "Written", "Gate", "record", "watching"]

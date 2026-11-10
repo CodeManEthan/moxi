@@ -26,6 +26,9 @@ FLOWS = """\
     [flows.sketch]
     steps = [ { step = "design", by = "lead" } ]
 
+    [flows.empty]
+    steps = []
+
     [flows.review]
     steps = [ { step = "design", by = "lead" },
               { step = "retro", by = "worker" } ]
@@ -298,6 +301,106 @@ def test_a_round_whose_flow_builds_does_not_close(opened, capsys, flow):
     assert status(folder) == "open"
     assert "round.closed" not in types(folder)
     assert f"close waits for: {BUILDS}\n" in run(capsys, "show", ROUND)
+
+
+# -- the verb whose write closes a round says so -----------------------------------------
+
+CLOSED_LINE = f"closed {ROUND}: nothing is left for its close to wait for"
+
+
+def report(folder, word="publishable"):
+    path = folder / "a-report.md"
+    path.write_text('# A report\n\n```toml rounds\nkind = "design"\n'
+                    f'verdict = "{word}"\npass = "full"\nby = "critic"\n'
+                    'model = "a-model"\ndesign = 1\n```\n', encoding="utf-8")
+    return str(path)
+
+
+def test_the_verdict_that_closes_a_round_says_so_in_its_last_line(folder, capsys):
+    fold(folder)
+
+    printed = run(capsys, "verdict", ROUND, report(folder)).splitlines()
+
+    assert printed[-1] == CLOSED_LINE
+    assert printed.count(CLOSED_LINE) == 1
+
+
+def test_a_verdict_that_closes_nothing_does_not_say_closed(folder, capsys):
+    fold(folder)
+
+    printed = run(capsys, "verdict", ROUND, report(folder, "fold-first"))
+
+    assert CLOSED_LINE not in printed.splitlines()
+    assert status(folder) == "open"
+
+
+def test_the_ruling_that_answers_the_last_question_says_it_closed_the_round(
+        opened, capsys):
+    folder = opened("sketch")
+    (folder / "design.md").write_text(
+        "# A design\n\n```toml rounds\n" + question("Q1", blocks='"none"')
+        + "\n```\n", encoding="utf-8")
+    assert CLOSED_LINE not in run(capsys, "fold", ROUND).splitlines()
+    assert run(capsys, "rule", ROUND, "Q1", "--text", "They do.", "--record",
+               PTR).splitlines()[-1] == CLOSED_LINE
+
+
+def test_the_freezing_that_closes_a_round_says_so(opened, capsys):
+    folder = opened("sketch")
+    (folder / "design.md").write_text("# A design\n\n```toml rounds\n```\n",
+                                      encoding="utf-8")
+
+    assert run(capsys, "fold", ROUND).splitlines()[-1] == CLOSED_LINE
+
+
+def test_the_skip_that_closes_a_round_says_so(folder, capsys):
+    fold(folder)
+
+    assert run(capsys, "rule", ROUND, "skip:verify-design", "--record",
+               PTR).splitlines()[-1] == CLOSED_LINE
+
+
+def test_a_round_opened_on_a_flow_with_no_steps_is_said_to_be_closed_by_open(
+        tmp_path, add_project, write_config, capsys):
+    add_project("proj-a", notes_root=tmp_path / "notes")
+    write_config(FLOWS)
+    capsys.readouterr()
+
+    printed = run(capsys, "open", ROUND, "--description", "a placeholder round",
+                  "--flow", "empty").splitlines()
+
+    assert printed[0] == f"opened {ROUND}   flow empty (no steps)"
+    assert printed[-1] == CLOSED_LINE
+    assert status(tmp_path / "notes" / "rounds" / "a-round") == "closed"
+
+
+def test_a_write_to_a_round_already_closed_does_not_say_closed_again(folder, capsys):
+    fold(folder)
+    rule("skip:verify-design")
+
+    printed = run(capsys, "rule", ROUND, "revoke:C1", "--record", PTR)
+
+    assert CLOSED_LINE not in printed.splitlines()
+
+
+def test_a_verb_that_is_refused_says_nothing_of_a_close(folder, capsys):
+    fold(folder)
+    verdict(folder)
+
+    assert main(["ask", ROUND, ASKED, "--from", PTR]) != 0
+
+    assert "closed proj-a/a-round:" not in capsys.readouterr().out
+
+
+def test_only_the_writes_made_while_watching_are_collected(folder):
+    from moxi_rounds import write
+
+    fold(folder)
+    with write.watching() as writes:
+        rule("skip:verify-design")
+    rule("revoke:C1")
+
+    assert [one.closed["type"] for one in writes] == ["round.closed"]
 
 
 # -- a close that stopped short ----------------------------------------------------------

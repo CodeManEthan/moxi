@@ -414,14 +414,16 @@ Recorded as C1: Only an exact title match
 in answer to Q1: Should a title match always rank above a body match?
 show him this under "Recorded as" in your next message, then:
   moxi rounds mark alpha/ranking C1 --shown --record <pointer to that message>
+closed alpha/ranking: nothing is left for its close to wait for
 $ moxi rounds list --closed
 alpha/ranking   closed at 2026-11-10T10:00:33Z   flow design   design: publishable@v1   open questions: 0   parked: 0   rulings not shown: 0
 ```
 
 The ruling above answered the round's last open question, so its write closed the
 round. `show` gives an open round's `close waits for:` line, and `next` gives it for a round
-at no step. The verb whose write closes a round prints nothing more for it. A closed
-round is listed by `list --closed`, and its note says when it closed. Like a dropped
+at no step. The verb whose write closes a round says so in its last line, `closed
+ROUND: ...`, whichever verb it is: `open` too, for a round on a flow with no steps. A
+closed round is listed by `list --closed`, and its note says when it closed. Like a dropped
 one it takes no new question and no new ruling; a correction of one of its rulings is
 still recorded, and its rulings are still marked as shown.
 

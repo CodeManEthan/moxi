@@ -171,6 +171,16 @@ def _warn_of(failed, prog: str, verb: str) -> None:
               "again", file=sys.stderr)
 
 
+def _say_closed(writes, out) -> None:
+    """Say, in a line, each round a write of the verb closed. No verb closes a round,
+    so the verb's own lines never say it: whichever write left the close nothing to
+    wait for did."""
+    for written in writes:
+        if written.closed is not None:
+            print(f"closed {written.where.project}/{written.where.slug}: nothing is "
+                  "left for its close to wait for", file=out)
+
+
 # -- open --------------------------------------------------------------------------------
 
 def _declare_open(verbs) -> None:
@@ -1029,8 +1039,13 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi rounds") -> int
         parser.print_usage(sys.stderr)
         print(f"{prog}: name a verb", file=sys.stderr)
         return codes.USAGE
+    from . import write
+
     try:
-        return _VERBS[args.verb](args, sys.stdout)
+        with write.watching() as writes:
+            code = _VERBS[args.verb](args, sys.stdout)
+        _say_closed(writes, sys.stdout)
+        return code
     except Refused as exc:
         print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
         return exc.exit_code
