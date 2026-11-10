@@ -17,6 +17,8 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
 - `NoRound` (exit 3): the project has no round of that name.
 - `NoFolder` (exit 3): a project's rounds folder can't be worked out. `problem` says why,
   and the fix names the setting that gives it one.
+- `SharedFolder` (exit 3), a `NoFolder`: the project's rounds folder is another
+  project's too. `other` is that project and `folder` the one folder both reach.
 """
 
 from __future__ import annotations
@@ -186,5 +188,30 @@ class NoFolder(RoundsError):
             f"{project} --notes-root DIR`")
 
 
+class SharedFolder(NoFolder):
+    """The rounds folder of the project `project` is the rounds folder of the project
+    `other` too: both reach `folder`, once every link on the way is followed. A rounds
+    folder belongs to one project, since a log in it is written under its project's
+    lock, and under two projects' locks two writers would not wait for each other."""
+
+    def __init__(self, project: str, other: str, folder: Path):
+        self.project = project
+        self.other = other
+        self.folder = Path(folder)
+        self.problem = (f"it is {self.folder}, which is the rounds folder of the "
+                        f"project {other!r} too")
+        self.known = True
+        RoundsError.__init__(
+            self,
+            f"the rounds folder of the project {project!r} is {self.folder}, and that "
+            f"is the rounds folder of the project {other!r} too: a rounds folder "
+            "belongs to one project, and neither is used while the two share one",
+            f'give one of the two a folder of its own: set dir = "/an/absolute/folder" '
+            f"under [projects.{project}] or [projects.{other}] in rounds' config, or "
+            f"give one another notes folder with `moxi projects set {project} "
+            "--notes-root DIR`")
+
+
 __all__ = ["RoundsError", "NoLog", "Unreadable", "TooNew", "Unmet", "Refused", "Locked",
-           "BadName", "BadArgument", "UnknownProject", "NoRound", "NoFolder"]
+           "BadName", "BadArgument", "UnknownProject", "NoRound", "NoFolder",
+           "SharedFolder"]

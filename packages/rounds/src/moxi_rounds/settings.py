@@ -70,6 +70,7 @@ def check(settings):
                 "matched ignoring case, so the two tables are one project's",
                 f"keep the project's settings in one table, [projects.{first}]")
         _check_project(settings.file, name, table)
+    _check_folders_apart(settings)
     return settings
 
 
@@ -205,6 +206,37 @@ def _check_dir(file, where, project, value) -> None:
             "folder to place it in",
             "give an absolute folder, or give the project a notes folder with `moxi "
             f"projects set {project} --notes-root DIR`")
+
+
+def _check_folders_apart(settings) -> None:
+    """Refuse two project tables whose `dir` settings reach one folder, once every
+    link on the way is followed: a rounds folder belongs to one project. A relative
+    `dir` is judged where the project's notes folder is known, and left alone where it
+    is not."""
+    import os
+
+    from . import folders
+    from .errors import RoundsError
+
+    reached: dict[str, str] = {}
+    for name, table in settings["projects"].items():
+        if "dir" not in table:
+            continue
+        folder = os.path.expanduser(table["dir"])
+        if not os.path.isabs(folder):
+            try:
+                folder = os.path.join(folders.notes_folder(name), folder)
+            except RoundsError:
+                continue
+        real = os.path.realpath(folder)
+        first = reached.setdefault(real, name)
+        if first != name:
+            raise ConfigError(
+                settings.file, f"projects.{name}.dir",
+                f"is {table['dir']!r}, which is the folder {real}, and "
+                f"projects.{first}.dir is that folder too: a rounds folder belongs to "
+                "one project",
+                f"give {name} or {first} a rounds folder of its own")
 
 
 def has_notes_folder(project: str) -> bool | None:

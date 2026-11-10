@@ -36,7 +36,7 @@ read = "use"
 [defaults.dir]
 type = "string"
 default = "rounds"
-doc = "A project's rounds folder: absolute, or relative to the project's notes folder."
+doc = "A project's rounds folder: absolute, or relative to the project's notes folder. A rounds folder belongs to one project: two projects that reach one folder are refused."
 read = "use"
 
 [defaults.ratify]

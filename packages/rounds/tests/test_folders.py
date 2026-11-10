@@ -11,7 +11,7 @@ from moxi import exit as exits
 from moxi import modules
 
 from moxi_rounds import folders, log
-from moxi_rounds.errors import BadName, NoFolder, UnknownProject
+from moxi_rounds.errors import BadName, NoFolder, SharedFolder, UnknownProject
 
 
 @pytest.fixture
@@ -202,6 +202,64 @@ def test_every_project_is_listed_with_its_folder_and_the_unresolved_beside_them(
     found, failed = folders.homes()
     assert found == [folders.Home("proj-a", tmp_path / "notes" / "proj-a" / "rounds")]
     assert [(type(error), error.project) for error in failed] == [(NoFolder, "proj-b")]
+
+
+# -- one folder, one project -------------------------------------------------------------
+
+@pytest.fixture
+def linked(add_project, without_notes, tmp_path):
+    """Two projects, `proj-a` and `proj-b`, where the notes folder of `proj-b` is a
+    link to that of `proj-a`, so both reach one rounds folder. Returns that folder."""
+    add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
+    (tmp_path / "link").symlink_to(tmp_path / "notes" / "proj-a")
+    add_project("proj-b", notes_root=tmp_path / "link")
+    return tmp_path / "notes" / "proj-a" / "rounds"
+
+
+@pytest.mark.parametrize("asked, other", [("proj-a", "proj-b"), ("proj-b", "proj-a")])
+def test_a_folder_two_projects_reach_is_refused_for_each_of_them(linked, asked, other):
+    with pytest.raises(SharedFolder) as caught:
+        folders.home(asked)
+    error = caught.value
+    assert (error.project, error.other, error.folder) == (asked, other, linked)
+    assert error.exit_code == exits.REFUSED
+    assert f"{asked!r}" in error.reason and f"{other!r}" in error.reason
+    assert str(linked) in error.reason
+    assert "dir = " in error.fix and f"[projects.{asked}]" in error.fix
+    assert f"[projects.{other}]" in error.fix
+
+
+def test_two_projects_that_reach_one_folder_are_both_listed_as_unresolved(
+        linked, add_project, tmp_path):
+    add_project("proj-c", notes_root=tmp_path / "notes" / "proj-c")
+    found, failed = folders.homes()
+    assert [one.project for one in found] == ["proj-c"]
+    assert [(type(error), error.project, error.other) for error in failed] == [
+        (SharedFolder, "proj-a", "proj-b"), (SharedFolder, "proj-b", "proj-a")]
+
+
+def test_a_verb_writes_nothing_into_a_folder_two_projects_reach(linked, capsys):
+    from moxi_rounds.cli import main
+
+    assert main(["open", "proj-b/a-round", "--description", "a placeholder round"]) == 3
+    err = capsys.readouterr().err
+    assert "'proj-b'" in err and "'proj-a'" in err and "dir = " in err
+    assert not linked.exists()
+
+
+def test_a_folder_of_its_own_ends_the_refusal(linked, write_config, tmp_path):
+    write_config(f"""
+        [projects.proj-b]
+        dir = "{tmp_path / 'own'}"
+    """)
+    assert folders.home("proj-a").folder == linked
+    assert folders.home("proj-b").folder == tmp_path / "own"
+
+
+def test_a_project_with_no_folder_shares_none(add_project, without_notes, tmp_path):
+    add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
+    add_project("proj-b")
+    assert folders.home("proj-a").folder == tmp_path / "notes" / "proj-a" / "rounds"
 
 
 # -- the rounds in it --------------------------------------------------------------------

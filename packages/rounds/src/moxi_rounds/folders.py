@@ -7,6 +7,12 @@ when notes is installed. That one call is all rounds asks of notes. A project th
 projects list does not hold is `UnknownProject`; a relative `dir` with no notes folder to
 place it in is `NoFolder`, which names the setting that fixes it.
 
+A rounds folder belongs to one project. Every log in it is written under its project's
+lock, so two projects that reached one folder would write one log under two locks. A
+project whose folder is another project's too, once every link on the way is followed,
+is `SharedFolder`, which names both; it is so for each of the two, whichever is asked
+for.
+
 The rounds of a project are the folders of its rounds folder that hold a `round.jsonl`.
 Nothing else lists them: a folder copied in, or one that arrived by git, is a round as
 soon as it is there. A round's name is `<project>/<slug>`, the slug its folder's name.
@@ -23,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import log
-from .errors import BadName, NoFolder, RoundsError, UnknownProject
+from .errors import BadName, NoFolder, RoundsError, SharedFolder, UnknownProject
 
 #: What a slug is: lower-case letters, digits and `-`.
 SLUG = re.compile(r"[a-z0-9-]+")
@@ -59,25 +65,53 @@ def split(name: str) -> tuple[str, str]:
 def home(project: str, settings=None) -> Home:
     """The project `project` (its key, in any case) with its rounds folder. `settings`
     are rounds' settings as `settings.load()` gives them, read now when left out. Raises
-    `UnknownProject`, or `NoFolder` when the folder can't be worked out."""
-    return _home(_projects().get, project, settings)
+    `UnknownProject`, `NoFolder` when the folder can't be worked out, or `SharedFolder`
+    when it is another project's rounds folder too."""
+    api = _projects()
+    record = _record(api.get, project)
+    settings = _settings(settings)
+    found = Home(record.key, _folder(record, settings))
+    mine = os.path.realpath(found.folder)
+    for other in _records(api):
+        if other.key == record.key:
+            continue
+        try:
+            theirs = _folder(other, settings)
+        except NoFolder:
+            continue
+        if os.path.realpath(theirs) == mine:
+            raise SharedFolder(record.key, other.key, Path(mine))
+    return found
 
 
 def homes(settings=None) -> tuple[list[Home], list[RoundsError]]:
     """Every project of the projects list with its rounds folder, by key, and beside
-    them the `NoFolder` of each project whose folder can't be worked out."""
-    api = _projects()
-    try:
-        records = api.list_projects()
-    except api.ProjectsError as error:
-        raise RoundsError(f"the projects list can't be read: {error}") from None
+    them the error of each project that has none to use: the `NoFolder` of one whose
+    folder can't be worked out, and the `SharedFolder` of each of two that reach one
+    folder."""
+    records = _records(_projects())
     settings = _settings(settings)
-    found, failed = [], []
+    placed: list[Home | NoFolder] = []
+    reach: dict[str, list[str]] = {}
     for record in records:
         try:
-            found.append(_home(lambda key, record=record: record, record.key, settings))
+            one = Home(record.key, _folder(record, settings))
         except NoFolder as error:
-            failed.append(error)
+            placed.append(error)
+            continue
+        placed.append(one)
+        reach.setdefault(os.path.realpath(one.folder), []).append(record.key)
+    found, failed = [], []
+    for one in placed:
+        if isinstance(one, NoFolder):
+            failed.append(one)
+            continue
+        real = os.path.realpath(one.folder)
+        others = [key for key in reach[real] if key != one.project]
+        if others:
+            failed.append(SharedFolder(one.project, others[0], Path(real)))
+        else:
+            found.append(one)
     return found, failed
 
 
@@ -126,16 +160,21 @@ def _projects():
     return found.api
 
 
-def _home(get, project: str, settings) -> Home:
+def _records(api) -> list:
+    """Every record of the projects list."""
+    try:
+        return api.list_projects()
+    except api.ProjectsError as error:
+        raise RoundsError(f"the projects list can't be read: {error}") from None
+
+
+def _folder(record, settings) -> Path:
+    """The rounds folder the `dir` setting gives the project `record`. Raises
+    `NoFolder`."""
     from . import settings as own
 
-    record = _record(get, project)
-    value = own.round_setting(_settings(settings), record.key, "dir")
-    folder = Path(os.path.expanduser(value))
-    if folder.is_absolute():
-        return Home(record.key, folder)
-    notes = _notes_folder(record)
-    return Home(record.key, notes / folder)
+    folder = Path(os.path.expanduser(own.round_setting(settings, record.key, "dir")))
+    return folder if folder.is_absolute() else _notes_folder(record) / folder
 
 
 def _record(get, project: str):

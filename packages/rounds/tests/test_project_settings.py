@@ -378,6 +378,32 @@ def test_a_relative_dir_is_not_judged_for_a_project_the_list_does_not_hold(
     assert settings.check_text(project('dir = "designs"')) is None
 
 
+def test_two_tables_whose_dirs_reach_one_folder_are_refused(tmp_path):
+    (tmp_path / "rounds").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "rounds")
+    error = refusal(f'[projects.proj-a]\ndir = "{tmp_path / "rounds"}"\n\n'
+                    f'[projects.proj-b]\ndir = "{tmp_path / "link"}"\n')
+    assert error.key == "projects.proj-b.dir"
+    assert "projects.proj-a.dir is that folder too" in error.problem
+    assert str(tmp_path / "rounds") in error.problem
+    assert "proj-a" in error.fix and "proj-b" in error.fix
+
+
+def test_two_relative_dirs_in_one_notes_folder_are_refused(
+        add_project, without_notes, tmp_path):
+    add_project("proj-a", notes_root=tmp_path / "notes")
+    add_project("proj-b", notes_root=tmp_path / "notes")
+    error = refusal('[projects.proj-a]\ndir = "designs"\n\n'
+                    '[projects.proj-b]\ndir = "designs"\n')
+    assert error.key == "projects.proj-b.dir"
+
+
+def test_two_tables_with_a_folder_each_pass_the_check(tmp_path):
+    assert settings.check_text(f'[projects.proj-a]\ndir = "{tmp_path / "one"}"\n\n'
+                               f'[projects.proj-b]\ndir = "{tmp_path / "two"}"\n'
+                               ) is None
+
+
 def test_the_default_relative_dir_alone_refuses_no_config(add_project, without_notes):
     add_project("proj-a")
     assert settings.check_text(project('into = "main"')) is None
