@@ -211,35 +211,105 @@ def _carried(was: Standing | None, version: states.Version) -> Standing:
     return Standing(LEAD_DECISION, version.n, verdict=was.verdict, fold=version.n)
 
 
-def standing(state: states.State) -> Standing:
-    """The standing of the round's design at its current version, `NONE` when nothing
-    gives it one or no version was frozen. The module's docstring has the rule."""
-    if current(state) is None:
-        return Standing(NONE)
+@dataclass
+class _Walk:
+    """The log read in order for what its design's verification came to: what each
+    version `stands` at, the `newest` version, the verdicts in a row that sent the
+    design back and count towards ending the passes (`run`), whether the design's
+    text was `rewritten` after the last of them, and whether the lead `decided` the
+    design's standing at any point."""
+
+    stands: dict[int, Standing]
+    newest: int | None = None
+    run: tuple[states.Verdict, ...] = ()
+    rewritten: bool = False
+    decided: bool = False
+
+
+def _walk(state: states.State) -> _Walk:
     acts = sorted([*((one.event or 0, one) for one in state.versions),
                    *((one.n or 0, one) for one in design_verdicts(state)),
                    *((one.n or 0, one) for one in state.threads)],
                   key=lambda act: act[0])
-    stands: dict[int, Standing] = {}
+    walk = _Walk(stands={})
+    stands = walk.stands
     only: dict[int, bool] = {}
-    newest = None
+    digests: dict[int, str | None] = {}
+    # The versions that stood verified at some point.
+    firm: set[int] = set()
+
+    def restart(*, decided: bool = False) -> None:
+        walk.run, walk.rewritten = (), False
+        walk.decided = walk.decided or decided
+
     for _number, one in acts:
         if isinstance(one, states.Version):
-            stands[one.n] = (_carried(stands.get(newest), one) if one.records_only
+            before = walk.newest
+            stands[one.n] = (_carried(stands.get(before), one) if one.records_only
                              else Standing(NONE, one.n))
             only[one.n] = one.records_only
-            newest = one.n
+            digests[one.n] = one.digest
+            walk.newest = one.n
+            if stands[one.n].fold == one.n:
+                # Freezing a change of records only after the design was sent back is
+                # the lead's decision, as a decision on a thread is.
+                restart(decided=True)
+            elif walk.run and before is not None and one.digest != digests[before]:
+                walk.rewritten = True
         elif isinstance(one, states.Verdict):
             if one.design not in stands:
                 continue
+            # A verdict counts when it gave the design its standing as it was
+            # recorded: it read the version current then, and that version did not
+            # stand verified already.
+            counts = one.design == walk.newest and one.design not in firm
             stands[one.design] = Standing(one.verdict or NONE, one.design, one)
             later = one.design + 1
             while (one.verdict == report_block.PUBLISHABLE and only.get(later)):
                 stands[later] = Standing(one.verdict, later, one)
                 later += 1
-        elif newest is not None:
-            stands[newest] = Standing(LEAD_DECISION, newest, decision=one)
-    return stands[newest]
+            if one.verdict == report_block.PUBLISHABLE:
+                if stands[walk.newest].verdict is one:
+                    restart()
+            elif counts:
+                walk.run, walk.rewritten = (*walk.run, one), False
+        elif walk.newest is not None:
+            stands[walk.newest] = Standing(LEAD_DECISION, walk.newest, decision=one)
+            restart(decided=True)
+        firm.update(n for n, stood in stands.items() if stood.word in VERIFIED)
+    return walk
+
+
+def standing(state: states.State) -> Standing:
+    """The standing of the round's design at its current version, `NONE` when nothing
+    gives it one or no version was frozen. The module's docstring has the rule."""
+    if current(state) is None:
+        return Standing(NONE)
+    walk = _walk(state)
+    return walk.stands[walk.newest]
+
+
+def sent_back(state: states.State) -> tuple[states.Verdict, ...]:
+    """The verdicts in a row that sent the design back and count towards ending its
+    passes, oldest first. The run starts after the lead's newest decision (a decision
+    on a thread, or a change of records only frozen after the design was sent back)
+    and after a verdict that left the design standing at publishable. It holds only a
+    verdict that gave the design its standing as it was recorded: one for a version
+    that was not the current one then, or that already stood verified, is in the
+    record and is not counted."""
+    return _walk(state).run
+
+
+def lead_decided(state: states.State) -> bool:
+    """Whether the lead decided the design's standing at any point, by a decision on
+    a thread or a change of records only frozen after the design was sent back."""
+    return _walk(state).decided
+
+
+def rewritten(state: states.State) -> bool:
+    """Whether the design's text changed since the last verdict `sent_back` counts: a
+    version frozen after it whose digest differs from the version before it."""
+    return _walk(state).rewritten
 
 
 def said(pending: states.Pending) -> str:
@@ -333,6 +403,7 @@ def unchanged(state: states.State, folder: Path | str, name: str) -> Unmet | Non
 
 __all__ = ["DESIGN_FILE", "file", "current", "find", "digest", "declarations",
            "pending_removals", "outstanding", "said", "DESIGN_REPORT", "NONE",
+           "sent_back", "rewritten", "lead_decided",
            "LEAD_DECISION", "VERIFIED", "Standing", "design_verdicts", "verified",
            "standing", "stages", "newest", "verdicts",
            "threads", "waiting", "unchanged"]

@@ -24,6 +24,13 @@ bounded by five rules, and the functions here are those rules:
    freeze the design, and record the lead's decision on the thread with `decide`,
    which closes the thread or accepts its risk and gives the design the standing
    `lead-decision`.
+   The run is counted from the lead's newest decision, so a decided thread is over:
+   a design frozen again after it is asked for a re-check, and a second thread is
+   decided only after two more such verdicts. A verdict counts only when it gave the
+   design its standing as it was recorded: one for a version that was no longer
+   current, or that already stood verified, does not. The freezing that must follow
+   the two is one that changed the design's text. `asked` and `decide` read the one
+   count, `versions.sent_back`.
 
 A round whose flow has no step that verifies its design never meets any of this:
 `asked` gives None for it.
@@ -96,20 +103,16 @@ class Asked:
 
 
 def sent_back(state: states.State) -> bool:
-    """Whether the newest verdicts recorded of the design, `SENT_BACK_IN_A_ROW` of
-    them, each sent it back."""
-    last = versions.design_verdicts(state)[-SENT_BACK_IN_A_ROW:]
-    return (len(last) == SENT_BACK_IN_A_ROW
-            and all(one.verdict == report_block.FOLD_FIRST for one in last))
+    """Whether `SENT_BACK_IN_A_ROW` verdicts in a row each sent the design back, as
+    `versions.sent_back` counts them: since the lead's newest decision, and only the
+    ones that gave the design its standing as they were recorded."""
+    return len(versions.sent_back(state)) >= SENT_BACK_IN_A_ROW
 
 
 def frozen_since(state: states.State) -> bool:
-    """Whether the design was frozen after the newest verdict recorded of it."""
-    read = versions.design_verdicts(state)
-    newest = versions.current(state)
-    if not read or newest is None:
-        return False
-    return (newest.event or 0) > (read[-1].n or 0)
+    """Whether the design's text changed since the last verdict that sent it back: a
+    version frozen after it with other bytes than the version before."""
+    return versions.rewritten(state)
 
 
 def had_full_pass(state: states.State) -> bool:
@@ -130,7 +133,8 @@ def asked(state: states.State, *, name: str = "ROUND") -> Asked | None:
 
     In order: a design never frozen is asked for no pass yet; one that stands
     verified is asked for none; after `SENT_BACK_IN_A_ROW` verdicts in a row that
-    sent it back, none, with what to do in place of one; while no full pass is
+    sent it back, counted from the lead's newest decision, none, with what to do in
+    place of one; while no full pass is
     recorded, a full pass; after one, a re-check of what changed since the newest
     version a pass read.
     """
@@ -231,14 +235,17 @@ def differences(before: dict, now: dict) -> list[str]:
 @dataclass(frozen=True)
 class Decided:
     """A thread as the lead decided it: the round's `name`, the `decision` as the log
-    now holds it, the design's `standing` after it, and the `event` written. `failed`
-    pairs each after-append callback that raised with what it raised."""
+    now holds it, the design's `standing` after it, and the `event` written. `found`
+    says the log held this decision already, so nothing was written and `event` is
+    None. `failed` pairs each after-append callback that raised with what it
+    raised."""
 
     name: str
     decision: states.Decided
     standing: versions.Standing
-    event: dict
+    event: dict | None
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    found: bool = False
 
 
 def decide(name: str, thread: str, decision: str, *, record: str | None, actor: str,
@@ -253,9 +260,12 @@ def decide(name: str, thread: str, decision: str, *, record: str | None, actor: 
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject`,
     `NoFolder` or `NoRound` for a round that can't be found, and `Refused` when the
     round has ended, the pointer is missing or has no known shape, the last
-    `SENT_BACK_IN_A_ROW` verdicts recorded of the design did not each send it back,
-    or the design was not frozen since the last of them. A refusal leaves the log as
-    it was.
+    `SENT_BACK_IN_A_ROW` verdicts in a row did not each send the design back since
+    the lead's last decision, or the design's text was not changed and frozen since
+    the last of them. A refusal leaves the log as it was.
+
+    The same decision run again (the same thread and word, at the version it was
+    recorded for) is found and returned with `found` set, and nothing is appended.
     """
     project, slug = folders.split(name)
     if not isinstance(thread, str) or not THREAD.fullmatch(thread):
@@ -276,27 +286,40 @@ def decide(name: str, thread: str, decision: str, *, record: str | None, actor: 
                          f"below is one token: {pointers.SHAPES}", again)
         return pointers.unmet(record, again)
 
+    def found(view) -> states.Decided | None:
+        """This decision as the log already holds it: the same thread and word at
+        the version that is current, which a run stopped after its append left."""
+        current = versions.current(view.state)
+        return next((one for one in view.state.threads
+                     if current is not None and one.version == current.n
+                     and (one.thread, one.decision) == (thread, decision)), None)
+
     def was_sent_back_twice(view):
-        if sent_back(view.state):
+        if found(view) is not None or sent_back(view.state):
             return None
-        read = versions.design_verdicts(view.state)
-        have = ("no verdict of the design is recorded" if not read else
-                "one verdict of the design is recorded" if len(read) == 1 else
-                "the last of them are "
-                + " and ".join(f"{one.verdict} for v{one.design}"
-                               for one in read[-SENT_BACK_IN_A_ROW:]))
-        return Unmet(f"a thread is decided only after the last {SENT_BACK_IN_A_ROW} "
-                     f"verdicts recorded of the design each sent it back: {have}",
-                     shown)
+        run = versions.sent_back(view.state)
+        since = (" since the lead's last decision"
+                 if versions.lead_decided(view.state) else "")
+        have = ("no verdict of the design is recorded"
+                if not versions.design_verdicts(view.state) else
+                f"none has{since}" if not run else
+                f"one has{since}, for v{run[0].design}")
+        return Unmet(f"a thread is decided only after {SENT_BACK_IN_A_ROW} verdicts in "
+                     "a row each sent the design back, counted from the lead's last "
+                     "decision and only where the verdict gave the design its "
+                     f"standing: {have}", shown)
 
     def was_frozen_since(view):
-        if not sent_back(view.state) or frozen_since(view.state):
+        if (found(view) is not None or not sent_back(view.state)
+                or frozen_since(view.state)):
             return None
-        return Unmet("the design was not frozen since the last verdict sent it back: "
-                     "write the section again from its rule and freeze the design "
-                     "first", f"moxi rounds fold {name}")
+        return Unmet("the design's text was not changed and frozen since the last "
+                     "verdict sent it back: write the section again from its rule "
+                     "and freeze the design first", f"moxi rounds fold {name}")
 
     def decided(view, result):
+        if found(view) is not None:
+            return None
         return write.Entry("thread.decided", {"thread": thread, "decision": decision,
                                               "record": record})
 
@@ -309,6 +332,10 @@ def decide(name: str, thread: str, decision: str, *, record: str | None, actor: 
     except NoLog:
         raise NoRound(name) from None
     after = states.fold(written.round_events)
+    if not written.events:
+        return Decided(name=name, decision=found(written.view),
+                       standing=versions.standing(after), event=None, found=True,
+                       failed=written.failed)
     return Decided(name=name, decision=after.threads[-1],
                    standing=versions.standing(after), event=written.events[0],
                    failed=written.failed)

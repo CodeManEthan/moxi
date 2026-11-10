@@ -631,8 +631,10 @@ def _mark_thread(args, out) -> int:
                         brake.CLOSE if args.close else brake.ACCEPT_RISK,
                         record=args.record, actor=_actor(args))
     one = done.decision
+    already = (f"   (recorded already, {one.at} by {one.actor}: nothing was written)"
+               if done.found else "")
     print(f"{done.name} {brake.PREFIX}{one.thread}: {one.decision}   record: "
-          f"{one.record}", file=out)
+          f"{one.record}{already}", file=out)
     print(f"standing: {done.standing}", file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK

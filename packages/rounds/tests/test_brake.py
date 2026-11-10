@@ -531,13 +531,13 @@ def test_a_thread_is_not_decided_before_two_verdicts_in_a_row_sent_the_design_ba
     refused("no verdict of the design is recorded")
     verdict(folder, pass_="full")
     fold(folder)
-    refused("one verdict of the design is recorded")
+    refused("one has, for v1")
     verdict(folder, "publishable", design=2)
     fold(folder)
-    refused("the last of them are fold-first for v1 and publishable for v2")
+    refused("none has")
     verdict(folder, design=3)
     fold(folder)
-    refused("the last of them are publishable for v2 and fold-first for v3")
+    refused("one has, for v3")
 
 
 def test_a_thread_is_not_decided_before_the_design_was_frozen_again(folder):
@@ -551,7 +551,8 @@ def test_a_thread_is_not_decided_before_the_design_was_frozen_again(folder):
         decide(folder)
 
     assert [(one.reason.partition(":")[0], one.fix) for one in refused.value.unmet] == [
-        ("the design was not frozen since the last verdict sent it back",
+        ("the design's text was not changed and frozen since the last verdict sent "
+         "it back",
          f"moxi rounds fold {ROUND}")]
     assert raw(folder) == before
 
@@ -609,20 +610,143 @@ def test_a_verdict_recorded_after_a_decision_is_the_standing(folder):
     assert standing(folder) == "publishable@v3"
 
 
-def test_a_version_frozen_after_a_decision_stands_at_none_and_a_second_thread_is_decided(
+def test_a_version_frozen_after_a_decision_is_asked_for_a_recheck_and_no_second_thread(
         folder):
     sent_back_twice(folder)
     decide(folder)
 
-    fold(folder)
+    fold(folder, *PLAN, stage("B9"))
 
     assert standing(folder) == "none"
+    found = asked(folder)
+    assert (found.pass_, found.since, found.version, found.instead) == (
+        brake.RECHECK, 2, 4, ())
+    before = raw(folder)
+    with pytest.raises(Refused) as refused:
+        decide(folder, "another", brake.ACCEPT_RISK)
+    assert [one.reason.partition(": ")[2] for one in refused.value.unmet] == [
+        "none has since the lead's last decision"]
+    assert raw(folder) == before
+
+
+def test_a_second_thread_is_decided_after_two_more_verdicts_sent_the_design_back(
+        folder):
+    sent_back_twice(folder)
+    decide(folder)
+    fold(folder)
+    verdict(folder, design=4)
+    fold(folder)
+    with pytest.raises(Refused, match="one has since the lead's last decision, for v4"):
+        decide(folder, "another")
+    verdict(folder, design=5)
     assert asked(folder).pass_ is None
+    fold(folder)
+
     assert str(decide(folder, "another", brake.ACCEPT_RISK).standing) == (
-        "lead-decision@v4")
+        "lead-decision@v6")
     assert [(one.thread, one.decision, one.version)
             for one in folded(folder).threads] == [
-        ("the-holds", "close", 3), ("another", "accept-risk", 4)]
+        ("the-holds", "close", 3), ("another", "accept-risk", 6)]
+
+
+def test_the_count_starts_again_after_a_change_of_records_only_made_the_decision(
+        folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+    fold(folder)
+    verdict(folder, design=2)
+    records_only(folder)
+    assert standing(folder) == "lead-decision@v3"
+
+    fold(folder, *PLAN, stage("B9"))
+
+    assert asked(folder).pass_ == brake.RECHECK
+    with pytest.raises(Refused, match="none has since the lead's last decision"):
+        decide(folder)
+
+
+def test_a_verdict_that_sends_back_a_verified_version_is_not_counted(folder):
+    fold(folder)
+    verdict(folder, "publishable", pass_="full")
+    verdict(folder)
+    verdict(folder)
+    assert len(folded(folder).verdicts) == 3
+    assert versions.sent_back(folded(folder)) == ()
+
+    fold(folder, *PLAN, stage("B9"))
+
+    assert asked(folder).pass_ == brake.RECHECK
+    with pytest.raises(Refused, match="none has"):
+        decide(folder)
+
+
+def test_a_verdict_that_sends_back_a_version_the_lead_decided_is_not_counted(folder):
+    sent_back_twice(folder)
+    decide(folder)
+    verdict(folder, design=3)
+    verdict(folder, design=3)
+
+    assert versions.sent_back(folded(folder)) == ()
+    fold(folder)
+    assert asked(folder).pass_ == brake.RECHECK
+
+
+def test_a_verdict_that_sends_back_an_older_version_is_not_counted(folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+    fold(folder)
+    verdict(folder, design=1)
+    assert [one.design for one in versions.sent_back(folded(folder))] == [1]
+    assert asked(folder).pass_ == brake.RECHECK
+
+    verdict(folder, design=2)
+
+    assert [one.design for one in versions.sent_back(folded(folder))] == [1, 2]
+    assert asked(folder).pass_ is None
+
+
+def test_a_design_frozen_with_the_same_text_does_not_open_the_gate(folder):
+    fold(folder)
+    verdict(folder, pass_="full")
+    fold(folder)
+    verdict(folder, design=2)
+    freezing.freeze(ROUND, actor="scout")
+    assert folded(folder).versions[-1].digest == folded(folder).versions[-2].digest
+    before = raw(folder)
+
+    with pytest.raises(Refused, match="text was not changed and frozen"):
+        decide(folder)
+
+    assert raw(folder) == before
+    assert len(asked(folder).instead) == 3
+    fold(folder)
+    assert len(asked(folder).instead) == 1
+    assert str(decide(folder).standing) == "lead-decision@v4"
+
+
+def test_the_same_decision_run_again_is_found_and_not_recorded_twice(folder, capsys):
+    sent_back_twice(folder)
+    first = decide(folder)
+    before = raw(folder)
+
+    again = decide(folder)
+
+    assert raw(folder) == before
+    assert (again.found, again.event, again.decision) == (True, None, first.decision)
+    assert str(again.standing) == "lead-decision@v3"
+    assert len(folded(folder).threads) == 1
+    assert main(["mark", ROUND, "thread:the-holds", "--close", "--record", WHY]) == 0
+    assert "recorded already" in capsys.readouterr().out
+    assert raw(folder) == before
+    # Another word, another thread or another version is not the same decision.
+    with pytest.raises(Refused):
+        decide(folder, decision=brake.ACCEPT_RISK)
+    with pytest.raises(Refused):
+        decide(folder, "another")
+    fold(folder)
+    with pytest.raises(Refused):
+        decide(folder)
+    assert len(folded(folder).threads) == 1
 
 
 def test_mark_decides_a_thread(folder, capsys):
