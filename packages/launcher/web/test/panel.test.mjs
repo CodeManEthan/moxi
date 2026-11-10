@@ -400,7 +400,8 @@ const ROW = { request_id: "q1", created_at: T, updated_at: T, actor: "page", har
 
 test("a status path gives the row, a refusal from before the row, or nothing yet", () => {
   const up = (extra) => ({ status: 200, data: { state: "up", detail: null, launches: [], refused: null, ...extra } });
-  assert.deepEqual(followedOf(up({ launches: [ROW] })), { kind: "row", row: ROW });
+  assert.deepEqual(followedOf(up({ launches: [ROW] })), { kind: "row", row: ROW, why: null });
+  assert.equal(followedOf(up({ launches: [ROW], why: "slot 3 is taken" })).why, "slot 3 is taken");
   assert.deepEqual(followedOf(up({ refused: { code: "no-cwd", row: null, problem: "p", hint: "h" } })),
                    { kind: "refused", refusal: { code: "no-cwd", row: null, problem: "p", hint: "h" } });
   assert.deepEqual(followedOf(up({})), { kind: "waiting" });
