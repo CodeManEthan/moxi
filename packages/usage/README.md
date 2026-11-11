@@ -362,18 +362,104 @@ the keys that differ.
 
 ## The page
 
-With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there: tokens and cost by day or month, by session (each session split
-by agent and model), by project and by model with where its price came from, with the
-limits meters and a strip about the index above them. The Cost terms view gives each
-model's cost split by class and tier, the Reconcile table (every term of each price group,
-a subtotal per model of several groups, and the total) and a Rates section with the rates
-of the models in use and a search over the whole model table. The daily view can stack
-cost by class. A session's view charts its main agent's requests, or any agent's, on one
-request axis: tokens or cost by class per request, and the context against the window,
-with turn and compaction marks. Two blocks go on the shell's home
-view: the limits, one meter per window, and the cost of today and the last 7 days, with
-how old the index behind it is, flagged once its last pass is over 10 minutes old. Without
-the extra, nothing of usage changes.
+With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there, at
+`/m/usage/`. It shows how much of each plan window is used and what the sessions on
+this machine cost, from usage's own index and readings, and names sessions through the
+sessions module. Top to bottom:
+
+- **Limits.** A group per harness with a plan window read, Claude then Codex, the one that
+  fills soonest first. A row per window says how much is used in words, in whole percents
+  rounded down, so it never says more is used than is; a thin line, with a tick at how
+  much of the window has passed when its start is known; when it resets; and when it
+  fills, if the readings say it runs out first. Such a row sits first in its group, and a
+  warning line above the page names it. A window whose last reading is from a period that
+  has ended is one dim row, `5-hour · reset 21:34`. A row opens in place: the window's
+  start and reset, its readings and the session the last one came from, why it has no
+  fill time, and, on a harness's main limit, this machine's sessions of that harness since
+  the window opened (the ten dearest, under a total that counts them all).
+- **Cost.** Today, the last 7 days and the last 30, each beside the period before it; the
+  two sessions that cost most today; when the sessions were last read; and `Prices`. It
+  sits above the filter line and does not follow it.
+- **The filter line.** Range (Today, Last 7 days, Last 30 days by default, Last 90 days,
+  From … to …, All time), each range with its figure under the filters set; Project, or
+  Folder where the projects module is not installed; Harness and Model, each drawn only
+  when there is more than one to choose or one is set; and Cost / Tokens. Everything
+  under it follows them.
+- **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
+  sentence over it, each bar's value on hover, a dashed outline on a period whose figures
+  are not whole, and `Table`, its rows as a table.
+- **The sections**, each one row stating its answer, with the count that opens it:
+  - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
+    `Show` for thirty more, and the days before them as `Earlier`. A session opens in its
+    row: its requests, its context, a chart of its requests with its turns and
+    compactions, where its cost went, its subagents (a map, a row each, and one opened
+    with its own requests), its harness, model and start, the restart point when one is
+    measured, and `Open in Sessions`, `Table`, `Check against a bill` and `Copy id`.
+  - Projects, or Folders where the projects module is not installed, by cost. A row
+    filters the page to it and opens Sessions. Files with no project are one `no
+    project` row, and the sentence under the list names their folders.
+  - Models, by cost.
+  - Token kinds: how much input was read from cache, the four classes, and what caching
+    saved, as an estimate.
+  - Prices: how many of the range's models are priced, and the price table's date.
+    Opened, their prices per million tokens; `Find a model`, a search over the whole
+    table; `Check against a bill`, every term of each price group with a subtotal per
+    model of several groups and the total; and `Details`, where each rate came from, its
+    tiers and periods, your own `[[model]]` rows and any rows skipped.
+
+  Each opened section but Token kinds and Prices ends with `Table`: every figure its rows
+  carry, the harness's own cost where it reported one, and why a figure is not whole.
+- **The foot.** When the sessions were read, how many files each harness holds, and `Read
+  new sessions` (`Reading new sessions…` while a pass runs). Under it, one dim line each
+  while it holds: a harness the last pass could not read and why, files held back and
+  why, a range whose total is not whole and why, the limits' notes, a window that could
+  not be read, a read or a pass that failed or was refused, and an address the page does
+  not have.
+
+A session is shown by the name typed for it in its harness, else by its folder's last
+segment and when it started (`proj-a · started 09:14`), never by its id; `Copy id`
+copies the id. A sum that is not whole reads `at least $19.54`, and one nothing in which
+could be priced, `no price`. A time is the hour and minute, and its day is worded against
+the page server's date: nothing for the same day, `yesterday` or `tomorrow`, the weekday
+within six days, else the date. With no request counted yet the page says so and offers
+`Read new sessions`; with no index, or one an older usage wrote, it gives the command
+`moxi usage index` to copy instead. A range that holds nothing says `Nothing was used in
+this range.` in the chart's place. A piece is drawn once its read has answered: until the
+first answers, `Reading…` stands where the page will be, and inside an opened row or
+section a read still out shows `Reading…` in its place.
+
+Its addresses, after `/m/usage/`:
+
+| address | opens |
+|---|---|
+| none | the page, nothing opened |
+| `limit/<harness>/<limit_id>/<minutes>` | that limit row |
+| `sessions` | the Sessions section |
+| `sessions/<harness>/<id>` | that session, opened first in the section, with its whole figures whatever range is set |
+| `sessions/<harness>/<id>/<agent>` | the same, with that subagent's requests opened |
+| `projects`, `folders` | the Projects or the Folders section, whichever the install has |
+| `models`, `kinds`, `prices` | that section |
+
+One piece is open at a time, and the address names it. The page rewrites the address in
+place as a piece opens or closes, adding no history entry, so Back leaves the page; a
+reload, or Back from the Sessions page, opens the same piece again, though not the scroll
+or how far it was shown. The range, the filters and Cost / Tokens are not part of the
+address: they are kept until the shell's page is reloaded, which starts again on the last
+30 days with no filter. An address the page does not have opens it with nothing opened
+and a line at the foot.
+
+What it leaves out: a heading of its own (the shell's top line names the page); colour
+for bad news (it draws in the theme's text, border and background colours, with no
+accent, warning or error colour); a group for a harness with no plan window read
+(OpenCode, Claude without the turns module, Codex with no rollout); a title the harness
+made up, as a session's name; a decimal on a percent; a line for a harness whose folder
+was never on the machine; cost by class as a stacked chart; and the tabs and the `daily`,
+`terms` and `session/<id>` addresses of the page before it. It has no screen of its own
+for a phone, and fits a window 360 px wide.
+
+Two blocks go on the shell's home view: the limits, one meter per window, and the cost of
+today and the last 7 days, with how old the index behind it is, flagged once its last pass
+is over 10 minutes old. Without the extra, nothing of usage changes.
 
 The page server's reads, each a `GET` under `/api`:
 

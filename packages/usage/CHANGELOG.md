@@ -2,6 +2,39 @@
 
 ## 0.2.1 (2026-11-10)
 
+- usage's page is drawn anew, as one page with no tabs and no heading of its own.
+  - The plan limits lead: a group per harness with a window read, a row per window with
+    how much is used in words, a thin line with a tick at how much of the window has
+    passed, when it resets and when it fills, and a warning line while any limit fills
+    before it resets. A window whose period has ended is one dim row. A row opens in
+    place, with the window's readings, why it has no fill time, and the sessions that
+    used it since it opened.
+  - Cost gives today, the last 7 days and the last 30, each beside the period before, and
+    today's two dearest sessions.
+  - The filter line holds Range (now with Today, From … to … and All time, each range
+    with its figure), Project or Folder, Harness and Model, and Cost / Tokens. The chart
+    is by month only for All time and a range over 92 days.
+  - Sessions, Projects (or Folders), Models, Token kinds and Prices are each one row that
+    opens in place. Sessions shows the week's ten dearest, `Show` for more and the days
+    before as `Earlier`; a session opens in its row, with its subagents and one agent's
+    requests. Token kinds says what caching saved, as an estimate. Prices holds `Find a
+    model`, `Check against a bill` (the Reconcile table) and `Details`. Each opened
+    section but Token kinds and Prices ends with `Table`, its rows with every figure
+    their read carries.
+  - A session is shown by the name typed for it, else by its folder and start, never by
+    its id; a title the harness made up is no longer shown as its name.
+  - The foot says when the sessions were read, the files by harness and `Read new
+    sessions`, and under it what the figures leave out: a harness not read, files held
+    back, a total that is not whole, a read that failed.
+  - Addresses: `limit/<harness>/<limit_id>/<minutes>`, `sessions`, `sessions/<harness>/<id>`
+    and its `/<agent>`, `projects` or `folders`, `models`, `kinds` and `prices`. The page
+    rewrites its address in place, so Back leaves it. `daily`, `terms` and
+    `session/<id>` are gone.
+  - Left out from the old page: the tabs and the heading; colour for bad news, including
+    the meter colours at 75% and 90%; a decimal on a percent under ten; cost by class as
+    a stacked chart; a limits row for a window with no reading; a line for a harness
+    whose folder was never there.
+  - The `limits` and `cost` blocks on the home view are unchanged.
 - Interface 2, which is interface 1 plus four things. usage still offers interface 1.
   - `report` takes `folder`, a folder's whole path: it keeps the files whose `cwd` it
     is, whatever project key they carry. A path that is not absolute is refused.
@@ -13,7 +46,7 @@
     is unpriced or lacks a price the sums need. `moxi usage terms --json` prints it.
   - A limits row carries `opened`, when its window started, or None when the readings
     cannot say. `moxi usage limits --json` prints it.
-- The page server's reads changed. The page still shows what it showed.
+- The page server's reads changed.
   - New `GET /api/window?harness=&limit_id=&minutes=`: one fresh plan window, with when
     it opened, the first and last reading of its period, and the sessions of that
     harness with requests since it opened (how many, their requests and cost since then,
