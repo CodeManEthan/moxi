@@ -169,7 +169,7 @@ const STYLES = css`
   .m .base { fill: var(--moxi-border-strong); }
   .m .fill { fill: var(--moxi-text); }
   .m .tick { fill: var(--moxi-text-dim); }
-  .one { display: flex; justify-content: space-between; align-items: baseline; padding: 7px 0;
+  .one { display: flex; justify-content: space-between; align-items: baseline; min-width: 0; padding: 7px 0;
          font-size: 14px; line-height: 20px; }
   .one > span:first-child { min-width: 0; padding-right: 18px; white-space: nowrap; overflow: hidden;
                             text-overflow: ellipsis; }

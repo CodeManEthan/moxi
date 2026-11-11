@@ -233,6 +233,35 @@ def test_an_opened_section_fits_a_phone(full, page, ui_width_check):
     ui_width_check(page)
 
 
+# --- Token kinds at a desk's width -----------------------------------------------------------
+
+def test_a_long_token_kinds_row_keeps_its_count_where_every_rows_count_ends(full, ui_contexts):
+    page = ui_contexts(full, viewport={"width": 1280, "height": 900}).pages[0]
+
+    def long_figures(route):
+        answer = route.fetch()
+        body = answer.json()
+        # Figures in the billions, each `at least`: the closed row's longest words.
+        body["total"]["unknown_rows"] = 3
+        for item in body["total"]["split"]:
+            item["cost"] *= 1e7
+        route.fulfill(response=answer, json=body)
+
+    page.route(re.compile(r"/m/usage/api/terms\?(?!.*by=agent)"), long_figures)
+    panel = open_page(page)
+    kinds = section_of(panel, "kinds")
+    expect(kinds.locator("[data-part=closed]")).to_contain_text("at least $")
+    count = kinds.locator("[data-part=count]")
+    expect(count).to_have_text(re.compile(r" tokens$"))
+    row = kinds.locator(".one").bounding_box()
+    link = count.bounding_box()
+    other = section_of(panel, "models").locator("[data-part=count]").bounding_box()
+    assert link["x"] + link["width"] <= row["x"] + row["width"] + 0.5, (link, row)
+    assert abs((link["x"] + link["width"]) - (other["x"] + other["width"])) <= 1, (link, other)
+    words = kinds.locator("[data-part=closed]").bounding_box()
+    assert words["x"] + words["width"] <= link["x"], (words, link)
+
+
 # --- without projects ----------------------------------------------------------------------
 
 def test_without_projects_folders_are_written_whole_with_no_row_for_no_project(small, ui_contexts):
