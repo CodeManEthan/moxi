@@ -12,7 +12,7 @@ import { costWords, countWords, whyNotWhole } from "./cost-model.ts";
 import { dateWord } from "./days.ts";
 import type { Prices, PriceSet, Rate, Report, Saving, TermsRow, TermsTotal } from "./feed.ts";
 import { percentWords } from "./limits-model.ts";
-import { fmtCost, fmtTokens, pricesPath, rateAsks, UNKNOWN_MODEL } from "./views.ts";
+import { fmtCost, fmtTokens, pricesPath, rateAsks, tierPrice, UNKNOWN_MODEL } from "./views.ts";
 
 export const KINDS_LABEL = "Token kinds";
 export const PRICES_LABEL = "Prices";
@@ -101,7 +101,7 @@ export function kindsSection(report: Terms | null): Kinds | null {
     const notes: string[] = [];
     const hour = kind.key === "cache_write" ? known(total, "cache_write_1h") : null;
     if (hour !== null && hour > 0) notes.push(`${fmtTokens(hour)} of them for 1 hour`);
-    for (const [tier, cost] of sum.tiers) notes.push(`${fmtCost(cost)} at ${tier} prices`);
+    for (const [tier, cost] of sum.tiers) notes.push(`${fmtCost(cost)} at ${tierPrice(tier)}`);
     return [{ sum, row: { key: kind.key, name: kind.name, note: notes.length ? notes.join(" · ") : null,
                           tokens: `${fmtTokens(tokens)} tokens`, cost: costWords(sum), why: whyNotWhole(sum) } }];
   });

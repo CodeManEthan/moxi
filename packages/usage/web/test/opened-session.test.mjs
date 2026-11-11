@@ -85,7 +85,7 @@ test("went to sums the classes dearest first, with a tier's part and the harness
                        { class: "cache_read", tier: "batch", tokens: 5, cost: 0.10 },
                        { class: "input", tier: null, tokens: 3, cost: 0.22 }] } });
   const parts = wentLine(terms);
-  assert.equal(words(parts), "cache writes $1.81 · output $0.85 · cache reads $0.79 · $0.10 at batch prices"
+  assert.equal(words(parts), "cache writes $1.81 · output $0.85 · cache reads $0.79 · $0.10 at the batch price"
     + " · fresh input $0.22 · harness $3.50");
   assert.deepEqual(parts.filter((part) => !part.dim).map((part) => part.text),
                    ["cache writes $1.81", "output $0.85", "cache reads $0.79", "fresh input $0.22"]);

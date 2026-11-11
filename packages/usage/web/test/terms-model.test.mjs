@@ -31,7 +31,7 @@ const TERMS = answer([row("m-a", [group("m-a", [term("input", 1_700_000, 3.72), 
   { input: 71_000_000, fresh_input: 1_700_000, cache_read: 65_100_000, cache_write: 4_200_000, cache_write_1h: 800_000,
     output: 900_000, tokens: 71_900_000, cost: 63.73, saving: SAVING,
     split: [split("input", 1_700_000, 3.72), split("cache_read", 65_100_000, 13.74), split("cache_write_5m", 3_400_000, 21.0),
-            split("cache_write_1h", 800_000, 10.46), split("output", 700_000, 12.81), split("output", 200_000, 2.0, "fast")] });
+            split("cache_write_1h", 800_000, 10.46), split("output", 700_000, 12.81), split("output", 200_000, 2.0, "above_100k")] });
 
 test("token kinds lists the four classes by cost with tokens, the 1-hour writes and a tier's part", () => {
   const kinds = kindsSection(TERMS);
@@ -40,7 +40,7 @@ test("token kinds lists the four classes by cost with tokens, the 1-hour writes 
     ["Cache writes", "4.20M tokens", "$31.46"], ["Output", "900k tokens", "$14.81"],
     ["Cache reads", "65.1M tokens", "$13.74"], ["Fresh input", "1.70M tokens", "$3.72"]]);
   assert.equal(kinds.rows[0].note, "800k of them for 1 hour");
-  assert.equal(kinds.rows[1].note, "$2.00 at fast prices");
+  assert.equal(kinds.rows[1].note, "$2.00 at the over-100k-token price");
   assert.equal(kinds.rows[2].note, null);
   assert.ok(kinds.rows.every((r) => r.why === null));
 });

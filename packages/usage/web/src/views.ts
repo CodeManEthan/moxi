@@ -190,10 +190,25 @@ function summedCells(groups: Group[], what: string): TermCell[] {
   });
 }
 
+/** The price tiers the model table names, in words for a person. */
+const TIER_WORDS: Record<string, string> = {
+  above_32k: "over-32k-token", above_100k: "over-100k-token", above_128k: "over-128k-token",
+  above_200k: "over-200k-token", above_256k: "over-256k-token", above_272k: "over-272k-token",
+  above_512k: "over-512k-token", above_200k_priority: "over-200k-token priority",
+  above_272k_priority: "over-272k-token priority", above_272k_flex: "over-272k-token flex",
+  priority: "priority", flex: "flex", fast: "fast",
+};
+
+/** A price tier in words: `the over-100k-token price`; a tier the map does not know is
+ * its id with spaces for underscores. */
+export function tierPrice(tier: string): string {
+  return `the ${TIER_WORDS[tier] ?? tier.replaceAll("_", " ")} price`;
+}
+
 /** How a group was priced: where its prices came from, its tier and its provider. */
 export function pricedBy(group: Group): string {
   const parts = [provenanceLine(group.provenance)];
-  if (group.tier) parts.push(`tier ${group.tier}`);
+  if (group.tier) parts.push(tierPrice(group.tier));
   if (group.above) parts.push(`above ${fmtTokens(group.above)}`);
   if (group.provider) parts.push(group.provider);
   return parts.join(" · ");

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   costAge, costDays, flags, fmtAgo, fmtCost, fmtPercent, fmtSpan, fmtTokens, meter, pricesPath, provenanceLine,
-  rateAsks, rateLine, readout, reconcileLines, requestNotes, shiftDay, termCell, tierText,
+  rateAsks, rateLine, readout, reconcileLines, requestNotes, shiftDay, termCell, tierPrice, tierText,
 } from "../src/views.ts";
 
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
@@ -169,7 +169,7 @@ test("a model of two groups gets a subtotal equal to their sum, and one of one g
   const [a, b, subtotal, , total] = lines;
   assert.ok(Math.abs(subtotal.cost - (a.cost + b.cost)) < 1e-9);
   assert.equal(subtotal.cells[0].title, "fresh input: 3,000 tokens over 2 groups = $0.01");
-  assert.ok(b.pricedBy.includes("tier fast"));
+  assert.ok(b.pricedBy.includes("the fast price"));
   const groupsOnly = lines.filter((line) => line.kind === "group").reduce((sum_, line) => sum_ + line.cost, 0);
   assert.ok(Math.abs(total.cost - groupsOnly) < 1e-9);
 });
@@ -234,4 +234,11 @@ test("a request's readout and the notes under its chart", () => {
     "1 compaction copied from another file isn't drawn",
     "compactions aren't read yet for a file of this agent; the next pass that can read it brings them in",
     "this harness wrote no turns here"]);
+});
+
+test("a price tier is worded for a person, and an id the map does not know reads with spaces", () => {
+  assert.equal(tierPrice("above_100k"), "the over-100k-token price");
+  assert.equal(tierPrice("above_272k_priority"), "the over-272k-token priority price");
+  assert.equal(tierPrice("priority"), "the priority price");
+  assert.equal(tierPrice("night_batch_v2"), "the night batch v2 price");
 });

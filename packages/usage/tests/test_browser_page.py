@@ -795,7 +795,7 @@ def test_token_kinds_closed_says_the_input_read_from_cache_and_opens_its_classes
     for row in rows.all():
         expect(row).to_contain_text(re.compile(r"tokens\s*(at least )?\$\d"))
     # The sixth request ran on the `[[model]]` row's fast tier.
-    expect(kinds.locator("[data-row=output]")).to_contain_text(re.compile(r"· \$\d+\.\d\d at fast prices"))
+    expect(kinds.locator("[data-row=output]")).to_contain_text(re.compile(r"· \$\d+\.\d\d at the fast price"))
 
 
 def test_token_kinds_says_what_caching_saved_as_an_estimate(charted, charted_page):

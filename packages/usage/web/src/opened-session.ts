@@ -19,7 +19,7 @@ import type { PageState } from "./filter-model.ts";
 import { percentWords } from "./limits-model.ts";
 import type { ListDays } from "./sessions-model.ts";
 import { KINDS, kindSum } from "./terms-model.ts";
-import { fmtCost, readout, REQUEST_CLASSES, requestNotes, TERM_CLASSES, UNKNOWN_MODEL } from "./views.ts";
+import { fmtCost, readout, REQUEST_CLASSES, requestNotes, TERM_CLASSES, tierPrice, UNKNOWN_MODEL } from "./views.ts";
 
 export const OPEN_IN_SESSIONS = "Open in Sessions";
 export const COPY_ID = "Copy id";
@@ -165,7 +165,7 @@ export function wentLine(report: Report<TermsRow, TermsTotal>): Part[] | null {
     const tokens = total[kind.tokens];
     const sum = kindSum(report, kind.terms, Number.isFinite(tokens) ? tokens : 0);
     if (sum.cost === 0 && sum.unpriced_tokens === 0) return [];
-    const notes = [...sum.tiers].map(([tier, cost]) => `${fmtCost(cost)} at ${tier} prices`);
+    const notes = [...sum.tiers].map(([tier, cost]) => `${fmtCost(cost)} at ${tierPrice(tier)}`);
     return [{ cost: sum.cost, text: `${kind.name.toLowerCase()} ${costWords(sum)}`, notes }];
   });
   if (found.length === 0) return null;
