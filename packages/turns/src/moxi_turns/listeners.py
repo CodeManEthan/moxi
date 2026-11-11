@@ -552,7 +552,7 @@ def ask(registry: Registry, event: SessionEvent, wait_s: float, *,
     _join(threads, wait_s)
     if not context:
         return None
-    texts = [t for t in (_text(ls, event, answers[i], done[i], wait_s)
+    texts = [t for t in (_text(ls, event, answers[i], done=done[i], wait_s=wait_s)
                          for i, ls in enumerate(chosen)) if t]
     return JOIN.join(texts) if texts else None
 
@@ -585,7 +585,7 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float,
                     log.warning("start list entry %s adds nothing: it cannot be read: %s",
                                 e.entry, exc)
     _join(threads, wait_s)
-    texts = {id(ls): _text(ls, start, answers[i], done[i], wait_s)
+    texts = {id(ls): _text(ls, start, answers[i], done=done[i], wait_s=wait_s)
              for i, ls in enumerate(rows)}
     per_entry: list[tuple[str, str | None]] = []
     for e in the_plan.entries:
@@ -617,7 +617,7 @@ def _join(threads: list[threading.Thread], wait_s: float) -> None:
         t.join(max(0.0, deadline - time.monotonic()))
 
 
-def _text(listener: Listener, event: SessionEvent, answer: object, done: bool,
+def _text(listener: Listener, event: SessionEvent, answer: object, *, done: bool,
           wait_s: float) -> str | None:
     if not done:
         log.warning("listener %s (%s) did not answer %s within %d ms; it counts as "

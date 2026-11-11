@@ -242,7 +242,7 @@ def _rooted_path(w: str, cwd: str | None, home: str | None) -> bool:
     return False
 
 
-def _word_passes(w: str, cwd: str | None, home: str | None, has_rmdir: bool) -> bool:
+def _word_passes(w: str, cwd: str | None, home: str | None, *, has_rmdir: bool) -> bool:
     if not PRINTABLE.fullmatch(w):
         return False
     if has_rmdir and "*" in w:
@@ -282,7 +282,7 @@ def rules(raw: str, cwd: str | None, home: str | None) -> str:
         out += "T"
     if any(RM.search(t) for t in texts):
         has_rmdir = any(RMDIR.search(t) for t in texts)
-        if not all(_word_passes(w, cwd, home, has_rmdir) for w in SPLIT.split(raw) if w):
+        if not all(_word_passes(w, cwd, home, has_rmdir=has_rmdir) for w in SPLIT.split(raw) if w):
             out += "W"
         if openers(raw) > 64:
             out += "S"

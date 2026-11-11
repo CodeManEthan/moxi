@@ -171,7 +171,7 @@ class Live:
     without_shells: int | None = None
 
     @classmethod
-    def of(cls, agents: Agents, draft: bool = False) -> Live:
+    def of(cls, agents: Agents, *, draft: bool = False) -> Live:
         """The live facts with the count derived from `agents`: entries not final and
         pending, running or waiting, and of them the `shell` entries; None when the list
         is not complete."""
@@ -243,7 +243,7 @@ class Harness:
     def agents(self) -> Agents:
         """The session's subagents as the harness records them, read on every call. The
         base cannot list any: its list is not complete, which counts as busy."""
-        return Agents((), False, time.time())
+        return Agents((), complete=False, at=time.time())
 
     @staticmethod
     def tool_points() -> dict[str, bool]:

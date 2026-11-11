@@ -376,6 +376,7 @@ comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	fetch	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	write_state	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/shim_roster.py	write_state	name	f	fh
 comms	packages/comms/src/moxi_comms/adapters/terminal.py	Terminal.take_back	name	e	exc
+comms	packages/comms/src/moxi_comms/adapters/word.py	BOUND, OFFLINE, REFUSED, TRY_AGAIN, FAILED = "B", "O", "R", "T", "E"	keep	R	R
 comms	packages/comms/src/moxi_comms/api/__init__.py	attributed	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	check	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)	use	sender.environ	sender.sender_env
@@ -662,7 +663,10 @@ comms	packages/comms/src/moxi_comms/membership.py	ProcView.stat	name	f	fh
 comms	packages/comms/src/moxi_comms/membership.py	seen = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/mock_record.py	MockRecord._save	name	f	fh
 comms	packages/comms/src/moxi_comms/mock_record.py	self._stop.set()	keep	set	set
+comms	packages/comms/src/moxi_comms/owed.py	**Paid.** By `R`'s own message to `A`, after `M`, whose posture is not `once`. An	keep	R	R
+comms	packages/comms/src/moxi_comms/owed.py	**The predicate.** A delivered message `M` from `A` owes `R` a reply when it was	keep	R	R
 comms	packages/comms/src/moxi_comms/owed.py	ReplyCheck.decide	name	e	exc
+comms	packages/comms/src/moxi_comms/owed.py	`R`'s payment to `A` owes nothing unless it is `[reply-once]`. A referent whose standing	keep	R	R
 comms	packages/comms/src/moxi_comms/owed.py	self.ledger.settle(answer, now)	keep	handled	handled
 comms	packages/comms/src/moxi_comms/owed.py	tail.append(TOOLS_FALLBACK.format(id=one))	keep	id	id
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_Feed._poll	name	err	exc
@@ -1379,6 +1383,7 @@ comms	packages/comms/tests/test_opencode_tools.py	assert not {TOKEN_ENV, URL_ENV
 comms	packages/comms/tests/test_opencode_tools.py	assert set(config["mcp"]) == {"comms", "other"} and config["share"] == "disabled"	keep	set	set
 comms	packages/comms/tests/test_opencode_tools.py	daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,	keep	record	record
 comms	packages/comms/tests/test_opencode_tools.py	return [tmp_path, os.environ["HOME"], os.environ["MOXI_COMMS_RUNTIME_DIR"]]	keep	HOME	HOME
+comms	packages/comms/tests/test_opencode_window.py	proc = w.launch(window="alt")	keep	window	window
 comms	packages/comms/tests/test_operator_lane.py	assert rig.record.get_message(mid).withdrawn_at	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	assert rig.record.get_message(mid).withdrawn_at is None	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	assert rig.record.history(rig.names_channel) == []	keep	record	record
@@ -1691,6 +1696,7 @@ connector	packages/connector/src/moxi_connector/page.py	await send({"type": "htt
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.start", "status": status,	keep	fail	fail
 connector	packages/connector/src/moxi_connector/page.py	repeated = set()	keep	set	set
 connector	packages/connector/src/moxi_connector/page.py	req = under.check(params)	keep	ok	ok
+connector	packages/connector/src/moxi_connector/page.py	said=WRONG.format(left="1 try" if left == 1 else f"{left} tries"))	keep	said	said
 connector	packages/connector/src/moxi_connector/probe.py	with opener.open(req, timeout=STEP_WAIT) as answer:	keep	timeout	timeout
 connector	packages/connector/src/moxi_connector/signin.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/signin.py	await send({"type": "http.response.start", "status": 401,	keep	fail	fail
@@ -2855,6 +2861,7 @@ moxi	packages/moxi/src/moxi/units/_schtasks.py	out = set()	keep	set	set
 moxi	packages/moxi/src/moxi/units/_schtasks.py	return path.startswith(TASK_DIR.casefold()) or path.startswith(self.folder.casefold())	use	self.folder	self.task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	return self.folder if tag is None else f"{self.folder}{tag}\\"	use	self.folder	self.task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	self.folder = task_dir	use	self.folder	self.task_dir
+moxi	packages/moxi/src/moxi/units/_status.py	return _Runs().of(module, f"{module}/{timer}")[-n:]	keep	draft	draft
 moxi	packages/moxi/src/moxi/units/_systemd.py	-	name	_environment	_env
 moxi	packages/moxi/src/moxi/units/_systemd.py	_login_line	kwonly	login	login
 moxi	packages/moxi/src/moxi/units/_systemd.py	_read_wrap	name	handle	fh
@@ -3625,6 +3632,7 @@ moxi-dev	packages/moxi-dev/tests/test_fence.py	given = terminal_record({"HOME": 
 moxi-dev	packages/moxi-dev/tests/test_fence.py	kept = set(testing.KEPT_ENV)	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_fence.py	kept |= set(testing.WINDOWS_KEPT_ENV)	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_fence.py	lines = set(result.outlines)	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_fence.py	local, roaming, home = tmp_path / "L", tmp_path / "R", tmp_path / "H"	keep	R	R
 moxi-dev	packages/moxi-dev/tests/test_fence.py	pytester.makepyfile(test_uv_probe=UV_PROBE.format(cache=cache, data=data,	keep	data	data
 moxi-dev	packages/moxi-dev/tests/test_fence.py	testing.ANCHOR_HOME} | {	use	testing.ANCHOR_HOME	testing.ANCHOR_HOME_ENV
 moxi-dev	packages/moxi-dev/tests/test_kit.py	assert set(testing.TIERS) <= registered	keep	set	set
@@ -3650,6 +3658,7 @@ notes	packages/notes/src/moxi_notes/backfill.py	__all__ = ["INFERABLE", "Proposa
 notes	packages/notes/src/moxi_notes/blobs.py	`git(*args, input=None, timeout=..., binary=True)` returning a finished process. Both	use	input=None, timeout=...	stdin_data=None, timeout_s=...
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	input=	stdin_data=
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	timeout=	timeout_s=
+notes	packages/notes/src/moxi_notes/blobs.py	if status in ("R", "C"):	keep	R	R
 notes	packages/notes/src/moxi_notes/cli.py	"backfill", help="add the required frontmatter keys notes can infer",	keep	help	help
 notes	packages/notes/src/moxi_notes/cli.py	"scan", help="what a snapshot would leave out now, with rules and lines",	keep	help	help
 notes	packages/notes/src/moxi_notes/cli.py	"validate", help="check the notes' frontmatter against the types file",	keep	help	help
@@ -3860,6 +3869,7 @@ repo	packages/repo/src/moxi_repo/committer.py	for label, value in (("min_interva
 repo	packages/repo/src/moxi_repo/committer.py	for label, value in (("min_interval", spec.min_interval),	use	.min_interval	.min_interval_s
 repo	packages/repo/src/moxi_repo/committer.py	for name in sorted(set(saved) | set(state)):	keep	set	set
 repo	packages/repo/src/moxi_repo/committer.py	got = gate.acquire(timeout=wait)	keep	timeout	timeout
+repo	packages/repo/src/moxi_repo/committer.py	if c.status in ("A", "R", "C"):	keep	R	R
 repo	packages/repo/src/moxi_repo/committer.py	if failed_at is not None and _now() - failed_at < spec.push_backoff:	use	.push_backoff	.push_backoff_s
 repo	packages/repo/src/moxi_repo/committer.py	if spec.min_interval and since is not None and now - since < spec.min_interval:	use	.min_interval	.min_interval_s
 repo	packages/repo/src/moxi_repo/committer.py	input=_stdin(stage))	use	input=	stdin_data=
@@ -3887,6 +3897,7 @@ repo	packages/repo/src/moxi_repo/gitconf.py	self.moved: set[str] = set()	keep	se
 repo	packages/repo/src/moxi_repo/gitconf.py	self.sections: set[str] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	state.moved = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	state.moved = set(moved)	keep	set	set
+repo	packages/repo/src/moxi_repo/gitrun.py	"""One changed path. `status` is git's letter (`A`, `M`, `D`, `R`, `T`, ...);	keep	R	R
 repo	packages/repo/src/moxi_repo/gitrun.py	__all__ = ["git", "changes", "Change", "literal_pathspec", "environment", "local_env_vars",	keep	environment	environment
 repo	packages/repo/src/moxi_repo/gitrun.py	`changes(root, staged=True | range=(a, b), paths=())` lists what changed, from git's `-z`	use	range=(a, b)	rev_range=(a, b)
 repo	packages/repo/src/moxi_repo/gitrun.py	changes	kwonly	staged	staged
@@ -3896,6 +3907,7 @@ repo	packages/repo/src/moxi_repo/gitrun.py	environment's own variables are `envi
 repo	packages/repo/src/moxi_repo/gitrun.py	git	name	input	stdin_data
 repo	packages/repo/src/moxi_repo/gitrun.py	git	name	timeout	timeout_s
 repo	packages/repo/src/moxi_repo/gitrun.py	if command == "remote" and not (_REMOTE_VERBS & set(rest[:1])):	keep	set	set
+repo	packages/repo/src/moxi_repo/gitrun.py	if status in ("R", "C"):	keep	R	R
 repo	packages/repo/src/moxi_repo/gitrun.py	raise ValueError("changes() reads what is staged, or a range=(a, b)")	use	range=(a, b)	rev_range=(a, b)
 repo	packages/repo/src/moxi_repo/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/pieces.py	"""What a piece returns. Make one with `ok()`, `refuse()`, `notice()` or `record()`."""	keep	record	record
@@ -3936,6 +3948,8 @@ repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="backup", mi
 repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="origin", min_interval=3600)	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_commit_records.py	took.set()	keep	set	set
 repo	packages/repo/tests/test_commit_rules.py	imported = set()	keep	set	set
+repo	packages/repo/tests/test_committer.py	("R", "notes/c.md", "notes/b.md")]	keep	R	R
+repo	packages/repo/tests/test_committer.py	("R", "notes/new.md", "notes/old.md")]	keep	R	R
 repo	packages/repo/tests/test_committer.py	assert from_b.status == "committed" and set(from_b.pushed) == {"a", "b"}	keep	set	set
 repo	packages/repo/tests/test_committer.py	assert moxi_repo.commit(spec(repo, min_interval=3600)).status == "committed"	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_committer.py	assert not set(call["argv"]) & set(GLOBAL_OPTIONS), call	keep	set	set
@@ -4686,6 +4700,7 @@ sessions	packages/sessions/tests/test_claude.py	assert projects_root({"HOME": "/
 sessions	packages/sessions/tests/test_claude.py	monkeypatch.setenv("HOME", str(tmp_path / "home"))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude_shape.py	transcript.other("progress", data={"message": {"type": "assistant", "message": {	keep	data	data
+sessions	packages/sessions/tests/test_claude_shape.py	{"type": "text", "text": "twice"}], is_error=True)	keep	is_error	is_error
 sessions	packages/sessions/tests/test_cli.py	"source": "environment",	keep	environment	environment
 sessions	packages/sessions/tests/test_cli.py	"source": "environment", "detail": "CODEX_HOME/sessions"}	keep	environment	environment
 sessions	packages/sessions/tests/test_cli.py	assert set(data) == {"shape", "claude", "codex", "opencode"}	keep	set	set
@@ -4778,6 +4793,7 @@ sessions	packages/sessions/tests/test_read.py	for n, step in enumerate(steps, st
 sessions	packages/sessions/tests/test_read.py	m.step_finish(input=4, output=2)	keep	input	input
 sessions	packages/sessions/tests/test_read.py	start, _ = a.step(input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/test_read.py	t.other("attachment", type=None, promptId=t.prompt_id, note="n" * LONG)	keep	type	type
+sessions	packages/sessions/tests/test_read.py	t.tool_result(call2, "a b", is_error=False)	keep	is_error	is_error
 sessions	packages/sessions/tests/test_retention.py	assert by_harness({"HOME": str(other)})["claude"].value == 7	keep	HOME	HOME
 sessions	packages/sessions/tests/test_retention.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_session_facts.py	assert set(failure) == {"harness", "root", "reason"}	keep	set	set
@@ -4941,35 +4957,55 @@ tunnel	packages/tunnel/tests/test_uninstall_build.py	assert box.record()["entrie
 tunnel	packages/tunnel/tests/test_uninstall_build.py	assert list(box.record()["entries"]) == ["alpha/gateway"]	keep	record	record
 turns	packages/turns/src/moxi_turns/__init__.py	d.wait_ended(timeout)    # Ended | Refused | Lost	use	d.wait_ended(timeout)	d.wait_ended(timeout_s)
 turns	packages/turns/src/moxi_turns/__init__.py	d.wait_started(timeout)  # Started | Refused | Lost	use	d.wait_started(timeout)	d.wait_started(timeout_s)
+turns	packages/turns/src/moxi_turns/__init__.py	e = s.environ(names)   # {name: value | None}: the session's own environment, read	use	environ	env
 turns	packages/turns/src/moxi_turns/__init__.py	r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout=None,	use	timeout=None	timeout_s=None
 turns	packages/turns/src/moxi_turns/__init__.py	s = turns.wait_ready(session_id="…", timeout=30)   # or pid=: found, and its Ready seen	use	timeout=30	timeout_s=30
 turns	packages/turns/src/moxi_turns/additions.py	granted = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	"environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	ep.command_ran(request.id, new_session_id=new_id, shells=shells)	keep	shells	shells
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	ep.command_ran(request.id, shells=shells)	keep	shells	shells
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	is_error=is_error if isinstance(is_error, bool) else None, rows=rows)	keep	is_error	is_error
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._gate_refused: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.ended.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.session_known.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	slot[0].set()	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	PACKAGE_FOLDER	PACKAGE_DIR
+turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	_market_folder	_marketplace_dir
+turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	_same_folder	_same_dir
+turns	packages/turns/src/moxi_turns/claude_setup.py	_endpoint_file_row	name	Row	row_type
+turns	packages/turns/src/moxi_turns/claude_setup.py	_version_row	name	Row	row_type
 turns	packages/turns/src/moxi_turns/claude_setup.py	data = json.dumps({"command": str(command), "environment": sys.prefix,	keep	environment	environment
+turns	packages/turns/src/moxi_turns/claude_setup.py	install_plugins	name	folder	marketplace_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	installed = set() if moved else {	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_setup.py	rows	name	folder	plugin_root_dir
+turns	packages/turns/src/moxi_turns/claude_setup.py	write_endpoint_file	name	out	fh
 turns	packages/turns/src/moxi_turns/client.py	"""The version 2 endpoint in `directory` as a `Session`, when a connection to its	keep	directory	directory
 turns	packages/turns/src/moxi_turns/client.py	Delivery.wait_ended	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/client.py	Delivery.wait_started	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/client.py	Read bounds. A short call (`session`, `deliver`, `steer`, `environ`, the look-up,	keep	environ	environ
+turns	packages/turns/src/moxi_turns/client.py	Session	name	environ	env
 turns	packages/turns/src/moxi_turns/client.py	Session.__init__	name	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/client.py	Session.codex_limits	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/client.py	Session.command	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/client.py	Session.mcp_reload	name	timeout	timeout_s
+turns	packages/turns/src/moxi_turns/client.py	_NotWritten.__init__	kwonly	connect	connect
+turns	packages/turns/src/moxi_turns/client.py	_candidates	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/client.py	_probe	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/client.py	_probe_listed	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/client.py	_v1_error	name	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/client.py	`capability` error on a session without `environ`."""	keep	environ	environ
 turns	packages/turns/src/moxi_turns/client.py	`deliver`, `steer`, `environ`, and the look-up by `ref` of a hand-in whose answer never	keep	environ	environ
 turns	packages/turns/src/moxi_turns/client.py	answer = self._client.call("stops.answer", {"ask": ask, "reason": reason},	keep	_client	_client
 turns	packages/turns/src/moxi_turns/client.py	client = self._client	keep	_client	_client
 turns	packages/turns/src/moxi_turns/client.py	client, self._client = self._client, None	keep	_client	_client
 turns	packages/turns/src/moxi_turns/client.py	data={"client": list(client),	keep	data	data
+turns	packages/turns/src/moxi_turns/client.py	find	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/client.py	for directory, hello in wanted:	use	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/client.py	for method, params in self._client.notifications():	keep	_client	_client
+turns	packages/turns/src/moxi_turns/client.py	futures.append(pool.submit(_probe_listed, directory, hello))	use	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/client.py	if not isinstance(values, dict) or set(values) != set(asked) or not all(	keep	set	set
 turns	packages/turns/src/moxi_turns/client.py	info = client.call("session", timeout=READ_S)	use	timeout=	timeout_s=
+turns	packages/turns/src/moxi_turns/client.py	launch's. At most `ENVIRON_MAX_NAMES` names, each `[A-Za-z_][A-Za-z0-9_]*`.	use	ENVIRON_MAX_NAMES	ENV_MAX_NAMES
 turns	packages/turns/src/moxi_turns/client.py	pool.shutdown(wait=False, cancel_futures=True)	keep	wait	wait
 turns	packages/turns/src/moxi_turns/client.py	pool.shutdown(wait=True)	keep	wait	wait
 turns	packages/turns/src/moxi_turns/client.py	raw = self._read(self._short, "environ", READ_S, {"names": asked})	keep	environ	environ
@@ -4984,8 +5020,10 @@ turns	packages/turns/src/moxi_turns/client.py	self._closed.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/client.py	self._thread.join(timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/client.py	timeout=READ_S)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/client.py	wait_ready	name	timeout	timeout_s
+turns	packages/turns/src/moxi_turns/client.py	wanted = [(directory, hello) for directory, hello, version in _candidates()	use	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/codex.py	"""Apply a collab item's notices to `record`, in order. An agent's latest status is	keep	record	record
 turns	packages/turns/src/moxi_turns/codex.py	"mcp-token", "environ"})	keep	environ	environ
+turns	packages/turns/src/moxi_turns/codex.py	CodexHarness._inject	name	mismatch	exc
 turns	packages/turns/src/moxi_turns/codex.py	done.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/codex.py	for process_id in sorted((still or set()) - set(ids)):	keep	set	set
 turns	packages/turns/src/moxi_turns/codex.py	generation.ended.set()	keep	set	set
@@ -5009,6 +5047,7 @@ turns	packages/turns/src/moxi_turns/codex.py	still: set[str] | None = set(self._
 turns	packages/turns/src/moxi_turns/codex.py	timeout=2.0,	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex.py	timeout=remaining)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/codex.py	timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/codex_appserver.py	_from_app_server	name	folder	server_dir
 turns	packages/turns/src/moxi_turns/codex_appserver.py	answer = session.codex_limits(timeout=remaining)	use	timeout=	timeout_s=
 turns	packages/turns/src/moxi_turns/codex_appserver.py	codex_rate_limits	name	timeout	timeout_s
 turns	packages/turns/src/moxi_turns/codex_appserver.py	proc.wait(timeout=grace + moxi_proc.KILL_GRACE)	keep	timeout	timeout
@@ -5019,6 +5058,7 @@ turns	packages/turns/src/moxi_turns/codex_hooks.py	_Ping.__init__	name	wait_seco
 turns	packages/turns/src/moxi_turns/codex_hooks.py	command	name	wait_seconds	wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	conn.send(reply)	keep	fail	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	conn.send({"ok": True, "block": reason})	keep	fail	fail
+turns	packages/turns/src/moxi_turns/codex_hooks.py	hooks_socket	name	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--refuse-unanswered", help=argparse.SUPPRESS)	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--socket", required=True)	keep	required	required
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,	keep	type	type
@@ -5030,6 +5070,8 @@ turns	packages/turns/src/moxi_turns/codex_hooks.py	self.conn.send(ask)	keep	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self.conn.send({"op": PRINTED})	keep	fail	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self.wait_seconds = wait_s	use	self.wait_seconds	self.wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	session_flags	name	wait_seconds	event_wait_s
+turns	packages/turns/src/moxi_turns/codex_host.py	_log_to	kwonly	window	window
+turns	packages/turns/src/moxi_turns/codex_host.py	_log_to	name	folder	state_dir
 turns	packages/turns/src/moxi_turns/codex_host.py	choice.add_argument("--sandbox", choices=SANDBOX_MODES, help="the sandbox mode")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_host.py	help="a JSON object of thread parameters")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_host.py	help="a named permission profile, in place of a sandbox mode")	keep	help	help
@@ -5048,7 +5090,10 @@ turns	packages/turns/src/moxi_turns/codex_ws.py	self._conn.send(json.dumps(proto
 turns	packages/turns/src/moxi_turns/codex_ws.py	self._conn.send(json.dumps(proto.request(rid, method, params)))	keep	fail	fail
 turns	packages/turns/src/moxi_turns/config.py	names = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/config.py	names: set[str] = set()	keep	set	set
+turns	packages/turns/src/moxi_turns/doctor.py	Row	kwonly	ok	ok
+turns	packages/turns/src/moxi_turns/doctor.py	_endpoint_rows	name	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/doctor.py	modules.setdefault(listener.module, set()).update(listener.events)	keep	set	set
+turns	packages/turns/src/moxi_turns/endpoint.py	Endpoint._write_hello	name	f	fh
 turns	packages/turns/src/moxi_turns/endpoint.py	for turn in list(self._held):	keep	_held	_held
 turns	packages/turns/src/moxi_turns/endpoint.py	for turn in self._held:	keep	_held	_held
 turns	packages/turns/src/moxi_turns/endpoint.py	if turn is self.ledger.open or turn in self._held:	keep	_held	_held
@@ -5071,9 +5116,13 @@ turns	packages/turns/src/moxi_turns/guards/question.py	pairs = set(zip(words, wo
 turns	packages/turns/src/moxi_turns/guards/removal.py	"""The refusal for `command` run in `cwd` under `env`'s `HOME`, or None to let it run.	keep	HOME	HOME
 turns	packages/turns/src/moxi_turns/guards/removal.py	A `cwd` or `HOME` that is not an absolute path counts as unknown."""	keep	HOME	HOME
 turns	packages/turns/src/moxi_turns/guards/removal.py	The rules read the call's working directory and the launch's `HOME`. A command that is not	keep	HOME	HOME
+turns	packages/turns/src/moxi_turns/guards/removal.py	_word_passes	kwonly	has_rmdir	has_rmdir
 turns	packages/turns/src/moxi_turns/guards/removal.py	found = rules(command, _absolute(cwd), _absolute((env or {}).get("HOME") or None))	keep	HOME	HOME
 turns	packages/turns/src/moxi_turns/guards/removal.py	workspace = {_fold(p) for p in _with_parents(cwd)} | set(_with_parents(_fold(cwd)))	keep	set	set
+turns	packages/turns/src/moxi_turns/guards/run.py	Entry.covers	name	input	tool_input
+turns	packages/turns/src/moxi_turns/guards/run.py	GuardRunner._broke	kwonly	denied	denied
 turns	packages/turns/src/moxi_turns/guards/run.py	`load(on)` stands in for the loader, `settings()` for turns' config, `record` and	keep	record	record
+turns	packages/turns/src/moxi_turns/guards/run.py	decide	name	input	tool_input
 turns	packages/turns/src/moxi_turns/guards/run.py	if item[0] == "record":	keep	record	record
 turns	packages/turns/src/moxi_turns/guards/run.py	item[1].set()	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/run.py	outcomes[gid] = future.result(timeout=max(0.0, deadline - self._clock()))	keep	timeout	timeout
@@ -5081,20 +5130,33 @@ turns	packages/turns/src/moxi_turns/guards/run.py	self._clean: set[str] = set()	
 turns	packages/turns/src/moxi_turns/guards/run.py	self._records.put(("record", f"guard {e.id} could not check a {call.tool} call on "	keep	record	record
 turns	packages/turns/src/moxi_turns/guards/run.py	self._said: set[tuple[str, str]] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/harness.py	Live.busy	name	shells	include_shells
+turns	packages/turns/src/moxi_turns/harness.py	Live.of	kwonly	draft	draft
 turns	packages/turns/src/moxi_turns/harness.py	return cls(count, draft, count - (agents.busy(shells=False) or 0))	use	shells=	include_shells=
 turns	packages/turns/src/moxi_turns/hooks/__init__.py	return sorted(set(globals()) | set(_SUBMODULES))	keep	set	set
 turns	packages/turns/src/moxi_turns/hooktimes.py	self._stop.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/hooktimes.py	thread.join(timeout=2.0)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/listeners.py	_text	kwonly	done	done
 turns	packages/turns/src/moxi_turns/listeners.py	listed = set(registry.start_order())	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	read.done.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	seen: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	self._said: set[tuple[str, str]] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	text = future.result(timeout=max(0.0, deadline - self._clock()))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/listeners.py	wanted = None if ids is None else set(i for i in ids if isinstance(i, str))	keep	set	set
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._after_tool	kwonly	is_error	is_error
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._compact	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._connect_stream	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._create_session	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._model	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._post_once	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness._supervise	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness.reconcile	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode.py	OpenCodeHarness.start	name	f	fh
 turns	packages/turns/src/moxi_turns/opencode.py	can = frozenset({"deliver", "only-if-idle", "compact", "agents", "environ"})	keep	environ	environ
 turns	packages/turns/src/moxi_turns/opencode.py	cstatus, children = http.json("GET", f"/session/{sid}/children", timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode.py	elif self._held:	keep	_held	_held
 turns	packages/turns/src/moxi_turns/opencode.py	if self._held:	keep	_held	_held
+turns	packages/turns/src/moxi_turns/opencode.py	is_error=is_error, point="after", rows=rows)	keep	is_error	is_error
+turns	packages/turns/src/moxi_turns/opencode.py	outcome_of	kwonly	errored	errored
 turns	packages/turns/src/moxi_turns/opencode.py	self._children: set[str] = set()     # child sessions the stream announced	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode.py	self._held = False	keep	_held	_held
 turns	packages/turns/src/moxi_turns/opencode.py	self._held = False              # its tie is not decided yet	keep	_held	_held
@@ -5104,12 +5166,22 @@ turns	packages/turns/src/moxi_turns/opencode.py	self._stop.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode.py	self._supervisor.join(timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode.py	sstatus, status = http.json("GET", "/session/status", timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode.py	timeout=SUMMARIZE_WAIT)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/opencode_server.py	EventStream._read	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode_server.py	EventStream.start	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode_server.py	Http.connect	name	e	exc
+turns	packages/turns/src/moxi_turns/opencode_server.py	Http.request	name	e	exc
 turns	packages/turns/src/moxi_turns/opencode_server.py	proc.wait(timeout=grace)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode_server.py	self._listening.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode_server.py	self.closed.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode_server.py	self.connected.set()	keep	set	set
+turns	packages/turns/src/moxi_turns/pagehandlers.py	_Feed._run	name	err	exc
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.kick.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.loop.call_soon_threadsafe(self.kick.set)	keep	set	set
+turns	packages/turns/src/moxi_turns/pagereader.py	Reader._gone	kwonly	said	said
+turns	packages/turns/src/moxi_turns/pagereader.py	Reader._notify	name	err	exc
+turns	packages/turns/src/moxi_turns/pagereader.py	Reader._scan	name	err	exc
+turns	packages/turns/src/moxi_turns/pagereader.py	_Held._read	name	err	exc
+turns	packages/turns/src/moxi_turns/pagereader.py	_Held._watching	name	err	exc
 turns	packages/turns/src/moxi_turns/pagereader.py	del self._held[held.key]	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	gone = [held for key, held in self._held.items()	keep	_held	_held
 turns	packages/turns/src/moxi_turns/pagereader.py	held = list(self._held.values())	keep	_held	_held
@@ -5124,21 +5196,36 @@ turns	packages/turns/src/moxi_turns/pagereader.py	self._stop.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagereader.py	self.dirty.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagereader.py	self.failed: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagereader.py	self.first.set()	keep	set	set
+turns	packages/turns/src/moxi_turns/pagereader.py	self.reader._gone(self, gone)	use	gone	said=gone
 turns	packages/turns/src/moxi_turns/pagereader.py	self.stopped.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/procs.py	seen: set[int] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/protocol.py	"""Ask the version 1 endpoint in `directory` for its hello, with version 1's own line	keep	directory	directory
 turns	packages/turns/src/moxi_turns/protocol.py	"""The `hello.json` in `directory` as a dict, or None when it is missing or does not	keep	directory	directory
+turns	packages/turns/src/moxi_turns/protocol.py	-	name	remove_directory	remove_endpoint_dir
+turns	packages/turns/src/moxi_turns/protocol.py	-	name	v1_directories	v1_endpoint_dirs
+turns	packages/turns/src/moxi_turns/protocol.py	-	name	v2_directories	v2_endpoint_dirs
 turns	packages/turns/src/moxi_turns/protocol.py	conn.send(V1_HELLO)	keep	fail	fail
+turns	packages/turns/src/moxi_turns/protocol.py	endpoint_socket	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/protocol.py	read_hello	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/protocol.py	remove_directory	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/protocol.py	remove_moved_sockets	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/protocol.py	sweep	name	directory	endpoint_dir
+turns	packages/turns/src/moxi_turns/protocol.py	v1_hello	name	directory	endpoint_dir
 turns	packages/turns/src/moxi_turns/results.py	"mcp-token", "environ")	keep	environ	environ
 turns	packages/turns/src/moxi_turns/results.py	#: The most names one `environ` call may ask.	keep	environ	environ
 turns	packages/turns/src/moxi_turns/results.py	#: limits). `mcp-token`: the Codex host's `mcp.reload`. `environ`: the `environ` method.	keep	environ	environ
+turns	packages/turns/src/moxi_turns/results.py	-	name	ENVIRON_MAX_NAMES	ENV_MAX_NAMES
 turns	packages/turns/src/moxi_turns/results.py	Agents.busy	name	shells	include_shells
 turns	packages/turns/src/moxi_turns/results.py	after `compact`, None. `shells` reports the stop of a command given `stop_shells`, and	keep	shells	shells
+turns	packages/turns/src/moxi_turns/rpc.py	"environ": self._env,	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	"environ": self._environ,	keep	environ	environ
 turns	packages/turns/src/moxi_turns/rpc.py	#: A name `environ` may ask: an environment variable's name.	keep	environ	environ
+turns	packages/turns/src/moxi_turns/rpc.py	Rpc	name	_environ	_env
 turns	packages/turns/src/moxi_turns/rpc.py	first `await`. `environ` reads the endpoint's own copy of the session's environment and answers at once.	keep	environ	environ
+turns	packages/turns/src/moxi_turns/rpc.py	in_thread.settle	kwonly	ok	ok
 turns	packages/turns/src/moxi_turns/rpc.py	name, if_turn_number=if_turn_number, timeout=timeout, stop_shells=stop_shells))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/rpc.py	self._needs("environ")	keep	environ	environ
+turns	packages/turns/tests/claude_runner.py	FakeRunner.turn_complete	kwonly	is_aborted	is_aborted
 turns	packages/turns/tests/claude_runner.py	line = self.lines.get(timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/claude_runner.py	return self.lines.get(timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/claude_runner.py	self._first.set()	keep	set	set
@@ -5146,12 +5233,27 @@ turns	packages/turns/tests/claude_runner.py	self._resume.set()	keep	set	set
 turns	packages/turns/tests/claude_runner.py	self.parked.set()	keep	set	set
 turns	packages/turns/tests/claude_runner.py	super().__init__("localhost", timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/fake_codex.py	"""Write an executable `codex` into `folder` that runs this stub."""	keep	folder	folder
+turns	packages/turns/tests/fake_codex.py	AppServer.handle	name	f	fh
+turns	packages/turns/tests/fake_codex.py	AppServer.handle	name	folder	records_dir
+turns	packages/turns/tests/fake_codex.py	calls	name	folder	records_dir
+turns	packages/turns/tests/fake_codex.py	event	name	f	fh
+turns	packages/turns/tests/fake_codex.py	event	name	folder	records_dir
+turns	packages/turns/tests/fake_codex.py	events	name	folder	records_dir
+turns	packages/turns/tests/fake_codex.py	install	name	folder	bin_dir
 turns	packages/turns/tests/fake_codex.py	signal.signal(signal.SIGTERM, lambda *_: stop.set())	keep	set	set
 turns	packages/turns/tests/fake_codex.py	ws.send(json.dumps(frame))	keep	fail	fail
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, new_session_id=new_id, shells=self.stop_report)	keep	shells	shells
 turns	packages/turns/tests/fake_harness.py	ep.command_ran(request.id, shells=self.stop_report)	keep	shells	shells
+turns	packages/turns/tests/fake_opencode.py	FakeOpenCode.finish	kwonly	idle	idle
+turns	packages/turns/tests/fake_opencode.py	event	name	directory	records_dir
+turns	packages/turns/tests/fake_opencode.py	event	name	f	fh
+turns	packages/turns/tests/fake_opencode.py	events	name	directory	records_dir
+turns	packages/turns/tests/fake_opencode.py	install	name	directory	bin_dir
 turns	packages/turns/tests/fake_opencode.py	self._stop.set()	keep	set	set
+turns	packages/turns/tests/hooks/test_hooks_law.py	-	name	test_l1_the_suite_needs_no_environment	test_l1_the_suite_needs_no_env
+turns	packages/turns/tests/hooks/test_hooks_law.py	-	name	test_l2_no_module_reads_the_environment	test_l2_no_module_reads_the_env
 turns	packages/turns/tests/hooks/test_hooks_law.py	docstrings = set()	keep	set	set
+turns	packages/turns/tests/hooks/test_hooks_pipe.py	-	name	test_the_package_needs_nothing_on_the_path_or_in_the_environment	test_the_package_needs_nothing_on_the_path_or_in_the_env
 turns	packages/turns/tests/hooks/test_hooks_pipe.py	out, err = proc.communicate(json.dumps({"cwd": "/piped"}).encode(), timeout=30)	keep	timeout	timeout
 turns	packages/turns/tests/hooks/test_hooks_surface.py	assert len(set(names)) == 9	keep	set	set
 turns	packages/turns/tests/hooks/test_hooks_surface.py	assert set(module.__all__) <= public, f"{module.__name__} lost a name"	keep	set	set
@@ -5163,7 +5265,11 @@ turns	packages/turns/tests/test_additions.py	assert set(config) == {"mcp_servers
 turns	packages/turns/tests/test_additions.py	got = adds(harness, env={"HOME": "/home/someone"})	keep	HOME	HOME
 turns	packages/turns/tests/test_additions.py	kw.setdefault("env", {"HOME": "/home/someone"})	keep	HOME	HOME
 turns	packages/turns/tests/test_additions.py	return {"HOME": "/home/someone", TOKEN_ENV: SECRET, **more}	keep	HOME	HOME
+turns	packages/turns/tests/test_additions.py	test_claude_launches_from_a_read_only_install	name	folder	plugin_dir
+turns	packages/turns/tests/test_additions.py	test_claude_launches_from_a_read_only_install	name	folders	plugin_dirs
 turns	packages/turns/tests/test_agents.py	answer = connect(ep).call("agents", {}, timeout=5)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_agents.py	entry	kwonly	final	final
+turns	packages/turns/tests/test_agents.py	entry	name	id	agent_id
 turns	packages/turns/tests/test_bound_grant.py	("", ("s-1",), set()),	keep	set	set
 turns	packages/turns/tests/test_bound_grant.py	("s-1:", ("s-1",), set()),	keep	set	set
 turns	packages/turns/tests/test_bound_grant.py	("s-1:clear,exit", ("s-2",), set()),                         # another session's id	keep	set	set
@@ -5176,6 +5282,10 @@ turns	packages/turns/tests/test_browser_page.py	expect(found).to_have_count(1, t
 turns	packages/turns/tests/test_browser_page.py	expect(rows(panel)).to_have_count(2, timeout=APPEAR_MS)	keep	timeout	timeout
 turns	packages/turns/tests/test_browser_page.py	expect(state).to_have_attribute("data-state", "empty", timeout=APPEAR_MS)	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	"environ"})	keep	environ	environ
+turns	packages/turns/tests/test_claude_endpoint.py	-	name	test_an_after_tool_events_cwd_is_the_launch_directory_not_the_calls	test_an_after_tool_events_cwd_is_the_launch_dir_not_the_calls
+turns	packages/turns/tests/test_claude_endpoint.py	-	name	test_mod_sock_sits_in_the_endpoint_directory_when_its_path_is_short	test_mod_sock_sits_in_the_endpoint_dir_when_its_path_is_short
+turns	packages/turns/tests/test_claude_endpoint.py	answer = runner.enter(line["nonce"], draft=None, agents=None)	keep	draft	draft
+turns	packages/turns/tests/test_claude_endpoint.py	answer = runner.enter(line["nonce"], draft=True, agents=None)	keep	draft	draft
 turns	packages/turns/tests/test_claude_endpoint.py	assert len(set(nonces)) == 3	keep	set	set
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Failed("not-exited")	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Ran("s-2")	keep	timeout	timeout
@@ -5184,24 +5294,41 @@ turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == 
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Ran(None, expected)	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Refused("draft")	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	assert out.get(timeout=3) == turns.Refused("unsupported")	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_endpoint.py	assert runner.enter(line["nonce"], draft=False, agents=None)["verdict"] == "pass"	keep	draft	draft
 turns	packages/turns/tests/test_claude_endpoint.py	assert runner.next_line(timeout=0.1) == {"op": "floors",	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	out.append(events.get(timeout=timeout))	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	out.put(out.get(timeout=timeout))	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_endpoint.py	out.put(s.command(name, timeout=5))	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_claude_endpoint.py	runner.turn_complete("T1", reason="aborted", is_aborted=True)	keep	is_aborted	is_aborted
 turns	packages/turns/tests/test_claude_endpoint.py	timeout=5)), daemon=True).start()	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_claude_plugins.py	-	name	test_the_folder_marketplace_lists_both_plugins_by_relative_path	test_the_local_marketplace_lists_both_plugins_by_relative_path
 turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	keep	folder	folder
+turns	packages/turns/tests/test_claude_plugins.py	@pytest.mark.parametrize("folder", ["", *PLUGINS])	use	"folder"	"plugin_dir"
+turns	packages/turns/tests/test_claude_plugins.py	test_claude_plugin_validate_passes	name	folder	plugin_dir
+turns	packages/turns/tests/test_claude_process.py	-	name	test_sigterm_ends_it_with_lost_and_removes_its_directory	test_sigterm_ends_it_with_lost_and_removes_its_dir
+turns	packages/turns/tests/test_claude_process.py	_alive	name	f	fh
 turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=5) == 0	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=5) == 2	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_process.py	p.wait(timeout=5)	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_setup.py	-	name	test_a_launch_through_launch_additions_names_the_placed_folders	test_a_launch_through_launch_additions_names_the_placed_dirs
+turns	packages/turns/tests/test_claude_setup.py	-	name	test_a_read_only_runner_folder_is_a_setup_error	test_a_read_only_runner_dir_is_a_setup_error
+turns	packages/turns/tests/test_claude_setup.py	-	name	test_claude_plugin_dirs_returns_both_folders_and_writes_nothing	test_claude_plugin_dirs_returns_both_dirs_and_writes_nothing
+turns	packages/turns/tests/test_claude_setup.py	-	name	test_endpoint_json_names_this_environment_script	test_endpoint_json_names_this_env_script
+turns	packages/turns/tests/test_claude_setup.py	-	name	test_no_test_sees_the_package_folder	test_no_test_sees_the_package_dir
+turns	packages/turns/tests/test_claude_setup.py	-	name	test_setup_moves_a_marketplace_added_from_a_package_folder	test_setup_moves_a_marketplace_added_from_a_package_dir
 turns	packages/turns/tests/test_claude_setup.py	[{"name": "moxi-turns", "source": "directory", "path": "/somewhere/else"}]))	keep	directory	directory
 turns	packages/turns/tests/test_claude_setup.py	[{"name": "moxi-turns", "source": "directory", "path": old}]))	keep	directory	directory
 turns	packages/turns/tests/test_claude_setup.py	[{"name": "moxi-turns", "source": "directory", "path": str(placed)}]))	keep	directory	directory
 turns	packages/turns/tests/test_claude_setup.py	assert set(written) == {runner / "endpoint.json"}	keep	set	set
+turns	packages/turns/tests/test_client.py	-	name	test_a_v2_endpoint_beside_a_v1_directory_is_found	test_a_v2_endpoint_beside_a_v1_dir_is_found
+turns	packages/turns/tests/test_client.py	_hello	name	directory	endpoint_dir
 turns	packages/turns/tests/test_client.py	assert s._short._client is not s._reads._client	keep	_client	_client
 turns	packages/turns/tests/test_client.py	gate.set()	keep	set	set
 turns	packages/turns/tests/test_client.py	h = s.handle_stops(lambda facts: asked.set() or "go on")	keep	set	set
 turns	packages/turns/tests/test_client.py	release.set()	keep	set	set
 turns	packages/turns/tests/test_client.py	s._short._client.close()                          # the first connection closes too	keep	_client	_client
+turns	packages/turns/tests/test_client.py	test_a_probe_that_raises_raises_the_first_in_order_and_closes_what_was_found.failing	name	directory	endpoint_dir
+turns	packages/turns/tests/test_client.py	test_an_endpoint_of_another_version_names_both_ranges	name	directory	endpoint_dir
 turns	packages/turns/tests/test_client.py	threading.Timer(0.3, gate.set).start()	keep	set	set
 turns	packages/turns/tests/test_codex_agents.py	result = s.command("compact", stop_shells=True, timeout=15)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_commands.py	answer = s.command("compact", stop_shells=True, timeout=10)	use	timeout=	timeout_s=
@@ -5209,6 +5336,7 @@ turns	packages/turns/tests/test_codex_commands.py	assert s.command("compact", st
 turns	packages/turns/tests/test_codex_commands.py	result = s.command("compact", stop_shells=True, timeout=10)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_commands.py	result = s.command("compact", stop_shells=True, timeout=15)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_commands.py	t = threading.Thread(target=lambda: out.append(s.command("compact", timeout=5)),	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_codex_host.py	-	name	test_the_codex_sockets_sit_in_the_endpoint_directory_when_their_paths_are_short	test_the_codex_sockets_sit_in_the_endpoint_dir_when_their_paths_are_short
 turns	packages/turns/tests/test_codex_host.py	accept_resume.set()	keep	set	set
 turns	packages/turns/tests/test_codex_host.py	assert len(set(sockets)) == 2	keep	set	set
 turns	packages/turns/tests/test_codex_host.py	entered.set()	keep	set	set
@@ -5221,7 +5349,10 @@ turns	packages/turns/tests/test_codex_host.py	retry.set()	keep	set	set
 turns	packages/turns/tests/test_codex_host.py	sent.set()	keep	set	set
 turns	packages/turns/tests/test_codex_host.py	start_entered.set()	keep	set	set
 turns	packages/turns/tests/test_codex_host.py	steering.set()	keep	set	set
+turns	packages/turns/tests/test_codex_host.py	test_stopping_the_endpoint_reaps_the_owned_children_and_runtime_dir	name	directory	endpoint_dir
 turns	packages/turns/tests/test_codex_host.py	timer = threading.Timer(0.3, gate.set)    # Codex answers the steer later	keep	set	set
+turns	packages/turns/tests/test_codex_host_entry.py	-	name	test_missing_files_and_folders_are_usage_errors	test_missing_files_and_dirs_are_usage_errors
+turns	packages/turns/tests/test_codex_host_entry.py	-	name	test_the_check_counts_the_working_directory_as_writable	test_the_check_counts_the_working_dir_as_writable
 turns	packages/turns/tests/test_codex_host_entry.py	proc.wait(timeout=WAIT)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_host_entry.py	return proc.wait(timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_limits.py	assert set(fresh) == {"payload", "received_at"}	keep	set	set
@@ -5230,6 +5361,7 @@ turns	packages/turns/tests/test_codex_mcp.py	assert set(records) == {"mcp:t:othe
 turns	packages/turns/tests/test_codex_mcp.py	gate.set()	keep	set	set
 turns	packages/turns/tests/test_codex_mcp.py	go_on.set()	keep	set	set
 turns	packages/turns/tests/test_codex_mcp.py	in_read.set()	keep	set	set
+turns	packages/turns/tests/test_codex_tool_hooks.py	-	name	test_a_missing_or_relative_cwd_falls_back_to_the_launch_directory	test_a_missing_or_relative_cwd_falls_back_to_the_launch_dir
 turns	packages/turns/tests/test_codex_tool_hooks.py	assert not {"PreToolUse", "PostToolUse"} & set(groups)	keep	set	set
 turns	packages/turns/tests/test_codex_tool_hooks.py	assert not {"PreToolUse", "PostToolUse"} & set(hook_groups(argv)["groups"])	keep	set	set
 turns	packages/turns/tests/test_codex_tool_hooks.py	assert set(keys) == {codex_hooks.hook_key(e.label) for e in codex_hooks.EVENTS} | {	keep	set	set
@@ -5263,28 +5395,35 @@ turns	packages/turns/tests/test_contract.py	("environ", {"names": ["HOME"]}, "en
 turns	packages/turns/tests/test_contract.py	("environ", {"names": ["HOME"]}, "environ"),	keep	environ	environ
 turns	packages/turns/tests/test_contract.py	("environ", {"names": [f"V{n}" for n in range(65)]}),	keep	environ	environ
 turns	packages/turns/tests/test_contract.py	("environ", {}),	keep	environ	environ
+turns	packages/turns/tests/test_contract.py	-	name	R	results
+turns	packages/turns/tests/test_contract.py	-	name	test_environ_answers_the_names_asked_from_the_endpoints_environment	test_env_answers_the_names_asked_from_the_endpoints_env
 turns	packages/turns/tests/test_contract.py	answer = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	answer = client.call("environ", {"names": ["MOXI_T_SET", "MOXI_T_EMPTY", "MOXI_T_NO"]},	keep	environ	environ
 turns	packages/turns/tests/test_contract.py	assert agreed.version == 2 and set(agreed.capabilities) == set(R.CAPABILITIES)	keep	set	set
+turns	packages/turns/tests/test_contract.py	assert agreed.version == 2 and set(agreed.capabilities) == set(results.CAPABILITIES)	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert client.call("environ", {"names": []}, timeout=5) == {"values": {}}	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	assert client.call("environ", {"names": names}, timeout=5)["values"] == \	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	assert first.call("stops.handle", {}, timeout=5) == {}	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	assert set(R.NOTIFICATIONS) == set(NOTIFICATIONS)	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(_names(command)) - {"compact", "stop_shells"} == set(R.COMMAND_REFUSALS)	keep	set	set
+turns	packages/turns/tests/test_contract.py	assert set(_names(command)) - {"compact", "stop_shells"} == set(results.COMMAND_REFUSALS)	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(adapter.can) == offered, adapter.__name__	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(agreed.capabilities) == {"deliver", "only-if-idle", "compact", "agents"}	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(answer) == METHODS["environ"][1]	keep	environ	environ
 turns	packages/turns/tests/test_contract.py	assert set(client.call("facts", {}, timeout=5)) == {"kind", *VALUES["facts"]}	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	assert set(entry) == {"id", "ref", "how"} and entry["how"] in R.DELIVERY_HOW	keep	set	set
+turns	packages/turns/tests/test_contract.py	assert set(entry) == {"id", "ref", "how"} and entry["how"] in results.DELIVERY_HOW	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(first) == METHODS["watch"][1]	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(moxi_turns._WHERE) == set(moxi_turns.__all__)	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(note.to_params()) == set(NOTIFICATIONS[note.METHOD]), note	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(params["delivery"]) == {"id", "ref"}	keep	set	set
+turns	packages/turns/tests/test_contract.py	assert set(results.NOTIFICATIONS) == set(NOTIFICATIONS)	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert set(wire) == fields, value	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert values == {kind: set(fields) for kind, fields in VALUES.items()}	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert want <= set(session) <= want | SESSION_OPTIONAL	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert {"delivery", "ref"} <= set(answer) <= {"delivery", "ref", "result"}	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert {need for need, _ in METHODS.values() if need} <= set(R.CAPABILITIES)	keep	set	set
+turns	packages/turns/tests/test_contract.py	assert {need for need, _ in METHODS.values() if need} <= set(results.CAPABILITIES)	keep	set	set
 turns	packages/turns/tests/test_contract.py	assert {v.to_wire()["kind"] for v in SAMPLES} == set(VALUES)	keep	set	set
 turns	packages/turns/tests/test_contract.py	client.call(method, params, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	facts = R.from_wire(client.call("facts", {}, timeout=5))	use	timeout=	timeout_s=
@@ -5301,6 +5440,7 @@ turns	packages/turns/tests/test_delivery.py	"refuse_agents": True}, timeout=5))	
 turns	packages/turns/tests/test_delivery.py	"timeout_ms": 0}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	"timeout_ms": 1000}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	"timeout_ms": 5000}, timeout=10)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_delivery.py	-	name	R	results
 turns	packages/turns/tests/test_delivery.py	_, took = timed(lambda: client.call("facts", {}, timeout=5))	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	_, took = timed(lambda: client.call(method, params, timeout=5))	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	answer = client.call("steer", {"text": "also", "ref": "s1"}, timeout=5)	use	timeout=	timeout_s=
@@ -5324,7 +5464,10 @@ turns	packages/turns/tests/test_delivery.py	timed(lambda: client.call("facts", {
 turns	packages/turns/tests/test_delivery.py	timeout=10)))	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	watch.call("watch", {}, timeout=5)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_doctor.py	-	name	test_a_v1_directory_is_named_and_left	test_a_v1_dir_is_named_and_left
 turns	packages/turns/tests/test_endpoint.py	"mod_version"} <= set(hello)	keep	set	set
+turns	packages/turns/tests/test_endpoint.py	-	name	test_a_dead_directory_is_swept_and_a_starting_one_is_not	test_a_dead_dir_is_swept_and_a_starting_one_is_not
+turns	packages/turns/tests/test_endpoint.py	-	name	test_directory_and_hello	test_dir_and_hello
 turns	packages/turns/tests/test_endpoint.py	assert s.command("clear", timeout=1) == turns.Ran("s-2")	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_endpoint.py	assert s.command("exit", timeout=0.1) == turns.Refused("in-flight")	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_endpoint.py	first = s.command("clear", timeout=0.1)          # the caller stops waiting	use	timeout=	timeout_s=
@@ -5332,20 +5475,32 @@ turns	packages/turns/tests/test_endpoint.py	late = ep.command("exit", timeout=No
 turns	packages/turns/tests/test_endpoint.py	started.set()	keep	set	set
 turns	packages/turns/tests/test_endpoint.py	t = threading.Thread(target=lambda: results.append(s.command("clear", timeout=3)))	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_environ.py	"""`environ` and `Session.environ`: the named variables of the session's own environment,	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	"""`environ` and `Session.environ`: the named variables of the session's own environment,	use	Session.environ	Session.env
 turns	packages/turns/tests/test_environ.py	answers[harness] = s.environ(ASKED)	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	answers[harness] = s.environ(ASKED)	use	environ	env
 turns	packages/turns/tests/test_environ.py	assert "environ" in s.capabilities	keep	environ	environ
 turns	packages/turns/tests/test_environ.py	assert "environ" not in s.capabilities	keep	environ	environ
 turns	packages/turns/tests/test_environ.py	assert caught.value.data == {"capability": "environ"}	keep	environ	environ
 turns	packages/turns/tests/test_environ.py	assert s.environ(["MOXI_T_ENV_ONE", "OPENCODE_SERVER_PASSWORD"]) == {	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	assert s.environ(["MOXI_T_ENV_ONE", "OPENCODE_SERVER_PASSWORD"]) == {	use	environ	env
 turns	packages/turns/tests/test_environ.py	assert s.environ(["MOXI_T_ENV_ONE"]) == {"MOXI_T_ENV_ONE": "one"}	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	assert s.environ(["MOXI_T_ENV_ONE"]) == {"MOXI_T_ENV_ONE": "one"}	use	environ	env
 turns	packages/turns/tests/test_environ.py	assert s.environ([]) == {}	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	assert s.environ([]) == {}	use	environ	env
 turns	packages/turns/tests/test_environ.py	assert s.environ(names) == dict.fromkeys(names)	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	assert s.environ(names) == dict.fromkeys(names)	use	environ	env
 turns	packages/turns/tests/test_environ.py	client.call("environ", {"names": ["HOME"]}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_environ.py	hosts["claude"].environ("HOME")	keep	HOME	HOME
 turns	packages/turns/tests/test_environ.py	hosts["claude"].environ("HOME")	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	hosts["claude"].environ("HOME")	use	environ	env
+turns	packages/turns/tests/test_environ.py	s.env(["HOME"])	keep	HOME	HOME
 turns	packages/turns/tests/test_environ.py	s.environ(["HOME"])	keep	HOME	HOME
+turns	packages/turns/tests/test_environ.py	s.environ(["HOME"])	use	environ	env
 turns	packages/turns/tests/test_environ.py	s.environ(names)	keep	environ	environ
+turns	packages/turns/tests/test_environ.py	s.environ(names)	use	environ	env
 turns	packages/turns/tests/test_guard_run.py	("record", "guard:t.f"), ("record", "guard:t.f"),	keep	record	record
+turns	packages/turns/tests/test_guard_run.py	-	name	test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_directory	test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_dir
+turns	packages/turns/tests/test_guard_run.py	Rig.call	name	input	tool_input
 turns	packages/turns/tests/test_guard_run.py	assert [e["id"] for e in runner.tables.get(timeout=2)] == ["t.a", "t.new"]	keep	timeout	timeout
 turns	packages/turns/tests/test_guard_run.py	assert kinds == [("record", "guard:t.f"), ("clear", "guard:t.f"),	keep	record	record
 turns	packages/turns/tests/test_guard_run.py	assert len(set(ORDER)) == len(ORDER)	keep	set	set
@@ -5369,8 +5524,14 @@ turns	packages/turns/tests/test_guards.py	monkeypatch.setenv("HOME", str(tmp_pat
 turns	packages/turns/tests/test_held_turns.py	assert [x.id for x in fake.handed(2, timeout=0.2)] == [d1.id]   # not decided yet	keep	timeout	timeout
 turns	packages/turns/tests/test_held_turns.py	out.append(events.get(timeout=timeout))	keep	timeout	timeout
 turns	packages/turns/tests/test_install_without_claude.py	"HOME": str(self.home),	keep	HOME	HOME
+turns	packages/turns/tests/test_install_without_claude.py	_project	name	directory	package_dir
+turns	packages/turns/tests/test_install_without_claude.py	_project	name	f	fh
+turns	packages/turns/tests/test_install_without_claude.py	wheels	name	directory	package_dir
+turns	packages/turns/tests/test_listeners.py	-	name	test_the_environment_metadata_group_loads	test_the_env_metadata_group_loads
+turns	packages/turns/tests/test_listeners.py	assert ep.after_tool("Bash", tool_use_id="u1", agent_id="a1", is_error=True) \	keep	is_error	is_error
 turns	packages/turns/tests/test_listeners.py	env={"HOME": "/h"}, **kw)	keep	HOME	HOME
 turns	packages/turns/tests/test_opencode_host.py	"environ"})	keep	environ	environ
+turns	packages/turns/tests/test_opencode_host.py	-	name	test_a_dead_hosts_directory_is_swept_with_its_instructions	test_a_dead_hosts_dir_is_swept_with_its_instructions
 turns	packages/turns/tests/test_opencode_host.py	assert events.get(timeout=5).source == "compact"	keep	timeout	timeout
 turns	packages/turns/tests/test_opencode_host.py	assert s.command("compact", timeout=10) == Failed("no model known yet")	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_opencode_host.py	assert s.command("compact", timeout=10) == Ran(None)	use	timeout=	timeout_s=
@@ -5379,6 +5540,7 @@ turns	packages/turns/tests/test_opencode_host.py	assert s.command("compact", tim
 turns	packages/turns/tests/test_opencode_host.py	assert s.command("compact", timeout=10) == Refused("unsupported")	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_opencode_host.py	ended = events.get(timeout=5)	keep	timeout	timeout
 turns	packages/turns/tests/test_opencode_host.py	ev = events.get(timeout=5)	keep	timeout	timeout
+turns	packages/turns/tests/test_opencode_host.py	host.make	kwonly	auto	auto
 turns	packages/turns/tests/test_opencode_host.py	result = s.command("compact", timeout=10)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_opencode_host.py	started = events.get(timeout=5)	keep	timeout	timeout
 turns	packages/turns/tests/test_opencode_host.py	started, ended = events.get(timeout=5), events.get(timeout=5)	keep	timeout	timeout
@@ -5399,6 +5561,7 @@ turns	packages/turns/tests/test_shipped_guards.py	env = dict(os.environ, HOME="/
 turns	packages/turns/tests/test_shipped_guards.py	env = {} if home is rc.UNSET else {"HOME": home}	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	return set(module.QUESTIONS)	keep	set	set
 turns	packages/turns/tests/test_steer_hosts.py	"timeout_ms": 5000}, timeout=10)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_steer_hosts.py	-	name	R	results
 turns	packages/turns/tests/test_steer_hosts.py	answer, took = timed(lambda: client.call("steer", {"text": "too late"}, timeout=5))	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_steer_hosts.py	app.steer_gate.set()	keep	set	set
 turns	packages/turns/tests/test_steer_hosts.py	app.steer_gate.set()                             # Codex's late word changes nothing	keep	set	set
@@ -5410,6 +5573,19 @@ turns	packages/turns/tests/test_steer_hosts.py	timeout=5))	use	timeout=	timeout_
 turns	packages/turns/tests/test_steer_hosts.py	watch.call("watch", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	"timeout_ms": 5000}, timeout=10)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	"with files.lock(sys.argv[1], timeout=5):\n"	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_wire.py	-	name	R	results
+turns	packages/turns/tests/test_wire.py	-	name	test_a_dead_directory_goes_on_sweeps_word	test_a_dead_dir_goes_on_sweeps_word
+turns	packages/turns/tests/test_wire.py	-	name	test_a_dead_endpoints_moved_sockets_go_with_its_directory	test_a_dead_endpoints_moved_sockets_go_with_its_dir
+turns	packages/turns/tests/test_wire.py	-	name	test_a_dead_version_1_directory_reads_as_no_answer_and_stays	test_a_dead_version_1_dir_reads_as_no_answer_and_stays
+turns	packages/turns/tests/test_wire.py	-	name	test_a_directory_whose_socket_is_gone_goes_too	test_a_dir_whose_socket_is_gone_goes_too
+turns	packages/turns/tests/test_wire.py	-	name	test_a_short_root_keeps_every_internal_socket_in_the_directory	test_a_short_root_keeps_every_internal_socket_in_the_dir
+turns	packages/turns/tests/test_wire.py	-	name	test_a_starting_directory_has_no_hello_and_is_listed_as_such	test_a_starting_dir_has_no_hello_and_is_listed_as_such
+turns	packages/turns/tests/test_wire.py	-	name	test_stop_takes_the_directory_the_socket_and_its_lock	test_stop_takes_the_dir_the_socket_and_its_lock
+turns	packages/turns/tests/test_wire.py	-	name	test_the_directory_the_address_and_hello_json	test_the_dir_the_address_and_hello_json
+turns	packages/turns/tests/test_wire.py	V1Endpoint.__init__	name	directory	endpoint_dir
+turns	packages/turns/tests/test_wire.py	_dead_v2	name	directory	endpoint_dir
+turns	packages/turns/tests/test_wire.py	_plant_moved	name	directory	endpoint_dir
+turns	packages/turns/tests/test_wire.py	_v1_scan	name	directory	endpoint_dir
 turns	packages/turns/tests/test_wire.py	assert "facts" in connect(ep).call("watch", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	assert R.from_wire(client.call("agents", {}, timeout=5)).complete is True	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	assert R.from_wire(client.call("facts", {}, timeout=5)).session_id == "s-1"	use	timeout=	timeout_s=
@@ -6009,6 +6185,7 @@ usage	packages/usage/src/moxi_usage/mark.py	self.models: set[str] = set()	keep	s
 usage	packages/usage/src/moxi_usage/marks.py	FROM_RECORD = "record"	keep	record	record
 usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT, listener.CROSSING_AT])	keep	environ	environ
 usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT_ENV, listener.CROSSING_AT_ENV])	keep	environ	environ
+usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT_ENV, listener.CROSSING_AT_ENV])	use	environ	env
 usage	packages/usage/src/moxi_usage/measure.py	return harness == "codex" and originator is not None and originator in set(originators)	keep	set	set
 usage	packages/usage/src/moxi_usage/models.py	return sorted(set(self.rows) | exact)	keep	set	set
 usage	packages/usage/src/moxi_usage/page.py	"agent": lb.Field("string", required=False, max=512), **FILTERS},	keep	required	required

@@ -62,7 +62,7 @@ def _code_literals(path):
 
 # --- Law 1 — Stateless --------------------------------------------------------------
 
-def test_l1_the_suite_needs_no_environment():
+def test_l1_the_suite_needs_no_env():
     """Gauge: the suite needs no environment. Driven as the harness drives it, in a
     process handed nothing at all (no HOME, no PATH, no PYTHONPATH), because every fact
     the kit uses crossed the boundary as an argument."""
@@ -82,7 +82,7 @@ def test_l1_the_suite_needs_no_environment():
 
 # --- Law 2 — Env-free ---------------------------------------------------------------
 
-def test_l2_no_module_reads_the_environment():
+def test_l2_no_module_reads_the_env():
     """Gauge: `os.environ` and `getenv` appear nowhere in the package. A caller's own
     override variables, and the roots `moxi.paths` locates, stay in the caller."""
     for path in ALL:

@@ -687,7 +687,7 @@ def _shells(value: Any) -> Shells:
             entries.append(LeftShell(e.get("id"), e["why"]))
     except ValueError as exc:
         log.warning("the runner's shell report cannot be read (%s): %r", exc, value)
-        return Shells((), (unnamed,), False)
+        return Shells((), (unnamed,), complete=False)
     if not complete and unnamed not in entries:
         entries.append(unnamed)
     return Shells(tuple(stopped), tuple(entries), complete)
@@ -706,7 +706,7 @@ def agents_from_runner(entries: Any, at: float) -> Agents:
     could not read; an entry with no id makes the list not complete, never shorter. A
     status turns does not know reads `unknown`, with no notice to call final."""
     if not isinstance(entries, list):
-        return Agents((), False, at)
+        return Agents((), complete=False, at=at)
     out: list[Agent] = []
     complete = True
     for raw in entries:

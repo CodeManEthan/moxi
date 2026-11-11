@@ -184,7 +184,7 @@ def test_a_terminal_alone_holds_a_plain_compact_but_not_one_that_stops_shells(co
     assert s.command("compact") == Refused("busy-agents")
     assert methods(app, "thread/compact/start") == []
     result = s.command("compact", stop_shells=True, timeout_s=10)
-    assert result == Ran(None, Shells(("p1",), (), True))
+    assert result == Ran(None, Shells(("p1",), (), complete=True))
     assert app.terminals == []
     # The pair counted once toward the rate.
     assert s.command("compact", stop_shells=True) == Refused("rate")
@@ -194,7 +194,7 @@ def test_the_terminals_are_stopped_only_after_the_compaction_took_effect(codex):
     s, ep, harness, app = codex()
     app.terminals = ["p1", "p2"]
     result = s.command("compact", stop_shells=True, timeout_s=10)
-    assert result == Ran(None, Shells(("p1", "p2"), (), True))
+    assert result == Ran(None, Shells(("p1", "p2"), (), complete=True))
     order = methods(app, "thread/backgroundTerminals/list", "thread/compact/start",
                     "thread/backgroundTerminals/terminate")
     first_terminate = order.index("thread/backgroundTerminals/terminate")
@@ -207,12 +207,12 @@ def test_the_stop_lists_the_terminals_again_as_it_begins(codex):
     app.terminals = ["p1"]
     app.start_at_compact = ["p2"]
     result = s.command("compact", stop_shells=True, timeout_s=10)
-    assert result == Ran(None, Shells(("p1", "p2"), (), True))
+    assert result == Ran(None, Shells(("p1", "p2"), (), complete=True))
 
 
 def test_a_vouched_empty_list_stops_nothing_and_says_so(codex):
     s, ep, harness, app = codex()
-    assert s.command("compact", stop_shells=True, timeout_s=10) == Ran(None, Shells((), (), True))
+    assert s.command("compact", stop_shells=True, timeout_s=10) == Ran(None, Shells((), (), complete=True))
     assert methods(app, "thread/backgroundTerminals/terminate") == []
 
 
@@ -231,7 +231,7 @@ def test_a_list_that_fails_still_runs_the_compaction_and_is_not_vouched(codex, e
     app.terminals = ["p1"]
     app.list_errors = [None, error]
     result = s.command("compact", stop_shells=True, timeout_s=15)
-    assert result == Ran(None, Shells((), (UNLISTED,), False))
+    assert result == Ran(None, Shells((), (UNLISTED,), complete=False))
     assert methods(app, "thread/compact/start") == ["thread/compact/start"]
     assert methods(app, "thread/backgroundTerminals/terminate") == []
     assert app.terminals == ["p1"]
@@ -244,7 +244,7 @@ def test_a_list_that_fails_as_the_stop_begins_stops_the_earlier_list(codex):
     # re-check's live read, then the list as the stop begins, which fails.
     app.list_errors = [None, None, None, proto.CodexError(-32603, "busy")]
     result = s.command("compact", stop_shells=True, timeout_s=10)
-    assert result == Ran(None, Shells(("p1",), (UNLISTED,), False))
+    assert result == Ran(None, Shells(("p1",), (UNLISTED,), complete=False))
 
 
 def test_a_codex_without_terminate_leaves_each_terminal_unsupported(codex):
@@ -253,7 +253,7 @@ def test_a_codex_without_terminate_leaves_each_terminal_unsupported(codex):
     app.terminate_answers["p1"] = missing("thread/backgroundTerminals/terminate")
     result = s.command("compact", stop_shells=True, timeout_s=10)
     assert result == Ran(None, Shells((), (LeftShell("p1", "unsupported"),
-                                           LeftShell("p2", "unsupported")), True))
+                                           LeftShell("p2", "unsupported")), complete=True))
     assert len(methods(app, "thread/backgroundTerminals/terminate")) == 1
 
 
@@ -276,7 +276,7 @@ def test_a_second_list_that_fails_trusts_codexs_terminate_answers(codex):
     app.list_errors = [None, None, None, None, proto.CodexError(-32603, "list broke")]
     result = s.command("compact", stop_shells=True, timeout_s=10)
     assert result == Ran(None, Shells(
-        ("p1",), (LeftShell("p2", "list broke (code -32603)"),), True))
+        ("p1",), (LeftShell("p2", "list broke (code -32603)"),), complete=True))
 
 
 def test_a_stop_past_its_bound_leaves_the_rest_timeout(codex, monkeypatch):

@@ -195,7 +195,7 @@ def test_an_options_file_the_host_refuses_exits_2(tmp_path, capsys, options, wor
     assert words in capsys.readouterr().err
 
 
-def test_missing_files_and_folders_are_usage_errors(tmp_path):
+def test_missing_files_and_dirs_are_usage_errors(tmp_path):
     with pytest.raises(UsageError, match="not a directory"):
         launch_args(["--cwd", str(tmp_path / "nowhere")])
     with pytest.raises(UsageError, match="--options-file"):
@@ -227,7 +227,7 @@ def test_the_check_names_each_mismatch(tmp_path, reported, reason):
     assert reason in verify_options(options, answer, tmp_path)
 
 
-def test_the_check_counts_the_working_directory_as_writable(tmp_path):
+def test_the_check_counts_the_working_dir_as_writable(tmp_path):
     options = _options(tmp_path, [tmp_path])
     answer = {"sandbox": {"type": "workspaceWrite", "networkAccess": True,
                           "writableRoots": []}}

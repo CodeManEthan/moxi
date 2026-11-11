@@ -50,7 +50,7 @@ class FakeHarness(Harness):
         self.open_turn: str | None = None
         #: What a command's shell stop reports, and the stops made, in order, after the
         #: command took effect.
-        self.stop_report = Shells(("sh1",), (), True)
+        self.stop_report = Shells(("sh1",), (), complete=True)
         self.stops: list[str] = []
         #: With `compact_ready` off a compaction raises no Ready; the test raises it.
         self.compact_ready = True
@@ -65,7 +65,7 @@ class FakeHarness(Harness):
             raise OSError("the prompt box cannot be read")
         try:
             agents = self.agents()
-            return Live.of(agents, self.draft)
+            return Live.of(agents, draft=self.draft)
         except Exception:  # noqa: BLE001 - the box was read; the list is unknown
             return Live(None, self.draft)
 
@@ -75,11 +75,11 @@ class FakeHarness(Harness):
         if self.entries is not None:
             return Agents(tuple(self.entries), self.agents_complete, time.time())
         if self.live_agents is None:
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         shells = min(self.shells, self.live_agents)
-        made = [Agent(f"a{n}", "subagent", "running", False)
+        made = [Agent(f"a{n}", "subagent", "running", final=False)
                 for n in range(self.live_agents - shells)]
-        made += [Agent(f"sh{n}", "shell", "running", False) for n in range(shells)]
+        made += [Agent(f"sh{n}", "shell", "running", final=False) for n in range(shells)]
         return Agents(tuple(made), self.agents_complete, time.time())
 
     def submit(self, delivery: Delivery) -> None:
@@ -120,7 +120,7 @@ class FakeHarness(Harness):
         if self.live_fails:
             return None
         try:
-            return Live.of(self.agents(), self.draft)
+            return Live.of(self.agents(), draft=self.draft)
         except Exception:  # noqa: BLE001 - an unreadable list reads as unknown
             return None
 

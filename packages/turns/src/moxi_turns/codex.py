@@ -802,8 +802,8 @@ class CodexHarness(Harness):
         subagents, whole, shells = self._read_agents()
         busy = sum(1 for a in subagents if a.busy) if whole else None
         if busy is None or shells is None:
-            return Live(None, False, without_shells=busy)
-        return Live(busy + len(shells), False, shells=len(shells))
+            return Live(None, draft=False, without_shells=busy)
+        return Live(busy + len(shells), draft=False, shells=len(shells))
 
     def agents(self) -> Agents:
         """The collab subagents as the host recorded Codex's notices, and the background
@@ -827,7 +827,7 @@ class CodexHarness(Harness):
             subagents = [Agent(agent_id, "subagent", state, final, None, parent)
                          for agent_id, (state, final, parent) in self._collab.items()]
         try:
-            shells = [Agent(pid, "shell", "running", False)
+            shells = [Agent(pid, "shell", "running", final=False)
                       for pid in self._terminals(ws, thread_id)]
         except Exception as exc:  # noqa: BLE001 - an unread list is unknown, never empty
             log.info("the background terminals could not be listed: %s", exc)
@@ -1095,7 +1095,7 @@ class CodexHarness(Harness):
         """Terminate each background terminal and read what is left, by `deadline`."""
         if listed is None:
             # No list before the command: nothing is stopped, and the report says so.
-            return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
+            return Shells((), (LeftShell(None, SHELL_UNLISTED),), complete=False)
         with self._lock:
             thread_id, ws = self.session_id, self.ws
         complete = True
@@ -1176,8 +1176,8 @@ class CodexHarness(Harness):
                 self._steers_out += 1
             try:
                 result = ws.call("turn/steer", proto.steer_params(thread_id, expected, text))
-            except proto.ActiveTurnMismatch as mismatch:
-                expected = mismatch.found
+            except proto.ActiveTurnMismatch as exc:
+                expected = exc.found
                 with self._lock:
                     self.active_turn_id = expected
                 continue

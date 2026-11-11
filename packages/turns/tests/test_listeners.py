@@ -116,7 +116,7 @@ def test_the_endpoint_asks_at_ready_and_prompt_and_tells_turn_and_gone(make_endp
         ("comms", "turn", "s-1", None), ("comms", "gone", "s-1", None)]
 
 
-def test_the_environment_metadata_group_loads(monkeypatch):
+def test_the_env_metadata_group_loads(monkeypatch):
     # With nothing registered in this environment, the group is empty and nothing breaks.
     reg = listeners.load()
     assert all(b.module for b in reg.broken)
@@ -263,7 +263,7 @@ def test_a_listener_written_for_the_first_events_reads_the_longer_event():
                          "record_path", "text", "origin", "usage", "received_at",
                          "payload", "kind"]
     full = turns.SessionEvent("after-tool", "claude", "s-1", {}, None, None, None, None,
-                              "/w", "a-1", "Bash", "tu-1", False, "after", "/r.jsonl")
+                              "/w", "a-1", "Bash", "tu-1", is_error=False, point="after", record_path="/r.jsonl")
     assert (full.cwd, full.agent_id, full.point, full.record_path) == (
         "/w", "a-1", "after", "/r.jsonl")
 

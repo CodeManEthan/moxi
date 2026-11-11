@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 from moxi import ipc
 
-from .results import (CAPABILITIES, COMMAND_WAIT_S, COMMANDS, ENVIRON_MAX_NAMES,
+from .results import (CAPABILITIES, COMMAND_WAIT_S, COMMANDS, ENV_MAX_NAMES,
                       ERROR_CAPABILITY, ERROR_GONE, ERROR_STOP_HANDLER_TAKEN, REFUSED_GONE,
                       STOP_SHELLS_WAIT_S, Refused, check_ref)
 
@@ -82,7 +82,7 @@ class Rpc:
             "watch": self._watch,
             "stops.handle": self._stops_handle,
             "stops.answer": self._stops_answer,
-            "environ": self._environ,
+            "environ": self._env,
             "usage.codex_limits": self._codex_limits,
             "mcp.reload": self._mcp_reload,
         }
@@ -232,14 +232,14 @@ class Rpc:
             raise invalid("reason is a string, or null to let the turn end")
         return {"taken": self.ep.stop_answer(ask, reason)}
 
-    async def _environ(self, conn, params: dict) -> dict:
+    async def _env(self, conn, params: dict) -> dict:
         """The named variables in the endpoint's copy of the session's environment, null
         for one that is unset. Only the names asked; no other process is read."""
         names = params.get("names")
         if not isinstance(names, list):
             raise invalid("names is a list of environment variable names")
-        if len(names) > ENVIRON_MAX_NAMES:
-            raise invalid(f"names lists at most {ENVIRON_MAX_NAMES} names")
+        if len(names) > ENV_MAX_NAMES:
+            raise invalid(f"names lists at most {ENV_MAX_NAMES} names")
         for name in names:
             if not isinstance(name, str) or not ENV_NAME.fullmatch(name):
                 raise invalid(f"{name!r} is not an environment variable name "
@@ -350,7 +350,7 @@ def in_thread(fn: Callable[..., Any], *args: Any) -> asyncio.Future:
     loop = asyncio.get_running_loop()
     future = loop.create_future()
 
-    def settle(ok: bool, value: Any) -> None:
+    def settle(*, ok: bool, value: Any) -> None:
         if future.done():
             return
         if ok:

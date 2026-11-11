@@ -107,8 +107,8 @@ class _Feed:
                 continue
             try:
                 await self.snapshot.changed()
-            except Exception as err:  # noqa: BLE001 - the next change rebuilds again
-                log.warning("turns' page could not rebuild its topic: %s", err, exc_info=err)
+            except Exception as exc:  # noqa: BLE001 - the next change rebuilds again
+                log.warning("turns' page could not rebuild its topic: %s", exc, exc_info=exc)
 
 
 _feed_now: _Feed | None = None

@@ -145,7 +145,7 @@ class Entry:
                 "wants": list(self.wants), "on_error": self.on_error,
                 "deadline_ms": self.deadline_ms}
 
-    def covers(self, tool: str, agent_id: str | None, input: Mapping[str, Any]) -> bool:
+    def covers(self, tool: str, agent_id: str | None, tool_input: Mapping[str, Any]) -> bool:
         """Whether this guard covers the call (the module's docstring has the rule)."""
         if not any(p.fullmatch(tool) for p in self._names):
             return False
@@ -154,7 +154,7 @@ class Entry:
         if self.who == "agents" and not agent_id:
             return False
         for name, rx in self._match.items():
-            value = input.get(name) if isinstance(input, Mapping) else None
+            value = tool_input.get(name) if isinstance(tool_input, Mapping) else None
             if not isinstance(value, str) or rx.search(value) is None:
                 return False
         return True
@@ -191,9 +191,9 @@ class Decision:
 
 
 def decide(entries: Iterable[Entry], tool: str, agent_id: str | None,
-           input: Mapping[str, Any]) -> Decision:
+           tool_input: Mapping[str, Any]) -> Decision:
     """The decision for one call against a table."""
-    covering = [e for e in entries if e.covers(tool, agent_id, input)]
+    covering = [e for e in entries if e.covers(tool, agent_id, tool_input)]
     ids = tuple(e.id for e in covering)
     for e in covering:
         if not e.judge:
@@ -535,7 +535,7 @@ class GuardRunner:
                     deny = deny if deny is not None else break_deny(e.id, o.why)
                 else:
                     broken.append(break_line(e.id, o.why))
-                self._broke(e, call, o.why, denied)
+                self._broke(e, call, o.why, denied=denied)
                 continue
             if e.judge:
                 self._judged_clean(e.id)
@@ -547,7 +547,7 @@ class GuardRunner:
 
     # -- records -----------------------------------------------------------------------
 
-    def _broke(self, e: Entry, call: ToolCall, why: str, denied: bool) -> None:
+    def _broke(self, e: Entry, call: ToolCall, why: str, *, denied: bool) -> None:
         what = "was refused" if denied else "ran unchecked"
         log.warning("guards: %s could not check a %s call (%s); it %s", e.id, call.tool, why,
                     what)

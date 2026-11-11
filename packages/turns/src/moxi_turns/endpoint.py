@@ -563,8 +563,8 @@ class Endpoint:
         data = json.dumps(hello, indent=1, sort_keys=True) + "\n"
         tmp = self.dir / protocol.HELLO_TMP
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(data)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(data)
         os.replace(tmp, self.hello_path)
 
     def _remove_files(self) -> None:
@@ -1019,12 +1019,12 @@ class Endpoint:
         """The session's subagents as the harness records them, within the harness's live
         bound; past it, or unreadable, the list is not complete, which counts as busy."""
         agents = self._agents_read.wait(self.harness.live_wait_s)
-        return agents if agents is not None else Agents((), False, time.time())
+        return agents if agents is not None else Agents((), complete=False, at=time.time())
 
     async def agents_async(self) -> Agents:
         """`agents` on the loop, never blocking it."""
         agents = await self._agents_read.wait_async(self.harness.live_wait_s)
-        return agents if agents is not None else Agents((), False, time.time())
+        return agents if agents is not None else Agents((), complete=False, at=time.time())
 
     def _agents_now(self) -> Agents:
         """The adapter's list, read from the harness on this call. One that fails, or
@@ -1034,10 +1034,10 @@ class Endpoint:
             agents = self.harness.agents()
         except Exception as exc:  # noqa: BLE001 - an unreadable list is unknown
             log.warning("reading the subagents failed: %s", exc)
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         if not isinstance(agents, Agents):
             log.warning("the adapter's subagent list is not a list: %r", agents)
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         return agents
 
     def watch(self, conn, first: Reading, live: Live | None) -> Facts | None:
@@ -1615,7 +1615,7 @@ def _busy(live: Live | None, *, shells: bool = True) -> bool:
 
 def _unvouched() -> Shells:
     """A shell stop turns cannot vouch for: nothing named, the unnamed entry left."""
-    return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
+    return Shells((), (LeftShell(None, SHELL_UNLISTED),), complete=False)
 
 
 def _moved(reading: Reading, version_seen: int | None) -> str | None:

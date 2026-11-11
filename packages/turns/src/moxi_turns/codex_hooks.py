@@ -121,10 +121,10 @@ class HooksUntrusted(RuntimeError):
     """The app-server did not report every launch hook as trusted."""
 
 
-def hooks_socket(directory) -> Path:
+def hooks_socket(endpoint_dir) -> Path:
     """The hooks' socket of the endpoint in `directory`: in it, or on the short path
     when that is too long for a socket address."""
-    return Path(protocol.endpoint_socket(directory, protocol.CODEX_HOOKS_SOCK))
+    return Path(protocol.endpoint_socket(endpoint_dir, protocol.CODEX_HOOKS_SOCK))
 
 
 def command(ping: list[str], socket_path, event: HookEvent,

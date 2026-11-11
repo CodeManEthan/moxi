@@ -177,7 +177,7 @@ def launch_config(options: Mapping, instructions_path: Path | None) -> dict:
     return config
 
 
-def outcome_of(last: dict, errored: bool) -> str:
+def outcome_of(last: dict, *, errored: bool) -> str:
     """A turn's outcome from its last assistant message and whether the session reported
     an error during it."""
     error = last.get("error")
@@ -317,8 +317,8 @@ class OpenCodeHarness(Harness):
         if self.instructions_path is not None:
             fd = os.open(self.instructions_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                          0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(str(self.instructions))
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(self.instructions))
         self._bring_up()
         self._create_session()
         self._connect_stream()
@@ -346,8 +346,8 @@ class OpenCodeHarness(Harness):
     def _create_session(self) -> None:
         try:
             status, body = self.http.json("POST", "/session", {})
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"creating the session: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"creating the session: {exc}") from exc
         if status != 200 or not isinstance(body, dict) or not body.get("id"):
             raise OpenCodeOffline(f"creating the session answered {status}")
         with self._lock:
@@ -365,8 +365,8 @@ class OpenCodeHarness(Harness):
                              on_close=self._on_stream_close, **kw)
         try:
             stream.start()
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"the event stream did not open: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"the event stream did not open: {exc}") from exc
         self.stream = stream
         self.reconcile()
 
@@ -412,11 +412,11 @@ class OpenCodeHarness(Harness):
                     self.reconcile()
                 self._delays = None
                 self.trouble = None
-            except (OpenCodeOffline, Unreachable, NoAnswer) as e:
+            except (OpenCodeOffline, Unreachable, NoAnswer) as exc:
                 if self._stop.is_set():
                     return
-                self.trouble = str(e)
-                log.warning("the OpenCode server is not reachable: %s", e)
+                self.trouble = str(exc)
+                log.warning("the OpenCode server is not reachable: %s", exc)
                 if self._delays is None:
                     self._delays = self._backoff_factory()
                 self._stop.wait(next(self._delays))
@@ -453,8 +453,8 @@ class OpenCodeHarness(Harness):
         try:
             status, body = self.http.json("GET", "/session/status")
             mstatus, messages = self.http.json("GET", f"/session/{sid}/message")
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"reconciling: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"reconciling: {exc}") from exc
         if status != 200 or not isinstance(body, dict):
             raise OpenCodeOffline(f"the session status read answered {status}")
         if mstatus == 404:
@@ -497,7 +497,7 @@ class OpenCodeHarness(Harness):
                     self._tie_locked(post)
             if idle:
                 self._busy = False
-                self._end_turn_locked(outcome_of(self._last, self._errored))
+                self._end_turn_locked(outcome_of(self._last, errored=self._errored))
                 post = self._post
                 if post is not None and post.admitted:
                     self._post = None
@@ -601,7 +601,7 @@ class OpenCodeHarness(Harness):
         return tool, call_id, agent_id, status == "error", rows
 
     def _after_tool(self, tool: str, call_id: str, agent_id: str | None,
-                    is_error: bool, rows: list[str] | None = None) -> None:
+                    *, is_error: bool, rows: list[str] | None = None) -> None:
         """Tell the `after-tool` rows a call finished. Their text has nowhere to go."""
         try:
             text = self.endpoint.after_tool(tool, tool_use_id=call_id, agent_id=agent_id,
@@ -658,7 +658,7 @@ class OpenCodeHarness(Harness):
         self._busy = False
         if self._turn_id is None:
             return
-        self._end_turn_locked(outcome_of(self._last, self._errored))
+        self._end_turn_locked(outcome_of(self._last, errored=self._errored))
         post = self._post
         if post is not None and post.admitted:
             self._post = None
@@ -710,15 +710,15 @@ class OpenCodeHarness(Harness):
         final notice, so `final` is None. A read that fails is not complete."""
         sid, http = self.session_id, self.http
         if not sid or http is None:
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         try:
             cstatus, children = http.json("GET", f"/session/{sid}/children", timeout=2.0)
             sstatus, status = http.json("GET", "/session/status", timeout=2.0)
         except (Unreachable, NoAnswer):
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         if cstatus != 200 or sstatus != 200 or not isinstance(children, list) \
                 or not isinstance(status, dict):
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         entries = []
         complete = True
         for child in children:
@@ -763,8 +763,8 @@ class OpenCodeHarness(Harness):
             return
         try:
             status, body = http.json("GET", "/session/status")
-        except (Unreachable, NoAnswer) as e:
-            log.warning("the session's status could not be read before /compact: %s", e)
+        except (Unreachable, NoAnswer) as exc:
+            log.warning("the session's status could not be read before /compact: %s", exc)
             self.endpoint.command_settled(request.id, Refused("loading"))
             return
         with self._lock:
@@ -777,14 +777,14 @@ class OpenCodeHarness(Harness):
             code, answer = http.request("POST", f"/session/{sid}/summarize",
                                         {"providerID": provider, "modelID": model_id},
                                         timeout=SUMMARIZE_WAIT)
-        except Unreachable as e:
-            log.warning("/compact found no server: %s", e)
+        except Unreachable as exc:
+            log.warning("/compact found no server: %s", exc)
             self.endpoint.command_settled(request.id, Refused("loading"))
             return
-        except NoAnswer as e:
+        except NoAnswer as exc:
             # The server may be compacting: its `session.compacted` settles the command,
             # or the core's bound does.
-            log.warning("/compact had no answer: %s", e)
+            log.warning("/compact had no answer: %s", exc)
             return
         if 200 <= code < 300 and not _json_or_empty(answer):
             # The web app's page: the server has no such route.
@@ -814,8 +814,8 @@ class OpenCodeHarness(Harness):
         launch's `model` option."""
         try:
             status, messages = http.json("GET", f"/session/{sid}/message")
-        except (Unreachable, NoAnswer) as e:
-            log.warning("the session's messages could not be read for /compact: %s", e)
+        except (Unreachable, NoAnswer) as exc:
+            log.warning("the session's messages could not be read for /compact: %s", exc)
             messages = None
         else:
             if status != 200:
@@ -880,8 +880,8 @@ class OpenCodeHarness(Harness):
         sid, http = self.session_id, self.http
         try:
             status, body = http.json("GET", "/session/status")
-        except (Unreachable, NoAnswer) as e:
-            log.warning("the session's status could not be read before a post: %s", e)
+        except (Unreachable, NoAnswer) as exc:
+            log.warning("the session's status could not be read before a post: %s", exc)
             return "offline"
         if not idle_from_status(status, body, sid):
             return "busy"
@@ -895,16 +895,16 @@ class OpenCodeHarness(Harness):
             code, answer = http.request("POST", f"/session/{sid}/prompt_async",
                                         {"messageID": mid,
                                          "parts": [{"type": "text", "text": d.text}]})
-        except Unreachable as e:
+        except Unreachable as exc:
             self._unpost(post)
-            log.warning("a post found no server: %s", e)
+            log.warning("a post found no server: %s", exc)
             return "offline"
-        except NoAnswer as e:
+        except NoAnswer as exc:
             with self._lock:
                 post.uncertain = True
                 self._reconcile_wanted = True
             log.warning("post %s had no answer (%s); the session's messages will say "
-                        "whether it was admitted", mid, e)
+                        "whether it was admitted", mid, exc)
             return "posted"
         if 200 <= code < 300:
             return "posted"
