@@ -82,8 +82,19 @@
 // the user edits becomes his, and leaves the item. A filled value that can do harm asks
 // nothing and stays after a launch. The button is off until the fill is read and made, and
 // the request names each filled row.
+//
+// `Run again` under the box lists the recent launches of what the line names, read when the
+// piece connects, when what the line names changes, and on every event of the topic
+// `launches`. Pointing at one, or giving it the focus, underlines it and reads `/api/recent`
+// with the button's default, and a card under it says what a click runs and where, a value
+// that can do harm in the warning colour, and what the click does. A click previews and
+// launches that request as the button does, with the lines under the box, or copies its
+// command where the default is the user's terminal; it uses the card's answer while it is
+// under five seconds old and the default is the same, else reads it again, and does nothing
+// for a launch that can't run again. It leaves the box, the panel and the fill as they are.
 
 import { css, html, LitElement, nothing } from "lit";
+import type { TemplateResult } from "lit";
 import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
@@ -106,7 +117,7 @@ import {
   choiceKey, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
   parsePresets, same,
 } from "./panel.ts";
-import type { Catalog, Choice, Form, Preset } from "./panel.ts";
+import type { Catalog, Choice, Form, LaunchBody, Preset } from "./panel.ts";
 import {
   afterPick, atLoad, lastQuery, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
 } from "./preset-model.ts";
@@ -114,11 +125,27 @@ import {
   afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
   inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
-  runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
+  placeTime, runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
+import {
+  againRun, CARD_FRESH_MS, cardAct, leftOutWords, OFF_DEFAULTS, OWN_DEFAULTS, parseRecent, parseRecents, placeWords,
+  postureWords, presetWords, ranWhere, recentBody, recentQuery, RUN_AGAIN, runsWith, sameDefault,
+} from "./recent-model.ts";
+import type { Recent, RecentAnswer, RecentRequest, Shows } from "./recent-model.ts";
 
 const TAG = "moxi-launcher-prompt";
+/** The id of the card under a recent, which names the recent it is for. */
+const CARD_ID = "recent-card";
+
+/** `/api/recent`'s answer for one recent, read with the button's default `run`, at `at` by the
+ * page's clock. */
+interface Card {
+  id: string;
+  answer: RecentAnswer;
+  run: Run;
+  at: number;
+}
 /** The event projects' picker sends its host on a choice, with `{key}`. */
 const PICKED = "moxi-change";
 
@@ -264,6 +291,31 @@ const STYLES = css`
   .said .dim { color: var(--moxi-text-dim); }
   .said a { color: inherit; }
   .said code { display: block; margin-top: 4px; font: 13px/1.5 var(--moxi-font-mono); user-select: all; }
+  .again { display: flex; align-items: baseline; margin: 10px 2px 0; color: var(--moxi-text-dim); font-size: 14px;
+            line-height: 20px; white-space: nowrap; }
+  .again > .k { flex: none; margin-right: 10px; }
+  .again .items { display: flex; min-width: 0; }
+  .rec { position: relative; margin-right: 14px; }
+  .rec:last-child { margin-right: 0; }
+  .rec > button { display: inline-flex; align-items: baseline; padding: 0; border: 0; background: none; color: inherit;
+                  font: inherit; text-align: left; }
+  .rec > button b { min-width: 0; overflow: hidden; color: var(--moxi-text); font-weight: 400; text-overflow: ellipsis; }
+  .rec > button.on b { text-decoration: underline; text-decoration-color: var(--moxi-text-dim); text-underline-offset: 3px; }
+  .rec .t { flex: none; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .card { position: absolute; z-index: 2; left: -14px; top: calc(100% + 8px); width: 400px; max-width: calc(100vw - 32px);
+          padding: 11px 14px 10px; border: 1px solid var(--moxi-border-strong); border-radius: 10px;
+          background: var(--moxi-bg); color: var(--moxi-text-dim); font-size: 14px; line-height: 20px; white-space: normal; }
+  .card p { margin: 0; }
+  .card .q { margin-bottom: 5px; color: var(--moxi-text); overflow-wrap: anywhere; }
+  .card .r { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
+  .card .r > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .card .l { overflow-wrap: anywhere; }
+  .card .l .k { margin-right: 8px; }
+  .card .l b { color: var(--moxi-text); font-weight: 400; }
+  .card .l b.dg { color: var(--moxi-danger); }
+  .card hr { margin: 9px -14px 8px; border: 0; border-top: 1px solid var(--moxi-border); }
+  .card .act { color: var(--moxi-text); }
+  .card .cant { color: var(--moxi-text); overflow-wrap: anywhere; }
   :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
   textarea:focus-visible, .find:focus-visible { outline: 0; }
   [hidden] { display: none; }
@@ -278,6 +330,12 @@ const STYLES = css`
     .presets .row .d { grid-row: 2; grid-column: 2 / 4; }
     .fr { grid-template-columns: 1fr auto; }
     .fr .d { grid-row: 2; grid-column: 1 / 3; }
+    .again { display: grid; grid-template-columns: auto 1fr; margin-top: 6px; }
+    .again > .k { padding: 6px 0; }
+    .again .items { display: block; }
+    .rec { display: block; margin-right: 0; }
+    .rec > button { display: flex; justify-content: space-between; width: 100%; padding: 6px 0; }
+    .rec .card { left: 0; }
   }
 `;
 
@@ -307,6 +365,9 @@ export class LauncherPrompt extends LitElement {
     baseFields: { state: true },
     filled: { state: true },
     last: { state: true },
+    recents: { state: true },
+    pointed: { state: true },
+    card: { state: true },
   };
 
   /** The box's text. */
@@ -356,6 +417,16 @@ export class LauncherPrompt extends LitElement {
   filled: Record<string, FormValue> = {};
   /** The last launch the fill was made from, with the key it was read for; null with none. */
   last: (Last & { key: LastKey }) | null = null;
+  /** The earlier launches `Run again` lists, newest first; empty until read. */
+  recents: Recent[] = [];
+  /** The recent the pointer or the focus is on; "" for none. */
+  pointed = "";
+  /** The latest answer read for a recent's card. */
+  card: Card | null = null;
+  #recentsAsked = 0;
+  #cardAsked = 0;
+  /** A click on a recent is reading what it runs. */
+  #again = false;
   /** The query the latest read of the last launch was for; undefined until the piece reads
    * one after it connects. */
   #lastQuery: string | null | undefined = undefined;
@@ -374,8 +445,8 @@ export class LauncherPrompt extends LitElement {
   #targetsRead: Promise<void> = Promise.resolve();
   /** Counts presses, so an answer for an earlier launch is dropped. */
   #pressed = 0;
-  /** The box's text when the button was pressed. */
-  #sent = "";
+  /** The box's text when the button was pressed; null for a recent run again, which sends none. */
+  #sent: string | null = "";
   /** The values that can do harm turned on when the button was pressed, by row. */
   #sentOn: Record<string, string> = {};
   #followTimer: ReturnType<typeof setInterval> | undefined;
@@ -429,7 +500,10 @@ export class LauncherPrompt extends LitElement {
     document.addEventListener("pointerdown", this.#outside);
     document.addEventListener("visibilitychange", this.#shown);
     // Every launch through the launcher writes the log, and may take or free a slot.
-    this.#stops.push(subscribe("launcher", "launches", () => void this.#readTargets()));
+    this.#stops.push(subscribe("launcher", "launches", () => {
+      void this.#readTargets();
+      this.#readRecents(this.#lastQuery ?? null);
+    }));
     this.#lastQuery = undefined;
     void this.#open();
     void this.#readCatalog();
@@ -446,6 +520,8 @@ export class LauncherPrompt extends LitElement {
     this.#asked += 1;
     this.#targetsAsked += 1;
     this.#lastAsked += 1;
+    this.#recentsAsked += 1;
+    this.#cardAsked += 1;
     this.#pressed += 1;
     this.#stopFollow();
     if (this.panel) {
@@ -458,7 +534,10 @@ export class LauncherPrompt extends LitElement {
    * button launches in, or the form, is another. */
   protected willUpdate(changed: Map<string, unknown>): void {
     const query = lastQuery(this.preset, this.pick);
-    if (query !== this.#lastQuery) this.#readLast(query);
+    if (query !== this.#lastQuery) {
+      this.#readLast(query);
+      this.#readRecents(query);
+    }
     if (!["fields", "targets", "picked", "options"].some((name) => changed.has(name))) return;
     const mode = this.#mode;
     if (mode === undefined || this.fields.length === 0) return;
@@ -838,6 +917,7 @@ export class LauncherPrompt extends LitElement {
       ${this.#changed()}
       ${this.#presetLine()}
       ${this.#said()}
+      ${this.#recentLine()}
       ${this.panel ? this.#panel() : nothing}
     </div>`;
   }
@@ -1185,6 +1265,129 @@ export class LauncherPrompt extends LitElement {
           type="button" @click=${() => { this.pending = null; }}>Cancel</button></div>`}</div>`;
   }
 
+  // --- recents ---------------------------------------------------------------------------------
+
+  /** Reads the recent launches of what the line names, `query`; null names none. Only the latest
+   * read's answer is kept, and one that fails leaves the list as it was. */
+  #readRecents(query: string | null): void {
+    const asked = (this.#recentsAsked += 1);
+    if (query === null) {
+      this.recents = [];
+      return;
+    }
+    void api("launcher", `api/recents?${query}`).then((answer) => {
+      const read = answer.status === 200 ? parseRecents(answer.data) : null;
+      if (asked !== this.#recentsAsked || read === null) return;
+      this.recents = read;
+      if (this.pointed !== "" && !read.some((recent) => recent.id === this.pointed)) this.pointed = "";
+    });
+  }
+
+  /** The pointer or the focus is on a recent: its card is read, unless the one held is for it,
+   * fresh, and read with the default the button has now. */
+  #point(recent: Recent): void {
+    this.pointed = recent.id;
+    if (this.targets === null) return;
+    const card = this.card;
+    if (card !== null && card.id === recent.id && Date.now() - card.at <= CARD_FRESH_MS
+        && sameDefault(card.run, this.targets.default)) return;
+    void this.#readCard(recent);
+  }
+
+  #unpoint(recent: Recent): void {
+    if (this.pointed === recent.id) this.pointed = "";
+  }
+
+  /** Reads `/api/recent` for a recent with the button's default now; only the latest read's
+   * answer is held. Null when there is no listing to take the default from. */
+  async #readCard(recent: Recent): Promise<Card | null> {
+    if (this.targets === null) return null;
+    const asked = (this.#cardAsked += 1);
+    const run = this.targets.default;
+    const at = Date.now();
+    const answer = await api("launcher", `api/recent?${recentQuery(recent.id, run)}`);
+    const why = answer.status === 0 ? "no answer from the shell"
+      : `the launcher's page server answered ${answer.status}`;
+    const card: Card = { id: recent.id, answer: parseRecent(answer.status === 200 ? answer.data : null, why), run, at };
+    if (asked === this.#cardAsked) this.card = card;
+    return card;
+  }
+
+  /** A click on a recent: its request previewed and launched, or its command copied, where the
+   * button's default places it. The card's answer is used when it is fresh and was read with
+   * the default the button has now, else it is read again; a recent that can't run again
+   * does nothing. */
+  async #runAgain(recent: Recent): Promise<void> {
+    if (inFlight(this.flight) || this.targets === null || this.#again) return;
+    this.#again = true;
+    let card = this.card;
+    try {
+      if (Date.now() - this.#targetsAt > TARGETS_FRESH_MS) await this.#readTargets();
+      const run = (this.targets as Targets).default;
+      if (card === null || card.id !== recent.id || Date.now() - card.at > CARD_FRESH_MS || !sameDefault(card.run, run)) {
+        card = await this.#readCard(recent);
+      }
+    } finally {
+      this.#again = false;
+    }
+    if (!this.isConnected || inFlight(this.flight) || card === null || card.answer.refused !== null) return;
+    const mine = (this.#pressed += 1);
+    this.#stopFollow();
+    this.#sent = null;
+    this.#sentOn = {};
+    this.menu = "";
+    this.flight = PRESSED;
+    await this.#send(mine, recentBody(card.answer.request), againRun(card.run));
+  }
+
+  /** `Run again` and the recents under the box; absent with none. */
+  #recentLine() {
+    if (this.recents.length === 0) return nothing;
+    const now = new Date();
+    return html`<div class="again" data-recents><span class="k">${RUN_AGAIN}</span><span class="items">${
+      this.recents.map((recent) => this.#recent(recent, now))}</span></div>`;
+  }
+
+  #recent(recent: Recent, now: Date) {
+    const on = this.pointed === recent.id;
+    const card = on && this.card !== null && this.card.id === recent.id ? this.card : null;
+    return html`<span class="rec" data-recent=${recent.id} @mouseenter=${() => this.#point(recent)}
+      @mouseleave=${() => this.#unpoint(recent)}><button type="button" class=${on ? "on" : ""}
+        aria-describedby=${card === null ? nothing : CARD_ID} @focus=${() => this.#point(recent)}
+        @blur=${() => this.#unpoint(recent)} @click=${() => void this.#runAgain(recent)}><b>${recent.head}</b><span
+        class="t">${placeTime(recent.at, now)}</span></button>${card === null ? nothing : this.#card(recent, card)}</span>`;
+  }
+
+  /** The card under a recent: what a click runs and where, then what the click does. A recent
+   * that can't run again shows its head and when, and why. */
+  #card(recent: Recent, card: Card) {
+    const when = lastWhen(recent.at, new Date());
+    const act = cardAct(card.answer, card.run, recent, this.targets);
+    const answer = card.answer;
+    const top = answer.refused === null ? this.#cardRuns(recent, answer.request, answer.shows, when)
+      : html`<div class="r"><span class="q">${recent.head}</span><span>${when}</span></div>`;
+    return html`<div class="card" id=${CARD_ID} role="tooltip" data-card=${recent.id}>${top}<hr>${act.runs
+      ? html`<div class="r"><span class="act" data-act>${act.text}</span>${
+        act.beside === "" ? nothing : html`<span data-beside>${act.beside}</span>`}</div>`
+      : html`<p class="cant" data-act>${act.text}</p>`}</div>`;
+  }
+
+  #cardRuns(recent: Recent, request: RecentRequest, shows: Shows, when: string) {
+    const fields = fieldsFor(this.#catalog, shows.harness) as PanelField[];
+    const posture = postureWords(shows, request, fields, this.#home);
+    const place = placeWords(shows, this.pick, this.#home);
+    const left = leftOutWords(shows, fields);
+    const words = (lead: string, name: string, list: Word[]): TemplateResult | typeof nothing => list.length === 0 ? nothing
+      : html`<p class="l" data-posture=${name}><span class="k">${lead}</span>${list.map((word, at) =>
+        html`${at === 0 ? "" : ", "}<b class=${word.danger ? "dg" : ""}>${word.text}</b>`)}</p>`;
+    return html`${shows.prompt === null ? nothing : html`<p class="q" data-prompt>${shows.prompt}</p>`}
+      <div class="r"><span data-runs>${runsWith(shows)}</span><span data-preset>${presetWords(request)}</span></div>
+      <div class="r"><span data-ran>${ranWhere(recent)}</span><span>${when}</span></div>
+      ${place === "" ? nothing : html`<p data-place>${place}</p>`}
+      ${words(OFF_DEFAULTS, "off", posture.off)}${words(OWN_DEFAULTS, "own", posture.own)}
+      ${left === null ? nothing : html`<p data-left-out>${left}</p>`}`;
+  }
+
   // --- the button, its menu and the launch ---------------------------------------------------
 
   /** Reads where a launch may run. Only the latest read's answer is kept; one that fails
@@ -1243,6 +1446,12 @@ export class LauncherPrompt extends LitElement {
       const now = runOf(this.targets, this.picked);
       if (shown.target === "slot" && !shown.named && now.target === "slot" && !now.named) said = now;
     }
+    await this.#send(mine, body, said);
+  }
+
+  /** The preview of `body`, then the launch with its ticket, or its command copied; `said` is
+   * where the lines say it runs. */
+  async #send(mine: number, body: LaunchBody, said: Run): Promise<void> {
     const answer = previewed(await api("launcher", "api/preview", body));
     if (mine !== this.#pressed) return;
     if (answer.next === "end") {
@@ -1299,7 +1508,7 @@ export class LauncherPrompt extends LitElement {
     this.flight = next;
     if (!following(next)) this.#stopFollow();
     if (!next.started) return;
-    if (this.brief === this.#sent) this.brief = "";
+    if (this.#sent !== null && this.brief === this.#sent) this.brief = "";
     this.options = afterStarted(this.options, this.#sentOn);
     this.#sentOn = {};
   }
