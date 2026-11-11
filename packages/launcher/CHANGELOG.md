@@ -32,6 +32,13 @@
   applies that project's own preset; a seat stays applied when a place is picked. The
   applied preset's values are what `Changed` and the count measure from, and a dim line
   under the box names the permission rows it sets off the user's defaults.
+- Home's launch piece fills each row the form leaves at its shipped default with the
+  value the last launch of the seat, else the project, else the folder on the line above
+  the box gave it, the harness first. `From last launch` on that line names the filled
+  values, its list gives each with `Clear`, and the panel says under each when that
+  launch was made. A filled value is no change, an edited one becomes the user's, and
+  one that can do harm is in the `danger` colour, asks nothing and stays after a launch.
+  The request names the filled rows in `filled`.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
