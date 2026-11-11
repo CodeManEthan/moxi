@@ -92,6 +92,14 @@
 // command where the default is the user's terminal; it uses the card's answer while it is
 // under five seconds old and the default is the same, else reads it again, and does nothing
 // for a launch that can't run again. It leaves the box, the panel and the fill as they are.
+//
+// Seat > Name & notes > Session name, while the panel is open, shows the name `/api/name`
+// renders for the seat, the place, the model and the comms name the piece holds, read again
+// whenever one of them changes, with a dim sentence naming its template. A name typed over it
+// is a changed row; `Use the template` lets go of it. Its caret opens the template's editor,
+// each edit rendered unsaved by `/api/name`; `Save template` writes through the shell's own
+// settings route, never the launcher's, so a key the shell was started with locked is refused
+// in the shell's words, and the name is read again after a save.
 
 import { css, html, LitElement, nothing } from "lit";
 import type { TemplateResult } from "lit";
@@ -133,6 +141,12 @@ import {
   postureWords, presetWords, ranWhere, recentBody, recentQuery, RUN_AGAIN, runsWith, sameDefault,
 } from "./recent-model.ts";
 import type { Recent, RecentAnswer, RecentRequest, Shows } from "./recent-model.ts";
+import {
+  ADD, addList, CANCEL, DATE_FORMATS, DATE_WORD, dateFormat, dateSample, EVERY_PROJECT, KEEP_FOR, keepShown, NAME_ROW, nameNote,
+  nameQuery, parseName, PIECES_WORD, SAVE, saveBody, saveSaid, tokens, TYPED, USE_TEMPLATE, withDate, withoutPiece,
+  withPiece, WRITTEN,
+} from "./name-model.ts";
+import type { Draft, NameContext, Named, Piece } from "./name-model.ts";
 
 const TAG = "moxi-launcher-prompt";
 /** The id of the card under a recent, which names the recent it is for. */
@@ -223,6 +237,35 @@ const STYLES = css`
   .opt { padding: 8px 6px; border: 0; background: none; color: var(--moxi-text-dim); font: 14px/1 var(--moxi-font-sans);
          font-variant-numeric: tabular-nums; white-space: nowrap; }
   .opt.on { color: var(--moxi-text); }
+  .lab { margin: 4px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .nm { display: flex; align-items: center; margin-bottom: 6px; border: 1px solid var(--moxi-border); border-radius: 7px; }
+  .nm.on { border-color: var(--moxi-border-strong); }
+  .nm input { flex: 1 1 auto; min-width: 0; padding: 6px 0 6px 10px; border: 0; outline: 0; background: none;
+              color: var(--moxi-text); font: 13px/20px var(--moxi-font-sans); }
+  .nm input::placeholder { color: var(--moxi-text); opacity: 1; }
+  .nm > button { flex: none; padding: 6px 10px; border: 0; background: none; color: var(--moxi-text-dim); font-size: 15px;
+                 line-height: 20px; }
+  .tnote { margin: 0; padding: 0 44px 8px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px;
+           overflow-wrap: anywhere; }
+  .tnote button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .tpl { margin: 8px 0 10px; padding-left: 12px; border-left: 1px solid var(--moxi-border); }
+  .tl { display: grid; grid-template-columns: 60px 1fr; align-items: center; min-height: 29px; font-size: 13px; }
+  .tl > .k { color: var(--moxi-text-dim); }
+  .toks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 2px 0; }
+  .tok { padding: 4px 7px; border: 1px solid var(--moxi-border-strong); border-radius: 6px; background: none;
+         color: var(--moxi-text); font: 13px/1 var(--moxi-font-sans); }
+  .pk { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .pk.d { margin-left: 4px; color: var(--moxi-text-dim); }
+  .pk .v { font-size: 14px; }
+  .menu.nmenu { width: 240px; padding: 4px 0; }
+  .nmenu .row { grid-template-columns: 1fr auto; padding: 6px 14px; }
+  .written { width: 100%; min-width: 0; padding: 2px 0; border: 0; border-bottom: 1px solid var(--moxi-border); outline: 0;
+             background: none; color: var(--moxi-text); font: 11px/18px var(--moxi-font-mono); }
+  .nref { margin: 2px 0 4px; color: var(--moxi-text); font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+  .btns { display: flex; justify-content: flex-end; gap: 18px; }
+  .btns button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .btns button:first-child { color: var(--moxi-text-dim); }
+  .btns button:disabled { cursor: default; opacity: 0.5; }
   .menu.fill { width: 540px; padding: 6px 0 0; }
   .fr { display: grid; grid-template-columns: 104px 1fr auto; align-items: baseline; gap: 0 10px; padding: 7px 14px; }
   .fr .d { min-width: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
@@ -369,6 +412,10 @@ export class LauncherPrompt extends LitElement {
     recents: { state: true },
     pointed: { state: true },
     card: { state: true },
+    named: { state: true },
+    draft: { state: true },
+    nameSaid: { state: true },
+    saving: { state: true },
   };
 
   /** The box's text. */
@@ -378,7 +425,7 @@ export class LauncherPrompt extends LitElement {
   places: Place[] = [];
   /** The menu that is open: the line's (`where`), the chip's (`chip`), the button's
    * (`run`), or none. */
-  menu: "" | "where" | "chip" | "run" | "preset" | "fill" = "";
+  menu: "" | "where" | "chip" | "run" | "preset" | "fill" | "name-add" | "name-date" = "";
   /** A typed folder path the menu did not take. */
   typed = "";
   /** The form's fields for the harness, filled from `/api/form`; empty until both are read. */
@@ -424,6 +471,17 @@ export class LauncherPrompt extends LitElement {
   pointed = "";
   /** The latest answer read for a recent's card. */
   card: Card | null = null;
+  /** The session name as `/api/name` last answered, for the template being edited while one is. */
+  named: Named | null = null;
+  /** The template being edited in the name's editor; null while it is closed. */
+  draft: Draft | null = null;
+  /** Why the last save of a template did not write, in the shell's words; "" for none. */
+  nameSaid = "";
+  /** A template is being saved. */
+  saving = false;
+  #nameAsked = 0;
+  /** The query the latest read of the name was for; null to read it again at the next update. */
+  #nameKey: string | null = null;
   #recentsAsked = 0;
   #cardAsked = 0;
   /** A click on a recent is reading what it runs. */
@@ -504,6 +562,9 @@ export class LauncherPrompt extends LitElement {
     this.#stops.push(subscribe("launcher", "launches", () => {
       void this.#readTargets();
       this.#readRecents(this.#lastQuery ?? null);
+      // A name holding the number among live launches takes the next free one.
+      this.#nameKey = null;
+      this.requestUpdate();
     }));
     this.#lastQuery = undefined;
     void this.#open();
@@ -523,6 +584,8 @@ export class LauncherPrompt extends LitElement {
     this.#lastAsked += 1;
     this.#recentsAsked += 1;
     this.#cardAsked += 1;
+    this.#nameAsked += 1;
+    this.#nameKey = null;
     this.#pressed += 1;
     this.#stopFollow();
     if (this.panel) {
@@ -555,6 +618,13 @@ export class LauncherPrompt extends LitElement {
     // The modes of a launch under a comms name are not those of one under none.
     if (this.#form !== null && this.fields.length > 0 && this.#identity !== this.#identityAsked) {
       void this.#readForm(this.harness);
+    }
+    // The name follows what it is rendered for, while the panel that shows it is open.
+    if (this.panel && this.fields.length > 0) {
+      const query = nameQuery(this.#nameContext, this.draft);
+      if (query !== this.#nameKey) this.#readName(query);
+    } else {
+      this.#nameKey = null;
     }
   }
 
@@ -1051,10 +1121,13 @@ export class LauncherPrompt extends LitElement {
     }
   }
 
-  /** Closes the panel and gives the focus back to the word that opens it. */
+  /** Closes the panel, and the name's editor with it, and gives the focus back to the word
+   * that opens it. */
   #closePanel(): void {
     this.panel = false;
     this.query = "";
+    this.draft = null;
+    this.nameSaid = "";
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".opt")?.focus());
   }
 
@@ -1229,6 +1302,7 @@ export class LauncherPrompt extends LitElement {
    * the form renderer's control for its kind, showing the value held back for the row while
    * one is. A row whose value can do harm has its name and control in the warning colour. */
   #optionRow(row: PanelRow, where = "") {
+    if (row.name === NAME_ROW) return this.#nameRow(row, where);
     const field = row.field;
     const held = this.pending?.name === row.name ? this.pending.value : null;
     return html`<div class=${row.danger ? "prow dg" : "prow"} data-row=${row.name}>
@@ -1264,6 +1338,174 @@ export class LauncherPrompt extends LitElement {
     return html`<div class="ask" data-ask=${row.name}><p>${does} ${lasts}</p>${held === null ? nothing
       : html`<div><button type="button" class="on" @click=${() => this.#turnOn(field)}>Turn on</button><button
           type="button" @click=${() => { this.pending = null; }}>Cancel</button></div>`}</div>`;
+  }
+
+  // --- the session name ------------------------------------------------------------------------
+
+  /** What the name is rendered for now: the seat applied, the place, and the model, the comms
+   * name and scope and the agent role the form holds. */
+  get #nameContext(): NameContext {
+    const pick = this.pick;
+    const set = this.set;
+    return {
+      seat: this.preset.kind === "seat" ? this.preset.name : "",
+      project: pick?.kind === "project" ? pick.key : "",
+      cwd: pick?.kind === "folder" ? pick.path : "",
+      model: valueOf(this.fields, set, "model"),
+      identity: this.#identity,
+      scope: valueOf(this.fields, set, "scope"),
+      agent: valueOf(this.fields, set, "agent"),
+      harness: this.harness,
+    };
+  }
+
+  /** Reads `/api/name` for `query`; only the latest read's answer is kept. */
+  #readName(query: string): void {
+    const asked = (this.#nameAsked += 1);
+    this.#nameKey = query;
+    void api("launcher", `api/name?${query}`).then((answer) => {
+      if (asked !== this.#nameAsked) return;
+      const why = answer.status === 0 ? "no answer from the shell" : `the launcher's page server answered ${answer.status}`;
+      this.named = parseName(answer.status === 200 ? answer.data : null, why);
+    });
+  }
+
+  /** The name typed over the template, or emptied to take it. */
+  #typeName(field: PanelField, value: string): void {
+    this.options = withOption(this.options, field, value === "" ? null : value, this.fields as PanelField[]);
+  }
+
+  /** Opens the editor on the template the name is rendered from, or closes it. */
+  #toggleEditor(): void {
+    this.nameSaid = "";
+    if (this.draft !== null) {
+      this.draft = null;
+      return;
+    }
+    const named = this.named;
+    const project = this.#nameContext.project;
+    this.draft = { template: named?.template ?? "", keep: named?.from === "project" && project !== "" ? "project" : "global" };
+  }
+
+  /** An edit of the template being edited; it is rendered again unsaved. */
+  #editTemplate(template: string): void {
+    if (this.draft === null) return;
+    this.draft = { ...this.draft, template };
+    this.nameSaid = "";
+  }
+
+  /** Saves the template being edited through the shell's settings route; the name is read
+   * again once it is written. A save the shell refuses says why and keeps the editor open. */
+  async #saveTemplate(): Promise<void> {
+    const save = this.named?.save ?? null;
+    if (this.draft === null || save === null || this.saving) return;
+    this.saving = true;
+    const asked = this.#nameAsked;
+    let said: string | null;
+    try {
+      said = saveSaid(await api("ui", "api/settings/set", saveBody(save)));
+    } finally {
+      this.saving = false;
+    }
+    if (!this.isConnected) return;
+    if (said !== null) {
+      this.nameSaid = said;
+      return;
+    }
+    if (asked === this.#nameAsked) this.named = null;
+    this.draft = null;
+    this.nameSaid = "";
+    this.#nameKey = null;
+  }
+
+  /** The session name: the name the launch takes, typed over or from its template, its caret
+   * opening the editor, and under it whose template it is or that it was typed. */
+  #nameRow(row: PanelRow, where: string) {
+    const field = row.field;
+    const value = valueNow(field, this.#values);
+    const typed = typeof value === "string" ? value : "";
+    const named = this.named;
+    const open = this.draft !== null;
+    return html`<div class="prow" data-row=${row.name}>
+      ${where === "" ? nothing : html`<div class="at"><span>${where}</span></div>`}
+      <div class="lab" aria-hidden="true">${row.label}</div>
+      <div class=${open ? "nm on" : "nm"}><input type="text" data-control=${row.name} aria-label=${row.label}
+        autocomplete="off" spellcheck="false" .value=${typed} placeholder=${named?.name ?? ""}
+        @input=${(event: Event) => this.#typeName(field, (event.target as HTMLInputElement).value)}><button
+        type="button" aria-label="Edit the name template" aria-expanded=${open ? "true" : "false"}
+        @click=${this.#toggleEditor}><span aria-hidden="true">▾</span></button></div>
+      ${open ? this.#editor(this.draft as Draft) : this.#nameNote(typed, named)}
+    </div>`;
+  }
+
+  /** The dim line under the name: typed, with `Use the template`; else whose template it is,
+   * or why it can't be read. */
+  #nameNote(typed: string, named: Named | null) {
+    if (typed !== "") {
+      const mine = Object.hasOwn(this.options, NAME_ROW);
+      return html`<p class="tnote" data-note="typed">${mine ? TYPED : "Set by the preset or your defaults."} <button
+        type="button" @click=${() => this.#typeName(this.#nameField, "")}>${USE_TEMPLATE}</button></p>`;
+    }
+    if (named === null) return nothing;
+    if (named.failed !== "") return html`<p class="tnote" data-note="failed">The name can't be read: ${named.failed}.</p>`;
+    if (named.refused !== null) {
+      return html`<p class="tnote" data-note="refused">${named.refused.problem}. ${named.refused.hint}</p>`;
+    }
+    return html`<p class="tnote" data-note="template">${nameNote(named, this.#nameContext.project)}</p>`;
+  }
+
+  get #nameField(): PanelField {
+    return this.fields.find((field) => field.name === NAME_ROW) as PanelField;
+  }
+
+  /** The template's editor: its pieces with the ones to add, the date's format, the template
+   * as written, where it is kept, and `Cancel` and `Save template`. */
+  #editor(draft: Draft) {
+    const named = this.named;
+    const project = this.#nameContext.project;
+    const date = dateFormat(draft.template);
+    const adds = addList(this.fields, draft.template);
+    const refused = named?.refused ?? null;
+    const savable = !this.saving && named !== null && named.save !== null && refused === null;
+    const now = new Date();
+    return html`<div class="tpl" data-editor>
+      <div class="tl"><span class="k">${PIECES_WORD}</span><span class="toks">${tokens(draft.template).map((token, at) =>
+        html`<button type="button" class="tok" aria-label=${`Take out ${token.piece}`}
+          @click=${() => this.#editTemplate(withoutPiece(draft.template, at))}>${token.piece}</button>`)}${
+        adds.length === 0 ? nothing : this.#nameMenu("name-add", html`${ADD}`, ADD, html`${adds.map((piece: Piece) =>
+          html`<button type="button" class="row" data-piece=${piece} @click=${() => this.#pickName(withPiece(draft.template,
+            piece))}><span class="name">${piece}</span></button>`)}`)}</span></div>
+      ${date === null ? nothing : html`<div class="tl"><span class="k">${DATE_WORD}</span><span>${this.#nameMenu("name-date",
+        html`${dateSample(date, now)}`, `${DATE_WORD} ${dateSample(date, now)}`, html`${DATE_FORMATS.map((format) =>
+          html`<button type="button" class="row" data-format=${format} @click=${() => this.#pickName(withDate(draft.template,
+            format))}><span class="name">${dateSample(format, now)}</span><span class="t">${format}</span></button>`)}`)}</span></div>`}
+      <div class="tl"><span class="k">${WRITTEN}</span><input class="written" type="text" aria-label="The template as written"
+        autocomplete="off" spellcheck="false" .value=${draft.template}
+        @input=${(event: Event) => this.#editTemplate((event.target as HTMLInputElement).value)}></div>
+      ${refused === null ? nothing : html`<p class="nref" data-refused>${refused.problem}. ${refused.hint}</p>`}
+      ${keepShown(this.#withProjects, project) ? html`<div class="tl"><span class="k">${KEEP_FOR}</span><span class="tri"
+        role="group" aria-label=${KEEP_FOR}>${([["project", project], ["global", EVERY_PROJECT]] as const).map(([keep, word]) =>
+          html`<button type="button" class=${draft.keep === keep ? "s" : ""} aria-pressed=${draft.keep === keep ? "true" : "false"}
+            @click=${() => { this.draft = { ...draft, keep }; this.nameSaid = ""; }}>${word}</button>`)}</span></div>` : nothing}
+      ${this.nameSaid === "" ? nothing : html`<p class="nref" data-saved role="status">${this.nameSaid}</p>`}
+      <div class="tl"><span></span><span class="btns"><button type="button" @click=${this.#toggleEditor}>${CANCEL}</button><button
+        type="button" class="save" ?disabled=${!savable} @click=${() => void this.#saveTemplate()}>${SAVE}</button></span></div>
+    </div>`;
+  }
+
+  /** One of the editor's two menus: its face, and its list while it is open. */
+  #nameMenu(which: "name-add" | "name-date", face: TemplateResult, label: string, items: TemplateResult) {
+    const open = this.menu === which;
+    return html`<span class=${open ? "anchor open" : "anchor"}><button type="button" class=${which === "name-add" ? "pk d" : "pk"}
+      aria-haspopup="true" aria-expanded=${open ? "true" : "false"} aria-label=${label}
+      @click=${() => { this.menu = open ? "" : which; }}>${face}<span class="v" aria-hidden="true">▾</span></button>${
+      open ? html`<div class="menu nmenu" data-menu=${which}>${items}</div>` : nothing}</span>`;
+  }
+
+  /** A piece added or a date's format picked in one of the editor's menus. */
+  #pickName(template: string): void {
+    this.menu = "";
+    this.#editTemplate(template);
   }
 
   // --- recents ---------------------------------------------------------------------------------
