@@ -419,6 +419,8 @@ def _binding_nodes(source: Source, scope: str, name: str) -> list[ast.AST]:
         for one in ast.walk(statement):
             if isinstance(one, ast.Name) and isinstance(one.ctx, ast.Store) and one.id == name:
                 found.append(one)
+            elif isinstance(one, ast.ExceptHandler) and one.name == name:
+                found.append(one)
             elif (isinstance(one, ast.Attribute) and isinstance(one.ctx, ast.Store)
                   and one.attr == name):
                 found.append(one)
@@ -486,6 +488,12 @@ def _name_edit(source: Source, node: ast.AST, old: str, new: str) -> Edit | None
         matches = list(re.finditer(rf"\b{re.escape(old)}\b", source.text[start:end]))
         return (Edit(start + matches[-1].start(), start + matches[-1].end(), new)
                 if matches else None)
+    if isinstance(node, ast.ExceptHandler):
+        line_start = source.position(node.lineno, 0)
+        line_end = source.offsets[node.lineno] if node.lineno < len(source.offsets) else len(source.text)
+        match = re.search(rf"\bas\s+({re.escape(old)})\b", source.text[line_start:line_end])
+        return (Edit(line_start + match.start(1), line_start + match.end(1), new)
+                if match else None)
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         line_start = source.position(node.lineno, 0)
         line_end = source.offsets[node.lineno] if node.lineno < len(source.offsets) else len(source.text)

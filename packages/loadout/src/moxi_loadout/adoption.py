@@ -99,7 +99,7 @@ def at_its_folder(placed, table=None) -> bool:
     if table is None:
         table, _ = place.harnesses()
     row = table.get(placed.harness)
-    folder = None if row is None else row.folder(placed.kind)
+    folder = None if row is None else row.harness_dir(placed.kind)
     if folder is None:
         return False
     return place.target_key(folder / placed.name) == place.target_key(placed.path)

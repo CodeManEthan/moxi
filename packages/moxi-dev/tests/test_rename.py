@@ -87,6 +87,23 @@ def test_rows_report_to_apply_applied_and_not_here_before_editing(tmp_path, caps
     assert (root / "packages/p/src/p/x.py").read_text() == "old = 1\ndone = 2\n"
 
 
+def test_name_row_renames_an_exception_alias_and_its_reads(tmp_path):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: '''
+def read():
+    try:
+        return open("missing")
+    except OSError as error:
+        return str(error)
+'''})
+    renames = table(tmp_path, row(path, "read", "name", "error", "exc"))
+
+    assert rename.run(root, renames) == 0
+    text = (root / path).read_text()
+    assert "except OSError as exc:" in text
+    assert "return str(exc)" in text
+
+
 def test_use_changes_one_exact_line_and_keep_covers_an_unrelated_old_name(tmp_path):
     source = "def fresh():\n    pass\nold()\noutside.old()\n"
     root = repo(tmp_path, {"packages/p/src/p/x.py": source})

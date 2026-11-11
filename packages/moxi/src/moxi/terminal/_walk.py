@@ -167,13 +167,13 @@ class _Walk:
         self.seen: set[int] = set()
 
     def go(self) -> Found:
-        if (found := self.own_environment()) is not None:
+        if (found := self.own_env()) is not None:
             return found
         try:
             own = self.view.read(self.run.pid)
-        except (Gone, Unread) as error:
-            return Undecided(N1, UNREAD, self.run.pid, getattr(error, "name", ""),
-                             str(error))
+        except (Gone, Unread) as exc:
+            return Undecided(N1, UNREAD, self.run.pid, getattr(exc, "name", ""),
+                             str(exc))
         self.seen.add(own.pid)
         if (found := self.unit(own)) is not None:
             return found
@@ -192,7 +192,7 @@ class _Walk:
                 return found
         return above
 
-    def own_environment(self) -> Evidence | None:
+    def own_env(self) -> Evidence | None:
         """E4's mark, then E2's tool marks, in the run's own start environment as noted at
         import; read before any process is."""
         from moxi import _mark
@@ -286,8 +286,8 @@ class _Walk:
             if now == pid:
                 return None  # hidden from this account: the walk ends there
             return Undecided(N1, ENDED, pid)
-        except Unread as error:
-            return Undecided(N1, UNREAD, pid, error.name, error.error)
+        except Unread as exc:
+            return Undecided(N1, UNREAD, pid, exc.name, exc.error)
         if parent.started > child.started:
             return None if self.windows else Undecided(N1, ENDED, pid, self.program(parent))
         self.seen.add(pid)

@@ -311,7 +311,7 @@ class Spec:
     memory_swap_max: str | None = None
     schedule: Schedule | None = None
     socket: Socket | None = None
-    environment: tuple[tuple[str, str], ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
 
     @property
     def unit(self) -> str:

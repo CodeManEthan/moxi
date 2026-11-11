@@ -673,8 +673,8 @@ def _load(path: Path) -> dict | None:
     from xml.parsers.expat import ExpatError
 
     try:
-        with open(path, "rb") as handle:
-            body = plistlib.load(handle)
+        with open(path, "rb") as fh:
+            body = plistlib.load(fh)
     except (OSError, ValueError, ExpatError):
         return None
     return body if isinstance(body, dict) else None

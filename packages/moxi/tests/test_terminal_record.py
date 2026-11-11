@@ -51,7 +51,7 @@ def test_folding_takes_any_spelling_of_a_name():
     assert not in_set("moxi_anchor_home", fold=True)
 
 
-def test_the_record_of_an_environment_keeps_only_set_names_with_exact_values():
+def test_the_record_of_an_env_keeps_only_set_names_with_exact_values():
     env = {"HOME": "/home/ada", "MOXI_HOME": "", "PATH": "/bin:/usr/bin",
            "MOXI_PROJECTS_DATA_HOME": " /srv/p ", "GITHUB_TOKEN": "ghp_secret",
            "MOXI_ANCHOR_HOME": "/t", "MOXI_STARTED_BY": "moxi", "TERM": "xterm"}
@@ -60,12 +60,12 @@ def test_the_record_of_an_environment_keeps_only_set_names_with_exact_values():
                                    "PATH": "/bin:/usr/bin"}
 
 
-def test_the_record_of_a_windows_environment_upper_cases_names():
+def test_the_record_of_a_windows_env_upper_cases_names():
     assert of({"Path": r"C:\bin", "UserProfile": r"C:\Users\ada", "temp": "x"},
               fold=True) == {"PATH": r"C:\bin", "USERPROFILE": r"C:\Users\ada"}
 
 
-def test_the_record_of_no_mapping_is_the_process_environment(monkeypatch):
+def test_the_record_of_no_mapping_is_the_process_env(monkeypatch):
     monkeypatch.setenv("MOXI_HOME", "/srv/moxi")
     monkeypatch.setenv("SOME_TOKEN", "t")
     held = of()
@@ -137,7 +137,7 @@ def test_the_text_is_the_json_of_the_record(env):
     assert got.isascii() and json.loads(got) == body
 
 
-def test_the_same_environment_gives_the_same_bytes(fence):
+def test_the_same_env_gives_the_same_bytes(fence):
     env = {"PATH": "/b", "HOME": "/h"}
     first = write(env).read_bytes()
     assert write(dict(reversed(env.items()))).read_bytes() == first
@@ -149,7 +149,7 @@ def test_a_missing_file_is_no_record(fence):
     assert read() == NoRecord(paths.terminal_record())
 
 
-def test_a_missing_folder_above_it_is_no_record(fence, tmp_path):
+def test_a_missing_dir_above_it_is_no_record(fence, tmp_path):
     (tmp_path / "file").write_text("")
     assert read(tmp_path / "file" / "terminal.json") == NoRecord(
         tmp_path / "file" / "terminal.json")
@@ -203,7 +203,7 @@ def test_a_read_error_that_persists_is_unreadable(fence, monkeypatch):
     started = time.monotonic()
     got = read(retry_s=0.2)
     assert isinstance(got, Unreadable) and got.path == path
-    assert isinstance(got.error, PermissionError)
+    assert isinstance(got.exc, PermissionError)
     assert time.monotonic() - started >= 0.2 and len(calls) > 1
 
 
@@ -289,8 +289,8 @@ def test_the_version_is_found_on_the_path_without_importlib_metadata(tmp_path, m
 def test_a_terminal_on_the_input_is_a_keyboard():
     leader, follower = os.openpty()
     try:
-        with os.fdopen(follower, "rb", closefd=False) as stdin:
-            assert keyboard(stdin)
+        with os.fdopen(follower, "rb", closefd=False) as fh:
+            assert keyboard(fh)
     finally:
         os.close(leader)
         os.close(follower)
@@ -299,17 +299,17 @@ def test_a_terminal_on_the_input_is_a_keyboard():
 def test_a_pipe_on_the_input_is_no_keyboard():
     r, w = os.pipe()
     try:
-        with os.fdopen(r, "rb", closefd=False) as stdin:
-            assert not keyboard(stdin)
+        with os.fdopen(r, "rb", closefd=False) as fh:
+            assert not keyboard(fh)
     finally:
         os.close(r)
         os.close(w)
 
 
 def test_a_file_a_closed_input_or_none_is_no_keyboard(tmp_path):
-    with open(tmp_path / "in", "wb+") as stdin:
-        assert not keyboard(stdin)
-    assert not keyboard(stdin)
+    with open(tmp_path / "in", "wb+") as fh:
+        assert not keyboard(fh)
+    assert not keyboard(fh)
 
     class NoFileno:
         pass
@@ -358,12 +358,12 @@ def test_on_windows_a_terminal_is_a_keyboard_only_as_a_console_or_the_pty_pipe(m
     monkeypatch.setattr(_record, "pty_pipe", lambda fd: False)
     leader, follower = os.openpty()
     try:
-        with os.fdopen(follower, "rb", closefd=False) as stdin:
-            assert keyboard(stdin) and not asked
+        with os.fdopen(follower, "rb", closefd=False) as fh:
+            assert keyboard(fh) and not asked
             monkeypatch.setattr(_record, "_WINDOWS", True)
-            assert not keyboard(stdin) and asked == [follower]
+            assert not keyboard(fh) and asked == [follower]
             monkeypatch.setattr(_record, "console", lambda fd: True)
-            assert keyboard(stdin)
+            assert keyboard(fh)
     finally:
         os.close(leader)
         os.close(follower)
@@ -381,11 +381,11 @@ def test_a_pipe_counts_only_on_windows(monkeypatch):
     monkeypatch.setattr(_record, "console", lambda fd: False)
     r, w = os.pipe()
     try:
-        with os.fdopen(r, "rb", closefd=False) as stdin:
+        with os.fdopen(r, "rb", closefd=False) as fh:
             monkeypatch.setattr(_record, "_WINDOWS", False)
-            assert not keyboard(stdin)
+            assert not keyboard(fh)
             monkeypatch.setattr(_record, "_WINDOWS", True)
-            assert keyboard(stdin)
+            assert keyboard(fh)
     finally:
         os.close(r)
         os.close(w)
@@ -418,8 +418,8 @@ def test_a_named_pipe_on_the_input_of_a_child(name, expected):
         fd = msvcrt.open_osfhandle(client, os.O_RDONLY)
         code = ("import sys; from moxi.terminal import keyboard; "
                 "print(keyboard())")
-        with os.fdopen(fd, "rb") as stdin:
-            done = subprocess.run([sys.executable, "-c", code], stdin=stdin,
+        with os.fdopen(fd, "rb") as fh:
+            done = subprocess.run([sys.executable, "-c", code], stdin=fh,
                                   capture_output=True, text=True, timeout=60)
         assert done.stdout.strip() == str(expected), done.stderr
     finally:

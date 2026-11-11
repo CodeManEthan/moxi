@@ -132,7 +132,7 @@ def test_tool_command_without_a_module_keeps_the_rest_of_the_receipt(tmp_path):
                     "moxi-turns", "--find-links", "file:///w"]
 
 
-def test_plain_environment_removes_with_uv_or_pip(monkeypatch):
+def test_plain_env_removes_with_uv_or_pip(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/u/uv")
     assert uninstall.uninstall_command("moxi-comms") == [
         "/u/uv", "pip", "uninstall", "--python", sys.executable, "moxi-comms"]
@@ -168,7 +168,7 @@ def test_a_module_another_installed_module_requires_is_refused(fake, capsys):
     assert fake.runs == [] and fake.teardowns == []
 
 
-def test_the_environment_checks_are_install_s(fake, capsys, monkeypatch):
+def test_the_env_checks_are_install_s(fake, capsys, monkeypatch):
     monkeypatch.setattr(install, "environment", lambda: (_ for _ in ()).throw(
         install.InstallError("moxi runs from the system Python")))
     code, _, err = moxi_uninstall(capsys, "comms")
@@ -203,7 +203,7 @@ def test_uninstalling_a_module_taken_through_an_extra_drops_the_extra(fake, caps
     assert "uninstalled cache" in out and "was installed for" not in out
 
 
-def test_uninstall_in_a_plain_environment(site, tmp_path, monkeypatch, capsys):
+def test_uninstall_in_a_plain_env(site, tmp_path, monkeypatch, capsys):
     f = Removing(site, tmp_path, monkeypatch, kind=install.PLAIN)
     monkeypatch.setattr(uninstall, "run_teardown", f.run_teardown)
     root = tmp_path / "units"
@@ -598,8 +598,8 @@ def stored(fake, capsys, monkeypatch):
     moxi_install(capsys, "turns", "--none")
     layout = paths.Layout("turns")
     data, cache, state = layout.data_dir(), layout.cache_dir(), layout.state_dir()
-    for folder in (data, cache / "index" / "deep", state / "logs"):
-        folder.mkdir(parents=True, exist_ok=True)
+    for store_dir in (data, cache / "index" / "deep", state / "logs"):
+        store_dir.mkdir(parents=True, exist_ok=True)
     (data / "mail.db").write_bytes(b"x" * 2048)
     (data / "mail.db-wal").write_bytes(b"w")
     (data / "mail.db-shm").write_bytes(b"s")
@@ -688,7 +688,7 @@ def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path
                            "symlink or a junction as a link (the rmdir fallback), and keeps "
                            "what it points at")
 @pytest.mark.parametrize("made", ["junction", "symlink"])
-def test_purge_removes_a_directory_link_or_junction_store_on_windows(stored, capsys, tmp_path,
+def test_purge_removes_a_dir_link_or_junction_store_on_windows(stored, capsys, tmp_path,
                                                                      made):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()

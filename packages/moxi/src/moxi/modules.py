@@ -731,10 +731,10 @@ class _DistInfo:
         return None
 
 
-def _read_text(directory: str, name: str) -> str | None:
+def _read_text(source_dir: str, name: str) -> str | None:
     try:
-        with open(os.path.join(directory, name), encoding="utf-8") as file:
-            return file.read()
+        with open(os.path.join(source_dir, name), encoding="utf-8") as fh:
+            return fh.read()
     except OSError:
         return None
 

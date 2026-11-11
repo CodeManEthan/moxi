@@ -114,8 +114,8 @@ def _replace(src: Path, dst: Path) -> None:
             time.sleep(POLL)
 
 
-def _fsync_dir(directory: Path) -> None:
-    fd = os.open(directory, os.O_RDONLY)
+def _fsync_dir(target_dir: Path) -> None:
+    fd = os.open(target_dir, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -862,8 +862,8 @@ def private_dir(path: str | os.PathLike) -> Path:
     return path
 
 
-def _make_dirs(directory: str | os.PathLike, *, private: bool = True) -> None:
-    """Make each missing directory down to `directory`, outermost first.
+def _make_dirs(target_dir: str | os.PathLike, *, private: bool = True) -> None:
+    """Make each missing directory down to `target_dir`, outermost first.
 
     With `private` each one is made 0700 (on Windows with the access list that grants only
     the current user); without it, with the default mode. A directory that already exists
@@ -873,13 +873,13 @@ def _make_dirs(directory: str | os.PathLike, *, private: bool = True) -> None:
     would not do: it gives the mode to the last directory alone and makes every missing
     parent with the default mode.
     """
-    directory = Path(directory)
+    target_dir = Path(target_dir)
     missing = []
-    while not os.path.isdir(directory):
-        missing.append(directory)
-        if directory.parent == directory:
+    while not os.path.isdir(target_dir):
+        missing.append(target_dir)
+        if target_dir.parent == target_dir:
             break
-        directory = directory.parent
+        target_dir = target_dir.parent
     for each in reversed(missing):
         if private and _WINDOWS:
             from . import _win

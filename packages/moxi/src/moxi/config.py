@@ -406,14 +406,14 @@ def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
     """
     from pathlib import Path
 
-    environ = os.environ if env is None else env
+    effective_env = os.environ if env is None else env
     if path is None:
         from .paths import _layout
 
-        path = _layout(module).config_file(environ)
+        path = _layout(module).config_file(effective_env)
     else:
         path = Path(path)
-    return _settings(module, schema, path, _parsed(path), environ)
+    return _settings(module, schema, path, _parsed(path), effective_env)
 
 
 class Config:
@@ -504,23 +504,23 @@ def _parsed(path) -> dict | None:
     return result
 
 
-def _settings(module, schema, path, data, environ) -> Settings:
+def _settings(module, schema, path, data, env) -> Settings:
     schema.check_env(module)
     from_file: dict = {}
     if data is not None:
-        _walk_file(data, "", schema, path, from_file, environ)
+        _walk_file(data, "", schema, path, from_file, env)
     values: dict = {}
     sources: dict = {}
     for key in schema.live():
-        raw = environ.get(key.env) if key.env else None
+        raw = env.get(key.env) if key.env else None
         if raw:
-            values[key.name] = _from_env(key, raw, environ)
+            values[key.name] = _from_env(key, raw, env)
             sources[key.name] = ENV
         elif key.name in from_file:
             values[key.name] = _copied(from_file[key.name])
             sources[key.name] = FILE
         else:
-            values[key.name] = _default_value(key, environ)
+            values[key.name] = _default_value(key, env)
             sources[key.name] = DEFAULT
     return Settings(module, path, schema, _MappingProxy(values), _MappingProxy(sources))
 
@@ -534,7 +534,7 @@ def _copied(value):
     return value
 
 
-def _walk_file(table, prefix, schema, path, out, environ) -> None:
+def _walk_file(table, prefix, schema, path, out, env) -> None:
     fix_unknown = "remove it, or check its spelling against the module's schema"
     for name, value in table.items():
         dotted = f"{prefix}{name}"
@@ -542,12 +542,12 @@ def _walk_file(table, prefix, schema, path, out, environ) -> None:
         if key is not None:
             if key.retired is not None:
                 raise ConfigError(path, dotted, "is retired", key.retired)
-            out[dotted] = _check_value(key, value, path, environ)
+            out[dotted] = _check_value(key, value, path, env)
         elif schema.is_group(dotted):
             if not isinstance(value, dict):
                 raise ConfigError(path, dotted, "is a table of settings, not a value",
                                   f"write it as [{dotted}] with its keys under it")
-            _walk_file(value, f"{dotted}.", schema, path, out, environ)
+            _walk_file(value, f"{dotted}.", schema, path, out, env)
         else:
             raise ConfigError(path, dotted, "is not a setting of this module", fix_unknown)
 
@@ -562,7 +562,7 @@ def _item_ok(kind, value) -> bool:
     return isinstance(value, str)
 
 
-def _check_value(key, value, path, environ):
+def _check_value(key, value, path, env):
     """`value` as key `key`'s type, or `ConfigError`."""
     kind = key.type
     ok = True
@@ -586,7 +586,7 @@ def _check_value(key, value, path, environ):
         raise ConfigError(path, key.name, f"is {value!r}, which it cannot be",
                           f"set it to one of {', '.join(map(repr, key.values))}")
     if kind == "path":
-        return _path(key, value, path, environ)
+        return _path(key, value, path, env)
     if key.items is not None and kind in ("list", "table"):
         return _check_items(key, value, path)
     return value
@@ -608,7 +608,7 @@ def _check_items(key, value, path):
     return {k: float(v) for k, v in value.items()} if kind == "float" else value
 
 
-def _path(key, value, source, environ):
+def _path(key, value, source, env):
     from pathlib import Path
 
     from .paths import _expanduser
@@ -617,14 +617,14 @@ def _path(key, value, source, environ):
         return None
     # `check_text` reads no environment of its own, but its `~` is still this process's
     # home, as `load` without an `env` expands it.
-    expanded = Path(_expanduser(value, os.environ if environ is _NO_ENV else environ))
+    expanded = Path(_expanduser(value, os.environ if env is _NO_ENV else env))
     if not expanded.is_absolute():
         raise ConfigError(source, key.name, f"is the relative path {value!r}",
                           "give an absolute path, or one starting with ~")
     return expanded
 
 
-def _from_env(key, raw, environ):
+def _from_env(key, raw, env):
     where = f"environment variable {key.env}"
     kind = key.type
     if kind == "bool":
@@ -640,12 +640,12 @@ def _from_env(key, raw, environ):
         except ValueError:
             raise ConfigError(where, key.name, f"is {raw!r}, not {_a(kind)}",
                               f"set it to {_a(kind)}") from None
-    return _check_value(key, raw, where, environ)
+    return _check_value(key, raw, where, env)
 
 
-def _default_value(key, environ):
+def _default_value(key, env):
     if key.type == "path":
-        return _path(key, key.default, "schema", environ)
+        return _path(key, key.default, "schema", env)
     if key.type in ("list", "table"):
         return _copied(key.default)
     return key.default

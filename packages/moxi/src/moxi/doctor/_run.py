@@ -1328,8 +1328,8 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
 
     try:
         record = paths.terminal_record()
-    except paths.NoAnchor as no:
-        return stopped("warn", _record.Outcome(_record.NO_PLACE, None, error=no))
+    except paths.NoAnchor as exc:
+        return stopped("warn", _record.Outcome(_record.NO_PLACE, None, error=exc))
     if terminal.anchor_set(os.environ):
         return worded("warn", _lines.row_anchor_set(str(record)))
     if not (_record.keyboard() if keyboard is None else keyboard):
@@ -1342,7 +1342,7 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     held = _record.read(record)
     if isinstance(held, _record.Unreadable):
         return Row("moxi", name, "fail",
-                   f"the record at {record} can't be read ({_record._reason(held.error)})",
+                   f"the record at {record} can't be read ({_record._reason(held.exc)})",
                    f"fix its permissions or remove it, then type {terminal.RECORD_COMMAND} "
                    "here")
     if isinstance(held, _record.Record) and held.env == _record.of():
@@ -1364,10 +1364,10 @@ def _unwritable(record: Path) -> OSError | None:
     nearest folder above it that exists must be writable by this account."""
     import errno
 
-    folder = record.parent
-    while not folder.exists() and folder.parent != folder:
-        folder = folder.parent
-    for path in ((record,) if record.exists() else ()) + (folder,):
+    check_dir = record.parent
+    while not check_dir.exists() and check_dir.parent != check_dir:
+        check_dir = check_dir.parent
+    for path in ((record,) if record.exists() else ()) + (check_dir,):
         if not os.access(path, os.W_OK):
             return PermissionError(errno.EACCES, f"{path}: {os.strerror(errno.EACCES)}")
     return None

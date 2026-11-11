@@ -185,7 +185,7 @@ def test_an_interrupt_during_the_step_ends_the_command_as_an_interrupt(
 
 # -- written only on a change ------------------------------------------------------------------
 
-def test_an_unchanged_environment_rewrites_nothing_and_walks_nothing(
+def test_an_unchanged_env_rewrites_nothing_and_walks_nothing(
         fence, walks, typed, console):
     console("modules")
     before = paths.terminal_record().stat()
@@ -287,10 +287,10 @@ def no_account(monkeypatch):
     if WINDOWS:
         from moxi import _win
 
-        def no_folder(name):
+        def no_dir(name):
             raise OSError("no folder")
 
-        monkeypatch.setattr(_win, "known_folder", no_folder)
+        monkeypatch.setattr(_win, "known_folder", no_dir)
     else:
         monkeypatch.setattr(paths, "_account_home", lambda: None)
 
@@ -340,16 +340,16 @@ def test_a_write_that_fails_gives_one_warning_and_the_commands_code(
 
 
 @posix_only
-def test_a_read_only_folder_gives_one_warning(fence, walks, typed, console):
-    folder = paths.anchor_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    folder.chmod(0o500)
+def test_a_read_only_dir_gives_one_warning(fence, walks, typed, console):
+    anchor_dir = paths.anchor_dir()
+    anchor_dir.mkdir(parents=True, exist_ok=True)
+    anchor_dir.chmod(0o500)
     try:
-        if os.access(folder, os.W_OK):
+        if os.access(anchor_dir, os.W_OK):
             pytest.skip("this account writes any folder")
         code, err = console("modules")
     finally:
-        folder.chmod(0o700)
+        anchor_dir.chmod(0o700)
     assert code == 0 and err.count("moxi: warning:") == 1
     assert "can't be written (Permission denied)" in err and recorded() is None
 

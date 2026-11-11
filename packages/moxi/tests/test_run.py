@@ -352,7 +352,7 @@ def test_log_rolls_past_its_cap(demo, monkeypatch):
 
 
 @POSIX
-def test_the_logs_missing_directories_are_each_made_0700(tmp_path):
+def test_the_logs_missing_dirs_are_each_made_0700(tmp_path):
     shared = tmp_path / "shared"
     shared.mkdir()
     os.chmod(shared, 0o775)

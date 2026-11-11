@@ -135,7 +135,7 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
     if isinstance(outcome, terminal.NoRecord):
         return _with_anchor(no_record(str(record), page=for_page), anchor, for_page)
     if isinstance(outcome, terminal.Unreadable):
-        return _with_anchor(unreadable(str(record), _error(outcome.error), page=for_page),
+        return _with_anchor(unreadable(str(record), _error(outcome.exc), page=for_page),
                             anchor, for_page)
     if isinstance(outcome, terminal.NewerFormat):
         return _with_anchor(newer(str(record), outcome.format, outcome.moxi,

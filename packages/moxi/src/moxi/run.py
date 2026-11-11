@@ -663,7 +663,7 @@ def condition(args: Args) -> int:
 def result(args: Args, env: Mapping[str, str] | None = None) -> int:
     """`--result`, a wrap's `ExecStopPost=`: the run line from systemd's variables when
     `--condition` left a stamp. Always 0."""
-    environ = os.environ if env is None else env
+    effective_env = os.environ if env is None else env
     stamp = stamp_path(args.module, args.name)
     try:
         text = stamp.read_text(encoding="utf-8")
@@ -683,14 +683,14 @@ def result(args: Args, env: Mapping[str, str] | None = None) -> int:
         _say(f"the start stamp {stamp} is not one --condition wrote ({exc}); "
              "no run line")
         return 0
-    service_result = environ.get("SERVICE_RESULT")
+    service_result = effective_env.get("SERVICE_RESULT")
     if service_result == "exec-condition":
         return 0
-    how = environ.get("EXIT_CODE") or None
+    how = effective_env.get("EXIT_CODE") or None
     if how is None:
         outcome, code = NOT_STARTED, NOT_STARTED_EXIT
     else:
-        outcome, code = RAN, _systemd_exit(how, environ.get("EXIT_STATUS", ""))
+        outcome, code = RAN, _systemd_exit(how, effective_env.get("EXIT_STATUS", ""))
     _line(args, at=at, seconds=time.monotonic() - mono, result=outcome, code=code,
           service_result=service_result)
     return 0

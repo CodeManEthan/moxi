@@ -312,7 +312,7 @@ def _known(stems: list[str]) -> list[str]:
     return [line.split()[0] for line in listed.stdout.splitlines() if line.strip()]
 
 
-def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
+def _scrub(unit_dir: Path, stems: list[str], fence: Fence) -> None:
     """Stop and delete every unit file under `stems` and every `.wants` link to one, then
     forget the failure of every unit under `stems` and reload. That takes in a unit whose
     file the row already deleted, such as a dropped socket unit that failed: the manager
@@ -321,10 +321,10 @@ def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
     def ours(name: str) -> bool:
         return any(name.startswith((stem + ".", stem + "-")) for stem in stems)
 
-    found = [p for p in directory.iterdir() if ours(p.name)]
+    found = [p for p in unit_dir.iterdir() if ours(p.name)]
     for path in sorted(found, key=lambda p: not p.name.endswith(".socket")):
         fence.run("stop", path.name)
-    for wants in directory.glob("*.wants"):
+    for wants in unit_dir.glob("*.wants"):
         for link in wants.iterdir():
             if ours(link.name) and link.is_symlink():
                 link.unlink()

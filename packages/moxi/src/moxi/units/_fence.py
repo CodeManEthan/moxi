@@ -142,8 +142,8 @@ def task_refs_env(refs: Sequence[tuple[str, str]]) -> list[dict[str, str]]:
     """The `MOXI_TASK_REFS` values for `refs` (each `(folder, name)`), split so no one
     value passes `TASK_REFS_MAX` characters. Each becomes one PowerShell call."""
     chunks: list[list[dict]] = [[]]
-    for folder, name in refs:
-        item = {"path": folder, "name": name}
+    for refs_dir, name in refs:
+        item = {"path": refs_dir, "name": name}
         if chunks[-1] and len(json.dumps(chunks[-1] + [item])) > TASK_REFS_MAX:
             chunks.append([])
         chunks[-1].append(item)

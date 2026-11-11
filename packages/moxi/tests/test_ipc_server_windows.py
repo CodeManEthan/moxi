@@ -71,7 +71,7 @@ def fake_windows(monkeypatch):
 
 # -- the lock's place and the sweep (any system) ---------------------------------------------
 
-def test_a_pipes_lock_is_its_name_in_the_modules_runtime_directory(fake_windows, runtime):
+def test_a_pipes_lock_is_its_name_in_the_modules_runtime_dir(fake_windows, runtime):
     address = ipc.address("demo", "a-b")
     assert address == r"\\.\pipe\moxi-demo-a-b-0123abcd"
     assert _sweep.lock_path(address) == str(runtime / "demo" / "a-b.lock")
@@ -384,16 +384,16 @@ def connect_fails(address) -> int:
 
 
 @WINDOWS
-def test_serve_on_a_pipe_answers_and_keeps_its_lock_in_a_private_directory(pipe_serving,
+def test_serve_on_a_pipe_answers_and_keeps_its_lock_in_a_private_dir(pipe_serving,
                                                                            runtime):
     srv = pipe_serving(echo)
     raw = PipeRaw(srv.address)
     raw.send(req(1, "go"))
     assert raw.json()["result"] == {"method": "go", "params": None}
-    directory = runtime / "demo"
+    socket_dir = runtime / "demo"
     assert os.path.exists(_sweep.lock_path(srv.address))
-    assert os.path.dirname(_sweep.lock_path(srv.address)) == str(directory)
-    assert _win._only_user(directory, _win._token_sid(_win._TOKEN_USER))
+    assert os.path.dirname(_sweep.lock_path(srv.address)) == str(socket_dir)
+    assert _win._only_user(socket_dir, _win._token_sid(_win._TOKEN_USER))
     assert ipc.sweep(srv.address) == "live"
 
 

@@ -158,8 +158,8 @@ class FakeSchtasks:
             want = (ref["path"] + ref["name"]).casefold()
             for path, info in self._known().items():
                 if path.casefold() == want:
-                    folder, _, name = path.rpartition("\\")
-                    out.append({"path": folder + "\\", "name": name, **info})
+                    task_dir, _, name = path.rpartition("\\")
+                    out.append({"path": task_dir + "\\", "name": name, **info})
         return self._done(cmd, 0, "\ufeff" + json.dumps(out))
 
     def _known(self) -> dict[str, dict]:
@@ -372,7 +372,7 @@ def test_enabled_false_is_in_the_settings_and_read_back(w):
     assert not w.backend.enabled(text)
 
 
-def test_cwd_is_the_working_directory_and_text_is_escaped(w):
+def test_cwd_is_the_working_dir_and_text_is_escaped(w):
     _, _, root = render(w, spec(cwd="C:\\work & play", doc="a <b> & 'c'",
                                 command=("C:\\x\\t.exe", "a&b", "<c>")))
     assert root.find("t:Actions/t:Exec/t:WorkingDirectory", N).text == "C:\\work & play"
@@ -662,7 +662,7 @@ def test_running_reads_the_live_runtime_files(w):
     assert w.sup.calls == []
 
 
-def test_own_names_the_moxi_folder_and_foreign_refs_are_timers(w):
+def test_own_names_the_moxi_dir_and_foreign_refs_are_timers(w):
     assert w.backend.own("\\Moxi\\demo-relay") and w.backend.own("\\moxi\\Anything")
     assert not w.backend.own("\\Backups\\Daily") and not w.backend.own("Moxi")
     ref = w.backend.foreign("\\Backups\\Daily (home)", w.fence)
@@ -819,7 +819,7 @@ def test_a_foreign_task_is_read_as_a_timer_from_the_powershell_call(w, info, sta
     assert read.since is None and read.log is None
 
 
-def test_foreign_refs_reach_powershell_only_in_its_environment(w):
+def test_foreign_refs_reach_powershell_only_in_its_env(w):
     name = "a b 'c\" ;$d"
     w.sup.foreign[f"\\MoxiTest\\{name}"] = {"state": "Ready", "last_run": None,
                                             "last_result": 0}
@@ -876,7 +876,7 @@ def test_ids_is_the_task_path_whether_or_not_it_is_registered(w):
     w.apply(w.plan().values())
     [ref] = w.backend.marked("demo")
     assert ref.ids == w.backend.ids("demo", "relay", "daemon")
-    assert SchtasksBackend(folder="\\MoxiTest\\").ids("demo", "relay", "daemon") == (
+    assert SchtasksBackend(task_dir="\\MoxiTest\\").ids("demo", "relay", "daemon") == (
         "\\MoxiTest\\demo-relay",)
 
 
@@ -1367,7 +1367,7 @@ windows = pytest.mark.skipif(
 
 
 @windows
-def test_a_real_task_under_a_test_folder_is_created_run_read_ended_and_deleted(
+def test_a_real_task_under_a_test_dir_is_created_run_read_ended_and_deleted(
         tmp_path, record_property):
     """Registers `\\MoxiTest\\<hex>-probe` from a rendered XML whose gate is replaced by a
     short sleep, and walks it through the verbs and the reads: armed and disabled, as a
@@ -1378,7 +1378,7 @@ def test_a_real_task_under_a_test_folder_is_created_run_read_ended_and_deleted(
 
     from moxi.units._fence import Fence as RealFence
 
-    backend = SchtasksBackend(folder="\\MoxiTest\\")
+    backend = SchtasksBackend(task_dir="\\MoxiTest\\")
     fence = RealFence("schtasks")
     module = "t" + secrets.token_hex(4)
     task = backend.task(module, "probe")
@@ -1468,7 +1468,7 @@ def test_a_real_foreign_task_read_as_a_daemon_tracks_its_process(tmp_path, recor
     from moxi.units._fence import Fence as RealFence
     from moxi.units._schtasks import SETTLE_SECONDS
 
-    owner = SchtasksBackend(folder="\\MoxiTest\\")
+    owner = SchtasksBackend(task_dir="\\MoxiTest\\")
     account = owner.user()
     needs = (f"needs {account} logged on at the console: an InteractiveToken task runs "
              "only in an interactive session")

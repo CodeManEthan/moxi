@@ -906,7 +906,7 @@ def test_store_existence_mode_and_size(d):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
-def test_the_core_s_stores_in_a_module_s_state_directory(d):
+def test_the_core_s_stores_in_a_module_s_state_dir(d):
     d.module(settings=None)
     assert not any(name.startswith("store") for _, name in d.rows("demo"))
     state = d.state_dir()
@@ -943,7 +943,7 @@ def test_cache_s_doctor_runs_through_the_runner_with_no_fail_row():
 
 # -- 6 to 9: home, strays, setup versions, records ---------------------------------------------
 
-def test_a_state_directory_read_in_place_under_a_host_folder_warns(d, monkeypatch):
+def test_a_state_dir_read_in_place_under_a_host_dir_warns(d, monkeypatch):
     d.module(settings=None)
     monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldhost")
     legacy = moxi.paths.Layout("demo").state_root() / "oldhost" / "demo"

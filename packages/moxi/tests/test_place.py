@@ -40,7 +40,7 @@ def home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def folder_links():
+def dir_links():
     """On Windows `auto` copies a skill folder (`place._AUTO_JUNCTION`), so the tests here
     that place one as a link set `link`, which makes a junction there; elsewhere `auto`
     links already, and nothing is set."""
@@ -66,12 +66,12 @@ def git(tmp_path, monkeypatch):
 def skill(tmp_path):
     """A skill folder in a package-like place, and a function that makes more."""
     def make(name: str = "comms-send", text: str = "# send\n", base: Path | None = None):
-        folder = (base or tmp_path / "pkg" / "skills") / name
-        folder.mkdir(parents=True)
-        (folder / "SKILL.md").write_text(text)
-        (folder / "scripts").mkdir()
-        (folder / "scripts" / "run.sh").write_text("echo hi\n")
-        return folder
+        skill_dir = (base or tmp_path / "pkg" / "skills") / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(text)
+        (skill_dir / "scripts").mkdir()
+        (skill_dir / "scripts" / "run.sh").write_text("echo hi\n")
+        return skill_dir
     return make
 
 
@@ -98,7 +98,7 @@ def set_core(key, value):
 
 # -- targets and the harness table --------------------------------------------------------
 
-def test_a_skill_links_into_each_default_harness_folder(home, skill):
+def test_a_skill_links_into_each_default_harness_dir(home, skill):
     src = skill()
     items = [Item(src, "claude", "comms-send"), Item(src, "codex", "comms-send")]
     steps = place.plan("comms", items)
@@ -114,7 +114,7 @@ def test_a_skill_links_into_each_default_harness_folder(home, skill):
     assert [s.action for s in place.plan("comms", items)] == ["keep", "keep"]
 
 
-def test_an_agent_goes_to_the_agents_folder_as_one_file(home, tmp_path):
+def test_an_agent_goes_to_the_agents_dir_as_one_file(home, tmp_path):
     need_symlinks()
     agent = tmp_path / "pkg" / "reviewer.md"
     agent.parent.mkdir()
@@ -128,13 +128,13 @@ def test_an_agent_goes_to_the_agents_folder_as_one_file(home, tmp_path):
     assert entry["kind"] == "agent" and entry["harness"] == "claude"
 
 
-def test_claude_config_dir_moves_claudes_folders(tmp_path, monkeypatch, skill):
+def test_claude_config_dir_moves_claudes_dirs(tmp_path, monkeypatch, skill):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     step = one(place.plan("comms", [Item(skill(), "claude", "comms-send")]))
     assert step.target == tmp_path / "cc" / "skills" / "comms-send"
 
 
-def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path,
+def test_codex_home_moves_codexs_agents_dir_and_not_its_skills(home, tmp_path,
                                                                    monkeypatch, skill):
     need_symlinks()
     agent = tmp_path / "pkg" / "reviewer.md"
@@ -152,7 +152,7 @@ def test_codex_home_moves_codexs_agents_folder_and_not_its_skills(home, tmp_path
     assert not os.path.lexists(home / ".codex")
 
 
-def test_folders_names_each_rows_folders_as_the_placer_resolves_them(home):
+def test_dirs_names_each_rows_dirs_as_the_placer_resolves_them(home):
     rows, _ = place.harnesses()
     assert place.harness_dirs() == {
         "claude's skills folder": home / ".claude" / "skills",
@@ -163,7 +163,7 @@ def test_folders_names_each_rows_folders_as_the_placer_resolves_them(home):
             for name, row in rows.items() for kind in ("skills", "agents")} == place.harness_dirs()
 
 
-def test_folders_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
+def test_dirs_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "process-cc"))
     given = {"HOME": str(tmp_path / "given"), "USERPROFILE": str(tmp_path / "given"),
              "CODEX_HOME": str(tmp_path / "cx"), "MOXI_HOME": str(tmp_path / "given-moxi")}
@@ -180,14 +180,14 @@ def test_folders_reads_a_given_mapping_alone(home, tmp_path, monkeypatch):
     assert set(place.harnesses(env=given)[0]) == {"claude", "oc"}
 
 
-def test_folders_keeps_a_relative_value_that_harnesses_makes_absolute(home, monkeypatch):
+def test_dirs_keeps_a_relative_value_that_harnesses_makes_absolute(home, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "relative-cc")
     assert place.harness_dirs()["claude's skills folder"] == Path("relative-cc", "skills")
     rows, _ = place.harnesses()
     assert rows["claude"].skills == Path(os.path.abspath("relative-cc"), "skills")
 
 
-def test_a_row_folder_expands_its_tilde_from_the_mapping(home, tmp_path):
+def test_a_row_dir_expands_its_tilde_from_the_mapping(home, tmp_path):
     set_core("harnesses", [{"name": "oc", "skills": "~/.oc/skills", "agents": "~"}])
     given = {**os.environ, "HOME": str(tmp_path / "given"),
              "USERPROFILE": str(tmp_path / "given")}
@@ -275,7 +275,7 @@ def test_two_items_with_one_target_refuse_the_second(skill):
     assert steps[1].cause == "duplicate" and "two items place" in steps[1].reason
 
 
-def test_a_harness_folder_reached_through_a_symlink_gives_one_key(home, tmp_path, skill):
+def test_a_harness_dir_reached_through_a_symlink_gives_one_key(home, tmp_path, skill):
     real = tmp_path / "real-skills"
     real.mkdir()
     (home / ".claude").mkdir()
@@ -290,7 +290,7 @@ def test_a_harness_folder_reached_through_a_symlink_gives_one_key(home, tmp_path
 
 # -- copies, updates, occupants -----------------------------------------------------------
 
-def test_a_copied_folder_carries_its_mark_and_updates_when_the_source_changes(home, skill):
+def test_a_copied_dir_carries_its_mark_and_updates_when_the_source_changes(home, skill):
     src = skill()
     item = Item(src, "claude", "comms-send")
     place.apply(place.plan("comms", [item], form="copy"))
@@ -344,7 +344,7 @@ def test_volatile_paths_are_kept_as_slash_separated_strings(skill):
 
 
 @pytest.mark.parametrize("bad", ["", ".", "/abs", "../out", "a/../../b", "C:/x"])
-def test_a_volatile_path_outside_the_folder_raises(skill, bad):
+def test_a_volatile_path_outside_the_dir_raises(skill, bad):
     with pytest.raises(ValueError, match="volatile"):
         place.plan("turns", [Item(skill(), "claude", "x", volatile=[bad])])
 
@@ -508,7 +508,7 @@ def test_another_owners_placement_is_refused_and_replace_leaves_it(home, skill):
     assert list(ledger()) == ["loadout"]
 
 
-def test_a_path_git_tracks_is_named_and_git_is_asked_once_per_folder(tmp_path, monkeypatch,
+def test_a_path_git_tracks_is_named_and_git_is_asked_once_per_dir(tmp_path, monkeypatch,
                                                                       skill):
     if shutil.which("git") is None:
         pytest.skip("no git")
@@ -523,7 +523,7 @@ def test_a_path_git_tracks_is_named_and_git_is_asked_once_per_folder(tmp_path, m
     calls = []
     real = place._git_files
     monkeypatch.setattr(place, "_git_files",
-                        lambda folder, *rest: calls.append(folder) or real(folder, *rest))
+                        lambda repo_dir, *rest: calls.append(repo_dir) or real(repo_dir, *rest))
     src = skill()
     steps = place.plan("loadout", [Item(src, "claude", n, dest=skills / n) for n in "ab"])
     assert [(s.action, s.cause) for s in steps] == [("refuse", "tracked")] * 2
@@ -630,10 +630,10 @@ def test_an_occupant_git_tracks_is_cause_tracked_with_the_same_reason(
         src.parent.mkdir()
         src.write_text("an agent\n")
     repo = tmp_path / "repo"
-    folder = repo / ".claude" / ("skills" if kind == "skill" else "agents")
-    folder.mkdir(parents=True)
+    skills_dir = repo / ".claude" / ("skills" if kind == "skill" else "agents")
+    skills_dir.mkdir(parents=True)
     git("init", "-q", repo)
-    target = folder / "x"
+    target = skills_dir / "x"
     _occupy(case, target, src, tmp_path)
     item = Item(src, "claude", "x", kind=kind, dest=target)
 
@@ -657,7 +657,7 @@ def test_an_occupant_git_tracks_is_cause_tracked_with_the_same_reason(
     one(place.plan("loadout", [item], form="copy"), "keep")
 
 
-def test_a_marked_folder_this_ledger_lacks_is_cause_tracked(tmp_path, git, skill):
+def test_a_marked_dir_this_ledger_lacks_is_cause_tracked(tmp_path, git, skill):
     """A copy with this owner's mark that the ledger has no entry for came with a commit:
     an occupant only because git tracks it, so always cause `tracked`."""
     src = skill()
@@ -698,14 +698,14 @@ def test_remove_unlinks_deletes_copies_and_moves_a_modified_copy_aside(home, tmp
     place.apply(place.plan("comms", [Item(a, "claude", "a")]))
     place.apply(place.plan("comms", [Item(a, "claude", "a"), Item(b, "claude", "b"),
                                      Item(c, "claude", "c")], form="copy"))
-    folder = home / ".claude" / "skills"
+    skills_dir = home / ".claude" / "skills"
     place.apply(place.plan("comms", [Item(a, "claude", "a"), Item(b, "claude", "b"),
                                      Item(c, "claude", "c")], form="link")[:1])
-    (folder / "c" / "SKILL.md").write_text("my edit\n")
+    (skills_dir / "c" / "SKILL.md").write_text("my edit\n")
     said, say = lines()
     gone = place.remove("comms", say=say)
     assert {p.name: p.state for p in gone} == {"a": "ok", "b": "ok", "c": "modified"}
-    assert not any(os.path.lexists(folder / n) for n in "abc")
+    assert not any(os.path.lexists(skills_dir / n) for n in "abc")
     assert (a / "SKILL.md").exists(), "a link's source is never removed"
     moved = list((moxi.paths.core().data_dir() / "displaced").glob("*/claude/c/SKILL.md"))
     assert moved and moved[0].read_text() == "my edit\n"
@@ -766,13 +766,13 @@ def test_status_reads_missing_stale_and_modified(home, skill):
     place.apply(place.plan("comms", [Item(a, "claude", "a"), Item(b, "claude", "b")]))
     place.apply(place.plan("comms", [Item(a, "claude", "a"), Item(b, "claude", "b"),
                                      Item(c, "claude", "c")], form="copy")[2:])
-    folder = home / ".claude" / "skills"
-    (folder / "a").unlink()
+    skills_dir = home / ".claude" / "skills"
+    (skills_dir / "a").unlink()
     shutil.rmtree(b)
     (c / "SKILL.md").write_text("changed source\n")
     states = {p.name: p.state for p in place.status("comms")}
     assert states == {"a": "missing", "b": "stale", "c": "stale"}
-    (folder / "c" / "SKILL.md").write_text("changed copy\n")
+    (skills_dir / "c" / "SKILL.md").write_text("changed copy\n")
     assert {p.name: p.state for p in place.status("comms")}["c"] == "modified"
 
 
@@ -1162,14 +1162,14 @@ def test_apply_inside_a_nested_hold_yields(skill):
     ("auto", True, False, False, ("link", None)),
     ("auto", False, False, False, ("copy", place.FILE_NOTE)),
     ("auto", True, True, True, ("link", None)),
-    ("auto", False, True, True, ("copy", place.FOLDER_NOTE)),
+    ("auto", False, True, True, ("copy", place.DIR_NOTE)),
     ("copy", True, False, True, ("copy", None)),
 ])
-def test_the_windows_form(monkeypatch, tmp_path, setting, symlinks, held, folder, want):
+def test_the_windows_form(monkeypatch, tmp_path, setting, symlinks, held, is_dir, want):
     monkeypatch.setattr(place, "_WINDOWS", True)
-    monkeypatch.setattr(place, "_symlink_allowed", lambda folder: symlinks)
+    monkeypatch.setattr(place, "_symlink_allowed", lambda link_dir: symlinks)
     source = tmp_path / "src"
-    if folder:
+    if is_dir:
         source.mkdir()
     else:
         source.write_text("x")

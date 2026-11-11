@@ -276,7 +276,7 @@ def run_child(argv: list[str], *, env: dict[str, str] | None = None) -> Outcome:
     from . import files, paths
 
     fd = files._descriptor(paths.core_lock())
-    environ = dict(os.environ if env is None else env)
+    child_env = dict(os.environ if env is None else env)
     seen: list[int] = []
     box: list[subprocess.Popen] = []
 
@@ -297,7 +297,7 @@ def run_child(argv: list[str], *, env: dict[str, str] | None = None) -> Outcome:
         signal.signal(signum, forward)
     try:
         try:
-            proc = _start(argv, environ, fd)
+            proc = _start(argv, child_env, fd)
         except OSError as exc:
             say(f"moxi: cannot run {argv[0]}: {exc}", err=True)
             return Outcome(127, tuple(seen))
@@ -315,12 +315,12 @@ def run_child(argv: list[str], *, env: dict[str, str] | None = None) -> Outcome:
     return Outcome(code, tuple(seen))
 
 
-def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Popen:
+def _start(argv: list[str], env: dict[str, str], fd: int) -> subprocess.Popen:
     from .files import LOCK_FD_ENV
 
     if not _WINDOWS:
-        environ[LOCK_FD_ENV] = str(fd)
-        return subprocess.Popen(argv, env=environ, pass_fds=(fd,))
+        env[LOCK_FD_ENV] = str(fd)
+        return subprocess.Popen(argv, env=env, pass_fds=(fd,))
     import msvcrt
 
     handle = msvcrt.get_osfhandle(fd)
@@ -328,8 +328,8 @@ def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Pope
     try:
         info = subprocess.STARTUPINFO()
         info.lpAttributeList = {"handle_list": [handle]}
-        environ[LOCK_FD_ENV] = str(handle)
-        return subprocess.Popen(argv, env=environ, startupinfo=info, close_fds=True)
+        env[LOCK_FD_ENV] = str(handle)
+        return subprocess.Popen(argv, env=env, startupinfo=info, close_fds=True)
     finally:
         os.set_handle_inheritable(handle, False)
 
@@ -892,7 +892,7 @@ def _skills(step: Settle) -> bool:
         placed = [p for p in place.status(module) if str(p.path) not in by_dest]
         if found.skills is None and not placed:
             return True
-        skills, source = _skill_folders(found)
+        skills, source = _skill_dirs(found)
         if skills is None:
             say(f"{module}: skills not placed: {source}", err=True)
             return False
@@ -950,7 +950,7 @@ def _misnamed(module: str, skills: list[str]) -> set[str]:
     return misnamed
 
 
-def _skill_folders(found) -> tuple[list[str] | None, object]:
+def _skill_dirs(found) -> tuple[list[str] | None, object]:
     """The skill names in `found`'s `SKILLS` folder (its subfolders `moxi.names.
     is_skill_dir` counts, sorted) and the folder, read through
     `importlib.resources`; or None and the line that says why they can't be read. A
@@ -964,18 +964,18 @@ def _skill_folders(found) -> tuple[list[str] | None, object]:
     if found.skills is None:
         return [], None
     try:
-        folder = importlib.resources.files(found.package).joinpath(found.skills)
+        skill_dir = importlib.resources.files(found.package).joinpath(found.skills)
     except (ImportError, TypeError, ValueError) as exc:
         return None, f"package {found.package} can't be read ({_one_line(exc)})"
-    if not isinstance(folder, Path):
+    if not isinstance(skill_dir, Path):
         return None, (f"package {found.package} is not a folder on disk, so its skills "
                       f"can't be placed")
     try:
-        skills = sorted(entry.name for entry in folder.iterdir()
+        skills = sorted(entry.name for entry in skill_dir.iterdir()
                         if names.is_skill_dir(entry.name) and entry.is_dir())
     except OSError as exc:
-        return None, f"SKILLS folder {folder} can't be read ({exc.strerror or exc})"
-    return skills, folder
+        return None, f"SKILLS folder {skill_dir} can't be read ({exc.strerror or exc})"
+    return skills, skill_dir
 
 
 def _skills_report(module: str, steps, done, replace: bool) -> bool:

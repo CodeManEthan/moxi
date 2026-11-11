@@ -193,9 +193,9 @@ def read(path: str | os.PathLike | None = None, *,
             break
         except (FileNotFoundError, NotADirectoryError):
             return NoRecord(path)
-        except OSError as error:
+        except OSError as exc:
             if time.monotonic() >= deadline:
-                return Unreadable(path, error)
+                return Unreadable(path, exc)
             time.sleep(files.POLL)
     return parse(path, data)
 
@@ -436,8 +436,8 @@ def step(env: Mapping[str, str] | None = None, *, stdin=None, view=None,
     no_place = None
     try:
         path = paths.terminal_record(source)
-    except paths.NoAnchor as error:
-        no_place = error
+    except paths.NoAnchor as exc:
+        no_place = exc
     else:
         # One read, no retry, no parse: the file is this run's record byte for byte, or the
         # run applies the rule. A file that can't be read now is replaced if it holds.
@@ -459,8 +459,8 @@ def step(env: Mapping[str, str] | None = None, *, stdin=None, view=None,
         return Outcome(NO_PLACE, None, error=no_place)
     try:
         files.atomic_write(path, text(held, version()), mode=0o600)
-    except OSError as error:
-        return Outcome(FAILED, path, error=error)
+    except OSError as exc:
+        return Outcome(FAILED, path, error=exc)
     return Outcome(WRITTEN, path)
 
 
@@ -476,9 +476,9 @@ def row(outcome: Outcome) -> str | None:
     if outcome.kind == NO_PLACE:
         return f"Moxi can't find where it keeps the record: {error.cause}; {error.step}"
     if outcome.kind == FAILED:
-        folder = outcome.path.parent
+        record_dir = outcome.path.parent
         return (f"the record at {outcome.path} can't be written ({_reason(error)}); "
-                f"make {folder} writable by you")
+                f"make {record_dir} writable by you")
     return None
 
 

@@ -336,7 +336,7 @@ def tool_command(receipt: dict, prefix: Path, added: list[Req], uv: str,
 # -- the environment ----------------------------------------------------------------------
 
 @dataclass
-class Environment:
+class InstallEnv:
     kind: str
     prefix: Path
     #: The environment's own interpreter, for fresh processes.
@@ -344,7 +344,7 @@ class Environment:
     receipt: dict | None = None
 
 
-def environment() -> Environment:
+def install_env() -> InstallEnv:
     """The environment `moxi` runs in, or `InstallError` when the installer refuses it."""
     from . import paths
 
@@ -367,8 +367,8 @@ def environment() -> Environment:
             receipt = tomllib.loads(receipt_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
             raise InstallError(f"{receipt_path} cannot be read: {exc}") from None
-        return Environment(TOOL, prefix, python_text, receipt)
-    return Environment(PLAIN, prefix, python_text)
+        return InstallEnv(TOOL, prefix, python_text, receipt)
+    return InstallEnv(PLAIN, prefix, python_text)
 
 
 def _direct_url(dist_name: str) -> dict | None:
@@ -411,13 +411,13 @@ def installed_source(dist_name: str) -> Req | None:
 
 def run(argv: list[str], env: dict[str, str] | None = None) -> int:
     """Run a command with the installer's output; returns its exit code."""
-    environ = None
+    process_env = None
     if env:
-        environ = dict(os.environ)
-        environ.update(env)
+        process_env = dict(os.environ)
+        process_env.update(env)
     print("$ " + " ".join(_quote(a) for a in argv), flush=True)
     try:
-        return subprocess.run(argv, env=environ, check=False).returncode
+        return subprocess.run(argv, env=process_env, check=False).returncode
     except OSError as exc:
         print(f"moxi install: cannot run {argv[0]}: {exc}", file=sys.stderr)
         return 127
@@ -551,7 +551,7 @@ class Installer:
             return self._run(module)
 
     def _run(self, module: str) -> int:
-        env = environment()
+        env = install_env()
         self.env = env
         self._set_skills_form()
         before = snapshot(env.python)
@@ -865,5 +865,5 @@ def _setup_order(items: list[dict], last: str) -> list[dict]:
 
 
 __all__ = ["main", "Installer", "InstallError", "Req", "union", "parse_from",
-           "receipt_entry", "receipt_options", "tool_command", "environment",
+           "receipt_entry", "receipt_options", "tool_command", "install_env",
            "installed_source", "snapshot", "run", "run_settle"]

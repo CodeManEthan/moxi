@@ -74,7 +74,7 @@ def test_the_fence_refuses_anything_else(backend, verb, args):
         argv(backend, verb, *args)
 
 
-def test_the_task_read_carries_refs_only_in_its_environment():
+def test_the_task_read_carries_refs_only_in_its_env():
     cmd = argv("schtasks", "tasks")
     assert cmd[:4] == ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
     assert "$env:MOXI_TASK_REFS" in cmd[4]

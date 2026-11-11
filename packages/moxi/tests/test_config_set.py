@@ -810,7 +810,7 @@ def test_a_check_that_cannot_be_imported_refuses_with_exit_3(demo, site):
 @pytest.mark.parametrize("argv", [("set", "demo", "name", "x"),
                                   ("unset", "demo", "name"),
                                   ("demo", "check")])
-def test_a_bad_environment_variable_never_refuses_a_change_or_the_check(checked, capsys,
+def test_a_bad_env_variable_never_refuses_a_change_or_the_check(checked, capsys,
                                                                          monkeypatch, argv):
     checked.parent.mkdir(parents=True)
     checked.write_text('backend = "local"\nname = "y"\n')

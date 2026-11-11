@@ -36,11 +36,11 @@ def home_path(env: Mapping[str, str] | None = None) -> str | None:
     empty, which is the default home."""
     from .. import paths
 
-    environ = os.environ if env is None else env
-    value = environ.get(paths.HOME_ENV)
+    effective_env = os.environ if env is None else env
+    value = effective_env.get(paths.HOME_ENV)
     if not value:
         return None
-    return os.path.realpath(os.path.abspath(paths._expanduser(value, environ)))
+    return os.path.realpath(os.path.abspath(paths._expanduser(value, effective_env)))
 
 
 def home_tag(env: Mapping[str, str] | None = None) -> str | None:
@@ -69,6 +69,6 @@ def locators_set(module: str, env: Mapping[str, str] | None = None) -> tuple[str
     `MOXI_HOME`. Other variables in the module's namespace are not locators."""
     from .. import paths
 
-    environ = os.environ if env is None else env
+    effective_env = os.environ if env is None else env
     return tuple(name for name in paths.Layout(module).locators()
-                 if name != paths.HOME_ENV and environ.get(name))
+                 if name != paths.HOME_ENV and effective_env.get(name))

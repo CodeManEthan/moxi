@@ -111,7 +111,7 @@ def test_importing_the_package_stays_light():
     assert out == ""
 
 
-def test_the_core_s_records_are_in_the_core_s_state_directory(tmp_path, monkeypatch):
+def test_the_core_s_records_are_in_the_core_s_state_dir(tmp_path, monkeypatch):
     """A module-style variable for the name `moxi` doesn't move the core's records."""
     from moxi import paths
 

@@ -180,7 +180,7 @@ def test_an_undumpable_codex_is_still_an_agent():
     assert got == Evidence("E2", RUN + 2, "codex", "codex")
 
 
-def test_a_harness_resetting_its_tool_shells_environment_is_met_above_the_hop():
+def test_a_harness_resetting_its_tool_shells_env_is_met_above_the_hop():
     hop = p(["env", "-i", "bash"], env={})
     got = found(ME, SHELL, hop, p(["codex", "exec"]), SHELL, *PERSON[1:])
     assert got.kind == "E2" and got.pid == RUN + 3
@@ -308,7 +308,7 @@ def test_a_file_descriptor_path_elsewhere_records(procs):
 
 
 @pytest.mark.parametrize("value", ["1", ""], ids=["one", "empty"])
-def test_a_tool_mark_in_the_runs_start_environment_stops_it_before_any_read(value):
+def test_a_tool_mark_in_the_runs_start_env_stops_it_before_any_read(value):
     from moxi import _mark
 
     marks = _mark.present({"CLAUDECODE": value}, _mark.TOOL_MARKS)
@@ -339,7 +339,7 @@ def test_a_run_with_neither_mark_records():
     ({"CLAUDECODEX": "1", "CLAUDE": "1"}, True, ()),
     ({}, False, ()),
 ], ids=["set", "empty", "posix-case", "windows-case", "near-miss", "none"])
-def test_which_tool_marks_an_environment_holds(env, fold, marks):
+def test_which_tool_marks_an_env_holds(env, fold, marks):
     from moxi import _mark
 
     assert _mark.present(env, _mark.TOOL_MARKS, fold=fold) == marks
@@ -432,13 +432,13 @@ def test_a_unit_that_is_not_the_cores_passes():
 
 # -- E4 ------------------------------------------------------------------------------------
 
-def test_an_ancestors_start_environment_with_the_mark_stops_it():
+def test_an_ancestors_start_env_with_the_mark_stops_it():
     marked = p(["/usr/bin/script", "-q"], env={_mark.STARTED_BY_ENV: "moxi-launcher-job"})
     got = found(ME, SHELL, marked, *PERSON[1:])
     assert got == Evidence("E4", RUN + 2, "script", "moxi-launcher-job")
 
 
-def test_the_runs_own_environment_is_read_from_what_moxi_noted_at_import():
+def test_the_runs_own_env_is_read_from_what_moxi_noted_at_import():
     # The run's own start environment in the view is not what decides; the noted value is.
     me = p(ME["argv"], env={_mark.STARTED_BY_ENV: "ignored"})
     assert found(me, *PERSON) is None
@@ -808,12 +808,12 @@ LINUX = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /
 
 
 def _fake(root, pid, *, ppid=1, start=500, state="S", comm="bash", cmdline=b"bash\0",
-          environ=b"A=1\0", cgroup=b"0::/user.slice/x.scope\n"):
+          env=b"A=1\0", cgroup=b"0::/user.slice/x.scope\n"):
     d = root / str(pid)
     d.mkdir()
     (d / "stat").write_bytes(f"{pid} ({comm}) {state} {ppid} ".encode()
                              + b" ".join(b"0" for _ in range(17)) + f" {start} 0\n".encode())
-    for name, raw in (("cmdline", cmdline), ("environ", environ), ("cgroup", cgroup)):
+    for name, raw in (("cmdline", cmdline), ("environ", env), ("cgroup", cgroup)):
         if raw is not None:
             (d / name).write_bytes(raw)
     return d
@@ -822,7 +822,7 @@ def _fake(root, pid, *, ppid=1, start=500, state="S", comm="bash", cmdline=b"bas
 @LINUX
 def test_the_linux_reader_reads_a_process(tmp_path):
     _fake(tmp_path, 12, ppid=7, start=4321, comm="tmux: server",
-          cmdline=b"/usr/bin/tmux\0-D\0", environ=b"MOXI_STARTED_BY=x\0",
+          cmdline=b"/usr/bin/tmux\0-D\0", env=b"MOXI_STARTED_BY=x\0",
           cgroup=b"0::/user.slice/user@1000.service/app.slice/moxi-slots-server.service\n")
     got = _view.LinuxView(str(tmp_path), uid=os.geteuid()).read(12)
     assert got == Proc(12, 7, 4321.0, ("/usr/bin/tmux", "-D"), {"MOXI_STARTED_BY": "x"},
@@ -838,7 +838,7 @@ def test_the_linux_reader_shields_another_uids_process(tmp_path):
 
 
 @LINUX
-def test_the_linux_reader_shields_a_process_whose_environment_is_refused(tmp_path):
+def test_the_linux_reader_shields_a_process_whose_env_is_refused(tmp_path):
     d = _fake(tmp_path, 12, cmdline=b"/usr/lib/systemd/systemd\0--user\0")
     (d / "environ").chmod(0)
     if os.access(d / "environ", os.R_OK):
@@ -851,9 +851,9 @@ def test_the_linux_reader_shields_a_process_whose_environment_is_refused(tmp_pat
 @pytest.mark.parametrize("what", ["gone", "zombie", "no-environ"])
 def test_the_linux_reader_says_gone(tmp_path, what):
     if what == "zombie":
-        _fake(tmp_path, 12, state="Z", cmdline=b"", environ=b"")
+        _fake(tmp_path, 12, state="Z", cmdline=b"", env=b"")
     elif what == "no-environ":
-        _fake(tmp_path, 12, environ=None)
+        _fake(tmp_path, 12, env=None)
     view = _view.LinuxView(str(tmp_path), uid=os.geteuid())
     with pytest.raises(Gone):
         view.read(12)
@@ -958,9 +958,9 @@ def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_pa
     command gives the walk."""
     import json
 
-    folder = os.path.dirname(sys.executable)
+    bin_dir = os.path.dirname(sys.executable)
     name = "moxi.exe" if sys.platform == "win32" else "moxi"
-    if not any(entry.lower() == name for entry in os.listdir(folder)):
+    if not any(entry.lower() == name for entry in os.listdir(bin_dir)):
         pytest.skip("no moxi console script beside this interpreter")
     site = tmp_path / "site"
     site.mkdir()
@@ -971,9 +971,9 @@ def test_live_the_walk_skips_exactly_the_real_console_scripts_entry_chain(tmp_pa
             "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
             "PATHEXT")
     env = {k: os.environ[k] for k in keep if k in os.environ}
-    env.update(PATH=os.pathsep.join([folder, os.environ.get("PATH", "")]),
+    env.update(PATH=os.pathsep.join([bin_dir, os.environ.get("PATH", "")]),
                PYTHONPATH=str(site), WALK_OUT=str(out), **{_mark.STARTED_BY_ENV: "the hop"})
-    script = "moxi" if form == "bare" else os.path.join(folder, name)
+    script = "moxi" if form == "bare" else os.path.join(bin_dir, name)
     done = subprocess.run([sys.executable, "-c", _HOP, script, "version"], env=env,
                           cwd=tmp_path, capture_output=True, text=True, timeout=150)
     assert done.returncode == 0, done.stderr

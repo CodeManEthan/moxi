@@ -224,7 +224,7 @@ def _sid_text(pointer: int) -> str:
 # -- the user's known folders -------------------------------------------------------------
 
 #: The known folders `known_folder` asks for, by the names the core uses for them.
-KNOWN_FOLDERS = {
+KNOWN_FOLDERS = {  # noqa: MX3 -- Windows names these Known Folders
     "roaming": "{3EB685DB-65F9-4CF6-A03A-E3EF65729F3D}",  # FOLDERID_RoamingAppData
     "local": "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}",    # FOLDERID_LocalAppData
     "profile": "{5E6C858F-0E22-4760-9AFE-EA3317B67173}",  # FOLDERID_Profile
@@ -232,7 +232,7 @@ KNOWN_FOLDERS = {
 _KF_FLAG_DONT_VERIFY = 0x00004000
 
 
-def known_folder(name: str) -> str:
+def known_folder(name: str) -> str:  # noqa: MX3 -- Windows names these Known Folders
     """The current user's known folder `name` (`roaming`, `local` or `profile`), asked of
     the shell (`SHGetKnownFolderPath`), never read from an environment variable.
 

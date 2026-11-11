@@ -370,7 +370,7 @@ def test_the_mark_is_the_first_line_only(unit_root):
     assert backend.mark("# moxi unit: \n") is None
 
 
-def test_the_unit_directory_follows_the_environment(tmp_path, monkeypatch):
+def test_the_unit_dir_follows_the_env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "x"))
     assert SystemdBackend().root == tmp_path / "x" / "systemd" / "user"
     monkeypatch.delenv("XDG_CONFIG_HOME")
@@ -2120,7 +2120,7 @@ def test_unwrap_of_a_timer_not_wrapped_is_ok_and_reloads_nothing(unit_root):
     assert run.calls == []
 
 
-def test_unwrap_leaves_another_file_in_the_drop_in_folder(unit_root, bin_dir):
+def test_unwrap_leaves_another_file_in_the_drop_in_dir(unit_root, bin_dir):
     _wrap(unit_root)
     other = unit_root / "backup-run.service.d" / "10-local.conf"
     other.write_text("[Service]\n")

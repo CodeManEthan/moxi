@@ -203,7 +203,7 @@ def parent(argv: list[str]) -> int:
             from moxi.units import _backend
 
             _backend._override.append(backend())
-            install.environment = lambda: install.Environment(
+            install.install_env = lambda: install.InstallEnv(
                 install.PLAIN, Path(sys.prefix), sys.executable)
             install.run = lambda argv, env=None: note("parent", ran=argv) or 0
             uninstall.run_teardown = (

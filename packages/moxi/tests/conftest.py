@@ -204,10 +204,10 @@ def drop_modules(packages: set[str]) -> None:
 WINDOWS = sys.platform == "win32"
 
 #: The form a skill folder takes under `skills.form = link`.
-FOLDER_LINK = "junction" if WINDOWS else "link"
+DIR_LINK = "junction" if WINDOWS else "link"
 
 
-def link_folder(link: Path, target: Path) -> None:
+def link_dir(link: Path, target: Path) -> None:
     """Make `link` a link to the folder `target`: a symlink, or on Windows a directory
     junction, which needs no privilege there."""
     if WINDOWS:

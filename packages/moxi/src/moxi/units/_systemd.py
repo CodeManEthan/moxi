@@ -96,9 +96,9 @@ _PLAIN = re.compile(r"[A-Za-z0-9_@%$+=:,./-]+")
 def unit_dir(env: Mapping[str, str] | None = None) -> Path:
     """The user unit directory: `$XDG_CONFIG_HOME/systemd/user`, else
     `~/.config/systemd/user`."""
-    environ = os.environ if env is None else env
-    base = environ.get("XDG_CONFIG_HOME") or os.path.join(
-        environ.get("HOME") or os.path.expanduser("~"), ".config")
+    effective_env = os.environ if env is None else env
+    base = effective_env.get("XDG_CONFIG_HOME") or os.path.join(
+        effective_env.get("HOME") or os.path.expanduser("~"), ".config")
     return Path(base) / "systemd" / "user"
 
 
@@ -124,7 +124,7 @@ def quote(arg: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-def environment_line(name: str, value: str) -> str:
+def environment_line(name: str, value: str) -> str:  # noqa: MX3 -- systemd names this an Environment= line
     """One `Environment=` line setting `name` to `value`, by that setting's rules: the
     assignment in double quotes, `\\` and `"` escaped, a control character written as a
     C escape, `%` doubled (a specifier), and `$` left alone, since systemd expands no
@@ -299,7 +299,7 @@ class SystemdBackend:
                                "WantedBy=sockets.target"]
                     sockets.append((root / unit, _text(socket)))
             service = head + ["[Unit]", f"Description={_value(doc)}", "", "[Service]",
-                              "Type=simple", *_environment(spec),
+                              "Type=simple", *_env(spec),
                               f"ExecStart={command_line(spec.command)}"]
             if sockets:
                 # By default a service is handed only the socket unit of its own name.
@@ -322,7 +322,7 @@ class SystemdBackend:
                 out.append(Rendered("socket", tuple(sockets)))
             return tuple(out)
         service = head + ["[Unit]", f"Description={_value(doc)}", "", "[Service]",
-                          "Type=oneshot", *_environment(spec),
+                          "Type=oneshot", *_env(spec),
                           f"ExecStart={command_line(_gate_argv(spec))}"]
         if spec.cwd:
             service.append(f"WorkingDirectory={_path_value(spec.cwd, 'cwd')}")
@@ -981,7 +981,7 @@ def dropin_name(module: str) -> str:
     return f"50-moxi-{module}.conf" if tag is None else f"50-moxi-{tag}-{module}.conf"
 
 
-def _environment(spec: Spec) -> list[str]:
+def _env(spec: Spec) -> list[str]:
     """A service's `Environment=` lines: one per variable the unit runs with."""
     return [environment_line(name, value) for name, value in spec.environment]
 
@@ -990,8 +990,8 @@ def _read_wrap(path: Path) -> tuple[str, str, str, str] | None:
     """A drop-in's two mark lines as `(module, timer, key, name)`, or None for a file
     without them."""
     try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            first, second = handle.readline().rstrip("\n"), handle.readline().rstrip("\n")
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            first, second = fh.readline().rstrip("\n"), fh.readline().rstrip("\n")
     except OSError:
         return None
     if not first.startswith(WRAP_MARK):

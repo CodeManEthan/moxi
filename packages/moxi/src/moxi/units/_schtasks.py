@@ -53,7 +53,7 @@ from ._home import home_tag
 from ._types import TASK_STATUS_CODES, Acted, UnitChange, UnitState, Wrapped
 
 #: The task folder that is moxi's namespace on this backend.
-FOLDER = "\\Moxi\\"
+TASK_DIR = "\\Moxi\\"
 #: The XML's namespace.
 NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 #: The schedule's anchor: a fixed day in the past, local time.
@@ -73,7 +73,7 @@ class SchtasksBackend:
     """The `Backend` protocol over Task Scheduler.
 
     `user` is the account the tasks run as and log on with, `DOMAIN\\user`; it is read
-    from this process's token when first needed unless given. `folder` is the task
+    from this process's token when first needed unless given. `task_dir` is the task
     folder (`\\Moxi\\`; a proof row uses another). `clock` (seconds, monotonic) and
     `sleep` time the reads an act on a foreign daemon task makes while it waits for
     `State` to follow; a test passes its own so nothing waits.
@@ -84,11 +84,11 @@ class SchtasksBackend:
     encoding = "utf-16"
     sockets = "none"
 
-    def __init__(self, *, user: str | None = None, folder: str = FOLDER,
+    def __init__(self, *, user: str | None = None, task_dir: str = TASK_DIR,
                  clock: Callable[[], float] | None = None,
                  sleep: Callable[[float], object] | None = None):
         self._user = user
-        self.folder = folder
+        self.task_dir = task_dir
         self._clock = clock or time.monotonic
         self._sleep = sleep or time.sleep
 
@@ -97,13 +97,13 @@ class SchtasksBackend:
     def task(self, module: str, name: str) -> str:
         """The task's path, `\\Moxi\\<module>-<name>`, or `\\Moxi\\<tag>\\<module>-<name>`
         for a tagged home."""
-        return f"{self.home_folder()}{module}-{name}"
+        return f"{self.home_dir()}{module}-{name}"
 
-    def home_folder(self) -> str:
+    def home_dir(self) -> str:
         """The folder this home's tasks are in: the folder itself, or its subfolder of
         this home's tag."""
         tag = home_tag()
-        return self.folder if tag is None else f"{self.folder}{tag}\\"
+        return self.task_dir if tag is None else f"{self.task_dir}{tag}\\"
 
     @staticmethod
     def xml_path(module: str, name: str) -> Path:
@@ -210,9 +210,9 @@ class SchtasksBackend:
         return ()
 
     def marked(self, module: str) -> tuple[UnitRef, ...]:
-        folder = self.xml_path(module, "x").parent
+        task_dir = self.xml_path(module, "x").parent
         out = []
-        for path in sorted(folder.glob(f"{module}-*.xml")):
+        for path in sorted(task_dir.glob(f"{module}-*.xml")):
             try:
                 text = path.read_bytes().decode(self.encoding, errors="replace")
             except OSError:
@@ -311,7 +311,7 @@ class SchtasksBackend:
 
     def own(self, ref: str) -> bool:
         path = _path(ref).casefold()
-        return path.startswith(FOLDER.casefold()) or path.startswith(self.folder.casefold())
+        return path.startswith(TASK_DIR.casefold()) or path.startswith(self.task_dir.casefold())
 
     def foreign(self, ref: str, fence: Fence | None, kind: str | None = None) -> UnitRef:
         """The task `ref` (a leading `\\` added when it has none), read and acted on as
@@ -442,12 +442,12 @@ class SchtasksBackend:
         not running. A runtime file that is there and cannot be read, or holds no
         `{"pid", "started"}`, raises `ReadError`: it may name a daemon that runs."""
         out = set()
-        folder = self.home_folder()
+        task_dir = self.home_dir()
         for task in ids:
             path = _path(task)
-            if not path.casefold().startswith(folder.casefold()):
+            if not path.casefold().startswith(task_dir.casefold()):
                 continue
-            module, dash, name = path[len(folder):].partition("-")
+            module, dash, name = path[len(task_dir):].partition("-")
             if not dash or "\\" in module:
                 continue
             file = self.runtime_file(module, name)

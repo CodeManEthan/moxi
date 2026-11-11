@@ -174,7 +174,7 @@ def test_with_nothing_to_move_the_move_reads_and_stops_nothing(w, monkeypatch):
     assert w.sup.calls == []
 
 
-def test_the_move_stops_records_renames_and_removes_the_host_folder(w):
+def test_the_move_stops_records_renames_and_removes_the_host_dir(w):
     w.installed(DAEMONS=SOCKET)
     old, cache = w.legacy(), w.legacy("cache")
     record: list = []
@@ -262,7 +262,7 @@ def test_a_stop_that_fails_on_the_second_unit_raises_before_the_rename(w):
     assert (old / "data.txt").exists()
 
 
-def test_an_empty_new_directory_is_replaced_and_an_empty_old_one_tidied(w):
+def test_an_empty_new_dir_is_replaced_and_an_empty_old_one_tidied(w):
     w.installed(DAEMONS=ONE)
     w.legacy()
     (w.home / "state" / "demo").mkdir()
@@ -1614,11 +1614,11 @@ def sk(w, monkeypatch):
 
     def skills(*names, **more):
         """Module demo shipping `names` in `skills/`, and nothing else there."""
-        folder = w.pkg / "skills"
-        if folder.exists():
+        skills_dir = w.pkg / "skills"
+        if skills_dir.exists():
             import shutil
 
-            shutil.rmtree(folder)
+            shutil.rmtree(skills_dir)
         for name in names:
             w.site.write(f"moxi_demo/skills/{name}/SKILL.md", f"# {name}\n")
         w.module(SKILLS="'skills'", **more)
@@ -2015,7 +2015,7 @@ def test_an_occupant_git_tracks_is_refused_and_replace_moves_it_aside(sk, capsys
     assert f"demo: placed skill moxi-demo-send for claude ({mine})" in out
 
 
-def test_a_skills_folder_not_on_disk_or_a_broken_ledger_fails_the_step(sk, capsys,
+def test_a_skills_dir_not_on_disk_or_a_broken_ledger_fails_the_step(sk, capsys,
                                                                        monkeypatch):
     import importlib.resources
 
@@ -2165,17 +2165,17 @@ def test_a_dest_placement_alone_asks_no_skills_question(copying, capsys, monkeyp
     assert [p.path for p in copying.place.status("demo")] == [copying.dest]
 
 
-def test_the_step_counts_folders_only_and_reads_no_skill_md(sk, capsys):
+def test_the_step_counts_dirs_only_and_reads_no_skill_md(sk, capsys):
     """Dot-named folders, `__pycache__` and plain files in `SKILLS` are not skills, and a
     skill whose `SKILL.md` names it otherwise, or that has none, is still placed: the
     contract check holds the file before release."""
     sk.skills("moxi-a")
-    folder = sk.pkg / "skills"
+    skills_dir = sk.pkg / "skills"
     for name in (".hidden", "__pycache__"):
-        (folder / name).mkdir()
-    (folder / "README.md").write_text("not a skill\n")
-    (folder / "moxi-b").mkdir()
-    (folder / "moxi-a" / "SKILL.md").write_text("---\nname: other\n---\n")
+        (skills_dir / name).mkdir()
+    (skills_dir / "README.md").write_text("not a skill\n")
+    (skills_dir / "moxi-b").mkdir()
+    (skills_dir / "moxi-a" / "SKILL.md").write_text("---\nname: other\n---\n")
     code, out = place_settle(sk, capsys, skills=True)
     assert code == 0, out
     assert sorted({p.name for p in sk.place.status("demo")}) == ["moxi-a", "moxi-b"]

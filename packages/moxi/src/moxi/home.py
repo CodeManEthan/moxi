@@ -260,9 +260,9 @@ def _tidy(old: Path) -> None:
     _tidy_label(old.parent)
 
 
-def _tidy_label(folder: Path) -> None:
+def _tidy_label(label_dir: Path) -> None:
     try:
-        folder.rmdir()
+        label_dir.rmdir()
     except OSError:
         pass  # not empty: another module's data is still there
 

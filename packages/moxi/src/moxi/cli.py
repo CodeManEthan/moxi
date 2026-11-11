@@ -1181,21 +1181,21 @@ def _paths_of(module: str) -> dict:
         if found.state != modules.PRESENT:
             raise LookupError(found.reason)
         layout, stores = paths.Layout(module), found.stores
-    directories = {"data": layout.data_dir(), "state": layout.state_dir(),
+    store_dirs = {"data": layout.data_dir(), "state": layout.state_dir(),
                    "cache": layout.cache_dir(), "config": layout.config_dir(),
                    "runtime": layout.runtime_dir()}
     notes = [f"{kind} is read where it is, under a host folder; a later release of "
              "moxi moves it"
              for kind, root in (("state", layout.state_root()), ("cache", layout.cache_root()))
-             if directories[kind] != root / module]
+             if store_dirs[kind] != root / module]
     listed = []
     for name, entry in stores.items():
-        path = directories[entry["root"]] / entry["path"]
+        path = store_dirs[entry["root"]] / entry["path"]
         listed.append({"name": name, "path": str(path), "root": entry["root"],
                        "kind": entry["kind"], "lazy": bool(entry.get("lazy", False)),
                        **_store_facts(path, entry["kind"])})
     info = {"module": module,
-            "directories": {kind: str(path) for kind, path in directories.items()},
+            "directories": {kind: str(path) for kind, path in store_dirs.items()},
             "config_file": str(layout.config_file()), "notes": notes, "stores": listed}
     if module == names.HARNESS:
         # The core's record of the terminal's environment, in the anchor no variable
