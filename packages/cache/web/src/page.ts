@@ -72,7 +72,8 @@ const STYLES = css`
          cursor: auto; }
   .det .r { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline; }
   .det .k, .det .d { color: var(--moxi-text-dim); }
-  .det .f { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .det .f { min-width: 0; overflow-wrap: anywhere; }
+  .det .at { font-variant-numeric: tabular-nums; }
   .det .x { color: var(--moxi-text-dim); padding-left: 18px; }
   .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 92px; }
   .det .foot button { font-size: 13px; line-height: 18px; }
@@ -328,7 +329,8 @@ export class CachePage extends LitElement {
     const copied = `id ${row.key}`;
     return html`<div class="det" data-part="opened">
       ${view.lines.map((line) => html`<div class="r" data-line=${line.label}><span class="k">${line.label}</span><span
-        class="f">${line.value}${line.tails.map((tail) => html` <span class="d">· ${tail}</span>`)}</span><span></span></div>`)}
+        class="f"><span class="at">${line.value}</span>${line.tails.map((tail) => html` <span class="d">· ${tail}</span>`)
+        }</span><span></span></div>`)}
       <div class="r" data-line="session"><span class="k">${SESSION_LABEL}</span><span class="f">${view.session.map((part, at) =>
         html`${at > 0 ? " " : ""}<span class=${part.dim ? "d" : ""}>${at > 0 ? "· " : ""}${part.text}</span>`)}</span>${
         view.sessions !== null ? this.#link("sessions", view.sessions, SESSIONS_LINK, { cls: "x", action: "sessions" })

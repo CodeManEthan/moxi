@@ -374,6 +374,14 @@ def test_my_session_is_warm_until_a_time_and_opens_to_the_second(on_both, moment
             rf"^Goes cold\s*(.* )?{hhmmss(moment + 3000)} · in 50 minutes · one hour after the last request$"))
         expect(det.locator('[data-line="session"]')).to_have_text(re.compile(
             rf"^Session\s*Claude Code · {MODEL} · started (.* )?{hhmm(moment - 3000)} · ~/code/proj-a\s*Sessions$"))
+        # The times take figures of one width, so they line up; the Session line keeps the
+        # font's own, so its hyphens stay narrow.
+        for label, at in (("Last request", moment - 600), ("Goes cold", moment + 3000)):
+            expect(det.locator(f'[data-line="{label}"]').get_by_text(re.compile(rf"^(.* )?{hhmmss(at)}$"))
+                   ).to_have_css("font-variant-numeric", "tabular-nums")
+        session = det.locator('[data-line="session"]')
+        for part in ("Claude Code", MODEL, re.compile(rf"started (.* )?{hhmm(moment - 3000)}$"), "~/code/proj-a"):
+            expect(session.get_by_text(part)).to_have_css("font-variant-numeric", "normal")
         expect(det.get_by_role("link", name="Sessions")).to_be_visible()
         expect(det.locator('[data-line="Read"]')).to_have_count(0)
         # One sessions holds nothing for is its harness alone, with no link.
