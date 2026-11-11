@@ -185,8 +185,9 @@ export function spanWords(secs: number): string | null {
   return hours < 24 ? count(hours, "hour") : count(Math.floor(hours / 24), "day");
 }
 
-/** A label inside a sentence: `weekly Opus`. */
-const inSentence = (label: string): string => label.replace(/^Weekly\b/, "weekly");
+/** A limit's label inside a sentence, wherever the page writes one: `weekly Opus`,
+ * `5-hour`. */
+export const inSentence = (label: string): string => label.replace(/^Weekly\b/, "weekly");
 
 function warning(early: Drawn[], today: string | null, clock: Clock): Warning | null {
   if (early.length === 0) return null;

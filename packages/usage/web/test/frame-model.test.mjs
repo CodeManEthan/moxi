@@ -229,7 +229,7 @@ test("a window that could not be read has a line only for a harness with files, 
   const found = frame({ limits: read(limits(rows)) });
   assert.deepEqual(found.limits.groups, []);
   assert.deepEqual(texts(found), ["Codex 5-hour limit not read: no rollout holds a reading",
-                                  "Codex Weekly limit not read: no rollout holds a reading"]);
+                                  "Codex weekly limit not read: no rollout holds a reading"]);
   const noFiles = frame({ limits: read(limits(rows)), status: read(status({ lanes: [lane("claude", 72)] })) });
   assert.deepEqual(texts(noFiles), []);
   assert.deepEqual(texts(frame({ limits: read(limits(rows)), status: OUT })), []);

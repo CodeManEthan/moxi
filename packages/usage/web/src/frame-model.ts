@@ -9,7 +9,7 @@ import type { CostRow, Sum } from "./cost-model.ts";
 import { addDays, dayPart, isDay, LOCAL, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import type { DayRow, IndexEvent, Lane, Limits, PassOutcome, Report, Status } from "./feed.ts";
-import { harnessName, limitLabel, limitsModel } from "./limits-model.ts";
+import { harnessName, inSentence, limitLabel, limitsModel } from "./limits-model.ts";
 import type { LimitsModel } from "./limits-model.ts";
 
 /** One read as the frame takes it; a `Feed` is one. A failed read keeps its last value. */
@@ -255,7 +255,7 @@ function windowLines(limits: Limits | null, status: Status | null): FootLine[] {
   const out: FootLine[] = [];
   for (const row of limits.rows) {
     if (row.state !== "unavailable" || !row.reason || row.reason === NO_TURNS || !used.has(row.harness)) continue;
-    const text = `${harnessName(row.harness)} ${limitLabel(row)} limit not read: ${row.reason}`;
+    const text = `${harnessName(row.harness)} ${inSentence(limitLabel(row))} limit not read: ${row.reason}`;
     if (!out.some((line) => line.text === text)) out.push({ key: `window:${out.length}`, text });
   }
   return out;
