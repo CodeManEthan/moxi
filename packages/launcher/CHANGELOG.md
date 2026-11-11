@@ -20,6 +20,12 @@
   holds for the one launch that starts with it. A request from Home carries
   `off_posture: true` when a permission row it sends or leaves out is off the user's
   usual value, so such a launch is not refused for it.
+- Home's `Options` panel draws a harness's row only where the place the button launches
+  in passes its flag, and lets go of a value set on a row it stops drawing. Its Tools >
+  Built-in is a line per built-in tool with `allow` and `deny`: a press changes only that
+  tool's own entry in `allowed_tools` or `disallowed_tools`, scoped rules and every other
+  entry stay listed in their places with `Remove`, and while `tools` names a set the
+  lines it leaves out are dim.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an

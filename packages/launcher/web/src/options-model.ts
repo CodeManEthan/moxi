@@ -22,13 +22,19 @@
 // box names each by its label and the word that opens the panel counts them. A value that
 // can do harm is marked wherever it is drawn, however it got there, and is named first.
 //
+// Tools > Built-in is drawn as one line per built-in tool over the three rows that hold
+// tools: the session's whole set of them, those it may use without asking and those it may
+// not use. A line's `allow` and `deny` change that tool's own entry in the last two and
+// nothing else: every other entry, a tool the page does not name included, stays in its
+// place, and no line ever changes the whole set.
+//
 // Every string here goes into the page as text.
 
 import type { FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import { GROUPS, isListField, leaveOutChoice, same, shownValue } from "./panel.ts";
 import type { FormMode } from "./panel.ts";
-import { FIRST_TURN, launchedValue, offPosture } from "./prompt-model.ts";
+import { BUILT_IN_TOOLS, FIRST_TURN, launchedValue, offPosture } from "./prompt-model.ts";
 
 /** A launch form's field with what the catalog says of its place in the panel. */
 export interface PanelField extends FieldDescriptor {
@@ -307,6 +313,9 @@ export function drawnField(field: PanelField, value: FormValue): FieldDescriptor
   } else {
     out.value = typeof value === "string" ? value : leaveOutChoice(field) ?? "";
   }
+  if (field.name === TOOL_SET && Array.isArray(out.value_items) && out.value_items.length === 0) {
+    out.note = said(field.note) !== "" ? `${EVERY_TOOL}; ${field.note}` : EVERY_TOOL;
+  }
   const offered = field.type === "string" && Array.isArray(field.values) ? field.values.filter((item) => item !== "") : [];
   if (picksOnly(field)) {
     out.type = "enum";
@@ -317,6 +326,12 @@ export function drawnField(field: PanelField, value: FormValue): FieldDescriptor
   }
   return out;
 }
+
+/** The row that holds the session's whole set of built-in tools; empty, it has every one. */
+export const TOOL_SET = "tools";
+
+/** What the set of built-in tools reads while it is empty. */
+export const EVERY_TOOL = "every built-in tool";
 
 /**
  * A row's value after one change the form renderer reports: a new value, a list item added
@@ -485,4 +500,143 @@ export function offRows(fields: readonly PanelField[], base: readonly PanelField
 export function presetOffLine(preset: string, rows: readonly OffRow[]): string | null {
   const labels = rows.filter((row) => row.source === "preset").map((row) => row.label);
   return labels.length === 0 ? null : `Preset ${preset} sets ${labels.join(", ")} off your defaults`;
+}
+
+// --- Tools > Built-in ----------------------------------------------------------------------
+
+/** The rows of the tools the session may use without asking, and may not use. */
+export const ALLOWED = "allowed_tools";
+export const DENIED = "disallowed_tools";
+export type RuleRow = typeof ALLOWED | typeof DENIED;
+
+/** The items of the three rows the Tools view is over, by row name. */
+export interface ToolLists {
+  tools: string[];
+  allowed_tools: string[];
+  disallowed_tools: string[];
+}
+
+/** The two words on a tool's line. */
+export type ToolWord = "allow" | "deny";
+
+const ROW_OF: Readonly<Record<ToolWord, RuleRow>> = { allow: ALLOWED, deny: DENIED };
+
+/** What a line says whose tool the launch's set of built-in tools leaves out. */
+export const NOT_IN_SET = "not in this launch's tools";
+
+/** The heading over the rules no line draws. */
+export const OTHER_RULES = "Other rules";
+
+/** Whether a subgroup is drawn as the Tools view: Tools > Built-in, with both rows of rules. */
+export function isToolsView(group: string, sub: PanelSub): boolean {
+  return group === "tools" && sub.name === "Built-in"
+    && [ALLOWED, DENIED].every((name) => sub.rows.some((row) => row.name === name));
+}
+
+/** The three rows' items now: the value set in the panel, else the form's fill. */
+export function toolLists(fields: readonly PanelField[], set: Readonly<Record<string, FormValue>>): ToolLists {
+  const items = (name: string): string[] => {
+    const field = fields.find((row) => row.name === name);
+    const value = field === undefined ? null : valueNow(field, set);
+    return Array.isArray(value) ? [...value] : [];
+  };
+  return { tools: items(TOOL_SET), allowed_tools: items(ALLOWED), disallowed_tools: items(DENIED) };
+}
+
+/** The built-in tool a scoped rule is for, `Bash` for `Bash(git status)`; null for any
+ * other entry, a bare name included. */
+export function scopedTool(entry: string): string | null {
+  const found = /^([A-Za-z]+)\(.*\)$/s.exec(entry);
+  return found !== null && (BUILT_IN_TOOLS as readonly string[]).includes(found[1]) ? found[1] : null;
+}
+
+/** The word boxed on a tool's line: `deny` while its bare name is a denied entry, which
+ * wins over an allowed one, else `allow` while it is an allowed entry, else neither. */
+export function boxedWord(from: ToolLists, tool: string): ToolWord | null {
+  if (from.disallowed_tools.includes(tool)) return "deny";
+  return from.allowed_tools.includes(tool) ? "allow" : null;
+}
+
+function copied(from: ToolLists): ToolLists {
+  return { tools: [...from.tools], allowed_tools: [...from.allowed_tools], disallowed_tools: [...from.disallowed_tools] };
+}
+
+/**
+ * The three rows after `word` is pressed on `tool`'s line. The boxed word takes the bare
+ * name out of its row; the other puts it last in its own row, where it is not already, and
+ * takes it out of the other row. Every other entry stays where it was, and the set of
+ * built-in tools is never changed.
+ */
+export function pressTool(from: ToolLists, tool: string, word: ToolWord): ToolLists {
+  const out = copied(from);
+  const row = ROW_OF[word];
+  if (boxedWord(from, tool) === word) {
+    out[row] = from[row].filter((entry) => entry !== tool);
+    return out;
+  }
+  const other: RuleRow = row === ALLOWED ? DENIED : ALLOWED;
+  if (!from[row].includes(tool)) out[row] = [...from[row], tool];
+  out[other] = from[other].filter((entry) => entry !== tool);
+  return out;
+}
+
+/** One entry of a row of rules, with the row it is in and its place there. */
+export interface ToolRule {
+  row: RuleRow;
+  entry: string;
+  at: number;
+}
+
+/** One built-in tool's line. */
+export interface ToolLine {
+  tool: string;
+  boxed: ToolWord | null;
+  /** Its scoped rules, the allowed ones first, each row's in its order. */
+  rules: ToolRule[];
+  /** The launch's set of built-in tools holds names and not this one. */
+  dim: boolean;
+}
+
+function rulesOf(from: ToolLists): ToolRule[] {
+  return ([ALLOWED, DENIED] as const).flatMap((row) => from[row].map((entry, at) => ({ row, entry, at })));
+}
+
+/** A line for each of the built-in tools the page names, in its order. */
+export function toolLines(from: ToolLists): ToolLine[] {
+  const rules = rulesOf(from);
+  return BUILT_IN_TOOLS.map((tool) => ({
+    tool, boxed: boxedWord(from, tool), rules: rules.filter((rule) => scopedTool(rule.entry) === tool),
+    dim: from.tools.length > 0 && !from.tools.includes(tool),
+  }));
+}
+
+/** Every entry of the two rows of rules no line draws: a tool the page does not name, an
+ * MCP tool, anything that is neither a named tool nor one's scoped rule. */
+export function otherRules(from: ToolLists): ToolRule[] {
+  return rulesOf(from).filter((rule) => scopedTool(rule.entry) === null
+    && !(BUILT_IN_TOOLS as readonly string[]).includes(rule.entry));
+}
+
+/** The three rows with one rule taken out of its row; the rest stay in their places. */
+export function withoutRule(from: ToolLists, rule: ToolRule): ToolLists {
+  const out = copied(from);
+  if (out[rule.row][rule.at] === rule.entry) out[rule.row].splice(rule.at, 1);
+  return out;
+}
+
+/** The count of a line's scoped rules: `1 rule`, `2 rules`. */
+export function rulesWord(count: number): string {
+  return `${count} ${count === 1 ? "rule" : "rules"}`;
+}
+
+/** The values set in the panel once the two rows of rules hold what `next` gives them,
+ * each set as any row is; the set of built-in tools is not written. */
+export function withTools(options: Readonly<Record<string, FormValue>>, fields: readonly PanelField[],
+                          next: ToolLists): Record<string, FormValue> {
+  let out: Record<string, FormValue> = { ...options };
+  for (const name of [ALLOWED, DENIED] as const) {
+    const field = fields.find((row) => row.name === name);
+    if (field !== undefined) out = withOption(out, field, [...next[name]], fields);
+  }
+  return out;
 }

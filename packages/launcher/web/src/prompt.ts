@@ -46,6 +46,12 @@
 // name the form holds; the form is read again when that name changes. When the button
 // is set to another place, a value set on a row the panel no longer draws is let go of.
 //
+// Tools > Built-in draws the set of built-in tools as its plain list row, then a line for
+// each tool the page names with `allow` and `deny`, the one the rules hold boxed. A press
+// changes that tool's own entry in the allowed or the denied tools, and the boxed word takes
+// it out. A tool's scoped rules are counted on its line and open to a list with `Remove`;
+// every other entry of the two rows is listed under `Other rules`.
+//
 // A row changed in the panel is named by its label on a dim line under the box, `Changed`,
 // and counted on the word, `Options · 2`; `Reset` on that line puts every changed row back
 // to what the form is filled with and leaves the box, the place, the chip and the button
@@ -62,10 +68,14 @@ import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import {
-  afterStarted, asksFirst, CHANGED, changedValue, changes, DEFAULTS, drawnField, findRows, HIDDEN_FLAG, keptOptions, modeOf,
-  NO_MATCH, optionsWord, PANEL_WIDTH_PX, panelFields, panelGroups, RESET, SIDE_EVENT, turnedOn, valueNow, withOption,
+  afterStarted, ALLOWED, asksFirst, CHANGED, changedValue, changes, DEFAULTS, DENIED, drawnField, findRows, HIDDEN_FLAG,
+  isToolsView, keptOptions, modeOf, NO_MATCH, NOT_IN_SET, optionsWord, OTHER_RULES, otherRules, PANEL_WIDTH_PX, panelFields,
+  panelGroups, pressTool, RESET, rowLabel, rulesWord, SIDE_EVENT, toolLines, toolLists, turnedOn, valueNow, withOption,
+  withoutRule, withTools,
 } from "./options-model.ts";
-import type { Change, Mode, PanelField, PanelGroup, PanelRow, PanelSub, Pending, Word } from "./options-model.ts";
+import type {
+  Change, Mode, PanelField, PanelGroup, PanelRow, PanelSub, Pending, ToolLine, ToolLists, ToolRule, ToolWord, Word,
+} from "./options-model.ts";
 
 import {
   fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
@@ -184,6 +194,22 @@ const STYLES = css`
   .prow { padding: 6px 0; }
   .at { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 2px; color: var(--moxi-text-dim);
         font-size: 13px; line-height: 18px; }
+  .tool { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 29px; }
+  .tool .nm { min-width: 0; }
+  .tool .nm i, .tool .rc { margin-left: 8px; color: var(--moxi-text-dim); font-size: 13px; font-style: normal; }
+  .tool.dim .nm { color: var(--moxi-text-dim); }
+  .rc { padding: 0; border: 0; background: none; font-family: inherit; }
+  .tri { display: inline-flex; flex: none; }
+  .tri button { padding: 4px 7px; border: 1px solid transparent; border-radius: 6px; background: none;
+                color: var(--moxi-text-dim); font: 13px/1 var(--moxi-font-sans); }
+  .tri button.s { border-color: var(--moxi-border-strong); color: var(--moxi-text); }
+  .rules { padding: 0 0 4px 16px; }
+  .rule { display: flex; align-items: baseline; gap: 10px; font-size: 13px; line-height: 24px; }
+  .rule .re { min-width: 0; overflow-wrap: anywhere; font-family: var(--moxi-font-mono); }
+  .rule .rl { flex: none; margin-left: auto; color: var(--moxi-text-dim); }
+  .rule button { flex: none; padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; }
+  .others { margin-top: 6px; }
+  .others .oh { color: var(--moxi-text-dim); line-height: 29px; }
   .none { margin: 0; padding: 8px 0; border-top: 1px solid var(--moxi-border); color: var(--moxi-text-dim); }
   .said { margin: 10px 2px 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
   .said p { margin: 0; }
@@ -734,7 +760,53 @@ export class LauncherPrompt extends LitElement {
     return html`<button type="button" class="sub" data-sub=${key} aria-expanded=${open ? "true" : "false"}
         @click=${() => this.#toggleOpen(key)}><span><span class="ar" aria-hidden="true">${open ? "▾" : "▸"}</span>${
         sub.name}</span><span class="sum">${open ? "" : this.#summary(sub.words)}</span></button>
-      ${open ? html`<div class="subopen">${sub.rows.map((row) => this.#optionRow(row))}</div>` : nothing}`;
+      ${open ? html`<div class="subopen">${isToolsView(group.key, sub) ? this.#tools(sub)
+        : sub.rows.map((row) => this.#optionRow(row))}</div>` : nothing}`;
+  }
+
+  // --- Tools > Built-in ----------------------------------------------------------------------
+
+  /** Writes the two rows of rules as `change` leaves the three rows read now. */
+  #setTools(change: (now: ToolLists) => ToolLists): void {
+    const fields = this.fields as PanelField[];
+    this.options = withTools(this.options, fields, change(toolLists(fields, this.options)));
+  }
+
+  /** The Tools view: the set of built-in tools as its own row, a line per tool the page
+   * names, and every rule no line draws. */
+  #tools(sub: PanelSub) {
+    const now = toolLists(this.fields as PanelField[], this.options);
+    const others = otherRules(now);
+    return html`${sub.rows.filter((row) => row.name !== ALLOWED && row.name !== DENIED).map((row) => this.#optionRow(row))}
+      <div data-view="tools">${toolLines(now).map((line) => this.#toolLine(line))}</div>
+      ${others.length === 0 ? nothing : html`<div class="others" data-rules="other"><div class="oh">${OTHER_RULES}</div>${
+        this.#rules(others)}</div>`}`;
+  }
+
+  #toolLine(line: ToolLine) {
+    const key = `tool/${line.tool}`;
+    const open = line.rules.length > 0 && this.opened.has(key);
+    const word = (said: ToolWord) => html`<button type="button" class=${line.boxed === said ? "s" : ""}
+      aria-pressed=${line.boxed === said ? "true" : "false"}
+      @click=${() => this.#setTools((now) => pressTool(now, line.tool, said))}>${said}</button>`;
+    return html`<div class=${line.dim ? "tool dim" : "tool"} data-tool=${line.tool}><span class="nm">${line.tool}${
+        line.rules.length === 0 ? nothing : html`<button type="button" class="rc" aria-expanded=${open ? "true" : "false"}
+          @click=${() => this.#toggleOpen(key)}>${rulesWord(line.rules.length)}</button>`}${
+        line.dim ? html`<i>${NOT_IN_SET}</i>` : nothing}</span><span class="tri" role="group"
+        aria-label=${line.tool}>${word("allow")}${word("deny")}</span></div>
+      ${open ? html`<div class="rules" data-rules=${line.tool}>${this.#rules(line.rules)}</div>` : nothing}`;
+  }
+
+  /** Rules, each with the row it is in and `Remove`. */
+  #rules(rules: ToolRule[]) {
+    const fields = this.fields as PanelField[];
+    const label = (name: string) => {
+      const field = fields.find((row) => row.name === name);
+      return field === undefined ? name : rowLabel(field);
+    };
+    return rules.map((rule) => html`<div class="rule" data-rule=${rule.entry}><span class="re">${rule.entry}</span><span
+      class="rl">${label(rule.row)}</span><button type="button" aria-label=${`Remove ${rule.entry}`}
+      @click=${() => this.#setTools((now) => withoutRule(now, rule))}>Remove</button></div>`);
   }
 
   /** One row: where it sits when the find field found it, the mark of a hidden flag, and

@@ -523,6 +523,10 @@ export const PLACED = ["target", "slot"] as const;
 /** The rows whose text or file a launch sends as its session's first turn. */
 export const FIRST_TURN = ["brief", "brief_file", "handoff"] as const;
 
+/** The built-in tools the Options panel draws a line for, in its order. No route lists a
+ * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
+export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;
+
 /**
  * The launch as `/api/preview` and `/api/launch` take it: the whole form, as the launcher's
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
