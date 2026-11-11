@@ -1,12 +1,12 @@
-"""The views usage's page had before its frame was redrawn, which stay mounted under the
-frame until each has its place in the new page, and usage's two blocks, in a browser,
-through a real shell that starts usage's real page server:
-the contract check on the page and its two blocks (the cost block saying how old the index
-is), each view drawn over a small index and fitting a phone, a session opened under its
-row's harness, the command with no index, a read over a stale index that runs no pass,
-and "Read new sessions" bringing new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
-the opened session's lines, its chart with its turns, compaction, context and each request's
-readout, its table, its bill, its restart point and its reads still out, a subagent's charts,
+"""usage's page and its two blocks in a browser, through a real shell that starts usage's
+real page server: the contract check on the page and its two blocks (the cost block saying
+how old the index is), the chart, the Sessions section and an opened session drawn over a
+small index and fitting a phone, a session opened under its row's harness with its
+subagents shown, the command with no index, a read over a stale index that runs no pass,
+and "Read new sessions" bringing new sessions in. Over a session of two turns with a
+compaction and a dated `[[model]]` row: the opened session's lines, its chart with its
+turns, compaction, context and each request's readout, its table, its bill, its restart
+point and its reads still out, its subagent opened with its own requests and table,
 and the Token kinds and Prices sections: the classes with a tier's part and what caching saved,
 the price table, `Check against a bill` with its Total against its group lines, `Details`
 and `Find a model`, the two tables keeping every column on a phone, scrolling in their
@@ -137,6 +137,12 @@ def session_row(panel, session: str):
     return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
 
 
+def show_subagents(opened):
+    """Presses `Show` at the end of the opened session's `Subagents` line; gives the rows."""
+    opened.locator("[data-line=subagents]").get_by_role("button", name="Show").click()
+    return opened.locator("[data-part=agents] moxi-ui-row[data-agent]")
+
+
 # --- the contract --------------------------------------------------------------------------
 
 def test_the_page_keeps_the_contract(indexed, ui_page, ui_component_check):
@@ -161,18 +167,19 @@ def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
     expect(age).to_have_text(re.compile(r"^as of "))
 
 
-# --- the views, at a phone's width ---------------------------------------------------------
+# --- the page's pieces, at a phone's width -------------------------------------------------
 
-#: Each view's route and what shows once its report has drawn.
+#: Each address and what shows once its reads have drawn.
 VIEWS = {
     "": "[data-group=chart] svg g[data-period]",
     "sessions": f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]',
-    f"sessions/claude/{FIRST}": f'section[data-part=view] tr[data-agent="{AGENT}"]',
+    f"sessions/claude/{FIRST}": "[data-part=session] [data-line=subagents]",
+    f"sessions/claude/{FIRST}/{AGENT}": "[data-part=agent] svg[data-part=session-chart] rect.bar",
 }
 
 
-@pytest.mark.parametrize("route", list(VIEWS), ids=["daily", "sessions", "session"])
-def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_check, route):
+@pytest.mark.parametrize("route", list(VIEWS), ids=["daily", "sessions", "session", "subagent"])
+def test_each_address_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_check, route):
     ui_width_check(ui_page, module="usage", route=route)
     panel = panel_of(ui_page)
     expect(panel.locator(VIEWS[route]).first).to_be_visible()
@@ -180,14 +187,33 @@ def test_each_view_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_width_c
     ui_width_check(ui_page)
 
 
-def test_the_sessions_view_lists_both_and_links_to_one(indexed, ui_page):
+def test_an_opened_session_shows_its_subagents_as_rows_under_a_map_of_its_agents(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
     session_row(panel, FIRST).get_by_role("link", name="Open").click()
     expect(ui_page).to_have_url(f"{indexed.url}/m/usage/sessions/claude/{FIRST}")
-    agents = panel.locator("section[data-part=view] tr[data-agent]")
-    expect(agents).to_have_count(2)
-    expect(panel.locator(f'section[data-part=view] svg g[data-agent="{AGENT}"]')).to_have_count(1)
+    opened = session_row(panel, FIRST).locator("[data-part=session]")
+    rows = show_subagents(opened)
+    # A row a subagent, main left out; the map holds every agent, main among them.
+    expect(rows).to_have_count(1)
+    row = rows.first
+    expect(row).to_have_attribute("name", AGENT)
+    expect(row).to_have_attribute("where", "subagent")
+    expect(row).to_have_attribute("fact", re.compile(r"^\$\d+\.\d\d$"))
+    expect(row).to_have_attribute("lead", MODEL)
+    expect(row).to_have_attribute("lead-more", re.compile(r"^first "))
+    expect(row).to_have_attribute("rest", re.compile(r"^2 requests, [\d.]+k tokens$"))
+    expect(row).to_have_attribute("tail", re.compile(r"^(under 1|\d+)% of the session$"))
+    cells = opened.locator("svg[data-part=agent-map] g[data-agent]")
+    expect(cells).to_have_count(2)
+    expect(opened.locator('svg[data-part=agent-map] g[data-agent="main"] title')).to_contain_text("main: $")
+    expect(opened.locator("[data-part=agents] [data-more=agents]")).to_have_count(0)
+    # Shown, the line's act takes the rows away again; the address does not change.
+    line = opened.locator("[data-line=subagents]")
+    expect(line.get_by_role("button", name="Show")).to_have_count(0)
+    line.get_by_role("button", name="Hide").click()
+    expect(opened.locator("[data-part=agents]")).to_have_count(0)
+    expect(ui_page).to_have_url(f"{indexed.url}/m/usage/sessions/claude/{FIRST}")
 
 
 def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_page):
@@ -206,7 +232,7 @@ def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_
     opened = row.locator("[data-part=session]")
     expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(r"^Requests\s*3 requests (at|from) "))
     expect(opened.locator("[data-line=subagents]")).to_have_text(
-        re.compile(rf"^Subagents\s*1 subagent · \$\d+\.\d\d of the {re.escape(cost)}$"))
+        re.compile(rf"^Subagents\s*1 subagent · \$\d+\.\d\d of the {re.escape(cost)}\s*Show$"))
     assert int(requests) == 3 + 2
     # The harness is the address's, not a filter of the page: with one harness holding
     # files the filter has no place, before and after.
@@ -367,14 +393,6 @@ def charted_page(charted, ui_contexts):
     return ui_contexts(charted).pages[0]
 
 
-def requests_chart(panel):
-    return panel.locator("section[data-part=view] svg[data-chart=requests]")
-
-
-def context_chart(panel):
-    return panel.locator("section[data-part=view] svg[data-chart=context]")
-
-
 def prices_of(panel):
     return panel.locator("section[data-group=prices]")
 
@@ -496,7 +514,9 @@ def opened_of(panel):
 
 
 def session_chart(panel):
-    return opened_of(panel).locator("svg[data-part=session-chart]")
+    """The opened session's own chart, not its opened subagent's."""
+    return panel.locator(
+        "section[data-group=sessions] [data-part=session] > [data-line=chart] svg[data-part=session-chart]")
 
 
 def test_the_opened_session_charts_each_request_its_turns_compaction_and_context(
@@ -536,7 +556,7 @@ def test_the_opened_session_says_its_requests_context_cost_agents_and_start(
         r"^Went to\s*\w[\w ]+ \$\d+\.\d\d( · .+)?$"))
     expect(opened.locator("[data-line=went]")).to_contain_text("cache reads $")
     expect(opened.locator("[data-line=subagents]")).to_have_text(re.compile(
-        r"^Subagents\s*1 subagent · <?\$\d+\.\d\d of the \$\d+\.\d\d$"))
+        r"^Subagents\s*1 subagent · <?\$\d+\.\d\d of the \$\d+\.\d\d\s*Show$"))
     expect(opened.locator("[data-line=session]")).to_have_text(re.compile(
         rf"^Session\s*claude · {MODEL} · started "))
     # With no measure the restart point has no line, once its read has answered.
@@ -644,22 +664,34 @@ def test_the_opened_sessions_chart_keeps_its_words_inside_wide_and_on_a_phone(
     assert [text for text, inside in phone if not inside] == [], phone
 
 
-def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charted_page):
+def test_a_subagents_open_shows_its_requests_under_its_row_with_its_address(charted, charted_page):
     panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
-    # The main agent's requests are the opened session's chart; the old view charts none.
     expect(session_chart(panel).locator("rect.bar")).to_have_count(6)
-    expect(requests_chart(panel)).to_have_count(0)
-    panel.locator(f'section[data-part=view] tr[data-agent="{CHARTED_AGENT}"] a').click()
+    opened = opened_of(panel)
+    row = show_subagents(opened).first
+    expect(row).to_have_attribute("lead", SUBAGENT_MODEL)
+    row.get_by_role("link", name="Open").click()
     expect(charted_page).to_have_url(
         f"{charted.url}/m/usage/sessions/claude/{CHARTED}/{CHARTED_AGENT}")
-    bars = requests_chart(panel)
-    expect(bars.locator("g[data-n]")).to_have_count(2)
-    expect(bars.locator("[data-rule]")).to_have_count(0)
-    expect(context_chart(panel).locator("path[data-part=context]")).to_have_attribute(
-        "data-points", "2")
-    bars.locator('rect.hit[data-n="2"]').hover()
-    expect(panel.locator("section[data-part=view] [data-part=readout]")).to_contain_text(
-        SUBAGENT_MODEL)
+    agent = row.locator("[data-part=agent]")
+    # Its own requests, as a session's are shown: the line, its context, the chart.
+    expect(agent.locator("[data-line=requests]")).to_have_text(
+        re.compile(r"^Requests\s*2 requests (at|from) "))
+    expect(agent.locator("[data-line=context]")).to_have_text(
+        re.compile(r"^Context\s*\d+k? (of [\d,]+k )?tokens on the last request"))
+    chart = agent.locator("svg[data-part=session-chart]")
+    expect(chart.locator("rect.bar")).to_have_count(2)
+    expect(chart.locator("[data-mark]")).to_have_count(0)
+    expect(chart.locator('rect.hit[data-n="2"] title')).to_contain_text(SUBAGENT_MODEL)
+    # The session's own chart stays the main agent's.
+    expect(session_chart(panel).locator("rect.bar")).to_have_count(6)
+    agent.get_by_role("button", name="Table").click()
+    expect(agent.locator("[data-part=agent-table] tbody tr")).to_have_count(2)
+    # Its act closes it back to the session, the rows still shown.
+    row.get_by_role("link", name="Close").click()
+    expect(charted_page).to_have_url(f"{charted.url}/m/usage/sessions/claude/{CHARTED}")
+    expect(opened.locator("[data-part=agent]")).to_have_count(0)
+    expect(opened.locator("[data-part=agents] moxi-ui-row")).to_have_count(1)
 
 
 def test_the_bills_total_is_its_group_lines(charted, charted_page):

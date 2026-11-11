@@ -141,10 +141,6 @@ def lines_of(panel):
     return panel.locator("[data-part=lines] p")
 
 
-def view(panel, name: str):
-    return panel.locator(f"section[data-part=view][data-view={name}]")
-
-
 def session_row(panel, session: str):
     """A row of the Sessions section, by the harness and session it opens."""
     return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
@@ -165,7 +161,6 @@ def test_the_page_alone_has_nothing_opened(seeded, page):
     expect(limit(panel, FIVE)).to_have_attribute("aria-expanded", "false")
     expect(panel.locator("[data-group=chart]")).to_be_visible()
     expect(opened(panel)).to_have_count(0)
-    expect(panel.locator("section[data-part=view]")).to_have_count(0)
     expect(lines_of(panel)).to_have_count(0)
     assert path_of(page) == "/m/usage/"
 
@@ -173,10 +168,9 @@ def test_the_page_alone_has_nothing_opened(seeded, page):
 #: Each section's address, the address the page keeps for it, and what it shows.
 SECTIONS = {
     "sessions": ("sessions", f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]'),
-    f"sessions/claude/{FIRST}": (f"sessions/claude/{FIRST}",
-                                 f'section[data-view=session] tr[data-agent="{AGENT}"]'),
+    f"sessions/claude/{FIRST}": (f"sessions/claude/{FIRST}", "[data-part=session] [data-line=subagents]"),
     f"sessions/claude/{FIRST}/{AGENT}": (f"sessions/claude/{FIRST}/{AGENT}",
-                                         "section[data-view=session] svg[data-chart=requests] g[data-n]"),
+                                         "[data-part=agent] svg[data-part=session-chart] rect.bar"),
     "projects": ("projects", "section[data-group=projects] [data-part=rows] .tr2"),
     # Projects is installed, so the section's other name is rewritten to this one.
     "folders": ("projects", "section[data-group=projects] [data-part=rows] .tr2"),
@@ -198,12 +192,19 @@ def test_a_sections_address_opens_it_under_the_chart(seeded, page, route):
     assert path_of(page) == f"/m/usage/{kept}"
 
 
-def test_a_subagents_address_charts_its_requests_alone(seeded, page):
+def test_a_subagents_address_shows_the_rows_and_opens_its_requests_under_its_row(seeded, page):
     panel = open_page(page, f"sessions/claude/{FIRST}/{AGENT}")
-    expect(panel.locator("svg[data-chart=requests] g[data-n]")).to_have_count(2)
+    row = panel.locator(f'[data-part=agents] moxi-ui-row[data-agent="{AGENT}"]')
+    expect(row).to_have_attribute("open", "")
+    expect(row.locator("[data-part=agent] svg[data-part=session-chart] rect.bar")).to_have_count(2)
+    session = panel.locator("[data-part=session] > [data-line=chart] svg[data-part=session-chart]")
+    expect(session.locator("rect.bar")).to_have_count(3)
+    expect(panel.locator("[data-line=subagents]").get_by_role("button", name="Hide")).to_be_visible()
+    # The session's own address shows neither the rows nor an agent's requests.
     panel = open_page(page, f"sessions/claude/{FIRST}")
     expect(panel.locator("[data-part=session] svg[data-part=session-chart] rect.bar")).to_have_count(3)
-    expect(panel.locator("svg[data-chart=requests]")).to_have_count(0)
+    expect(panel.locator("[data-part=agents]")).to_have_count(0)
+    expect(panel.locator("[data-part=agent]")).to_have_count(0)
 
 
 def test_a_limits_address_opens_its_row(seeded, page):
@@ -213,7 +214,6 @@ def test_a_limits_address_opens_its_row(seeded, page):
     expect(opened(panel)).to_have_count(1)
     expect(opened(panel).locator("[data-opened=window]")).to_be_visible()
     expect(limit(panel, WEEK)).to_have_attribute("aria-expanded", "false")
-    expect(panel.locator("section[data-part=view]")).to_have_count(0)
     assert path_of(page) == "/m/usage/limit/claude/plan/300"
 
 
@@ -225,7 +225,6 @@ def test_an_address_the_page_does_not_have_shows_its_top_and_says_so_at_the_foot
     expect(panel.locator("[data-group=cost]")).to_be_visible()
     expect(panel.locator("[data-group=chart]")).to_be_visible()
     expect(opened(panel)).to_have_count(0)
-    expect(panel.locator("section[data-part=view]")).to_have_count(0)
     # Opening a piece takes the line away and names the piece in the address.
     limit(panel, FIVE).click()
     expect(opened(panel)).to_have_count(1)
@@ -306,12 +305,15 @@ def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     entries = page.evaluate("history.length")
     session_row(panel, FIRST).get_by_role("link", name="Open").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
-    expect(view(panel, "session").locator(f'tr[data-agent="{AGENT}"]')).to_be_visible()
-    view(panel, "session").locator(f'tr[data-agent="{AGENT}"] a').click()
+    panel.locator("[data-line=subagents]").get_by_role("button", name="Show").click()
+    row = panel.locator(f'[data-part=agents] moxi-ui-row[data-agent="{AGENT}"]')
+    row.get_by_role("link", name="Open").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}/{AGENT}")
-    expect(panel.locator("svg[data-chart=requests] g[data-n]")).to_have_count(2)
-    # The opened row's act closes it back to the section.
-    session_row(panel, FIRST).get_by_role("link", name="Close").click()
+    expect(row.locator("[data-part=agent] svg[data-part=session-chart] rect.bar")).to_have_count(2)
+    # The agent's act closes it back to the session, and the session's to the section.
+    row.get_by_role("link", name="Close").click()
+    expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}")
+    session_row(panel, FIRST).locator(":scope > a[data-action=open]").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
     assert page.evaluate("history.length") == entries
 
@@ -517,7 +519,7 @@ def test_a_sections_address_fits_a_phone(seeded, page, ui_width_check, route):
     ui_width_check(page, module="usage", route=route)
     expect(session_row(panel_of(page), FIRST)).to_be_visible()
     if route != "sessions":
-        expect(panel_of(page).locator("section[data-part=view]")).to_be_visible()
+        expect(panel_of(page).locator("[data-part=session] [data-line=subagents]")).to_be_visible()
     ui_width_check(page)
 
 

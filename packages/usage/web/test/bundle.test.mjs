@@ -41,11 +41,11 @@ async function bundled(entry) {
 test("the page bundle's tail holds the ISC notice of each package in it but Lit's", async () => {
   const packages = await bundled("page.ts");
   const d3 = [...packages.keys()].filter((name) => !LIT.has(name)).sort();
-  assert.ok(d3.includes("d3-scale") && d3.includes("d3-hierarchy"), d3.join(", "));
+  assert.deepEqual(d3, ["d3-hierarchy"], "the subagents' map is the one piece drawn with d3");
   const page = read("page.js");
   const tail = page.slice(page.lastIndexOf("/*! Bundled with d3"));
   assert.ok(tail.length > 0 && tail.length < 4000, "the notice is the bundle's last comment");
-  assert.match(tail, /each under the ISC licence/);
+  assert.match(tail, /under the ISC licence/);
   assert.match(tail, /Permission to use, copy, modify, and\/or distribute this software for any purpose/);
   assert.match(tail, /THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES/);
   for (const name of d3) {

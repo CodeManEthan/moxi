@@ -1,12 +1,6 @@
-/*! Bundled with d3-array, d3-color, d3-format, d3-hierarchy, d3-interpolate and d3-scale,
- * each under the ISC licence:
+/*! Bundled with d3-hierarchy, under the ISC licence:
  *
- * d3-array 3.2.4: Copyright 2010-2023 Mike Bostock
- * d3-color 3.1.0: Copyright 2010-2022 Mike Bostock
- * d3-format 3.1.2: Copyright 2010-2026 Mike Bostock
  * d3-hierarchy 3.1.2: Copyright 2010-2021 Mike Bostock
- * d3-interpolate 3.0.1: Copyright 2010-2021 Mike Bostock
- * d3-scale 4.0.2: Copyright 2010-2021 Mike Bostock
  *
  * Permission to use, copy, modify, and/or distribute this software for any purpose
  * with or without fee is hereby granted, provided that the above copyright notice and
@@ -38,7 +32,9 @@
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
 //                                  they leave out, the earlier days, and the table; an
 //                                  opened row holds its session (div[data-part=session]):
-//                                  its lines, its chart and its acts
+//                                  its lines, its chart and its acts; shown, its
+//                                  subagents (div[data-part=agents]): a map and a row
+//                                  each, the opened one with its requests under it
 //     section[data-group=projects|folders]  the dearest projects (or folders), and opened
 //                                  each with its share and cost, a row filtering Sessions
 //     section[data-group=models]   the dearest models, and opened each with share and cost
@@ -46,15 +42,13 @@
 //                                  opened the four classes and what caching saved
 //     section[data-group=prices]   how many models are priced and the table's date, and
 //                                  opened their prices and the acts that open under them
-//   moxi-usage-legacy           a session's agents as the page had them, serving that
-//                               session's address until they open in its row
 //   div[data-part=foot]         when the sessions were last read, the files, the act
 //   div[data-part=lines]        dim lines: what the figures leave out, reads that failed
 //
 // The view places what its models return and words nothing itself: a piece whose fact
 // no read carries is not in the model and is not drawn. The range and the filters are
 // one state (`filter-model.ts`), held for the document's life; every read under the
-// filter line is asked with it, and today's views are handed it.
+// filter line is asked with it.
 //
 // One piece is open at a time, a limit row or a section, and the address names it
 // (`address-model.ts`). The page is placed with the route the address gave. When a piece
@@ -70,7 +64,7 @@ import {
 import type { Address } from "./address-model.ts";
 import { chartDraw, chartGroup } from "./chart-model.ts";
 import type { ChartDraw, ChartGroup, Table } from "./chart-model.ts";
-import { mostTo, rangeDays, sumRows } from "./cost-model.ts";
+import { mostTo, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
 import {
@@ -90,10 +84,8 @@ import {
   COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, READING, shouldPass,
 } from "./frame-model.ts";
 import type { Cost, Foot, FootLine, Nothing, OtherRead } from "./frame-model.ts";
-import "./legacy.ts";
 import type { LimitGroup, LimitRow, Warning } from "./limits-model.ts";
-import { fmtCost, layerLine, NO_FILTERS, overrideLine, RATE_FIELDS, rateLine, reconcileLines, searchPath, TERM_CLASSES } from "./views.ts";
-import type { Filters } from "./views.ts";
+import { fmtCost, layerLine, overrideLine, RATE_FIELDS, rateLine, reconcileLines, searchPath, TERM_CLASSES } from "./views.ts";
 import { CLOSE, HIDE_TABLE, modelsSection, placesSection, SECTION_LABELS, TABLE as SECTION_TABLE } from "./sections-model.ts";
 import type { Section, SectionKey, SentencePart } from "./sections-model.ts";
 import {
@@ -111,7 +103,11 @@ import {
   COPY_ID, newestModel, OPEN_IN_SESSIONS, openedKeys, openedPaths, openedSession, placedRow, restartPath, SESSION_CHART,
   sessionChart,
 } from "./opened-session.ts";
-import type { OpenedSession, Part, SessionChart } from "./opened-session.ts";
+import type { Item, OpenedSession, Part, SessionChart } from "./opened-session.ts";
+import {
+  AGENTS_PAGE, agentMap, agentPath, HIDE, MAIN, MAP_HEIGHT, moreLine, openedAgent, shownCount, subagentLines,
+} from "./subagents.ts";
+import type { AgentLine, AgentMap } from "./subagents.ts";
 import type { OpenedLimit } from "./window-model.ts";
 
 const TAG = "moxi-usage-page";
@@ -161,7 +157,7 @@ const STYLES = css`
   .lim .w .x { font-size: var(--moxi-font-size-sm); }
   .det { margin: 4px 0 8px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border);
          font-size: var(--moxi-font-size-sm); line-height: 18px; overflow-wrap: anywhere; }
-  .det .r { display: grid; grid-template-columns: 76px 1fr; padding: 3px 0; align-items: baseline; }
+  .det .r { display: grid; grid-template-columns: 76px 1fr auto; padding: 3px 0; align-items: baseline; }
   .det .k, .det .d { color: var(--moxi-text-dim); }
   .det .f { min-width: 0; }
   .det p { padding: 3px 0; }
@@ -234,6 +230,11 @@ const STYLES = css`
   svg.ch .ln { fill: none; stroke: var(--moxi-text); stroke-width: 1.5; stroke-linejoin: round; }
   svg.ch .dot { fill: var(--moxi-text); stroke: var(--moxi-bg); stroke-width: 2; }
   svg.ch.ses-ch { max-width: 100%; height: auto; margin: 0; }
+  svg.ch.map { max-width: 100%; height: auto; margin: 4px 0 6px; }
+  svg.ch.map .cell { fill: var(--moxi-text); fill-opacity: 0.1; }
+  svg.ch.map .cell.on { fill-opacity: 0.3; }
+  .det .x { padding-left: 18px; color: var(--moxi-text-dim); }
+  .det .x.act { color: var(--moxi-text); }
   .ses .det { margin: 9px 0 3px; }
   .det .cw { padding: 4px 0 2px; }
   .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 76px; }
@@ -340,6 +341,8 @@ export class UsagePage extends LitElement {
     searchText: { state: true },
     sessionPart: { state: true },
     copiedId: { state: true },
+    agentsShown: { state: true },
+    agentPart: { state: true },
     width: { state: true },
   };
 
@@ -363,6 +366,11 @@ export class UsagePage extends LitElement {
   sessionPart: "table" | "bill" | null = null;
   /** The opened session's id was just copied. */
   copiedId = false;
+  /** How many of the opened session's subagents `Show` has asked for; none until it is
+   * pressed. */
+  agentsShown = 0;
+  /** What is open under the opened subagent's lines: its table. */
+  agentPart: "table" | null = null;
   /** The element's own width, in px. */
   width = 680;
 
@@ -404,6 +412,9 @@ export class UsagePage extends LitElement {
   #openedReads: { requests: Feed<Report<RequestRow, RequestsTotal>>; terms: Feed<Report<TermsRow, TermsTotal>>;
              session: Feed<Report<AgentRow>>; restart: Feed<RestartPoint> | null; model: string | null } | null = null;
   #openedKey: string | null = null;
+  /** The opened subagent's requests, read with the session's query. */
+  #agentRead: Feed<Report<RequestRow, RequestsTotal>> | null = null;
+  #agentPath: string | null = null;
   /** The named session's own read, for its row, while the address keeps it first. */
   #placedRead: Feed<Report<AgentRow>> | null = null;
   #placedPath: string | null = null;
@@ -522,8 +533,15 @@ export class UsagePage extends LitElement {
     if (sameAddress(next, this.#at)) return;
     refusedWindow = null;
     this.sectionTable = null;
-    this.sessionPart = null;
-    this.copiedId = false;
+    const was = this.#at;
+    const sameSession = was.piece === "sessions" && next.piece === "sessions" && was.session !== null
+      && was.harness === next.harness && was.session === next.session;
+    if (!sameSession) {
+      this.sessionPart = null;
+      this.copiedId = false;
+      this.agentsShown = 0;
+    }
+    this.agentPart = null;
     if (next.piece !== "sessions") this.#placed = null;
     if (next.piece !== "sessions" || next.session === null) this.#openedIn = null;
     this.#closePart();
@@ -624,6 +642,8 @@ export class UsagePage extends LitElement {
       else this.#setAt(at);
       if (at.piece !== "none") refusedWindow = null;
       this.#openedIn = null;
+      this.agentsShown = 0;
+      this.agentPart = null;
       this.#placed = at.piece === "sessions" && at.session !== null && at.harness !== null
         ? { harness: at.harness, id: at.session } : null;
     }
@@ -742,7 +762,8 @@ export class UsagePage extends LitElement {
       this.#closeOpened();
       return;
     }
-    const paths = openedPaths(at.session, openedKeys(state, today, days, at.harness));
+    const keys = openedKeys(state, today, days, at.harness);
+    const paths = openedPaths(at.session, keys);
     const key = JSON.stringify(paths);
     const update = () => this.requestUpdate();
     if (key !== this.#openedKey) {
@@ -766,12 +787,28 @@ export class UsagePage extends LitElement {
       opened.restart = new Feed<RestartPoint>(() => api("usage", path), parseRestartPoint, update);
       void opened.restart.refresh();
     }
+    // The opened subagent's requests, with the session's query.
+    const agent = at.agent === null || at.agent === MAIN ? null : agentPath(at.session, at.agent, keys);
+    if (agent !== this.#agentPath) {
+      this.#closeAgent();
+      this.#agentPath = agent;
+      if (agent !== null) {
+        this.#agentRead = new Feed<Report<RequestRow, RequestsTotal>>(() => api("usage", agent), parseReport, update);
+        void this.#agentRead.refresh();
+      }
+    }
+  }
+
+  #closeAgent(): void {
+    this.#agentRead?.close();
+    this.#agentRead = null;
+    this.#agentPath = null;
   }
 
   #openedFeeds(): { close(): void; refresh(): Promise<void> }[] {
     const opened = this.#openedReads;
     return [...(opened === null ? [] : [opened.requests, opened.terms, opened.session, opened.restart]),
-            this.#placedRead].filter((feed) => feed !== null);
+            this.#placedRead, this.#agentRead].filter((feed) => feed !== null);
   }
 
   #closeOpened(): void {
@@ -779,6 +816,7 @@ export class UsagePage extends LitElement {
     if (opened !== null) for (const feed of [opened.requests, opened.terms, opened.session, opened.restart]) feed?.close();
     this.#openedReads = null;
     this.#openedKey = null;
+    this.#closeAgent();
   }
 
   /** `Show` under the earlier line: its rows, thirty at a time. */
@@ -874,6 +912,7 @@ export class UsagePage extends LitElement {
     other("The opened session's cost terms", this.#openedReads?.terms ?? null);
     other("The opened session's agents", this.#openedReads?.session ?? null);
     other("The session the address names", this.#placedRead);
+    other("The opened subagent's requests", this.#agentRead);
     const restart = this.#openedReads?.restart ?? null;
     if (restart !== null) others.push({ what: "The restart point", read: restart, report: false });
     if (this.#prices !== null) others.push({ what: "The price table", read: this.#prices, report: false });
@@ -907,11 +946,6 @@ export class UsagePage extends LitElement {
       this.#kinds(kindsSection(this.#terms?.value ?? null)),
       this.#pricesGroup(pricesSection(this.#terms?.value ?? null, this.#prices?.value ?? null, today)),
     ].filter((drawn) => drawn !== nothing);
-    const days = rangeDays(state.range, today);
-    // A session's address names its harness, and its view is read under it.
-    const harness = at.piece === "sessions" && at.harness !== null ? at.harness : state.harness;
-    const filters: Filters = { ...NO_FILTERS, harness, model: state.model, project: state.project,
-                               folder: state.folder, days: days ?? {} };
     return html`
       ${frame.reading === null ? nothing : html`<p class="reading dim" data-part="reading">${frame.reading}</p>`}
       ${frame.limits.warning === null ? nothing : this.#warning(frame.limits.warning)}
@@ -923,8 +957,6 @@ export class UsagePage extends LitElement {
       ${line === null ? nothing : this.#filters(line)}
       ${group === null && sections.length === 0 ? nothing : html`<div class="grps below" data-part="below">${
         group === null ? nothing : this.#chartGroup(group)}${sections}</div>`}
-      ${frame.below ? html`<moxi-usage-legacy .address=${at} .open=${(address: Address) => this.open(address)} .filters=${filters}
-        .said=${group !== null && group.nothing !== null}></moxi-usage-legacy>` : nothing}
       ${frame.foot === null ? nothing : this.#foot(frame.foot)}
       ${frame.lines.length ? this.#lines(frame.lines) : nothing}`;
   }
@@ -1310,22 +1342,30 @@ export class UsagePage extends LitElement {
     const model: OpenedSession = openedSession({ harness, id, requests: opened.requests, terms: opened.terms,
                                                  session: opened.session, restart: opened.restart, today });
     const requests = opened.requests.value;
-    const wide = !window.matchMedia("(max-width: 720px)").matches;
-    const width = Math.max(200, this.width - (wide ? 96 : 0) - 76);
+    const width = this.#detWidth(0);
     const chart = requests === null ? null : sessionChart(requests, heldState().measure, width, today);
     const part = this.sessionPart;
+    const agents = opened.session.value;
+    const lines = agents === null ? [] : subagentLines(agents, today);
+    const shown = shownCount(lines, this.agentsShown, this.#at.piece === "sessions" ? this.#at.agent : null);
     const act = (key: "table" | "bill", label: string) => html`<button type="button" class="act d" data-act=${key}
       aria-expanded=${String(part === key)} @click=${() => { this.sessionPart = part === key ? null : key; }}>${label}</button>`;
     const sessions = model.sessions;
     const route = sessions === null ? "" : `${encodeURIComponent(sessions.harness)}/${encodeURIComponent(sessions.id)}`;
+    const toggle = () => {
+      if (shown > 0) {
+        this.agentsShown = 0;
+        if (this.#at.piece === "sessions" && this.#at.agent !== null) this.open(sessionAddress(harness, id));
+      } else {
+        this.agentsShown = 1;
+      }
+    };
     return html`<div class="det" data-part="session">
-      ${model.items.map((item) => item.kind === "reading"
-        ? html`<p class="d" data-part="reading" data-reading=${item.key}>${READING}</p>`
-        : item.kind === "chart" ? (chart === null ? nothing : html`<div class="r" data-line="chart"><span class="k"></span>
-            <span class="f"><div class="cw">${this.#sessionChart(chart)}</div>${model.notes.map((note) =>
-              html`<p class="d" data-part="note">${note}</p>`)}</span></div>`)
-        : html`<div class="r" data-line=${item.key}><span class="k">${item.label}</span>
-            <span class="f">${item.parts.map((one: Part) => one.dim ? html`<span class="d">${one.text}</span>` : one.text)}</span></div>`)}
+      ${model.items.map((item) => item.kind === "line" && item.key === "subagents" && lines.length
+        ? html`${this.#line(item, html`<button type="button" class="x act" data-act="agents"
+            aria-expanded=${String(shown > 0)} @click=${toggle}>${shown > 0 ? HIDE : SHOW}</button>`)}${
+            shown > 0 && agents !== null ? this.#agents(harness, id, agents, lines, shown) : nothing}`
+        : this.#detItem(item, chart === null ? nothing : html`<div class="cw">${this.#sessionChart(chart)}</div>`, model.notes))}
       <div class="foot" data-part="session-acts">
         ${sessions === null ? nothing : html`<a class="act" href=${`/m/sessions/${route}`} @click=${(event: MouseEvent) => {
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -1339,6 +1379,95 @@ export class UsagePage extends LitElement {
       </div>
       ${part === "table" && model.table !== null ? html`<div class="under" data-part="session-table">${this.#table(model.table)}</div>`
         : part === "bill" && opened.terms.value !== null ? this.#billOf(opened.terms.value) : nothing}
+    </div>`;
+  }
+
+  /** The width the opened session's lines leave a chart, inside `depth` levels of rows. */
+  #detWidth(depth: number): number {
+    const wide = !window.matchMedia("(max-width: 720px)").matches;
+    return Math.max(200 - depth * 76, this.width - (wide ? 96 : 0) - 76 * (depth + 1));
+  }
+
+  /** One item of an opened session's or subagent's lines: a line, `Reading…`, or the
+   * chart with the notes under it. */
+  #detItem(item: Item, chart: unknown, notes: string[]) {
+    if (item.kind === "reading") return html`<p class="d" data-part="reading" data-reading=${item.key}>${READING}</p>`;
+    if (item.kind === "chart") {
+      return chart === nothing ? nothing : html`<div class="r" data-line="chart"><span class="k"></span>
+        <span class="f">${chart}${notes.map((note) => html`<p class="d" data-part="note">${note}</p>`)}</span></div>`;
+    }
+    return this.#line(item, nothing);
+  }
+
+  #line(item: Extract<Item, { kind: "line" }>, act: unknown) {
+    return html`<div class="r" data-line=${item.key}><span class="k">${item.label}</span>
+      <span class="f">${item.parts.map((one: Part) => one.dim ? html`<span class="d">${one.text}</span>` : one.text)}</span>${
+      act}</div>`;
+  }
+
+  /** The opened session's subagents, shown: the session's agents as a map, then a row
+   * each, dearest first, as many as `Show` asked for, and what they leave out. */
+  #agents(harness: string, id: string, report: Report<AgentRow>, lines: AgentLine[], shown: number) {
+    const map = agentMap(report, this.#detWidth(0));
+    const opened = this.#at.piece === "sessions" ? this.#at.agent : null;
+    const more = moreLine(lines, shown);
+    return html`<div class="r" data-part="agents"><span class="k"></span><span class="f">
+      ${map === null ? nothing : this.#agentMap(map, opened)}
+      <div class="ses" data-list="agents">${lines.slice(0, shown).map((line) =>
+        this.#agentRow(harness, id, line, line.agent === opened))}</div>
+      ${more === null ? nothing : html`<div class="more" data-part="more" data-more="agents"><span>${more}</span>
+        <button type="button" class="act" data-act="show" @click=${() => {
+          this.agentsShown = shown + AGENTS_PAGE;
+        }}>${SHOW}</button></div>`}
+    </span></div>`;
+  }
+
+  /** The agents as a map: a cell each, its area its cost, named where the words fit. */
+  #agentMap(map: AgentMap, opened: string | null) {
+    const width = this.#detWidth(0);
+    return html`<svg class="ch map" data-part="agent-map" role="img" aria-label=${map.aria} width=${width}
+      height=${MAP_HEIGHT} viewBox="0 0 ${width} ${MAP_HEIGHT}">${map.cells.map((cell) => svg`<g data-agent=${cell.agent}>
+        <title>${cell.title}</title>
+        <rect class=${cell.agent === opened ? "cell on" : "cell"} x=${cell.x} y=${cell.y} width=${cell.width}
+          height=${cell.height}></rect>
+        ${cell.words.map((text, i) => svg`<text class=${i === 0 ? "v" : ""} x=${cell.x + 4} y=${cell.y + 13 + i * 14}>${text}</text>`)}
+      </g>`)}</svg>`;
+  }
+
+  /** One subagent as a two-line row; opened, its requests under it as a session's are. */
+  #agentRow(harness: string, id: string, line: AgentLine, open: boolean) {
+    const target = open ? sessionAddress(harness, id) : sessionAddress(harness, id, line.agent);
+    const go = (): void => this.open(target);
+    return html`<moxi-ui-row toggles ?open=${open} data-agent=${line.agent} name=${line.agent} where=${line.kind}
+        fact=${line.cost} lead=${line.models} lead-more=${line.first ?? ""} rest=${line.figures}
+        tail=${line.share ?? ""} @moxi-row-toggle=${go}>
+      <a slot="acts" class="do" data-action="open" href=${addressPath(target)} aria-expanded=${String(open)}
+        @click=${(event: MouseEvent) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          go();
+        }}>${open ? CLOSE : OPEN}</a>
+      ${open ? this.#agentBody() : nothing}
+    </moxi-ui-row>`;
+  }
+
+  /** The opened subagent's requests: its requests line, its context, its chart and the
+   * notes under it, and `Table`. */
+  #agentBody() {
+    const read = this.#agentRead;
+    if (read === null) return nothing;
+    const today = this.#today();
+    const model = openedAgent(read, today);
+    const requests = read.value;
+    const chart = requests === null ? null : sessionChart(requests, heldState().measure, this.#detWidth(1), today);
+    const table = this.agentPart === "table";
+    return html`<div class="det" data-part="agent">
+      ${model.items.map((item) => this.#detItem(item,
+        chart === null ? nothing : html`<div class="cw">${this.#sessionChart(chart)}</div>`, model.notes))}
+      ${model.table === null ? nothing : html`<div class="foot" data-part="agent-acts">
+        <button type="button" class="act d" data-act="table" aria-expanded=${String(table)}
+          @click=${() => { this.agentPart = table ? null : "table"; }}>${SECTION_TABLE}</button></div>
+        ${table ? html`<div class="under" data-part="agent-table">${this.#table(model.table)}</div>` : nothing}`}
     </div>`;
   }
 

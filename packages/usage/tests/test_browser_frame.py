@@ -266,11 +266,11 @@ def test_the_foot_says_when_the_sessions_were_read_and_the_files_by_harness(seed
     expect(foot.locator(".last")).to_have_text(
         re.compile(rf"^Sessions read {TIME} · 2 files: Claude 2$"))
     expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
-    # The foot closes the page: the chart and the views the page had before sit between
+    # The foot closes the page: the filter line, the chart and the sections sit between
     # Cost and it.
     order = panel.evaluate("""el => [...el.shadowRoot.children].map((node) =>
         node.dataset && node.dataset.part || node.localName)""")
-    assert order[-5:] == ["top", "filters", "below", "moxi-usage-legacy", "foot"], order
+    assert order[-4:] == ["top", "filters", "below", "foot"], order
     expect(lines_of(panel)).to_have_count(0)
 
 
@@ -316,9 +316,9 @@ def test_with_no_index_the_block_gives_the_command_to_copy(own_shell):
     expect(block.locator("code")).to_have_text("moxi usage index")
     expect(block.get_by_role("button", name="Copy")).to_be_visible()
     expect(panel.get_by_role("button", name="Read new sessions")).to_have_count(0)
-    # The limits still lead; Cost, the views under it and the foot are absent.
+    # The limits still lead; Cost, the sections under it and the foot are absent.
     expect(panel.locator("[data-group=limits]")).to_have_count(2)
-    for gone in ("[data-group=cost]", "moxi-usage-legacy", "[data-part=foot]", "[data-part=lines]"):
+    for gone in ("[data-group=cost]", "[data-part=below]", "[data-part=foot]", "[data-part=lines]"):
         expect(panel.locator(gone)).to_have_count(0)
 
 
@@ -332,7 +332,7 @@ def test_an_index_with_no_request_says_nothing_is_counted_and_reads_new_sessions
     expect(block.locator(".first p").first).to_have_text(re.compile(
         "^" + re.escape(WHAT_USAGE_DOES)
         + rf" It found no sessions when it last looked, at {TIME}\.$"))
-    for gone in ("[data-group=limits]", "[data-group=cost]", "moxi-usage-legacy",
+    for gone in ("[data-group=limits]", "[data-group=cost]", "[data-part=below]",
                  "[data-part=foot]", "code"):
         expect(panel.locator(gone)).to_have_count(0)
     seed(shell, SESSIONS[0])

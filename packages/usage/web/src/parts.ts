@@ -1,10 +1,9 @@
 // The pieces usage's page and blocks share: the base styles, the limits meters and the
 // incomplete-row flag. Each entry bundles its own copy, as each bundles its own Lit.
 
-import { css, html, nothing, svg, unsafeCSS } from "lit";
+import { css, html, nothing, svg } from "lit";
 import type { TemplateResult } from "lit";
 
-import { SERIES_TOKENS } from "./views.ts";
 import type { Meter } from "./views.ts";
 
 export const BASE = css`
@@ -36,12 +35,6 @@ export const BASE = css`
   .meter .line.state { color: var(--moxi-warn); }
   .meter[data-state="reset"] .line.state { color: var(--moxi-text-dim); }
 `;
-
-/** The series colours as classes, `s` and the token's index, for SVG marks and legend
- * swatches: a theme token reaches a mark through a class, since the page's policy allows
- * no inline style. */
-export const SERIES = unsafeCSS(SERIES_TOKENS.map((token, i) =>
-  `.s${i} { fill: var(--moxi-${token}); background: var(--moxi-${token}); }`).join("\n"));
 
 /** The flag an incomplete row carries: a mark whose title says why. */
 export function flag(lines: string[]): TemplateResult | typeof nothing {
