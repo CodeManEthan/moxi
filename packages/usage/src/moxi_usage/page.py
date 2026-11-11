@@ -1,29 +1,55 @@
 """usage's page: the routes its page server answers, declared as data.
 
-    GET  /api/limits    each plan window now (`limits()`), with the server's `now`
+    GET  /api/limits    each plan window now (`limits()`, with no pull), with the
+                        server's `now`
+    GET  /api/window    one plan window opened (`harness=&limit_id=&minutes=`): when it
+                        started, its period's readings, and the sessions it was used by
     GET  /api/daily     tokens and cost by day or month and model (`by=day|month`)
-    GET  /api/sessions  tokens and cost by session, the `top` by cost, with how many more
-    GET  /api/session   one session by agent and model (`session=ID`)
-    GET  /api/projects  tokens and cost by project, or by `cwd` where there is none
+    GET  /api/sessions  tokens and cost by session, dearest first: the `top` after `skip`,
+                        how many there are and how many come after, each with its context
+                        and what names it
+    GET  /api/session   one session by agent and model (`session=ID`), with its context
+                        and what names it
+    GET  /api/projects  tokens and cost by project, or by `cwd` where there is none; by
+                        `cwd` alone with `by=folder`; with the account's `home` folder
     GET  /api/models    tokens and cost by model, with where each price came from
-    GET  /api/terms     every term of each cost, by model, day, month or a session's agent
+    GET  /api/terms     every term of each cost, by model, day, month or a session's agent,
+                        and what caching saved over the answer
     GET  /api/requests  one row per request of a session's agent (`session=ID&agent=ID`)
     GET  /api/prices    the model table's rates: some models (`models=`) or a search (`q=`)
     GET  /api/status    the index: its lanes, held rows and last pass
+    GET  /api/restart-point  the context size past which carrying on with a session of
+                        one model costs more than restarting it (`model=`), from the measure
     GET  /api/cost      today and the six days before it, by day and model
     POST /api/pass      start a pass over the index, unless one is running
     GET  /api/events    the stream: topics `limits` and `index`
 
 Each read answers from `moxi_usage.api` and reads the index as it is: no read runs a
-pass, so none waits on the index's lock, and `/api/prices` reads no index at all. The one act starts a pass. A report route takes
-the filters `since` and `until` (`YYYY-MM-DD`, both days included), `harness`, `project`,
-`model` and `utc`; days are cut in the page server's local zone, or in UTC with `utc`.
-Each route declares exactly the query keys it reads.
+pass, so none waits on the index's lock, and `/api/prices` reads no index at all.
+`/api/limits` makes no Codex pull, so no read waits on another module: the stream's
+poller pulls and publishes the `limits` topic. `/api/window` reads the readings store
+only when it exists, and creates, prunes and pulls nothing. `/api/restart-point` reads
+the measure's file and the model table and writes nothing. The one act starts a pass.
+
+A report route takes the filters `since` and `until` (`YYYY-MM-DD`, both days included),
+`harness`, `project`, `folder` (a folder's whole path: the files
+whose `cwd` it is, whatever project key they carry), `model` and `utc`; days are cut in
+the page server's local zone, or in UTC with `utc`. Each route declares exactly the query
+keys it reads.
+
+Every report's answer, `/api/status`, `/api/window` and `/api/limits` with its topic
+carry `today`, the page server's local date (`YYYY-MM-DD`), so the page words a time's
+day against the server's day and not the browser's.
 
 Where the API's answer holds a map with open keys, the route carries it as a list of
 `{name, value}` rows or leaves it out, so every shape here is fixed. Every value that can
-hold a path carries the mark `path`, and a session title the mark `redact`; only the
-gateway acts on a mark, and no route is the gateway's.
+hold a path carries the mark `path` (a `cwd`, a session's `folder`, the `home` folder),
+and a session's name or title the mark `redact`; only the gateway acts on a mark, and no
+route is the gateway's.
+
+Wherever an answer names a session it carries `SESSION_REF`: the name typed for the
+session, its folder and its start, asked of the sessions module once per answer for the
+sessions that answer sends, and `known`, whether the session's record was found.
 
 The page's assets are the built files in `web/` beside this module: the `page`, `limits`
 and `cost` components' scripts and the build's stamp.
@@ -47,8 +73,12 @@ lb = _ui.api.loopback
 
 #: The harnesses a report can be cut to.
 HARNESSES = ("claude", "codex", "opencode")
+#: The harnesses that have plan windows.
+LIMIT_HARNESSES = ("claude", "codex")
+#: The most sessions `/api/window` lists under a window's total.
+USED_MAX = 10
 #: The most rows `/api/sessions` sends, and how many it sends unless asked.
-TOP_MAX = 1000
+TOP_MAX = 200
 TOP_DEFAULT = 200
 
 _TEXT = lb.Out("string")
@@ -61,6 +91,7 @@ _MAYBE_INT = lb.Out("int", nullable=True)
 _FLOAT = lb.Out("float")
 _WHEN = lb.Out("float", nullable=True)
 _BOOL = lb.Out("bool")
+_MAYBE_BOOL = lb.Out("bool", nullable=True)
 _WORDS = lb.Out("list", items=_TEXT)
 
 
@@ -78,6 +109,7 @@ FILTERS = {
     "until": _DATE,
     "harness": lb.Field("enum", required=False, values=HARNESSES),
     "project": _ANY,
+    "folder": _ANY,
     "model": _ANY,
     "utc": lb.Field("bool", required=False),
 }
@@ -112,10 +144,11 @@ INDEX = lb.Out("table", items={"passed": _BOOL, "last_pass": _WHEN, "note": _MAY
 
 def _report(row: dict[str, lb.Out], *, total: dict[str, lb.Out] | None = None,
             **extra: lb.Out) -> dict[str, lb.Out]:
-    """A report's whole answer: its range (epoch seconds, null for an open end), zone,
-    filters as given, rows, total (`SUMS` unless the report adds to it), unpriced models
-    and rules, and the index note."""
+    """A report's whole answer: the page server's local date, its range (epoch seconds,
+    null for an open end), zone, filters as given, rows, total (`SUMS` unless the report
+    adds to it), unpriced models and rules, and the index note."""
     return {
+        "today": _TEXT,
         "since": _WHEN,
         "until": _WHEN,
         "tz": _TEXT,
@@ -133,23 +166,54 @@ def _report(row: dict[str, lb.Out], *, total: dict[str, lb.Out] | None = None,
 #: month (`YYYY-MM`), null for requests with no time.
 PERIOD_ROW = {"period": _MAYBE, "model": _MAYBE, **ROW_SUMS}
 DAILY = _report(PERIOD_ROW, by=_TEXT)
-COST = _report(PERIOD_ROW, today=_TEXT)
+COST = _report(PERIOD_ROW)
 
-#: One session: its main file's title, `cwd` and project, its models, and its first and
-#: last request in range. `session_id` is null for a file with no session id, which has
-#: no session view.
-SESSION_ROW = {
+#: How full a session's context was at its newest request: `tokens` is the whole prompt
+#: of the newest claimed request of the session's main file, `window` the one it ran
+#: against (the harness's own, else the model table's, else null). The whole value is
+#: null when the session has no such request or its prompt size is unknown.
+CONTEXT = lb.Out("table", nullable=True, items={"tokens": _INT, "window": _MAYBE_INT})
+
+#: What names one session, wherever an answer names one. `harness` and `session_id` are
+#: the index's, for the page's addresses and requests; a session is shown by `name`,
+#: `folder` and `started`, never by its id.
+#:
+#: * `known`: true when the sessions module holds the session's record; false when it
+#:   was looked for under every root of its harness and none holds it (the record is
+#:   gone); null when it was not looked for: its harness's root was not listed whole,
+#:   the row has no session id, or the sessions module could not be asked.
+#: * `name`: the name typed for the session in its harness; null when it has none, for
+#:   a Codex or an OpenCode session, and unless `known` is true.
+#: * `folder`: the folder the session's record gives, else the `cwd` the index stored.
+#: * `started`: when the session's record says it started. With `known` false it is the
+#:   time of the earliest request the index holds for the session, and with `known`
+#:   null it is null: the first request's time stands in only for a record that is gone.
+SESSION_REF = {
     "harness": _TEXT,
     "session_id": _MAYBE,
-    "title": _MAYBE_SAYS,
+    "name": _MAYBE_SAYS,
+    "folder": _MAYBE_PATH,
+    "started": _WHEN,
+    "known": _MAYBE_BOOL,
+}
+
+#: One session: what names it, its main file's `cwd` and project, its models, its first
+#: and last request in range, and its context. `session_id` is null for a file with no
+#: session id: no route reads such a row by id, so it has no session view, a null
+#: `context` and a null `known`.
+SESSION_ROW = {
+    **SESSION_REF,
     "cwd": _MAYBE_PATH,
     "project": _MAYBE,
     "models": _WORDS,
     "first_ts": _WHEN,
     "last_ts": _WHEN,
+    "context": CONTEXT,
     **ROW_SUMS,
 }
-SESSIONS = _report(SESSION_ROW, top=_INT, more=_INT)
+#: `rows` is `[skip, skip + top)` of the sessions in order; `count` is all of them and
+#: `more` those after the rows sent.
+SESSIONS = _report(SESSION_ROW, top=_INT, skip=_INT, count=_INT, more=_INT)
 
 #: One agent and model of a session: `agent` is `main` for the main file, else the
 #: agent's id; `kind` its file's kind.
@@ -162,11 +226,16 @@ AGENT_ROW = {
     "last_ts": _WHEN,
     **ROW_SUMS,
 }
-SESSION = _report(AGENT_ROW)
+#: `ref` is what names the session, null when no `harness` was asked for and the index
+#: holds no one harness's session of that id.
+SESSION = _report(AGENT_ROW, context=CONTEXT,
+                  ref=lb.Out("table", nullable=True, items=SESSION_REF))
 
-#: One project key, or for files with none, one `cwd`.
+#: One project key, or for files with none, one `cwd`; by folder, one `cwd` and no key.
 PROJECT_ROW = {"project": _MAYBE, "cwd": _MAYBE_PATH, "models": _WORDS, **ROW_SUMS}
-PROJECTS = _report(PROJECT_ROW)
+#: `by` is the grouping asked for; `home` the account's home folder, null when the page
+#: server cannot say it, so the page can write a folder under it from `~`.
+PROJECTS = _report(PROJECT_ROW, by=_TEXT, home=_MAYBE_PATH)
 
 #: Where one model's price came from (the API's provenance without its `source`).
 PROVENANCE = lb.Out("table", items={
@@ -221,7 +290,17 @@ GROUP = lb.Out("table", items={
 #: and `kind`, as `by` says; the others are null.
 TERMS_ROW = {"model": _MAYBE, "period": _MAYBE, "agent": _MAYBE, "kind": _MAYBE,
              **ROW_SUMS, "groups": lb.Out("list", items=GROUP), "split": SPLIT}
-TERMS = _report(TERMS_ROW, total={**SUMS, "split": SPLIT}, by=_TEXT)
+#: What caching saved over a terms answer, an estimate: the same tokens with no cache,
+#: at the same prices. `read_tokens` of `input_tokens` (the whole prompts) were read
+#: from cache; `reads_at_input` is those reads at each price group's own input price,
+#: `reads_cost` what they did cost, `write_extra` what the cache writes cost over the
+#: input price, and `saved` the first less the other two, 0 or less where caching cost
+#: more than it saved. Null when the answer holds no cache read, and when a group that
+#: holds cache reads or writes is unpriced or lacks a price the sums need.
+SAVING = lb.Out("table", nullable=True, items={
+    "input_tokens": _INT, "read_tokens": _INT, "reads_at_input": _FLOAT,
+    "reads_cost": _FLOAT, "write_extra": _FLOAT, "saved": _FLOAT})
+TERMS = _report(TERMS_ROW, total={**SUMS, "split": SPLIT, "saving": SAVING}, by=_TEXT)
 
 #: One request of `/api/requests`: `n` is its place on the request axis, `context` its
 #: whole prompt (null when unknown), `window` the one it ran against (null when unknown).
@@ -329,6 +408,7 @@ LANE = lb.Out("table", items={
 })
 _FILE = {"lane": _TEXT, "path": lb.Out("string", mark="path"), "part": _TEXT}
 STATUS = {
+    "today": _TEXT,
     "lanes": lb.Out("list", items=LANE),
     "total": lb.Out("table", items={
         "files": _INT,
@@ -354,7 +434,8 @@ STATUS = {
 }
 
 #: One plan window. Times are ISO 8601 UTC; `dollars` holds the dollar figures the
-#: reading gave beside the window. The age of a reading is `now - observed_at`.
+#: reading gave beside the window. The age of a reading is `now - observed_at`. `opened`
+#: is when the window started, null when the readings cannot say.
 WINDOW = lb.Out("table", items={
     "harness": _TEXT,
     "limit_id": _TEXT,
@@ -372,17 +453,64 @@ WINDOW = lb.Out("table", items={
     "full_at": _MAYBE,
     "projection": _MAYBE,
     "fit": _INT,
+    "opened": _MAYBE,
     "note": _MAYBE_SAYS,
     "dollars": _named(_FLOAT),
     "unknown": _WORDS,
 })
-#: The windows, and what the last Codex pull did when one was wanted.
+#: The windows, the page server's local date, and what the last Codex pull did when one
+#: was wanted: always null on `/api/limits`, which makes none.
 LIMITS = {
+    "today": _TEXT,
     "rows": lb.Out("list", items=WINDOW),
     "pull": lb.Out("table", nullable=True, items={
         "tried": _BOOL, "ok": _BOOL, "reason": _MAYBE_SAYS, "via": _MAYBE, "added": _INT}),
     "notes": lb.Out("list", items=_SAYS),
 }
+
+#: One reading of a window's period: when it was read (ISO 8601 UTC) and its percent,
+#: null when the reading gave none.
+_READING = {"at": _TEXT, "used_percent": _WHEN}
+#: One window opened: the row `/api/limits` shows for it, when it started, the readings
+#: of its period and the sessions it was used by. Times are ISO 8601 UTC, as a limits
+#: row's are, but `now`. `readings.last` is the reading the row is from and `first` the
+#: period's earliest, null when that is the same one; `last.session` is what names the
+#: session the reading came from, null when the reading names none. `used` is this
+#: machine's sessions of the harness with requests since the window opened: how many
+#: (`count`), their requests and cost since then, and the ten dearest, each with what
+#: names it; null for a limit that is not the harness's main one, with a null `opened`,
+#: and when there is no index to read.
+OPENED_WINDOW = {
+    "now": _FLOAT,
+    "today": _TEXT,
+    "harness": _TEXT,
+    "limit_id": _TEXT,
+    "window_minutes": _INT,
+    "resets_at": _TEXT,
+    "used_percent": _FLOAT,
+    "opened": _MAYBE,
+    "readings": lb.Out("table", nullable=True, items={
+        "count": _INT,
+        "first": lb.Out("table", nullable=True, items=_READING),
+        "last": lb.Out("table", items={
+            **_READING,
+            "session": lb.Out("table", nullable=True, items=SESSION_REF)})}),
+    "used": lb.Out("table", nullable=True, items={
+        "since": _TEXT,
+        "count": _INT,
+        "requests": _INT,
+        "cost": _WHEN,
+        "complete": _BOOL,
+        "rows": lb.Out("list", items=lb.Out("table", items={
+            **SESSION_REF, "requests": _INT, "cost": _WHEN}))}),
+}
+
+#: The restart point of one model's main sessions: `model` is the id the measure keys
+#: its row by (the one asked for with a bracket or date suffix taken off; the one asked
+#: for when it names no model), `tokens` the context size past which carrying on costs
+#: more than restarting, and `reason` why there is none: no measure, no row for the
+#: model, or a price the model table lacks. Exactly one of `tokens` and `reason` is null.
+RESTART_POINT = {"model": _TEXT, "tokens": _MAYBE_INT, "reason": _MAYBE_SAYS}
 
 #: The index topic: whether a pass started here runs now, the last pass, and its note.
 INDEX_TOPIC = {"running": _BOOL, "last_pass": _WHEN, "note": _MAYBE_SAYS}
@@ -391,18 +519,26 @@ PAGE = lb.Page(
     routes=(
         lb.Route("/api/limits", "read", "moxi_usage.pagehandlers:limits",
                  returns={"now": _FLOAT, **LIMITS}),
+        lb.Route("/api/window", "read", "moxi_usage.pagehandlers:window",
+                 query={"harness": lb.Field("enum", values=LIMIT_HARNESSES),
+                        "limit_id": lb.Field("string", max=512),
+                        "minutes": lb.Field("int")},
+                 returns=OPENED_WINDOW),
         lb.Route("/api/daily", "read", "moxi_usage.pagehandlers:daily",
                  query={"by": lb.Field("enum", required=False, values=("day", "month")),
                         **FILTERS},
                  returns=DAILY),
         lb.Route("/api/sessions", "read", "moxi_usage.pagehandlers:sessions",
-                 query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},
+                 query={"top": lb.Field("int", required=False, max=TOP_MAX),
+                        "skip": lb.Field("int", required=False), **FILTERS},
                  returns=SESSIONS),
         lb.Route("/api/session", "read", "moxi_usage.pagehandlers:session",
                  query={"session": lb.Field("string", max=512), **FILTERS},
                  returns=SESSION),
         lb.Route("/api/projects", "read", "moxi_usage.pagehandlers:projects",
-                 query=FILTERS, returns=PROJECTS),
+                 query={"by": lb.Field("enum", required=False,
+                                       values=("project", "folder")), **FILTERS},
+                 returns=PROJECTS),
         lb.Route("/api/models", "read", "moxi_usage.pagehandlers:models",
                  query=FILTERS, returns=MODELS),
         lb.Route("/api/terms", "read", "moxi_usage.pagehandlers:terms",
@@ -420,6 +556,8 @@ PAGE = lb.Page(
                         "q": lb.Field("string", required=False, max=200)},
                  returns=PRICES),
         lb.Route("/api/status", "read", "moxi_usage.pagehandlers:status", returns=STATUS),
+        lb.Route("/api/restart-point", "read", "moxi_usage.pagehandlers:restart_point",
+                 query={"model": lb.Field("string", max=512)}, returns=RESTART_POINT),
         lb.Route("/api/cost", "read", "moxi_usage.pagehandlers:cost", returns=COST),
         lb.Route("/api/pass", "act", "moxi_usage.pagehandlers:start_pass",
                  returns={"started": _BOOL, "running": _BOOL}),
@@ -430,9 +568,11 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["AGENT_ROW", "COST", "DAILY", "FILTERS", "GROUP", "HARNESSES", "INDEX",
-           "INDEX_TOPIC", "LANE", "LIMITS", "MODELS", "MODEL_ROW", "OVERRIDE", "PAGE",
+__all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESSES", "INDEX",
+           "INDEX_TOPIC", "LANE", "LIMITS", "LIMIT_HARNESSES", "MODELS", "MODEL_ROW",
+           "OPENED_WINDOW", "OVERRIDE", "PAGE",
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
-           "REQUESTS", "REQUEST_ROW", "ROW_SUMS", "SESSION", "SESSIONS", "SESSION_ROW",
+           "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS",
+           "SESSION_REF", "SESSION_ROW",
            "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
-           "WINDOW"]
+           "USED_MAX", "WINDOW"]

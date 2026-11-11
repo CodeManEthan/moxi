@@ -27,7 +27,7 @@ the `moxi` command.
 ## Requirements
 
 - Linux and Python 3.12 or later, with [uv](https://docs.astral.sh/uv/) to install.
-- `moxi`, Moxi's core, 0.1.6 or later, and `moxi-sessions` 0.2.
+- `moxi`, Moxi's core, 0.1.6 or later, and `moxi-sessions` 0.2.8 or later.
 - The live parts need turns and the harness it reaches: Claude limits, the warn-at mark
   and the worker ceiling need Claude Code (or Codex) sessions running under turns, and a
   pulled Codex limits reading needs `codex` on PATH. The token index, the reports, the
@@ -134,6 +134,12 @@ line through them says when it reaches 100%, given only when that comes after no
 before the reset. Of what else a reading says, the line prints only a spend limit's
 dollars; `--json` keeps all of it.
 
+A row also says when its window opened (`opened` in `--json` and from Python): the reset
+time less the window's duration. It is null when either is unknown, when that time is
+not earlier than the first reading of the period, and for a window at 0% with one
+reading: a window is not said to have opened at a time it had already been read at, nor
+from one reading that shows no use.
+
 ## The token index
 
 Every request every harness wrote is kept in one SQLite file, `STATE/usage/index.db`, so a
@@ -190,7 +196,15 @@ by the project each session was recorded under, or by its directory when none wa
 tier, prompt-size bound and price period), the tokens of fresh input, cache read, the two
 cache writes and output, the price each paid and the dollars, which add up to the cost. By
 model it is a reconciliation table; by day, month or (with `--session`) a session's agents
-it gives cost by token class and by price tier. `requests` gives one line per request of a
+it gives cost by token class and by price tier. With `--json` its total carries `saving`,
+what caching saved over the report: the cache reads at each price group's own input
+price (`reads_at_input`), what those reads did cost (`reads_cost`), what the cache writes
+cost over the input price (`write_extra`), and `saved`, the first less the other two,
+with how many of the input tokens were read from cache (`read_tokens` of
+`input_tokens`). It is an estimate: the same tokens with no cache, at the same table's
+prices. `saved` is 0 or less where caching cost more than it saved. `saving` is null when
+the report holds no cache read, and when a price group that holds cache reads or writes
+is unpriced or lacks a price the sums need. `requests` gives one line per request of a
 session's agent (`main` unless `--agent` names another): its tokens by class, cost,
 context against the model's window, its turn, and a line where a compaction fell. It
 exits 1 when no request of that agent is in range.
@@ -348,22 +362,153 @@ the keys that differ.
 
 ## The page
 
-With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there: tokens and cost by day or month, by session (each session split
-by agent and model), by project and by model with where its price came from, with the
-limits meters and a strip about the index above them. The Cost terms view gives each
-model's cost split by class and tier, the Reconcile table (every term of each price group,
-a subtotal per model of several groups, and the total) and a Rates section with the rates
-of the models in use and a search over the whole model table. The daily view can stack
-cost by class. A session's view charts its main agent's requests, or any agent's, on one
-request axis: tokens or cost by class per request, and the context against the window,
-with turn and compaction marks. Two blocks go on the shell's home
-view: the limits, one meter per window, and the cost of today and the last 7 days, with
-how old the index behind it is, flagged once its last pass is over 10 minutes old. Without
-the extra, nothing of usage changes.
+With the `ui` extra (`moxi-ui`, Moxi's browser UI shell), usage shows a page there, at
+`/m/usage/`. It shows how much of each plan window is used and what the sessions on
+this machine cost, from usage's own index and readings, and names sessions through the
+sessions module. Top to bottom:
 
-Its reads include `GET /api/terms` (the `terms` report), `GET /api/requests` (the
-`requests` report) and `GET /api/prices` (the model table's rates, for some models or a
-search; it reads no index). The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
+- **Limits.** A group per harness with a plan window read, Claude then Codex, the one that
+  fills soonest first. A row per window says how much is used in words, in whole percents
+  rounded down, so it never says more is used than is; a thin line, with a tick at how
+  much of the window has passed when its start is known; when it resets; and when it
+  fills, if the readings say it runs out first. Such a row sits first in its group, and a
+  warning line above the page names it. A window whose last reading is from a period that
+  has ended is one dim row, `5-hour · reset 21:34`. A row opens in place: the window's
+  start and reset, its readings and the session the last one came from, why it has no
+  fill time, and, on a harness's main limit, this machine's sessions of that harness since
+  the window opened (the ten dearest, under a total that counts them all).
+- **Cost.** Today, the last 7 days and the last 30, each beside the period before it; the
+  two sessions that cost most today; when the sessions were last read; and `Prices`. It
+  sits above the filter line and does not follow it.
+- **The filter line.** Range (Today, Last 7 days, Last 30 days by default, Last 90 days,
+  From … to …, All time), each range with its figure under the filters set; Project, or
+  Folder where the projects module is not installed; Harness and Model, each drawn only
+  when there is more than one to choose or one is set; and Cost / Tokens. Everything
+  under it follows them.
+- **The chart.** One bar a day, or a month for All time and a range over 92 days, with a
+  sentence over it, each bar's value on hover, a dashed outline on a period whose figures
+  are not whole, and `Table`, its rows as a table.
+- **The sections**, each one row stating its answer, with the count that opens it:
+  - Sessions. Opened, the ten dearest of the range's last seven days as two-line rows,
+    `Show` for thirty more, and the days before them as `Earlier`. A session opens in its
+    row: its requests, its context, a chart of its requests with its turns and
+    compactions, where its cost went, its subagents (a map, a row each, and one opened
+    with its own requests), its harness, model and start, the restart point when one is
+    measured, and `Open in Sessions`, `Table`, `Check against a bill` and `Copy id`.
+  - Projects, or Folders where the projects module is not installed, by cost. A row
+    filters the page to it and opens Sessions. Files with no project are one `no
+    project` row, and the sentence under the list names the dearest three of their
+    folders and counts the rest as `N more`, which opens the table that lists them all.
+  - Models, by cost.
+  - Token kinds: how much input was read from cache, the four classes, and what caching
+    saved, as an estimate.
+  - Prices: how many of the range's models are priced, and the price table's date.
+    Opened, their prices per million tokens; `Find a model`, a search over the whole
+    table; `Check against a bill`, every term of each price group with a subtotal per
+    model of several groups and the total; and `Details`, where each rate came from, its
+    tiers and periods, your own `[[model]]` rows and any rows skipped.
+
+  Each opened section but Token kinds and Prices ends with `Table`: every figure its rows
+  carry, the harness's own cost where it reported one, and why a figure is not whole.
+- **The foot.** When the sessions were read, how many files each harness holds, and `Read
+  new sessions` (`Reading new sessions…` while a pass runs). Under it, one dim line each
+  while it holds: a harness the last pass could not read and why, files held back and
+  why, a range whose total is not whole and why, the limits' notes, a window that could
+  not be read, a read or a pass that failed or was refused, and an address the page does
+  not have.
+
+A session is shown by the name typed for it in its harness, else by its folder's last
+segment and when it started (`proj-a · started today 09:14`, `proj-a · started Nov 3
+08:52`: the start's day is worded as the Sessions page words it), never by its id; `Copy id`
+copies the id. A sum that is not whole reads `at least $19.54`, and one nothing in which
+could be priced, `no price`. A time is the hour and minute, and its day is worded against
+the page server's date: nothing for the same day, `yesterday` or `tomorrow`, the weekday
+within six days, else the date. With no request counted yet the page says so and offers
+`Read new sessions`; with no index, or one an older usage wrote, it gives the command
+`moxi usage index` to copy instead. A range that holds nothing says `Nothing was used in
+this range.` in the chart's place. A piece is drawn once its read has answered: until the
+first answers, `Reading…` stands where the page will be, and inside an opened row or
+section a read still out shows `Reading…` in its place.
+
+Its addresses, after `/m/usage/`:
+
+| address | opens |
+|---|---|
+| none | the page, nothing opened |
+| `limit/<harness>/<limit_id>/<minutes>` | that limit row |
+| `sessions` | the Sessions section |
+| `sessions/<harness>/<id>` | that session, opened first in the section, with its whole figures whatever range is set |
+| `sessions/<harness>/<id>/<agent>` | the same, with that subagent's requests opened |
+| `projects`, `folders` | the Projects or the Folders section, whichever the install has |
+| `models`, `kinds`, `prices` | that section |
+
+One piece is open at a time, and the address names it. The page rewrites the address in
+place as a piece opens or closes, adding no history entry, so Back leaves the page; a
+reload, or Back from the Sessions page, opens the same piece again, though not the scroll
+or how far it was shown. The range, the filters and Cost / Tokens are not part of the
+address: they are kept until the shell's page is reloaded, which starts again on the last
+30 days with no filter. An address the page does not have opens it with nothing opened
+and a line at the foot.
+
+What it leaves out: a heading of its own (the shell's top line names the page); colour
+for bad news (it draws in the theme's text, border and background colours, with no
+accent, warning or error colour); a group for a harness with no plan window read
+(OpenCode, Claude without the turns module, Codex with no rollout); a title the harness
+made up, as a session's name; a decimal on a percent; a line for a harness whose folder
+was never on the machine; cost by class as a stacked chart; and the tabs and the `daily`,
+`terms` and `session/<id>` addresses of the page before it. It has no screen of its own
+for a phone, and fits a window 360 px wide.
+
+Two blocks go on the shell's home view: the limits, one meter per window, and the cost of
+today and the last 7 days, with how old the index behind it is, flagged once its last pass
+is over 10 minutes old. Without the extra, nothing of usage changes.
+
+The page server's reads, each a `GET` under `/api`:
+
+| route | query | answers |
+|---|---|---|
+| `limits` | none | each plan window now, from the stored readings, with `opened` |
+| `window` | `harness`, `limit_id`, `minutes` | one fresh window: when it opened, the first and last reading of its period with the session the last came from, and the sessions that used it |
+| `daily` | `by` (`day`, `month`), filters | tokens and cost by day or month and model |
+| `sessions` | `top` (1 to 200), `skip`, filters | sessions, dearest first: the `top` after `skip`, `count` of them all, `more` after those sent, each with its `context` and what names it |
+| `session` | `session`, filters | one session by agent and model, with its `context` and what names it (`ref`) |
+| `projects` | `by` (`project`, `folder`), filters | tokens and cost by project, or by folder alone, with the account's `home` folder |
+| `models` | filters | tokens and cost by model, with where each price came from |
+| `terms` | `by` (`model`, `day`, `month`, `agent`), `session`, filters | every term of each cost, and `saving` on the total |
+| `requests` | `session`, `agent`, filters | one row per request of a session's agent |
+| `prices` | `models`, `providers`, `q` | the model table's rates, for some models or a search; it reads no index |
+| `restart-point` | `model` | `{model, tokens, reason}`: the context size past which carrying on with a main session of that model costs more than restarting it, or null with the reason |
+| `status` | none | the index: its lanes, held rows and last pass |
+| `cost` | none | today and the six days before it, by day and model |
+
+The filters are `since`, `until` (dates, both included), `harness`, `project`, `folder`,
+`model` and `utc`. `folder` is a folder's whole path and keeps the sessions run in it,
+whatever project they were recorded under; a folder above matches nothing under it.
+Every answer but `prices` and `restart-point` carries `today`, the page server's local
+date. `POST /api/pass` starts a pass, and `GET /api/events` is the stream, with the
+topics `limits` and `index`.
+
+`limits` makes no Codex pull, so it never waits on turns: the stream's poller pulls and
+publishes the `limits` topic. `window` and `restart-point` write nothing: `window` opens
+the readings store only when it exists, and `restart-point` reads the measure's file and
+the model table. A session's `context` is the whole prompt of the newest request of its
+main file and the window it ran against, null when that is not known. `window`'s sessions
+are given for the harness's main limit when its start is known and there is an index to
+read, else null.
+
+Wherever an answer names a session it carries `harness`, `session_id`, `name`, `folder`,
+`started` and `known`. The page server asks the sessions module for them once per answer,
+for the sessions that answer sends. `name` is the name typed for the session in its
+harness; a Codex or an OpenCode session has none, and a title the harness made up is not
+one. `known` is true when the session's record was found. It is false when every root of
+the harness was listed and none holds it: the record is gone, the session keeps its
+figures, `folder` is the `cwd` the index stored and `started` the session's earliest
+request in the index. It is null when the session was not looked for (its harness's root
+could not be listed whole, the row has no session id, or the sessions module could not be
+asked), and then `name` and `started` are null too. The id is there for the page's
+addresses and requests; the page shows a session by its name, or by its folder and start.
+
+The page reads the index as it is: no view runs a pass, so none waits on the index's lock.
 "Read new sessions" runs one in the page server, which the page also asks for when it opens
 and the last pass is over 10 minutes old. With no index yet, or one an older usage wrote,
 the page says to run `moxi usage index`, and it builds or migrates nothing itself. Days are
@@ -428,7 +573,17 @@ ctx.tokens, ctx.window, ctx.percent, ctx.text()
 point = api.restart_point()                    # rows per model and population, marks
 api.threshold("claude-opus-5-5", "1.5x", "main").tokens   # None when unavailable
 status = api.report("status", fresh=False)    # the index itself, one row per lane
+
+# interface 2: modules.load("usage", interface=2)
+row.opened                                     # when the window started, or None
+api.report("daily", folder="/work/app")        # the sessions run in one folder
+api.report("projects", by="folder")            # by folder alone, whatever the project
+api.report("terms").total["saving"]            # what caching saved, or None
 ```
+
+usage offers interfaces 1 and 2. Interface 2 is interface 1 plus those four: a limits
+row's `opened`, `report`'s `folder` filter, the `projects` report by folder, and `saving`
+on a `terms` total. A module that needs one of them loads usage with `interface=2`.
 
 Every result has `as_dict()` for JSON: an unknown fact is left out and named in the
 object's `"unknown"` list.
