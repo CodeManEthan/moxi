@@ -388,6 +388,7 @@ const STYLES = css`
   [hidden] { display: none; }
   @media (max-width: 720px) {
     .where { position: relative; margin-bottom: 10px; white-space: normal; overflow-wrap: anywhere; }
+    .where .k { white-space: nowrap; }
     .box { height: auto; min-height: 150px; }
     textarea { min-height: 64px; }
     .boxrow { flex-wrap: wrap; justify-content: flex-end; row-gap: 10px; }
