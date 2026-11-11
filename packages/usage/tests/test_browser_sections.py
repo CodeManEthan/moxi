@@ -18,6 +18,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -312,6 +313,57 @@ def test_an_open_menu_stays_open_with_its_focus_when_another_filters_list_arrive
     expect(model).to_have_attribute("aria-expanded", "true")
     focused = panel.evaluate("el => el.shadowRoot.activeElement?.closest('[data-filter]')?.dataset.filter ?? null")
     assert focused == "model", focused
+
+
+def test_an_open_menu_keeps_its_element_and_focus_when_the_day_turns_over(page):
+    turning = []
+    tomorrow = []
+
+    def status(route):
+        answer = route.fetch()
+        body = answer.json()
+        if turning and isinstance(body.get("today"), str):
+            body["today"] = (date.fromisoformat(body["today"]) + timedelta(days=1)).isoformat()
+            tomorrow.append(body["today"])
+        route.fulfill(response=answer, json=body)
+
+    page.route("**/m/usage/api/status", status)
+    panel = open_page(page)
+    filters = panel.locator("[data-part=filters]")
+    expect(filters.locator("[data-filter=place]")).to_have_count(1)
+    model = filters.locator("[data-filter=model] button.pick")
+    model.click()
+    menu = filters.locator("[data-menu=model]")
+    menu.locator("[role=menuitemradio]").first.focus()
+    expect(menu.locator("[role=menuitemradio]").first).to_be_focused()
+    # Every change to the page from here on is checked: the menu is still in the page,
+    # the same element, with the focus inside it.
+    panel.evaluate("""el => {
+        const root = el.shadowRoot;
+        const menu = root.querySelector("[data-menu=model]");
+        window.lost = [];
+        new MutationObserver(() => {
+            if (!menu.isConnected) window.lost.push("the menu was taken out");
+            else if (!menu.contains(root.activeElement)) window.lost.push("the focus left the menu");
+        }).observe(root, { subtree: true, childList: true, attributes: true });
+    }""")
+    turning.append(True)
+
+    def new_day(route: str):
+        return lambda answer: route in answer.url and bool(tomorrow) and f"until={tomorrow[-1]}" in answer.url
+
+    # The page reads its status again after the pass: the day it gives has moved on, and
+    # the menus' lists are read for the new day.
+    with page.expect_response(new_day("/api/models?")), page.expect_response(new_day("/api/projects?")):
+        panel.locator("[data-part=foot]").get_by_role("button", name="Read new sessions").evaluate(
+            "button => button.click()")
+    panel.evaluate("el => el.updateComplete")
+    expect(filters.locator("[data-menu]")).to_have_count(1)
+    expect(filters.locator("[data-filter=place] button.pick")).to_have_attribute("aria-expanded", "false")
+    expect(model).to_have_attribute("aria-expanded", "true")
+    assert page.evaluate("() => window.lost") == []
+    assert panel.evaluate("el => el.shadowRoot.querySelector('[data-menu=model]')"
+                          "?.contains(el.shadowRoot.activeElement) ?? false")
 
 
 # --- without projects ----------------------------------------------------------------------

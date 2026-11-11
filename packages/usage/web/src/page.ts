@@ -440,6 +440,8 @@ export class UsagePage extends LitElement {
   #windowPath: string | null = null;
   #windowKey: string | null = null;
   #asked: string | null = null;
+  /** The state and folders the reads under the filter line were asked under. */
+  #askedFilters: string | null = null;
   #askedAllTime: string | null = null;
   #resize: ResizeObserver | null = null;
   #stops: (() => void)[] = [];
@@ -626,7 +628,7 @@ export class UsagePage extends LitElement {
     this.#pricesPath = null;
     this.#closeLists();
     this.#closePart();
-    this.#asked = this.#askedAllTime = null;
+    this.#asked = this.#askedFilters = this.#askedAllTime = null;
   }
 
   /** Whether the project filter is by folder: projects is not installed. */
@@ -663,13 +665,23 @@ export class UsagePage extends LitElement {
     const asked = JSON.stringify(paths);
     if (asked !== this.#asked) {
       this.#asked = asked;
+      // Under the same filters the paths change only with a new day. The menus' lists
+      // then keep their last value until the new reads answer, so the filter line keeps
+      // every filter, and a menu the person opened stays open, while the lists reload.
+      const filters = JSON.stringify([state, this.#folders()]);
+      const sameFilters = filters === this.#askedFilters;
+      this.#askedFilters = filters;
+      const heldPlaces = sameFilters ? this.#places?.value ?? null : null;
+      const heldModels = sameFilters ? this.#models?.value ?? null : null;
       const allTime = this.#allTime;
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) feed.close();
       this.#chart = new Feed<Report<DayRow>>(() => api("usage", paths.chart), parseReport, update);
       const figures = paths.figures;
       this.#figures = figures === null ? null : new Feed<Report<DayRow>>(() => api("usage", figures), parseReport, update);
-      this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update);
-      this.#models = new Feed<Report<ModelRow>>(() => api("usage", paths.models), parseReport, update);
+      this.#places = new Feed<Report<ProjectRow>>(() => api("usage", paths.places), parseReport, update)
+        .hold(heldPlaces);
+      this.#models = new Feed<Report<ModelRow>>(() => api("usage", paths.models), parseReport, update)
+        .hold(heldModels);
       this.#placesSection = paths.placesSection === paths.places ? this.#places
         : new Feed<Report<ProjectRow>>(() => api("usage", paths.placesSection), parseReport, update);
       this.#modelsSection = paths.modelsSection === paths.models ? this.#models

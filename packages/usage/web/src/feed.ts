@@ -594,6 +594,13 @@ export class Feed<V> {
     this.#clock = clock;
   }
 
+  /** Starts the feed with `value`, read before under other arguments, which it shows
+   * until its own first read answers. */
+  hold(value: V | null): this {
+    this.value = value;
+    return this;
+  }
+
   /** The server's time now in epoch seconds: this browser's clock until a body gave `now`. */
   now(): number {
     return this.#clock() + (this.offset ?? 0);
