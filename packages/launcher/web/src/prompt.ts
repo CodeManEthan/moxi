@@ -156,9 +156,9 @@ import {
 } from "./recent-model.ts";
 import type { Recent, RecentAnswer, RecentRequest, Shows } from "./recent-model.ts";
 import {
-  ADD, addList, CANCEL, DATE_FORMATS, DATE_WORD, dateFormat, dateSample, EVERY_PROJECT, KEEP_FOR, keepShown, NAME_ROW, nameNote,
-  nameQuery, parseName, PIECES_WORD, SAVE, saveBody, saveSaid, tokens, TYPED, USE_TEMPLATE, withDate, withoutPiece,
-  withPiece, WRITTEN,
+  ADD, addList, CANCEL, DATE_FORMATS, DATE_WORD, dateFormat, dateSample, draftOf, EVERY_PROJECT, KEEP_FOR, keepShown,
+  NAME_ROW, nameNote, nameQuery, parseName, PIECES_WORD, SAVE, saveBody, saveSaid, tokens, TYPED, USE_TEMPLATE, withDate,
+  withoutPiece, withPiece, WRITTEN,
 } from "./name-model.ts";
 import type { Draft, NameContext, Named, Piece } from "./name-model.ts";
 
@@ -1524,16 +1524,15 @@ export class LauncherPrompt extends LitElement {
     this.options = withOption(this.options, field, value === "" ? null : value, this.fields as PanelField[]);
   }
 
-  /** Opens the editor on the template the name is rendered from, or closes it. */
+  /** Opens the editor on the template the name is rendered from, kept for the project the answer
+   * names, else the line's; or closes it. */
   #toggleEditor(): void {
     this.nameSaid = "";
     if (this.draft !== null) {
       this.draft = null;
       return;
     }
-    const named = this.named;
-    const project = this.#nameContext.project;
-    this.draft = { template: named?.template ?? "", keep: named?.from === "project" && project !== "" ? "project" : "global" };
+    this.draft = draftOf(this.named, this.#nameContext.project);
   }
 
   /** An edit of the template being edited; it is rendered again unsaved. */
@@ -1611,7 +1610,7 @@ export class LauncherPrompt extends LitElement {
    * as written, where it is kept, and `Cancel` and `Save template`. */
   #editor(draft: Draft) {
     const named = this.named;
-    const project = this.#nameContext.project;
+    const project = draft.project;
     const date = dateFormat(draft.template);
     const adds = addList(this.fields, draft.template);
     const refused = named?.refused ?? null;

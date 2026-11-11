@@ -49,11 +49,12 @@
   the button's default places it, or copies its command for the user's terminal.
 - Home's `Options` panel shows the session name under Seat > Name & notes: the name the
   template gives, following the seat, the place, the model and the comms name, with a
-  sentence saying whose template it is. A name typed over it is a change for that
-  launch, and `Use the template` takes it back. Its caret opens the template's editor
-  (pieces, date format, the template as written, `Keep for` a project), each edit
-  rendered unsaved; `Save template` writes `name.template` or `name.templates` through
-  the shell's own settings route, so a key locked for the shell's run is refused there.
+  sentence saying whose template it is, a folder inside a project naming that project's.
+  A name typed over it is a change for that launch, and `Use the template` takes it
+  back. Its caret opens the template's editor (pieces, date format, the template as
+  written, `Keep for` that project), each edit rendered unsaved; `Save template` writes
+  `name.template` or `name.templates` through the shell's own settings route, so a key
+  locked for the shell's run is refused there.
 - Home's launch piece has a `+` at the left of the chip with two entries. `Brief from a
   file` takes a path: while it is set the box is off and the launch sends that file as
   its first turn (`brief_file`, and no `brief`). `Continue the last session`, read each
@@ -104,7 +105,8 @@
   `moxi_launcher.names` (the template's pieces, date formats, cleanup and save check,
   `shown(row)`, what a launch is called), which needs no UI shell. `api.preview` names
   the launch as `api.launch` does. The page server answers `GET /api/name`: the name a
-  launch of the form would take, a template being edited rendered unsaved with the save
+  launch of the form would take and the key of the project whose template gave it (for a
+  folder, the project it is in), a template being edited rendered unsaved with the save
   check's refusal, and what saving it writes. A taken slot's label in `GET /api/targets`
   is the launch's name.
 - Each entry of the past-sessions list (`GET /api/sessions`, `moxi launcher sessions

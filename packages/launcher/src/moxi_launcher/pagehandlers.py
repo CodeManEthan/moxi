@@ -674,8 +674,8 @@ def spelled_table(table: Mapping[str, str]) -> str:
 
 
 def _unnamed(**answer: Any) -> dict[str, Any]:
-    return {"name": None, "template": names.DEFAULT, "from": names.GLOBAL, "refused": None,
-            "save": None, **answer}
+    return {"name": None, "template": names.DEFAULT, "from": names.GLOBAL, "project": None,
+            "refused": None, "save": None, **answer}
 
 
 def _keep_checked(query: Mapping[str, Any]) -> None:
@@ -691,12 +691,13 @@ def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
     project, else the one for every launch. Its project is `project`, else the one a
     launch in the folder `cwd` finds (`presets.folder_place`, which also expands `~`).
     `seat`, else `agent`, fills `<agent>`; the project's key, else the name of that
-    folder, fills `<project>`; `identity` and `scope` fill nothing without comms. With
-    `template`, that text is rendered in the stored template's place and checked:
-    refused, the answer holds the refusal and no name; else `save` holds what saving it
-    writes, for `project` when `keep` is `project`. Settings or projects that can't be
-    read are answered as a refusal. A `keep` with no `template`, or for a project with
-    no `project`, is refused (422)."""
+    folder, fills `<project>`; `identity` and `scope` fill nothing without comms. The
+    answer's `project` is the key of the project whose template it rendered, null for
+    the one for every launch. With `template`, that text is rendered in the stored
+    template's place and checked: refused, the answer holds the refusal and no name;
+    else `save` holds what saving it writes, for `project` when `keep` is `project`.
+    Settings or projects that can't be read are answered as a refusal. A `keep` with no
+    `template`, or for a project with no `project`, is refused (422)."""
     _keep_checked(query)
     project = query.get("project") or None
     keep, editing = query.get("keep"), "template" in query
@@ -723,6 +724,7 @@ def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
         refused = names.refusal(template)
         if refused is not None:
             return _up(**_unnamed(template=template, refused=_refusal(refused),
+                                  project=key if source == names.PROJECT else None,
                                   **{"from": source}))
         save = {"key": names.TEMPLATE, "value": template}
         if source == names.PROJECT:
@@ -731,12 +733,14 @@ def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
     else:
         picked = names.chosen(current, key)
         template, source = picked.template, picked.source
+    owner = key if source == names.PROJECT else None
     taken: frozenset[str] = frozenset()
     if "<instance>" in template:
         with _store() as conn:
             taken = frozenset() if conn is None else names.taken(conn)
     name = names.render(template, pieces, now=names.now(), taken=taken)
-    return _up(name=name, template=template, refused=None, save=save, **{"from": source})
+    return _up(name=name, template=template, project=owner, refused=None, save=save,
+               **{"from": source})
 
 
 def read_name(call: Any) -> dict[str, Any]:

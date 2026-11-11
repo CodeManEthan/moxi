@@ -2,8 +2,9 @@
 the launcher's real page server: the name the template gives, following the model; a name
 typed over it, a change that reaches the launch; the template's editor rendering each edit
 unsaved, refusing a template the page server would refuse, and saving through the shell's
-own settings route, after which the next read names the saved template; and the save
-refused on a shell started with the template's key locked.
+own settings route, after which the next read names the saved template; a folder inside a
+project named, and its template kept, as that project's; and the save refused on a shell
+started with the template's key locked.
 
 The shell's clock is real, so a name holding the date is matched by its pattern. The shell
 runs the fake slots in slots' place and a fake `claude` first on its `PATH`, so a launch
@@ -243,6 +244,33 @@ def test_a_template_kept_for_the_project_names_its_launches_and_says_whose_it_is
     assert body == {"module": "launcher", "key": "name.templates", "value": '{proj-a = "<project>-own"}'}, body
     expect(note(panel)).to_have_text(f"From proj-a's template. It follows the project; {TYPE_OVER}")
     expect(field(panel)).to_have_attribute("placeholder", "proj-a-own")
+
+
+def test_a_folder_inside_a_project_says_the_projects_template_and_keeps_an_edit_for_it(
+        page, shell, unsaved):
+    (Path(shell.env["HOME"]) / "work" / "proj-a" / "sub").mkdir(exist_ok=True)
+    status, answer = kit.session(shell).post(SAVE, {"module": "launcher", "key": "name.templates",
+                                                    "value": '{proj-a = "<project>-own"}'})
+    assert status == 200, (status, answer)
+    piece = kit.open_home(page)
+    piece.locator(".where .face").click()
+    find = piece.locator('[data-menu="where"] .find')
+    find.fill("~/work/proj-a/sub")
+    find.press("Enter")
+    expect(piece.locator(".where")).to_have_attribute("data-word", "Folder")
+    panel = name_row(piece)
+    expect(field(panel)).to_have_attribute("placeholder", "proj-a-own")
+    expect(note(panel)).to_have_text(f"From proj-a's template. It follows the project; {TYPE_OVER}")
+    found = editor(panel)
+    keep = found.get_by_role("group", name="Keep for")
+    expect(keep.get_by_role("button")).to_have_text(["proj-a", "every project"])
+    expect(keep.get_by_role("button", name="proj-a")).to_have_attribute("aria-pressed", "true")
+    written(found).fill("<project>-sub")
+    expect(field(panel)).to_have_attribute("placeholder", "proj-a-sub")
+    body = saved(page, found)
+    assert body == {"module": "launcher", "key": "name.templates", "value": '{proj-a = "<project>-sub"}'}, body
+    expect(note(panel)).to_have_text(f"From proj-a's template. It follows the project; {TYPE_OVER}")
+    expect(field(panel)).to_have_attribute("placeholder", "proj-a-sub")
 
 
 def test_on_a_shell_started_with_the_template_locked_the_save_is_refused_in_the_shells_words(

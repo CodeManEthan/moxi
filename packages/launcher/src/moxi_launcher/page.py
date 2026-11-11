@@ -294,10 +294,12 @@ TARGETS = {**STANDING, "slots": Out("list", items=SLOT), "new_slot": Out("bool")
 
 #: The name a launch would take. `name` is the template rendered now, null while
 #: `refused`; `template` is the text rendered and `from` whose it is, `project` or
-#: `global`. `refused` is why a template being edited can't be saved. `save` is what
-#: saving it writes, a launcher setting's key and its value as the command line spells
-#: it; null while refused, and when no template is being edited.
+#: `global`; `project` is the key of that project, null for `global`. `refused` is why a
+#: template being edited can't be saved. `save` is what saving it writes, a launcher
+#: setting's key and its value as the command line spells it; null while refused, and
+#: when no template is being edited.
 NAME = {**STANDING, "name": _text(nullable=True), "template": _text(), "from": _text(),
+        "project": _text(nullable=True),
         "refused": Out("table", items=REFUSAL.items, nullable=True),
         "save": _table(nullable=True, key=_text(), value=_text())}
 

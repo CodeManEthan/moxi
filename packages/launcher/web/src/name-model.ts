@@ -2,18 +2,20 @@
 // can drive it. prompt.ts draws it.
 //
 // Seat > Name & notes > Session name shows the name a launch would take now, as `/api/name`
-// renders it from the template of the line's project, else the one for every launch, for the
-// seat, the place, the model and the comms name the piece holds; it is read again whenever one
-// of those changes, so the name follows them. Under it, one dim sentence says whose template it
-// is and what it follows. A name typed over it is the row's value, a change like any other, and
-// the sentence says so with `Use the template`, which lets go of it.
+// renders it from the template of the project the line names or the folder is in, else the one
+// for every launch, for the seat, the place, the model and the comms name the piece holds; it is
+// read again whenever one of those changes, so the name follows them. Under it, one dim sentence
+// says whose template it is, as the answer names it, and what it follows. A name typed over it
+// is the row's value, a change like any other, and the sentence says so with `Use the
+// template`, which lets go of it.
 //
 // The caret opens the template's editor: the pieces in the template, each taken out by a
 // press, and the pieces it lacks to add; the date's format; the template as written, typed
-// into freely; whether it is kept for the line's project or for every project. Each edit is
-// rendered unsaved by `/api/name?template=`, which says why the page server would refuse it,
-// and what saving it writes. The save goes through the shell's own settings route, which
-// refuses a key the shell was started with locked, in its own words.
+// into freely; whether it is kept for the project whose template it was opened on (else the
+// line's project) or for every project. Each edit is rendered unsaved by
+// `/api/name?template=`, which says why the page server would refuse it, and what saving it
+// writes. The save goes through the shell's own settings route, which refuses a key the shell
+// was started with locked, in its own words.
 //
 // Every string here goes into the page as text.
 
@@ -51,13 +53,15 @@ export const EVERY_PROJECT = "every project";
 export const CANCEL = "Cancel";
 export const SAVE = "Save template";
 
-/** Where a template is kept: the line's project's own entry, or the one for every launch. */
+/** Where a template is kept: a project's own entry, or the one for every launch. */
 export type Keep = "project" | "global";
 
-/** A template being edited, and where saving it keeps it. */
+/** A template being edited, where saving it keeps it, and the project it may be kept for, ""
+ * for none. */
 export interface Draft {
   template: string;
   keep: Keep;
+  project: string;
 }
 
 /** What a name is rendered for: each "" when the launch has none. */
@@ -85,33 +89,39 @@ export interface NameSave {
 }
 
 /** `/api/name`'s answer: the name (null when none is rendered), the template it was rendered
- * from and whose it is, why the template is refused, what saving it writes; `failed` is why
- * the read gave nothing, "" when it did. */
+ * from, whose it is and the key of its project (null for the one for every launch), why the
+ * template is refused, what saving it writes; `failed` is why the read gave nothing, "" when
+ * it did. */
 export interface Named {
   name: string | null;
   template: string;
   from: Keep;
+  project: string | null;
   refused: NameRefusal | null;
   save: NameSave | null;
   failed: string;
 }
 
 /** The query `/api/name` takes for `context`, and for a template being edited when `draft` is
- * given; a template is kept for a project only when the line names one. */
+ * given; a template is kept for a project only when the draft names one, and that project is
+ * the one asked for. */
 export function nameQuery(context: NameContext, draft: Draft | null = null): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(context)) if (value !== "") query.set(key, value);
   if (draft !== null) {
     query.set("template", draft.template);
-    if (draft.keep === "project" && context.project !== "") query.set("keep", "project");
+    if (draft.keep === "project" && draft.project !== "") {
+      query.set("project", draft.project);
+      query.set("keep", "project");
+    }
   }
   return query.toString();
 }
 
 /** `/api/name`'s answer, or why there is none: `why` names a status that is not 200. */
 export function parseName(data: unknown, why: string): Named {
-  const failed = (said: string): Named => ({ name: null, template: "", from: "global", refused: null, save: null,
-                                              failed: said });
+  const failed = (said: string): Named => ({ name: null, template: "", from: "global", project: null, refused: null,
+                                              save: null, failed: said });
   if (!isTable(data)) return failed(why);
   if (data.state !== "up") return failed(text(data.detail) ?? why);
   const refused = isTable(data.refused) ? { problem: text(data.refused.problem) ?? "", hint: text(data.refused.hint) ?? "" }
@@ -119,7 +129,21 @@ export function parseName(data: unknown, why: string): Named {
   const save = isTable(data.save) && typeof data.save.key === "string" && typeof data.save.value === "string"
     ? { key: data.save.key, value: data.save.value } : null;
   return { name: text(data.name), template: text(data.template) ?? "", from: data.from === "project" ? "project" : "global",
-           refused, save: refused === null ? save : null, failed: "" };
+           project: text(data.project), refused, save: refused === null ? save : null, failed: "" };
+}
+
+/** The project whose template the name was rendered from: the answer's, else the line's `project`;
+ * "" for none. */
+export function templateProject(named: Named | null, project: string): string {
+  return named?.project ?? project;
+}
+
+/** The template the editor opens on: the one the name was rendered from, kept for its project when
+ * the answer says it is that project's. */
+export function draftOf(named: Named | null, project: string): Draft {
+  const owner = templateProject(named, project);
+  return { template: named?.template ?? "", keep: named?.from === "project" && owner !== "" ? "project" : "global",
+           project: owner };
 }
 
 // --- the note under the name ---------------------------------------------------------------
@@ -134,10 +158,12 @@ function joined(words: readonly string[]): string {
   return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
-/** The dim sentence under a name rendered from a template: whose template it is, what the name
- * follows, and that typing over it names this launch. */
+/** The dim sentence under a name rendered from a template: whose template it is (the answer's
+ * project, else the line's `project`), what the name follows, and that typing over it names this
+ * launch. */
 export function nameNote(named: Named, project: string): string {
-  const whose = named.from === "project" && project !== "" ? `From ${project}'s template.`
+  const owner = templateProject(named, project);
+  const whose = named.from === "project" && owner !== "" ? `From ${owner}'s template.`
     : "From the template for every launch.";
   const follows = [...new Set(tokens(named.template).map((token) => FOLLOWS[token.piece]))];
   const what = follows.length === 0 ? "It is the same for every launch" : `It follows ${joined(follows)}`;
@@ -196,7 +222,7 @@ export function addList(fields: readonly FieldDescriptor[], template: string): P
     && (slots || piece !== "instance"));
 }
 
-/** Whether `Keep for` is drawn: projects is there and the line names a project. */
+/** Whether `Keep for` is drawn: projects is there and the template has a project to be kept for. */
 export function keepShown(withProjects: boolean, project: string): boolean {
   return withProjects && project !== "";
 }

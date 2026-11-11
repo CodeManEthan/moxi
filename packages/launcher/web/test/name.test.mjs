@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addList, dateFormat, dateSample, keepShown, nameNote, nameQuery, parseName, PIECES, saveBody, saveSaid, tokens,
+  addList, dateFormat, dateSample, draftOf, keepShown, nameNote, nameQuery, parseName, PIECES, saveBody, saveSaid, tokens,
   withDate, withoutPiece, withPiece,
 } from "../src/name-model.ts";
 
@@ -41,20 +41,26 @@ test("the read's query names only what the launch has, and an edited template wi
   assert.equal(nameQuery(CONTEXT), "project=proj-a&model=opus&harness=claude");
   const seat = { ...CONTEXT, seat: "planner", project: "", cwd: "/work/box-1", model: "" };
   assert.equal(nameQuery(seat), "seat=planner&cwd=%2Fwork%2Fbox-1&harness=claude");
-  assert.equal(nameQuery(CONTEXT, { template: "<model> in <project>", keep: "project" }),
+  assert.equal(nameQuery(CONTEXT, { template: "<model> in <project>", keep: "project", project: "proj-a" }),
                "project=proj-a&model=opus&harness=claude&template=%3Cmodel%3E+in+%3Cproject%3E&keep=project");
-  assert.equal(nameQuery(CONTEXT, { template: "<model>", keep: "global" }),
+  assert.equal(nameQuery(CONTEXT, { template: "<model>", keep: "global", project: "proj-a" }),
                "project=proj-a&model=opus&harness=claude&template=%3Cmodel%3E");
-  // With no project on the line there is no project to keep it for.
-  assert.equal(nameQuery({ ...CONTEXT, project: "" }, { template: "", keep: "project" }),
+  // A folder's template is kept for the project the draft names, which the query then asks for.
+  const folder = { ...CONTEXT, project: "", cwd: "/work/proj-a/sub" };
+  assert.equal(nameQuery(folder, { template: "<model>", keep: "project", project: "proj-a" }),
+               "cwd=%2Fwork%2Fproj-a%2Fsub&model=opus&harness=claude&template=%3Cmodel%3E&project=proj-a&keep=project");
+  // With no project for the draft there is no project to keep it for.
+  assert.equal(nameQuery({ ...CONTEXT, project: "" }, { template: "", keep: "project", project: "" }),
                "model=opus&harness=claude&template=");
 });
 
 test("the answer is read with its refusal, its save, and why a failed read gave nothing", () => {
   const up = { state: "up", detail: null, name: "opus in proj-a", template: "<model> in <project>", from: "project",
-               refused: null, save: { key: "name.templates", value: "{proj-a = \"<model> in <project>\"}" } };
+               project: "proj-a", refused: null,
+               save: { key: "name.templates", value: "{proj-a = \"<model> in <project>\"}" } };
   assert.deepEqual(parseName(up, "x"), { name: "opus in proj-a", template: "<model> in <project>", from: "project",
-                                         refused: null, save: up.save, failed: "" });
+                                         project: "proj-a", refused: null, save: up.save, failed: "" });
+  assert.equal(parseName({ ...up, from: "global", project: null }, "x").project, null);
   const refused = parseName({ ...up, name: null, save: null,
                               refused: { code: "bad-template", row: "name", problem: "P", hint: "H" } }, "x");
   assert.deepEqual([refused.name, refused.refused, refused.save], [null, { problem: "P", hint: "H" }, null]);
@@ -74,6 +80,28 @@ test("the note says whose template it is and what the name follows", () => {
   assert.equal(nameNote({ ...named, from: "global", template: "build" }, ""),
                "From the template for every launch. It is the same for every launch; type over it to name this "
                + "launch yourself.");
+});
+
+test("the note names the project the answer took the template from, for a folder inside it too", () => {
+  const named = parseName({ state: "up", name: "proj-a-opus", template: "<project>-<model>", from: "project",
+                            project: "proj-a", refused: null, save: null }, "");
+  // A folder pick names no project on the line; the answer does.
+  assert.equal(nameNote(named, ""),
+               "From proj-a's template. It follows the project and the model; type over it to name this launch "
+               + "yourself.");
+  assert.equal(nameNote({ ...named, from: "global", project: null }, ""),
+               "From the template for every launch. It follows the project and the model; type over it to name this "
+               + "launch yourself.");
+});
+
+test("the editor opens on the answer's template, kept for the project the answer names, else the line's", () => {
+  const named = parseName({ state: "up", name: "proj-a-opus", template: "<project>-<model>", from: "project",
+                            project: "proj-a", refused: null, save: null }, "");
+  assert.deepEqual(draftOf(named, ""), { template: "<project>-<model>", keep: "project", project: "proj-a" });
+  const global = { ...named, from: "global", project: null };
+  assert.deepEqual(draftOf(global, "proj-a"), { template: "<project>-<model>", keep: "global", project: "proj-a" });
+  assert.deepEqual(draftOf(global, ""), { template: "<project>-<model>", keep: "global", project: "" });
+  assert.deepEqual(draftOf(null, ""), { template: "", keep: "global", project: "" });
 });
 
 test("a piece is taken out with the text before it, or the first with the text after it", () => {

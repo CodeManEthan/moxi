@@ -48,12 +48,13 @@ def name(**query) -> dict:
 
 
 def up(**answer) -> dict:
-    return {"state": "up", "detail": None, "refused": None, "save": None, **answer}
+    return {"state": "up", "detail": None, "project": None, "refused": None, "save": None,
+            **answer}
 
 
 def test_the_answer_declares_its_keys():
-    assert set(page.NAME) == {"state", "detail", "name", "template", "from", "refused",
-                              "save"}
+    assert set(page.NAME) == {"state", "detail", "name", "template", "from", "project",
+                              "refused", "save"}
     assert set(page.NAME["save"].items) == {"key", "value"}
 
 
@@ -68,7 +69,8 @@ def test_the_name_is_the_shipped_templates_for_the_form_as_it_stands():
 def test_a_project_with_a_template_of_its_own_is_named_by_it():
     settings_file(f'[name]\ntemplate = "{EVERY}"\n[name.templates]\nproj-a = "<project> <model>"\n')
     assert name(project="proj-a", model="opus") == up(
-        name="proj-a opus", template="<project> <model>", **{"from": "project"})
+        name="proj-a opus", template="<project> <model>", project="proj-a",
+        **{"from": "project"})
     assert name(project="proj-b", model="opus") == up(
         name="Nov-08-2026 12:45", template=EVERY, **{"from": "global"})
 
@@ -115,10 +117,31 @@ def test_a_folder_inside_a_project_is_named_by_the_projects_key_and_template(pro
     settings_file(f'[name]\ntemplate = "{EVERY}"\n[name.templates]\nproj-a = "<project>-<model>"\n')
     folder = str(proj_a / "sub")
     said = name(cwd=folder, model="opus")
-    assert said == up(name="proj-a-opus", template="<project>-<model>", **{"from": "project"})
+    assert said == up(name="proj-a-opus", template="<project>-<model>", project="proj-a",
+                      **{"from": "project"})
     assert previewed_name(folder, model="opus") == "proj-a-opus"
     # Outside every project the folder's own name stands in, from the template for every launch.
     assert name(cwd=str(proj_a.parent))["name"] == "Nov-08-2026 12:45"
+
+
+def test_the_answer_names_the_project_whose_template_it_rendered(proj_a, tmp_path,
+                                                                  monkeypatch):
+    home = tmp_path / "shell"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    settings_file(f'[name]\ntemplate = "{EVERY}"\n[name.templates]\nproj-a = "<project>"\n')
+    for query in ({"cwd": str(proj_a / "sub")}, {"project": "proj-a"}):
+        said = name(**query)
+        assert (said["from"], said["project"]) == ("project", "proj-a"), query
+    # The template for every launch belongs to no project: outside every project, at home,
+    # and for a project with no template of its own.
+    for query in ({"cwd": str(proj_a.parent)}, {"cwd": "~"}, {"project": "proj-b"}):
+        said = name(**query)
+        assert (said["from"], said["project"]) == ("global", None), query
+    # A template being edited belongs to the project it is kept for, else to none.
+    edited = {"cwd": str(proj_a / "sub"), "template": "<model>"}
+    assert name(**edited, project="proj-a", keep="project")["project"] == "proj-a"
+    assert name(**edited, keep="global")["project"] is None
 
 
 def test_a_seat_stands_before_the_agent_role():
@@ -194,7 +217,8 @@ def test_a_template_the_save_check_refuses_has_no_name_and_nothing_to_save(
         template, problem, keep):
     query = {"project": "proj-a", "template": template, **({"keep": keep} if keep else {})}
     assert name(**query) == up(
-        name=None, template=template, **{"from": keep or "global"},
+        name=None, template=template, project="proj-a" if keep else None,
+        **{"from": keep or "global"},
         refused={"code": "bad-template", "row": "name", "problem": problem, "hint": HINT})
 
 
@@ -237,5 +261,5 @@ def test_a_failed_read_says_only_the_class(monkeypatch):
     status, said, raw = get("/api/name")
     assert status == 200 and said["state"] == "error" and b"private" not in raw
     assert "RuntimeError" in said["detail"]
-    assert (said["name"], said["template"], said["from"], said["refused"], said["save"]) == (
-        None, names.DEFAULT, "global", None, None)
+    assert (said["name"], said["template"], said["from"], said["project"], said["refused"],
+            said["save"]) == (None, names.DEFAULT, "global", None, None, None)
