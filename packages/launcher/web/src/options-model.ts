@@ -9,6 +9,11 @@
 // that say where the session starts: a launch takes one of them, and the line above the
 // box sets it.
 //
+// A row of the harness's is drawn only where its flag is passed: when its command modes hold
+// the mode of the place the button launches in, as `/api/form` names it for each place. A
+// row of the launcher's own is drawn in every mode. Where no launch is possible in that
+// place (the mode is null) no row of the harness's is drawn.
+//
 // A value set in the panel is kept by the row's name and goes into the launch request with
 // the other rows the piece sets. Each row is drawn by the shell's one form renderer, from
 // the descriptor `drawnField` gives it.
@@ -22,6 +27,7 @@
 import type { FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import { GROUPS, isListField, leaveOutChoice, same, shownValue } from "./panel.ts";
+import type { FormMode } from "./panel.ts";
 import { FIRST_TURN, launchedValue, offPosture } from "./prompt-model.ts";
 
 /** A launch form's field with what the catalog says of its place in the panel. */
@@ -90,18 +96,34 @@ export function rowLabel(field: PanelField): string {
 /** The rows that say where the session starts, of which a launch takes one. */
 export const PLACE_ROWS: readonly string[] = ["cwd", "project", "scratch"];
 
+/** The command mode a launch in one place composes: a mode's name, null where no launch is
+ * possible there, or undefined while it is not known, which every row is drawn for. */
+export type Mode = string | null | undefined;
+
+/** The mode `/api/form` names for a launch in `target`; undefined where it names none. */
+export function modeOf(modes: readonly FormMode[], target: string): Mode {
+  return modes.find((item) => item.target === target)?.mode;
+}
+
+/** Whether a row's flag is passed in `mode`: always for a row of the launcher's own (no
+ * modes), never in a mode that is null, and in any mode while it is not known. */
+export function runsIn(field: PanelField, mode: Mode): boolean {
+  if (mode === undefined || !Array.isArray(field.modes) || field.modes.length === 0) return true;
+  return mode !== null && field.modes.includes(mode);
+}
+
 /** Whether the panel draws a row: it is in one of the panel's groups, the page server says
- * it is shown here and takes input, and it is neither one of the first turn's rows nor one
- * of the place's. */
-export function inPanel(field: PanelField): boolean {
+ * it is shown here and takes input, its flag is passed in `mode`, and it is neither one of
+ * the first turn's rows nor one of the place's. */
+export function inPanel(field: PanelField, mode?: Mode): boolean {
   return PANEL_GROUPS.some((group) => group.key === field.group) && field.shown !== false
-    && field.needs_absent !== true && field.owned !== true
+    && field.needs_absent !== true && field.owned !== true && runsIn(field, mode)
     && !(FIRST_TURN as readonly string[]).includes(field.name) && !PLACE_ROWS.includes(field.name);
 }
 
-/** The rows the panel draws, in the fields' order. */
-export function panelFields(fields: readonly PanelField[]): PanelField[] {
-  return fields.filter(inPanel);
+/** The rows the panel draws in `mode`, in the fields' order. */
+export function panelFields(fields: readonly PanelField[], mode?: Mode): PanelField[] {
+  return fields.filter((field) => inPanel(field, mode));
 }
 
 // --- a row's value -------------------------------------------------------------------------
@@ -203,10 +225,11 @@ function rowOf(field: PanelField, set: Readonly<Record<string, FormValue>>): Pan
 /**
  * The panel's groups for the form's fields and the values set now, in the catalog's order,
  * each with its subgroups in order and the rows with no subgroup last. A group none of
- * whose rows is drawn on this install, or for this harness, is left out.
+ * whose rows is drawn on this install, for this harness, or in `mode`, is left out.
  */
-export function panelGroups(fields: readonly PanelField[], set: Readonly<Record<string, FormValue>>): PanelGroup[] {
-  const drawn = panelFields(fields);
+export function panelGroups(fields: readonly PanelField[], set: Readonly<Record<string, FormValue>>,
+                            mode?: Mode): PanelGroup[] {
+  const drawn = panelFields(fields, mode);
   const out: PanelGroup[] = [];
   for (const shape of PANEL_GROUPS) {
     const mine = drawn.filter((field) => field.group === shape.key);
@@ -238,14 +261,14 @@ export interface Found extends PanelRow {
 /**
  * The rows whose label, name or help text holds `query`, whatever its case, in the panel's
  * order, each marked by its value in `set`. An empty query finds nothing; a row the panel
- * does not draw is never found.
+ * does not draw, on this install or in `mode`, is never found.
  */
 export function findRows(fields: readonly PanelField[], query: string,
-                         set: Readonly<Record<string, FormValue>> = {}): Found[] {
+                         set: Readonly<Record<string, FormValue>> = {}, mode?: Mode): Found[] {
   const asked = query.trim().toLowerCase();
   if (asked === "") return [];
   const out: Found[] = [];
-  for (const group of panelGroups(fields, set)) {
+  for (const group of panelGroups(fields, set, mode)) {
     for (const sub of group.subs) {
       for (const row of sub.rows) {
         const texts = [row.label, row.name, said(row.field.doc)];
@@ -339,11 +362,11 @@ export function withOption(options: Readonly<Record<string, FormValue>>, field: 
   return out;
 }
 
-/** The values set in the panel that the form's fields still have a row for, as after
- * another harness's form is read. */
+/** The values set in the panel whose rows the panel still draws, as after another
+ * harness's form is read or the button is set to launch in a place of another `mode`. */
 export function keptOptions(options: Readonly<Record<string, FormValue>>,
-                            fields: readonly PanelField[]): Record<string, FormValue> {
-  const names = new Set(panelFields(fields).map((field) => field.name));
+                            fields: readonly PanelField[], mode?: Mode): Record<string, FormValue> {
+  const names = new Set(panelFields(fields, mode).map((field) => field.name));
   return Object.fromEntries(Object.entries(options).filter(([name]) => names.has(name)));
 }
 

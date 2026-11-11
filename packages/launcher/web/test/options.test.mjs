@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
+import { filledFields, formPath, NO_PRESET, parseForm } from "../src/panel.ts";
 import {
-  changedValue, DEFAULTS, differs, drawnField, findRows, inPanel, keptOptions, PANEL_GROUPS, PANEL_WIDTH_PX, panelFields,
-  panelGroups, picksOnly, PLACE_ROWS, rowLabel, shippedValue, summaryOf, valueNow, valueWords, withOption,
+  changedValue, changes, DEFAULTS, differs, drawnField, findRows, inPanel, keptOptions, modeOf, PANEL_GROUPS, PANEL_WIDTH_PX,
+  panelFields, panelGroups, picksOnly, PLACE_ROWS, rowLabel, runsIn, shippedValue, summaryOf, valueNow, valueWords,
+  withOption,
 } from "../src/options-model.ts";
 import { launchRequest } from "../src/prompt-model.ts";
 
@@ -321,4 +322,80 @@ test("nothing set in the panel makes a first-turn row part of the request", () =
   const body = launchRequest(fields, form, { ...options, cwd: "~" }, { target: "terminal" });
   assert.ok(!("handoff" in body.values) && body.leave_out.includes("handoff"), body);
   assert.ok(!("brief" in body.values), body);
+});
+
+// --- the rows a launch's place draws -------------------------------------------------------
+
+/** Claude's rows as the catalog gives their modes: the launcher's own have none. */
+const MODED = [
+  { ...MODE, modes: ["interactive", "print"] }, { ...ADD_DIR, modes: ["interactive", "print"] },
+  { ...REMOTE, modes: ["interactive"] }, { ...NATIVE, modes: ["interactive", "print"] },
+  { ...WARN, modes: [] }, { ...KEEP, modes: [] }, { ...AGENT, modes: ["interactive", "print"] },
+  { ...IDENTITY, shown: true, modes: [] },
+];
+const drawnIn = (mode) => names(panelFields(MODED, mode));
+
+test("the form's answer names the mode of each place a launch runs in, null where none can", () => {
+  const form = parseForm({ state: "up", detail: null, harness: "claude", rows: [], refused: null,
+                           modes: [{ target: "terminal", mode: "interactive" }, { target: "headless", mode: null },
+                                   { target: "slot", mode: "interactive" }, { mode: "print" }, "x"] });
+  assert.deepEqual(form.modes, [{ target: "terminal", mode: "interactive" }, { target: "headless", mode: null },
+                                { target: "slot", mode: "interactive" }]);
+  assert.equal(modeOf(form.modes, "slot"), "interactive");
+  assert.equal(modeOf(form.modes, "headless"), null);
+  // A place the answer does not name is not known, and every row is drawn for it.
+  assert.equal(modeOf(form.modes, "elsewhere"), undefined);
+  assert.equal(modeOf(parseForm({ state: "up", detail: null, harness: "claude", rows: [], refused: null }).modes, "slot"),
+               undefined);
+  // The read asks under the comms name the form holds, and under none when it holds none.
+  assert.equal(formPath(NO_PRESET, "claude", "planner"), "api/form?harness=claude&identity=planner");
+  assert.equal(formPath(NO_PRESET, "claude", ""), "api/form?harness=claude");
+});
+
+test("a row of the harness's is drawn only in a mode its flag is passed in", () => {
+  assert.deepEqual(drawnIn("interactive"), names(MODED));
+  // Remote Control is passed to an interactive session only.
+  assert.deepEqual(drawnIn("print"), names(MODED).filter((name) => name !== "remote_control"));
+  assert.equal(runsIn(MODED[2], "print"), false);
+  assert.equal(inPanel(MODED[2], "print"), false);
+  assert.equal(inPanel(MODED[2], "interactive"), true);
+  // The launcher's own rows are drawn in every mode.
+  assert.deepEqual(drawnIn("exec"), ["warn_at", "keep_warm", "identity"]);
+  // Not known yet, every row is.
+  assert.deepEqual(drawnIn(undefined), names(MODED));
+  const groups = (mode) => panelGroups(MODED, {}, mode).map((group) => group.key);
+  assert.deepEqual(groups("interactive"), ["access", "seat", "runs-in", "lifecycle"]);
+  // A group with no row left to draw is left out.
+  assert.deepEqual(groups("print"), ["access", "seat", "lifecycle"]);
+});
+
+test("the find field reaches only the rows the place's mode draws", () => {
+  assert.deepEqual(names(findRows(MODED, "remote", {}, "interactive")), ["remote_control"]);
+  assert.deepEqual(names(findRows(MODED, "remote", {}, "print")), []);
+  assert.deepEqual(names(findRows(MODED, "permission", {}, null)), []);
+  assert.deepEqual(names(findRows(MODED, "warn", {}, null)), ["warn_at"]);
+});
+
+test("set to launch in a place of another mode, the values of the rows it no longer draws are let go of", () => {
+  const { fields } = filled(MODED);
+  let options = withOption({}, fields.find((item) => item.name === "remote_control"), "");
+  options = withOption(options, fields.find((item) => item.name === "permission_mode"), "plan");
+  options = withOption(options, fields.find((item) => item.name === "warn_at"), "80");
+  // While its row is drawn a value is kept.
+  assert.deepEqual(keptOptions(options, fields, "interactive"), options);
+  assert.deepEqual(keptOptions(options, fields, undefined), options);
+  const kept = keptOptions(options, fields, "print");
+  assert.deepEqual(kept, { permission_mode: "plan", warn_at: "80" });
+  assert.deepEqual(names(changes(fields, kept)), ["permission_mode", "warn_at"]);
+  // Back in an interactive place the row is drawn again at what the form is filled with.
+  assert.equal(valueNow(fields.find((item) => item.name === "remote_control"), kept), null);
+});
+
+test("where no launch is possible in the place, no row of the harness's is drawn and none is kept", () => {
+  const { fields } = filled(MODED);
+  assert.deepEqual(drawnIn(null), ["warn_at", "keep_warm", "identity"]);
+  assert.deepEqual(panelGroups(MODED, {}, null).map((group) => group.key), ["seat", "lifecycle"]);
+  let options = withOption({}, fields.find((item) => item.name === "permission_mode"), "plan");
+  options = withOption(options, fields.find((item) => item.name === "identity"), "planner");
+  assert.deepEqual(keptOptions(options, fields, null), { identity: "planner" });
 });

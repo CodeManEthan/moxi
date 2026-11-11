@@ -41,6 +41,10 @@
 // and subgroup opening in place and saying, while closed, which of its values differ from
 // the shipped defaults. Each row is drawn by the shell's form renderer; a value changed
 // there is one more row this piece sets, and goes in the launch request with the rest.
+// The panel draws a row of the harness's only where the place the button launches in
+// passes its flag, by the command mode `/api/form` names for that place under the comms
+// name the form holds; the form is read again when that name changes. When the button
+// is set to another place, a value set on a row the panel no longer draws is let go of.
 //
 // A row changed in the panel is named by its label on a dim line under the box, `Changed`,
 // and counted on the word, `Options · 2`; `Reset` on that line puts every changed row back
@@ -58,10 +62,10 @@ import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import {
-  afterStarted, asksFirst, CHANGED, changedValue, changes, DEFAULTS, drawnField, findRows, HIDDEN_FLAG, keptOptions, NO_MATCH,
-  optionsWord, PANEL_WIDTH_PX, panelGroups, RESET, SIDE_EVENT, turnedOn, valueNow, withOption,
+  afterStarted, asksFirst, CHANGED, changedValue, changes, DEFAULTS, drawnField, findRows, HIDDEN_FLAG, keptOptions, modeOf,
+  NO_MATCH, optionsWord, PANEL_WIDTH_PX, panelFields, panelGroups, RESET, SIDE_EVENT, turnedOn, valueNow, withOption,
 } from "./options-model.ts";
-import type { Change, PanelField, PanelGroup, PanelRow, PanelSub, Pending, Word } from "./options-model.ts";
+import type { Change, Mode, PanelField, PanelGroup, PanelRow, PanelSub, Pending, Word } from "./options-model.ts";
 
 import {
   fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
@@ -276,6 +280,8 @@ export class LauncherPrompt extends LitElement {
   #form: Form | null = null;
   /** Counts `/api/form` reads, so only the latest one's answer is drawn. */
   #asked = 0;
+  /** The comms name the latest `/api/form` read was asked under; "" for none. */
+  #identityAsked = "";
   /** Whether projects is there, worked out once when the piece connects. */
   #withProjects = false;
   /** The user's home folder as the page server names it, drawn as `~`. */
@@ -334,8 +340,38 @@ export class LauncherPrompt extends LitElement {
     }
   }
 
+  /** Lets go of each value set on a row the panel no longer draws, once the place the
+   * button launches in, or the form, is another. */
+  protected willUpdate(changed: Map<string, unknown>): void {
+    if (!["fields", "targets", "picked", "options"].some((name) => changed.has(name))) return;
+    const mode = this.#mode;
+    if (mode === undefined || this.fields.length === 0) return;
+    const kept = keptOptions(this.options, this.fields as PanelField[], mode);
+    if (Object.keys(kept).length !== Object.keys(this.options).length) this.options = kept;
+    const held = this.pending?.name;
+    if (held !== undefined && !panelFields(this.fields as PanelField[], mode).some((field) => field.name === held)) {
+      this.pending = null;
+    }
+  }
+
   protected updated(changed: Map<string, unknown>): void {
     if (changed.has("panel") && changed.get("panel") !== undefined) this.#side(this.panel ? PANEL_WIDTH_PX : 0);
+    // The modes of a launch under a comms name are not those of one under none.
+    if (this.#form !== null && this.fields.length > 0 && this.#identity !== this.#identityAsked) {
+      void this.#readForm(this.harness);
+    }
+  }
+
+  /** The comms name the form holds now; "" for none. */
+  get #identity(): string {
+    return valueOf(this.fields, this.set, "identity");
+  }
+
+  /** The command mode of the place the button launches in now, by the form's last read;
+   * undefined until the places a launch may run in are read. */
+  get #mode(): Mode {
+    if (this.targets === null || this.#form === null) return undefined;
+    return modeOf(this.#form.modes, runOf(this.targets, this.picked).target);
   }
 
   /** Tells Home how wide the panel beside its column is now; 0 is no panel. */
@@ -381,7 +417,9 @@ export class LauncherPrompt extends LitElement {
    * leaves the form as it was. */
   async #readForm(harness: string): Promise<void> {
     const asked = (this.#asked += 1);
-    const answer = await api("launcher", formPath(NO_PRESET, harness));
+    const identity = this.fields.length === 0 ? "" : this.#identity;
+    this.#identityAsked = identity;
+    const answer = await api("launcher", formPath(NO_PRESET, harness, identity));
     if (asked !== this.#asked) return;
     const form = answer.status === 200 ? parseForm(answer.data) : null;
     if (form === null || form.state === "error") {
@@ -669,12 +707,12 @@ export class LauncherPrompt extends LitElement {
       <input class="pfind" type="text" aria-label="Find an option" placeholder="Find an option" autocomplete="off"
         spellcheck="false" .value=${this.query}
         @input=${(event: Event) => { this.query = (event.target as HTMLInputElement).value; }}>
-      ${finding ? this.#found(fields) : panelGroups(fields, this.options).map((group) => this.#group(group))}
+      ${finding ? this.#found(fields) : panelGroups(fields, this.options, this.#mode).map((group) => this.#group(group))}
     </aside>`;
   }
 
   #found(fields: PanelField[]) {
-    const rows = findRows(fields, this.query, this.options);
+    const rows = findRows(fields, this.query, this.options, this.#mode);
     if (rows.length === 0) return html`<p class="none" role="status">${NO_MATCH}</p>`;
     return html`<div class="found">${rows.map((row) => this.#optionRow(row, row.where))}</div>`;
   }

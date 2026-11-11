@@ -220,35 +220,52 @@ export interface FormRow {
   withheld: boolean;
 }
 
+/** The command a launch composes in one place the `target` row names; null where the
+ * resolver refuses a launch there. */
+export interface FormMode {
+  target: string;
+  mode: string | null;
+}
+
 /** The value of `/api/form`: the harness the form is drawn for and its rows, or the
- * resolver's refusal with no rows. */
+ * resolver's refusal with no rows, and the command each place a launch runs in composes. */
 export interface Form {
   state: "up" | "error";
   detail: string | null;
   harness: string;
   rows: FormRow[];
   refused: Refusal | null;
+  modes: FormMode[];
+}
+
+function formModes(data: unknown): FormMode[] {
+  if (!Array.isArray(data)) return [];
+  return data.filter((item): item is Fields => isTable(item) && typeof item.target === "string")
+    .map((item) => ({ target: item.target as string, mode: typeof item.mode === "string" ? item.mode : null }));
 }
 
 export function parseForm(data: unknown): Form | null {
   const read = standing(data);
   if (read === null) return null;
-  if (read.state === "error") return { state: "error", detail: read.detail, harness: "", rows: [], refused: null };
-  const { harness, rows, refused } = read.fields;
+  if (read.state === "error") return { state: "error", detail: read.detail, harness: "", rows: [], refused: null, modes: [] };
+  const { harness, rows, refused, modes } = read.fields;
   if (typeof harness !== "string" || !Array.isArray(rows)) return null;
   const kept = rows.filter((row): row is Fields => isTable(row) && typeof row.name === "string")
     .map((row) => ({ name: row.name as string, value: text(row.value),
                      items: Array.isArray(row.items) ? texts(row.items) : null,
                      source: text(row.source) ?? "shipped", withheld: row.withheld === true }));
-  return { state: "up", detail: null, harness, rows: kept, refused: isRefusal(refused) ? refusal(refused) : null };
+  return { state: "up", detail: null, harness, rows: kept, refused: isRefusal(refused) ? refusal(refused) : null,
+           modes: formModes(modes) };
 }
 
-/** The `/api/form` path for a choice, for `harness` when one is asked. */
-export function formPath(choice: Choice, harness = ""): string {
+/** The `/api/form` path for a choice, for `harness` when one is asked, and with the comms
+ * name the launch holds, `identity`, when it holds one. */
+export function formPath(choice: Choice, harness = "", identity = ""): string {
   const query = new URLSearchParams();
   if (choice.kind === "seat" && choice.name) query.set("seat", choice.name);
   if (choice.kind === "project" && choice.name) query.set("project_preset", choice.name);
   if (harness) query.set(HARNESS, harness);
+  if (identity) query.set("identity", identity);
   const said = query.toString();
   return said ? `api/form?${said}` : "api/form";
 }

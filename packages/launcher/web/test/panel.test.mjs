@@ -96,7 +96,7 @@ test("the form's answer reads whole, and an error, a refusal and a bad body are 
   const refused = parseForm({ ...FORM, rows: [], refused: { code: "bad-preset", row: null, problem: "no", hint: "h", x: 1 } });
   assert.deepEqual(refused.refused, { code: "bad-preset", row: null, problem: "no", hint: "h" });
   assert.deepEqual(parseForm({ state: "error", detail: "it broke" }),
-                   { state: "error", detail: "it broke", harness: "", rows: [], refused: null });
+                   { state: "error", detail: "it broke", harness: "", rows: [], refused: null, modes: [] });
   assert.equal(parseForm({ state: "up", detail: null, rows: [] }), null);
   assert.equal(parseForm("nope"), null);
 });
