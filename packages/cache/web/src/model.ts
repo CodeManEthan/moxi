@@ -647,6 +647,50 @@ export interface OpenedModel {
   copy: string;
 }
 
+/**
+ * The model of each opened row, from `/api/session`: asked when a row opens and not
+ * before, `reading` while it is out, and forgotten when the row closes. An answer for a
+ * row closed (or closed and opened again) since it was asked is dropped. A request that
+ * gives no readable answer reads as no model, which is not drawn.
+ */
+export class ModelReads {
+  #reads = new Map<string, ModelRead>();
+  #read: (session: string) => Promise<ApiResult>;
+  #onChange: () => void;
+
+  constructor(read: (session: string) => Promise<ApiResult>, onChange: () => void) {
+    this.#read = read;
+    this.#onChange = onChange;
+  }
+
+  /** The row `key`, for `session`, opened: its model is asked. */
+  open(key: string, session: string): void {
+    const out: ModelRead = { state: "reading" };
+    this.#reads.set(key, out);
+    void (async () => {
+      let answer: ApiResult;
+      try {
+        answer = await this.#read(session);
+      } catch {
+        answer = { status: 0, data: null };
+      }
+      if (this.#reads.get(key) !== out) return;
+      const value = answer.status === 200 ? parseSession(answer.data) : null;
+      this.#reads.set(key, { state: "read", model: value?.model ?? null });
+      this.#onChange();
+    })();
+  }
+
+  /** The row `key` closed: its model is forgotten. */
+  close(key: string): void {
+    this.#reads.delete(key);
+  }
+
+  get(key: string): ModelRead | null {
+    return this.#reads.get(key) ?? null;
+  }
+}
+
 export const READ_TAIL = "not rewritten since; this reading may be old";
 
 /** A row opened at `now`. */

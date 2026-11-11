@@ -136,6 +136,40 @@ def test_the_rows_follow_the_topic_and_a_stopped_watcher_is_said_once(shell, ui_
     expect(group(panel, "warm").get_by_text("1 warm", exact=True)).to_be_visible()
 
 
+def test_an_opened_row_has_its_times_to_the_second_and_copies_its_id(shell, ui_contexts,
+                                                                       ui_browser):
+    clipboard = ui_browser.browser_type.name == "chromium"
+    page = ui_contexts(**({"permissions": ["clipboard-read", "clipboard-write"]}
+                          if clipboard else {})).pages[0]
+    page_kit.put_reading(shell)
+    write(shell, record(A, age=600), record(B, age=4000))
+    panel = open_panel(page)
+    warm = group(panel, "warm").locator("moxi-ui-row")
+    warm.get_by_role("button", name="Open").click()
+    det = warm.locator('[data-part="opened"]')
+    expect(det.locator('[data-line="Last request"]')).to_have_text(
+        re.compile(r"^Last request\s*\S*\d\d:\d\d:\d\d"))
+    expect(det.locator('[data-line="Goes cold"]')).to_have_text(re.compile(
+        r"^Goes cold\s*\S*\d\d:\d\d:\d\d.* · in (49|50) minutes · one hour after the last request$"))
+    # sessions holds no transcript for it: the harness alone, and no link
+    expect(det.locator('[data-line="session"]')).to_have_text(re.compile(r"^Session\s*Claude Code$"))
+    expect(det.get_by_role("link", name="Sessions")).to_have_count(0)
+    expect(det.locator('[data-line="Read"]')).to_have_count(0)
+    cold = group(panel, "cold").locator("moxi-ui-row")
+    cold.get_by_role("button", name="Open").click()
+    expect(cold.locator('[data-line="Went cold"]')).to_have_text(
+        re.compile(r" · 6 minutes ago · one hour after the last request$"))
+    # both stay open, and the first closes on its own
+    expect(warm).to_have_attribute("open", "")
+    warm.get_by_role("button", name="Close").click()
+    expect(warm.locator('[data-part="opened"]')).to_have_count(0)
+    expect(cold).to_have_attribute("open", "")
+    if clipboard:
+        cold.get_by_role("button", name="Copy id").click()
+        expect(cold.locator('[data-action="copy-id"]')).to_have_text("Copied")
+        assert page.evaluate("navigator.clipboard.readText()") == B
+
+
 @pytest.mark.parametrize("status", [500, 401])
 def test_a_failed_read_shows_the_failure_line(shell, ui_page, status):
     ui_page.route("**" + page_kit.CLOCKS,

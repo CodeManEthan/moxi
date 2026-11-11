@@ -9,7 +9,10 @@
 // shown: a piece the model gives as null is not drawn, and every word comes from there.
 // Each session is a `<moxi-ui-row>` with `toggles`, named from `/api/names` and never by
 // its id; a click on its lines, Enter or Space on its first line, or its `Open` act opens
-// it in place, and the page keeps which rows are open across a refresh.
+// it in place, and the page keeps which rows are open across a refresh. An opened row
+// shows its times to the second, its `Session` line with a `Sessions` link when sessions
+// holds it, and `Copy id`; its model is asked from `/api/session` when it opens and not
+// before.
 //
 // It reads `/api/clocks`, then follows the topic `clocks`, and reads the route again when
 // its tab is shown; it counts each second on the server's clock, so a row turns cold at
@@ -25,8 +28,9 @@ import { api, navigate, subscribe } from "/m/ui/client.js";
 
 import { Feed } from "./feed.ts";
 import {
-  Arrivals, CLOSE, COPIED, COPIED_MS, COPY, commandParts, factText, keep, keyOf, NAMES_EVERY_MS, NamesFeed, OPEN,
-  pageModel, parsePageClocks, SETTINGS_LINK, SETTINGS_ROUTE, WAITING_MS, WATCHER_LABEL,
+  Arrivals, CLOSE, COPIED, COPIED_MS, COPY, COPY_ID, commandParts, factText, keep, keyOf, ModelReads, NAMES_EVERY_MS,
+  NamesFeed, namesBy, OPEN, openedModel, pageModel, parsePageClocks, SESSION_LABEL, SESSIONS_LINK, sessionPath,
+  SETTINGS_LINK, SETTINGS_ROUTE, todayOf, WAITING_MS, WATCHER_LABEL,
 } from "./model.ts";
 import type { GroupModel, Kept, LastLine, PageClocks, PageModel, RowModel, UntimedModel, WatcherRow } from "./model.ts";
 
@@ -62,6 +66,17 @@ const STYLES = css`
   .stop .l1 b { font-weight: 600; min-width: 0; }
   .stop .l1 button { flex: none; color: var(--moxi-text); font-size: 13px; }
   .stop .l2 { display: block; font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+
+  /* A row opened in place: a label, what it says to the second, and a link at the right end. */
+  .det { margin: 9px 0 3px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border); font-size: 13px; line-height: 18px;
+         cursor: auto; }
+  .det .r { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline; }
+  .det .k, .det .d { color: var(--moxi-text-dim); }
+  .det .f { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .det .x { color: var(--moxi-text-dim); padding-left: 18px; }
+  .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 92px; }
+  .det .foot button { font-size: 13px; line-height: 18px; }
+  .det .foot .d { color: var(--moxi-text-dim); }
 
   .one { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 7px 0;
          color: var(--moxi-text-dim); }
@@ -105,6 +120,7 @@ export class CachePage extends LitElement {
   #taken: PageClocks | null = null;
   /** The keys of the rows open. */
   #opened = new Set<string>();
+  #models = new ModelReads((session) => api("cache", sessionPath(session)), () => this.requestUpdate());
   #untimedShown = false;
   #openedAt = 0;
   /** Which copy act reads `Copied`. */
@@ -180,14 +196,18 @@ export class CachePage extends LitElement {
 
   // -- acts --------------------------------------------------------------------------------
 
-  #toggle(key: string): void {
-    if (this.#opened.has(key)) this.#closed(key);
-    else this.#opened.add(key);
+  #toggle(row: RowModel): void {
+    if (this.#opened.has(row.key)) this.#closed(row.key);
+    else {
+      this.#opened.add(row.key);
+      this.#models.open(row.key, row.session);
+    }
     this.requestUpdate();
   }
 
   #closed(key: string): void {
     this.#opened.delete(key);
+    this.#models.close(key);
   }
 
   /** Puts `text` on the clipboard; the act named `what` then reads `Copied` for a while. */
@@ -286,7 +306,7 @@ export class CachePage extends LitElement {
   }
 
   #row(row: RowModel) {
-    const toggle = (): void => this.#toggle(row.key);
+    const toggle = (): void => this.#toggle(row);
     return html`<moxi-ui-row toggles data-key=${row.key} name=${row.name} where=${ifDefined(row.where ?? undefined)}
         fact=${factText(row)} rest=${ifDefined(row.rest ?? undefined)} ?open=${row.open} @moxi-row-toggle=${toggle}>
       <button type="button" slot="acts" class="do" data-action="open" aria-expanded=${row.open ? "true" : "false"}
@@ -295,9 +315,27 @@ export class CachePage extends LitElement {
     </moxi-ui-row>`;
   }
 
-  /** What an opened row shows under its lines. */
-  protected opened(_row: RowModel): unknown {
-    return nothing;
+  /** What an opened row shows under its lines: `Last request`, `Goes cold` or `Went
+   * cold`, `Read` for a record that is old, the `Session` line and `Copy id`. */
+  protected opened(row: RowModel): unknown {
+    const kept = this.#kept;
+    const now = this.#feed?.now() ?? null;
+    const record = kept?.value.clocks.find((one) => keyOf(one) === row.key);
+    if (kept === null || now === null || record === undefined) return nothing;
+    const answer = this.#names?.answer ?? null;
+    const view = openedModel(record, now, namesBy(answer), answer?.home ?? null, this.#models.get(row.key),
+                             todayOf(kept, answer));
+    const copied = `id ${row.key}`;
+    return html`<div class="det" data-part="opened">
+      ${view.lines.map((line) => html`<div class="r" data-line=${line.label}><span class="k">${line.label}</span><span
+        class="f">${line.value}${line.tails.map((tail) => html` <span class="d">· ${tail}</span>`)}</span><span></span></div>`)}
+      <div class="r" data-line="session"><span class="k">${SESSION_LABEL}</span><span class="f">${view.session.map((part, at) =>
+        html`${at > 0 ? " " : ""}<span class=${part.dim ? "d" : ""}>${at > 0 ? "· " : ""}${part.text}</span>`)}</span>${
+        view.sessions !== null ? this.#link("sessions", view.sessions, SESSIONS_LINK, { cls: "x", action: "sessions" })
+          : html`<span></span>`}</div>
+      <div class="foot"><button type="button" class="d" data-action="copy-id"
+        @click=${() => void this.#copy(copied, view.copy)}>${this.#copied === copied ? COPIED : COPY_ID}</button></div>
+    </div>`;
   }
 
   /** Draws the page again when the next row still waiting for its name is due. */
