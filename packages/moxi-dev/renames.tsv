@@ -172,6 +172,7 @@ cache	packages/cache/tests/test_opencode_clock.py	assert clock.kind == "warm" an
 cache	packages/cache/tests/test_page.py	assert set(body) == {"now", "state", "detail", "clocks"}	keep	set	set
 cache	packages/cache/tests/test_page.py	assert set(found.components) == {"page", "chip"}	keep	set	set
 cache	packages/cache/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "chip"}	keep	set	set
+cache	packages/cache/tests/test_page.py	inner = lb.app(page.PAGE, module="cache", server_id=SERVER_ID, strict=True)	keep	strict	strict
 cache	packages/cache/tests/test_page.py	keys = set(page.ROW.items) | set(page.CLOCKS)	keep	set	set
 cache	packages/cache/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 cache	packages/cache/tests/test_page.py	self._gone.set()	keep	set	set
@@ -660,6 +661,7 @@ comms	packages/comms/src/moxi_comms/mcp/tools.py	msgs = ctx.record.history(room[
 comms	packages/comms/src/moxi_comms/mcp/tools.py	return set()	keep	set	set
 comms	packages/comms/src/moxi_comms/mcp/tools.py	rows, seen = [], set()	keep	set	set
 comms	packages/comms/src/moxi_comms/membership.py	ProcView.stat	name	f	fh
+comms	packages/comms/src/moxi_comms/membership.py	for depth, (at, start) in enumerate(proc.ancestry(pid, strict=strict)):	keep	strict	strict
 comms	packages/comms/src/moxi_comms/membership.py	seen = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/mock_record.py	MockRecord._save	name	f	fh
 comms	packages/comms/src/moxi_comms/mock_record.py	self._stop.set()	keep	set	set
@@ -1399,6 +1401,7 @@ comms	packages/comms/tests/test_page.py	assert asked == [{"deadline": 2.0}] and 
 comms	packages/comms/tests/test_page.py	assert set(body) == {"now", "state", "detail", "rows"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(found.components) == {"page", "roster"}	keep	set	set
 comms	packages/comms/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "roster"}	keep	set	set
+comms	packages/comms/tests/test_page.py	inner = lb.app(page.PAGE, module="comms", server_id=SERVER_ID, strict=True)	keep	strict	strict
 comms	packages/comms/tests/test_page.py	keys = set(page.ROW.items) | set(page.ROSTER)	keep	set	set
 comms	packages/comms/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 comms	packages/comms/tests/test_page.py	self._gone.set()	keep	set	set
@@ -1653,6 +1656,8 @@ comms	packages/comms/tests/test_wire.py	message = rig.record.get_message(sent["m
 comms	packages/comms/tests/test_wire.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_wire.py	thread.join(timeout=2)	keep	timeout	timeout
 connector	packages/connector/src/moxi_connector/app.py	None, lambda: log_.write(row, durable=durable, collapse=collapse))	keep	durable	durable
+connector	packages/connector/src/moxi_connector/app.py	Tools.call_tool	name	e	exc
+connector	packages/connector/src/moxi_connector/app.py	_settle	kwonly	written	written
 connector	packages/connector/src/moxi_connector/app.py	await send(message)	keep	fail	fail
 connector	packages/connector/src/moxi_connector/app.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/app.py	await send({"type": "http.response.start", "status": status, "headers": head})	keep	fail	fail
@@ -1664,9 +1669,21 @@ connector	packages/connector/src/moxi_connector/app.py	self._idle.set()	keep	set
 connector	packages/connector/src/moxi_connector/app.py	self._retiring: set[asyncio.Task] = set()	keep	set	set
 connector	packages/connector/src/moxi_connector/app.py	self._stop.set()	keep	set	set
 connector	packages/connector/src/moxi_connector/app.py	token = CALL.set(call)	keep	set	set
+connector	packages/connector/src/moxi_connector/calllog.py	CallLog.__init__	name	directory	log_dir
 connector	packages/connector/src/moxi_connector/calllog.py	`directory` defaults to `calls_dir()`; `clock` gives seconds since the epoch and	keep	directory	directory
+connector	packages/connector/src/moxi_connector/calllog.py	last	name	directory	log_dir
 connector	packages/connector/src/moxi_connector/calllog.py	log_.write({"at": now(), "kind": kind, **fields}, durable=True, collapse=None)	keep	durable	durable
+connector	packages/connector/src/moxi_connector/calllog.py	read_rows	name	directory	log_dir
+connector	packages/connector/src/moxi_connector/calllog.py	read_rows	name	folder	day_dir
+connector	packages/connector/src/moxi_connector/checks.py	health	name	e	exc
 connector	packages/connector/src/moxi_connector/checks.py	return client.call(method, params, timeout=wait)	use	timeout=	timeout_s=
+connector	packages/connector/src/moxi_connector/cli.py	_check	name	e	exc
+connector	packages/connector/src/moxi_connector/cli.py	_code	name	e	exc
+connector	packages/connector/src/moxi_connector/cli.py	_code	name	environ	source_env
+connector	packages/connector/src/moxi_connector/cli.py	_off	name	e	exc
+connector	packages/connector/src/moxi_connector/cli.py	_refused_row	name	e	exc
+connector	packages/connector/src/moxi_connector/cli.py	_revoke_row	name	e	exc
+connector	packages/connector/src/moxi_connector/cli.py	_set_switch	kwonly	value	value
 connector	packages/connector/src/moxi_connector/cli.py	durable=True, collapse=None)	keep	durable	durable
 connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("check", help="probe the public address through the edge",	keep	help	help
 connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("code", help="a one-time sign-in code, for a sign-in you started",	keep	help	help
@@ -1682,36 +1699,68 @@ connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("--label",
 connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("id", nargs="?", help="the grant's id, from moxi connector grants")	keep	help	help
 connector	packages/connector/src/moxi_connector/cli.py	verbs.add_parser("disable", help="revoke every grant and turn the connector off",	keep	help	help
 connector	packages/connector/src/moxi_connector/cli.py	verbs.add_parser("enable", help="turn the connector on",	keep	help	help
+connector	packages/connector/src/moxi_connector/daemon.py	_serve	name	e	exc
+connector	packages/connector/src/moxi_connector/daemon.py	await self.host.signin.stopping(switch_on)	use	stopping(switch_on)	stopping(switch_on=switch_on)
 connector	packages/connector/src/moxi_connector/daemon.py	loop.add_signal_handler(sig, stopping.set)	keep	set	set
+connector	packages/connector/src/moxi_connector/daemon.py	main	name	e	exc
 connector	packages/connector/src/moxi_connector/daemon.py	signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stopping.set))	keep	set	set
+connector	packages/connector/src/moxi_connector/doctor.py	take	name	e	exc
+connector	packages/connector/src/moxi_connector/grants.py	Store.view	name	e	exc
+connector	packages/connector/src/moxi_connector/listen.py	_from_systemd	name	environ	env
+connector	packages/connector/src/moxi_connector/listen.py	_not_loopback_listener	name	e	exc
+connector	packages/connector/src/moxi_connector/listen.py	_wrap	name	err	exc
+connector	packages/connector/src/moxi_connector/listen.py	holder_uid	name	f	fh
+connector	packages/connector/src/moxi_connector/listen.py	inherited	name	environ	env
+connector	packages/connector/src/moxi_connector/listen.py	take	name	e	exc
+connector	packages/connector/src/moxi_connector/listen.py	take	name	environ	env
 connector	packages/connector/src/moxi_connector/listen.py	three `LISTEN_*` variables are removed from `environ` either way, so no process the	keep	environ	environ
+connector	packages/connector/src/moxi_connector/oauth.py	OAuth.stopping	kwonly	switch_on	switch_on
 connector	packages/connector/src/moxi_connector/oauth.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/oauth.py	await send({"type": "http.response.start", "status": 200,	keep	fail	fail
 connector	packages/connector/src/moxi_connector/oauth.py	await send({"type": "http.response.start", "status": status, "headers": head})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/oauth.py	self._stale: set[str] = set()	keep	set	set
 connector	packages/connector/src/moxi_connector/oauth.py	self._tasks: set[asyncio.Task] = set()	keep	set	set
+connector	packages/connector/src/moxi_connector/origin.py	parse	name	e	exc
+connector	packages/connector/src/moxi_connector/origin.py	read	name	e	exc
+connector	packages/connector/src/moxi_connector/origin.py	tunnel_address	name	e	exc
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.body", "body": text})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.start", "status": 303,	keep	fail	fail
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.start", "status": status,	keep	fail	fail
+connector	packages/connector/src/moxi_connector/page.py	page.get	name	e	exc
 connector	packages/connector/src/moxi_connector/page.py	repeated = set()	keep	set	set
 connector	packages/connector/src/moxi_connector/page.py	req = under.check(params)	keep	ok	ok
 connector	packages/connector/src/moxi_connector/page.py	said=WRONG.format(left="1 try" if left == 1 else f"{left} tries"))	keep	said	said
+connector	packages/connector/src/moxi_connector/probe.py	fetch	name	e	exc
+connector	packages/connector/src/moxi_connector/probe.py	run	name	e	exc
 connector	packages/connector/src/moxi_connector/probe.py	with opener.open(req, timeout=STEP_WAIT) as answer:	keep	timeout	timeout
+connector	packages/connector/src/moxi_connector/providers.py	Registry.start	name	e	exc
+connector	packages/connector/src/moxi_connector/providers.py	Registry.status_rows	name	e	exc
+connector	packages/connector/src/moxi_connector/providers.py	load	name	e	exc
+connector	packages/connector/src/moxi_connector/server.py	Endpoint.start	name	e	exc
+connector	packages/connector/src/moxi_connector/settings.py	check	name	e	exc
+connector	packages/connector/src/moxi_connector/signin.py	Closed.stopping	kwonly	switch_on	switch_on
+connector	packages/connector/src/moxi_connector/signin.py	SignIn.stopping	kwonly	switch_on	switch_on
 connector	packages/connector/src/moxi_connector/signin.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/signin.py	await send({"type": "http.response.start", "status": 401,	keep	fail	fail
 connector	packages/connector/tests/conftest.py	await registry.start({"HOME": "/nowhere"})	keep	HOME	HOME
+connector	packages/connector/tests/kit.py	Admit.stopping	kwonly	switch_on	switch_on
+connector	packages/connector/tests/kit.py	Running.__enter__.main	name	e	exc
 connector	packages/connector/tests/kit.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 connector	packages/connector/tests/kit.py	await send({"type": "http.response.start", "status": 200,	keep	fail	fail
 connector	packages/connector/tests/kit.py	conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)	keep	timeout	timeout
 connector	packages/connector/tests/kit.py	ready.set()	keep	set	set
 connector	packages/connector/tests/signin_kit.py	pid = under.open(under.check(params))	keep	ok	ok
+connector	packages/connector/tests/test_browser_signin.py	launch	name	err	exc
+connector	packages/connector/tests/test_calllog.py	_days	name	directory	log_dir
 connector	packages/connector/tests/test_calllog.py	calllog.MemoryLog().write({"at": "x", **row}, durable=durable,	keep	durable	durable
+connector	packages/connector/tests/test_calllog.py	every_byte	name	directory	log_dir
 connector	packages/connector/tests/test_cli.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 connector	packages/connector/tests/test_cli.py	await send({"type": "http.response.start", "status": 200,	keep	fail	fail
 connector	packages/connector/tests/test_cli.py	calllog.CallLog().write(row, durable=False, collapse=None)	keep	durable	durable
 connector	packages/connector/tests/test_control.py	client.call("status", None, timeout=2)	use	timeout=	timeout_s=
 connector	packages/connector/tests/test_doctor.py	assert not {"providers", "mint gate", "comms identity"} & set(rows)	keep	set	set
+connector	packages/connector/tests/test_door.py	broken_manager.set_	kwonly	broken	broken
 connector	packages/connector/tests/test_door.py	gate.set()	keep	set	set
 connector	packages/connector/tests/test_door.py	waiting = under.open(under.check({               # and a sign-in in progress	keep	ok	ok
 connector	packages/connector/tests/test_grants.py	start.set()	keep	set	set
@@ -1728,9 +1777,12 @@ connector	packages/connector/tests/test_seam.py	began.set()	keep	set	set
 connector	packages/connector/tests/test_seam.py	gone.set()	keep	set	set
 connector	packages/connector/tests/test_seam.py	out = set()	keep	set	set
 connector	packages/connector/tests/test_seam.py	started.set()	keep	set	set
+connector	packages/connector/tests/test_seam.py	test_ctx_log_with_a_field_the_connector_writes_raises_and_keeps_its_own.clashing	name	e	exc
+connector	packages/connector/tests/test_seam.py	test_ctx_log_with_a_refused_field_raises_and_writes_nothing.leaky	name	e	exc
 connector	packages/connector/tests/test_seam.py	token = CALL.set(scope_[CALL_KEY])	keep	set	set
 connector	packages/connector/tests/test_signin.py	assert under.check(good).resource == ORIGIN.resource	keep	ok	ok
 connector	packages/connector/tests/test_signin.py	assert under.check({**good, "resource": ORIGIN.resource}).resource == ORIGIN.resource	keep	ok	ok
+connector	packages/connector/tests/test_signin.py	await d.oauth.stopping(True)	use	stopping(True)	stopping(switch_on=True)
 connector	packages/connector/tests/test_signin.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 connector	packages/connector/tests/test_signin.py	await send({"type": "http.response.body", "body": b"page"})	keep	fail	fail
 connector	packages/connector/tests/test_signin.py	await send({"type": "http.response.start", "status": 200, "headers": []})	keep	fail	fail
@@ -1980,6 +2032,7 @@ launcher	packages/launcher/tests/test_page.py	assert set(module.COMPONENTS) == {
 launcher	packages/launcher/tests/test_page.py	assert set(page.VALUES) == set(settable)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert set(run) == set(page.RUN.items)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	brief="the brief text", base_env={"HOME": "/users/ann-secret"}, at=at,	keep	HOME	HOME
+launcher	packages/launcher/tests/test_page.py	inner = lb.app(page.PAGE, module="launcher", server_id=SERVER_ID, strict=True)	keep	strict	strict
 launcher	packages/launcher/tests/test_page.py	meta={"request_id": "r1"}, create=True)	keep	create	create
 launcher	packages/launcher/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 launcher	packages/launcher/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))	keep	HOME	HOME
@@ -2405,6 +2458,7 @@ loadout	packages/loadout/tests/test_manifest.py	test_text_that_is_not_toml_is_a_
 loadout	packages/loadout/tests/test_manifest.py	test_the_example_reads_with_every_section_and_kind	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_manifest.py	test_two_sections_for_one_project_are_refused	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_page.py	entered.set()	keep	set	set
+loadout	packages/loadout/tests/test_page.py	inner = LB.app(page.PAGE, module="loadout", server_id=SERVER_ID, strict=True)	keep	strict	strict
 loadout	packages/loadout/tests/test_page.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 loadout	packages/loadout/tests/test_page.py	release.set()	keep	set	set
@@ -3397,6 +3451,9 @@ moxi	packages/moxi/tests/test_units.py	assert set(decl.rejected) == {("daemon", 
 moxi	packages/moxi/tests/test_units.py	assert set(decl.timers) == {"nightly"}	keep	set	set
 moxi	packages/moxi/tests/test_units.py	assert set(decl.timers) == {"shell-3"}	keep	set	set
 moxi	packages/moxi/tests/test_units.py	assert set(w.plan(only=["relay"])) == {("relay", "daemon")}	keep	set	set
+moxi	packages/moxi/tests/test_units.py	textwrap.dedent(source.format(flag=False, tool=str(tool))))	keep	flag	flag
+moxi	packages/moxi/tests/test_units.py	textwrap.dedent(source.format(flag=True, tool=str(tool))))	keep	flag	flag
+moxi	packages/moxi/tests/test_units.py	w.module(units_from=source.format(flag=False, tool=str(tool)))	keep	flag	flag
 moxi	packages/moxi/tests/test_units_acts.py	[acted] = act("services", ["backup.timer"], foreign=True)	keep	foreign	foreign
 moxi	packages/moxi/tests/test_units_acts.py	[acted] = act("services", [ref], foreign=True)	keep	foreign	foreign
 moxi	packages/moxi/tests/test_units_acts.py	assert set(json.loads(path.read_text())) == {"resume:moxi-demo-other.service", "other"}	keep	set	set
@@ -3445,8 +3502,11 @@ moxi	packages/moxi/tests/test_units_systemd.py	assert set(refs) == {("relay", "d
 moxi	packages/moxi/tests/test_units_systemd.py	assert set(refs) == {("relay", "daemon"), ("relay", "socket")}	keep	set	set
 moxi	packages/moxi/tests/test_units_systemd.py	declare(False)	keep	enabled	enabled
 moxi	packages/moxi/tests/test_units_systemd.py	declare(True)	keep	enabled	enabled
+moxi	packages/moxi/tests/test_units_systemd.py	declare(flag=False)	keep	flag	flag
+moxi	packages/moxi/tests/test_units_systemd.py	declare(flag=True)	keep	flag	flag
 moxi	packages/moxi/tests/test_units_systemd.py	env = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "cfg"),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_systemd.py	monkeypatch.setenv("HOME", str(tmp_path / "h"))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_units_systemd.py	textwrap.dedent(source.format(tool=str(tool), flag=flag)))	keep	flag	flag
 moxi	packages/moxi/tests/test_units_systemd_live.py	Row.switch	kwonly	on	on
 moxi	packages/moxi/tests/test_units_systemd_live.py	The test fence is function-scoped and keeps a test's writes, `HOME` and the user	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_systemd_live.py	_scrub	name	directory	unit_dir
@@ -3510,6 +3570,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	each skill in it (a subfolde
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for end, line in enumerate(lines[1:], start=1):	keep	start	start
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for norm in sorted(set(optional) - set(self.extras)):	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for norm in sorted(set(self.extras) - set(optional)):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for op, right in zip(node.ops, node.comparators, strict=True):	keep	strict	strict
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for other in sorted(set(self.scripts) - {script}):	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	found = [(n + 1, line) for n, line in enumerate(lines[1:end], start=1)	keep	start	start
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	found = set()	keep	set	set
@@ -3810,6 +3871,7 @@ projects	packages/projects/tests/test_page.py	assets = set(LB.export(page.PAGE)[
 projects	packages/projects/tests/test_page.py	entered.set()	keep	set	set
 projects	packages/projects/tests/test_page.py	for name in ("HOME", "MOXI_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME",	keep	HOME	HOME
 projects	packages/projects/tests/test_page.py	given = {"HOME": str(tmp_path / "h"), "USERPROFILE": str(tmp_path / "h"),	keep	HOME	HOME
+projects	packages/projects/tests/test_page.py	inner = LB.app(page.PAGE, module="projects", server_id=SERVER_ID, strict=True)	keep	strict	strict
 projects	packages/projects/tests/test_page.py	release.set()	keep	set	set
 repo	packages/repo/src/moxi_repo/_records.py	- `<cgd>::piece::<id>`: a piece's last run broke, or a post-* piece returned `record`.	keep	record	record
 repo	packages/repo/src/moxi_repo/_records.py	specs_of: set[str] = set()	keep	set	set
@@ -4006,6 +4068,7 @@ repo	packages/repo/tests/test_installs.py	demo.act(watch="record")	keep	record	r
 repo	packages/repo/tests/test_page.py	assert set(body) == {"now", "state", "detail", "repos"}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(listed) == {str(broken_repo), str(fine_repo)}	keep	set	set
 repo	packages/repo/tests/test_page.py	assert set(module.OPTIONAL) == {"ui", "projects"}	keep	set	set
+repo	packages/repo/tests/test_page.py	inner = lb.app(page.PAGE, module="repo", server_id=SERVER_ID, strict=True)	keep	strict	strict
 repo	packages/repo/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 repo	packages/repo/tests/test_pieces.py	(dict(GOOD, fail="soft"), "fail 'soft' is not"),	keep	fail	fail
 repo	packages/repo/tests/test_pieces.py	assert set(good) == {"demo/lint"}	keep	set	set
@@ -4184,6 +4247,7 @@ rounds	packages/rounds/src/moxi_rounds/questions.py	return set(old) <= set(new)	
 rounds	packages/rounds/src/moxi_rounds/readback.py	"record": ruling.record, "supersedes": ruling.supersedes,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/rendering.py	("ruling", "ruling"), ("chose", "chose"), ("record", "record"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/rendering.py	folder = Path(where.folder)	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/rendering.py	for one, recorded in zip(shown_as["rulings"], found.state.rulings, strict=True):	keep	strict	strict
 rounds	packages/rounds/src/moxi_rounds/rendering.py	said = [f"record: {one['record']}"]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/ruling.py	"record": record, "kind": form.kind}	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/ruling.py	- `record`: the pointer to where the operator said it.	keep	record	record
@@ -4297,6 +4361,7 @@ rounds	packages/rounds/tests/test_list.py	assert set(row) == {"name", "project",
 rounds	packages/rounds/tests/test_list.py	{"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_list.py	{"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_locks.py	assert len(set(locks)) == len(locks)	keep	set	set
+rounds	packages/rounds/tests/test_locks.py	for path, proc in zip(locks, held, strict=True))	keep	strict	strict
 rounds	packages/rounds/tests/test_locks.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_locks.py	return write.Entry("ruling.shown", {"ids": ["S1"], "record": "comms:12"},	keep	record	record
 rounds	packages/rounds/tests/test_log.py	third = log.append(path, "ruling.shown", {"ids": ["C1"], "record": "comms:12"},	keep	record	record
@@ -4321,6 +4386,7 @@ rounds	packages/rounds/tests/test_paths.py	assert directory(env) == own / "round
 rounds	packages/rounds/tests/test_paths.py	assert set(paths.LAYOUT.locators()) == {*paths.LOCATOR_ENVS, HOME_ENV}	keep	set	set
 rounds	packages/rounds/tests/test_project_settings.py	assert not set(settings.ROUND_KEYS) & set(settings.BUILD_KEYS)	keep	set	set
 rounds	packages/rounds/tests/test_project_settings.py	assert set(settings.ROUND_KEYS) | {"check_on"} >= {	keep	set	set
+rounds	packages/rounds/tests/test_rendering.py	strict=True):	keep	strict	strict
 rounds	packages/rounds/tests/test_rule.py	"blocks": recorded, "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	"question": "P1", "state": "ruled", "record": "comms:12", "kind": "substance",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	"question": "Q1", "state": "ruled", "stages": stages, "record": "comms:12",	keep	record	record
@@ -4433,10 +4499,31 @@ secrets	packages/secrets/tools/bump_gitleaks.py	unique = sorted(set(keywords))	k
 secrets	packages/secrets/tools/name_folds.py	help="write nothing; exit 1 when _folds.py differs from a fresh one")	keep	help	help
 secrets	packages/secrets/tools/name_folds.py	if not {chr(x) for x in s} <= set(held.get(chr(c), chr(c))))	keep	set	set
 secrets	packages/secrets/tools/name_folds.py	out: set[int] = set()	keep	set	set
+services	packages/services/src/moxi_services/acts.py	_adoptable	kwonly	enable	enable
+services	packages/services/src/moxi_services/acts.py	_check_enabled	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_check_running	kwonly	want	want
+services	packages/services/src/moxi_services/acts.py	_outcome.decorate.run	name	done	done_exc
+services	packages/services/src/moxi_services/acts.py	_set_flag	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_set_key	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_switch_adopted	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_switch_body	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_switch_module	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_switch_wrapped	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_switch_written	kwonly	on	on
+services	packages/services/src/moxi_services/acts.py	_word	kwonly	on	on
 services	packages/services/src/moxi_services/acts.py	`moxi.config.set(M, <its switch>, ...)` to enable or disable it (refused without a	use	set	set_value
+services	packages/services/src/moxi_services/acts.py	fields = dict(name=name, form="adopted", kind=kind, unit=ref, health=_list(health),	keep	health	health
+services	packages/services/src/moxi_services/acts.py	health=_list(health), project=project, platform=sys.platform, doc=doc,	keep	health	health
 services	packages/services/src/moxi_services/acts.py	if not _acted(call(MODULE, [ref], foreign=True, kinds=kinds), lines):	keep	foreign	foreign
+services	packages/services/src/moxi_services/acts.py	name, argv, timer=timer, every=every, at=at, days=days, cwd=cwd, health=health,	keep	health	health
+services	packages/services/src/moxi_services/acts.py	name, ref, enable=enable, timer=timer, health=health, project=project,	keep	enable	enable
+services	packages/services/src/moxi_services/acts.py	name, ref, enable=enable, timer=timer, health=health, project=project,	keep	health	health
 services	packages/services/src/moxi_services/acts.py	ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)),	keep	foreign	foreign
 services	packages/services/src/moxi_services/acts.py	ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)), lines)	keep	foreign	foreign
+services	packages/services/src/moxi_services/acts.py	project=project, launches_session=launches_session, doc=doc, enable=enable,	keep	enable	enable
+services	packages/services/src/moxi_services/cli.py	_parser	name	help	verb_help
+services	packages/services/src/moxi_services/cli.py	_parser.verb	name	help	help_text
+services	packages/services/src/moxi_services/cli.py	_watch_line	kwonly	as_json	as_json
 services	packages/services/src/moxi_services/cli.py	help="a command whose exit 0 means the daemon is healthy")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	help="adopt this existing unit: a systemd user unit, a launchd label "	keep	help	help
 services	packages/services/src/moxi_services/cli.py	help="also run each running daemon's health check")	keep	help	help
@@ -4444,6 +4531,7 @@ services	packages/services/src/moxi_services/cli.py	help="mark a timer that laun
 services	packages/services/src/moxi_services/cli.py	help="turn it on (a new command starts off without it)")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	on.add_argument("--disable", action="store_true", help="turn it off")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".",	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p = verbs.add_parser(name, help=help_text, description=help_text[0].upper() + help_text[1:] + ".",	keep	help	help
 services	packages/services/src/moxi_services/cli.py	p.add_argument("--cwd", metavar="DIR", help="the directory the command runs in")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	p.add_argument("--days", metavar="mon,...", help="only on these days (with --at)")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	p.add_argument("--doc", default="", metavar="TEXT", help="one line saying what it is")	keep	help	help
@@ -4457,6 +4545,7 @@ services	packages/services/src/moxi_services/cli.py	p.add_argument("--timer", ac
 services	packages/services/src/moxi_services/cli.py	p.add_argument("name", metavar="NAME")	keep	NAME	NAME
 services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--at", metavar="HH:MM[,HH:MM...]", help="run at these times")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--every", metavar="N", help="run every N minutes (5m) or hours (2h)")	keep	help	help
+services	packages/services/src/moxi_services/jobs.py	Jobs._ended	name	err	exc
 services	packages/services/src/moxi_services/page.py	"at": lb.Field("list", required=False, max=48,	keep	required	required
 services	packages/services/src/moxi_services/page.py	"command": lb.Field("string", required=False, max=COMMAND_MAX),	keep	required	required
 services	packages/services/src/moxi_services/page.py	"cwd": lb.Field("string", required=False, max=PATH_MAX),	keep	required	required
@@ -4466,17 +4555,34 @@ services	packages/services/src/moxi_services/page.py	"every": lb.Field("string",
 services	packages/services/src/moxi_services/page.py	"health": lb.Field("string", required=False, max=COMMAND_MAX),	keep	required	required
 services	packages/services/src/moxi_services/page.py	_MAYBE_BOOL = lb.Field("bool", required=False)	keep	required	required
 services	packages/services/src/moxi_services/page.py	_MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
+services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
+services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
+services	packages/services/src/moxi_services/pagehandlers.py	_Feed._poll	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_logged: set[type] = set()	keep	set	set
+services	packages/services/src/moxi_services/pagehandlers.py	common = dict(health=health, project=body.get("project"),	keep	health	health
+services	packages/services/src/moxi_services/pagehandlers.py	gather	name	err	unexpected_exc
+services	packages/services/src/moxi_services/pagehandlers.py	projects	name	err	exc
+services	packages/services/src/moxi_services/rows.py	-	name	_OWN_FOLDER	_OWN_SCHEDULER_DIR
 services	packages/services/src/moxi_services/rows.py	else set(modules))	keep	set	set
 services	packages/services/src/moxi_services/rows.py	if days is not None and (not _str_list(days) or not days or not set(days) <= set(DAYS)):	keep	set	set
 services	packages/services/src/moxi_services/state.py	modules: set[str] = set()	keep	set	set
+services	packages/services/src/moxi_services/store.py	_not_set_up	kwonly	strict	strict
+services	packages/services/src/moxi_services/store.py	at=at, days=days, health=health, project=project, platform=platform, doc=doc)	keep	health	health
+services	packages/services/src/moxi_services/store.py	set_enabled	kwonly	enabled	enabled
+services	packages/services/src/moxi_services/store.py	set_removing	kwonly	removing	removing
+services	packages/services/src/moxi_services/verdict.py	_daemon	kwonly	flag	flag
+services	packages/services/src/moxi_services/verdict.py	_missing	kwonly	flag	flag
+services	packages/services/src/moxi_services/verdict.py	_timer	kwonly	flag	flag
 services	packages/services/src/moxi_services/verdict.py	check(row, st)	keep	ok	ok
+services	packages/services/src/moxi_services/verdict.py	judge	kwonly	flag	flag
 services	packages/services/src/moxi_services/verdict.py	over.set()	keep	set	set
 services	packages/services/src/moxi_services/verdict.py	started: set[str] = set()	keep	set	set
 services	packages/services/tests/browser_kit.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 services	packages/services/tests/browser_kit.py	platform=sys.platform, enabled=True)	keep	enabled	enabled
 services	packages/services/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
+services	packages/services/tests/fake_units.py	FakeUnits._state	kwonly	foreign	foreign
 services	packages/services/tests/fake_units.py	names = set()	keep	set	set
+services	packages/services/tests/page_kit.py	inner = LB.app(page.PAGE, module="services", server_id=SERVER_ID, strict=True)	keep	strict	strict
 services	packages/services/tests/page_kit.py	self._gone.set()	keep	set	set
 services	packages/services/tests/test_acts.py	[], foreign=["backup.timer", "backup.service"]))	keep	foreign	foreign
 services	packages/services/tests/test_acts.py	done.set()	keep	set	set
@@ -4484,6 +4590,7 @@ services	packages/services/tests/test_acts.py	held.set()	keep	set	set
 services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set",	use	set	set_value
 services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set", config_set)	use	set	set_value
 services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set", refuse)	use	set	set_value
+services	packages/services/tests/test_acts.py	put_key	kwonly	on	on
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set
@@ -4493,6 +4600,7 @@ services	packages/services/tests/test_cli.py	monkeypatch.setattr(moxi.config, "s
 services	packages/services/tests/test_declared.py	assert set(found.daemons) == {"web"}	keep	set	set
 services	packages/services/tests/test_declared.py	assert set(found.timers) == {"nightly", "often"}	keep	set	set
 services	packages/services/tests/test_declared.py	assert set(units.declared()["daemons"]) == {"web"}	keep	set	set
+services	packages/services/tests/test_declared.py	test_a_busy_store_raises	name	holder	conn
 services	packages/services/tests/test_doctor.py	stuck.set()	keep	set	set
 services	packages/services/tests/test_jobs.py	first.set()	keep	set	set
 services	packages/services/tests/test_jobs.py	gate.set()	keep	set	set
@@ -4507,10 +4615,14 @@ services	packages/services/tests/test_page.py	monkeypatch.setattr(pagehandlers, 
 services	packages/services/tests/test_page.py	release.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	gathers.gate.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
+services	packages/services/tests/test_page_feed.py	return real(health=health)	keep	health	health
 services	packages/services/tests/test_page_feed.py	self.gate.set()	keep	set	set
 services	packages/services/tests/test_page_feed.py	self.inside.set()	keep	set	set
+services	packages/services/tests/test_page_table.py	-	name	test_commands_are_redact_a_working_directory_path_and_every_sentence_redact	test_commands_are_redact_a_working_dir_path_and_every_sentence_redact
 services	packages/services/tests/test_page_table.py	assert set(found["topics"]) == {"rows"} == {page.TOPIC}	keep	set	set
 services	packages/services/tests/test_page_table.py	assert set(module.COMPONENTS) == {"page", "summary"}	keep	set	set
+services	packages/services/tests/test_projects_link.py	test_a_read_that_fails_raises	name	holder	conn
+services	packages/services/tests/test_store.py	test_a_store_held_locked_past_the_wait_is_busy	name	holder	conn
 services	packages/services/tests/test_verdict.py	assert len(found) == 12 and set(found.values()) == {("ok", "fine")}	keep	set	set
 services	packages/services/tests/test_verdict.py	gate_.set()	keep	set	set
 services	packages/services/tests/test_verdict.py	rest = {"services/svc0", "services/svc1", "services/svc2"} - set(ran)	keep	set	set
@@ -4762,6 +4874,7 @@ sessions	packages/sessions/tests/test_page.py	assert set(routes["/api/subagents"
 sessions	packages/sessions/tests/test_page.py	assert set(routes["/api/window"]["query"]) == {"harness", "session", "agent", "turns",	keep	set	set
 sessions	packages/sessions/tests/test_page.py	assert {"message", "tool_call", "tool_result", "request", "limits", "marker"} <= set(kinds)	keep	set	set
 sessions	packages/sessions/tests/test_page.py	assert {"page.js", "window.js"} <= set(exported["assets"])	keep	set	set
+sessions	packages/sessions/tests/test_page.py	inner = LB.app(ROUTES, module="sessions", server_id=SERVER_ID, strict=True)	keep	strict	strict
 sessions	packages/sessions/tests/test_page_list.py	"folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	"harness", "since", "until", "folder",	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	ROW_PATH = {"path", "folder"}	keep	folder	folder
@@ -5553,6 +5666,7 @@ turns	packages/turns/tests/test_page.py	assert set(module.OPTIONAL) == {"codex",
 turns	packages/turns/tests/test_page.py	assert {"deliver", "agents", "steer"} <= set(row["capabilities"])	keep	set	set
 turns	packages/turns/tests/test_page.py	failing.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	if check(data):	keep	ok	ok
+turns	packages/turns/tests/test_page.py	inner = lb.app(page.PAGE, module="turns", server_id=SERVER_ID, strict=True)	keep	strict	strict
 turns	packages/turns/tests/test_page.py	self._gone.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
 turns	packages/turns/tests/test_shipped_guards.py	assert len(labels) == len(set(labels)) and len(labels) > 500	keep	set	set
@@ -5805,6 +5919,7 @@ ui	packages/ui/tests/fixture/moxi_fixture/page.py	"note": Field("string", requir
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	"pad": Field("string", required=False)},	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	body={"by": Field("int", required=False),	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	body={"by": Field("int", required=False)},	keep	required	required
+ui	packages/ui/tests/fixture/moxi_fixture/page.py	health=H + ":health",	keep	health	health
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.body", "body": b"route"})	keep	fail	fail
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.start", "status": 200, "headers": []})	keep	fail	fail
@@ -6201,6 +6316,7 @@ usage	packages/usage/src/moxi_usage/page.py	query={"by": lb.Field("enum", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"models": lb.Field("string", required=False, max=16384),	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_logged: set[type] = set()	keep	set	set
+usage	packages/usage/src/moxi_usage/pagehandlers.py	for model, provider in zip(ids, providers, strict=True):	keep	strict	strict
 usage	packages/usage/src/moxi_usage/prices.py	added = sorted(set(after) - set(before))	keep	set	set
 usage	packages/usage/src/moxi_usage/prices.py	names: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/prices.py	priced: set[str] = set()	keep	set	set
@@ -6211,6 +6327,7 @@ usage	packages/usage/src/moxi_usage/prices.py	unpriced: set[str] = set()	keep	se
 usage	packages/usage/src/moxi_usage/readings.py	return now == set(previous)	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	edges = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	for lane in sorted(set(known) | set(counts),	keep	set	set
+usage	packages/usage/src/moxi_usage/reports.py	for slot, term in zip(group["terms"], priced.terms, strict=True):	keep	strict	strict
 usage	packages/usage/src/moxi_usage/reports.py	found: set[int] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	row = rows[k] = make(values(found, extra))	keep	start	start
 usage	packages/usage/src/moxi_usage/reports.py	self.models: set[str] = set()	keep	set	set
@@ -6337,6 +6454,7 @@ usage	packages/usage/tests/test_page.py	assert set(rows[0]) == set(page.REQUEST_
 usage	packages/usage/tests/test_page.py	assert {"input", "output", "window", "tiers", "provider"} <= set(mystery["unknown"])	keep	set	set
 usage	packages/usage/tests/test_page.py	assert {path: (r["kind"], set(r["query"]), r["stream"]) for path, r in routes.items()} == {	keep	set	set
 usage	packages/usage/tests/test_page.py	assert {row["model"] for row in body["rows"]} == set(models_)	keep	set	set
+usage	packages/usage/tests/test_page.py	inner = lb.app(page.PAGE, module="usage", server_id=SERVER_ID, strict=True)	keep	strict	strict
 usage	packages/usage/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 usage	packages/usage/tests/test_page.py	release.set()	keep	set	set
 usage	packages/usage/tests/test_page.py	self._gone.set()	keep	set	set

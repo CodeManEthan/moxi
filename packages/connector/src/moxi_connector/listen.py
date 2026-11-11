@@ -111,7 +111,7 @@ class Taken:
     unit: str | None = None
 
 
-def take(port: int, *, environ: MutableMapping[str, str] | None = None,
+def take(port: int, *, env: MutableMapping[str, str] | None = None,
          activate: Activate | None = None, platform: str | None = None,
          sleep: Callable[[float], None] = time.sleep,
          clock: Callable[[], float] = time.monotonic,
@@ -123,9 +123,9 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
     `unit_state()` gives the state of the connector's socket row (`socket_unit_state`
     when None), read once, after the first failed bind and before any connect."""
     try:
-        sock = inherited(environ=environ, activate=activate, platform=platform)
-    except Unusable as e:
-        return Taken(None, "failed", str(e))
+        sock = inherited(env=env, activate=activate, platform=platform)
+    except Unusable as exc:
+        return Taken(None, "failed", str(exc))
     if sock is not None:
         found = sock.getsockname()[1]
         return Taken(sock, None, f"the supervisor holds {ADDRESS}:{found}", inherited=True)
@@ -134,8 +134,8 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
     while True:
         try:
             sock = bind(port)
-        except OSError as e:
-            error = e
+        except OSError as exc:
+            error = exc
         else:
             found = sock.getsockname()[1]
             return Taken(sock, None, f"the daemon bound {ADDRESS}:{found} itself")
@@ -240,8 +240,8 @@ def holder_uid(port: int, tables: Sequence[str] = _TCP_TABLES) -> int | None:
     want = f"{port:04X}"
     for table in tables:
         try:
-            with open(table, encoding="ascii", errors="replace") as f:
-                lines = f.read().splitlines()[1:]
+            with open(table, encoding="ascii", errors="replace") as fh:
+                lines = fh.read().splitlines()[1:]
         except OSError:
             continue
         for line in lines:
@@ -254,7 +254,7 @@ def holder_uid(port: int, tables: Sequence[str] = _TCP_TABLES) -> int | None:
     return None
 
 
-def inherited(*, environ: MutableMapping[str, str] | None = None,
+def inherited(*, env: MutableMapping[str, str] | None = None,
               activate: Activate | None = None,
               platform: str | None = None) -> socket.socket | None:
     """The socket the supervisor passed this process, non-blocking, or None.
@@ -264,9 +264,9 @@ def inherited(*, environ: MutableMapping[str, str] | None = None,
     daemon starts takes them for its own. On macOS launchd's is taken by its key; a
     process launchd did not start gets none. Raises `Unusable` for a passed socket the
     endpoint can't serve on, with every passed descriptor closed."""
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     platform = sys.platform if platform is None else platform
-    fds = _from_systemd(environ)
+    fds = _from_systemd(env)
     if fds is None and platform == "darwin":
         fds = _from_launchd(activate or _launch_activate_socket)
     if not fds:
@@ -286,13 +286,13 @@ def inherited(*, environ: MutableMapping[str, str] | None = None,
     return sock
 
 
-def _from_systemd(environ: MutableMapping[str, str]) -> list[int] | None:
+def _from_systemd(env: MutableMapping[str, str]) -> list[int] | None:
     """The descriptors systemd passed this process, or None."""
-    pid, count = environ.get("LISTEN_PID"), environ.get("LISTEN_FDS")
+    pid, count = env.get("LISTEN_PID"), env.get("LISTEN_FDS")
     if pid is None or count is None:
         return None
     for name in _SYSTEMD_VARIABLES:
-        environ.pop(name, None)
+        env.pop(name, None)
     if pid != str(os.getpid()) or not count.isdigit() or int(count) < 1:
         return None
     return list(range(_FIRST_FD, _FIRST_FD + int(count)))
@@ -317,7 +317,7 @@ def _wrap(fds: list[int]) -> list[socket.socket]:
             sock = socket.socket(fileno=fd)
             sockets.append(sock)
             sock.set_inheritable(False)
-    except OSError as err:
+    except OSError as exc:
         for sock in sockets:
             sock.close()
         for fd in fds[len(sockets):]:
@@ -325,7 +325,7 @@ def _wrap(fds: list[int]) -> list[socket.socket]:
                 os.close(fd)
             except OSError:
                 pass
-        raise Unusable(f"a passed socket can't be read: {err}") from None
+        raise Unusable(f"a passed socket can't be read: {exc}") from None
     return sockets
 
 
@@ -337,8 +337,8 @@ def _not_loopback_listener(sock: socket.socket) -> str | None:
         host = sock.getsockname()[0]
         listening = (sock.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN)
                      if hasattr(socket, "SO_ACCEPTCONN") else 1)
-    except OSError as e:
-        return f"can't be read: {e}"
+    except OSError as exc:
+        return f"can't be read: {exc}"
     if host != ADDRESS:
         return f"is on {host}, not {ADDRESS}"
     if not listening:

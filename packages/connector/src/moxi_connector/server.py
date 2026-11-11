@@ -73,9 +73,9 @@ class Endpoint:
         except SystemExit:
             self.sock.close()
             raise StartFailed("the HTTP server's startup failed") from None
-        except Exception as e:
+        except Exception as exc:
             self.sock.close()
-            raise StartFailed(f"{type(e).__name__}: {e}") from None
+            raise StartFailed(f"{type(exc).__name__}: {exc}") from None
         if not server.started:
             self.sock.close()
             raise StartFailed("the HTTP server didn't start")

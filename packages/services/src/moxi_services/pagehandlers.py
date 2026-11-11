@@ -260,9 +260,9 @@ def gather(*, health: bool = False) -> dict[str, Any]:
         listed = [row_value(v) for v in seen]
     except ServicesError as exc:
         return {"state": "error", "detail": _text(exc), "rows": [], "problems": []}
-    except Exception as err:  # noqa: BLE001 - the page says so, never a 500
-        _log_once(err, "listing the rows failed")
-        return {"state": "error", "detail": _unexpected(err), "rows": [], "problems": []}
+    except Exception as unexpected_exc:  # noqa: BLE001 - the page says so, never a 500
+        _log_once(unexpected_exc, "listing the rows failed")
+        return {"state": "error", "detail": _unexpected(unexpected_exc), "rows": [], "problems": []}
     return {"state": "up", "detail": None, "rows": listed,
             "problems": [{"module": m, "reason": r} for m, r in problems]}
 
@@ -297,12 +297,12 @@ def projects(call: Any) -> dict[str, Any]:
                                           "services --with projects` adds it"}
     try:
         listed = found.api.list_projects()
-    except Exception as err:  # noqa: BLE001 - the picker says why, it never fails
-        if type(err).__name__ == "Busy":
+    except Exception as exc:  # noqa: BLE001 - the picker says why, it never fails
+        if type(exc).__name__ == "Busy":
             return {"projects": [], "reason": "projects is busy; try again"}
-        _log_once(err, "services' page couldn't list the projects")
+        _log_once(exc, "services' page couldn't list the projects")
         return {"projects": [], "reason": f"projects couldn't be listed "
-                                          f"({type(err).__name__})"}
+                                          f"({type(exc).__name__})"}
     return {"projects": [{"key": str(p.key), "root": str(p.root)} for p in listed],
             "reason": None}
 
@@ -482,8 +482,8 @@ class _Feed:
         while True:
             try:
                 self.tick()
-            except Exception as err:  # noqa: BLE001 - the poller outlives every failure
-                _log_once(err, "the rows poller's tick failed")
+            except Exception as exc:  # noqa: BLE001 - the poller outlives every failure
+                _log_once(exc, "the rows poller's tick failed")
             await asyncio.sleep(PERIOD)
 
     def tick(self) -> bool:
@@ -501,15 +501,15 @@ class _Feed:
         self.thread.start()
         return True
 
-    def _gather(self, health: bool) -> None:
+    def _gather(self, *, health: bool) -> None:
         try:
             value = gather(health=health)
             digest = _digest(value)
             if digest != self._last:
                 self.topics.publish(TOPIC, value)
                 self._last = digest
-        except Exception as err:  # noqa: BLE001 - the next tick gathers again
-            _log_once(err, "the rows poller's gather failed")
+        except Exception as exc:  # noqa: BLE001 - the next tick gathers again
+            _log_once(exc, "the rows poller's gather failed")
 
 
 _current: _Feed | None = None

@@ -152,8 +152,8 @@ def launch(pw, engine: str):
                     "door's https origin needs")
     try:
         return pw.firefox.launch(firefox_user_prefs={"network.dns.forceResolve": "127.0.0.1"})
-    except Error as err:
-        pytest.skip(f"firefox can't start on this machine: {str(err).splitlines()[0]}")
+    except Error as exc:
+        pytest.skip(f"firefox can't start on this machine: {str(exc).splitlines()[0]}")
 
 
 def test_a_real_browser_signs_in_through_the_page(make_host, fake, tmp_path, monkeypatch,

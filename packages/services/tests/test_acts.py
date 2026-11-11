@@ -28,7 +28,7 @@ def key_on(name: str) -> bool:
     return state.key_on(name)
 
 
-def put_key(name: str, on: bool) -> None:
+def put_key(name: str, *, on: bool) -> None:
     moxi.config.set_value("services", state.key(name), on, by="test")
 
 

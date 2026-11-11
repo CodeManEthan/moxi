@@ -65,7 +65,7 @@ class Refused(Exception):
 
 # -- the switch ------------------------------------------------------------------------------
 
-def _set_switch(value: bool, by: str) -> list[str]:
+def _set_switch(*, value: bool, by: str) -> list[str]:
     """Set `enabled` through `moxi.config.set`, which writes and applies the daemon's
     units. Returns the lines the core printed while it applied them."""
     from moxi import config
@@ -89,8 +89,8 @@ def _store():
 def _revoke_row(**fields: Any) -> None:
     try:
         calllog.event(calllog.CallLog(), "revoke", **fields)
-    except Exception as e:  # noqa: BLE001 - the revoke stands without its row
-        print(f"The revoke couldn't be written to the call log: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - the revoke stands without its row
+        print(f"The revoke couldn't be written to the call log: {exc}", file=sys.stderr)
 
 
 def revoke_every_grant() -> str | None:
@@ -104,7 +104,7 @@ def revoke_every_grant() -> str | None:
 
 
 def _on(args, out: TextIO) -> int:
-    for line in _set_switch(True, "moxi connector enable"):
+    for line in _set_switch(value=True, by="moxi connector enable"):
         print(line, file=out)
     snap = doctor.take(ask=_no_ask)
     print("The connector is on.", file=out)
@@ -126,14 +126,14 @@ def _off(args, out: TextIO) -> int:
     code = codes.OK
     try:
         said = revoke_every_grant()
-    except Exception as e:  # noqa: BLE001 - said, and the switch still goes off
-        print(f"The grants couldn't be revoked: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - said, and the switch still goes off
+        print(f"The grants couldn't be revoked: {exc}", file=sys.stderr)
         print("  fix: moxi connector revoke --all", file=sys.stderr)
         code = codes.ERROR
     else:
         if said:
             print(said, file=out)
-    for line in _set_switch(False, "moxi connector disable"):
+    for line in _set_switch(value=False, by="moxi connector disable"):
         print(line, file=out)
     print("The connector is off.", file=out)
     address = doctor.take(ask=_no_ask).address
@@ -238,8 +238,8 @@ def _check(args, out: TextIO, *, fetch: probe.Fetch | None = None) -> int:
 
     try:
         steps = probe.run(found, ask=ask, fetch=fetch or probe.fetch, provider=snap.edge)
-    except ipc.IpcError as e:
-        raise Refused(f"the connector stopped answering during the check: {e}",
+    except ipc.IpcError as exc:
+        raise Refused(f"the connector stopped answering during the check: {exc}",
                       checks.RESTART) from None
     passed = probe.passed([s for s in steps if s.name != "note"])
     failed = next((s.name for s in steps if not s.passed), None)
@@ -249,8 +249,8 @@ def _check(args, out: TextIO, *, fetch: probe.Fetch | None = None) -> int:
                                  "steps": {s.name: s.passed for s in steps
                                            if s.name != "note"}},
                                 durable=True, collapse=None)
-    except Exception as e:  # noqa: BLE001 - the check's answer stands without its row
-        print(f"The check's result couldn't be written to the call log: {e}",
+    except Exception as exc:  # noqa: BLE001 - the check's answer stands without its row
+        print(f"The check's result couldn't be written to the call log: {exc}",
               file=sys.stderr)
     if args.json:
         print(json.dumps({"url": found.url, "passed": passed,
@@ -295,11 +295,11 @@ def _local_gates() -> list[tuple[str, Any]]:
 def _refused_row(**fields: Any) -> None:
     try:
         calllog.event(calllog.CallLog(), "code-refused", **fields)
-    except Exception as e:  # noqa: BLE001 - the refusal stands without its row
-        print(f"The refusal couldn't be written to the call log: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - the refusal stands without its row
+        print(f"The refusal couldn't be written to the call log: {exc}", file=sys.stderr)
 
 
-def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
+def _code(args, out: TextIO, *, source_env: dict[str, str] | None = None) -> int:
     import os
     import time
 
@@ -308,7 +308,7 @@ def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
     from . import codes as mint
     from . import settings
 
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if source_env is None else source_env)
     name = "moxi connector code"
     gates = _local_gates()
     if not gates:
@@ -318,9 +318,9 @@ def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
     for module, gate in gates:
         try:
             said = gate.shell(env)
-        except Exception as e:  # noqa: BLE001 - a check that fails never lets a mint through
+        except Exception as exc:  # noqa: BLE001 - a check that fails never lets a mint through
             said = (f"The mint gate of {module} failed in this shell "
-                    f"({type(e).__name__}), so no code is minted.")
+                    f"({type(exc).__name__}), so no code is minted.")
         if said is not None:
             _refused_row(check="shell", module=module, refusal=str(said))
             print(f"{name}: {said}", file=sys.stderr)
@@ -331,11 +331,11 @@ def _code(args, out: TextIO, *, environ: dict[str, str] | None = None) -> int:
         return codes.TEMPFAIL
     try:
         got = checks.ask("mint_code", {"label": mint.clean_label(args.label)})
-    except ipc.RpcError as e:
-        print(f"{name}: {e.message}", file=sys.stderr)
-        return NOPERM if e.code in (mint.REFUSED, mint.NO_GATE) else codes.ERROR
-    except ipc.IpcError as e:
-        print(f"{name}: the connector's process doesn't answer ({e}), so no code is "
+    except ipc.RpcError as exc:
+        print(f"{name}: {exc.message}", file=sys.stderr)
+        return NOPERM if exc.code in (mint.REFUSED, mint.NO_GATE) else codes.ERROR
+    except ipc.IpcError as exc:
+        print(f"{name}: the connector's process doesn't answer ({exc}), so no code is "
               "minted.", file=sys.stderr)
         print(f"  fix: {checks.RESTART}", file=sys.stderr)
         return codes.TEMPFAIL

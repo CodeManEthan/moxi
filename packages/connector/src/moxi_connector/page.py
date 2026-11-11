@@ -178,11 +178,11 @@ def page(under: Under):
                     req.redirect_uri, error="invalid_request", error_description=REPEATED,
                     state=req.state, iss=under.origin.issuer), "invalid_request")
             pid = under.open(req)
-        except RedirectError as e:
-            await redirect(send, e.url)
+        except RedirectError as exc:
+            await redirect(send, exc.url)
             return
-        except PageError as e:
-            await refused(send, e.status, e.text)
+        except PageError as exc:
+            await refused(send, exc.status, exc.text)
             return
         await form(send, 200, pid)
 

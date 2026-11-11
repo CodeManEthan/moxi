@@ -258,7 +258,7 @@ class OAuth:
         self._later(self._tidy_and_note, origin)
         return mount
 
-    async def stopping(self, switch_on: bool) -> None:
+    async def stopping(self, *, switch_on: bool) -> None:
         """At the process's stop: write pending last-use times; with the switch off,
         revoke every grant, so none stays valid behind a port nothing holds.
 

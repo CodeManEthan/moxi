@@ -282,7 +282,7 @@ def broken_manager(monkeypatch):
             raise RuntimeError("the session manager can't start")
             yield  # pragma: no cover
 
-    def set_(broken=True):
+    def set_(*, broken=True):
         monkeypatch.setattr(app_mod, "StreamableHTTPSessionManager",
                             Broken if broken else StreamableHTTPSessionManager)
 

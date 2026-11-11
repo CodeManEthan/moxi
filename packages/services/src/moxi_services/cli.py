@@ -169,8 +169,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    def verb(name: str, help: str, *, reads: bool = False) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".",
+    def verb(name: str, help_text: str, *, reads: bool = False) -> argparse.ArgumentParser:
+        p = verbs.add_parser(name, help=help_text, description=help_text[0].upper() + help_text[1:] + ".",
                              allow_abbrev=False)
         if reads:
             p.add_argument("--json", action="store_true", help="print JSON")
@@ -211,14 +211,14 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = verb("remove", "remove a row you added or adopted")
     p.add_argument("id", metavar="ID")
 
-    for name, help in (("start", "start a daemon, or run a timer now"),
+    for name, verb_help in (("start", "start a daemon, or run a timer now"),
                        ("stop", "stop a daemon until the next login or start, or end a "
                                 "timer's run"),
                        ("restart", "stop, then start"),
                        ("enable", "turn rows on: a daemon running and starting at login, "
                                   "a timer's schedule armed"),
                        ("disable", "turn rows off")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("ids", nargs="+", metavar="ID")
 
     p = verb("watch", "print a line whenever a row's verdict changes, until interrupted",
@@ -618,12 +618,12 @@ def _watch(args, out) -> int:
                     key = (view.verdict.state, view.verdict.reason)
                     if seen.get(view.row.id) != key:
                         seen[view.row.id] = key
-                        _watch_line(out, args.json, view.row.id, view)
+                        _watch_line(out, as_json=args.json, ident=view.row.id, view=view)
                 here = {v.row.id for v in current}
                 for ident in [i for i in seen if i not in here] + gone:
                     if ident in seen:
                         del seen[ident]
-                        _watch_line(out, args.json, ident, None)
+                        _watch_line(out, as_json=args.json, ident=ident, view=None)
             except ServicesError as exc:
                 print(f"{time.strftime('%H:%M:%S')} {exc.reason}", file=sys.stderr)
             out.flush()
@@ -632,7 +632,7 @@ def _watch(args, out) -> int:
         return codes.OK
 
 
-def _watch_line(out, as_json: bool, ident: str, view: View | None) -> None:
+def _watch_line(out, *, as_json: bool, ident: str, view: View | None) -> None:
     if as_json:
         found = {"at": _iso(time.time()), "id": ident}
         if view is None:

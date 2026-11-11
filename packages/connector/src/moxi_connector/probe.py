@@ -118,10 +118,10 @@ def fetch(method: str, url: str, headers: dict[str, str], body: bytes | None) ->
         with opener.open(req, timeout=STEP_WAIT) as answer:
             return Reply(answer.status, {k.lower(): v for k, v in answer.headers.items()},
                          answer.read(64 * 1024))
-    except urllib.error.HTTPError as e:
-        return Reply(e.code, {k.lower(): v for k, v in e.headers.items()}, e.read(64 * 1024))
-    except urllib.error.URLError as e:
-        raise OSError(str(e.reason)) from None
+    except urllib.error.HTTPError as exc:
+        return Reply(exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read(64 * 1024))
+    except urllib.error.URLError as exc:
+        raise OSError(str(exc.reason)) from None
 
 
 @dataclass
@@ -148,8 +148,8 @@ def run(origin, *, ask: Callable[[str, object], object], fetch: Fetch = fetch,
     url = origin.resource_metadata_url
     try:
         got = fetch("GET", url, {"User-Agent": USER_AGENT, "X-Moxi-Probe": nonce}, None)
-    except OSError as e:
-        steps.append(Step("reach", False, f"GET {url} didn't connect: {e}"))
+    except OSError as exc:
+        steps.append(Step("reach", False, f"GET {url} didn't connect: {exc}"))
         return steps
     seen = ask("probe_seen", {"nonce": nonce})
     seen = isinstance(seen, dict) and seen.get("seen") is True
@@ -176,8 +176,8 @@ def run(origin, *, ask: Callable[[str, object], object], fetch: Fetch = fetch,
         got = fetch("POST", mcp, {"User-Agent": USER_AGENT, "Content-Type": "application/json",
                                   "Accept": "application/json, text/event-stream"},
                     b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
-    except OSError as e:
-        steps.append(Step("unsigned", False, f"POST {mcp} didn't connect: {e}"))
+    except OSError as exc:
+        steps.append(Step("unsigned", False, f"POST {mcp} didn't connect: {exc}"))
     else:
         challenge = got.headers.get("www-authenticate", "")
         if got.status == 401 and "resource_metadata=" in challenge:

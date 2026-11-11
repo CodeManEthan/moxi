@@ -124,8 +124,8 @@ def _outcome(act: str) -> Callable:
             lines = _Lines()
             try:
                 code, fix = fn(target, *args, lines=lines, **kwargs)
-            except _Done as done:
-                return Outcome(ident, act, done.code, tuple(lines) + done.lines, done.fix,
+            except _Done as done_exc:
+                return Outcome(ident, act, done_exc.code, tuple(lines) + done_exc.lines, done_exc.fix,
                                tuple(lines.said))
             except ServicesError as exc:
                 return Outcome(ident, act, exc.exit_code, (*lines, exc.reason), exc.fix,
@@ -216,7 +216,7 @@ def _log_fix(st: units.UnitState | None) -> str | None:
     return f"its log: {st.log}" if st is not None and st.log else None
 
 
-def _check_running(row: Row, want: bool, lines: list[str]) -> int:
+def _check_running(row: Row, *, want: bool, lines: list[str]) -> int:
     """A daemon's re-read after start, restart or stop: `active` exactly when `want`."""
     st = state.read_one(row)
     why = _unknown(st)
@@ -232,7 +232,7 @@ def _check_running(row: Row, want: bool, lines: list[str]) -> int:
     raise _Done(moxi.exit.ERROR, (), _log_fix(st))
 
 
-def _check_enabled(row: Row, on: bool, lines: list[str], *, wrapped: bool = False) -> int:
+def _check_enabled(row: Row, *, on: bool, lines: list[str], wrapped: bool = False) -> int:
     """The re-read after enable or disable (and after add): the schedule or the start at
     login matches the flag, a daemon is running or not to match, an adopted Linux timer
     is wrapped and its key matches."""
@@ -251,7 +251,7 @@ def _check_enabled(row: Row, on: bool, lines: list[str], *, wrapped: bool = Fals
         if key_on is None:
             lines.append(f"{row.id}: its key {state.key(row.name)} can't be read")
         elif key_on != on:
-            wrong.append(f"its key {state.key(row.name)} is not {_word(on)}")
+            wrong.append(f"its key {state.key(row.name)} is not {_word(on=on)}")
         if on and st.enabled is False:
             wrong.append("its schedule is not armed")
     else:
@@ -274,7 +274,7 @@ def _kinds(row: UserRow) -> dict[str, str]:
     return {row.unit: row.kind}
 
 
-def _word(on: bool) -> str:
+def _word(*, on: bool) -> str:
     return "on" if on else "off"
 
 
@@ -341,7 +341,7 @@ def _run_body(ident: str, act: str, *, by: str, lines: list[str]):
     if not ok:
         return moxi.exit.ERROR, None
     if row.kind == "daemon":
-        return _check_running(row, act != "stop", lines), None
+        return _check_running(row, want=act != "stop", lines=lines), None
     if act != "stop":
         _note_gate_off(row, lines)
     return moxi.exit.OK, None
@@ -375,19 +375,19 @@ def disable(ident: str, *, by: str = BY) -> Outcome:
     return _outcome("disable")(_switch_body)(ident, False, by=by)
 
 
-def _switch_body(ident: str, on: bool, *, by: str, lines: list[str]):
+def _switch_body(ident: str, *, on: bool, by: str, lines: list[str]):
     row = resolve(ident)
     _refuse_unless_actable(row)
     if isinstance(row, ModuleRow):
-        return _switch_module(row, on, by, lines)
+        return _switch_module(row, on=on, by=by, lines=lines)
     if row.form == "written":
-        return _switch_written(row, on, by, lines)
+        return _switch_written(row, on=on, by=by, lines=lines)
     if state.is_wrapped(row):
-        return _switch_wrapped(row, on, by, lines)
-    return _switch_adopted(row, on, by, lines)
+        return _switch_wrapped(row, on=on, by=by, lines=lines)
+    return _switch_adopted(row, on=on, by=by, lines=lines)
 
 
-def _switch_module(row: ModuleRow, on: bool, by: str, lines: list[str]):
+def _switch_module(row: ModuleRow, *, on: bool, by: str, lines: list[str]):
     """A module unit is turned on and off only through the switch its module declares;
     one that declares none is refused, never forced."""
     if row.switch is None:
@@ -402,46 +402,46 @@ def _switch_module(row: ModuleRow, on: bool, by: str, lines: list[str]):
     return moxi.exit.OK, None
 
 
-def _set_flag(row: UserRow, on: bool, by: str) -> None:
+def _set_flag(row: UserRow, *, on: bool, by: str) -> None:
     def change(conn):
-        store.set_enabled(conn, row.name, on, by=by)
+        store.set_enabled(conn, row.name, enabled=on, by=by)
         if on and row.stopped is not None:
             store.set_stopped(conn, row.name, None, by=by)
     store.write(change)
 
 
-def _switch_written(row: UserRow, on: bool, by: str, lines: list[str]):
+def _switch_written(row: UserRow, *, on: bool, by: str, lines: list[str]):
     with _locked():
-        _set_flag(row, on, by)
+        _set_flag(row, on=on, by=by)
         changes = units.plan(MODULE, only=[row.name])
         code = _plan_refused(changes, row.name, lines)
         if code is not None:
             return code, None
         if not _applied(units.apply(changes, say=_quiet), lines):
             return moxi.exit.ERROR, f"moxi services {'enable' if on else 'disable'} {row.name}"
-    return _check_enabled(row, on, lines), None
+    return _check_enabled(row, on=on, lines=lines), None
 
 
-def _switch_adopted(row: UserRow, on: bool, by: str, lines: list[str]):
+def _switch_adopted(row: UserRow, *, on: bool, by: str, lines: list[str]):
     with _locked():
-        _set_flag(row, on, by)
+        _set_flag(row, on=on, by=by)
         call = units.enable if on else units.disable
         ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)), lines)
     if not ok:
         return moxi.exit.ERROR, f"moxi services {'enable' if on else 'disable'} {row.name}"
-    return _check_enabled(row, on, lines), None
+    return _check_enabled(row, on=on, lines=lines), None
 
 
-def _switch_wrapped(row: UserRow, on: bool, by: str, lines: list[str]):
+def _switch_wrapped(row: UserRow, *, on: bool, by: str, lines: list[str]):
     """An adopted Linux timer: wrapped again when its drop-in is gone, then its key set;
     `enable` also arms the schedule when it isn't."""
     retry = f"moxi services {'enable' if on else 'disable'} {row.name}"
     with _locked():
-        _set_flag(row, on, by)
+        _set_flag(row, on=on, by=by)
         if row.unit not in units.wraps(MODULE):
             if not _wrap(row, lines):
                 return moxi.exit.ERROR, retry
-        if not _set_key(row, on, by, lines):
+        if not _set_key(row, on=on, by=by, lines=lines):
             return moxi.exit.ERROR, retry
         if on:
             st = state.read_one(row)
@@ -449,10 +449,10 @@ def _switch_wrapped(row: UserRow, on: bool, by: str, lines: list[str]):
                 if not _acted(units.enable(MODULE, [row.unit], foreign=True,
                                            kinds=_kinds(row)), lines):
                     return moxi.exit.ERROR, retry
-    return _check_enabled(row, on, lines, wrapped=True), None
+    return _check_enabled(row, on=on, lines=lines, wrapped=True), None
 
 
-def _set_key(row: UserRow, on: bool, by: str, lines: list[str]) -> bool:
+def _set_key(row: UserRow, *, on: bool, by: str, lines: list[str]) -> bool:
     """Set an adopted Linux timer's key; a config file that refuses it is a failure of
     the act (exit 1), since the row is already written."""
     try:
@@ -460,7 +460,7 @@ def _set_key(row: UserRow, on: bool, by: str, lines: list[str]) -> bool:
     except moxi.config.ConfigError as exc:
         lines.append(str(exc))
         return False
-    lines.append(f"{row.unit}: runs {_word(on)} ({MODULE} {state.key(row.name)} = "
+    lines.append(f"{row.unit}: runs {_word(on=on)} ({MODULE} {state.key(row.name)} = "
                  f"{str(on).lower()})")
     return True
 
@@ -557,9 +557,9 @@ def _add_written(name, argv, *, timer, every, at, days, cwd, health, project,
             # Its unit may be partly written: the row stays, for remove, enable or
             # disable to finish.
             return moxi.exit.ERROR, f"moxi services remove {name}"
-    lines.append(f"{rows.row_id(MODULE, name)} added, {_word(enable)}")
+    lines.append(f"{rows.row_id(MODULE, name)} added, {_word(on=enable)}")
     row = store.get(name)
-    return _check_enabled(row, enable, lines), None
+    return _check_enabled(row, on=enable, lines=lines), None
 
 
 def _list(value) -> list | None:
@@ -612,7 +612,7 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
     st = read.get(ref)
     triggers = {unit: read[unit].triggers for unit in timers if unit in read}
     _held(name, ref, st, triggers)
-    _adoptable(ref, kind, st, enable)
+    _adoptable(ref, kind, st, enable=enable)
     if project is not None:
         fields["project"] = projects_link.lookup(project)
     probe = UserRow(**{**dict.fromkeys(UserRow._fields), **fields, "enabled": enable,
@@ -627,7 +627,7 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
         if wrapped:
             if not _wrap(probe, lines):
                 return _wrap_refused(probe, lines), None
-            if not _set_key(probe, enable, by, lines):
+            if not _set_key(probe, on=enable, by=by, lines=lines):
                 return moxi.exit.ERROR, retry
             if enable and st.enabled is False:
                 if not _acted(units.enable(MODULE, [ref], foreign=True, kinds=kinds),
@@ -637,8 +637,8 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
             call = units.enable if enable else units.disable
             if not _acted(call(MODULE, [ref], foreign=True, kinds=kinds), lines):
                 return moxi.exit.ERROR, retry
-    lines.append(f"{rows.row_id(MODULE, name)} adopts {ref} as a {kind}, {_word(enable)}")
-    return _check_enabled(store.get(name), enable, lines, wrapped=wrapped), None
+    lines.append(f"{rows.row_id(MODULE, name)} adopts {ref} as a {kind}, {_word(on=enable)}")
+    return _check_enabled(store.get(name), on=enable, lines=lines, wrapped=wrapped), None
 
 
 def _held(name: str, ref: str, st: units.UnitState | None = None,
@@ -696,7 +696,7 @@ def _timers(name: str) -> list[str]:
 
 
 def _adoptable(ref: str, kind: str, st: units.UnitState | None,
-               enable: bool | None) -> None:
+               *, enable: bool | None) -> None:
     """Refuse a unit services can't record truly; without `--enable` or `--disable`,
     say what the supervisor reads now."""
     if st is None or st.state in ("missing", "nobackend"):

@@ -101,15 +101,15 @@ def test_a_store_not_set_up_raises_rather_than_declaring_nothing(store_path):
 def test_a_busy_store_raises(store_path, monkeypatch):
     add(**written())
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
-    holder.execute("PRAGMA locking_mode = EXCLUSIVE")
-    holder.execute("BEGIN EXCLUSIVE")
+    conn = sqlite3.connect(store_path, isolation_level=None)
+    conn.execute("PRAGMA locking_mode = EXCLUSIVE")
+    conn.execute("BEGIN EXCLUSIVE")
     try:
         with pytest.raises(Busy):
             units.declared()
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        conn.execute("ROLLBACK")
+        conn.close()
 
 
 # --- through the core -------------------------------------------------------------------

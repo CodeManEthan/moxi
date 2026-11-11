@@ -218,8 +218,7 @@ def _unknown(reason: str) -> Verdict:
     return Verdict("warn", f"unknown: {reason}", None, True)
 
 
-def judge(row: Row, st: units.UnitState | None, flag: bool | None, *,
-          health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
+def judge(row: Row, st: units.UnitState | None, *, flag: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
           supervisor: bool = True, booted: float | None = None,
           unread: str | None = None) -> Verdict:
     """The verdict of one row.
@@ -263,16 +262,16 @@ def _state_verdict(row: Row, st, flag, *, socket, supervisor, booted, unread) ->
     if st.state == "off":
         return Verdict("off", st.detail or "not for this system")
     if st.state == "missing":
-        return _missing(row, flag)
+        return _missing(row, flag=flag)
     if user and state.is_wrapped(row) and st.wrapped is None:
         return Verdict("warn", "not wrapped: runs are neither gated nor recorded",
                        _cmd("enable" if flag else "disable", row))
     if row.kind == "daemon":
-        return _daemon(row, st, flag, socket, booted)
-    return _timer(row, st, flag)
+        return _daemon(row, st, flag=flag, socket=socket, booted=booted)
+    return _timer(row, st, flag=flag)
 
 
-def _missing(row: Row, flag: bool) -> Verdict:
+def _missing(row: Row, *, flag: bool) -> Verdict:
     if isinstance(row, ModuleRow):
         fix = f"moxi install {row.module}"
     elif row.form == "written":
@@ -283,7 +282,7 @@ def _missing(row: Row, flag: bool) -> Verdict:
     return Verdict("fail" if flag else "warn", what, fix)
 
 
-def _daemon(row: Row, st, flag: bool, socket, booted) -> Verdict:
+def _daemon(row: Row, st, *, flag: bool, socket, booted) -> Verdict:
     running = st.state == "active"
     listening = (socket is not None and socket.state == "active" and not running
                  and st.state == "inactive")
@@ -318,7 +317,7 @@ def _daemon(row: Row, st, flag: bool, socket, booted) -> Verdict:
     return Verdict("off", "off")
 
 
-def _timer(row: Row, st, flag: bool) -> Verdict:
+def _timer(row: Row, st, *, flag: bool) -> Verdict:
     module_or_wrapped = isinstance(row, ModuleRow) or state.is_wrapped(row)
     if not flag:
         if module_or_wrapped:
@@ -508,7 +507,7 @@ def views(rows: Sequence[Row], *, health: bool = False,
     out = []
     for row in rows:
         st = states.get(row.id)
-        verdict = judge(row, st, on[row.id], health=checked.get(row.id),
+        verdict = judge(row, st, flag=on[row.id], health=checked.get(row.id),
                         socket=sockets.get(row.id), supervisor=supervisor, booted=booted,
                         unread=unread)
         out.append(View(row, st, on[row.id], checked.get(row.id), verdict))

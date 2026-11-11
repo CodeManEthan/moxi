@@ -216,7 +216,7 @@ class FakeUnits:
                 out.append(self._state(None, ref, unit, self.wrapped.get(ref), foreign=True))
         return out
 
-    def _state(self, module, name, unit, wrapped=None, foreign=False):
+    def _state(self, module, name, unit, wrapped=None, *, foreign=False):
         # As the core's on systemd: only a foreign timer's state carries `wrapped` (the
         # table is keyed by timer), and a timer's carries `triggers`; a missing, unknown
         # or unread one carries neither. Other backends report no `triggers`.

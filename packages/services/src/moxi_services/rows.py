@@ -48,7 +48,7 @@ _AT = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9]")
 #: The prefixes of moxi's own unit names: systemd `moxi-*`, launchd `moxi.*`, and the
 #: Task Scheduler folder `\Moxi\`.
 _OWN_PREFIXES = ("moxi-", "moxi.")
-_OWN_FOLDER = "\\moxi\\"
+_OWN_SCHEDULER_DIR = "\\moxi\\"
 
 
 # --- names and ids ----------------------------------------------------------------------
@@ -97,7 +97,7 @@ def is_own_ref(ref: str) -> bool:
     """True when `ref` is in moxi's own unit namespace on any system: a systemd unit
     named `moxi-*`, a launchd label `moxi.*`, or a task under `\\Moxi\\`."""
     path = ref if ref.startswith("\\") else "\\" + ref
-    return ref.startswith(_OWN_PREFIXES) or path.casefold().startswith(_OWN_FOLDER)
+    return ref.startswith(_OWN_PREFIXES) or path.casefold().startswith(_OWN_SCHEDULER_DIR)
 
 
 def check_ref(ref: object, backend: str, *, timer: bool = False) -> str:

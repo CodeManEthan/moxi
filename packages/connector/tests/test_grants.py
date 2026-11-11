@@ -290,9 +290,9 @@ def test_a_stop_with_the_switch_off_revokes_and_a_restart_with_it_on_keeps(confi
     store = grants.Store()
     gid = made(store)
     oauth = OAuth(grants.Store(), _log(), redirect_uris=CALLBACKS)
-    run(oauth.stopping(True))
+    run(oauth.stopping(switch_on=True))
     assert not grants.Store().grant(gid)["revoked"]
-    run(oauth.stopping(False))
+    run(oauth.stopping(switch_on=False))
     assert grants.Store().grant(gid)["revoked_by"] == "stop"
 
 

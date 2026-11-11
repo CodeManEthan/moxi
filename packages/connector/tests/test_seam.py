@@ -295,8 +295,8 @@ def test_ctx_log_with_a_refused_field_raises_and_writes_nothing(front, fake):
                        {"ok": 1, "authorization": "Bearer x"}):
             try:
                 ctx.log(**fields)
-            except ValueError as e:
-                caught.append(str(e))
+            except ValueError as exc:
+                caught.append(str(exc))
         return Result("fine")
 
     async def main():
@@ -317,8 +317,8 @@ def test_ctx_log_with_a_field_the_connector_writes_raises_and_keeps_its_own(fron
                        {"dropped": False}):
             try:
                 ctx.log(**fields)
-            except ValueError as e:
-                caught.append(str(e))
+            except ValueError as exc:
+                caught.append(str(exc))
         return Result("fine")
 
     async def main():
@@ -515,7 +515,7 @@ def test_a_port_another_listener_holds_is_port_taken():
     held = listen.bind(0)
     try:
         port = held.getsockname()[1]
-        taken = listen.take(port, environ={}, unit_state=lambda: "missing", retry_for=0.2)
+        taken = listen.take(port, env={}, unit_state=lambda: "missing", retry_for=0.2)
         assert taken.sock is None and taken.why == "port-taken"
     finally:
         held.close()
