@@ -239,7 +239,7 @@ const STYLES = css`
   .opt.on { color: var(--moxi-text); }
   .lab { margin: 4px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
   .nm { display: flex; align-items: center; margin-bottom: 6px; border: 1px solid var(--moxi-border); border-radius: 7px; }
-  .nm.on { border-color: var(--moxi-border-strong); }
+  .nm.on, .nm:focus-within { border-color: var(--moxi-border-strong); }
   .nm input { flex: 1 1 auto; min-width: 0; padding: 6px 0 6px 10px; border: 0; outline: 0; background: none;
               color: var(--moxi-text); font: 13px/20px var(--moxi-font-sans); }
   .nm input::placeholder { color: var(--moxi-text); opacity: 1; }
@@ -249,7 +249,7 @@ const STYLES = css`
            overflow-wrap: anywhere; }
   .tnote button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
   .tpl { margin: 8px 0 10px; padding-left: 12px; border-left: 1px solid var(--moxi-border); }
-  .tl { display: grid; grid-template-columns: 60px 1fr; align-items: center; min-height: 29px; font-size: 13px; }
+  .tl { display: grid; grid-template-columns: 60px minmax(0, 1fr); align-items: center; min-height: 29px; font-size: 13px; }
   .tl > .k { color: var(--moxi-text-dim); }
   .toks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 2px 0; }
   .tok { padding: 4px 7px; border: 1px solid var(--moxi-border-strong); border-radius: 6px; background: none;
@@ -257,7 +257,8 @@ const STYLES = css`
   .pk { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
   .pk.d { margin-left: 4px; color: var(--moxi-text-dim); }
   .pk .v { font-size: 14px; }
-  .menu.nmenu { width: 240px; padding: 4px 0; }
+  .menu.nmenu { width: 260px; padding: 4px 0; }
+  .menu.nmenu[data-menu="name-add"] { left: auto; right: 0; width: 200px; }
   .nmenu .row { grid-template-columns: 1fr auto; padding: 6px 14px; }
   .written { width: 100%; min-width: 0; padding: 2px 0; border: 0; border-bottom: 1px solid var(--moxi-border); outline: 0;
              background: none; color: var(--moxi-text); font: 11px/18px var(--moxi-font-mono); }
