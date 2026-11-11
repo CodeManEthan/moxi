@@ -26,6 +26,12 @@
   tool's own entry in `allowed_tools` or `disallowed_tools`, scoped rules and every other
   entry stay listed in their places with `Remove`, and while `tools` names a set the
   lines it leaves out are dim.
+- Home's launch piece has `Preset` on the line above the box once any seat or project
+  preset is set up: its menu takes the preset off or applies one, each row saying what it
+  sets and where it puts the launch. A project picked there, or the one Home opens on,
+  applies that project's own preset; a seat stays applied when a place is picked. The
+  applied preset's values are what `Changed` and the count measure from, and a dim line
+  under the box names the permission rows it sets off the user's defaults.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an

@@ -19,6 +19,16 @@
 // Another harness reads `/api/form` again for it and lets go of the model and the effort
 // set here, which are the first harness's own.
 //
+// `Preset` beside the place, once `/api/presets` lists any, names the one preset the launch
+// starts from, `none` dim while none is applied. Its menu takes it off, or applies one of
+// the project presets or the seats, each row saying what it sets and where it puts the
+// launch; a preset that names a place moves the line there. A project picked on the line,
+// or the one it opens on, applies that project's own preset; while a seat is applied a
+// picked place is only the place, and the seat stays. The form is read for the applied
+// preset, so its values are what the panel and the Changed line count from, and read again
+// with no preset for the user's usual values: the permission rows the preset sets off
+// those are named on a dim line under the box.
+//
 // The button names the act and where it runs: `Launch in slot 2`, `Launch in a new slot`,
 // `Copy command`, `Launch headless`. Its caret opens the choices `/api/targets` gives. The
 // choice starts at that read's default each time the piece is drawn. The listing is read
@@ -69,7 +79,7 @@ import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/cl
 
 import {
   afterStarted, ALLOWED, asksFirst, CHANGED, changedValue, changes, DEFAULTS, DENIED, drawnField, findRows, HIDDEN_FLAG,
-  isToolsView, keptOptions, modeOf, NO_MATCH, NOT_IN_SET, optionsWord, OTHER_RULES, otherRules, PANEL_WIDTH_PX, panelFields,
+  isToolsView, keptOptions, modeOf, NO_MATCH, NOT_IN_SET, offRows, optionsWord, OTHER_RULES, otherRules, PANEL_WIDTH_PX, panelFields,
   panelGroups, pressTool, RESET, rowLabel, rulesWord, SIDE_EVENT, toolLines, toolLists, turnedOn, valueNow, withOption,
   withoutRule, withTools,
 } from "./options-model.ts";
@@ -78,9 +88,13 @@ import type {
 } from "./options-model.ts";
 
 import {
-  fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
+  choiceKey, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
+  parsePresets,
 } from "./panel.ts";
-import type { Catalog, Form } from "./panel.ts";
+import type { Catalog, Choice, Form, Preset } from "./panel.ts";
+import {
+  afterPick, atLoad, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
+} from "./preset-model.ts";
 import {
   afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
   inFlight, launched,
@@ -120,6 +134,15 @@ const STYLES = css`
   .row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row .t { padding-left: 10px; color: var(--moxi-text-dim); font-variant-numeric: tabular-nums; }
   .row.d { color: var(--moxi-text-dim); }
+  .where .sep { margin: 0 10px; }
+  .pre { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .menu.presets { width: 470px; padding: 4px 0 6px; }
+  .presets .row { grid-template-columns: 20px 108px 1fr auto; }
+  .presets .row .name { padding-right: 8px; }
+  .presets .row .d { min-width: 0; overflow: hidden; color: var(--moxi-text-dim); text-overflow: ellipsis; white-space: nowrap; }
+  .presets .row .d .dg { color: var(--moxi-danger); }
+  .presets .hd { padding: 8px 14px 0 34px; line-height: 22px; }
+  .presets hr { margin: 4px 0 0; border: 0; border-top: 1px solid var(--moxi-border); }
   .chip { padding: 8px 10px; border: 1px solid var(--moxi-border); border-radius: 7px; background: none;
           color: var(--moxi-text); font: 13px/1 var(--moxi-font-mono); white-space: nowrap; }
   .chip .v { margin-left: 8px; }
@@ -226,6 +249,8 @@ const STYLES = css`
     .boxrow { flex-wrap: wrap; justify-content: flex-end; row-gap: 10px; }
     .left { flex: 1 0 100%; }
     .run .row { grid-template-columns: 20px 96px 1fr; }
+    .presets .row { grid-template-columns: 20px 1fr auto; }
+    .presets .row .d { grid-row: 2; grid-column: 2 / 4; }
   }
 `;
 
@@ -250,6 +275,9 @@ export class LauncherPrompt extends LitElement {
     opened: { state: true },
     options: { state: true },
     pending: { state: true },
+    presets: { state: true },
+    preset: { state: true },
+    baseFields: { state: true },
   };
 
   /** The box's text. */
@@ -259,7 +287,7 @@ export class LauncherPrompt extends LitElement {
   places: Place[] = [];
   /** The menu that is open: the line's (`where`), the chip's (`chip`), the button's
    * (`run`), or none. */
-  menu: "" | "where" | "chip" | "run" = "";
+  menu: "" | "where" | "chip" | "run" | "preset" = "";
   /** A typed folder path the menu did not take. */
   typed = "";
   /** The form's fields for the harness, filled from `/api/form`; empty until both are read. */
@@ -287,6 +315,13 @@ export class LauncherPrompt extends LitElement {
   options: Record<string, FormValue> = {};
   /** A value that can do harm, picked in its row and waiting for `Turn on`. */
   pending: Pending | null = null;
+  /** The seats and project presets `/api/presets` lists; empty until it answers. */
+  presets: Preset[] = [];
+  /** The preset the launch starts from: a seat, a project preset, or none. */
+  preset: Choice = NO_PRESET;
+  /** The same harness's form read with no preset, whose fill is each row's usual value;
+   * the form's own fields while no preset is applied. */
+  baseFields: FieldDescriptor[] = [];
   /** When the read that gave the listing was asked, by the page's clock; 0 when the last
    * read failed or left the slots unread, so the next press reads again. */
   #targetsAt = 0;
@@ -304,6 +339,11 @@ export class LauncherPrompt extends LitElement {
   #stops: (() => void)[] = [];
   #catalog: Catalog | null = null;
   #form: Form | null = null;
+  /** The preset the form was read for. */
+  #formChoice: Choice = NO_PRESET;
+  /** The form read with no preset for the form's harness; null while it is the form. */
+  #base: Form | null = null;
+  #presetsRead = false;
   /** Counts `/api/form` reads, so only the latest one's answer is drawn. */
   #asked = 0;
   /** The comms name the latest `/api/form` read was asked under; "" for none. */
@@ -439,22 +479,32 @@ export class LauncherPrompt extends LitElement {
     this.#refill();
   }
 
-  /** Reads `/api/form`, for `harness` when one is asked. An answer that can't be read
-   * leaves the form as it was. */
+  /** Reads `/api/form` for the applied preset, for `harness` when one is asked, and with a
+   * preset applied reads it again with none for the same harness. An answer that can't be
+   * read leaves the form as it was. */
   async #readForm(harness: string): Promise<void> {
     const asked = (this.#asked += 1);
     const identity = this.fields.length === 0 ? "" : this.#identity;
     this.#identityAsked = identity;
-    const answer = await api("launcher", formPath(NO_PRESET, harness, identity));
-    if (asked !== this.#asked) return;
-    const form = answer.status === 200 ? parseForm(answer.data) : null;
-    if (form === null || form.state === "error") {
-      if (this.#form === null) this.unread = unreadWhy(answer, form);
-      return;
-    }
+    const choice = this.preset;
+    const reads = async (path: string): Promise<Form | null> => {
+      const answer = await api("launcher", path);
+      const form = answer.status === 200 ? parseForm(answer.data) : null;
+      if (form !== null && form.state !== "error") return form;
+      if (asked === this.#asked && (this.#form === null || !sameChoice(this.#formChoice, choice))) {
+        this.unread = unreadWhy(answer, form);
+      }
+      return null;
+    };
+    const form = await reads(formPath(choice, harness, identity));
+    if (asked !== this.#asked || form === null) return;
+    const base = choice.kind === "" ? null : await reads(formPath(NO_PRESET, form.harness, identity));
+    if (asked !== this.#asked || (choice.kind !== "" && base === null)) return;
     const other = this.#form !== null && form.harness !== this.#form.harness;
     if (other) this.chosen = {};
     this.#form = form;
+    this.#formChoice = choice;
+    this.#base = base;
     this.#refill();
     // A row the other harness has no place for in the panel is no longer set.
     if (other && this.fields.length > 0) {
@@ -466,26 +516,57 @@ export class LauncherPrompt extends LitElement {
   /** Reads the catalog and the form again, whichever the last read of it left unread. */
   #readUnread(): void {
     if (this.#catalog === null || this.#catalog.state === "error") void this.#readCatalog();
-    if (this.#form === null) void this.#readForm("");
+    if (this.#form === null || !sameChoice(this.#formChoice, this.preset)) void this.#readForm(this.harness);
+    if (!this.#presetsRead) void this.#readPresets();
   }
 
   #refill(): void {
     if (this.#form === null) return;
     if (this.#catalog !== null && this.#catalog.state === "up") this.unread = "";
-    this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, NO_PRESET);
+    this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, this.#formChoice);
+    this.baseFields = this.#base === null ? this.fields
+      : filledFields(fieldsFor(this.#catalog, this.#base.harness), this.#base, NO_PRESET);
+  }
+
+  /** Reads the presets; a read that fails leaves the ones read before. */
+  async #readPresets(): Promise<void> {
+    const mine = this.#opened;
+    const answer = await api("launcher", "api/presets");
+    const read = answer.status === 200 ? parsePresets(answer.data) : null;
+    if (mine !== this.#opened || read === null || read.state !== "up") return;
+    this.#presetsRead = true;
+    this.presets = read.presets;
+  }
+
+  /** The listed preset `choice` names, if any. */
+  #presetOf(choice: Choice): Preset | null {
+    return this.presets.find((preset) => preset.kind === choice.kind && preset.name === choice.name) ?? null;
+  }
+
+  /** Applies a preset, or none, and reads the form for it. The chip's choices go, since the
+   * preset gives the model and the effort; values set in the panel stay. */
+  #apply(choice: Choice): void {
+    if (sameChoice(choice, this.preset)) return;
+    this.preset = choice;
+    this.chosen = {};
+    this.pending = null;
+    void this.#readForm(this.#presetOf(choice)?.harness ? "" : this.harness);
   }
 
   /** Reads the places and sets the line, once for each time the piece is connected. */
   async #open(): Promise<void> {
     const mine = (this.#opened += 1);
     const picker = components("projects").some((item) => item.name === "picker");
-    const where = await openWhere(api, picker);
+    const [where] = await Promise.all([openWhere(api, picker), this.#readPresets()]);
     if (mine !== this.#opened) return;
     this.#withProjects = where.withProjects;
     this.#home = where.home;
     this.places = where.places;
-    // A place he picked while the read was under way stands.
-    this.pick ??= where.pick;
+    // A place he picked while the read was under way stands; the one opened on counts as
+    // picked, so a project's own preset is applied.
+    if (this.pick !== null) return;
+    this.pick = where.pick;
+    this.#apply(atLoad(where.pick, this.presets));
   }
 
   #toggleChip(): void {
@@ -535,10 +616,27 @@ export class LauncherPrompt extends LitElement {
     if (read !== null && mine === this.#opened) this.places = read.places;
   }
 
-  /** Takes a pick, closes the menu and puts the caret back in the box. */
+  /** Takes a pick, with the preset it applies, closes the menu and puts the caret back in
+   * the box. */
   #choose(pick: Pick): void {
     this.pick = pick;
     this.menu = "";
+    this.#apply(afterPick(this.preset, pick, this.presets));
+    void this.updateComplete.then(() => this.#box()?.focus());
+  }
+
+  #togglePreset(): void {
+    this.menu = this.menu === "preset" ? "" : "preset";
+    if (this.menu === "preset") void this.#readPresets();
+  }
+
+  /** Applies a preset picked in the menu, or none, and moves the line to the place it names. */
+  #pickPreset(choice: Choice): void {
+    this.menu = "";
+    const preset = this.#presetOf(choice);
+    const place = preset === null ? null : presetPlace(preset, this.#withProjects);
+    if (place !== null) this.pick = place;
+    this.#apply(choice);
     void this.updateComplete.then(() => this.#box()?.focus());
   }
 
@@ -573,6 +671,7 @@ export class LauncherPrompt extends LitElement {
         <div class="boxrow"><div class="left">${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
       </div>
       ${this.#changed()}
+      ${this.#presetLine()}
       ${this.#said()}
       ${this.panel ? this.#panel() : nothing}
     </div>`;
@@ -584,7 +683,37 @@ export class LauncherPrompt extends LitElement {
     return html`<div class="where" data-word=${face.word}><span class="k">${face.word}</span><span
       class=${open ? "anchor open" : "anchor"}><button type="button" class="face" aria-haspopup="true"
         aria-expanded=${open ? "true" : "false"} @click=${this.#toggleWhere}>${this.#folder(face.dim, face.name)}<span
-        class="v" aria-hidden="true">▾</span></button>${open ? this.#whereMenu(pick) : nothing}</span></div>`;
+        class="v" aria-hidden="true">▾</span></button>${open ? this.#whereMenu(pick) : nothing}</span>${
+        this.presets.length > 0 ? this.#presetItem() : nothing}</div>`;
+  }
+
+  /** `· Preset <name>` on the line, and its menu while it is open. */
+  #presetItem() {
+    const face = presetFace(this.preset);
+    const open = this.menu === "preset";
+    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${PRESET}</span><span
+      class=${open ? "anchor open" : "anchor"} data-item="preset"><button type="button" class="pre" aria-haspopup="true"
+        aria-expanded=${open ? "true" : "false"} aria-label=${`${PRESET} ${face.name}`} @click=${this.#togglePreset}>${
+        face.dim ? html`<span class="p">${face.name}</span>` : face.name}<span class="v" aria-hidden="true">▾</span></button>${
+        open ? this.#presetMenu() : nothing}</span>`;
+  }
+
+  #presetMenu() {
+    const fieldsOf = (harness: string | null) => fieldsFor(this.#catalog, harness ?? this.harness) as PanelField[];
+    const sections = presetMenu(this.presets, this.preset, this.pick, this.#withProjects, this.#home, fieldsOf);
+    return html`<div class="menu presets" data-menu="preset">
+      ${this.#presetRow(NO_PRESET, NO_PRESET_ROW, [], "", this.preset.kind === "")}<hr>
+      ${sections.map((section) => html`<div class="hd">${section.title}</div>${section.rows.map((row) =>
+        this.#presetRow(row.choice, row.name, row.sets, row.place, row.current))}`)}
+    </div>`;
+  }
+
+  #presetRow(choice: Choice, name: string, sets: Word[], place: string, current: boolean) {
+    return html`<button type="button" class="row" data-preset=${choiceKey(choice)}
+      data-current=${current ? "true" : "false"} @click=${() => this.#pickPreset(choice)}><span
+      aria-hidden="true">${current ? "✓" : ""}</span><span class="name">${name}</span><span class="d">${
+      sets.map((word, at) => html`${at === 0 ? "" : " · "}<span class=${word.danger ? "dg" : ""}>${word.text}</span>`)}</span><span
+      class="t">${place}</span></button>`;
   }
 
   #folder(dim: string, name: string) {
@@ -716,6 +845,18 @@ export class LauncherPrompt extends LitElement {
     return html`<div class="changed" data-line="changed"><span><span class="k">${CHANGED}</span>${rows.map((row, at) =>
       html`${at === 0 ? nothing : html`<span class="sep" aria-hidden="true">·</span>`}<b class=${row.danger ? "dg" : ""}
         data-change=${row.name}>${row.label}</b>`)}</span><button type="button" @click=${this.#reset}>${RESET}</button></div>`;
+  }
+
+  /** The line under the box naming the permission rows the applied preset sets off the
+   * user's usual values; absent with none. */
+  #presetLine() {
+    const fields = this.fields as PanelField[];
+    const rows = offRows(fields, this.baseFields as PanelField[], this.options);
+    const off = presetOff(this.#formChoice, fields, this.options, rows);
+    if (off === null) return nothing;
+    return html`<div class="changed" data-line="preset"><span>${off.lead} ${off.labels.map((word, at) =>
+      html`${at === 0 ? "" : ", "}<b class=${word.danger ? "dg" : ""} data-off=${word.text}>${word.text}</b>`)} ${
+      off.tail}</span></div>`;
   }
 
   /** A closed group's or subgroup's summary: its values, the ones that can do harm in the
@@ -869,9 +1010,10 @@ export class LauncherPrompt extends LitElement {
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".go")?.focus());
   }
 
-  /** Whether the button can start a launch: a place, a form and a listing are there. */
+  /** Whether the button can start a launch: a place, the form for the applied preset and a
+   * listing are there. */
   get #able(): boolean {
-    return this.ready && this.fields.length > 0 && this.targets !== null;
+    return this.ready && this.fields.length > 0 && this.targets !== null && sameChoice(this.#formChoice, this.preset);
   }
 
   /** The press: the preview, then the launch with its ticket or the command copied. */
@@ -881,7 +1023,7 @@ export class LauncherPrompt extends LitElement {
     this.#stopFollow();
     // What the button says at the press is what is sent, whatever a later read says.
     const shown = runOf(this.targets, this.picked);
-    const body = launchRequest(this.fields, this.#form, this.set, shown);
+    const body = launchRequest(this.fields, this.#form, this.set, shown, this.baseFields, this.#formChoice);
     this.#sent = this.brief;
     this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";

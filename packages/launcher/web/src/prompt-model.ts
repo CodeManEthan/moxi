@@ -23,7 +23,7 @@ import type { LaunchRow } from "./feed.ts";
 import {
   followedOf, HARNESS, launchBody, leaveOutChoice, NO_PRESET, outcomeOf, parsePreview, requestOf, same, shownValue,
 } from "./panel.ts";
-import type { Form, LaunchBody, Preview, Status } from "./panel.ts";
+import type { Choice, Form, LaunchBody, Preview, Status } from "./panel.ts";
 
 type Fields = Record<string, unknown>;
 
@@ -536,13 +536,14 @@ export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", 
  * has text. Every other such row the form has is left out, whatever the form filled it
  * with or withheld, so nothing the box does not show is sent as the first turn. Any other
  * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
- * The request says it starts off the user's usual permissions exactly when one of its
- * permission rows does, against `base` (see `offPosture`), which is `fields` for a form
- * read with no preset.
+ * The request names the one preset `choice` applies, whose values `fields` are filled
+ * with. It says it starts off the user's usual permissions exactly when one of its
+ * permission rows does, against `base` (see `offPosture`): the same harness's form read
+ * with no preset, which is `fields` when none is applied.
  */
 export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
                               set: Readonly<Record<string, FormValue>>, run: Run,
-                              base: readonly FieldDescriptor[] = fields): LaunchBody {
+                              base: readonly FieldDescriptor[] = fields, choice: Choice = NO_PRESET): LaunchBody {
   const values = formValues(fields, set);
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
@@ -554,7 +555,7 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   request.values.target = run.target;
   if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);
   else if (slotted) request.leave_out.push("slot");
-  return launchBody(NO_PRESET, request, offPosture(fields, base, set).length > 0);
+  return launchBody(choice, request, offPosture(fields, base, set).length > 0);
 }
 
 // --- the permission rows ---------------------------------------------------------------------
