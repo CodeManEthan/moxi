@@ -383,6 +383,8 @@ test("an opened row: its lines to the second, the Session line, the link and the
   ]);
   assert.deepEqual(opened.session.map((part) => part.text),
                    ["Claude Code", "claude-opus-4", "started today 16:27", "~/code/orbit-cli"]);
+  // the harness leads in the text colour; the parts after it are dim, as drawn
+  assert.deepEqual(opened.session.map((part) => part.dim), [false, true, true, true]);
   assert.equal(opened.sessions, "claude/s1");
   assert.equal(opened.copy, "s1");
   const cold = openedModel(one, NOW + 3600, names, "/home/alice", null, TODAY, UTC);

@@ -638,7 +638,8 @@ export function parseSession(data: unknown): { model: string | null } | null {
 export interface OpenedModel {
   /** `Last request`, `Goes cold` or `Went cold`, and `Read` for an old record. */
   lines: OpenedLine[];
-  /** The `Session` line's parts: harness, model, start, folder, each absent when null. */
+  /** The `Session` line's parts: harness, model, start, folder, each absent when null.
+   * The harness leads in the text colour and the parts after it are dim. */
   session: Part[];
   /** The Sessions page's route for the session's own view, when sessions holds it. */
   sessions: string | null;
@@ -663,12 +664,12 @@ export function openedModel(row: ClockRow, now: number, names: Map<string, NameI
   const item = names.get(keyOf(row));
   const session: Part[] = [{ text: harnessWords(row.harness), dim: false }];
   if (model?.state === "reading") session.push({ text: WAITING_LINE, dim: true });
-  else if (model?.state === "read" && model.model !== null) session.push({ text: model.model, dim: false });
+  else if (model?.state === "read" && model.model !== null) session.push({ text: model.model, dim: true });
   if (item !== undefined && item.started !== null) {
-    session.push({ text: `started ${whenWord(item.started, today, clock, { named: true })}`, dim: false });
+    session.push({ text: `started ${whenWord(item.started, today, clock, { named: true })}`, dim: true });
   }
   if (item !== undefined && item.folder !== null && item.folder !== "") {
-    session.push({ text: folderWords(item.folder, home), dim: false });
+    session.push({ text: folderWords(item.folder, home), dim: true });
   }
   return {
     lines,
@@ -676,4 +677,39 @@ export function openedModel(row: ClockRow, now: number, names: Map<string, NameI
     sessions: item !== undefined ? `${encodeURIComponent(row.harness)}/${encodeURIComponent(row.session)}` : null,
     copy: row.session,
   };
+}
+
+// --- the view's words ---------------------------------------------------------------------
+
+export const WATCHER_LABEL = "Watcher";
+export const OPEN = "Open";
+export const CLOSE = "Close";
+export const COPY = "Copy";
+export const COPY_ID = "Copy id";
+/** What a copy act reads for `COPIED_MS` after it wrote to the clipboard. */
+export const COPIED = "Copied";
+export const COPIED_MS = 1500;
+export const SETTINGS_LINK = "Cache settings";
+/** The settings view's route for cache's keys, in ui. */
+export const SETTINGS_ROUTE = "settings/cache";
+export const SESSIONS_LINK = "Sessions";
+export const SESSION_LABEL = "Session";
+
+/** The commands a Watcher row's sentence names, drawn as code. */
+const COMMANDS = /(moxi cache watch|moxi install cache)/;
+
+/** A sentence cut into its plain words and the commands it names, in order. */
+export function commandParts(line: string): { text: string; code: boolean }[] {
+  return line.split(COMMANDS).map((text, at) => ({ text, code: at % 2 === 1 })).filter((part) => part.text !== "");
+}
+
+/** `/api/session`'s path for one session. */
+export function sessionPath(session: string): string {
+  return `api/session?session=${encodeURIComponent(session)}`;
+}
+
+/** The record's fact as the row element draws it: a row with no clock time gets its
+ * record's code after the fact, as the record carries it. */
+export function factText(row: RowModel): string {
+  return row.code !== null && row.code !== "" ? `${row.fact} · ${row.code}` : row.fact;
 }
