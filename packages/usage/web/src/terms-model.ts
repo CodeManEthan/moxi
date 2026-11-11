@@ -57,7 +57,7 @@ export interface Kinds {
 type Terms = Report<TermsRow, TermsTotal>;
 
 /** A class's figures over the answer: its tokens, its priced dollars and what of it has no price. */
-function kindSum(report: Terms, terms: readonly string[], tokens: number): Sum & { tiers: Map<string, number> } {
+export function kindSum(report: Terms, terms: readonly string[], tokens: number): Sum & { tiers: Map<string, number> } {
   const total = report.total;
   const split = total.split.filter((item) => terms.includes(item.class));
   const priced = split.reduce((sum, item) => sum + item.cost, 0);

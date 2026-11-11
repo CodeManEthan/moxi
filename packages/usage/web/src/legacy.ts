@@ -1,44 +1,36 @@
 // <moxi-usage-legacy .address=... .filters=... .open=...>: the views the page had before
 // its frame was redrawn, kept mounted under the page's chart until each has its place in
-// the new page. It draws the view that serves the page's address (`legacyRoute`): one
-// session with its main agent's requests charted or a subagent's.
-// For any other address it draws nothing. A link here opens its piece through the page, which writes the address.
-// Every view reads under the page's range and filters, which the page passes in. A row whose figures aren't whole carries a flag saying why. The limits, the filter
-// line, the chart, the index's state and "Read new sessions" are the page's.
+// the new page. It draws what serves the page's address (`legacyRoute`) and is not yet
+// in the opened session: a session's agents as a treemap and a table, and a subagent's
+// requests charted. For any other address it draws nothing. A link here opens its piece
+// through the page, which writes the address. Every view reads under the page's range and
+// filters, which the page passes in. A row whose figures aren't whole carries a flag
+// saying why. The session's own lines, chart, table and bill are the page's.
 
 import { css, html, LitElement, nothing, svg } from "lit";
 import type { TemplateResult } from "lit";
 import { api, subscribe } from "/m/ui/client.js";
 
 import { Feed, parseIndexEvent, parseReport } from "./feed.ts";
-import type {
-  AgentRow, Report, RequestRow, RequestsTotal,
-  TermsRow, TermsTotal,
-} from "./feed.ts";
-import { addressPath, NOTHING_OPEN, sessionAddress, SESSIONS } from "./address-model.ts";
+import type { AgentRow, Report, RequestRow, RequestsTotal } from "./feed.ts";
+import { addressPath, NOTHING_OPEN, sessionAddress } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { BASE, flag, SERIES } from "./parts.ts";
 import {
-  agents, agentTreemap, cellLabel, contextChart, costText, filterKeys, flags, fmtCost, fmtMoment,
+  agents, agentTreemap, cellLabel, contextChart, costText, filterKeys, fmtMoment,
   fmtTokens, legacyRoute, localDay, MARGIN, NO_FILTERS, parseRoute,
-  readout, reconcileLines, REQUEST_CLASSES,
+  readout, REQUEST_CLASSES,
   requestNotes, requestRules, requestsChart, requestsPath, reportState, seriesClass,
-  sessionTermsPath, splitBars, splitKeys, splitLabel, classIndex, TERM_CLASSES,
   tickText, viewPath,
 } from "./views.ts";
 import type { ContextChart, Filters, PageRoute, RequestMeasure, RequestsChart, Rules } from "./views.ts";
 
 const TAG = "moxi-usage-legacy";
 const REQUESTS_HEIGHT = 200;
-const SPLIT_HEIGHT = 16;
 const TREEMAP_HEIGHT = 300;
 
 // The request charts' measure outlives one placement of the page.
 let requestMeasure: RequestMeasure = "tokens";
-
-/** The hatch a price tier's part of a class's segment carries over its colour. */
-const HATCH = svg`<defs><pattern id="usage-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-  <rect class="hatch-line" x="0" y="0" width="2" height="6"></rect></pattern></defs>`;
 
 const STYLES = [BASE, SERIES, css`
   :host { margin-top: calc(var(--moxi-gap) * 2); }
@@ -58,17 +50,12 @@ const STYLES = [BASE, SERIES, css`
   th { color: var(--moxi-text-dim); font-weight: normal; white-space: nowrap; }
   td.wrap { overflow-wrap: anywhere; min-width: 8em; }
   @media (max-width: 640px) { .wide { display: none; } }
-  /* Reconcile keeps every column on a phone and scrolls inside its wrapper; the Model
-     column stays in view, opaque over the cells that scroll under it. */
-  table[data-part="reconcile"] :is(th, td):first-child {
-    position: sticky; left: 0; z-index: 1; background: var(--moxi-bg); }
   a.link { color: var(--moxi-accent); }
   svg { display: block; width: 100%; height: auto; margin-bottom: var(--moxi-gap); }
   svg text { fill: var(--moxi-text-dim); font-size: 11px; font-family: var(--moxi-font-sans); }
   svg .axis { stroke: var(--moxi-border); }
   svg .cell-label { fill: var(--moxi-bg); font-size: 11px; }
   svg .incomplete { stroke: var(--moxi-warn); stroke-width: 2; stroke-dasharray: 3 2; }
-  svg .hatch-line { fill: var(--moxi-bg); opacity: 0.7; }
   svg .area { opacity: 0.85; }
   svg .context { fill: none; stroke: var(--moxi-accent); stroke-width: 1.5; }
   svg .window { fill: none; stroke: var(--moxi-error); stroke-width: 1; stroke-dasharray: 6 3; }
@@ -79,14 +66,8 @@ const STYLES = [BASE, SERIES, css`
   svg .hit:hover, svg .hit[data-on] { fill: var(--moxi-text-faint); opacity: 0.25; }
   .readout { min-height: 1.4em; font-size: var(--moxi-font-size-sm); font-variant-numeric: tabular-nums; }
   .ends { display: flex; justify-content: space-between; font-size: var(--moxi-font-size-sm); color: var(--moxi-text-dim); }
-  .split { display: grid; grid-template-columns: minmax(6em, 12em) 1fr; gap: 4px var(--moxi-gap); align-items: center; }
-  .split svg { margin: 0; }
-  tr[data-line="subtotal"] td { font-weight: 600; }
-  tr[data-line="total"] td { font-weight: 600; border-top: 2px solid var(--moxi-border-strong); }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 var(--moxi-gap); font-size: var(--moxi-font-size-sm); }
   .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; }
-  .totals { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: var(--moxi-gap); }
-  .totals b { font-variant-numeric: tabular-nums; }
 `];
 
 type AnyReport = Report<unknown>;
@@ -115,9 +96,8 @@ export class UsageLegacy extends LitElement {
 
   #on = false;
   #view: Feed<AnyReport> | null = null;
-  /** The session view's requests and cost terms. */
+  /** A subagent's requests. */
   #requests: Feed<Report<RequestRow, RequestsTotal>> | null = null;
-  #sessionTerms: Feed<Report<TermsRow, TermsTotal>> | null = null;
   /** The request the charts' readout shows. */
   #hover: number | null = null;
   #stops: (() => void)[] = [];
@@ -172,19 +152,17 @@ export class UsageLegacy extends LitElement {
     const filters = this.filters;
     const path = viewPath(route, filters, today);
     this.#view = path === null ? null : new Feed<AnyReport>(() => api("usage", path), parseReport, update);
-    if (route.view === "session") {
+    if (route.view === "session" && (route.agent ?? "main") !== "main") {
       const requests = requestsPath(route, filters, today);
-      const terms = sessionTermsPath(route, filters, today);
       this.#requests = new Feed(() => api("usage", requests), parseReport<RequestRow, RequestsTotal>, update);
-      this.#sessionTerms = new Feed(() => api("usage", terms), parseReport<TermsRow, TermsTotal>, update);
     }
-    for (const feed of [this.#requests, this.#sessionTerms]) void feed?.refresh();
+    void this.#requests?.refresh();
     void this.#view?.refresh();
   }
 
   #closeExtras(): void {
-    for (const feed of [this.#requests, this.#sessionTerms]) feed?.close();
-    this.#requests = this.#sessionTerms = null;
+    this.#requests?.close();
+    this.#requests = null;
     this.#hover = null;
   }
 
@@ -193,7 +171,7 @@ export class UsageLegacy extends LitElement {
     const event = parseIndexEvent(data);
     if (event === null || event.running) return;
     void this.#view?.refresh();
-    for (const feed of [this.#requests, this.#sessionTerms]) void feed?.refresh();
+    void this.#requests?.refresh();
   }
 
   render() {
@@ -232,26 +210,12 @@ export class UsageLegacy extends LitElement {
         state === "loading" ? "Reading…" : state === "refused" ? detail : `This view can't be read: ${detail}.`}</p>`;
     if (feed.value === null) return html`${stale}`;
     if (state === "empty") {
-      if (this.said && !(detail && /moxi usage index/.test(detail))) return this.#heading(route);
-      return html`${this.#heading(route)}<p class="dim" data-state="empty">${detail && /moxi usage index/.test(detail)
+      if (this.said && !(detail && /moxi usage index/.test(detail))) return nothing;
+      return html`<p class="dim" data-state="empty">${detail && /moxi usage index/.test(detail)
         ? html`${detail}` : "Nothing was used in this range."}</p>`;
     }
     const report = feed.value;
-    return html`${stale}${this.#heading(route)}${this.#totals(report)}${this.#view_(route, report)}`;
-  }
-
-  #heading(route: PageRoute) {
-    if (route.view !== "session") return nothing;
-    return html`<p>${this.#link(SESSIONS, "All sessions")} › <code>${route.session}</code></p>`;
-  }
-
-  #totals(report: AnyReport) {
-    const total = report.total;
-    return html`<div class="totals" data-part="totals">
-      <span>Cost <b>${costText(total)}</b>${flag(flags({ ...total, unpriced_models: report.unpriced_models }))}</span>
-      <span>Tokens <b>${fmtTokens(total.tokens)}</b></span>
-      <span>Requests <b>${total.requests.toLocaleString("en-US")}</b></span>
-    </div>`;
+    return html`${stale}${this.#view_(route, report)}`;
   }
 
   #view_(route: PageRoute, report: AnyReport) {
@@ -266,14 +230,8 @@ export class UsageLegacy extends LitElement {
     const width = Math.max(280, this.width);
     const map = agentTreemap(report.rows, width, TREEMAP_HEIGHT);
     const agent = route.agent ?? "main";
-    const terms = this.#sessionTerms;
     return html`
-      <h2>Requests of <code>${agent}</code></h2>
-      ${this.#requestCharts(route)}
-      <h2>Cost terms</h2>
-      ${terms?.value ? html`${this.#splitBars(terms.value.total.split.length
-        ? [{ ...terms.value.rows[0], model: "this session", split: terms.value.total.split }] : [])}
-        ${this.#reconcile(terms.value)}` : this.#extraState(terms)}
+      ${agent === "main" ? nothing : html`<h2>Requests of <code>${agent}</code></h2>${this.#requestCharts(route)}`}
       <h2>Agents by ${map.measure}</h2>
       ${map.cells.length ? html`<svg viewBox="0 0 ${width} ${TREEMAP_HEIGHT}" role="img" aria-label="The session's agents as a treemap">
         ${map.cells.map((cell) => {
@@ -306,47 +264,13 @@ export class UsageLegacy extends LitElement {
   }
 
   /** What a view's second feed shows while it has no value: reading, refused or failed. */
-  #extraState(feed: Feed<Report<TermsRow, TermsTotal>> | Feed<Report<RequestRow, RequestsTotal>> | null) {
+  #extraState(feed: Feed<Report<RequestRow, RequestsTotal>> | null) {
     if (feed === null) return nothing;
     const { state, detail } = reportState(feed as Feed<Report<unknown>>);
     if (state === "loading") return html`<p class="dim" data-state="loading">Reading…</p>`;
     if (state === "refused") return html`<p class="problem" data-state="refused">${detail}</p>`;
     if (state === "failed" || state === "gone") return html`<p class="problem" data-state="failed">This can't be read: ${detail ?? "the module went away"}.</p>`;
     return nothing;
-  }
-
-  /** One horizontal bar per row: its cost split by class and tier. */
-  #splitBars(rows: TermsRow[]) {
-    const width = Math.max(160, this.width - 200);
-    const bars = splitBars(rows, width);
-    const keys = splitKeys(rows.flatMap((row) => row.split));
-    return html`<div class="legend">${keys.map((key) => html`
-        <span data-key=${key}><span class="swatch ${seriesClass(classIndex(key))}"></span>${splitLabel(key)}</span>`)}</div>
-      <div class="split" data-part="split">${bars.map((bar) => html`
-        <span class="small wrap"><code>${bar.label}</code> ${fmtCost(bar.total)}</span>
-        <svg viewBox="0 0 ${width} ${SPLIT_HEIGHT}" preserveAspectRatio="none" role="img" aria-label=${`${bar.label}: cost by class`}>
-          ${HATCH}
-          ${bar.segments.map((seg) => svg`<rect class=${seriesClass(seg.index)} data-key=${seg.key} x=${seg.x} y="0" width=${Math.max(0, seg.width)} height=${SPLIT_HEIGHT}>
-            <title>${seg.title}</title></rect>
-            ${seg.hatch ? svg`<rect fill="url(#usage-hatch)" pointer-events="none" x=${seg.x} y="0" width=${Math.max(0, seg.width)} height=${SPLIT_HEIGHT}></rect>` : nothing}`)}
-        </svg>`)}</div>`;
-  }
-
-  /** The Reconcile table: a line per price group, a subtotal under a model of two or more,
-   * and the total. */
-  #reconcile(report: Report<TermsRow, TermsTotal>) {
-    const lines = reconcileLines(report);
-    return html`<div class="scroll"><table data-part="reconcile">
-      <thead><tr><th>Model</th><th>Priced by</th>${TERM_CLASSES.map(([, label]) => html`<th class="num">${label}</th>`)}<th class="num">Cost</th></tr></thead>
-      <tbody>${lines.map((line) => html`
-        <tr data-line=${line.kind} data-model=${line.model}>
-          <td class="wrap"><code>${line.model}</code></td>
-          <td class="wrap small">${line.pricedBy}</td>
-          ${line.cells.map((cell) => html`<td class="num" data-class=${cell.cls} title=${cell.title}>${cell.text}</td>`)}
-          <td class="num" data-cost=${line.cost === null ? "" : String(line.cost)}>${fmtCost(line.cost)}${flag(line.flags)}</td>
-        </tr>`)}</tbody>
-    </table></div>
-    <p class="dim small">The terms on each line add up to its cost.</p>`;
   }
 
   /** The rules both request charts draw, and the hover columns over them. */

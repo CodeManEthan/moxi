@@ -36,7 +36,9 @@
 //     section[data-group=chart]    one bar a day or a month, its sentence and its table
 //     section[data-group=sessions] the range's dearest session and the count, and opened
 //                                  the week's dearest as two-line rows (moxi-ui-row), what
-//                                  they leave out, the earlier days, and the table
+//                                  they leave out, the earlier days, and the table; an
+//                                  opened row holds its session (div[data-part=session]):
+//                                  its lines, its chart and its acts
 //     section[data-group=projects|folders]  the dearest projects (or folders), and opened
 //                                  each with its share and cost, a row filtering Sessions
 //     section[data-group=models]   the dearest models, and opened each with share and cost
@@ -44,8 +46,8 @@
 //                                  opened the four classes and what caching saved
 //     section[data-group=prices]   how many models are priced and the table's date, and
 //                                  opened their prices and the acts that open under them
-//   moxi-usage-legacy           one session's view as the page had it, serving that
-//                               session's address until it opens in its row
+//   moxi-usage-legacy           a session's agents as the page had them, serving that
+//                               session's address until they open in its row
 //   div[data-part=foot]         when the sessions were last read, the files, the act
 //   div[data-part=lines]        dim lines: what the figures leave out, reads that failed
 //
@@ -60,7 +62,7 @@
 // entry, so Back leaves the page, and a reload or a new placement opens the same piece.
 
 import { css, html, LitElement, nothing, svg } from "lit";
-import { api, installed, subscribe } from "/m/ui/client.js";
+import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import {
   addressPath, addressWrite, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress, SESSIONS, settled,
@@ -72,11 +74,12 @@ import { mostTo, rangeDays, sumRows } from "./cost-model.ts";
 import type { Sum } from "./cost-model.ts";
 import { LOCAL } from "./days.ts";
 import {
-  Feed, parseIndexEvent, parseLimits, parsePrices, parseReport, parseStatus, parseWindow, passOutcome,
+  Feed, parseIndexEvent, parseLimits, parsePrices, parseReport, parseRestartPoint, parseStatus, parseWindow,
+  passOutcome,
 } from "./feed.ts";
 import type {
-  DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, Prices, ProjectRow, Report, SessionRow, Status, TermsRow,
-  TermsTotal,
+  AgentRow, DayRow, IndexEvent, Limits, ModelRow, OpenedWindow, Prices, ProjectRow, Report, RequestRow, RequestsTotal,
+  RestartPoint, SessionRow, Status, TermsRow, TermsTotal,
 } from "./feed.ts";
 import {
   allTimePath, chartPath, customRange, figuresPath, filterLine, heldState, holdState, modelsPath,
@@ -104,6 +107,11 @@ import {
 } from "./sessions-model.ts";
 import type { ListLine, SessionLists } from "./sessions-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
+import {
+  COPY_ID, newestModel, OPEN_IN_SESSIONS, openedKeys, openedPaths, openedSession, placedRow, restartPath, SESSION_CHART,
+  sessionChart,
+} from "./opened-session.ts";
+import type { OpenedSession, Part, SessionChart } from "./opened-session.ts";
 import type { OpenedLimit } from "./window-model.ts";
 
 const TAG = "moxi-usage-page";
@@ -223,6 +231,15 @@ const STYLES = css`
   svg.ch .gr { stroke: var(--moxi-border); stroke-width: 1; }
   svg.ch .dash { fill: none; stroke: var(--moxi-text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
   svg.ch .hit { fill: none; pointer-events: all; }
+  svg.ch .ln { fill: none; stroke: var(--moxi-text); stroke-width: 1.5; stroke-linejoin: round; }
+  svg.ch .dot { fill: var(--moxi-text); stroke: var(--moxi-bg); stroke-width: 2; }
+  svg.ch.ses-ch { max-width: 100%; height: auto; margin: 0; }
+  .ses .det { margin: 9px 0 3px; }
+  .det .cw { padding: 4px 0 2px; }
+  .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 76px; }
+  .det .foot .act { color: var(--moxi-text); }
+  .det .foot .act.d { color: var(--moxi-text-dim); }
+  .det .under { padding-top: 6px; }
   .scroll { max-width: 100%; overflow-x: auto; padding: 2px 0 6px; }
   .tbl { width: 100%; border-collapse: collapse; font-size: var(--moxi-font-size-sm); line-height: 18px;
          white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -301,6 +318,7 @@ const STYLES = css`
     .menu button.it { grid-template-columns: 20px 1fr auto; }
     .tr2 { grid-template-columns: minmax(0, 1fr) 64px minmax(64px, auto); }
     .tr2.p5 { grid-template-columns: minmax(0, 1fr) 48px 52px 84px 52px; }
+    .det .foot { padding-left: 0; }
     .capl, .note { display: block; }
     .capl span, .note span { display: block; }
     .quietline { padding-top: 56px; white-space: normal; }
@@ -320,6 +338,8 @@ export class UsagePage extends LitElement {
     sectionTable: { state: true },
     pricesPart: { state: true },
     searchText: { state: true },
+    sessionPart: { state: true },
+    copiedId: { state: true },
     width: { state: true },
   };
 
@@ -339,6 +359,10 @@ export class UsagePage extends LitElement {
   pricesPart: PricesPart | null = null;
   /** What `Find a model` searches for. */
   searchText = "";
+  /** What is open under the opened session's lines: its table or its bill. */
+  sessionPart: "table" | "bill" | null = null;
+  /** The opened session's id was just copied. */
+  copiedId = false;
   /** The element's own width, in px. */
   width = 680;
 
@@ -370,6 +394,19 @@ export class UsagePage extends LitElement {
   #firstList: SessionList | null = null;
   #earlierTop: Feed<Report<SessionRow>> | null = null;
   #earlierList: SessionList | null = null;
+  /** The session the address named as the page was placed: its row comes first in the
+   * section, read over the session's whole life. */
+  #placed: { harness: string; id: string } | null = null;
+  /** The list the opened session was opened from; null when the address named it. */
+  #openedIn: "first" | "earlier" | null = null;
+  /** The opened session's reads, each with the query its row was read with, and the
+   * restart point for the model of its newest request. */
+  #openedReads: { requests: Feed<Report<RequestRow, RequestsTotal>>; terms: Feed<Report<TermsRow, TermsTotal>>;
+             session: Feed<Report<AgentRow>>; restart: Feed<RestartPoint> | null; model: string | null } | null = null;
+  #openedKey: string | null = null;
+  /** The named session's own read, for its row, while the address keeps it first. */
+  #placedRead: Feed<Report<AgentRow>> | null = null;
+  #placedPath: string | null = null;
   /** Today's two dearest sessions under no filter, for the Cost row's `most to`. */
   #mostToday: Feed<Report<SessionRow>> | null = null;
   #mostPath: string | null = null;
@@ -446,6 +483,10 @@ export class UsagePage extends LitElement {
     this.#limits = this.#status = this.#daily = this.#mostToday = null;
     this.#mostPath = null;
     this.#closeLists();
+    this.#closeOpened();
+    this.#placedRead?.close();
+    this.#placedRead = null;
+    this.#placedPath = null;
     this.#closeWindow();
     this.#closeBelow();
     for (const stop of this.#stops) stop();
@@ -481,6 +522,10 @@ export class UsagePage extends LitElement {
     if (sameAddress(next, this.#at)) return;
     refusedWindow = null;
     this.sectionTable = null;
+    this.sessionPart = null;
+    this.copiedId = false;
+    if (next.piece !== "sessions") this.#placed = null;
+    if (next.piece !== "sessions" || next.session === null) this.#openedIn = null;
     this.#closePart();
     this.#setAt(next);
     this.requestUpdate();
@@ -578,6 +623,9 @@ export class UsagePage extends LitElement {
       if (sameAddress(at, named)) this.#at = at;
       else this.#setAt(at);
       if (at.piece !== "none") refusedWindow = null;
+      this.#openedIn = null;
+      this.#placed = at.piece === "sessions" && at.session !== null && at.harness !== null
+        ? { harness: at.harness, id: at.session } : null;
     }
     this.#followWindow();
     const status = this.#status;
@@ -609,6 +657,7 @@ export class UsagePage extends LitElement {
       for (const feed of this.#belowFeeds()) if (feed !== allTime && feed !== this.#prices) void feed.refresh();
     }
     this.#followLists(state, today);
+    this.#followOpened(state, today);
     // Today's two dearest sessions, for the Cost row, under no filter.
     const mostPath = sessionsPath(START, today, { since: today, until: today }, 2);
     if (mostPath !== this.#mostPath) {
@@ -668,6 +717,70 @@ export class UsagePage extends LitElement {
     this.#lists = this.#listsKey = null;
   }
 
+  /** The opened session's reads follow the address, the list it was opened from, the
+   * range and the filters; the restart point is asked once the requests name a model. */
+  #followOpened(state: PageState, today: string): void {
+    const placed = this.#placed;
+    const placedPath = placed === null ? null : openedPaths(placed.id, openedKeys(state, today, null, placed.harness)).session;
+    if (placedPath !== this.#placedPath) {
+      this.#placedRead?.close();
+      this.#placedRead = null;
+      this.#placedPath = placedPath;
+      if (placedPath !== null) {
+        this.#placedRead = new Feed<Report<AgentRow>>(() => api("usage", placedPath), parseReport, () => this.requestUpdate());
+        void this.#placedRead.refresh();
+      }
+    }
+    const at = this.#at;
+    if (at.piece !== "sessions" || at.session === null || at.harness === null) {
+      this.#closeOpened();
+      return;
+    }
+    const from = this.#openedIn;
+    const days = from === null ? null : from === "first" ? this.#lists?.first ?? null : this.#lists?.earlier ?? null;
+    if (from !== null && days === null) {
+      this.#closeOpened();
+      return;
+    }
+    const paths = openedPaths(at.session, openedKeys(state, today, days, at.harness));
+    const key = JSON.stringify(paths);
+    const update = () => this.requestUpdate();
+    if (key !== this.#openedKey) {
+      this.#closeOpened();
+      this.#openedKey = key;
+      this.#openedReads = {
+        requests: new Feed<Report<RequestRow, RequestsTotal>>(() => api("usage", paths.requests), parseReport, update),
+        terms: new Feed<Report<TermsRow, TermsTotal>>(() => api("usage", paths.terms), parseReport, update),
+        session: new Feed<Report<AgentRow>>(() => api("usage", paths.session), parseReport, update),
+        restart: null, model: null,
+      };
+      for (const feed of [this.#openedReads.requests, this.#openedReads.terms, this.#openedReads.session]) void feed.refresh();
+    }
+    const opened = this.#openedReads;
+    const rows = opened?.requests.value?.rows ?? null;
+    const model = rows === null ? null : newestModel(rows);
+    if (opened !== null && model !== null && model !== opened.model) {
+      opened.restart?.close();
+      opened.model = model;
+      const path = restartPath(model);
+      opened.restart = new Feed<RestartPoint>(() => api("usage", path), parseRestartPoint, update);
+      void opened.restart.refresh();
+    }
+  }
+
+  #openedFeeds(): { close(): void; refresh(): Promise<void> }[] {
+    const opened = this.#openedReads;
+    return [...(opened === null ? [] : [opened.requests, opened.terms, opened.session, opened.restart]),
+            this.#placedRead].filter((feed) => feed !== null);
+  }
+
+  #closeOpened(): void {
+    const opened = this.#openedReads;
+    if (opened !== null) for (const feed of [opened.requests, opened.terms, opened.session, opened.restart]) feed?.close();
+    this.#openedReads = null;
+    this.#openedKey = null;
+  }
+
   /** `Show` under the earlier line: its rows, thirty at a time. */
   #showEarlier(): void {
     const lists = this.#lists;
@@ -690,7 +803,7 @@ export class UsagePage extends LitElement {
       void this.#status?.refresh();
       void this.#daily?.refresh();
       for (const feed of [...this.#belowFeeds(), this.#window, this.#mostToday, this.#firstList, this.#earlierTop,
-                          this.#earlierList]) void feed?.refresh();
+                          this.#earlierList, ...this.#openedFeeds()]) void feed?.refresh();
     }
     this.requestUpdate();
   }
@@ -707,6 +820,15 @@ export class UsagePage extends LitElement {
       this.#event = { running: true, last_pass: this.#event?.last_pass ?? null, note: null };
     }
     this.requestUpdate();
+  }
+
+  async #copyId(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.copiedId = true;
+    } catch {
+      this.copiedId = false;
+    }
   }
 
   async #copy(text: string): Promise<void> {
@@ -748,6 +870,12 @@ export class UsagePage extends LitElement {
     other("The earlier sessions", this.#earlierTop);
     other("The earlier sessions listed", this.#earlierList?.feed ?? null);
     other("Today's dearest sessions", this.#mostToday);
+    other("The opened session's requests", this.#openedReads?.requests ?? null);
+    other("The opened session's cost terms", this.#openedReads?.terms ?? null);
+    other("The opened session's agents", this.#openedReads?.session ?? null);
+    other("The session the address names", this.#placedRead);
+    const restart = this.#openedReads?.restart ?? null;
+    if (restart !== null) others.push({ what: "The restart point", read: restart, report: false });
     if (this.#prices !== null) others.push({ what: "The price table", read: this.#prices, report: false });
     const windowRead = this.#window ?? refusedWindow;
     if (windowRead !== null) others.push({ what: "The opened limit", read: windowRead, report: false });
@@ -771,7 +899,7 @@ export class UsagePage extends LitElement {
     const group = !frame.below || report === null ? null
       : chartGroup(report, state.range, state.measure, today, this.asTable);
     // With nothing in the range or under the filters no section is drawn.
-    const sections = !frame.below || group?.nothing ? [] : [
+    const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
       this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
       this.#section(this.#folders() ? "folders" : "projects", this.#placesSection,
                     placesSection(this.#placesSection?.value ?? null, this.#folders())),
@@ -1056,6 +1184,17 @@ export class UsagePage extends LitElement {
    * last seven days dearest first, what they leave out, the earlier days, and the table. */
   #sessions(model: SessionsClosed | null, today: string) {
     const open = this.#at.piece === "sessions";
+    if (model === null && open && this.#placed !== null && !(this.#sessionsTop?.loading ?? false)) {
+      // The range holds no session, and the address names one: its row stands alone.
+      return html`<section class="grp is-open" data-group="sessions">
+        <div class="gk">${SESSIONS_LABEL}</div>
+        <div class="gl">
+          <div class="one"><span data-part="closed"></span><a class="t" data-part="count" href=${addressPath(NOTHING_OPEN)}
+            aria-expanded="true" @click=${(event: MouseEvent) => this.#follow(event, NOTHING_OPEN)}>${CLOSE}</a></div>
+          ${this.#placedRow(today)}
+        </div>
+      </section>`;
+    }
     if (model === null) {
       const feed = this.#sessionsTop;
       if (!open || feed === null || feed.value !== null || !feed.loading) return nothing;
@@ -1076,30 +1215,51 @@ export class UsagePage extends LitElement {
     </section>`;
   }
 
+  /** The row of the session the address named, first in the section, with the
+   * session's whole figures; `Reading…` in its place while its read is out. */
+  #placedRow(today: string) {
+    const placed = this.#placed;
+    const session = this.#placedRead;
+    if (placed === null || session === null) return nothing;
+    if (session.value === null) return session.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing;
+    // The models of its requests are known when it is the session opened from it.
+    const own = this.#at.piece === "sessions" && this.#at.session === placed.id && this.#openedIn === null;
+    const row = placedRow(session.value, own ? this.#openedReads?.requests.value?.rows ?? null : null);
+    if (row === null) return nothing;
+    return html`<div class="ses" data-list="placed">${this.#sessionRow(sessionLine(row, today, !this.#folders()), "placed")}</div>`;
+  }
+
   #sessionLists(today: string) {
     const lists = this.#lists;
     const first = this.#firstList?.feed ?? null;
-    if (lists === null || first === null) return nothing;
+    const placedRow = this.#placedRow(today);
+    if (lists === null || first === null) return placedRow;
     if (first.value === null) {
-      return first.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing;
+      return html`${placedRow}${first.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing}`;
     }
     const projects = !this.#folders();
-    const firstRows = first.value.rows;
+    // The session the address named shows once, first.
+    const placed = this.#placed;
+    const other = (row: SessionRow): boolean => placed === null || row.harness !== placed.harness
+      || row.session_id !== placed.id;
+    const firstRows = first.value.rows.filter(other);
     const earlier = earlierLine(lists, this.#earlierTop?.value ?? null);
     const shown = this.#earlierList?.feed ?? null;
     const heading = firstHeading(lists);
+    const earlierRows = (shown?.value?.rows ?? []).filter(other);
     const parts: TablePart[] = [{ label: heading.replace(/, dearest first$/, ""), rows: firstRows },
-                                { label: "Earlier", rows: shown?.value?.rows ?? [] }];
+                                { label: "Earlier", rows: earlierRows }];
     const table = this.sectionTable === "sessions";
     return html`
+      ${placedRow}
       ${firstRows.length ? html`<div class="sub1" data-part="heading">${heading}</div>` : nothing}
-      <div class="ses" data-list="first">${firstRows.map((row) => this.#sessionRow(sessionLine(row, today, projects)))}</div>
+      <div class="ses" data-list="first">${firstRows.map((row) => this.#sessionRow(sessionLine(row, today, projects), "first"))}</div>
       ${this.#more(remainder(first.value, lists.week), "first", () => { void this.#firstList?.show(); })}
       ${earlier === null ? nothing : this.#more(earlier, "earlier", shown === null ? () => this.#showEarlier() : null)}
       ${shown === null ? nothing : shown.value === null
         ? (shown.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing)
-        : html`<div class="ses" data-list="earlier">${shown.value.rows.map((row) =>
-            this.#sessionRow(sessionLine(row, today, projects)))}</div>
+        : html`<div class="ses" data-list="earlier">${earlierRows.map((row) =>
+            this.#sessionRow(sessionLine(row, today, projects), "earlier"))}</div>
           ${this.#more(remainder(shown.value, false), "earlier-more", () => { void this.#earlierList?.show(); })}`}
       <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(table)}
         @click=${() => { this.sectionTable = table ? null : "sessions"; }}>${table ? HIDE_TABLE : SECTION_TABLE}</button></p>
@@ -1113,22 +1273,101 @@ export class UsagePage extends LitElement {
       : html`<button type="button" class="act" data-act="show" @click=${show}>${SHOW}</button>`}</div>`;
   }
 
-  /** One session as a two-line row. A row with a session opens it and its act says so; a
-   * row with no session id has no act and does not open. */
-  #sessionRow(line: SessionLine) {
+  /** One session as a two-line row. A row with a session opens it under its lines and
+   * its act says so; a row with no session id has no act and does not open. A session in
+   * both lists opens in the one it was opened from, and reads that list's days. */
+  #sessionRow(line: SessionLine, list: "first" | "earlier" | "placed") {
     const at = this.#at;
     const session = line.session;
     const open = session !== null && at.piece === "sessions" && at.harness === session.harness
-      && at.session === session.id;
+      && at.session === session.id && (this.#openedIn ?? "placed") === list;
     const target = session === null ? null : open ? SESSIONS : sessionAddress(session.harness, session.id);
+    const go = (): void => {
+      if (target === null) return;
+      this.open(target);
+      if (!open) this.#openedIn = list === "placed" ? null : list;
+      this.requestUpdate();
+    };
     return html`<moxi-ui-row ?toggles=${target !== null} ?open=${open} data-key=${line.key} name=${line.name}
         where=${line.where ?? ""} fact=${line.cost} lead=${line.requests} lead-more=${line.span ?? ""}
-        rest=${line.models ?? ""} tail=${line.context ?? ""}
-        @moxi-row-toggle=${() => { if (target !== null) this.open(target); }}>
+        rest=${line.models ?? ""} tail=${line.context ?? ""} @moxi-row-toggle=${go}>
       ${target === null ? nothing : html`<a slot="acts" class="do" data-action="open" href=${addressPath(target)}
-        aria-expanded=${String(open)} @click=${(event: MouseEvent) => this.#follow(event, target)}>${
-        open ? CLOSE : OPEN}</a>`}
+        aria-expanded=${String(open)} @click=${(event: MouseEvent) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          go();
+        }}>${open ? CLOSE : OPEN}</a>`}
+      ${open && session !== null ? this.#openedBody(session.harness, session.id) : nothing}
     </moxi-ui-row>`;
+  }
+
+  /** The opened session under its row: its lines, its chart, the notes under the chart,
+   * and its acts, with the table or the bill opened under them. */
+  #openedBody(harness: string, id: string) {
+    const opened = this.#openedReads;
+    if (opened === null) return nothing;
+    const today = this.#today();
+    const model: OpenedSession = openedSession({ harness, id, requests: opened.requests, terms: opened.terms,
+                                                 session: opened.session, restart: opened.restart, today });
+    const requests = opened.requests.value;
+    const wide = !window.matchMedia("(max-width: 720px)").matches;
+    const width = Math.max(200, this.width - (wide ? 96 : 0) - 76);
+    const chart = requests === null ? null : sessionChart(requests, heldState().measure, width, today);
+    const part = this.sessionPart;
+    const act = (key: "table" | "bill", label: string) => html`<button type="button" class="act d" data-act=${key}
+      aria-expanded=${String(part === key)} @click=${() => { this.sessionPart = part === key ? null : key; }}>${label}</button>`;
+    const sessions = model.sessions;
+    const route = sessions === null ? "" : `${encodeURIComponent(sessions.harness)}/${encodeURIComponent(sessions.id)}`;
+    return html`<div class="det" data-part="session">
+      ${model.items.map((item) => item.kind === "reading"
+        ? html`<p class="d" data-part="reading" data-reading=${item.key}>${READING}</p>`
+        : item.kind === "chart" ? (chart === null ? nothing : html`<div class="r" data-line="chart"><span class="k"></span>
+            <span class="f"><div class="cw">${this.#sessionChart(chart)}</div>${model.notes.map((note) =>
+              html`<p class="d" data-part="note">${note}</p>`)}</span></div>`)
+        : html`<div class="r" data-line=${item.key}><span class="k">${item.label}</span>
+            <span class="f">${item.parts.map((one: Part) => one.dim ? html`<span class="d">${one.text}</span>` : one.text)}</span></div>`)}
+      <div class="foot" data-part="session-acts">
+        ${sessions === null ? nothing : html`<a class="act" href=${`/m/sessions/${route}`} @click=${(event: MouseEvent) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          navigate("sessions", route);
+        }}>${OPEN_IN_SESSIONS}</a>`}
+        ${model.table === null ? nothing : act("table", SECTION_TABLE)}
+        ${model.bill ? act("bill", BILL) : nothing}
+        <button type="button" class="act d" data-act="copy-id" @click=${() => { void this.#copyId(id); }}>${
+          this.copiedId ? COPIED : COPY_ID}</button>
+      </div>
+      ${part === "table" && model.table !== null ? html`<div class="under" data-part="session-table">${this.#table(model.table)}</div>`
+        : part === "bill" && opened.terms.value !== null ? this.#billOf(opened.terms.value) : nothing}
+    </div>`;
+  }
+
+  /** The opened session's chart: a bar per request above, the context it sent below. */
+  #sessionChart(chart: SessionChart) {
+    const S = SESSION_CHART;
+    const after = chart.end + 6;
+    return html`<svg class="ch ses-ch" data-part="session-chart" role="img" aria-label=${chart.aria} width=${chart.width}
+      height=${S.height} viewBox="0 0 ${chart.width} ${S.height}">${svg`
+      <text x="0" y=${S.barTop + 3} data-part="top">${chart.top}</text>
+      <line class="gr" x1=${S.left} x2=${chart.end} y1=${S.barTop - 0.5} y2=${S.barTop - 0.5}></line>
+      ${chart.turns.map((x) => svg`<line class="gr" data-mark="turn" x1=${x} x2=${x} y1=${S.barTop} y2=${S.barBase}></line>`)}
+      ${chart.bars.map((bar) => svg`<rect class=${bar.dearest ? "bar now" : "bar"} data-n=${bar.n} x=${bar.x} y=${bar.y}
+        width=${bar.width} height=${bar.height}></rect>`)}
+      <line class="ax" x1=${S.left} x2=${chart.end} y1=${S.barBase + 0.5} y2=${S.barBase + 0.5}></line>
+      <text x=${after} y=${S.barBase}>a request</text>
+      ${chart.window === null ? nothing : svg`<line class="dash" data-part="window" x1=${S.left} x2=${chart.end}
+        y1=${chart.window.y + 0.5} y2=${chart.window.y + 0.5}></line>
+        <text x="0" y=${chart.window.y + 3.5}>${chart.window.words}</text><text x=${after} y=${chart.window.y + 3.5}>window</text>`}
+      <path class="ln" data-part="context" d=${chart.line}></path>
+      ${chart.dot === null ? nothing : svg`<circle class="dot" cx=${chart.dot.x} cy=${chart.dot.y} r="3.5"></circle>
+        <text class="v" data-part="last-context" x=${after} y=${chart.dot.y + 4}>${chart.dot.words}</text>`}
+      <line class="ax" x1=${S.left} x2=${chart.end} y1=${S.contextBase + 0.5} y2=${S.contextBase + 0.5}></line>
+      ${chart.compactions.map((mark) => svg`<g data-mark="compaction"><title>${mark.title}</title>
+        <line class="dash" x1=${mark.x} x2=${mark.x} y1=${S.barTop} y2=${S.contextBase}></line>
+        <text x=${mark.labelX} y=${S.contextTop - 8} text-anchor=${mark.anchor}>${mark.label}</text></g>`)}
+      ${chart.labels.map((label) => svg`<text x=${label.x} y=${S.labels} text-anchor=${label.anchor}>${label.text}</text>`)}
+      ${chart.hits.map((hit) => svg`<rect class="hit" data-n=${hit.n} x=${hit.x} y="0" width=${hit.width}
+        height=${S.contextBase}><title>${hit.title}</title></rect>`)}`}</svg>`;
   }
 
   /** A section's name and its closed row: the answer, and the count that opens it, which
@@ -1248,7 +1487,10 @@ export class UsagePage extends LitElement {
    * under a model of two or more, and the total. */
   #bill() {
     const report = this.#terms?.value ?? null;
-    if (report === null) return nothing;
+    return report === null ? nothing : this.#billOf(report);
+  }
+
+  #billOf(report: Report<TermsRow, TermsTotal>) {
     const lines = reconcileLines(report);
     const flagged = lines.some((line) => line.flags.length > 0);
     return html`<div class="under" data-part="bill">
