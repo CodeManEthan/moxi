@@ -60,14 +60,19 @@ an OpenCode row without one), `size` (bytes, null for OpenCode), `subagents` (ho
 null where the session's subagents folder could not be listed),
 `folder`, `started`, `by_program` (true where the record says a program started the
 session, else null), `name` (one typed for the session in the harness, else null),
-`model`, `activity` (`{at, who, text}`: the newest thing said, `who` being `you`, `agent`
-or null, `text` cut at 300 bytes; or null), `prompt` (`{at, text, truncated}`: the newest
-prompt a person typed, `text` cut at `TEXT_MAX` bytes; or null) and `recent` (true for a
+`model`, `activity` (`{at, who, text}`: the newest thing said in the last turn, whoever
+said it, `who` being `you`, `agent` or null, `text` cut at 300 bytes; or null), `prompt`
+(`{at, text, truncated}`: the newest message of the whole session that its record marks
+as typed by a person, `text` cut at `TEXT_MAX` bytes; null where the session holds no
+such message, and for every Codex and OpenCode session, whose records carry no mark
+sessions reads; a reply, an injected message or one with no mark is never in it) and
+`recent` (true for a
 session not started by a program that changed within the setting `list.recent_s` of
 `now`).
 
 *`/api/list`*: `now` (the time the answer was cut at), `today` (the server's local date,
-`YYYY-MM-DD`), `all` (the sessions before the filters) and `total` (after them), both of
+`YYYY-MM-DD`), `home` (the home folder of the account the page server runs as, so the
+page can word a folder under it with `~`; null when the account has none), `all` (the sessions before the filters) and `total` (after them), both of
 both kinds; `unreadable` (compressed Codex rollouts left out, null when Codex's root was
 not listed); `roots` (`{harness, root, reason, parts}` per harness whose root was not
 read whole, below); `harnesses` (`{harness, count}` for each harness whose root was
@@ -131,7 +136,7 @@ being its newest message cut at 300 bytes; null when they could not be listed), 
 listed) and `resume` (`{command, folder}`: the harness's command for picking the session
 up again and the folder to run it in, null where it runs anywhere; `resume` itself is
 null for a harness with no command, and for one whose command must be run in the
-session's folder when that folder was not read). It says nothing of whether the session
+session's folder when that folder was not read), and `today` and `home`, as the list's. It says nothing of whether the session
 is working. An id that is not a main session's (a subagent's, a spawned Codex thread's,
 an unknown one) is refused.
 
@@ -140,8 +145,8 @@ an unknown one) is refused.
 
 A filter, group, kind or `before` that is not one, and a config that cannot be read, are
 refused with the reason. Text a person or model wrote, a typed name, a subagent's
-description and a root's reason are marked `redact`; folders, paths and roots are marked
-`path`.
+description and a root's reason are marked `redact`; folders, paths, roots and `home` are
+marked `path`.
 
 The page's assets are what the repository's web build writes from `packages/sessions/web/`
 into this package's `web/`: `page.js`, the page, and `window.js`, the block other pages
@@ -398,6 +403,7 @@ LIST = {
     "shape": _INT,
     "now": lb.Out("float"),
     "today": _TEXT,
+    "home": _MAYBE_PATH,
     "all": _INT,
     "total": _INT,
     "unreadable": _MAYBE_INT,
@@ -439,6 +445,8 @@ SESSION = {
     "more": _MAYBE_INT,
     "resume": lb.Out("table", nullable=True,
                      items={"command": _TEXT, "folder": _MAYBE_PATH}),
+    "today": _TEXT,
+    "home": _MAYBE_PATH,
 }
 
 #: `/api/folders`.

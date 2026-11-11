@@ -274,3 +274,26 @@ def test_the_config_key_expands_a_tilde_and_refuses_a_relative_path(own_config,
     with pytest.raises(ConfigError):
         projects_root(None)
 
+
+
+def test_a_lines_bytes_tell_whether_it_can_hold_a_typed_message():
+    def line(**fields) -> bytes:
+        return json.dumps({"type": "user", "message": {"role": "user", "content": "hi"},
+                           **fields}).encode()
+
+    assert claude.may_be_typed(line(origin={"kind": "human"}))
+    assert claude.may_be_typed(b'{"origin" : {"kind" :"human"}}')
+    assert not claude.may_be_typed(line())
+    assert not claude.may_be_typed(line(origin={"kind": "task-notification"}))
+    # A message that only quotes the words has them escaped, so it is passed by.
+    assert not claude.may_be_typed(
+        line(message={"role": "user", "content": '{"origin": {"kind": "human"}}'}))
+    # The same key or kind written with an escape, or in UTF-16, is left to the decode;
+    # an escape of some other character is not.
+    assert claude.may_be_typed(b'{"\\u006frigin": {"kind": "human"}}')
+    assert claude.may_be_typed(b'{"origin": {"kind": "hu\\u006Dan"}}')
+    assert claude.may_be_typed(line(origin={"kind": "human"}).decode().encode("utf-16-le"))
+    assert not claude.may_be_typed(line(message={"role": "user", "content": "\x1b[0m \u2603"}))
+    # Every kind the reader takes as typed is one the bytes are looked for.
+    assert [json.loads(kind) for kind in claude.TYPED_KINDS] == [
+        kind for kind, injected in claude.ORIGIN_KINDS.items() if injected is False]
