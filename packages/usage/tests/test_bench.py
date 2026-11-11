@@ -590,17 +590,20 @@ def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
 
 # --- the page's reads ----------------------------------------------------------------------
 #
-# Each is timed through the page server's own app, in this process, as a browser asks it.
-# The sessions module names the sessions from the corpus's roots, as it does in a page
-# server's process. A run with nothing kept starts from a new catalog, as a page server's
-# first answer does. The run after it waits out the catalog's reuse, so the roots are
-# listed again while the heads read before are kept, as a later answer finds them.
+# Each is timed through the page server's own app as a browser asks it, in a new process
+# over the test's homes, so nothing is kept: no catalog of the sessions module, no price
+# table, no module loaded on first use. The sessions module names the sessions from the
+# corpus's roots, as it does in a page server's process. The same process then waits out
+# the catalog's reuse of its gather and reads again, so the roots are listed again while
+# the heads read before are kept, as a later answer finds them.
 
-#: Runs of each read; a bound holds the median run.
+#: Runs of each read, each in a process of its own; a bound holds the median run.
 READ_RUNS = 3
-#: The bounds, in ms, about four times the slowest of ten runs on a quiet machine (the
-#: opening reads 750 ms with nothing kept and 720 ms after the reuse, the sessions 450
-#: and 440 ms), so that they hold on a loaded one.
+#: How long the sessions module's catalog reuses a gather, in seconds.
+GATHER_REUSE_S = 2.0
+#: The bounds, in ms: about four times the slowest of ten runs on a quiet machine (the
+#: opening reads 790 ms with nothing kept and 680 ms after the reuse, the sessions 470
+#: and 430 ms), so that they hold on a loaded one.
 OPENING_COLD_MS = 3_000
 OPENING_LAPSED_MS = 3_000
 SESSIONS_COLD_MS = 1_800
@@ -625,27 +628,57 @@ def opening_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
             ("/api/sessions", {"since": day, "until": day, "top": "2"})]
 
 
+def sessions_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
+    """The first list of the Sessions section, opened over the last 30 days: the ten
+    dearest."""
+    return [("/api/sessions", {"since": (today - dt.timedelta(days=29)).isoformat(),
+                               "until": today.isoformat(), "top": "10"})]
+
+
 def _named(answer: dict) -> None:
     """Every session the answer sends was found by the sessions module."""
     assert answer["rows"] and all(row["known"] for row in answer["rows"]), answer["rows"]
 
 
-def _cold_and_lapsed(read: Callable[[], object]) -> tuple[list[float], list[float]]:
-    """`read` timed in ms, `READ_RUNS` times each with nothing kept and again once the
-    catalog's reuse has lapsed."""
-    from moxi_sessions import catalog
+def time_reads(which: str) -> None:
+    """Run in a new process: send `which` reads together, once with nothing kept and
+    again once the gather's reuse has lapsed, check the answers, and print the two times
+    in ms as JSON."""
+    from test_page import ask, served
 
+    reads = {"opening": opening_reads, "sessions": sessions_reads}[which](dt.date.today())
+    app = served()
+
+    async def all_of_them():
+        return await asyncio.gather(*(ask(app, path, query) for path, query in reads))
+
+    def once() -> float:
+        start = time.perf_counter()
+        answers = asyncio.run(all_of_them())
+        taken = (time.perf_counter() - start) * 1000
+        assert [status for status, _ in answers] == [200] * len(reads), answers
+        for (path, query), (_, body) in zip(reads, answers):
+            if path == "/api/sessions" and query["top"] != "2":
+                _named(body)
+                assert len(body["rows"]) == int(query["top"]) < body["count"]
+        return taken
+
+    cold = once()
+    time.sleep(GATHER_REUSE_S + 0.5)
+    print(json.dumps({"cold": cold, "lapsed": once()}))
+
+
+def _in_new_processes(which: str, cwd: Path) -> tuple[list[float], list[float]]:
     cold, lapsed = [], []
+    code = (f"import sys; sys.path.insert(0, {str(Path(__file__).parent)!r}); "
+            f"import test_bench; test_bench.time_reads({which!r})")
     for _ in range(READ_RUNS):
-        catalog.reset()
-        start = time.perf_counter()
-        read()
-        cold.append((time.perf_counter() - start) * 1000)
-        time.sleep(catalog.REUSE_S + 0.2)
-        start = time.perf_counter()
-        read()
-        lapsed.append((time.perf_counter() - start) * 1000)
-    catalog.reset()
+        done = subprocess.run([sys.executable, "-c", code], cwd=cwd, env=dict(os.environ),
+                              capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        taken = json.loads(done.stdout.strip().splitlines()[-1])
+        cold.append(taken["cold"])
+        lapsed.append(taken["lapsed"])
     return cold, lapsed
 
 
@@ -655,45 +688,19 @@ def _runs(taken: list[float]) -> str:
 
 
 @pytest.mark.timed
-def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench):
-    from test_page import ask, served
-
-    app, reads = served(), opening_reads(dt.date.today())
-
-    def opening():
-        async def all_of_them():
-            return await asyncio.gather(*(ask(app, path, query) for path, query in reads))
-
-        answers = asyncio.run(all_of_them())
-        assert [status for status, _ in answers] == [200] * len(reads), answers
-        for (path, query), (_, body) in zip(reads, answers):
-            if path == "/api/sessions" and query["top"] == "1":
-                _named(body)
-
-    cold, lapsed = _cold_and_lapsed(opening)
-    print(f"\nthe page's {len(reads)} opening reads sent together: nothing kept "
-          f"{_runs(cold)}; after the reuse {_runs(lapsed)}")
+def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench, tmp_path):
+    cold, lapsed = _in_new_processes("opening", tmp_path)
+    print(f"\nthe page's {len(opening_reads(dt.date.today()))} opening reads sent together:"
+          f" nothing kept {_runs(cold)}; after the gather's reuse {_runs(lapsed)}")
     assert statistics.median(cold) < OPENING_COLD_MS
     assert statistics.median(lapsed) < OPENING_LAPSED_MS
 
 
 @pytest.mark.timed
-def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench):
-    from test_page import ask, served
-
-    app, today = served(), dt.date.today()
-    query = {"since": (today - dt.timedelta(days=29)).isoformat(),
-             "until": today.isoformat(), "top": "10"}
-
-    def sessions_read():
-        status, answer = asyncio.run(ask(app, "/api/sessions", query))
-        assert status == 200, answer
-        assert len(answer["rows"]) == 10 and answer["count"] > 10
-        _named(answer)
-
-    cold, lapsed = _cold_and_lapsed(sessions_read)
-    print(f"\n/api/sessions over 30 days at top=10: nothing kept {_runs(cold)}; after "
-          f"the reuse {_runs(lapsed)}")
+def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench, tmp_path):
+    cold, lapsed = _in_new_processes("sessions", tmp_path)
+    print(f"\n/api/sessions over 30 days at top=10: nothing kept {_runs(cold)}; after the "
+          f"gather's reuse {_runs(lapsed)}")
     assert statistics.median(cold) < SESSIONS_COLD_MS
     assert statistics.median(lapsed) < SESSIONS_LAPSED_MS
 
