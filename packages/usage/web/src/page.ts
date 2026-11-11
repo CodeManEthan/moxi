@@ -56,6 +56,7 @@
 // entry, so Back leaves the page, and a reload or a new placement opens the same piece.
 
 import { css, html, LitElement, nothing, svg } from "lit";
+import { repeat } from "lit/directives/repeat.js";
 import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import {
@@ -1054,7 +1055,9 @@ export class UsagePage extends LitElement {
     </section>`;
   }
 
-  /** The filter line. */
+  /** The filter line. Each filter keeps its own elements while the line is drawn again,
+   * so a filter whose list arrives later is drawn closed beside the others and a menu the
+   * person opened stays open, its button keeping the focus. */
   #filters(line: FilterLine) {
     const menus = [line.range, line.place, line.harness, line.model].filter((menu): menu is Menu => menu !== null);
     return html`<div class="filt" data-part="filters" @keydown=${(event: KeyboardEvent) => {
@@ -1064,7 +1067,7 @@ export class UsagePage extends LitElement {
       void this.updateComplete.then(() =>
         this.renderRoot.querySelector<HTMLElement>(`[data-filter="${open}"] button.pick`)?.focus());
     }}>
-      <span class="fl">${menus.map((menu, i) => html`${i ? html`<span class="sep">·</span>` : nothing}${
+      <span class="fl">${repeat(menus, (menu) => menu.key, (menu, i) => html`${i ? html`<span class="sep">·</span>` : nothing}${
         this.#filter(menu, line)}`)}</span>
       <span class="tog" role="group" data-part="measure">${line.measures.map((measure) => html`<button type="button"
         data-measure=${measure.key} aria-pressed=${String(measure.picked)}

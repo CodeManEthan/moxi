@@ -262,6 +262,36 @@ def test_a_long_token_kinds_row_keeps_its_count_where_every_rows_count_ends(full
     assert words["x"] + words["width"] <= link["x"], (words, link)
 
 
+# --- the filter line -----------------------------------------------------------------------
+
+def test_an_open_menu_stays_open_with_its_focus_when_another_filters_list_arrives(page):
+    held = []
+    let_through = []
+    page.route("**/m/usage/api/projects?*",
+               lambda route: route.continue_() if let_through else held.append(route))
+    panel = open_page(page)
+    filters = panel.locator("[data-part=filters]")
+    model = filters.locator("[data-filter=model] button.pick")
+    expect(model).to_be_visible()
+    expect(filters.locator("[data-filter=place]")).to_have_count(0)
+    model.click()
+    menu = filters.locator("[data-menu=model]")
+    expect(menu).to_be_visible()
+    menu.evaluate("el => { el.dataset.kept = 'yes'; }")
+    assert held, "the projects read was not held"
+    let_through.append(True)
+    for route in held:
+        route.continue_()
+    # The list arrives and the Project filter is drawn before Model, closed.
+    expect(filters.locator("[data-filter=place] button.pick")).to_have_attribute("aria-expanded", "false")
+    expect(filters.locator("[data-menu]")).to_have_count(1)
+    expect(menu).to_be_visible()
+    expect(menu).to_have_attribute("data-kept", "yes")
+    expect(model).to_have_attribute("aria-expanded", "true")
+    focused = panel.evaluate("el => el.shadowRoot.activeElement?.closest('[data-filter]')?.dataset.filter ?? null")
+    assert focused == "model", focused
+
+
 # --- without projects ----------------------------------------------------------------------
 
 def test_without_projects_folders_are_written_whole_with_no_row_for_no_project(small, ui_contexts):
