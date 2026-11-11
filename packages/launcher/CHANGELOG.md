@@ -39,6 +39,13 @@
   launch was made. A filled value is no change, an edited one becomes the user's, and
   one that can do harm is in the `danger` colour, asks nothing and stays after a launch.
   The request names the filled rows in `filled`.
+- Home's launch piece lists up to three earlier launches of the same seat, project or
+  folder under the box, `Run again`, each by the first words of its brief and when it was
+  made. Pointing at one shows a card with what a click runs today and where (the prompt,
+  the harness, model and effort, the preset, where and when it ran, each permission row
+  off the user's defaults, a value that can do harm in the `danger` colour, and the rows
+  this install no longer offers) and what the click does; one click runs it again where
+  the button's default places it, or copies its command for the user's terminal.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
