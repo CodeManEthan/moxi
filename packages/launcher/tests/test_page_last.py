@@ -419,6 +419,28 @@ def test_a_launch_logged_before_launches_recorded_their_sources_fills_nothing(wo
     assert last(project="proj-a")["values"] == []
 
 
+def test_a_log_the_launcher_wrote_before_these_routes_is_read_by_all_three(world, monkeypatch):
+    work = str(world.work)
+    launch({"values": {"cwd": work, "model": "opus"}}, "fresh")
+    with monkeypatch.context() as older:
+        # A row as the launcher wrote it before launches were named and recorded what
+        # their request gave: no `name`, no `sources`, no `filled`.
+        older.setattr(api, "_recorded", lambda request, resolved, values: {
+            k: v for k, v in values.items() if k != "name"})
+        row = launch({"values": {"cwd": work, "model": "sonnet", "effort": "low"}}, "older")
+    assert not {"name", "sources", "filled"} & set(row.values)
+    assert row.created_at > stored("fresh").created_at
+    for query in ({"cwd": work}, {"cwd": work + "/"}):
+        said = last(**query)
+        assert said["at"] == stored("fresh").created_at, query
+        assert handed_values(said) == {"model": "opus"}, query
+        assert listed(**query) == ["fresh"], query
+    said = recent(request="older", target="terminal")
+    assert said["refused"]["code"] == "no-recent" and said["request"] is None
+    said = recent(request="fresh", target="terminal")
+    assert said["refused"] is None and said["shows"]["model"] == "opus"
+
+
 def test_only_a_launch_this_user_made_afresh_and_that_ran_is_the_last(world, monkeypatch):
     launch({"values": {"cwd": str(world.work), "model": "opus"}}, "fresh")
     expected = {"model": "opus"}
