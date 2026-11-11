@@ -1623,6 +1623,7 @@ moxi	packages/moxi/tests/test_settle.py	w.legacy	kwonly	data	data
 moxi	packages/moxi/tests/test_settle_procs.py	"HOME": str(user), "USERPROFILE": str(user),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_settle_procs.py	applied = config.set("demo", "relay.enabled", True, by="setup")	use	set	set_value
 moxi	packages/moxi/tests/test_settle_procs.py	assert ignored is not None and not {1, 2, 3, 15} & set(ignored), ignored	keep	set	set
+moxi	packages/moxi/tests/test_settle_procs.py	box.targets = sorted(str(user / folder / "skills" / "moxi-demo-send")	use	folder	harness_dir
 moxi	packages/moxi/tests/test_settle_procs.py	for folder in (".claude", ".agents"))	use	folder	harness_dir
 moxi	packages/moxi/tests/test_settle_procs.py	for name in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME",	keep	HOME	HOME
 moxi	packages/moxi/tests/test_settle_procs.py	monkeypatch.setenv("HOME", str(user))	keep	HOME	HOME

@@ -792,7 +792,7 @@ def placing(box, monkeypatch):
     box.site.write("moxi_demo/skills/moxi-demo-send/SKILL.md", "# send\n")
     box.site.write("moxi_demo/handback.py", HANDBACK)
     box.place = place
-    box.targets = sorted(str(user / folder / "skills" / "moxi-demo-send")
+    box.targets = sorted(str(user / harness_dir / "skills" / "moxi-demo-send")
                          for harness_dir in (".claude", ".agents"))
     return box
 
