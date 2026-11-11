@@ -11,6 +11,7 @@ finds its harness only on the `PATH` the shell was started with.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -348,6 +349,19 @@ def place(shell: Any, request_id: str, *, cwd: str, at: str,
 #: Before this, a launch is one a test made from a page; a place seeded to stay the newest
 #: is dated after it.
 AHEAD = "2090-01-01T00:00:00.000000Z"
+
+_fresh = itertools.count(1)
+
+
+def fresh_place(shell: Any) -> Path:
+    """A folder under the shell's home that no launch has run in, seeded as the newest
+    place, so Home opens there and fills nothing from a launch an earlier test made."""
+    number = next(_fresh)
+    folder = Path(shell.env["HOME"]) / "work" / f"fresh-{number}"
+    folder.mkdir(parents=True, exist_ok=True)
+    at = f"2099-01-01T{number // 3600:02d}:{number // 60 % 60:02d}:{number % 60:02d}.000000Z"
+    place(shell, f"fresh-place-{number}", cwd=str(folder), at=at)
+    return folder
 
 
 def newest_launch(shell: Any) -> Any:

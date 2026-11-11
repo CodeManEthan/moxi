@@ -63,6 +63,12 @@ def fake(module_fake):
     return module_fake
 
 
+@pytest.fixture(autouse=True)
+def own_folder(ui_shell):
+    """Home opens on a folder of the test's own, so it fills nothing from another test's launch."""
+    return kit.fresh_place(ui_shell)
+
+
 def home_at(page, width: int, height: int = 900):
     """Home opened in a window `width` px wide; returns the launcher's piece."""
     page.set_viewport_size({"width": width, "height": height})

@@ -71,7 +71,17 @@
 // for one launch: once a launch with it starts the row is back at the form's fill, and a
 // pick of it asks again. A launch that fails or is refused keeps it. A launch
 // whose permission rows are not all at the user's usual values says so in its request, and
-// each such row is one of those the line under the box names.
+// each such row is one of those the lines under and above the box name.
+//
+// The piece reads `/api/last` when it connects and whenever what the line above the box names
+// changes (a place picked, a seat applied or taken off), never on a launch, so nothing fills
+// under the user's hands; an answer for a key the line no longer names fills nothing. The
+// values that launch gave fill the rows the form leaves at their shipped defaults, the
+// harness first, and `From last launch` on the line above the box names them, with `Clear`
+// for each in its list and under its row in the panel. A filled value is not a change; one
+// the user edits becomes his, and leaves the item. A filled value that can do harm asks
+// nothing and stays after a launch. The button is off until the fill is read and made, and
+// the request names each filled row.
 
 import { css, html, LitElement, nothing } from "lit";
 import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
@@ -79,7 +89,7 @@ import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/cl
 
 import {
   afterStarted, ALLOWED, asksFirst, CHANGED, changedValue, changes, DEFAULTS, DENIED, drawnField, findRows, HIDDEN_FLAG,
-  isToolsView, keptOptions, modeOf, NO_MATCH, NOT_IN_SET, offRows, optionsWord, OTHER_RULES, otherRules, PANEL_WIDTH_PX, panelFields,
+  isDanger, isToolsView, keptOptions, modeOf, NO_MATCH, NOT_IN_SET, offRows, optionsWord, OTHER_RULES, otherRules, PANEL_WIDTH_PX, panelFields,
   panelGroups, pressTool, RESET, rowLabel, rulesWord, SIDE_EVENT, toolLines, toolLists, turnedOn, valueNow, withOption,
   withoutRule, withTools,
 } from "./options-model.ts";
@@ -88,12 +98,17 @@ import type {
 } from "./options-model.ts";
 
 import {
+  CLEAR, fillFace, fillIn, fillNote, fillOf, fillRows, FROM_LAST, fromLast, HARNESS_ROW, harnessStep, keptFill,
+  lastKey, lastWhen, parseLast, withoutFill,
+} from "./fill-model.ts";
+import type { Last, LastKey } from "./fill-model.ts";
+import {
   choiceKey, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
-  parsePresets,
+  parsePresets, same,
 } from "./panel.ts";
 import type { Catalog, Choice, Form, Preset } from "./panel.ts";
 import {
-  afterPick, atLoad, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
+  afterPick, atLoad, lastQuery, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
 } from "./preset-model.ts";
 import {
   afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
@@ -181,6 +196,16 @@ const STYLES = css`
   .opt { padding: 8px 6px; border: 0; background: none; color: var(--moxi-text-dim); font: 14px/1 var(--moxi-font-sans);
          font-variant-numeric: tabular-nums; white-space: nowrap; }
   .opt.on { color: var(--moxi-text); }
+  .menu.fill { width: 540px; padding: 6px 0 0; }
+  .fr { display: grid; grid-template-columns: 104px 1fr auto; align-items: baseline; gap: 0 10px; padding: 7px 14px; }
+  .fr .d { min-width: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .fr.dg .d, .fr.dg > span { color: var(--moxi-danger); }
+  .fr button, .came button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .fnote { margin: 6px 0 0; padding: 9px 14px 10px; border-top: 1px solid var(--moxi-border); color: var(--moxi-text-dim);
+           font-size: 13px; line-height: 18px; }
+  .came { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--moxi-text-dim);
+          font-size: 13px; line-height: 18px; }
+  .came.dg > span { color: var(--moxi-danger); }
   .changed { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin: 10px 2px 0;
              color: var(--moxi-text-dim); font-size: 14px; line-height: 20px; }
   .changed .k { margin-right: 10px; }
@@ -251,6 +276,8 @@ const STYLES = css`
     .run .row { grid-template-columns: 20px 96px 1fr; }
     .presets .row { grid-template-columns: 20px 1fr auto; }
     .presets .row .d { grid-row: 2; grid-column: 2 / 4; }
+    .fr { grid-template-columns: 1fr auto; }
+    .fr .d { grid-row: 2; grid-column: 1 / 3; }
   }
 `;
 
@@ -278,6 +305,8 @@ export class LauncherPrompt extends LitElement {
     presets: { state: true },
     preset: { state: true },
     baseFields: { state: true },
+    filled: { state: true },
+    last: { state: true },
   };
 
   /** The box's text. */
@@ -287,7 +316,7 @@ export class LauncherPrompt extends LitElement {
   places: Place[] = [];
   /** The menu that is open: the line's (`where`), the chip's (`chip`), the button's
    * (`run`), or none. */
-  menu: "" | "where" | "chip" | "run" | "preset" = "";
+  menu: "" | "where" | "chip" | "run" | "preset" | "fill" = "";
   /** A typed folder path the menu did not take. */
   typed = "";
   /** The form's fields for the harness, filled from `/api/form`; empty until both are read. */
@@ -322,6 +351,21 @@ export class LauncherPrompt extends LitElement {
   /** The same harness's form read with no preset, whose fill is each row's usual value;
    * the form's own fields while no preset is applied. */
   baseFields: FieldDescriptor[] = [];
+  /** The values filled from the last launch and left as they were, by row; `harness` when the
+   * harness was filled too. */
+  filled: Record<string, FormValue> = {};
+  /** The last launch the fill was made from, with the key it was read for; null with none. */
+  last: (Last & { key: LastKey }) | null = null;
+  /** The query the latest read of the last launch was for; undefined until the piece reads
+   * one after it connects. */
+  #lastQuery: string | null | undefined = undefined;
+  #lastAsked = 0;
+  /** The read of the last launch for the line's key has answered. */
+  #lastRead = false;
+  /** The last launch read, waiting for the form for the applied preset to fill over. */
+  #waiting: (Last & { key: LastKey }) | null = null;
+  /** The harness the fill asked the form to be read for, while it waits for that form. */
+  #fillHarness = "";
   /** When the read that gave the listing was asked, by the page's clock; 0 when the last
    * read failed or left the slots unread, so the next press reads again. */
   #targetsAt = 0;
@@ -346,6 +390,8 @@ export class LauncherPrompt extends LitElement {
   #presetsRead = false;
   /** Counts `/api/form` reads, so only the latest one's answer is drawn. */
   #asked = 0;
+  /** The latest `/api/form` read has not ended yet. */
+  #formIn = false;
   /** The comms name the latest `/api/form` read was asked under; "" for none. */
   #identityAsked = "";
   /** Whether projects is there, worked out once when the piece connects. */
@@ -384,6 +430,7 @@ export class LauncherPrompt extends LitElement {
     document.addEventListener("visibilitychange", this.#shown);
     // Every launch through the launcher writes the log, and may take or free a slot.
     this.#stops.push(subscribe("launcher", "launches", () => void this.#readTargets()));
+    this.#lastQuery = undefined;
     void this.#open();
     void this.#readCatalog();
     void this.#readForm("");
@@ -398,6 +445,7 @@ export class LauncherPrompt extends LitElement {
     this.#opened += 1;
     this.#asked += 1;
     this.#targetsAsked += 1;
+    this.#lastAsked += 1;
     this.#pressed += 1;
     this.#stopFollow();
     if (this.panel) {
@@ -409,6 +457,8 @@ export class LauncherPrompt extends LitElement {
   /** Lets go of each value set on a row the panel no longer draws, once the place the
    * button launches in, or the form, is another. */
   protected willUpdate(changed: Map<string, unknown>): void {
+    const query = lastQuery(this.preset, this.pick);
+    if (query !== this.#lastQuery) this.#readLast(query);
     if (!["fields", "targets", "picked", "options"].some((name) => changed.has(name))) return;
     const mode = this.#mode;
     if (mode === undefined || this.fields.length === 0) return;
@@ -464,10 +514,22 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** The rows this piece sets, over what `/api/form` fills: the brief, the place, the
-   * model and the effort once the chip's menu set them, and each value set in the panel. */
+   * model and the effort once the chip's menu set them, each value set in the panel, and
+   * under those the values filled from the last launch. */
   get set(): Record<string, FormValue> {
-    return { ...this.options, ...this.chosen, brief: this.brief === "" ? null : this.brief,
+    return { ...this.#fill, ...this.options, ...this.chosen, brief: this.brief === "" ? null : this.brief,
              ...(this.pick === null ? {} : pickValues(this.pick)) };
+  }
+
+  /** The filled values a launch in the button's place takes now. */
+  get #fill(): Record<string, FormValue> {
+    return fillIn(this.filled, this.fields as PanelField[], this.#mode);
+  }
+
+  /** Each panel row's value now: the one set in the panel, else the one filled, else the
+   * form's fill. */
+  get #values(): Record<string, FormValue> {
+    return { ...this.#fill, ...this.options };
   }
 
   async #readCatalog(): Promise<void> {
@@ -481,9 +543,24 @@ export class LauncherPrompt extends LitElement {
 
   /** Reads `/api/form` for the applied preset, for `harness` when one is asked, and with a
    * preset applied reads it again with none for the same harness. An answer that can't be
-   * read leaves the form as it was. */
-  async #readForm(harness: string): Promise<void> {
+   * read leaves the form as it was. A read the fill asks for (`fill`) takes no form that is
+   * refused; another harness read for any other reason lets go of the filled values, which
+   * are the first harness's own. */
+  async #readForm(harness: string, fill = false): Promise<void> {
     const asked = (this.#asked += 1);
+    this.#formIn = true;
+    try {
+      await this.#formRead(asked, harness, fill);
+    } finally {
+      // The fill waits for the latest read of the form, however it ended.
+      if (asked === this.#asked) {
+        this.#formIn = false;
+        this.#settle();
+      }
+    }
+  }
+
+  async #formRead(asked: number, harness: string, fill: boolean): Promise<void> {
     const identity = this.fields.length === 0 ? "" : this.#identity;
     this.#identityAsked = identity;
     const choice = this.preset;
@@ -497,11 +574,16 @@ export class LauncherPrompt extends LitElement {
       return null;
     };
     const form = await reads(formPath(choice, harness, identity));
-    if (asked !== this.#asked || form === null) return;
-    const base = choice.kind === "" ? null : await reads(formPath(NO_PRESET, form.harness, identity));
-    if (asked !== this.#asked || (choice.kind !== "" && base === null)) return;
+    if (asked !== this.#asked) return;
+    const base = form === null || choice.kind === "" ? null : await reads(formPath(NO_PRESET, form.harness, identity));
+    if (asked !== this.#asked) return;
+    if (form === null || (choice.kind !== "" && base === null) || (fill && form.refused !== null)) {
+      if (fill) this.#filledNothing();
+      return;
+    }
     const other = this.#form !== null && form.harness !== this.#form.harness;
     if (other) this.chosen = {};
+    if (other && !fill) this.filled = {};
     this.#form = form;
     this.#formChoice = choice;
     this.#base = base;
@@ -526,6 +608,88 @@ export class LauncherPrompt extends LitElement {
     this.fields = filledFields(fieldsFor(this.#catalog, this.#form.harness), this.#form, this.#formChoice);
     this.baseFields = this.#base === null ? this.fields
       : filledFields(fieldsFor(this.#catalog, this.#base.harness), this.#base, NO_PRESET);
+    this.#settle();
+  }
+
+  // --- the fill from the last launch -----------------------------------------------------------
+
+  /** Reads the last launch of what the line names now, `query`, and lets go of what was filled
+   * from another; null names nothing to read. Only the latest read's answer fills. */
+  #readLast(query: string | null): void {
+    const asked = (this.#lastAsked += 1);
+    this.#lastQuery = query;
+    // A harness the last key's launch gave goes with it: the layers' is read again.
+    if (Object.hasOwn(this.filled, HARNESS_ROW)) void this.#readForm("");
+    this.filled = {};
+    this.last = null;
+    this.#waiting = null;
+    this.#fillHarness = "";
+    this.#lastRead = query === null;
+    if (query === null) return;
+    const key = lastKey(query) as LastKey;
+    void api("launcher", `api/last?${query}`).then((answer) => {
+      if (asked !== this.#lastAsked) return;
+      const read = answer.status === 200 ? parseLast(answer.data) : null;
+      this.#lastRead = true;
+      if (read !== null && read.state === "up" && read.at !== null) this.#waiting = { ...read, key };
+      this.#settle();
+      this.requestUpdate();
+    });
+  }
+
+  /** Fills from the last launch waiting, once the form for the applied preset is read; else
+   * keeps of the filled values those the form still leaves at their shipped defaults. */
+  #settle(): void {
+    const form = this.#form;
+    if (this.#formIn || form === null || this.fields.length === 0 || !sameChoice(this.#formChoice, this.preset)) return;
+    const last = this.#waiting;
+    if (last === null) {
+      const kept = keptFill(this.filled, this.fields as PanelField[], form);
+      if (Object.keys(kept).length !== Object.keys(this.filled).length) this.filled = kept;
+      return;
+    }
+    const step = harnessStep(last, form);
+    if (step === "none" || (step === "read" && this.#fillHarness === last.harness)) {
+      this.#filledNothing();
+      return;
+    }
+    if (step === "read") {
+      this.#fillHarness = last.harness as string;
+      void this.#readForm(this.#fillHarness, true);
+      return;
+    }
+    const held = new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
+    const values = fillOf(last, this.fields as PanelField[], form, held);
+    this.filled = this.#fillHarness === form.harness ? { [HARNESS_ROW]: form.harness, ...values } : values;
+    this.last = last;
+    this.#waiting = null;
+    this.#fillHarness = "";
+  }
+
+  /** The last launch waiting fills nothing. */
+  #filledNothing(): void {
+    this.#waiting = null;
+    this.#fillHarness = "";
+    this.requestUpdate();
+  }
+
+  /** `Clear` on a filled value: the row is back at what the form is filled with. The harness
+   * takes every filled value with it, and the form is read again for the layers' harness. */
+  #clear(name: string): void {
+    if (name === HARNESS_ROW) {
+      this.filled = {};
+      void this.#readForm("");
+    } else {
+      this.filled = withoutFill(this.filled, name);
+    }
+    if (Object.keys(this.filled).length > 0) return;
+    this.menu = this.menu === "fill" ? "" : this.menu;
+    void this.updateComplete.then(() => this.#box()?.focus());
+  }
+
+  /** A filled row the user edits is his change from now on, no longer filled. */
+  #edited(...names: string[]): void {
+    if (names.some((name) => Object.hasOwn(this.filled, name))) this.filled = withoutFill(this.filled, ...names);
   }
 
   /** Reads the presets; a read that fails leaves the ones read before. */
@@ -576,6 +740,7 @@ export class LauncherPrompt extends LitElement {
 
   /** Sets the model or the effort; an empty value is the row's empty state. */
   #setChip(name: string, value: string): void {
+    this.#edited(name);
     this.chosen = { ...this.chosen, [name]: value === "" ? null : value };
     this.older = false;
   }
@@ -684,7 +849,30 @@ export class LauncherPrompt extends LitElement {
       class=${open ? "anchor open" : "anchor"}><button type="button" class="face" aria-haspopup="true"
         aria-expanded=${open ? "true" : "false"} @click=${this.#toggleWhere}>${this.#folder(face.dim, face.name)}<span
         class="v" aria-hidden="true">▾</span></button>${open ? this.#whereMenu(pick) : nothing}</span>${
-        this.presets.length > 0 ? this.#presetItem() : nothing}</div>`;
+        this.presets.length > 0 ? this.#presetItem() : nothing}${this.#fillItem()}</div>`;
+  }
+
+  /** When the last launch the fill came from was made, as the page says it. */
+  get #lastWhen(): string {
+    return this.last === null ? "" : lastWhen(this.last.at ?? "", new Date());
+  }
+
+  /** `· From last launch <label>` on the line, once a value is filled, and its list while
+   * it is open: each value with `Clear`, then where the values came from. */
+  #fillItem() {
+    const rows = fillRows(this.#fill, this.fields as PanelField[], this.#home);
+    const face = fillFace(rows);
+    if (face === null || this.last === null) return nothing;
+    const open = this.menu === "fill";
+    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${FROM_LAST}</span><span
+      class=${open ? "anchor open" : "anchor"} data-item="fill"><button type="button" class="pre" aria-haspopup="true"
+        aria-expanded=${open ? "true" : "false"} aria-label=${`${FROM_LAST} ${face.text}`}
+        @click=${() => { this.menu = open ? "" : "fill"; }}><span class=${face.danger ? "dg" : ""}>${face.text}</span><span
+        class="v" aria-hidden="true">▾</span></button>${open ? html`<div class="menu fill" data-menu="fill">
+        ${rows.map((row) => html`<div class=${row.danger ? "fr dg" : "fr"} data-fill=${row.name}><span>${row.label}</span><span
+          class="d">${row.text}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
+          @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`)}
+        <p class="fnote">${fillNote(this.last.key, this.#lastWhen, rows.length)}</p></div>` : nothing}</span>`;
   }
 
   /** `· Preset <name>` on the line, and its menu while it is open. */
@@ -740,8 +928,9 @@ export class LauncherPrompt extends LitElement {
 
   #chip() {
     if (this.fields.length === 0) return nothing;
-    const model = valueOf(this.fields, this.chosen, "model");
-    const effort = hasEffort(this.fields) ? valueOf(this.fields, this.chosen, "effort") : null;
+    const chosen = { ...this.#fill, ...this.chosen };
+    const model = valueOf(this.fields, chosen, "model");
+    const effort = hasEffort(this.fields) ? valueOf(this.fields, chosen, "effort") : null;
     const open = this.menu === "chip";
     return html`<span class=${open ? "anchor open" : "anchor"}><button type="button" class="chip"
       aria-haspopup="true" aria-expanded=${open ? "true" : "false"} aria-label="Harness and model"
@@ -800,19 +989,21 @@ export class LauncherPrompt extends LitElement {
    * lets go of one held back for the row. */
   #optionChanged(field: PanelField, event: CustomEvent<FormChange>): void {
     event.stopPropagation();
-    const now = valueNow(field, this.options);
+    const now = valueNow(field, this.#values);
     const next = changedValue(field, now, event.detail);
     if (asksFirst(field, now, next)) {
       this.pending = { name: field.name, value: next as string };
       return;
     }
     if (this.pending?.name === field.name) this.pending = null;
+    this.#edited(field.name);
     this.options = withOption(this.options, field, next, this.fields as PanelField[]);
   }
 
   /** Sets the value held back for a row. */
   #turnOn(field: PanelField): void {
     if (this.pending?.name !== field.name) return;
+    this.#edited(field.name);
     this.options = withOption(this.options, field, this.pending.value, this.fields as PanelField[]);
     this.pending = null;
   }
@@ -851,7 +1042,7 @@ export class LauncherPrompt extends LitElement {
    * user's usual values; absent with none. */
   #presetLine() {
     const fields = this.fields as PanelField[];
-    const rows = offRows(fields, this.baseFields as PanelField[], this.options);
+    const rows = offRows(fields, this.baseFields as PanelField[], this.options, this.#fill);
     const off = presetOff(this.#formChoice, fields, this.options, rows);
     if (off === null) return nothing;
     return html`<div class="changed" data-line="preset"><span>${off.lead} ${off.labels.map((word, at) =>
@@ -874,12 +1065,12 @@ export class LauncherPrompt extends LitElement {
       <input class="pfind" type="text" aria-label="Find an option" placeholder="Find an option" autocomplete="off"
         spellcheck="false" .value=${this.query}
         @input=${(event: Event) => { this.query = (event.target as HTMLInputElement).value; }}>
-      ${finding ? this.#found(fields) : panelGroups(fields, this.options, this.#mode).map((group) => this.#group(group))}
+      ${finding ? this.#found(fields) : panelGroups(fields, this.#values, this.#mode).map((group) => this.#group(group))}
     </aside>`;
   }
 
   #found(fields: PanelField[]) {
-    const rows = findRows(fields, this.query, this.options, this.#mode);
+    const rows = findRows(fields, this.query, this.#values, this.#mode);
     if (rows.length === 0) return html`<p class="none" role="status">${NO_MATCH}</p>`;
     return html`<div class="found">${rows.map((row) => this.#optionRow(row, row.where))}</div>`;
   }
@@ -910,13 +1101,16 @@ export class LauncherPrompt extends LitElement {
   /** Writes the two rows of rules as `change` leaves the three rows read now. */
   #setTools(change: (now: ToolLists) => ToolLists): void {
     const fields = this.fields as PanelField[];
-    this.options = withTools(this.options, fields, change(toolLists(fields, this.options)));
+    const now = toolLists(fields, this.#values);
+    const next = change(now);
+    this.#edited(...([ALLOWED, DENIED] as const).filter((name) => !same(now[name], next[name])));
+    this.options = withTools(this.options, fields, next, now);
   }
 
   /** The Tools view: the set of built-in tools as its own row, a line per tool the page
    * names, and every rule no line draws. */
   #tools(sub: PanelSub) {
-    const now = toolLists(this.fields as PanelField[], this.options);
+    const now = toolLists(this.fields as PanelField[], this.#values);
     const others = otherRules(now);
     return html`${sub.rows.filter((row) => row.name !== ALLOWED && row.name !== DENIED).map((row) => this.#optionRow(row))}
       <div data-view="tools">${toolLines(now).map((line) => this.#toolLine(line))}</div>
@@ -959,10 +1153,21 @@ export class LauncherPrompt extends LitElement {
     return html`<div class=${row.danger ? "prow dg" : "prow"} data-row=${row.name}>
       ${where === "" && !row.hidden ? nothing : html`<div class="at"><span>${where}</span>${
         row.hidden ? html`<span data-mark="hidden">${HIDDEN_FLAG}</span>` : nothing}</div>`}
-      <moxi-ui-form mode="each" .fields=${[drawnField(field, held ?? valueNow(field, this.options))]}
+      <moxi-ui-form mode="each" .fields=${[drawnField(field, held ?? valueNow(field, this.#values))]}
         @moxi-change=${(event: CustomEvent<FormChange>) => this.#optionChanged(field, event)}></moxi-ui-form>
+      ${held === null ? this.#fromLast(row) : nothing}
       ${this.#ask(row, held)}
     </div>`;
+  }
+
+  /** Under a value filled from the last launch: when that launch was made, and `Clear`; in
+   * the warning colour for a value that can do harm. */
+  #fromLast(row: PanelRow) {
+    const fill = this.#fill;
+    if (!Object.hasOwn(fill, row.name) || this.last === null) return nothing;
+    return html`<div class=${isDanger(row.field, fill[row.name]) ? "came dg" : "came"} data-from=${row.name}><span>${
+      fromLast(this.#lastWhen)}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
+      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`;
   }
 
   /** Under a value that can do harm: what it does and that it holds for this launch only.
@@ -1010,10 +1215,11 @@ export class LauncherPrompt extends LitElement {
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".go")?.focus());
   }
 
-  /** Whether the button can start a launch: a place, the form for the applied preset and a
-   * listing are there. */
+  /** Whether the button can start a launch: a place, the form for the applied preset, a
+   * listing, and the last launch read and filled from are there. */
   get #able(): boolean {
-    return this.ready && this.fields.length > 0 && this.targets !== null && sameChoice(this.#formChoice, this.preset);
+    return this.ready && this.fields.length > 0 && this.targets !== null && sameChoice(this.#formChoice, this.preset)
+      && this.#lastRead && this.#waiting === null;
   }
 
   /** The press: the preview, then the launch with its ticket or the command copied. */
@@ -1023,7 +1229,8 @@ export class LauncherPrompt extends LitElement {
     this.#stopFollow();
     // What the button says at the press is what is sent, whatever a later read says.
     const shown = runOf(this.targets, this.picked);
-    const body = launchRequest(this.fields, this.#form, this.set, shown, this.baseFields, this.#formChoice);
+    const body = launchRequest(this.fields, this.#form, this.set, shown, this.baseFields, this.#formChoice,
+                               Object.keys(this.#fill));
     this.#sent = this.brief;
     this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";
