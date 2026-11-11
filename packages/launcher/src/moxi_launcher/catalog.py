@@ -1163,7 +1163,7 @@ def _add_option(parser: argparse.ArgumentParser, row_: Row) -> None:
     elif row_.optional_value:
         parser.add_argument(row_.option, nargs="?", const=True, metavar="VALUE", **common)
     elif row_.type == "list":
-        convert = _cli_path if row_.items == "path" else str
+        convert = cli_path if row_.items == "path" else str
         if row_.variadic:
             parser.add_argument(row_.option, nargs="+", action="extend", type=convert,
                                 metavar="VALUE", **common)
@@ -1171,7 +1171,7 @@ def _add_option(parser: argparse.ArgumentParser, row_: Row) -> None:
             parser.add_argument(row_.option, action="append", type=convert,
                                 metavar="VALUE", **common)
     else:
-        convert = {"int": int, "float": float, "path": _cli_path}.get(row_.type, str)
+        convert = {"int": int, "float": float, "path": cli_path}.get(row_.type, str)
         choices = row_.values if row_.type == "enum" else None
         parser.add_argument(row_.option, type=convert, choices=choices,
                             metavar=row_.name.upper(), **common)
@@ -1542,7 +1542,7 @@ def _path(name: str, value: str):
     return str(expanded)
 
 
-def _cli_path(text: str) -> str:
+def cli_path(text: str) -> str:
     """A path typed at a launch: `~` expanded, a relative one read against this
     process's directory."""
     if text == "":

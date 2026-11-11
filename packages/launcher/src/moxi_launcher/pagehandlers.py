@@ -688,27 +688,34 @@ def _keep_checked(query: Mapping[str, Any]) -> None:
 
 def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
     """`/api/name`'s answer: the name a launch would take now, from the template of its
-    project (`project`), else the one for every launch. `seat`, else `agent`, fills
-    `<agent>`; `project`, else the folder name of `cwd`, fills `<project>`; `identity`
-    and `scope` fill nothing without comms. With `template`, that text is rendered in
-    the stored template's place and checked: refused, the answer holds the refusal and
-    no name; else `save` holds what saving it writes, for the project when `keep` is
-    `project`. Settings that can't be read are answered as a refusal. A `keep` with no
-    `template`, or for a project with no `project`, is refused (422)."""
+    project, else the one for every launch. Its project is `project`, else the one a
+    launch in the folder `cwd` finds (`presets.folder_place`, which also expands `~`).
+    `seat`, else `agent`, fills `<agent>`; the project's key, else the name of that
+    folder, fills `<project>`; `identity` and `scope` fill nothing without comms. With
+    `template`, that text is rendered in the stored template's place and checked:
+    refused, the answer holds the refusal and no name; else `save` holds what saving it
+    writes, for `project` when `keep` is `project`. Settings or projects that can't be
+    read are answered as a refusal. A `keep` with no `template`, or for a project with
+    no `project`, is refused (422)."""
     _keep_checked(query)
     project = query.get("project") or None
     keep, editing = query.get("keep"), "template" in query
-    comms = _available()("comms")
+    available = _available()
+    comms = available("comms")
+    key, folder = project, ""
+    try:
+        current = settings.current()
+        if project is None and query.get("cwd"):
+            cwd, key = presets.folder_place(query["cwd"], available=available)
+            folder = names.folder(cwd)
+    except REFUSALS as error:
+        return _up(**_unnamed(refused=_refusal(error)))
     pieces = names.Pieces(
-        project=project or names.folder(query.get("cwd")),
+        project=key or folder,
         agent=query.get("seat") or query.get("agent") or "",
         model=query.get("model") or "",
         identity=(query.get("identity") or "") if comms else "",
         scope=(query.get("scope") or "") if comms else "")
-    try:
-        current = settings.current()
-    except REFUSALS as error:
-        return _up(**_unnamed(refused=_refusal(error)))
     refused = save = None
     if editing:
         template = query["template"]
@@ -722,7 +729,7 @@ def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
             table = {**(current[names.TEMPLATES] or {}), str(project): template}
             save = {"key": names.TEMPLATES, "value": spelled_table(table)}
     else:
-        picked = names.chosen(current, project)
+        picked = names.chosen(current, key)
         template, source = picked.template, picked.source
     taken: frozenset[str] = frozenset()
     if "<instance>" in template:

@@ -719,6 +719,17 @@ def _project_for(directory: str, available) -> object | None:
     return _projects_call(api, api.for_path, directory)
 
 
+def folder_place(cwd: str, *, available: Callable[[str], bool] | None = None
+                 ) -> tuple[str, str | None]:
+    """Where a launch given the folder `cwd` starts: the folder as the command line reads
+    it (`~` expanded, a relative path read against this process's directory), and the key
+    of the project `resolve` finds that folder in, none without projects or outside every
+    project. Raises projects' refusals."""
+    directory = catalog.cli_path(cwd)
+    _, _, project = _place({"cwd": directory}, directory, _avail(available), "the launch")
+    return directory, project.key if project is not None else None
+
+
 @dataclass(frozen=True)
 class Agent:
     """One of a project's agents and the seats whose identity is its name."""

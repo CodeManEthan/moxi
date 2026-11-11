@@ -1,17 +1,19 @@
-"""`GET /api/name`: the name a launch of the form would take, a template being edited
-rendered unsaved, the save check's refusals, and what saving a template writes."""
+"""`GET /api/name`: the name a launch of the form would take, the same name a preview of
+that launch gives for a folder, a template being edited rendered unsaved, the save check's
+refusals, and what saving a template writes."""
 
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
-from moxi import proc
+from moxi import modules, proc
 from moxi.paths import Layout, python
-from test_page import get
+from test_page import get, post
 
 from moxi_launcher import names, page, pagehandlers, settings, slots, store
 
@@ -69,6 +71,54 @@ def test_a_project_with_a_template_of_its_own_is_named_by_it():
         name="proj-a opus", template="<project> <model>", **{"from": "project"})
     assert name(project="proj-b", model="opus") == up(
         name="Nov-08-2026 12:45", template=EVERY, **{"from": "global"})
+
+
+@pytest.fixture
+def proj_a(tmp_path, monkeypatch):
+    """The project `proj-a`, its root a folder of this test's, as projects finds it for a
+    folder in it; projects reads as installed."""
+    root = tmp_path / "proj-a"
+    (root / "sub").mkdir(parents=True)
+    project = SimpleNamespace(key="proj-a", root=str(root), lead=None, associated=(),
+                              agents=(), notes_root=None)
+
+    def for_path(path):
+        return project if path == str(root) or path.startswith(str(root) + os.sep) else None
+
+    found = modules.Found(name="projects", state=modules.PRESENT, interfaces=frozenset({1}),
+                          api=SimpleNamespace(get=lambda key: project, for_path=for_path))
+    real_load = modules.load
+    monkeypatch.setattr(modules, "load", lambda module, interface=None: found
+                        if module == "projects" else real_load(module, interface=interface))
+    installed(monkeypatch, "projects")
+    return root
+
+
+def previewed_name(cwd: str, **values: str) -> str:
+    """The session name a preview of a terminal launch from Home in `cwd` gives."""
+    status, said = post("/api/preview", {"values": {"harness": "claude", "target": "terminal",
+                                                    "cwd": cwd, **values}})
+    assert status == 200 and said["refused"] == [], said
+    argv = said["argv"]
+    return argv[argv.index("-n") + 1]
+
+
+def test_the_home_folder_is_named_as_a_launch_there_is_named(tmp_path, monkeypatch):
+    home = tmp_path / "shell"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    said = name(cwd="~")
+    assert said["name"] == previewed_name("~") == "shell-Nov-08 12:45", said
+
+
+def test_a_folder_inside_a_project_is_named_by_the_projects_key_and_template(proj_a):
+    settings_file(f'[name]\ntemplate = "{EVERY}"\n[name.templates]\nproj-a = "<project>-<model>"\n')
+    folder = str(proj_a / "sub")
+    said = name(cwd=folder, model="opus")
+    assert said == up(name="proj-a-opus", template="<project>-<model>", **{"from": "project"})
+    assert previewed_name(folder, model="opus") == "proj-a-opus"
+    # Outside every project the folder's own name stands in, from the template for every launch.
+    assert name(cwd=str(proj_a.parent))["name"] == "Nov-08-2026 12:45"
 
 
 def test_a_seat_stands_before_the_agent_role():
