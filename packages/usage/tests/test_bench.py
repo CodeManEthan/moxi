@@ -12,6 +12,8 @@ The first pass over it is made once too; each test starts from a copy of that in
 
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import json
 import os
 import random
@@ -584,6 +586,116 @@ def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
     taken = median_ms(lambda: limits.limits(now=bench.now, pull=False), 7)
     print(f"\nlimits() with no pull: {taken:.1f} ms (the first call {first:.1f} ms)")
     assert taken < 100
+
+
+# --- the page's reads ----------------------------------------------------------------------
+#
+# Each is timed through the page server's own app, in this process, as a browser asks it.
+# The sessions module names the sessions from the corpus's roots, as it does in a page
+# server's process. A run with nothing kept starts from a new catalog, as a page server's
+# first answer does. The run after it waits out the catalog's reuse, so the roots are
+# listed again while the heads read before are kept, as a later answer finds them.
+
+#: Runs of each read; a bound holds the median run.
+READ_RUNS = 3
+#: The bounds, in ms, about four times the slowest of ten runs on a quiet machine (the
+#: opening reads 750 ms with nothing kept and 720 ms after the reuse, the sessions 450
+#: and 440 ms), so that they hold on a loaded one.
+OPENING_COLD_MS = 3_000
+OPENING_LAPSED_MS = 3_000
+SESSIONS_COLD_MS = 1_800
+SESSIONS_LAPSED_MS = 1_800
+
+
+def opening_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
+    """The reads the page sends as it opens at its own address with no filter set, on an
+    install with projects: the limits, the status and Cost's 90 days; then, once the
+    status has answered, the last 30 days' chart, projects, models and terms, the closed
+    Sessions row's dearest session, and today's two dearest for Cost. All are sent at
+    once here, which asks more of the server than the page does. Prices is left out: the
+    page asks it only once the terms have answered, and it reads no index."""
+    day = today.isoformat()
+    month = {"since": (today - dt.timedelta(days=29)).isoformat(), "until": day}
+    return [("/api/limits", {}), ("/api/status", {}),
+            ("/api/daily", {"since": (today - dt.timedelta(days=89)).isoformat(),
+                            "until": day}),
+            ("/api/daily", {"by": "day", **month}), ("/api/projects", month),
+            ("/api/models", month), ("/api/terms", {"by": "model", **month}),
+            ("/api/sessions", {**month, "top": "1"}),
+            ("/api/sessions", {"since": day, "until": day, "top": "2"})]
+
+
+def _named(answer: dict) -> None:
+    """Every session the answer sends was found by the sessions module."""
+    assert answer["rows"] and all(row["known"] for row in answer["rows"]), answer["rows"]
+
+
+def _cold_and_lapsed(read: Callable[[], object]) -> tuple[list[float], list[float]]:
+    """`read` timed in ms, `READ_RUNS` times each with nothing kept and again once the
+    catalog's reuse has lapsed."""
+    from moxi_sessions import catalog
+
+    cold, lapsed = [], []
+    for _ in range(READ_RUNS):
+        catalog.reset()
+        start = time.perf_counter()
+        read()
+        cold.append((time.perf_counter() - start) * 1000)
+        time.sleep(catalog.REUSE_S + 0.2)
+        start = time.perf_counter()
+        read()
+        lapsed.append((time.perf_counter() - start) * 1000)
+    catalog.reset()
+    return cold, lapsed
+
+
+def _runs(taken: list[float]) -> str:
+    return f"median {statistics.median(taken):.0f} ms (" + ", ".join(
+        f"{ms:.0f}" for ms in taken) + ")"
+
+
+@pytest.mark.timed
+def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench):
+    from test_page import ask, served
+
+    app, reads = served(), opening_reads(dt.date.today())
+
+    def opening():
+        async def all_of_them():
+            return await asyncio.gather(*(ask(app, path, query) for path, query in reads))
+
+        answers = asyncio.run(all_of_them())
+        assert [status for status, _ in answers] == [200] * len(reads), answers
+        for (path, query), (_, body) in zip(reads, answers):
+            if path == "/api/sessions" and query["top"] == "1":
+                _named(body)
+
+    cold, lapsed = _cold_and_lapsed(opening)
+    print(f"\nthe page's {len(reads)} opening reads sent together: nothing kept "
+          f"{_runs(cold)}; after the reuse {_runs(lapsed)}")
+    assert statistics.median(cold) < OPENING_COLD_MS
+    assert statistics.median(lapsed) < OPENING_LAPSED_MS
+
+
+@pytest.mark.timed
+def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench):
+    from test_page import ask, served
+
+    app, today = served(), dt.date.today()
+    query = {"since": (today - dt.timedelta(days=29)).isoformat(),
+             "until": today.isoformat(), "top": "10"}
+
+    def sessions_read():
+        status, answer = asyncio.run(ask(app, "/api/sessions", query))
+        assert status == 200, answer
+        assert len(answer["rows"]) == 10 and answer["count"] > 10
+        _named(answer)
+
+    cold, lapsed = _cold_and_lapsed(sessions_read)
+    print(f"\n/api/sessions over 30 days at top=10: nothing kept {_runs(cold)}; after "
+          f"the reuse {_runs(lapsed)}")
+    assert statistics.median(cold) < SESSIONS_COLD_MS
+    assert statistics.median(lapsed) < SESSIONS_LAPSED_MS
 
 
 #: turns' guard loader, which is the one importer of usage's guard declarations.
