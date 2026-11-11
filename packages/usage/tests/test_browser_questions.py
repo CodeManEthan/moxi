@@ -626,7 +626,7 @@ def test_the_dearest_sessions_are_named_shown_further_and_one_opens_with_its_sub
         typed.get_by_role("link", name="Open").click()
         expect(page).to_have_url(re.compile(rf"/m/usage/sessions/claude/{WEEK[0]['session']}$"))
         body = typed.locator("[data-part=session]")
-        expect(body.locator("[data-line=requests]")).to_have_text(re.compile(r"^\s*Requests\s*16 requests"))
+        expect(body.locator("[data-line=requests]")).to_have_text(re.compile(r"^\s*Requests\s*16 requests by the main agent "))
         expect(body.locator("[data-line=context]")).to_have_text(re.compile(r"tokens on the last request"))
         expect(body.locator("[data-line=chart] svg[data-part=session-chart] rect.bar")).to_have_count(16)
         expect(body.locator("[data-line=went]")).to_have_text(re.compile(r"^\s*Went to\s*\S"))

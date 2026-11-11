@@ -114,12 +114,16 @@ export interface OpenedSession {
   bill: boolean;
 }
 
+/** Whose requests an opened session lists. */
+export const MAIN_AGENT = "the main agent";
+
 const dim = (text: string): Part => ({ text, dim: true });
 const plain = (text: string): Part => ({ text, dim: false });
 
-/** `34 requests from 12:45 to 19:09 · the dearest $0.28 at 18:34, the start of turn 9`. */
+/** `34 requests from 12:45 to 19:09 · the dearest $0.28 at 18:34, the start of turn 9`;
+ * with `whose`, the count says whose they are: `315 requests by the main agent from …`. */
 export function requestsLine(report: Report<RequestRow, RequestsTotal>, today: string | null,
-                             clock: Clock = LOCAL): Part[] | null {
+                             clock: Clock = LOCAL, whose: string | null = null): Part[] | null {
   const rows = report.rows;
   if (rows.length === 0) return null;
   const count = countWords(report.total.requests || rows.length, "request");
@@ -136,7 +140,7 @@ export function requestsLine(report: Report<RequestRow, RequestsTotal>, today: s
       ? ` at ${when(first)}`
       : ` from ${when(first)} to ${clock.day(first) === clock.day(last) ? clock.time(last) : when(last)}`;
   }
-  const parts = [plain(`${count}${span}`)];
+  const parts = [plain(`${count}${whose === null ? "" : ` by ${whose}`}${span}`)];
   const priced = rows.filter((row) => row.cost !== null && row.cost > 0);
   if (rows.length > 1 && priced.length) {
     const dear = priced.reduce((best, row) => ((row.cost as number) > (best.cost as number) ? row : best));
@@ -239,7 +243,8 @@ export function openedSession(facts: OpenedFacts, clock: Clock = LOCAL): OpenedS
   if (requests === null) {
     if (facts.requests.loading) reading("requests");
   } else {
-    line("requests", requestsLine(requests, facts.today, clock));
+    // The session's requests are its main agent's; its subagents' are counted under Subagents.
+    line("requests", requestsLine(requests, facts.today, clock, MAIN_AGENT));
   }
   if (session === null) {
     if (facts.session.loading) reading("session");

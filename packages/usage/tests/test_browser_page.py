@@ -230,7 +230,7 @@ def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_
     # agent's requests and the subagent's, and the subagent's cost a part of the row's.
     assert "harness=claude" in sent.value.url and "since=" in sent.value.url, sent.value.url
     opened = row.locator("[data-part=session]")
-    expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(r"^Requests\s*3 requests (at|from) "))
+    expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(r"^Requests\s*3 requests by the main agent (at|from) "))
     expect(opened.locator("[data-line=subagents]")).to_have_text(
         re.compile(rf"^Subagents\s*1 subagent · \$\d+\.\d\d of the {re.escape(cost)}\s*Show$"))
     assert int(requests) == 3 + 2
@@ -549,7 +549,7 @@ def test_the_opened_session_says_its_requests_context_cost_agents_and_start(
     panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
     opened = opened_of(panel)
     expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(
-        r"^Requests\s*6 requests (at .+|from .+ to .+) · the dearest \$\d+\.\d\d at .+$"))
+        r"^Requests\s*6 requests by the main agent (at .+|from .+ to .+) · the dearest \$\d+\.\d\d at .+$"))
     expect(opened.locator("[data-line=context]")).to_have_text(re.compile(
         r"^Context\s*\d+k of 1,000k tokens on the last request, \d+% full$"))
     expect(opened.locator("[data-line=went]")).to_have_text(re.compile(

@@ -64,6 +64,10 @@ test("the requests line counts them, gives their first and last times and the de
   assert.equal(words(requestsLine(report([request(1, "2026-11-08 12:45")], { requests: 1 },
                                          { total: { ...sums(), ...requestsTotal() } }), TODAY, UTC)), "1 request at 12:45");
   assert.equal(requestsLine(report([], {}, { total: { ...sums(), ...requestsTotal() } }), TODAY, UTC), null);
+  // An opened session's requests are its main agent's, and the line says so.
+  assert.equal(words(requestsLine(report(rows, { requests: 315 }, { total: { ...sums({ requests: 315 }), ...requestsTotal({ turns: 9 }) } }),
+                                  TODAY, UTC, "the main agent")),
+               "315 requests by the main agent from 12:45 to 19:09 · the dearest $0.28 at 18:34, the start of turn 9");
 });
 
 test("the context line gives the last request's whole prompt against its window, rounded down", () => {
@@ -132,6 +136,9 @@ test("a read still out shows one Reading in place of the first line it fills, an
                                today: TODAY }, UTC);
   assert.equal(words(done.items.find((item) => item.key === "restart").parts),
                "100k tokens for m-opus · this session is past it");
+  // The session's requests line is its main agent's, and says so.
+  assert.equal(words(done.items.find((item) => item.key === "requests").parts),
+               "2 requests by the main agent from 12:45 to 13:00 · the dearest $0.02 at 13:00");
   // A session whose record is gone has no Open in Sessions.
   const gone = { value: { ...session.value, ref: { ...REF, known: false } }, loading: false };
   assert.equal(openedSession({ harness: "claude", id: "s-1", requests, terms: out, session: gone, restart: null,
