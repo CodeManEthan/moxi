@@ -6,6 +6,7 @@ import {
   sessionLists, sessionName, sessionsPath, sessionWhere, shareWords, showPath,
 } from "../src/sessions-model.ts";
 import { START } from "../src/filter-model.ts";
+import { rowName } from "../../../sessions/web/src/list.ts";
 
 const UTC = {
   time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
@@ -38,7 +39,8 @@ test("a session is named by its typed name, with its folder's last segment besid
 test("without a name, a session is its folder and start, worded by the page's day words", () => {
   assert.deepEqual(name({}), { name: "proj-a · started today 18:45", where: null });
   assert.equal(name({ started: at("2026-11-07 22:25") }).name, "proj-a · started yesterday 22:25");
-  assert.equal(name({ started: at("2026-11-03 08:52") }).name, "proj-a · started Tue 08:52");
+  assert.equal(name({ started: at("2026-11-03 08:52") }).name, "proj-a · started Nov 3 08:52");
+  assert.equal(name({ started: at("2025-12-30 23:10") }).name, "proj-a · started Dec 30, 2025 23:10");
   assert.equal(name({ started: at("2026-11-01 08:52") }).name, "proj-a · started Nov 1 08:52");
   assert.equal(name({ name: "   " }).name, "proj-a · started today 18:45");
   assert.equal(name({ folder: "/work/proj-b/" }).name, "proj-b · started today 18:45");
@@ -215,4 +217,16 @@ test("a share is a whole percent rounded down, never 0% above zero, null without
   assert.equal(shareWords(null, 63.72), null);
   assert.equal(shareWords(1, null), null);
   assert.equal(shareWords(1, 0), null);
+});
+
+test("a session without a typed name is named as the Sessions page names it, day words and all", () => {
+  const zone = { clock: UTC.time, day: UTC.day, start: (day) => Date.parse(`${day}T00:00:00Z`) / 1000 };
+  const starts = ["2026-11-08 18:45", "2026-11-08 00:05", "2026-11-07 22:25", "2026-11-03 08:52", "2026-11-01 08:52",
+                  "2026-10-01 07:00", "2025-12-30 23:10"];
+  for (const start of starts) {
+    for (const folder of ["/work/proj-a", null]) {
+      const row = { harness: "claude", folder, name: null, started: at(start) };
+      assert.equal(sessionName(row, TODAY, UTC).name, rowName(row, TODAY, zone).name, `${start} ${folder}`);
+    }
+  }
 });

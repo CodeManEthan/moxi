@@ -417,7 +417,8 @@ sessions module. Top to bottom:
   not have.
 
 A session is shown by the name typed for it in its harness, else by its folder's last
-segment and when it started (`proj-a · started 09:14`), never by its id; `Copy id`
+segment and when it started (`proj-a · started today 09:14`, `proj-a · started Nov 3
+08:52`: the start's day is worded as the Sessions page words it), never by its id; `Copy id`
 copies the id. A sum that is not whole reads `at least $19.54`, and one nothing in which
 could be priced, `no price`. A time is the hour and minute, and its day is worded against
 the page server's date: nothing for the same day, `yesterday` or `tomorrow`, the weekday

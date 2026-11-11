@@ -111,3 +111,19 @@ export function whenWord(at: number, today: string | null, clock: Clock = LOCAL,
   const part = dayPart(at, today, clock) ?? (named ? "today" : null);
   return part === null ? time : `${part} ${time}`;
 }
+
+/**
+ * A session's start as the Sessions page words it, so both pages name a session alike:
+ * `today 08:52`, `yesterday 22:50`, else the date (`Nov 3 08:52`), with its year when
+ * that is not `today`'s (`Dec 30, 2025 23:10`). With no `today` held the time stands alone.
+ */
+export function startWord(at: number, today: string | null, clock: Clock = LOCAL): string {
+  const time = clock.time(at);
+  if (today === null) return time;
+  const day = clock.day(at);
+  const off = daysFrom(today, day);
+  if (off === 0) return `today ${time}`;
+  if (off === -1) return `yesterday ${time}`;
+  const date = dateWord(day);
+  return `${day.slice(0, 4) === today.slice(0, 4) ? date : `${date}, ${day.slice(0, 4)}`} ${time}`;
+}

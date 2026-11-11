@@ -6,7 +6,7 @@
 
 import { costWords, countWords, rangeDays, rangeLabel } from "./cost-model.ts";
 import type { Range, Sum } from "./cost-model.ts";
-import { addDays, daysFrom, isDay, LOCAL, whenWord } from "./days.ts";
+import { addDays, daysFrom, isDay, LOCAL, startWord } from "./days.ts";
 import type { Clock } from "./days.ts";
 import type { Report, SessionRef, SessionRow, Sums } from "./feed.ts";
 import { stateKeys } from "./filter-model.ts";
@@ -49,8 +49,9 @@ const typedOf = (ref: Naming): string =>
  * folder's last segment as `where`. Without one: `<folder's last segment> · started
  * <day> <time>`; with no start, the folder's last segment alone; with no folder,
  * `<harness> session` in its place. A session whose record is gone is named the same
- * way from the folder and first request the index holds for it. The day is worded
- * against `today`, and today's own reads `today 11:00`, since a list holds other days.
+ * way from the folder and first request the index holds for it. The start is worded as
+ * the Sessions page words it, against `today`: `today 11:00`, `yesterday 22:25`, else
+ * the date, `Nov 3 08:52`.
  */
 export function sessionName(ref: Naming, today: string | null, clock: Clock = LOCAL): SessionName {
   const folder = folderOf(ref);
@@ -58,7 +59,7 @@ export function sessionName(ref: Naming, today: string | null, clock: Clock = LO
   if (typed !== "") return { name: typed, where: folder };
   const what = folder ?? `${sessionHarness(ref.harness)} session`;
   if (typeof ref.started !== "number" || !Number.isFinite(ref.started)) return { name: what, where: null };
-  return { name: `${what} · started ${whenWord(ref.started, today, clock, true)}`, where: null };
+  return { name: `${what} · started ${startWord(ref.started, today, clock)}`, where: null };
 }
 
 /** A row's `where`: its project when projects is installed and the row has one, else

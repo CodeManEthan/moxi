@@ -27,13 +27,13 @@ const answer = (rows, extra = {}) => ({ since: null, until: null, tz: "UTC", fil
 
 test("the closed row names the dearest session with its cost and counts the range's sessions", () => {
   assert.deepEqual(sessionsClosed(answer([row("s-1", 5.35)], { count: 54, more: 53 }), TODAY, UTC),
-                   { closed: "most to proj-a · started Tue 08:52, $5.35", count: "54 sessions" });
+                   { closed: "most to proj-a · started Nov 3 08:52, $5.35", count: "54 sessions" });
   assert.deepEqual(sessionsClosed(answer([row("s-1", 5.35, { name: "fix the tests" })], { count: 1 }), TODAY, UTC),
                    { closed: "most to fix the tests, $5.35", count: "1 session" });
   // A dearest with tokens with no price is at least its figure; with no price at all the
   // closed row says no figure and keeps its count.
   assert.equal(sessionsClosed(answer([row("s-1", 2, { unpriced_tokens: 5, complete: false })], { count: 3 }), TODAY, UTC)
-    .closed, "most to proj-a · started Tue 08:52, at least $2.00");
+    .closed, "most to proj-a · started Nov 3 08:52, at least $2.00");
   assert.deepEqual(sessionsClosed(answer([row("s-1", null)], { count: 2 }), TODAY, UTC),
                    { closed: null, count: "2 sessions" });
 });
@@ -47,7 +47,7 @@ test("a row's second line says its requests, first to last, models and how full 
   const line = sessionLine(row("s-1", 5.35, { models: ["m-a", "m-b"], context: { tokens: 40_000, window: 200_000 } }),
                            TODAY, false, UTC);
   assert.deepEqual(line, {
-    key: "claude/s-1", name: "proj-a · started Tue 08:52", where: null, cost: "$5.35", why: null,
+    key: "claude/s-1", name: "proj-a · started Nov 3 08:52", where: null, cost: "$5.35", why: null,
     requests: "15 requests", span: "Tue 08:52 to 10:20", models: "m-a, m-b", context: "context 20% full",
     session: { harness: "claude", id: "s-1" },
   });
@@ -82,7 +82,7 @@ test("a row's where is its project with projects, else the folder beside a typed
 test("a row with no session id does not open and is never named by an id", () => {
   const line = sessionLine(row(null, 1, { name: null }), TODAY, false, UTC);
   assert.equal(line.session, null);
-  assert.equal(line.name, "proj-a · started Tue 08:52");
+  assert.equal(line.name, "proj-a · started Nov 3 08:52");
   assert.match(line.key, /^claude\/\//);
 });
 
@@ -98,7 +98,7 @@ test("the table holds every figure of the rows shown, naming the list when two s
                              { label: "Earlier", rows: [] }], TODAY, false, UTC);
   assert.deepEqual(one.columns.map((column) => column.label),
     ["Session", "Folder", "Harness", "Models", "First request", "Last request", "Context", "Requests", "Tokens", "Cost"]);
-  assert.deepEqual(one.rows[0].cells, ["proj-a · started Tue 08:52", "/work/proj-a", "claude", "m-a", "Tue 08:52",
+  assert.deepEqual(one.rows[0].cells, ["proj-a · started Nov 3 08:52", "/work/proj-a", "claude", "m-a", "Tue 08:52",
                                        "Tue 10:20", "10 of 100", "15", "1.20k", "$5.35"]);
   const two = sessionsTable([{ label: "This week", rows: [row("s-1", 2, { project: "proj-b" })] },
                              { label: "Earlier", rows: [row("s-1", 1, { unpriced_tokens: 9, complete: false })] }],
