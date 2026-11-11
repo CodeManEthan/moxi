@@ -95,6 +95,9 @@ FIVE = "claude/plan/300"
 WEEK = "claude/plan/10080"
 OPUS = "claude/opus/10080"
 NO_SUCH_VIEW = "There is no such view here."
+#: What ends the readings line: the session the readings came from, which the index does
+#: not hold, so it has no name, folder or start to be told by.
+LAST_FROM = " · the last from Claude Code session"
 
 
 def run(shell, *argv: str) -> str:
@@ -399,11 +402,14 @@ def test_an_opened_row_says_its_window_its_readings_and_who_used_it(seeded, page
         rf"^opened {WHEN}, resets {WHEN} · (39|4\d)% of it gone, 48% used$"))
     readings = lines.locator("[data-opened=readings]")
     expect(readings.locator(".k")).to_have_text("Readings")
-    # The first reading of the period and the row's own; no session is named.
-    expect(readings.locator(".f")).to_have_text(re.compile(rf"^20% at {WHEN}, 48% at {WHEN}$"))
+    # The first reading of the period and the row's own, then the session it came from.
+    expect(readings.locator(".f")).to_have_text(
+        re.compile(rf"^20% at {WHEN}, 48% at {WHEN}{LAST_FROM}$"))
     used = lines.locator("[data-opened=used]")
     expect(used.locator(".k")).to_have_text("Used by")
-    expect(used.locator("[data-part=used-row]")).to_have_count(0)
+    # The one session since the window opened, by its folder and start.
+    expect(used.locator("[data-part=used-row]")).to_have_text(
+        [re.compile(rf"^\s*proj-a · started {WHEN} · \d+ requests\s*(at least )?\$\d+\.\d\d$")])
     total = used.locator("[data-part=used-total]")
     expect(total.locator("span").first).to_have_text(re.compile(rf"^1 session, \d requests since {WHEN}$"))
     expect(total.locator("span").last).to_have_text(re.compile(r"^(at least )?\$\d+\.\d\d$"))
@@ -420,7 +426,7 @@ def test_a_window_whose_start_is_not_known_says_its_reset_and_no_who(seeded, pag
     panel = open_page(page, "limit/claude/plan/10080")
     lines = opened(panel)
     expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(rf"^resets {WHEN} · 0% used$"))
-    expect(lines.locator("[data-opened=readings] .f")).to_have_text(re.compile(rf"^0% at {WHEN}$"))
+    expect(lines.locator("[data-opened=readings] .f")).to_have_text(re.compile(rf"^0% at {WHEN}{LAST_FROM}$"))
     expect(lines.locator("[data-opened=used]")).to_have_count(0)
     # Why the row has no fill time is one dim line under the others.
     expect(lines.locator("[data-opened=note]")).to_have_text([re.compile(r"^No fill time: .+")])
@@ -431,7 +437,7 @@ def test_a_scoped_limit_says_its_window_and_one_reading_and_not_who_used_it(seed
     lines = opened(panel)
     expect(lines.locator("[data-opened=window] .f")).to_have_text(re.compile(
         rf"^opened {WHEN}, resets {WHEN} · \d+% of it gone, 33% used$"))
-    expect(lines.locator("[data-opened=readings] .f")).to_have_text(re.compile(rf"^33% at {WHEN}$"))
+    expect(lines.locator("[data-opened=readings] .f")).to_have_text(re.compile(rf"^33% at {WHEN}{LAST_FROM}$"))
     expect(lines.locator("[data-opened=used]")).to_have_count(0)
 
 
@@ -451,8 +457,9 @@ def test_a_line_whose_fact_the_answer_does_not_carry_is_absent(seeded, page):
 
 
 def test_an_opened_row_says_it_is_reading_until_its_read_answers(seeded, page):
-    held = []
-    page.route("**/m/usage/api/window?*", lambda route: held.append(route))
+    held, let_through = [], []
+    page.route("**/m/usage/api/window?*",
+               lambda route: route.continue_() if let_through else held.append(route))
     panel = open_page(page)
     limit(panel, FIVE).click()
     lines = opened(panel)
@@ -460,6 +467,8 @@ def test_an_opened_row_says_it_is_reading_until_its_read_answers(seeded, page):
     expect(lines.locator("[data-opened=window]")).to_have_count(0)
     expect(limit(panel, FIVE).locator("[data-part=close]")).to_have_text("Close")
     assert held, "the window was not asked for"
+    # A read asked after these goes through, so the row is not left on one held.
+    let_through.append(True)
     for route in held:
         route.continue_()
     expect(lines.locator("[data-opened=window]")).to_be_visible()

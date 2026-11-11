@@ -6,7 +6,7 @@
 import { costWords, countWords } from "./cost-model.ts";
 import { LOCAL, seconds, whenWord } from "./days.ts";
 import type { Clock } from "./days.ts";
-import type { OpenedWindow, UsedRow, Window } from "./feed.ts";
+import type { OpenedWindow, SessionRef, Window } from "./feed.ts";
 import { percentWords } from "./limits-model.ts";
 
 /** One labelled line: `Window  opened 16:34, resets 21:34 · 52% of it gone, 49% used`. */
@@ -59,8 +59,9 @@ export interface OpenedFacts {
   /** The page server's time, epoch seconds: the same the row's tick is drawn at. */
   now: number;
   /** A session's name as the page shows one; null where none is read, and then the
-   * session has no line. A session is never shown by its id. */
-  name?: (row: UsedRow) => string | null;
+   * session has no line and the last reading names no session. A session is never shown
+   * by its id. */
+  name?: (ref: SessionRef) => string | null;
 }
 
 export const CLOSE = "Close";
@@ -82,7 +83,8 @@ function pair(a: number | null, b: number | null, today: string, clock: Clock): 
  * - `Window`: when it opened and when it resets, then how much of it is gone and how
  *   much is used. A window whose start is not known says only its reset and its use.
  * - `Readings`: the period's first reading and the row's own, each a percent and its
- *   time; one reading when the period holds no earlier one. A reading with no percent
+ *   time; one reading when the period holds no earlier one, then `the last from
+ *   <session>` when the row's own reading names a session. A reading with no percent
  *   is left out, and with none left the line is absent.
  * - `Used by`: the sessions the answer lists that have a name, then the count of
  *   sessions and requests since the window opened with their cost. Absent when the
@@ -122,10 +124,12 @@ export function openedLimit(facts: OpenedFacts, clock: Clock = LOCAL): OpenedLim
       .filter((reading): reading is { at: number; percent: number } => reading !== null && reading.at !== null);
     if (found.length > 0) {
       const when = pair(found[0].at, found[found.length - 1].at, today, clock);
+      const session = readings.last?.session ?? null;
+      const from = session === null || facts.name === undefined ? null : facts.name(session);
       lines.push({
         key: "readings", label: READINGS,
         text: found.map((reading) => `${percentWords(reading.percent)} at ${when(reading.at)}`).join(", "),
-        dim: null,
+        dim: from === null ? null : `the last from ${from}`,
       });
     }
   }

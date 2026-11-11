@@ -924,7 +924,7 @@ export class UsagePage extends LitElement {
     const opened = at.piece !== "limit" || openedSource === null ? null : {
       key: `${at.harness}/${at.limit}/${at.minutes}`,
       model: openedLimit({ window: this.#window?.value ?? null, loading: this.#window?.loading ?? true,
-                           row: openedSource, now: limits.now() }),
+                           row: openedSource, now: limits.now(), name: (ref) => sessionName(ref, today).name }),
     };
     const frame = frameModel({
       limits, status, daily, event: this.#event, pass: this.#pass, most: this.#most(today), range, others,

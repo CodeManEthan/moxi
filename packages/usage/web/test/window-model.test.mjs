@@ -59,6 +59,21 @@ test("the readings are the period's first and the row's own; no session is named
     { key: "readings", label: "Readings", text: "22% at 17:45, 49% at 19:08", dim: null });
 });
 
+test("the readings end with the session the last one came from, by its name", () => {
+  const last = { at: "2026-11-08T19:08:00Z", used_percent: 49.4,
+                 session: { harness: "claude", session_id: "s1", name: "planner", folder: "/work/proj-a",
+                            started: at("2026-11-08T12:45:00Z"), known: true } };
+  const named = answer({ readings: { count: 5, first: { at: "2026-11-08T17:45:00Z", used_percent: 22.0 }, last } });
+  const name = (ref) => ref.name;
+  assert.deepEqual(line(opened(named, { name }), "readings"),
+    { key: "readings", label: "Readings", text: "22% at 17:45, 49% at 19:08", dim: "the last from planner" });
+  // A session the page has no name for, and a reading that names none, add nothing.
+  assert.equal(line(opened(named, { name: () => null }), "readings").dim, null);
+  assert.equal(line(opened(named), "readings").dim, null);
+  const none = answer({ readings: { count: 1, first: null, last: { ...last, session: null } } });
+  assert.equal(line(opened(none, { name }), "readings").dim, null);
+});
+
 test("one reading stands alone, and a first on another day names both days", () => {
   const single = answer({ readings: { count: 1, first: null, last: { at: "2026-11-08T19:08:00Z", used_percent: 49.4 } } });
   assert.equal(line(opened(single), "readings").text, "49% at 19:08");
