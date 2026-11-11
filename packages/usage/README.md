@@ -397,7 +397,8 @@ sessions module. Top to bottom:
     measured, and `Open in Sessions`, `Table`, `Check against a bill` and `Copy id`.
   - Projects, or Folders where the projects module is not installed, by cost. A row
     filters the page to it and opens Sessions. Files with no project are one `no
-    project` row, and the sentence under the list names their folders.
+    project` row, and the sentence under the list names the dearest three of their
+    folders and counts the rest as `N more`, which opens the table that lists them all.
   - Models, by cost.
   - Token kinds: how much input was read from cache, the four classes, and what caching
     saved, as an estimate.
