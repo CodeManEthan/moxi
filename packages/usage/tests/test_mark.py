@@ -305,7 +305,7 @@ class Codex:
 
     def context(self, tokens):
         self.r.user("go")
-        self.r.request(sessions.testing.token_usage(input=tokens, cached=tokens // 2))
+        self.r.request(sessions.testing.token_usage(input_tokens=tokens, cached=tokens // 2))
         self.r.write()
 
     def agent_context(self, tokens):
@@ -313,7 +313,7 @@ class Codex:
             self.child = self.r.spawn(CHILD, "explore")
             self.child.turn(MODEL)
         self.child.user("look")
-        self.child.request(sessions.testing.token_usage(input=tokens, cached=0))
+        self.child.request(sessions.testing.token_usage(input_tokens=tokens, cached=0))
         self.r.write()
         self.child.write()
 

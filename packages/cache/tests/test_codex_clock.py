@@ -112,7 +112,7 @@ class Rollout:
             "thread_id": self.tid if thread is ... else thread, "turn_id": turn,
             "session_id": self.tid if session is ... else session,
             "response_id": rid or f"resp_{turn}_{int(t)}",
-            "usage": token_usage(input=inp, cached=cached, output=5, reasoning=0)})
+            "usage": token_usage(input_tokens=inp, cached=cached, output=5, reasoning=0)})
 
     def turn(self, turn, t, *, model="gpt-5.6-terra", length=5.0, inp=20_000,
              cached=19_500, records=1):

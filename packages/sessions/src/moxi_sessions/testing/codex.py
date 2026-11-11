@@ -5,7 +5,7 @@
     r.user("read the notes")
     call = r.tool_call("exec", "cat notes.md")
     r.tool_output(call, "the notes")
-    r.request(token_usage(input=1200, cached=1000, output=40))
+    r.request(token_usage(input_tokens=1200, cached=1000, output=40))
     r.assistant("done")
     r.turn_end()
     path = r.write()
@@ -84,13 +84,13 @@ def spawn_meta(parent_thread: str, *, depth: int = 1, agent_path: str = "/root/t
             "multi_agent_version": "v2"}
 
 
-def token_usage(*, input: int = 1000, cached: int = 800, cache_write: int = 0,
+def token_usage(*, input_tokens: int = 1000, cached: int = 800, cache_write: int = 0,
                 output: int = 50, reasoning: int = 10) -> dict:
-    """A Codex usage object. `input` includes `cached` and `output` includes `reasoning`,
-    as Codex counts them."""
-    return {"input_tokens": input, "cached_input_tokens": cached,
+    """A Codex usage object. `input_tokens` includes `cached`; `output` includes
+    `reasoning`, as Codex counts them."""
+    return {"input_tokens": input_tokens, "cached_input_tokens": cached,
             "cache_write_input_tokens": cache_write, "output_tokens": output,
-            "reasoning_output_tokens": reasoning, "total_tokens": input + output}
+            "reasoning_output_tokens": reasoning, "total_tokens": input_tokens + output}
 
 
 def rate_limits(*, limit_id: str | None = "codex", limit_name: str | None = None,

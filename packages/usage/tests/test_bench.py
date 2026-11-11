@@ -235,7 +235,7 @@ def build(root: Path, now: float) -> Corpus:
             r.user("Fix the failing test.")
             for _ in range(rnd.randint(1, 8)):
                 five = rnd.uniform(0, 100)
-                spent = token_usage(input=rnd.randint(2_000, 120_000),
+                spent = token_usage(input_tokens=rnd.randint(2_000, 120_000),
                                     cached=rnd.randint(0, 1_900),
                                     output=rnd.randint(20, 3_000))
                 windows = rate_limits(primary=(five, 300, r.clock + 2 * HOUR),

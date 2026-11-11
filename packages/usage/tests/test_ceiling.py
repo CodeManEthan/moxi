@@ -312,8 +312,8 @@ def test_a_codex_agents_own_rollout_is_its_source():
     r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
     r.turn()
     r.user("go")
-    r.request(token_usage(input=30_000, cached=0), response_id="resp_1")
-    r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")
+    r.request(token_usage(input_tokens=30_000, cached=0), response_id="resp_1")
+    r.request(token_usage(input_tokens=30_000 + HARD, cached=0), response_id="resp_2")
     r.turn_end()
     r.write()
     call = SimpleNamespace(harness="codex", session_id="0190c000-parent", agent_id=THREAD,
@@ -333,8 +333,8 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
     r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
     r.turn()
     r.user("look into it")
-    r.request(token_usage(input=30_000, cached=0), response_id="resp_1")
-    r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")
+    r.request(token_usage(input_tokens=30_000, cached=0), response_id="resp_1")
+    r.request(token_usage(input_tokens=30_000 + HARD, cached=0), response_id="resp_2")
     r.write()
     parent = "0190c000-0000-7000-8000-0000000004c3"
 

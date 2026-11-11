@@ -55,6 +55,7 @@ cache	packages/cache/tests/test_codex_clock.py	assert clock.lowering is None and
 cache	packages/cache/tests/test_codex_clock.py	assert clock.lowering is None and clock.ttl_seconds == in_force	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/tests/test_codex_clock.py	assert clock.lowering["lifetime"] == 2400 and clock.ttl_seconds == 2400	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/tests/test_codex_clock.py	assert codex_read(root, drift=view).ttl_seconds == measured_seconds()	use	.ttl_seconds	.ttl_s
+cache	packages/cache/tests/test_codex_clock.py	"usage": token_usage(input=inp, cached=cached, output=5, reasoning=0)})	use	input=	input_tokens=
 cache	packages/cache/tests/test_drift.py	assert clock.lowering["lifetime"] == lowered and clock.ttl_seconds == lowered	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/tests/test_drift.py	assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"	use	again.ttl_seconds	again.ttl_s
 cache	packages/cache/tests/test_drift.py	assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"	use	first.ttl_seconds	first.ttl_s
@@ -67,6 +68,7 @@ cache	packages/cache/tests/test_opencode_clock.py	assert clock.age_seconds == py
 cache	packages/cache/tests/test_opencode_clock.py	assert clock.kind == "warm" and clock.age_seconds == pytest.approx(100, abs=0.01)	use	clock.age_seconds	clock.age_s
 cache	packages/cache/tests/test_opencode_clock.py	assert clock.kind == "cold" and clock.age_seconds == pytest.approx(400, abs=0.01)	use	clock.age_seconds	clock.age_s
 cache	packages/cache/tests/test_table.py	assert (after.kind, after.ttl_seconds, after.key) == ("warm", 600, "codex openai/gpt-5.5")	use	after.ttl_seconds	after.ttl_s
+cache	packages/cache/tests/test_table.py	r.request(token_usage(input=100, cached=90))	use	input=	input_tokens=
 cache	packages/cache/tests/test_timer.py	monkeypatch.setattr(proc, "environ", lambda pid: {"PID": str(pid)})	use	"environ"	"process_env"
 cache	packages/cache/tests/test_timer.py	monkeypatch.setattr(proc, "environ", lambda pid: None)	use	"environ"	"process_env"
 cache	packages/cache/tests/test_timer.py	monkeypatch.setattr(proc, "environ", refuse)	use	"environ"	"process_env"
@@ -679,6 +681,8 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	"HOME": ".",	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	#: `HOME`, under the test's `tmp_path`.	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	"""uv's cache and installed-Python directories, as uv finds them from `environ`;	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	__all__ = ["ANCHOR_HOME", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",	keep	ANCHOR_HOME	ANCHOR_HOME
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	console_script	name	directory	script_dir
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	`PATHEXT`. A test that needs the path uses the one returned, never `directory / name`.	use	directory / name	script_dir / name
 moxi-dev	packages/moxi-dev/tests/test_check.py	kw.setdefault("environ", {"PATH": "/usr/bin", "VIRTUAL_ENV": str(repo / ".venv")})	keep	environ	environ
 moxi-dev	packages/moxi-dev/tests/test_check_e2e.py	assert not (Path(os.environ["HOME"]) / ".cache" / "uv").exists()  # the real cache served	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_contract_rules.py	assert skilled.findings(staged=True) == []	keep	staged	staged
@@ -903,6 +907,8 @@ sessions	packages/sessions/src/moxi_sessions/source.py	"""A harness's root, wher
 sessions	packages/sessions/src/moxi_sessions/source.py	return RootOrigin(harness, path, "environment", "CLAUDE_CONFIG_DIR/projects")	keep	environment	environment
 sessions	packages/sessions/src/moxi_sessions/source.py	return RootOrigin(harness, path, "environment", "CODEX_HOME/sessions")	keep	environment	environment
 sessions	packages/sessions/src/moxi_sessions/source.py	return RootOrigin(harness, path, "environment",	keep	environment	environment
+sessions	packages/sessions/src/moxi_sessions/testing/codex.py	token_usage	name	input	input_tokens
+sessions	packages/sessions/src/moxi_sessions/testing/codex.py	r.request(token_usage(input=1200, cached=1000, output=40))	use	input=	input_tokens=
 sessions	packages/sessions/tests/browser_seed.py	a.step(text="opencode done", input=900, output=40)	keep	input	input
 sessions	packages/sessions/tests/browser_seed.py	k.step(text="looked", input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/test_api.py	assert list(inspect.signature(api.retention).parameters) == ["environ"]	use	"environ"	"env"
@@ -1373,8 +1379,12 @@ usage	packages/usage/tests/test_allowlist.py	os.symlink(p["HOME"], os.path.join(
 usage	packages/usage/tests/test_allowlist.py	commands=commands, home=P["HOME"])	keep	HOME	HOME
 usage	packages/usage/tests/test_allowlist.py	monkeypatch.setenv("HOME", p["HOME"])	keep	HOME	HOME
 usage	packages/usage/tests/test_bench.py	return {"PATH": os.environ.get("PATH", ""), "HOME": str(home),	keep	HOME	HOME
+usage	packages/usage/tests/test_bench.py	spent = token_usage(input=rnd.randint(2_000, 120_000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_page.py	holder.wait(timeout=30)	keep	timeout	timeout
 usage	packages/usage/tests/test_ceiling.py	tool_use_id="toolu_1", input=tool_input or {}, cwd=cwd,	keep	input	input
+usage	packages/usage/tests/test_ceiling.py	r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")	use	input=	input_tokens=
+usage	packages/usage/tests/test_ceiling.py	r.request(token_usage(input=30_000, cached=0), response_id="resp_1")	use	input=	input_tokens=
+usage	packages/usage/tests/test_context.py	r.request(token_usage(input=50_000, cached=40_000), response_id="resp_c1",	use	input=	input_tokens=
 usage	packages/usage/tests/test_index.py	parent = db.session(title="fix it", directory="/work/project")	keep	directory	directory
 usage	packages/usage/tests/test_index.py	reply.step(input=900, output=40, cache_read=100)	keep	input	input
 usage	packages/usage/tests/test_index.py	child = parent.child(title="look", directory="/work/project")	keep	directory	directory

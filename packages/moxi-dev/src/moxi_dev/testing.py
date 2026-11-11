@@ -1207,16 +1207,16 @@ def param_id(value: object) -> str:
     return type(value).__qualname__
 
 
-def console_script(directory: str | os.PathLike[str], name: str,
+def console_script(script_dir: str | os.PathLike[str], name: str,
                    source: str | None = None) -> Path:
-    """Write a stand-in for console script `name` into `directory` and return its path.
+    """Write a stand-in for console script `name` into `script_dir` and return its path.
 
     It has the name this system finds a console script by, so `moxi.paths.script(name)`
-    finds it when the scripts directory is `directory`, and so does a PATH lookup
-    (`shutil.which`) when `directory` is on PATH; and it runs. On POSIX it is `name`, a
+    finds it when the scripts directory is `script_dir`, and so does a PATH lookup
+    (`shutil.which`) when `script_dir` is on PATH; and it runs. On POSIX it is `name`, a
     `/bin/sh` script with mode 0o755. On Windows it is `name.cmd`, a batch file: an
     installer writes `name.exe`, which a test can't write as text, and `.cmd` is on every
-    `PATHEXT`. A test that needs the path uses the one returned, never `directory / name`.
+    `PATHEXT`. A test that needs the path uses the one returned, never `script_dir / name`.
 
     With no `source` it does nothing and exits 0. With `source`, Python code, it runs
     that code under this interpreter, with the stand-in's arguments in `sys.argv[1:]`,
@@ -1227,7 +1227,7 @@ def console_script(directory: str | os.PathLike[str], name: str,
     if WINDOWS:
         if source is not None and "%" in python:
             raise ValueError(f"can't quote {python!r} for cmd.exe")
-        path = Path(directory, f"{name}.cmd")
+        path = Path(script_dir, f"{name}.cmd")
         # `-x` makes Python skip the first line, the one cmd.exe runs; `call` reads
         # Python's exit status after it ran, not when cmd.exe read the line.
         head = ("@exit /b 0" if source is None
@@ -1235,7 +1235,7 @@ def console_script(directory: str | os.PathLike[str], name: str,
         path.write_bytes(f"{head}\r\n{source or ''}".replace("\r\n", "\n")
                          .replace("\n", "\r\n").encode())
         return path
-    path = Path(directory, name)
+    path = Path(script_dir, name)
     if source is None:
         path.write_text("#!/bin/sh\n")
     else:

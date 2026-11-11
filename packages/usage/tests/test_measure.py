@@ -289,7 +289,7 @@ def rollout(n, *, model=CODEX_MODEL):
     r.turn(model)
     for k in range(1, 6):
         r.user("go")
-        r.request(sessions.testing.token_usage(input=context_of(k),
+        r.request(sessions.testing.token_usage(input_tokens=context_of(k),
                                                cached=PREFIX if k == 1
                                                else context_of(k - 1)),
                   response_id=f"resp_{n}_{k}")

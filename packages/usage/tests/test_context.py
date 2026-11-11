@@ -75,7 +75,7 @@ def test_codexs_reported_window_wins_over_the_table():
     r = CodexRollout(Path(sessions.root("codex")), thread_id=THREAD)
     r.turn(context_window=200_000)
     r.user("go")
-    r.request(token_usage(input=50_000, cached=40_000), response_id="resp_c1",
+    r.request(token_usage(input_tokens=50_000, cached=40_000), response_id="resp_c1",
               context_window=200_000)
     r.turn_end()
     r.write()
