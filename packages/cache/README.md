@@ -31,7 +31,8 @@ while the recipient's cache is cold), and it adds these commands:
 The watcher also writes its reading, `watch.json` beside the clock records, after every
 tick: when it last ticked and when it last listed Claude Code's live sessions. Its page
 and `moxi cache doctor` read it to say whether the watcher is reading, running but not
-listing, or stopped, and when.
+listing, or stopped, and when. A watcher started before cache 0.1.5 writes no reading
+until it restarts; until then the page and doctor judge it by the clock records alone.
 
 With the `ui` extra, cache's page in Moxi's browser shell lists each session that has a
 clock record. A row is named as the Sessions page names it, by its typed name, else its

@@ -5,6 +5,9 @@
 - The watcher writes its reading, `watch.json` beside the clock records, after every
   tick: when it last ticked, when it last listed Claude Code's live sessions (null until
   it has) and the records' `stale_after`. The file stays when the watcher stops.
+- A watcher already running when cache updates to 0.1.5 writes no reading until it
+  restarts on 0.1.5. Until then the page and `moxi cache doctor` judge the watcher by the
+  clock records, as before.
 - `moxi cache doctor`'s watcher line leads with what the reading says: the watcher is
   reading, running but not listing Claude's sessions since a time, or stopped at a time.
   With no reading file the line is as before.
