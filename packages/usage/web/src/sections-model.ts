@@ -44,11 +44,17 @@ export interface SectionRow {
   patch: Partial<PageState> | null;
 }
 
-/** A piece of the sentence under the list: words, or a folder that filters to itself. */
+/** A piece of the sentence under the list: words, a folder that filters to itself, or the
+ * count of the folders it does not name, which opens the section's table. */
 export interface SentencePart {
   text: string;
   patch: Partial<PageState> | null;
+  /** True for `N more`: it opens the table, whose rows name every folder. */
+  table?: boolean;
 }
+
+/** How many folders with no project the sentence names, the dearest first. */
+export const LOOSE_NAMED = 3;
 
 export interface Section {
   key: SectionKey;
@@ -120,8 +126,9 @@ const sumOf = (row: RowSums): Sum => sumRows([row]);
 /**
  * The Projects section from `/api/projects` by project, or Folders from it by folder
  * (`folders`). Projects' files with no project are one `no project` row, their sum,
- * and the sentence under the list names their folders, each of which filters to
- * itself; Folders has no such row. A project row sets the project filter and a folder
+ * and the sentence under the list names the dearest three of their folders, each of
+ * which filters to itself, and counts the rest as `N more`, which opens the table that
+ * lists them all; Folders has no such row. A project row sets the project filter and a folder
  * row the folder filter. Null until the report has answered, and with no row.
  */
 export function placesSection(report: Report<ProjectRow> | null, folders: boolean): Section | null {
@@ -147,7 +154,10 @@ export function placesSection(report: Report<ProjectRow> | null, folders: boolea
     const fold = loose.length === 0 ? [] : [costRow("no-project", NO_PROJECT, sumRows(loose), whole, null)];
     rows = byCost([...own, ...fold], (row) => row.sum, (row) => row.name);
     const paths = loose.map((row) => row.cwd).filter((path): path is string => path !== null);
-    const parts: SentencePart[] = paths.map((path) => ({ text: folder(path), patch: { folder: path, project: "" } }));
+    const parts: SentencePart[] = paths.slice(0, LOOSE_NAMED)
+      .map((path) => ({ text: folder(path), patch: { folder: path, project: "" } }));
+    const unnamed = paths.length - LOOSE_NAMED;
+    if (unnamed > 0) parts.push({ text: `${unnamed.toLocaleString("en-US")} more`, patch: null, table: true });
     if (loose.some((row) => row.cwd === null)) parts.push({ text: "files with no folder", patch: null });
     sentence = [...(parts.length ? [{ text: `"${NO_PROJECT}" is `, patch: null }, ...listed(parts), { text: ". ", patch: null }] : []),
                 { text: "A project row opens the Sessions section above, filtered to it.", patch: null }];

@@ -56,6 +56,24 @@ test("three folders with no project are listed with commas, and files with no fo
   assert.equal(words, "\"no project\" is /w/a, /w/b and files with no folder. A project row opens the Sessions section above, filtered to it.");
 });
 
+test("with 379 folders of no project the sentence names the dearest three and counts the rest", () => {
+  const loose = Array.from({ length: 379 }, (_, n) => place(null, `/home/alice/work/f-${n}`, 1 + n / 100));
+  const report = answer([place("proj-a", null, 2000), ...loose, place(null, null, 0.01)], 3100, { home: HOME });
+  const { sentence, rows, table } = placesSection(report, false);
+  assert.equal(sentence.map((part) => part.text).join(""),
+               "\"no project\" is ~/work/f-378, ~/work/f-377, ~/work/f-376, 376 more and files with no folder. "
+               + "A project row opens the Sessions section above, filtered to it.");
+  assert.deepEqual(sentence.filter((part) => part.patch !== null).map((part) => part.patch.folder),
+                   ["/home/alice/work/f-378", "/home/alice/work/f-377", "/home/alice/work/f-376"]);
+  // `376 more` opens the table, whose rows hold every folder by name.
+  assert.deepEqual(sentence.filter((part) => part.table), [{ text: "376 more", patch: null, table: true }]);
+  assert.equal(table.rows.length, 381);
+  assert.deepEqual(rows.map((row) => row.name), ["proj-a", NO_PROJECT]);
+  // Three folders are named with no count.
+  const three = answer(loose.slice(0, 3), 3, { home: HOME });
+  assert.equal(placesSection(three, false).sentence.filter((part) => part.table).length, 0);
+});
+
 test("with every file in a project the sentence only says what a row does", () => {
   const report = answer([place("proj-a", null, 3)], 3, { home: HOME });
   const section = placesSection(report, false);

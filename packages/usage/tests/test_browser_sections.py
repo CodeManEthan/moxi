@@ -167,6 +167,28 @@ def test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder(p
     expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 
+def test_with_hundreds_of_folders_of_no_project_the_sentence_names_three_and_more_opens_the_table(page):
+    def many(route):
+        answer = route.fetch()
+        body = answer.json()
+        loose = next(row for row in body["rows"] if row["project"] is None)
+        home = body["home"].rstrip("/")
+        body["rows"] += [{**loose, "cwd": f"{home}/work/f-{n}", "cost": loose["cost"] / 2}
+                         for n in range(378)]  # with ~/work/loose, 379 folders of no project
+        route.fulfill(response=answer, json=body)
+
+    page.route("**/m/usage/api/projects?*", many)
+    panel = open_page(page, "projects")
+    section = section_of(panel, "projects")
+    sentence = section.locator("[data-part=sentence]")
+    expect(sentence).to_have_text(re.compile(
+        r'^"no project" is ~/work/loose, ~/work/f-\d+, ~/work/f-\d+ and 376 more\. A project row'))
+    expect(sentence.locator("a")).to_have_count(3)
+    expect(section.locator("table[data-part=table]")).to_have_count(0)
+    sentence.get_by_role("button", name="376 more").click()
+    expect(section.locator("table[data-part=table] tbody tr")).to_have_count(381)
+
+
 def test_a_project_row_sets_the_project_filter_and_opens_sessions(page):
     panel = open_page(page, "projects")
     section = section_of(panel, "projects")

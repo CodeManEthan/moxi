@@ -1201,7 +1201,7 @@ export class UsagePage extends LitElement {
             : html`<a class="tr2" data-row=${row.key} href=${addressPath(SESSIONS)}
                 @click=${(event: MouseEvent) => this.#filterTo(event, patch)}>${cells}</a>`;
         })}
-          ${model.sentence === null ? nothing : html`<p data-part="sentence">${model.sentence.map((part) => this.#part(part))}</p>`}
+          ${model.sentence === null ? nothing : html`<p data-part="sentence">${model.sentence.map((part) => this.#part(part, key))}</p>`}
           <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(shown)}
             @click=${() => { this.sectionTable = shown ? null : key; }}>${shown ? HIDE_TABLE : SECTION_TABLE}</button></p>
           ${shown ? this.#table(model.table) : nothing}
@@ -1687,7 +1687,11 @@ export class UsagePage extends LitElement {
     </table></div>`;
   }
 
-  #part(part: SentencePart) {
+  #part(part: SentencePart, key: SectionKey) {
+    if (part.table) {
+      return html`<button type="button" class="act" data-part="more-folders" aria-expanded=${String(this.sectionTable === key)}
+        @click=${() => { this.sectionTable = key; }}>${part.text}</button>`;
+    }
     const patch = part.patch;
     return patch === null ? part.text : html`<a href=${addressPath(SESSIONS)} data-folder=${patch.folder ?? ""}
       @click=${(event: MouseEvent) => this.#filterTo(event, patch)}>${part.text}</a>`;
