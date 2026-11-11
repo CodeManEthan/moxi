@@ -327,10 +327,19 @@ def range_button(panel):
     return panel.locator("[data-part=filters] [data-filter=range] button.pick")
 
 
+def settled(panel) -> None:
+    """Waits until the filter line holds its three filters, Range, the place and Model
+    (one harness gives no Harness filter): a filter is absent until its list answers,
+    and a menu opened meanwhile closes when the line is drawn again."""
+    expect(panel.locator("[data-part=filters] [data-filter]")).to_have_count(3)
+
+
 def set_filters(panel) -> None:
+    settled(panel)
     range_button(panel).click()
     panel.locator("[data-menu=range]").get_by_role("menuitemradio", name=re.compile("^Last 7 days")).click()
     expect(range_button(panel)).to_have_text("last 7 days▾")
+    settled(panel)
     model = panel.locator("[data-part=filters] [data-filter=model]")
     model.locator("button.pick").click()
     model.get_by_role("menuitemradio", name=MODEL).click()
