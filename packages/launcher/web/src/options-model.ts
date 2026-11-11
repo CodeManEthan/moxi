@@ -496,13 +496,6 @@ export function offRows(fields: readonly PanelField[], base: readonly PanelField
   }));
 }
 
-/** The line under the box for the rows a preset sets off the usual: `Preset planner sets
- * Permission mode, Allowed tools off your defaults`; null when it sets none. */
-export function presetOffLine(preset: string, rows: readonly OffRow[]): string | null {
-  const labels = rows.filter((row) => row.source === "preset").map((row) => row.label);
-  return labels.length === 0 ? null : `Preset ${preset} sets ${labels.join(", ")} off your defaults`;
-}
-
 // --- Tools > Built-in ----------------------------------------------------------------------
 
 /** The rows of the tools the session may use without asking, and may not use. */

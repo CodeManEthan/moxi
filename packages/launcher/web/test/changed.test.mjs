@@ -5,7 +5,7 @@ import test from "node:test";
 import { filledFields, NO_PRESET, parseForm } from "../src/panel.ts";
 import {
   afterLaunch, asksFirst, CHANGED, changes, dangerNames, findRows, isDanger, offRows, OPTIONS, optionsWord, panelGroups,
-  presetOffLine, RESET, summaryOf, summaryWords, turnedOn, withOption,
+  RESET, summaryOf, summaryWords, turnedOn, withOption,
 } from "../src/options-model.ts";
 import { CONFIRMED, DANGER_SAYS, dangerSentences, launchedValue, launchRequest, offPosture } from "../src/prompt-model.ts";
 
@@ -364,8 +364,6 @@ test("every row off the usual is named, each with what gave it its value", () =>
   const rows = offRows(fields, base, options, carried);
   assert.deepEqual(rows.map((row) => [row.name, row.source]), [
     ["allowed_tools", "preset"], ["permission_mode", "preset"], ["sandbox", "typed"], ["approval", "filled"]]);
-  assert.equal(presetOffLine("planner", rows), "Preset planner sets Allowed tools, Permission mode off your defaults");
-  assert.equal(presetOffLine("planner", rows.filter((row) => row.source !== "preset")), null);
   assert.equal(launchRequest(fields, form, { ...carried, ...options, cwd: "~" }, RUN, base).off_posture, true);
 });
 
