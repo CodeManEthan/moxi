@@ -443,6 +443,16 @@ test("a model of two groups gets a subtotal equal to their sum, and one of one g
   assert.ok(Math.abs(total.cost - groupsOnly) < 1e-9);
 });
 
+test("a bill by agent names each line by its agent and model, and a subtotal by its agent", () => {
+  const main = { ...termsRow(null, [group("m-a", five(1000, 0, 0, 0, 100)), group("m-b", five(10, 0, 0, 0, 1))]),
+                 agent: "main", kind: "main" };
+  const helper = { ...termsRow(null, [group("m-b", five(100, 0, 0, 0, 10))]), agent: "a-1", kind: "subagent" };
+  const lines = reconcileLines(report([main, helper], { total: sums({ cost: main.cost + helper.cost }) }));
+  assert.deepEqual(lines.map((line) => [line.kind, line.model]), [
+    ["group", "main · m-a"], ["group", "main · m-b"], ["subtotal", "main total"], ["group", "a-1 · m-b"],
+    ["total", "Total"]]);
+});
+
 test("the class split's bars and keys name class and tier", () => {
   const split = [{ class: "input", tier: null, tokens: 10, cost: 1 }, { class: "output", tier: "fast", tokens: 5, cost: 3 },
                  { class: "output", tier: null, tokens: 5, cost: 1 }];

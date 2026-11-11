@@ -343,7 +343,7 @@ export function placedRow(report: Report<AgentRow> | null, requests: RequestRow[
 
 /** The chart's sizes, in px, as drawn: the request bars above, the context below, on one
  * time axis, with the words for each band's top at the left and its name at the right. */
-export const SESSION_CHART = { height: 158, left: 46, right: 50, barTop: 8, barBase: 50, contextTop: 78,
+export const SESSION_CHART = { height: 158, left: 46, right: 58, barTop: 8, barBase: 50, contextTop: 78,
                                contextBase: 136, labels: 152, barWidth: 3 };
 
 export interface SessionChart {
@@ -356,8 +356,9 @@ export interface SessionChart {
   bars: { n: number; x: number; y: number; height: number; width: number; dearest: boolean }[];
   /** A column per request that gives its readout on hover. */
   hits: { n: number; x: number; width: number; title: string }[];
-  /** The window's level, and its size at the left; null when no request knows it. */
-  window: { y: number; words: string } | null;
+  /** The window each request ran against, stepping where it changes; the last level and
+   * its size at the left. Null when no request knows its window. */
+  window: { d: string; y: number; words: string } | null;
   line: string;
   /** The last request's context, its size at the right. */
   dot: { x: number; y: number; words: string } | null;
@@ -401,10 +402,25 @@ export function sessionChart(report: Report<RequestRow, RequestsTotal>, measure:
   const hits = rows.map((row, i) => ({ n: row.n, x: xs[i] - gap / 2, width: gap, title: readout(row) }));
   // The context band reaches the window, or the largest context when that is over it.
   const shown = rows.map((row) => (row.context !== null && !row.synthetic ? row.context : null));
-  const windows = rows.map((row) => row.window).filter((w): w is number => w !== null && w > 0);
+  const levels = rows.map((row) => (row.window !== null && row.window > 0 ? row.window : null));
+  const windows = levels.filter((w): w is number => w !== null);
   const windowSize = windows.length ? windows[windows.length - 1] : null;
-  const most = Math.max(windowSize ?? 0, ...shown.map((c) => c ?? 0));
+  const most = Math.max(...windows, ...shown.map((c) => c ?? 0));
   const cy = (tokens: number): number => S.contextBase - (most > 0 ? (tokens / most) : 0) * (S.contextBase - S.contextTop);
+  let windowLine = "";
+  let level: number | null = null;
+  levels.forEach((w, i) => {
+    const x0 = i === 0 ? left : (xs[i - 1] + xs[i]) / 2;
+    const x1 = i === rows.length - 1 ? end : (xs[i] + xs[i + 1]) / 2;
+    if (w === null) {
+      level = null;
+      return;
+    }
+    const y = round(cy(w) + 0.5);
+    windowLine += level === null ? `M${round(x0)},${y}` : w !== level ? `V${y}` : "";
+    windowLine += `H${round(x1)}`;
+    level = w;
+  });
   let line = "";
   let drawing = false;
   shown.forEach((c, i) => {
@@ -439,7 +455,7 @@ export function sessionChart(report: Report<RequestRow, RequestsTotal>, measure:
       : "Tokens of each request, and the context each one sent, over the session",
     top: measure === "cost" ? fmtCost(top) : kWords(top),
     bars, hits,
-    window: windowSize === null ? null : { y: round(cy(windowSize)), words: kWords(windowSize) },
+    window: windowSize === null ? null : { d: windowLine, y: round(cy(windowSize)), words: kWords(windowSize) },
     line, dot, turns, compactions,
     labels: timed ? timeLabels(t0, t1, left, end, today, clock) : [],
   };

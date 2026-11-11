@@ -691,13 +691,16 @@ function groupFlags(group: Group): string[] {
 }
 
 /** The Reconcile table's lines: each model's groups, a subtotal under a model of two or
- * more, then the total. The terms on each line add up to its cost. */
+ * more, then the total. The terms on each line add up to its cost. A report by agent
+ * names each line by its agent and its group's model, and a subtotal by its agent. */
 export function reconcileLines(report: Report<TermsRow>): ReconcileLine[] {
   const lines: ReconcileLine[] = [];
   for (const row of report.rows) {
-    const model = row.model ?? UNKNOWN_MODEL;
+    const byAgent = row.model === null && row.agent !== null;
+    const model = byAgent ? row.agent as string : row.model ?? UNKNOWN_MODEL;
     for (const group of row.groups) {
-      lines.push({ kind: "group", model, pricedBy: pricedBy(group), cells: group.terms.map(termCell),
+      const name = byAgent ? `${model} · ${group.model ?? UNKNOWN_MODEL}` : model;
+      lines.push({ kind: "group", model: name, pricedBy: pricedBy(group), cells: group.terms.map(termCell),
                    cost: group.cost, flags: groupFlags(group) });
     }
     if (row.groups.length > 1) {

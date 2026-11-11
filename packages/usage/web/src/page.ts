@@ -1348,15 +1348,14 @@ export class UsagePage extends LitElement {
     const after = chart.end + 6;
     return html`<svg class="ch ses-ch" data-part="session-chart" role="img" aria-label=${chart.aria} width=${chart.width}
       height=${S.height} viewBox="0 0 ${chart.width} ${S.height}">${svg`
-      <text x="0" y=${S.barTop + 3} data-part="top">${chart.top}</text>
+      <text x="0" y=${S.barTop + 5} data-part="top">${chart.top}</text>
       <line class="gr" x1=${S.left} x2=${chart.end} y1=${S.barTop - 0.5} y2=${S.barTop - 0.5}></line>
       ${chart.turns.map((x) => svg`<line class="gr" data-mark="turn" x1=${x} x2=${x} y1=${S.barTop} y2=${S.barBase}></line>`)}
       ${chart.bars.map((bar) => svg`<rect class=${bar.dearest ? "bar now" : "bar"} data-n=${bar.n} x=${bar.x} y=${bar.y}
         width=${bar.width} height=${bar.height}></rect>`)}
       <line class="ax" x1=${S.left} x2=${chart.end} y1=${S.barBase + 0.5} y2=${S.barBase + 0.5}></line>
       <text x=${after} y=${S.barBase}>a request</text>
-      ${chart.window === null ? nothing : svg`<line class="dash" data-part="window" x1=${S.left} x2=${chart.end}
-        y1=${chart.window.y + 0.5} y2=${chart.window.y + 0.5}></line>
+      ${chart.window === null ? nothing : svg`<path class="dash" data-part="window" d=${chart.window.d}></path>
         <text x="0" y=${chart.window.y + 3.5}>${chart.window.words}</text><text x=${after} y=${chart.window.y + 3.5}>window</text>`}
       <path class="ln" data-part="context" d=${chart.line}></path>
       ${chart.dot === null ? nothing : svg`<circle class="dot" cx=${chart.dot.x} cy=${chart.dot.y} r="3.5"></circle>

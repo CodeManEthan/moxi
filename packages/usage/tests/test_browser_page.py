@@ -5,8 +5,9 @@ the contract check on the page and its two blocks (the cost block saying how old
 is), each view drawn over a small index and fitting a phone, a session opened under its
 row's harness, the command with no index, a read over a stale index that runs no pass,
 and "Read new sessions" bringing new sessions in. Over a session of two turns with a compaction and a dated `[[model]]` row:
-the session view's request and context charts and their readout, a subagent's charts, and
-the Token kinds and Prices sections: the classes with a tier's part and what caching saved,
+the opened session's lines, its chart with its turns, compaction, context and each request's
+readout, its table, its bill, its restart point and its reads still out, a subagent's charts,
+and the Token kinds and Prices sections: the classes with a tier's part and what caching saved,
 the price table, `Check against a bill` with its Total against its group lines, `Details`
 and `Find a model`, the two tables keeping every column on a phone, scrolling in their
 wrappers with the Model column in view.
@@ -195,11 +196,18 @@ def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_
     row = session_row(panel, FIRST)
     expect(row).to_have_attribute("lead", re.compile(r"^\d+ requests?$"))
     requests = row.get_attribute("lead").split()[0]
+    expect(row).to_have_attribute("fact", re.compile(r"^\$\d+\.\d\d$"))
+    cost = row.get_attribute("fact")
     with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
         row.get_by_role("link", name="Open").click()
-    assert "harness=claude" in sent.value.url, sent.value.url
-    totals = panel.locator("section[data-part=view] [data-part=totals]")
-    expect(totals.locator("span", has_text="Requests").locator("b")).to_have_text(requests)
+    # Read with its list's days and its row's harness, so it adds up to the row: the main
+    # agent's requests and the subagent's, and the subagent's cost a part of the row's.
+    assert "harness=claude" in sent.value.url and "since=" in sent.value.url, sent.value.url
+    opened = row.locator("[data-part=session]")
+    expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(r"^Requests\s*3 requests (at|from) "))
+    expect(opened.locator("[data-line=subagents]")).to_have_text(
+        re.compile(rf"^Subagents\s*1 subagent · \$\d+\.\d\d of the {re.escape(cost)}$"))
+    assert int(requests) == 3 + 2
     # The harness is the address's, not a filter of the page: with one harness holding
     # files the filter has no place, before and after.
     expect(harness).to_have_count(0)
@@ -396,7 +404,7 @@ def test_the_page_keeps_the_contract_on_the_prices_section(charted, charted_page
 #: What shows on the prices section and the session view once their reads have drawn.
 CHARTED_VIEWS = {
     "prices": "section[data-group=prices] [data-part=price-table]",
-    f"sessions/claude/{CHARTED}": "section[data-part=view] svg[data-chart=requests] g[data-n]",
+    f"sessions/claude/{CHARTED}": "[data-part=session] svg[data-part=session-chart] rect.bar",
 }
 
 
@@ -482,63 +490,165 @@ def test_the_bill_and_the_rates_keep_every_column_on_a_phone_and_scroll_with_mod
     ui_width_check(charted_page)
 
 
-def test_the_session_view_charts_each_request_its_turns_compaction_and_context(
+def opened_of(panel):
+    """The opened session, under its row in the Sessions section."""
+    return panel.locator("section[data-group=sessions] [data-part=session]")
+
+
+def session_chart(panel):
+    return opened_of(panel).locator("svg[data-part=session-chart]")
+
+
+def test_the_opened_session_charts_each_request_its_turns_compaction_and_context(
         charted, charted_page):
     panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
-    bars = requests_chart(panel)
-    curve = context_chart(panel)
-    expect(bars.locator("g[data-n]")).to_have_count(6)
-    expect(bars.locator("[data-rule=turn]")).to_have_count(1)
-    compaction = bars.locator("[data-rule=compaction]")
+    chart = session_chart(panel)
+    expect(chart.locator("rect.bar")).to_have_count(6)
+    expect(chart.locator("rect.bar.now")).to_have_count(1)
+    expect(chart.locator("[data-mark=turn]")).to_have_count(1)
+    compaction = chart.locator("[data-mark=compaction]")
     expect(compaction).to_have_count(1)
-    expect(compaction).to_have_attribute("data-after", "4")
     expect(compaction.locator("text")).to_have_text("compaction (auto)")
-    expect(curve.locator("path[data-part=context]")).to_have_attribute("data-points", "6")
-    expect(curve.locator("circle.compaction-dot")).to_have_count(1)
-    expect(curve.locator("path[data-part=window]")).to_have_count(1)
-    # The shipped window for the first three, the `[[model]]` row's from the fourth on.
-    expect(curve.locator("text.window-label")).to_have_text(["window 200,000",
-                                                             "window 1,000,000"])
-
-    readout = panel.locator("section[data-part=view] [data-part=readout]")
-    expect(readout).not_to_contain_text("#5")
-    bars.locator('rect.hit[data-n="5"]').hover()
+    expect(compaction.locator("title")).to_contain_text("150,000 tokens before")
+    # One line through the six requests' context, under a window that steps up once: the
+    # shipped window for the first three, the `[[model]]` row's from the fourth on.
+    expect(chart.locator("path[data-part=context]")).to_have_attribute(
+        "d", re.compile(r"^M[\d.,]+(L[\d.,]+){5}$"))
+    expect(chart.locator("path[data-part=window]")).to_have_attribute(
+        "d", re.compile(r"^M[\d.,]+H[\d.]+(H[\d.]+)*V[\d.]+(H[\d.]+)+$"))
+    expect(chart.locator("[data-part=last-context]")).to_have_text(re.compile(r"^\d+k$"))
+    # Each request's readout is on hover over its column.
+    readout = chart.locator('rect.hit[data-n="5"] title')
     expect(readout).to_contain_text("#5")
     expect(readout).to_contain_text("turn 2")
     expect(readout).to_contain_text(MODEL)
 
 
-#: The labels the request charts draw beside their lines, each with whether its box lies
-#: inside its chart's viewBox, and its anchor.
-CHART_LABELS = """svgs => svgs.flatMap((svg) => [
-  ...svg.querySelectorAll("text.window-label, [data-rule=compaction] text")].map((text) => {
-    const box = text.getBBox(), view = svg.viewBox.baseVal;
-    return [text.textContent, text.getAttribute("text-anchor"),
-            box.x >= view.x && box.y >= view.y && box.x + box.width <= view.x + view.width
-            && box.y + box.height <= view.y + view.height];
-  }))"""
-
-
-def test_the_request_charts_keep_their_labels_inside_wide_and_on_a_phone(
+def test_the_opened_session_says_its_requests_context_cost_agents_and_start(
         charted, charted_page):
-    """The larger window is the top of its chart, so its label goes under its line; on a
-    phone the compaction's rule is near enough the right edge that its label goes left of
-    it."""
     panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
-    charts = panel.locator("section[data-part=view] svg[data-chart]")
-    expect(context_chart(panel).locator("text.window-label")).to_have_count(2)
-    wide = charts.evaluate_all(CHART_LABELS)
-    assert [label for label, _anchor, inside in wide if not inside] == [], wide
+    opened = opened_of(panel)
+    expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(
+        r"^Requests\s*6 requests (at .+|from .+ to .+) · the dearest \$\d+\.\d\d at .+$"))
+    expect(opened.locator("[data-line=context]")).to_have_text(re.compile(
+        r"^Context\s*\d+k of 1,000k tokens on the last request, \d+% full$"))
+    expect(opened.locator("[data-line=went]")).to_have_text(re.compile(
+        r"^Went to\s*\w[\w ]+ \$\d+\.\d\d( · .+)?$"))
+    expect(opened.locator("[data-line=went]")).to_contain_text("cache reads $")
+    expect(opened.locator("[data-line=subagents]")).to_have_text(re.compile(
+        r"^Subagents\s*1 subagent · <?\$\d+\.\d\d of the \$\d+\.\d\d$"))
+    expect(opened.locator("[data-line=session]")).to_have_text(re.compile(
+        rf"^Session\s*claude · {MODEL} · started "))
+    # With no measure the restart point has no line, once its read has answered.
+    expect(opened.locator("[data-part=reading]")).to_have_count(0)
+    expect(opened.locator("[data-line=restart]")).to_have_count(0)
+    acts = opened.locator("[data-part=session-acts]")
+    expect(acts.get_by_role("link", name="Open in Sessions")).to_have_attribute(
+        "href", f"/m/sessions/claude/{CHARTED}")
+    for name in ("Table", "Check against a bill", "Copy id"):
+        expect(acts.get_by_role("button", name=name)).to_be_visible()
+    # The session is never shown by its id.
+    assert CHARTED not in opened.inner_text()
+
+
+def test_an_addressed_session_is_first_in_the_section_read_over_its_whole_life(
+        charted, charted_page):
+    with charted_page.expect_request(
+            lambda request: "/m/usage/api/session?" in request.url) as sent:
+        panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
+    assert "since=" not in sent.value.url and "harness=claude" in sent.value.url, sent.value.url
+    section = panel.locator("section[data-group=sessions]")
+    placed = section.locator("[data-list=placed] moxi-ui-row")
+    expect(placed).to_have_attribute("data-key", f"claude/{CHARTED}")
+    expect(placed).to_have_attribute("open", "")
+    expect(section.locator("[data-list=first] moxi-ui-row")).to_have_count(0)
+    # Closed, its row stays first and the address goes back to the section.
+    placed.get_by_role("link", name="Close").click()
+    expect(placed).not_to_have_attribute("open", "")
+    assert charted_page.evaluate("location.pathname") == "/m/usage/sessions"
+
+
+def test_open_in_sessions_goes_to_the_session_on_the_sessions_page(charted, charted_page):
+    panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
+    opened_of(panel).get_by_role("link", name="Open in Sessions").click()
+    expect(charted_page).to_have_url(f"{charted.url}/m/sessions/claude/{CHARTED}")
+
+
+def test_the_opened_sessions_table_has_a_row_a_request_and_its_compaction(
+        charted, charted_page):
+    opened = opened_of(open_view(charted_page, f"sessions/claude/{CHARTED}"))
+    opened.get_by_role("button", name="Table").click()
+    table = opened.locator("[data-part=session-table] table")
+    expect(table.locator("tbody tr")).to_have_count(7)
+    expect(table.locator('tr[data-row="c:4"]')).to_contain_text("compaction (auto)")
+    expect(table.locator("thead th")).to_have_text(
+        ["#", "Time", "Turn", "Model", "Context", "Fresh input", "Cache read", "Cache write 5m",
+         "Cache write 1h", "Output", "Cost"])
+
+
+def test_check_against_a_bill_in_the_opened_session_lines_up_each_agents_models(
+        charted, charted_page):
+    opened = opened_of(open_view(charted_page, f"sessions/claude/{CHARTED}"))
+    opened.get_by_role("button", name="Check against a bill").click()
+    lines = opened.locator("table[data-part=bill-lines]")
+    expect(lines.locator(f'tr[data-model="{CHARTED_AGENT} · {SUBAGENT_MODEL}"]')).to_have_count(1)
+    expect(lines.locator("tr[data-line=total]")).to_have_count(1)
+    opened.get_by_role("button", name="Table").click()
+    expect(lines).to_have_count(0)
+
+
+def test_the_restart_point_says_when_the_session_is_past_it(charted, charted_page):
+    charted_page.route("**/m/usage/api/restart-point?*", lambda route: route.fulfill(
+        json={"model": MODEL, "tokens": 1000, "reason": None}))
+    opened = opened_of(open_view(charted_page, f"sessions/claude/{CHARTED}"))
+    restart = opened.locator("[data-line=restart]")
+    expect(restart).to_have_text(re.compile(
+        rf"^Restart point\s*1k tokens for {MODEL} · this session is past it$"))
+    expect(restart.locator(".d")).to_have_text(f"1k tokens for {MODEL}")
+
+
+def test_a_read_still_out_says_reading_in_its_place(charted, charted_page):
+    held = []
+    charted_page.route("**/m/usage/api/terms?by=agent*", lambda route: held.append(route))
+    opened = opened_of(open_view(charted_page, f"sessions/claude/{CHARTED}"))
+    reading = opened.locator("[data-part=reading][data-reading=terms]")
+    expect(reading).to_have_text("Reading…")
+    expect(opened.locator("[data-line=went]")).to_have_count(0)
+    expect(opened.locator("[data-line=session]")).to_be_visible()
+    assert held
+    for route in held:
+        route.continue_()
+    expect(opened.locator("[data-line=went]")).to_be_visible()
+    expect(reading).to_have_count(0)
+
+
+#: The words the opened session's chart draws, each with whether its box lies inside the
+#: chart's viewBox.
+CHART_WORDS = """svg => [...svg.querySelectorAll("text")].map((text) => {
+    const box = text.getBBox(), view = svg.viewBox.baseVal;
+    return [text.textContent, box.x >= view.x && box.y >= view.y
+            && box.x + box.width <= view.x + view.width && box.y + box.height <= view.y + view.height];
+  })"""
+
+
+def test_the_opened_sessions_chart_keeps_its_words_inside_wide_and_on_a_phone(
+        charted, charted_page):
+    panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
+    chart = session_chart(panel)
+    expect(chart.locator("rect.bar")).to_have_count(6)
+    wide = chart.evaluate(CHART_WORDS)
+    assert [text for text, inside in wide if not inside] == [], wide
     charted_page.set_viewport_size({"width": 360, "height": 800})
-    expect(context_chart(panel)).to_have_attribute("viewBox", re.compile(r"^0 0 [23]\d\d "))
-    phone = charts.evaluate_all(CHART_LABELS)
-    assert [label for label, _anchor, inside in phone if not inside] == [], phone
-    assert ["compaction (auto)", "end", True] in phone, phone
+    expect(chart).to_have_attribute("viewBox", re.compile(r"^0 0 2\d\d "))
+    phone = chart.evaluate(CHART_WORDS)
+    assert [text for text, inside in phone if not inside] == [], phone
 
 
 def test_the_subagents_link_redraws_both_charts_for_its_requests(charted, charted_page):
     panel = open_view(charted_page, f"sessions/claude/{CHARTED}")
-    expect(requests_chart(panel).locator("g[data-n]")).to_have_count(6)
+    # The main agent's requests are the opened session's chart; the old view charts none.
+    expect(session_chart(panel).locator("rect.bar")).to_have_count(6)
+    expect(requests_chart(panel)).to_have_count(0)
     panel.locator(f'section[data-part=view] tr[data-agent="{CHARTED_AGENT}"] a').click()
     expect(charted_page).to_have_url(
         f"{charted.url}/m/usage/sessions/claude/{CHARTED}/{CHARTED_AGENT}")

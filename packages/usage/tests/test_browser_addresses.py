@@ -202,7 +202,8 @@ def test_a_subagents_address_charts_its_requests_alone(seeded, page):
     panel = open_page(page, f"sessions/claude/{FIRST}/{AGENT}")
     expect(panel.locator("svg[data-chart=requests] g[data-n]")).to_have_count(2)
     panel = open_page(page, f"sessions/claude/{FIRST}")
-    expect(panel.locator("svg[data-chart=requests] g[data-n]")).to_have_count(3)
+    expect(panel.locator("[data-part=session] svg[data-part=session-chart] rect.bar")).to_have_count(3)
+    expect(panel.locator("svg[data-chart=requests]")).to_have_count(0)
 
 
 def test_a_limits_address_opens_its_row(seeded, page):
@@ -309,7 +310,8 @@ def test_a_link_inside_a_section_opens_its_piece_in_place(seeded, page):
     view(panel, "session").locator(f'tr[data-agent="{AGENT}"] a').click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions/claude/{FIRST}/{AGENT}")
     expect(panel.locator("svg[data-chart=requests] g[data-n]")).to_have_count(2)
-    view(panel, "session").get_by_role("link", name="All sessions").click()
+    # The opened row's act closes it back to the section.
+    session_row(panel, FIRST).get_by_role("link", name="Close").click()
     expect(page).to_have_url(f"{seeded.url}/m/usage/sessions")
     assert page.evaluate("history.length") == entries
 

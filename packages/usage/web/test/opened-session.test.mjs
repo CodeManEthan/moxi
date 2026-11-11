@@ -169,12 +169,14 @@ test("the chart puts requests at their times, the dearest in the text colour, th
                 request(3, "2026-11-08 14:45", { context: 268_000, window: 1_000_000, turn_start: true, turn: 2 })];
   const chart = sessionChart(report(rows, {}, { total: { ...sums(), ...requestsTotal({ turns: 2,
     marks: [{ after: 1, ts: null, trigger: null, pre_tokens: null }] }) } }), "cost", 500, TODAY, UTC);
-  assert.equal(chart.end, 450);
-  assert.deepEqual(chart.bars.map((bar) => Math.round(bar.x + bar.width / 2)), [46, 248, 450]);
+  assert.equal(chart.end, 442);
+  assert.deepEqual(chart.bars.map((bar) => Math.round(bar.x + bar.width / 2)), [46, 244, 442]);
   assert.deepEqual(chart.bars.map((bar) => bar.dearest), [false, true, false]);
   assert.equal(chart.bars[1].y, 8);
   assert.equal(chart.top, "$0.50");
-  assert.deepEqual(chart.window, { y: 78, words: "1,000k" });
+  assert.equal(chart.window.y, 78);
+  assert.equal(chart.window.words, "1,000k");
+  assert.match(chart.window.d, /^M46,\d+(\.\d)?H\d+(\.\d)?H\d+(\.\d)?V78.5H442$/);
   assert.equal(chart.dot.words, "268k");
   assert.equal(chart.turns.length, 1);
   assert.equal(chart.compactions[0].label, "compaction");
