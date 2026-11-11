@@ -133,6 +133,19 @@ items = "str"
 doc = "The keep-warm nudges for a director: the first, then the second for every later one."
 read = "use"
 
+[name.template]
+type = "string"
+default = "<project>-<model>-<date:mmm-dd hh:mm>"
+doc = "The template a launch's session name is made from, with the pieces <project>, <agent>, <model>, <identity>, <scope>, <instance>, <date[:format]> and <time[:format]>."
+read = "use"
+
+[name.templates]
+type = "table"
+default = {}
+items = "str"
+doc = "A name template of its own for a project, by project key; a project with none takes name.template."
+read = "use"
+
 [page.launch_wait_s]
 type = "int"
 default = 600

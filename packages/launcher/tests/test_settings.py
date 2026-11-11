@@ -26,6 +26,8 @@ DEFAULTS = {
     "recycle.limit_wait_s": 1800,
     "keep_warm.subagent_cap": 3,
     "keep_warm.director_cap": 10,
+    "name.template": "<project>-<model>-<date:mmm-dd hh:mm>",
+    "name.templates": {},
     "page.launch_wait_s": 600,
     "records.keep_days": 90,
 }

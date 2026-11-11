@@ -39,7 +39,10 @@ The flags are the catalog's rows: the launcher's own (`--harness`, `--cwd`, `--p
 `--instructions`, `--identity` and the rest) and the harness's (`--model`,
 `--permission-mode`, `--sandbox`, `--add-dir` and so on). `moxi launcher catalog` lists
 every row this install offers, and marks the rows the launcher sets itself and the rows
-whose module is not installed. A flag the catalog does not know is passed on to the
+whose module is not installed. `--name` is the launcher's own row, the session's name
+(below); it used to be passed on to the harness with a warning, which for Claude Code
+set its display name. Claude Code still shows the name you give, and Codex, which has
+no name flag, is no longer handed it. A flag the catalog does not know is passed on to the
 harness, last on its argv, after one warning line; the words after `--` are passed on as
 given. A passed-on flag that would set a row the launcher owns (the session id, a resume)
 or a permission row is refused, so the permission check always sees it. So is one that
@@ -91,6 +94,43 @@ and your own instructions can say more about each. Unset, the default, there is 
 
 `moxi launcher preview` takes the same words as `run` and prints the command and the
 environment variables the launch would set, starting nothing.
+
+### The session's name
+
+Every launch has a name. `--name TEXT` (or `name` in a preset) sets it; a launch that
+sets none is named from a template, `<project>-<model>-<date:mmm-dd hh:mm>` as shipped,
+which gives `docs-opus-Nov-08 12:45`. The name is recorded with the launch, a taken
+slot in the browser is labelled with it, and Claude Code shows it as the session's display name
+unless `--native-name` (or `native_name` in `[defaults]` or a preset) sets another.
+Codex has no display name, so there it is the launcher's label only. A relaunch or a
+resume keeps the name its launch had.
+
+A template is text with pieces in angle brackets, filled in the order written:
+
+| piece | filled with |
+|---|---|
+| `<project>` | the project key, else the name of the folder the session starts in |
+| `<agent>` | the seat's name when the launch names a seat, else its agent role |
+| `<model>` | the model the launch names; empty on the harness's default |
+| `<identity>`, `<scope>` | the comms name, and its scope beside one; empty without comms |
+| `<instance>` | the lowest number that makes the name differ from every running launch's |
+| `<date[:format]>`, `<time[:format]>` | the local date (`yyyymmdd`) and time (`hhmm`), or as the format says |
+
+A format is read by its tokens, in either case: `yyyy`, `yy`, `mmm` (`Nov`), `mm` (the
+month, or the minutes after an `hh`), `dd`, `hh` (24 hours), `ss`; a format holding `%`
+is taken as `strftime`'s. The filled name is then cleaned: anything outside printable
+ASCII becomes a dash, dashes in a row become one (an empty piece leaves two), the name
+starts with a letter or a digit and is cut at 63 characters; a name with nothing left is
+`launch`.
+
+`name.template` holds the template for every launch, and `name.templates` one of its own
+per project, by project key:
+
+    moxi config set launcher name.template '<identity>-<date:mmm-dd-yyyy hh:mm>'
+    moxi config set launcher name.templates '{docs = "<project> <time:hh:mm>"}'
+
+A template that names another piece, or holds a `<` or `>` outside a piece, is not used:
+the launch is named by the shipped template and warns, naming the setting.
 
 ## Presets
 
@@ -324,17 +364,36 @@ The page has four parts.
 visit to the page. Type what the agent should do and press the button. The line above
 the box says where the session starts, a project or a folder: it opens on the place you
 last launched in, and its menu takes a typed folder path, lists your recent places and,
-with projects installed, every project. The chip in the box sets the harness, the model
+with projects installed, every project. With any preset set up, `Preset` on the same
+line applies a seat or a project preset; a project picked there, or the one Home opens
+on, applies that project's own preset. The chip in the box sets the harness, the model
 and the effort. The button names where the launch runs, and its caret opens the choices:
 each slot with its state, your terminal, or headless. With slots it starts at the lowest
 free slot, without slots at your terminal, and the choice is not kept from one visit to
-the next. A launch from the box runs where its button says, whatever `[defaults]` sets
-for `target` and `slot`; every other row is filled from `[defaults]` as the page's form
-is, with no preset. The text in the box is the whole first turn: nothing your
-`[defaults]` set to be sent as a first turn goes with a launch from the box, so an
-empty box starts a session with no first turn. A slot or headless launch is previewed and handed to a detached job as on the page, and
-a line under the box says where it started, or why it failed or was refused. A
-terminal launch is not run: its command is copied for you to paste.
+the next. A launch from the box runs where its button says, whatever `[defaults]` or the
+preset sets for `target` and `slot`; every other row is filled from the preset and
+`[defaults]` as the page's form is. The text in the box is the whole first turn: nothing
+your `[defaults]` or the preset set to be sent as a first turn goes with a launch from
+the box, so an empty box starts a session with no first turn. The `+` beside the chip
+takes a brief from a file instead, which turns the box off while it is set, and offers to
+continue your last session in the place on the line. A slot or headless launch is
+previewed and handed to a detached job as on the page, and a line under the box says
+where it started, or why it failed or was refused. A terminal launch is not run: its
+command is copied for you to paste.
+
+`Options` beside the chip opens a panel with the form's other rows, in groups, with a
+find field. Each row you change there is named on a `Changed` line under the box, with
+`Reset`. A value that can do harm (skipping permission checks, no sandbox) is drawn in
+the theme's warning colour wherever it shows, and picked by hand it is set only after
+`Turn on`, for the one launch that starts with it. The panel also shows the session's
+name, with an editor for its template that saves `name.template` or `name.templates`
+through the shell's own settings, where a locked key is refused.
+
+Rows the form leaves at their shipped defaults are filled from the last launch of the
+seat, else the project, else the folder on the line; `From last launch` on the line
+names them, each with `Clear`. Under the box, `Run again` lists up to three earlier
+launches there; pointing at one shows what a click runs today, and one click runs it
+again where the button places a launch.
 
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
@@ -452,6 +511,9 @@ Set with `moxi config set launcher <key> <value>`:
   words.
 - `records.keep_days` (90): how long ended runs, their events, exits and released holds
   are kept.
+- `name.template` (`<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates` (empty):
+  the template a launch's session name is made from, and a project's own by project key
+  (see "The session's name").
 
 ## Install
 

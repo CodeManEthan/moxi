@@ -178,6 +178,17 @@ def test_the_list_is_one_entry_per_launch_newest_first(conn):
     assert [e["request_id"] for e in older.data["sessions"]] == ["r1"]
 
 
+def test_an_entry_names_its_launchs_project_and_actor(conn):
+    launched(conn, request_id="r1")
+    store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",
+                 cwd="/src/proj-a", values={}, argv=["claude"], env={}, posture="operator",
+                 session_id=SID2, slot="2", project_key="proj-a")
+    entries = {e["request_id"]: e for e in resume.sessions(conn=conn, turns=None).data[
+        "sessions"]}
+    assert (entries["r1"]["project_key"], entries["r1"]["actor"]) == (None, "ann")
+    assert (entries["r2"]["project_key"], entries["r2"]["actor"]) == ("proj-a", "alice")
+
+
 def test_an_empty_log_lists_no_sessions(conn):
     got = resume.sessions(conn=conn, turns=None)
     assert got.lines == ("no sessions",) and got.data == {"sessions": []}

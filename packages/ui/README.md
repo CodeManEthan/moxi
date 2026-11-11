@@ -64,8 +64,10 @@ edit of the file still change the key, and the variable holds no value for it.
 Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A
 module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
 and an `order`; a row component reports its line with a `moxi-home-row` event and Home
-draws it. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
-has the fields, how rows are ordered and opened, and the `needs` and `order` scales.
+draws it. A main piece that opens a panel at the window's right edge sends
+`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
+has the fields, how rows are ordered and opened, the `needs` and `order` scales and the
+side panel's event.
 
 ## The row of a list
 

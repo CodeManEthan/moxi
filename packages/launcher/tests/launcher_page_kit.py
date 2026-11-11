@@ -11,6 +11,7 @@ finds its harness only on the `PATH` the shell was started with.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -95,9 +96,9 @@ def launch_log(shell: Any) -> Iterator[Any]:
 
 
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
-         session_id: str | None = None, cwd: str = "/work/page") -> str:
-    """A Claude launch's row, started; its process this test's own when `live`, else one
-    that has ended. Returns its session id."""
+         session_id: str | None = None, cwd: str = "/work/page", actor: str = "ann") -> str:
+    """A Claude launch's row made by `actor`, started; its process this test's own when
+    `live`, else one that has ended. Returns its session id."""
     sid = session_id or str(uuid.uuid4())
     me = proc.identity(os.getpid())
     slot = "3" if target == "slot" else None
@@ -105,7 +106,7 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
               **({"slot": slot} if slot else {})}
     with launch_log(shell) as conn:
-        store.insert(conn, request_id=request_id, actor="ann", harness="claude",
+        store.insert(conn, request_id=request_id, actor=actor, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
                      posture="operator", session_id=sid, slot=slot)
         # A start time no running process has, so an ended launch's process reads ended.
@@ -348,6 +349,19 @@ def place(shell: Any, request_id: str, *, cwd: str, at: str,
 #: Before this, a launch is one a test made from a page; a place seeded to stay the newest
 #: is dated after it.
 AHEAD = "2090-01-01T00:00:00.000000Z"
+
+_fresh = itertools.count(1)
+
+
+def fresh_place(shell: Any) -> Path:
+    """A folder under the shell's home that no launch has run in, seeded as the newest
+    place, so Home opens there and fills nothing from a launch an earlier test made."""
+    number = next(_fresh)
+    folder = Path(shell.env["HOME"]) / "work" / f"fresh-{number}"
+    folder.mkdir(parents=True, exist_ok=True)
+    at = f"2099-01-01T{number // 3600:02d}:{number // 60 % 60:02d}:{number % 60:02d}.000000Z"
+    place(shell, f"fresh-place-{number}", cwd=str(folder), at=at)
+    return folder
 
 
 def newest_launch(shell: Any) -> Any:

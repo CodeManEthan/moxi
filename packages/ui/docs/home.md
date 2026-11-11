@@ -34,6 +34,41 @@ at 900, so a row with a lower number sits above it.
 With no main piece installed the spot says `Nothing needs you.`, or nothing while a row
 needs the user. The phone gets no spot: its Home is the rows.
 
+## A side panel beside the column
+
+Home's column is 680 px wide, centred in the window. A main piece that opens a panel at
+the window's right edge can ask Home to move the column aside, so the piece and the rows
+stay in view beside the panel. The piece draws the panel itself, in its own shadow root,
+with `position: fixed`, and says how wide it is by dispatching an event from itself or
+from anything inside it:
+
+```js
+this.dispatchEvent(new CustomEvent("moxi-home-side", {
+  bubbles: true, composed: true,
+  detail: { width: 400 },
+}));
+```
+
+| field | what it means |
+|---|---|
+| `width` | The panel's width in px. `0` when the panel closes. |
+
+What Home does with it:
+
+- **From 1100 px of window**, the column's centre moves to the centre of the window less
+  `width`: with a 400 px panel in a 1400 px window it is 500 px from the left, and the
+  column ends 160 px short of the panel. Send the event again when the width changes.
+- **Under 1100 px** the column stays where it is and the panel lies over the page. Home
+  keeps the width, so a window that grows past 1100 px moves the column then.
+- **`0` puts the column back.** So does the piece leaving the spot; a piece need not
+  send `0` as it goes. A `detail` without a `width` that is a number above 0 reads as `0`.
+- **Only the main spot is heard.** A row component's event moves nothing, and the phone
+  has no spot.
+
+Home moves the column with a margin, never with a transform, so the window stays the box
+a `position: fixed` panel is placed in: `right: 0` is the window's right edge whether or
+not the column has moved. Home leaves the panel's own size and place to the piece.
+
 ## The row contract
 
 Home places a row component in a host it keeps hidden, as soon as the modules list names

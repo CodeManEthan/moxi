@@ -354,7 +354,10 @@ def test_a_replay_composes_the_argv_a_fresh_launch_of_its_values_does(work, harn
     new = row("r2")
     assert (new.relaunch_of, new.resume_of, new.session_id) == ("r1", None,
                                                                replayed.session_id)
-    assert new.values == {**row("r1").values}
+    # A replay keeps the rows' values, and not the record of what the request gave.
+    first = row("r1").values
+    assert first["sources"]["model"] == "typed" and first["filled"] == []
+    assert new.values == {k: v for k, v in first.items() if k not in ("sources", "filled")}
 
 
 def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no_exec,

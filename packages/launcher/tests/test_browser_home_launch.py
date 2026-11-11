@@ -70,6 +70,12 @@ def fake(module_fake):
     return module_fake
 
 
+@pytest.fixture(autouse=True)
+def own_folder(ui_shell):
+    """Home opens on a folder of the test's own, so it fills nothing from another test's launch."""
+    return kit.fresh_place(ui_shell)
+
+
 def said(piece, line: str):
     """The line `line` under the box."""
     return piece.locator(f'.said [data-line="{line}"]')

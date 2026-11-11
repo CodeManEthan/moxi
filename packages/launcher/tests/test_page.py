@@ -34,7 +34,8 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/preview", "/api/launch", "/api/resume",
+          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/recents",
+          "/api/recent", "/api/name", "/api/preview", "/api/launch", "/api/resume",
           "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
@@ -448,6 +449,60 @@ def test_no_presets_file_gives_the_shipped_defaults():
     assert {r["source"] for r in said["rows"]} == {"shipped"}
 
 
+def form_modes(query: str = "") -> dict[str, str | None]:
+    said = form(query)
+    assert [m["target"] for m in said["modes"]] == ["terminal", "headless", "slot"]
+    return {m["target"]: m["mode"] for m in said["modes"]}
+
+
+def test_the_form_names_the_command_a_launch_composes_in_each_target():
+    assert form()["modes"] == [{"target": "terminal", "mode": "interactive"},
+                               {"target": "headless", "mode": "print"},
+                               {"target": "slot", "mode": "interactive"}]
+    assert form_modes("harness=codex") == {"terminal": "interactive", "headless": "exec",
+                                           "slot": "interactive"}
+
+
+def test_the_forms_modes_follow_turns_host_for_codex(monkeypatch):
+    installed(monkeypatch, "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    assert form_modes("harness=codex") == {"terminal": "host", "headless": "exec",
+                                           "slot": "host"}
+    assert form_modes("harness=claude")["terminal"] == "interactive"
+
+
+def test_the_forms_modes_are_null_where_a_launch_under_the_identity_is_refused(monkeypatch):
+    installed(monkeypatch, "comms", "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    assert form_modes("identity=planner") == {"terminal": "interactive", "headless": None,
+                                              "slot": "interactive"}
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": "host", "headless": None, "slot": "host"}
+    # Without its wrapper's host a Codex launch under a name is refused everywhere.
+    monkeypatch.setattr(presets, "_host_installed", lambda: False)
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": None, "headless": None, "slot": None}
+    assert form_modes("harness=codex")["terminal"] == "interactive"
+
+
+def test_an_identity_changes_no_mode_without_comms():
+    assert form_modes("identity=planner") == form_modes()
+    assert form_modes("harness=codex&identity=planner") == form_modes("harness=codex")
+
+
+def test_the_forms_modes_are_for_the_harness_it_is_drawn_for():
+    write_presets(FORM_FILE)
+    assert form_modes("seat=coder")["headless"] == "exec"
+    # A form that is refused still says its harness's modes.
+    said = form("seat=coder&harness=claude")
+    assert said["rows"] == [] and said["modes"][1] == {"target": "headless", "mode": "print"}
+    # Every mode named is one some row of that harness composes into.
+    for harness in catalog.HARNESSES:
+        known = {mode for row in catalog.load(harness) for mode in row.modes}
+        assert set(form_modes(f"harness={harness}").values()) <= known
+
+
 def test_a_failed_form_read_says_only_the_class(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("/home/someone/private/presets.toml")
@@ -793,6 +848,8 @@ def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
     launched(log, "named", "2026-01-01T09:00:00.000000Z", identity="planner",
              cwd="/src/proj-a")
     launched(log, "bare", "2026-01-01T10:30:00.000000Z", cwd="/src/proj-b")
+    launched(log, "called", "2026-01-01T11:00:00.000000Z", identity="planner",
+             cwd="/src/proj-a", values={"name": "proj-a-opus-Jan-01 11:00"})
     at = store.parse_time("2026-01-01T10:30:00.000000Z").astimezone()
 
     def taken(request_id, state="occupied"):
@@ -802,13 +859,14 @@ def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
 
     fake_slots(slots={"1": taken("named"), "2": taken("bare"), "3": taken("unknown"),
                       "4": {"state": "occupied", "launchable": False},
-                      "5": taken("named", state="ended"),
+                      "5": taken("named", state="ended"), "7": taken("called"),
                       "6": {"state": "occupied", "launchable": False,
                             "last": {"at": 1.0, "label": "by hand", "meta": None}}})
     by = {s["number"]: s["taken_by"] for s in targets_answer()["slots"]}
     assert by == {1: {"request_id": "named", "label": "planner"},
                   2: {"request_id": "bare", "label": f"proj-b {at:%H:%M}"},
-                  3: None, 4: None, 5: None, 6: None}
+                  3: None, 4: None, 5: None, 6: None,
+                  7: {"request_id": "called", "label": "proj-a-opus-Jan-01 11:00"}}
 
 
 def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, tmp_path):

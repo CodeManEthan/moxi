@@ -6,7 +6,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,10 +18,12 @@ from moxi_dev.testing import wait_for
 
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness, run_child
-from moxi_launcher import api, compose, first, handoffs, presets
+from moxi_launcher import api, compose, first, handoffs, names, presets
 from moxi_launcher.compose import Additions, common
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+#: The time a test names its launch at.
+NOW = datetime(2026, 11, 8, 12, 45)
 
 
 @dataclass(frozen=True)
@@ -289,22 +292,24 @@ def test_preview_composes_what_resolve_returns(monkeypatch):
 
     monkeypatch.setattr(api, "_resolve", resolve)
     monkeypatch.setattr(compose, "installed", lambda: frozenset())
+    monkeypatch.setattr(names, "now", lambda: NOW)
     got = api.preview(Request())
     assert seen == [Request()]
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file",
         str(Layout("launcher").state_dir() / "runs" / "r1.prompt.md"),
-        "--model", "opus", "--permission-mode", "default"]
+        "--model", "opus", "-n", "work-opus-Nov-08 12:45", "--permission-mode", "default"]
     assert got.target == "terminal" and got.mode == "interactive"
     # It starts nothing and writes nothing of the launcher's.
     assert not (Layout("launcher").state_dir() / "runs").exists()
 
 
+#: Each names its session, so the preview and the composer are given the same values.
 CONTRACT_REQUESTS = [
-    {"harness": "claude", "cwd": "/work", "model": "opus", "brief": "b"},
-    {"harness": "claude", "cwd": "/work", "target": "headless", "brief": "b"},
-    {"harness": "codex", "cwd": "/work", "target": "headless", "brief": "b"},
-    {"harness": "codex", "cwd": "/work", "trust_cwd": True},
+    {"harness": "claude", "cwd": "/work", "model": "opus", "brief": "b", "name": "one"},
+    {"harness": "claude", "cwd": "/work", "target": "headless", "brief": "b", "name": "two"},
+    {"harness": "codex", "cwd": "/work", "target": "headless", "brief": "b", "name": "three"},
+    {"harness": "codex", "cwd": "/work", "trust_cwd": True, "name": "four"},
 ]
 
 
@@ -414,6 +419,7 @@ def write_presets(text: str) -> None:
 
 def test_preview_resolves_through_presets(tmp_path, monkeypatch):
     monkeypatch.setattr(compose, "installed", lambda: frozenset())
+    monkeypatch.setattr(names, "now", lambda: NOW)
     write_presets(f"""
 [defaults]
 permission_mode = "acceptEdits"
@@ -431,11 +437,12 @@ add_dir = ["{tmp_path}"]
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file", prompt_file,
         "--model", "opus", "--effort", "high", "--add-dir", str(tmp_path),
-        "--permission-mode", "acceptEdits"]
+        "-n", f"{tmp_path.name}-opus-Nov-08 12:45", "--permission-mode", "acceptEdits"]
     assert "handoff dir:" in got.prompt_file.text      # the seat's name is its key
     assert got.values["mode"] == "interactive" and got.values["off_posture"] is False
     resolved = presets.resolve(request)
-    assert got.argv == compose.build(request, resolved, create=True).argv
+    named = replace(resolved, values={**resolved.values, "name": got.values["name"]})
+    assert got.argv == compose.build(request, named, create=True).argv
 
 
 def test_preview_of_a_scratch_codex_launch_names_the_scratch_folder():

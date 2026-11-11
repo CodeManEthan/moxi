@@ -1,12 +1,14 @@
 """Home in a browser: the main spot and its sentence, the rows Home draws from what row
 components report (nothing to report, a late report, needing the user, opening in place, held
-open, a script that does not load), the Health row on a kept run and on a real one, a
-small install, the colours and the layout at 360 px.
+open, a script that does not load), the column moving aside for a main piece's side panel,
+the Health row on a kept run and on a real one, a small install, the colours and the
+layout at 360 px.
 
 The module's one test shell serves `ui` and the `fixture` module, whose two rows report
 only what a test tells them to (tests/fixture/moxi_fixture/web/rows.js). It runs no
 doctor and keeps no run, so its Health row reads `Checking…`; the tests of Health start
-shells of their own."""
+shells of their own. The tests of the main spot install the fixture with its main piece
+(tests/fixture/moxi_fixture/web/main.js)."""
 
 from __future__ import annotations
 
@@ -43,6 +45,8 @@ PASS = {"module": "ui", "name": "shell", "state": "ok", "detail": "The shell ans
 
 _SAY = """([row, report]) => window.dispatchEvent(
   new CustomEvent("moxi-fixture-row", {detail: {row, report}}))"""
+
+_SIDE = """(detail) => window.dispatchEvent(new CustomEvent("moxi-fixture-side", {detail}))"""
 
 
 def _now() -> str:
@@ -306,6 +310,81 @@ def test_the_sentence_waits_for_a_main_piece_and_shows_when_it_does_not_load(
     held[0].abort()
     # It did not load: the sentence shows.
     expect(home.locator(".spot")).to_have_text(SENTENCE)
+
+
+# --- a main piece's side panel -------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def main_shell(ui_shells, tmp_path_factory):
+    """A shell whose Home shows the fixture's main piece."""
+    site = fixture_kit.install(tmp_path_factory.mktemp("side-site"), main=True)
+    return ui_shells(site=[site], leave_out=_others())
+
+
+def _side_page(main_shell, ui_contexts, width: int):
+    """Home with the fixture's main piece placed, in a window `width` px wide."""
+    page = ui_contexts(main_shell).pages[0]
+    page.set_viewport_size({"width": width, "height": 800})
+    expect(_home(page).locator(".spot moxi-fixture-main").get_by_test_id("main")).to_be_visible()
+    return page
+
+
+def _expect_centre(page, centre: float) -> None:
+    """The column is 680 px wide with its centre `centre` px from the window's left."""
+    expect(_home(page)).to_have_js_property("offsetWidth", 680)
+    # Home sets the margin as it hears the event, before the call that sent it returns.
+    assert _home(page).evaluate(
+        "home => { const box = home.getBoundingClientRect(); return (box.left + box.right) / 2; }"
+    ) == centre
+
+
+def test_a_side_panel_moves_the_column_to_the_centre_of_what_it_leaves_and_0_puts_it_back(
+        main_shell, ui_contexts):
+    page = _side_page(main_shell, ui_contexts, 1400)
+    _expect_centre(page, 700)
+    page.evaluate(_SIDE, {"width": 400})
+    _expect_centre(page, (1400 - 400) / 2)
+    # The piece's fixed panel is still placed in the window: its right edge is the window's.
+    panel = _home(page).locator("moxi-fixture-main").get_by_test_id("side")
+    expect(panel).to_be_visible()
+    box = panel.bounding_box()
+    assert box["width"] == 400 and box["x"] + box["width"] == 1400 and box["height"] == 800
+    # The column and the rows under it clear the panel.
+    spot = _home(page).locator(".spot").bounding_box()
+    assert spot["x"] == 160 and spot["x"] + spot["width"] <= box["x"]
+    assert _line(page, HEALTH).bounding_box()["x"] == 160
+    # Another width moves it again, and 0 puts it back.
+    page.evaluate(_SIDE, {"width": 300})
+    _expect_centre(page, (1400 - 300) / 2)
+    page.evaluate(_SIDE, {"width": 0})
+    _expect_centre(page, 700)
+    expect(panel).to_be_hidden()
+
+
+def test_the_column_goes_back_when_the_piece_with_the_side_panel_leaves(main_shell, ui_contexts):
+    page = _side_page(main_shell, ui_contexts, 1400)
+    page.evaluate(_SIDE, {"width": 400})
+    _expect_centre(page, 500)
+    page.evaluate(_SIDE, {"leave": True})
+    expect(_home(page).locator("moxi-fixture-main")).to_have_count(0)
+    _expect_centre(page, 700)
+
+
+def test_under_1100_px_of_window_a_side_panel_moves_nothing(main_shell, ui_contexts):
+    page = _side_page(main_shell, ui_contexts, 1000)
+    _expect_centre(page, 500)
+    page.evaluate(_SIDE, {"width": 400})
+    panel = _home(page).locator("moxi-fixture-main").get_by_test_id("side")
+    expect(panel).to_be_visible()
+    _expect_centre(page, 500)
+    # The panel lies over the page, at the window's right edge.
+    box = panel.bounding_box()
+    assert box["x"] + box["width"] == 1000 and box["x"] < _home(page).bounding_box()["x"] + 680
+    # From 1100 px the column stands beside the panel that is still shown.
+    page.set_viewport_size({"width": 1100, "height": 800})
+    _expect_centre(page, (1100 - 400) / 2)
+    page.set_viewport_size({"width": 1099, "height": 800})
+    _expect_centre(page, 1099 / 2)
 
 
 def test_with_the_core_and_ui_alone_home_is_the_sentence_and_health(ui_shells, ui_contexts,

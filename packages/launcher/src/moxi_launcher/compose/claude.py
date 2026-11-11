@@ -20,6 +20,10 @@ With comms and an identity, comms' wrapper runs claude, with the claude argv aft
 The claude argv then carries neither `-n` (the native name goes to `--native-name`) nor
 turns' launch additions, which the wrapper asks for itself.
 
+**The display name** (`-n`, or the wrapper's `--native-name`) is the `native_name` row
+when `[defaults]`, a preset or a flag set it, else the launch's own `name`. The launch
+records each row as it was resolved, so a `native_name` nothing set stays unset there.
+
 A resume (`Context.resume`) passes `--resume <U>` where `--session-id` goes and no
 `--session-id` to claude, so the session keeps the id it resumes. With comms the wrapper
 still names that same id with its own `--session-id`, which it takes from `--resume`.
@@ -55,6 +59,12 @@ def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
     """The launch's comms name, when it has one and comms is installed."""
     identity = values.get("identity")
     return str(identity) if identity and "comms" in ctx.modules else None
+
+
+def display_name(values: Mapping[str, object]) -> str:
+    """The session's display name in Claude Code: the `native_name` row when it is set,
+    else the launch's `name`; empty when the launch has neither."""
+    return str(values.get("native_name") or values.get("name") or "")
 
 
 def mode(values: Mapping[str, object], ctx: Context) -> str:
@@ -110,7 +120,9 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
     owned = {"resume" if ctx.resume else "session_id": ctx.session_id,
              "append_system_prompt_file": prompt_file.path}
-    fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
+    shown_as = display_name(values)
+    fit = catalog.fit(HARNESS, mode_, {**values, "native_name": shown_as, **owned},
+                      ctx.chosen)
     additions = ctx.additions if (turns and not identity) else None
     extra = [str(token) for token in values.get(catalog.EXTRA) or ()]
     catalog.refuse_passthrough(HARNESS, extra, mode_)
@@ -131,8 +143,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         for director in values.get("director") or ():
             argv += ["--director", str(director)]
         argv += ["--session-id", ctx.session_id]
-        if values.get("native_name"):
-            argv += ["--native-name", str(values["native_name"])]
+        if shown_as:
+            argv += ["--native-name", shown_as]
         argv += ["--", *tail]
     else:
         argv = [HARNESS] + (["-p"] if mode_ == "print" else []) + tail
@@ -156,4 +168,4 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
 
 __all__ = ["ADDITIONS", "HARNESS", "ORDER", "WRAPPER_ROWS", "comms_identity", "compose",
-           "mode"]
+           "display_name", "mode"]

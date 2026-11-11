@@ -3,8 +3,9 @@
 The keys, all read at the point of use, part 1's first: `ready.wait_s` (how long a launch waits for the
 session to be ready), `first.wait_s` (how long it waits for the first turn to start),
 `startup.wait_s`, `startup.trust_dialog` and `startup.dev_channels_dialog` (the startup
-screens a slot launch may answer, which need slots), and `runs.keep_days` (how long a
-launch's run files are kept). Seats and project presets are a file of their own,
+screens a slot launch may answer, which need slots), `runs.keep_days` (how long a
+launch's run files are kept), and `name.template` and `name.templates` (the templates a
+launch's session name is made from, `names`). Seats and project presets are a file of their own,
 `presets.toml`, not keys here.
 """
 

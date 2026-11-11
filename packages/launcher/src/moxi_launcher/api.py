@@ -24,6 +24,22 @@ sender.
 **After the row is written the row says what happened**: `launch` returns a
 `LaunchResult` whose `state`, `reason` and `exit_code` are the row's.
 
+**Every fresh launch has a name.** A launch whose `name` row nothing set is named from
+the name template (`names`): the entry of `name.templates` for its project, else
+`name.template`, filled with its project or folder, seat or agent role, model, comms
+identity and scope, and the local time. `preview` names it the same way, so within one
+minute it shows the launch's own name. The name is written to the launch's values, and
+Claude Code shows it as the session's display name unless `native_name` is set. A
+replay keeps its row's name.
+
+**A fresh launch records what its request gave.** Beside the rows, its values hold
+`sources`, where each row's value came from as the resolver says it (`shipped`,
+`defaults`, `preset`, `typed`, `left-out`, and `last` for a typed row the request
+names in `filled`: a value the caller filled in from an earlier launch), and `filled`,
+those rows' names. A row the request leaves out that the launch's harness doesn't offer
+is there as `left-out` too. From them the request can be told from what its preset and
+the defaults gave. A replay takes neither, and records neither.
+
 **A request id is a launch's idempotency key.** A request whose id is already in the
 launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set. It
 looks the id up before it resolves or checks anything, so a retry is never refused by
@@ -89,7 +105,8 @@ from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import catalog, compose, first, handoffs, identity, presets, slots, store, targets
+from . import (catalog, compose, first, handoffs, identity, names, presets, slots, store,
+               targets)
 from .compose import Composition, common
 
 if TYPE_CHECKING:
@@ -126,9 +143,10 @@ class LaunchRequest:
     """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
     typed (`typed`, as `catalog.parse(...).values` gives them) and passed on (`extra`),
     `--off-posture`, the catalog rows left out (`left_out`, each holding its shipped
-    default whatever `[defaults]` or the preset sets), the caller's directory, and the
-    request id, Claude session id and actor, each minted or read from the environment
-    when left None."""
+    default whatever `[defaults]` or the preset sets), the typed rows whose value the
+    caller filled in from an earlier launch (`filled`; a name that is no typed row counts
+    for nothing), the caller's directory, and the request id, Claude session id and
+    actor, each minted or read from the environment when left None."""
 
     seat: str | None = None
     project_preset: str | None = None
@@ -140,6 +158,7 @@ class LaunchRequest:
     session_id: str | None = None
     actor: str | None = None
     left_out: Sequence[str] = ()
+    filled: Sequence[str] = ()
 
 
 @dataclass(frozen=True)
@@ -240,6 +259,7 @@ def launch(request, *, env: Mapping[str, str] | None = None,
     refusals = _check(resolved, caller)
     if refusals:
         raise refusals[0]
+    resolved = _named(request, resolved, env)
 
     ids = _with_ids(request, resolved.harness)
     child, base = _child_base(request, caller)
@@ -260,7 +280,8 @@ def launch(request, *, env: Mapping[str, str] | None = None,
         inserted = store.insert(
             conn, request_id=ids.request_id, actor=_actor(ids, caller),
             harness=composition.harness, target=composition.target,
-            cwd=str(values["cwd"]), values=values, argv=composition.argv,
+            cwd=str(values["cwd"]), values=_recorded(request, resolved, values),
+            argv=composition.argv,
             env=composition.env, posture=str(resolved.posture or ""),
             session_id=session_id, slot=_slot_named(values),
             preset_kind=resolved.preset_kind, preset_name=resolved.preset_name,
@@ -327,7 +348,7 @@ def preview(request, *, env: Mapping[str, str] | None = None) -> Composition:
     bad_id = _request_id_refusal(getattr(request, "request_id", None))
     if bad_id is not None:
         raise bad_id
-    resolved = _resolve(request, env)
+    resolved = _named(request, _resolve(request, env), env)
     if getattr(request, "replay", False):
         caller = dict(os.environ if env is None else env)
         child, _ = _child_base(request, caller)
@@ -354,10 +375,65 @@ def _resolve(request, environ: Mapping[str, str] | None = None):
     return presets.resolve(request, env=environ)
 
 
+def _named(request, resolved, environ: Mapping[str, str] | None = None):
+    """`resolved` with the launch's name: as it is for a replay, which keeps its row's
+    name, and for a launch whose `name` row is set; else with the name its template
+    gives it (`names.chosen`), and the warning of a template the settings hold that was
+    refused. The launch log is read, and never made, only for a template that holds
+    `<instance>`."""
+    values = resolved.values
+    if getattr(request, "replay", False) or values.get("name"):
+        return resolved
+    from . import settings
+
+    seat = resolved.preset_name if resolved.preset_kind == "seat" else None
+    cwd = str(values.get("cwd") or "") or None
+    pieces = names.Pieces(
+        project=resolved.project_key or names.folder(cwd),
+        agent=str(seat or values.get("agent") or ""), model=str(values.get("model") or ""),
+        identity=str(values.get("identity") or ""), scope=str(values.get("scope") or ""))
+    picked = names.chosen(settings.current(), resolved.project_key)
+    taken = _live_names(environ) if "<instance>" in picked.template else frozenset()
+    name = names.render(picked.template, pieces, now=names.now(), taken=taken)
+    named = dataclasses.replace(resolved, values=MappingProxyType({**values, "name": name}))
+    if picked.warning is None:
+        return named
+    return dataclasses.replace(named, warnings=(*resolved.warnings, picked.warning))
+
+
+def _live_names(environ: Mapping[str, str] | None) -> frozenset[str]:
+    """The names of the live launches; none when the launch log was never made."""
+    if not store.path(environ).exists():
+        return frozenset()
+    conn = store.connect(env=environ, create=False)
+    try:
+        return names.taken(conn)
+    finally:
+        conn.close()
+
+
+#: The source recorded for a typed row whose value the caller filled in from an earlier
+#: launch.
+LAST = "last"
 #: What a replay does not take from the stored values as values: the composer's own
-#: record of the mode and the rows it left out, and `--off-posture`, which goes back on
-#: its own field.
-_NOT_REPLAYED = ("mode", "not_applied", "off_posture")
+#: record of the mode and the rows it left out, `--off-posture`, which goes back on
+#: its own field, and a fresh launch's record of what its request gave.
+_NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled")
+
+
+def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, object]:
+    """The values a launch's row records: `values` as they are for a replay; for a fresh
+    launch, with `sources` and `filled` (see the module's text)."""
+    if getattr(request, "replay", False):
+        return values
+    sources = dict(resolved.sources)
+    for name in getattr(request, "left_out", None) or ():
+        sources.setdefault(str(name), presets.LEFT_OUT)
+    filled = [str(name) for name in dict.fromkeys(getattr(request, "filled", None) or ())
+              if sources.get(str(name)) == presets.TYPED]
+    for name in filled:
+        sources[name] = LAST
+    return {**values, "sources": sources, "filled": filled}
 
 
 #: The option rows a replay sets back to their default, with a warning, when the
@@ -565,8 +641,8 @@ def _with_ids(request, harness: str):
         return dataclasses.replace(request,
                                    request_id=request.request_id or str(uuid.uuid4()),
                                    session_id=session_id)
-    names = ("seat", "project_preset", "typed", "extra", "off_posture", "left_out", "cwd",
-             "actor")
+    names = ("seat", "project_preset", "typed", "extra", "off_posture", "left_out",
+             "filled", "cwd", "actor")
     given = {name: getattr(request, name, None) for name in names}
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
     session_id = getattr(request, "session_id", None)
@@ -676,7 +752,7 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["KINDS", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
+__all__ = ["KINDS", "LAST", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
            "ReplayRequest", "Replayed", "ScratchRoot", "check", "exit_code", "launch",
            "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold"]

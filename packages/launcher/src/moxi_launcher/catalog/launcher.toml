@@ -6,31 +6,49 @@ type = "enum"
 default = "claude"
 values = ["claude", "codex"]
 doc = "The harness the launch starts."
+group = "model"
+label = "Harness"
 
 [cwd]
 type = "path"
 default = ""
 doc = "The directory the session starts in; the caller's own when unset."
+label = "Folder"
+carry = false
 
 [project]
 type = "string"
 default = ""
 doc = "A project key, whose directory the session starts in."
+label = "Project"
+carry = false
+shown_with = "projects"
 
 [scratch]
 type = "bool"
 default = false
 doc = "Start in a new scratch directory."
+group = "config"
+label = "Scratch folder"
+carry = false
 
 [identity]
 type = "string"
 default = ""
 doc = "The comms name the session holds; ignored, with a warning, without comms."
+group = "seat"
+sub = "Comms"
+label = "Comms identity"
+shown_with = "comms"
 
 [scope]
 type = "string"
 default = ""
 doc = "The comms scope of the identity."
+group = "seat"
+sub = "Comms"
+label = "Comms scope"
+shown_with = "comms"
 
 [director]
 type = "list"
@@ -38,66 +56,109 @@ default = []
 repeatable = true
 requires = "comms"
 doc = "A comms identity that directs the session; may be given more than once."
+group = "seat"
+sub = "Comms"
+label = "Directors"
+shown_with = "comms"
 
 [instructions]
 type = "string"
 default = ""
 doc = "The seat's standing instructions, inline."
+group = "seat"
+sub = "Instructions"
+label = "Standing instructions (inline)"
 
 [instructions_file]
 type = "path"
 default = ""
 doc = "A file holding the seat's standing instructions, read at launch."
+group = "seat"
+sub = "Instructions"
+label = "Standing instructions (file)"
 
 [brief]
 type = "string"
 default = ""
 doc = "The brief, sent as the session's first turn."
+label = "Brief"
+carry = false
 
 [brief_file]
 type = "path"
 default = ""
 doc = "A file holding the brief, sent as the session's first turn."
+label = "Brief from a file"
+carry = false
 
 [handoff]
 type = "path"
 default = ""
 doc = "A handoff file, sent as the session's first turn."
+group = "seat"
+label = "Handoff file as first turn"
+carry = false
 
 [posture]
 type = "string"
 default = ""
 values = ["operator", "go"]
 doc = "The start posture: operator, go, or with:<identity> (with comms)."
+group = "seat"
+sub = "Comms"
+label = "Start posture"
+typed_with = "comms"
 
 [target]
 type = "enum"
 default = "terminal"
 values = ["terminal", "headless", "slot"]
 doc = "Where the session runs: this terminal, headless, or a tmux slot."
+label = "Where it runs"
+carry = false
 
 [slot]
 type = "string"
 default = ""
 requires = "slots"
 doc = "The tmux slot a slot launch goes into; the lowest free one when unset."
+label = "Slot"
+carry = false
 
 [extra_flags]
 type = "list"
 default = []
 doc = "Flags passed on to the harness as given, last on its argv."
+group = "config"
+sub = "Pass-through"
+label = "Extra harness flags"
+
+[name]
+type = "string"
+default = ""
+doc = "The session's name; the name template's when unset."
+group = "seat"
+sub = "Name & notes"
+label = "Session name"
+carry = false
 
 [notes_dir]
 type = "path"
 default = ""
 requires = "notes"
 doc = "The notes directory the session works in."
+group = "seat"
+sub = "Name & notes"
+label = "Notes folder"
 
 [warn_at]
 type = "string"
 default = ""
 requires = "usage"
 doc = "The context mark at which usage warns the session, such as 1x or 1.5x."
+group = "lifecycle"
+sub = "Context"
+label = "Warn at context mark"
 
 [keep_warm]
 type = "enum"
@@ -106,6 +167,9 @@ values = ["off", "on"]
 requires = ["turns", "cache"]
 condition = "cache-timer"
 doc = "Nudge the session before its prompt cache expires while it waits on work it handed out."
+group = "lifecycle"
+sub = "Cache"
+label = "Keep warm"
 
 [recycle_on_expiry]
 type = "enum"
@@ -114,6 +178,9 @@ values = ["off", "clear", "compact"]
 requires = ["turns", "cache"]
 condition = "cache-timer"
 doc = "Clear or compact the session, once idle, when its prompt cache has expired."
+group = "lifecycle"
+sub = "Cache"
+label = "Recycle on cache expiry"
 
 [recycle_at_limit]
 type = "enum"
@@ -121,6 +188,9 @@ default = "off"
 values = ["off", "relaunch", "compact"]
 requires = ["turns", "usage"]
 doc = "Relaunch the session with its handoff, or compact it, once its context passes limit_at."
+group = "lifecycle"
+sub = "Context"
+label = "Recycle at limit"
 
 [recycle_at_limit.when.relaunch]
 requires = ["slots"]
@@ -136,3 +206,6 @@ values = ["1x", "1.5x", "2x"]
 requires = "usage"
 offered_with = "recycle_at_limit"
 doc = "The context mark at which recycle_at_limit acts, such as 1x or 1.5x."
+group = "lifecycle"
+sub = "Context"
+label = "Limit mark"

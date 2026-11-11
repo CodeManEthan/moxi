@@ -6,11 +6,12 @@ form's values (`presets.layered`), the launch
 log (`store.log`), the runs with their events (`store.runs`, `store.run_events`), the
 past-sessions list (`resume.sessions`), a session's state (`state.state`, or
 `state.of_launch` for every live launch), the places the page server's own actor last
-launched in (`store.places`) and where a launch may run now (slots' `list_slots`, joined
-with the launch log). Each holds `busy("read")` for its own length only.
+launched in (`store.places`), where a launch may run now (slots' `list_slots`, joined
+with the launch log) and the session name a launch would take (`names`). Each holds `busy("read")` for its own length only.
 
 **A live launch** is one not `failed` whose process runs now: `moxi.proc.alive` on the pid
-and start time its row recorded, or, with no pid, on the endpoint that claimed it. That
+and start time its row recorded, or, with no pid, on the endpoint that claimed it
+(`live.alive` and `live.live`, which this module imports and offers under its own name). That
 costs one store read and one look at a process per row, and asks turns nothing, so the
 `sessions` topic can gather it every few seconds; the past-sessions list, which asks turns
 about each entry, is read only when the page asks for it. A live launch whose state can't
@@ -29,10 +30,31 @@ exception: a failure is logged once per class and the next tick reads again.
 
 **The launch form** is filled from `/api/form`: the value each row offered for a harness
 takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
-lays them for `resolve`, so the form and the launch can't disagree. A brief or standing
+lays them for `resolve`, so the form and the launch can't disagree. Beside the rows it names the command a
+launch of that harness composes in each place it may run (`presets.mode_of`), which is
+what a row's `modes` are matched with. A brief or standing
 instructions that `[defaults]` or the preset writes inline is named `withheld`, and its
 text is not sent. A preset that can't be laid for the harness is answered with no rows and
 the resolver's refusal.
+
+**The session name** is read from `/api/name`, which renders the name template for the
+project, seat, model and comms name the form holds now, as a launch that sets no `name`
+is named. With `template` it renders that text, unsaved, and answers the save check's
+refusal, or what saving it writes: a launcher setting's key and value, `name.template`,
+or with `keep=project` the whole `name.templates` table with the project's entry set.
+No route here writes it: the page saves through the UI shell's own settings route, the
+one place a setting locked for a run of the shell is refused.
+
+**What an earlier launch was asked for** is read from the sources a launch records
+(`request_of`): the values its own request gave, apart from what its preset and the
+defaults gave, in the shape a launch request has. `/api/last` hands the newest launch's
+back for the form to start filled with, without the rows a launch never takes from an
+earlier one (the place, the first turn, where it runs, the name). `/api/recents` lists
+the newest three launches that asked for different requests, and `/api/recent` resolves
+one's request with where the page would run it now, as `/api/preview` does but with no
+ticket, so what the page shows of a recent is what running it again runs. The launches
+are those of the seat the query names, else of its project, else of its folder, and a
+project's or a folder's never include a seat's.
 
 **A launch from the page** goes in two steps. The request carries the whole form: each
 field showing a value in `values`, each shown empty in `leave_out`. Each value is read as
@@ -57,7 +79,7 @@ copy instead, with `--leave-out ROW` for each row left out: the page never runs 
 it would take the server's place.
 
 `/api/launch` takes the request and its ticket. A ticket not issued for exactly this
-request is refused `bad-ticket`, an old one `expired`. It compares the rows with the layers
+request, its `filled` included, is refused `bad-ticket`, an old one `expired`. It compares the rows with the layers
 again, as the presets file is now, and writes the request file
 (`STATE/runs/<request id>.request.json`, 0600, made only if it is not there) and spawns
 `moxi-launcher-job launch <request id>` detached, then answers 202 with the status path
@@ -95,6 +117,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -112,10 +135,11 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, presets, relaunch, settings, slots, state, store, target,
-               targets)
+from . import (api, catalog, first, job, names, presets, relaunch, settings, slots, state,
+               store, target, targets)
 from . import resume as resuming
 from .compose import common
+from .live import alive, live
 from .page import LAUNCH, LIMIT, RUN
 from .resume import sessions as past_sessions
 
@@ -228,7 +252,8 @@ def _offered_values(row: catalog.Row, available: Callable[[str], bool],
 
 
 def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> dict[str, Any]:
-    """One catalog row as the UI shell's form reads it, for a `harness` launch."""
+    """One catalog row as the UI shell's form reads it, for a `harness` launch. A row
+    whose catalog entry has no `label` is called by its name, the underscores as spaces."""
     why = row.unoffered(available, harness)
     values, notes = _offered_values(row, available, harness)
     default, items = _value_of(row, row.default)
@@ -243,6 +268,11 @@ def field(row: catalog.Row, available: Callable[[str], bool], harness: str) -> d
         "requires": row.requires if isinstance(row.requires, str) else None,
         "needs_absent": why is not None,
         "note": why[0] if why is not None else ("; ".join(notes) or None),
+        "group": row.group, "sub": row.sub,
+        "label": row.label or row.name.replace("_", " ").capitalize(),
+        "danger": list(row.danger), "carry": row.carry, "modes": list(row.modes),
+        "shown": why is None and all(available(module) for module in row.shown_with),
+        "typed": row.typed_with is None or available(row.typed_with),
     }
 
 
@@ -336,21 +366,43 @@ def _form_harness(request: presets.Request, asked: str | None) -> str:
         return _shipped_harness()
 
 
+def modes(harness: str, identity: str | None,
+          available: Callable[[str], bool]) -> list[dict[str, Any]]:
+    """The command a `harness` launch composes in each place the `target` row names, in
+    the row's order, as the resolver decides it (`presets.mode_of`); null where the
+    resolver refuses such a launch. `identity` counts only with comms installed, since
+    the resolver drops it without."""
+    name = identity if identity and available("comms") else None
+    out = []
+    for where in catalog.launcher()["target"].values or ():
+        try:
+            mode: str | None = presets.mode_of(harness, str(where), identity=name,
+                                               available=available)[0]
+        except catalog.Refused:
+            mode = None
+        out.append({"target": str(where), "mode": mode})
+    return out
+
+
 def form(seat: str | None = None, project_preset: str | None = None,
-         harness: str | None = None) -> dict[str, Any]:
+         harness: str | None = None, identity: str | None = None) -> dict[str, Any]:
     """`/api/form`'s answer: the harness the form is drawn for (`harness`, else the one the
     layers give) and each of its rows as the shipped defaults, `[defaults]` and the one
     preset named lay them. A request the resolver refuses (both presets named, a preset
     unknown or not laid for `harness`, a presets file that can't be read) is answered
     with no rows and its refusal. The `harness` row holds the layers' harness, which is
-    `harness` only when none is asked or the layers name the one asked."""
+    `harness` only when none is asked or the layers name the one asked. `modes` is for
+    the harness the form is drawn for, under the comms name `identity`."""
     request = presets.Request(seat=seat or None, project_preset=project_preset or None)
+    available = _available()
     try:
-        laid = presets.layered(request, harness=harness, available=_available())
+        laid = presets.layered(request, harness=harness, available=available)
     except REFUSALS as error:
-        return _up(harness=_form_harness(request, harness), rows=[],
+        drawn = _form_harness(request, harness)
+        return _up(harness=drawn, rows=[], modes=modes(drawn, identity, available),
                    refused=_refusal(error))
-    return _up(harness=laid.harness, rows=form_rows(laid), refused=None)
+    return _up(harness=laid.harness, rows=form_rows(laid),
+               modes=modes(laid.harness, identity, available), refused=None)
 
 
 def read_form(call: Any) -> dict[str, Any]:
@@ -358,10 +410,11 @@ def read_form(call: Any) -> dict[str, Any]:
     query = call.query
     with call.busy("read"):
         try:
-            return form(query.get("seat"), query.get("project_preset"), query.get("harness"))
+            return form(query.get("seat"), query.get("project_preset"), query.get("harness"),
+                        query.get("identity"))
         except Exception as err:
             return _failed(err, "reading the launch form failed",
-                           harness=_shipped_harness(), rows=[], refused=None)
+                           harness=_shipped_harness(), rows=[], modes=[], refused=None)
 
 
 # -- the launch log -------------------------------------------------------------------------
@@ -543,15 +596,6 @@ def read_places(call: Any) -> dict[str, Any]:
 NO_SLOTS = {"target": "terminal", "slot": None}
 
 
-def _taken_label(row: store.LaunchRow) -> str:
-    """What a taken slot is called: its launch's identity, else the name of the folder it
-    runs in and the time it started, on this machine's clock."""
-    if row.identity:
-        return row.identity
-    started = store.parse_time(row.created_at).astimezone()
-    return f"{Path(row.cwd).name or row.cwd} {started:%H:%M}"
-
-
 def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | None:
     """The launch that occupies `slot`: the request id slots keeps for its last start,
     when the launch log holds that launch."""
@@ -560,7 +604,7 @@ def _taken_by(conn: sqlite3.Connection | None, slot: Any) -> dict[str, Any] | No
     if conn is None or not isinstance(request_id, str):
         return None
     row = store.get(conn, request_id)
-    return None if row is None else {"request_id": request_id, "label": _taken_label(row)}
+    return None if row is None else {"request_id": request_id, "label": names.shown(row)}
 
 
 def _usable_slots() -> Any:
@@ -612,33 +656,105 @@ def read_targets(call: Any) -> dict[str, Any]:
                            new_slot=False, unread=_slots_there(), default=dict(NO_SLOTS))
 
 
+# -- /api/name ------------------------------------------------------------------------------
+
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_text(text: str) -> str:
+    # A JSON string's escapes are all TOML basic-string escapes.
+    return json.dumps(text, ensure_ascii=False)
+
+
+def spelled_table(table: Mapping[str, str]) -> str:
+    """A table of strings as the command line takes one: one TOML inline table."""
+    parts = [f"{key if _BARE_KEY.fullmatch(key) else _toml_text(key)} = {_toml_text(value)}"
+             for key, value in table.items()]
+    return "{" + ", ".join(parts) + "}"
+
+
+def _unnamed(**answer: Any) -> dict[str, Any]:
+    return {"name": None, "template": names.DEFAULT, "from": names.GLOBAL, "project": None,
+            "refused": None, "save": None, **answer}
+
+
+def _keep_checked(query: Mapping[str, Any]) -> None:
+    if "keep" in query and "template" not in query:
+        raise lb.Refused("keep is asked with template, the text to keep")
+    if query.get("keep") == names.PROJECT and not query.get("project"):
+        raise lb.Refused("keep=project is asked with project, the key the template is kept "
+                         "for")
+
+
+def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/name`'s answer: the name a launch would take now, from the template of its
+    project, else the one for every launch. Its project is `project`, else the one a
+    launch in the folder `cwd` finds (`presets.folder_place`, which also expands `~`).
+    `seat`, else `agent`, fills `<agent>`; the project's key, else the name of that
+    folder, fills `<project>`; `identity` and `scope` fill nothing without comms. The
+    answer's `project` is the key of the project whose template it rendered, null for
+    the one for every launch. With `template`, that text is rendered in the stored
+    template's place and checked: refused, the answer holds the refusal and no name;
+    else `save` holds what saving it writes, for `project` when `keep` is `project`.
+    Settings or projects that can't be read are answered as a refusal. A `keep` with no
+    `template`, or for a project with no `project`, is refused (422)."""
+    _keep_checked(query)
+    project = query.get("project") or None
+    keep, editing = query.get("keep"), "template" in query
+    available = _available()
+    comms = available("comms")
+    key, folder = project, ""
+    try:
+        current = settings.current()
+        if project is None and query.get("cwd"):
+            cwd, key = presets.folder_place(query["cwd"], available=available)
+            folder = names.folder(cwd)
+    except REFUSALS as error:
+        return _up(**_unnamed(refused=_refusal(error)))
+    pieces = names.Pieces(
+        project=key or folder,
+        agent=query.get("seat") or query.get("agent") or "",
+        model=query.get("model") or "",
+        identity=(query.get("identity") or "") if comms else "",
+        scope=(query.get("scope") or "") if comms else "")
+    refused = save = None
+    if editing:
+        template = query["template"]
+        source = names.PROJECT if keep == names.PROJECT else names.GLOBAL
+        refused = names.refusal(template)
+        if refused is not None:
+            return _up(**_unnamed(template=template, refused=_refusal(refused),
+                                  project=key if source == names.PROJECT else None,
+                                  **{"from": source}))
+        save = {"key": names.TEMPLATE, "value": template}
+        if source == names.PROJECT:
+            table = {**(current[names.TEMPLATES] or {}), str(project): template}
+            save = {"key": names.TEMPLATES, "value": spelled_table(table)}
+    else:
+        picked = names.chosen(current, key)
+        template, source = picked.template, picked.source
+    owner = key if source == names.PROJECT else None
+    taken: frozenset[str] = frozenset()
+    if "<instance>" in template:
+        with _store() as conn:
+            taken = frozenset() if conn is None else names.taken(conn)
+    name = names.render(template, pieces, now=names.now(), taken=taken)
+    return _up(name=name, template=template, project=owner, refused=None, save=save,
+               **{"from": source})
+
+
+def read_name(call: Any) -> dict[str, Any]:
+    """`GET /api/name`: the session name a launch would take, or a template being edited
+    would give it."""
+    _keep_checked(call.query)
+    with call.busy("read"):
+        try:
+            return name_now(call.query)
+        except Exception as err:
+            return _failed(err, "reading the session name failed", **_unnamed())
+
+
 # -- live launches and their state ------------------------------------------------------------
-
-
-def alive(row: store.LaunchRow) -> bool:
-    """Whether the process of the launch `row` runs now: `moxi.proc.alive` on the pid and
-    start time it recorded (with no start time, whether any process has that pid), or,
-    for a row that recorded no pid, on the endpoint that claimed it. An endpoint that
-    can't be read is not alive."""
-    if row.pid:
-        if row.pid_started is None:
-            return proc.identity(row.pid) is not None
-        return proc.alive(proc.ProcId(row.pid, row.pid_started))
-    parsed = store.parse_endpoint(row.endpoint) if row.endpoint else None
-    return parsed is not None and not store.endpoint_gone(row.endpoint or "")
-
-
-def live(conn: sqlite3.Connection) -> list[store.LaunchRow]:
-    """The live launches, newest first: each not `failed` whose process runs now, with
-    `newest_session_id` the id it was last known by. One store read and one look at a
-    process per row; turns is not asked."""
-    found = []
-    for row in store.running(conn):
-        if alive(row):
-            known = store.session_ids(conn, row.request_id)
-            found.append(replace(row, newest_session_id=known[-1][0] if known
-                                 else row.session_id))
-    return found
 
 
 def _readable(found: state.SessionState) -> dict[str, Any]:
@@ -847,12 +963,13 @@ def page_key(env: Mapping[str, str] | None = None) -> bytes:
 
 def canonical(body: Mapping[str, Any], request_id: str, expires: int) -> bytes:
     """The request a ticket is issued for, as the bytes it signs: the preset, the values,
-    the rows left out (sorted) and `off_posture` as the page sent them, the request id and
-    the expiry."""
+    the rows left out and the rows filled in (each sorted) and `off_posture` as the page
+    sent them, the request id and the expiry."""
     asked = {"seat": body.get("seat"), "project_preset": body.get("project_preset"),
              "values": body.get("values") or {},
              "leave_out": sorted(body.get("leave_out") or []),
              "off_posture": bool(body.get("off_posture", False)),
+             "filled": sorted(body.get("filled") or []),
              "request_id": request_id, "expires": expires}
     return json.dumps(asked, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False).encode()
@@ -999,7 +1116,8 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     taken out of the layers before the preset is laid, and stays left out when a layer
     names it. A typed row of a group (`_GROUPS`) makes every other value of that group in
     `body` typed too, so the resolver refuses two. The harness is typed only when it is
-    not the layers'. Raises a refusal."""
+    not the layers'. Of the rows `body` names in `filled`, those that are typed are the
+    request's `filled`. Raises a refusal."""
     seat = body.get("seat") or None
     project_preset = body.get("project_preset") or None
     values = dict(body.get("values") or {})
@@ -1053,9 +1171,11 @@ def launch_request(body: Mapping[str, Any], request_id: str):
 
     extra = typed.pop(catalog.EXTRA, ())
     off_posture = bool(body.get("off_posture", False))
+    filled = tuple(name for name in dict.fromkeys(body.get("filled") or ())
+                   if name in typed or (name == catalog.EXTRA and extra))
     request = api.LaunchRequest(seat=seat, project_preset=project_preset, typed=typed,
                                 extra=tuple(extra), off_posture=off_posture,
-                                left_out=left_out, request_id=request_id)
+                                left_out=left_out, filled=filled, request_id=request_id)
     command = ["moxi", "launcher", "run"]
     if seat:
         command += ["--seat", seat]
@@ -1069,6 +1189,185 @@ def launch_request(body: Mapping[str, Any], request_id: str):
     for name in left_out:
         command += ["--leave-out", name]
     return request, command + (["--", *extra] if extra else [])
+
+
+# -- what an earlier launch was asked for ---------------------------------------------------
+
+#: The sources of a value the launch's own request gave: typed, or filled in from an
+#: earlier launch.
+GIVEN = (presets.TYPED, api.LAST)
+#: The rows that say where a launch runs, which a launch made again never takes from the
+#: earlier one.
+_WHERE_IT_RAN = ("target", "slot")
+_PLACE_ROWS = ("cwd", "project", "scratch")
+_BRIEF_ROWS = ("brief", "brief_file")
+
+
+def _a_row(name: str) -> bool:
+    return name in catalog.launcher() or any(name in catalog.load(h)
+                                             for h in catalog.HARNESSES)
+
+
+def request_of(row: store.LaunchRow, available: Callable[[str], bool]) -> dict[str, Any]:
+    """The request the launch `row` was made with, read from the sources it recorded:
+    `seat`, `project_preset`, `values`, `leave_out` and `off_posture` as a body of
+    `/api/preview` holds them, and `not_offered`. It holds only what that launch's own
+    request gave, never a value the launch got from its preset, `[defaults]` or a
+    shipped default.
+
+    `values` has each row whose source is typed or filled in, spelled as the form
+    spells it, but: `target` and `slot` are never there; the place is `cwd` alone, the
+    folder the launch ran in, when the request named the place or no layer did (the
+    launch then started in its caller's directory), and absent when the preset or
+    `[defaults]` named it; the brief is `brief` alone, the text the launch read,
+    whichever spelling gave it. A row this install no longer offers for the launch's
+    harness is named in `not_offered` instead. `leave_out` has each row the request
+    left out, and each one it set to nothing (a list emptied, a switch with an optional
+    value set off, a text emptied). A brief row is there only when `brief` is not in
+    `values`, and both are there when the launch left one out and read no brief, so a
+    preset's brief is not given again to a launch that read none. `row` must be a
+    launch that recorded its sources."""
+    stored = row.values
+    sources: Mapping[str, str] = stored["sources"]
+    offered = catalog.offered(row.harness, available)
+    values: dict[str, Any] = {}
+    leave_out: list[str] = []
+    not_offered: list[str] = []
+    for name, source in sources.items():
+        if name in (*_WHERE_IT_RAN, *_PLACE_ROWS, *_BRIEF_ROWS):
+            continue
+        if source == presets.LEFT_OUT:
+            if _a_row(name):
+                leave_out.append(name)
+            continue
+        if source not in GIVEN:
+            continue
+        if name not in offered:
+            not_offered.append(name)
+            continue
+        value, items = _value_of(offered[name], stored.get(name))
+        if items is not None:
+            values[name] = items
+        elif value is not None:
+            values[name] = value
+        else:
+            leave_out.append(name)
+    if sources.get("cwd") in (*GIVEN, presets.SHIPPED, presets.LEFT_OUT):
+        values["cwd"] = row.cwd
+    if any(sources.get(name) in GIVEN for name in _BRIEF_ROWS) and row.brief:
+        values["brief"] = row.brief
+    left = [name for name in _BRIEF_ROWS if sources.get(name) == presets.LEFT_OUT
+            or (sources.get(name) in GIVEN and not row.brief)]
+    if left and not row.brief:
+        # The launch read no first turn: neither spelling may give one again.
+        left = list(_BRIEF_ROWS)
+    leave_out += [name for name in left if name not in values and _a_row(name)]
+    seat = row.preset_name if row.preset_kind == "seat" else None
+    project_preset = row.preset_name if row.preset_kind == "project" else None
+    return {"seat": seat, "project_preset": project_preset, "values": values,
+            "leave_out": leave_out, "off_posture": bool(stored.get("off_posture", False)),
+            "not_offered": not_offered}
+
+
+def body_of(handed: Mapping[str, Any]) -> dict[str, Any]:
+    """What `request_of` handed back as a body of `/api/preview`: a preset only when the
+    launch named one, and no `not_offered`."""
+    body = {key: handed[key] for key in ("values", "leave_out", "off_posture")}
+    for key in ("seat", "project_preset"):
+        if handed[key]:
+            body[key] = handed[key]
+    return body
+
+
+def handed_rows(values: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A request's `values` as rows: a list in `items`, any other value in `value`."""
+    return [{"name": name, "value": None if isinstance(value, list) else value,
+             "items": value if isinstance(value, list) else None}
+            for name, value in values.items()]
+
+
+# -- whose launch -----------------------------------------------------------------------------
+
+#: The keys a read of earlier launches is asked by; the first given decides.
+WHOSE = ("seat", "project", "cwd")
+
+
+def whose(query: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Which launches `query` asks about: `(key, value)` for the first of `seat`,
+    `project` and `cwd` it gives, a folder made absolute; None when it gives none."""
+    for key in WHOSE:
+        value = query.get(key)
+        if value:
+            return key, _folder(value) if key == "cwd" else value
+    return None
+
+
+def _folder(text: str) -> str:
+    return os.path.normpath(os.path.expanduser(text))
+
+
+def _is_of(row: store.LaunchRow, key: str, value: str) -> bool:
+    seat = row.preset_kind == "seat"
+    if key == "seat":
+        return seat and row.preset_name == value
+    if key == "project":
+        return not seat and row.project_key == value
+    return not seat and _folder(row.cwd) == value
+
+
+def made_again(row: store.LaunchRow, actor: str) -> bool:
+    """Whether `row` is a launch the page offers to make again: one `actor` made
+    (`store.launched_by`: not failed, no relaunch or resume, not in a scratch folder)
+    that recorded where its values came from. A launch made by an older launcher did
+    not, so what its request gave can't be told from what its preset gave."""
+    return store.launched_by(row, actor) and isinstance(row.values.get("sources"), dict)
+
+
+def launches_of(conn: sqlite3.Connection | None, key: str,
+                value: str) -> list[store.LaunchRow]:
+    """The launches of a seat (`key` `seat`: its preset, wherever it ran), a project
+    (`project`: its key, and no seat named) or a folder (`cwd`: it ran there, and no
+    seat named) that `made_again` counts, newest first, among the newest
+    `store.PLACES_SCAN` rows of the log."""
+    if conn is None:
+        return []
+    actor = first.actor()
+    return [row for row in store.log(conn, limit=store.PLACES_SCAN)
+            if made_again(row, actor) and _is_of(row, key, value)]
+
+
+# -- /api/last ------------------------------------------------------------------------------
+
+
+def last(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/last`'s answer: for the newest launch of the seat, project or folder asked
+    for, when it was made, its harness, and each value its own request gave
+    (`request_of`) for a row that may be filled from an earlier launch (`carry`). No
+    such launch, or no key asked, is answered with no values."""
+    none = _up(at=None, harness=None, values=[])
+    key = whose(query)
+    if key is None:
+        return none
+    with _store() as conn:
+        found = launches_of(conn, *key)
+    if not found:
+        return none
+    row = found[0]
+    values = request_of(row, _available())["values"]
+    kept = {name: value for name, value in values.items()
+            if getattr(catalog.row(row.harness, name), "carry", False)}
+    return _up(at=row.created_at, harness=row.harness, values=handed_rows(kept))
+
+
+def read_last(call: Any) -> dict[str, Any]:
+    """`GET /api/last`: what the newest launch of a seat, a project or a folder was
+    asked for, to fill a new launch there."""
+    with call.busy("read"):
+        try:
+            return last(call.query)
+        except Exception as err:
+            return _failed(err, "reading the last launch failed", at=None, harness=None,
+                           values=[])
 
 
 def _command(words: list[str]) -> str:
@@ -1109,6 +1408,28 @@ def on_path(composition: Any) -> dict[str, Any] | None:
     return None
 
 
+def _previewing(body: Mapping[str, Any], request_id: str):
+    """The page's `body` as a launch under `request_id`: the request and its command's
+    words, its resolved values, its composition, and the refusals `api.check` finds.
+    Raises a refusal the request, the resolver or the composer meets."""
+    request, words = launch_request(body, request_id)
+    resolved = job.placed(request)
+    composition = api.preview(request)
+    checked = [_refusal(found) for found in api.check(request)]
+    return request, words, resolved, composition, checked
+
+
+def _refusals(checked: list[dict[str, Any]], composition: Any) -> list[dict[str, Any]]:
+    """`checked`, then the PATH's refusal of a launch that is not in a terminal, each
+    once."""
+    terminal = composition.target == "terminal"
+    refused: list[dict[str, Any]] = []
+    for found in [*checked, None if terminal else on_path(composition)]:
+        if found is not None and found not in refused:
+            refused.append(found)
+    return refused
+
+
 def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
     """What `/api/preview` answers for the page's `body`: what the launch would start,
     the rows it leaves out, every refusal `check` finds, and, when there is none and the
@@ -1116,17 +1437,11 @@ def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
     copy instead."""
     request_id = str(uuid.uuid4())
     try:
-        request, words = launch_request(body, request_id)
-        job.placed(request)
-        composition = api.preview(request)
-        checked = [_refusal(found) for found in api.check(request)]
+        request, words, _, composition, checked = _previewing(body, request_id)
     except REFUSALS as error:
         return _previewed(refused=[_refusal(error)])
     terminal = composition.target == "terminal"
-    refused: list[dict[str, Any]] = []
-    for found in [*checked, None if terminal else on_path(composition)]:
-        if found is not None and found not in refused:
-            refused.append(found)
+    refused = _refusals(checked, composition)
     issued, expires_at = (None, None) if refused or terminal else ticket(body, request_id)
     return _previewed(
         refused=refused, harness=composition.harness, mode=composition.mode,
@@ -1153,6 +1468,140 @@ def preview(call: Any) -> dict[str, Any]:
             return previewed(call.body)
         except Exception as err:
             return _previewed(refused=[_unexpected(err, "previewing a launch failed")])
+
+
+# -- /api/recents and /api/recent ---------------------------------------------------------
+
+#: How many earlier launches `/api/recents` lists.
+RECENTS_MAX = 3
+#: The longest `head` of a recent, in characters.
+HEAD_MAX = 26
+#: Why `/api/recent` can't run a launch again that is no recent.
+NO_RECENT = ("launch {} is not one of your launches that can be run again: it failed, was "
+             "a relaunch, a resume or a scratch launch, or was made by an older launcher")
+NO_RECENT_HINT = "run again one of the launches the page lists"
+
+
+def head(row: store.LaunchRow) -> str:
+    """What a recent is called: the first whole words of its brief within `HEAD_MAX`
+    characters (a longer first word cut there), else its model and effort, else its
+    harness."""
+    words = (row.brief or "").split()
+    if words:
+        said = words[0][:HEAD_MAX]
+        for word in words[1:]:
+            if len(said) + 1 + len(word) > HEAD_MAX:
+                break
+            said += " " + word
+        return said
+    named = (spelled(row.values.get(name)) for name in ("model", "effort"))
+    return " · ".join(name for name in named if name) or row.harness
+
+
+def recents(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/recents`' answer: the launches of the seat, project or folder asked for that
+    can be run again, newest first, a launch whose `request_of` equals a newer one's left
+    out, at most `RECENTS_MAX`; none when no key is asked."""
+    key = whose(query)
+    if key is None:
+        return _up(recents=[])
+    with _store() as conn:
+        found = launches_of(conn, *key)
+    available = _available()
+    listed: list[dict[str, Any]] = []
+    asked: list[dict[str, Any]] = []
+    for row in found:
+        handed = request_of(row, available)
+        if handed in asked:
+            continue
+        asked.append(handed)
+        listed.append({"request_id": row.request_id, "at": row.created_at, "head": head(row),
+                       "target": row.target, "slot": row.slot})
+        if len(listed) == RECENTS_MAX:
+            break
+    return _up(recents=listed)
+
+
+def read_recents(call: Any) -> dict[str, Any]:
+    """`GET /api/recents`: the launches of a seat, a project or a folder that can be run
+    again."""
+    with call.busy("read"):
+        try:
+            return recents(call.query)
+        except Exception as err:
+            return _failed(err, "reading the recent launches failed", recents=[])
+
+
+def _not_again(refused: dict[str, Any]) -> dict[str, Any]:
+    return _up(request=None, shows=None, refused=refused)
+
+
+def danger(harness: str, values: Mapping[str, object]) -> list[str]:
+    """The rows of a `harness` launch whose value is one of the row's `danger` values."""
+    named = []
+    for name, value in values.items():
+        row = catalog.row(harness, name)
+        if row is not None and spelled(value) in row.danger:
+            named.append(name)
+    return named
+
+
+def recent(query: Mapping[str, Any]) -> dict[str, Any]:
+    """`/api/recent`'s answer for the launch `request`: its `request_of` with the
+    query's `target`, and its `slot` (left out when none is given), resolved as
+    `/api/preview` resolves a body, with no ticket. `shows` is what that resolution
+    runs; `request.off_posture` is true exactly when a posture row of it is off its
+    default, each named in `shows.off_posture`. A launch that is no recent of this user
+    (`made_again`), and a request the launcher refuses now, is answered `refused`."""
+    request_id = query["request"]
+    with _store() as conn:
+        row = None if conn is None else store.get(conn, request_id)
+    if row is None or not made_again(row, first.actor()):
+        return _not_again({"code": "no-recent", "row": None,
+                           "problem": NO_RECENT.format(request_id), "hint": NO_RECENT_HINT})
+    available = _available()
+    handed = request_of(row, available)
+    values = {**handed["values"], "target": query["target"]}
+    leave_out = list(handed["leave_out"])
+    if query.get("slot"):
+        values["slot"] = query["slot"]
+    else:
+        leave_out.append("slot")
+    asked = {**handed, "values": values, "leave_out": leave_out}
+    try:
+        # Resolved with the posture allowed, to name the rows off it.
+        request, _, resolved, composition, checked = _previewing(
+            body_of({**asked, "off_posture": True}), str(uuid.uuid4()))
+        defaults = presets.layered(request, available=available).defaults
+    except REFUSALS as error:
+        return _not_again(_refusal(error))
+    refused = _refusals(checked, composition)
+    if refused:
+        return _not_again(refused[0])
+    off = presets.off_posture_rows(resolved.harness, resolved.values, resolved.sources,
+                                   defaults)
+    return _up(
+        request={"seat": handed["seat"], "project_preset": handed["project_preset"],
+                 "values": handed_rows(values), "leave_out": leave_out,
+                 "off_posture": bool(off)},
+        shows={"harness": resolved.harness, "model": spelled(resolved.values.get("model")),
+               "effort": spelled(resolved.values.get("effort")),
+               "prompt": composition.brief or None, "cwd": resolved.cwd,
+               "project_key": resolved.project_key, "off_posture": off,
+               "danger": danger(resolved.harness, resolved.values),
+               "not_offered": handed["not_offered"]},
+        refused=None)
+
+
+def read_recent(call: Any) -> dict[str, Any]:
+    """`GET /api/recent`: an earlier launch's request, resolved as running it again now
+    would resolve it, or why it can't run again."""
+    with call.busy("read"):
+        try:
+            return recent(call.query)
+        except Exception as err:
+            return _failed(err, "reading a recent launch failed", request=None, shows=None,
+                           refused=None)
 
 
 # -- /api/launch ----------------------------------------------------------------------------
@@ -1209,7 +1658,7 @@ def launched(body: Mapping[str, Any]) -> Any:
         "act": "launch", "request_id": request_id, "seat": request.seat,
         "project_preset": request.project_preset, "typed": dict(request.typed),
         "extra": list(request.extra), "left_out": list(request.left_out),
-        "off_posture": request.off_posture})
+        "filled": list(request.filled), "off_posture": request.off_posture})
 
 
 def _run_job(request_id: str, data: Mapping[str, Any], used: str = USED) -> Any:
@@ -1308,14 +1757,14 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "NO_SLOTS", "PROJECTS",
-           "REFUSALS", "REGATHER",
-           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
-           "WITHHELD", "alive", "canonical", "events", "field", "fields", "form", "form_rows",
-           "gather_launches", "gather_sessions", "launch", "launch_request", "launch_row",
-           "launched", "launches", "live", "live_states", "on_path", "page_key", "places",
-           "preview", "previewed", "read_catalog", "read_form", "read_launches",
-           "read_places", "read_presets", "read_runs", "read_sessions", "read_state",
-           "read_targets", "refusal", "resumable", "resume", "resumed", "run_entry",
-           "session_state", "spelled", "targets_now", "ticket", "tokens", "unreadable",
-           "verify"]
+__all__ = ["EVENT_CUT", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",
+           "NO_SLOTS", "PROJECTS", "RECENTS_MAX", "REFUSALS", "REGATHER",
+           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED", "WHOSE",
+           "WITHHELD", "alive", "body_of", "canonical", "danger", "events", "field", "fields", "form", "form_rows",
+           "gather_launches", "gather_sessions", "handed_rows", "head", "last", "launch", "launch_request", "launch_row",
+           "launched", "launches", "launches_of", "live", "live_states", "made_again", "modes", "name_now", "on_path", "page_key",
+           "places", "preview", "previewed", "read_catalog", "read_form", "read_last", "read_launches",
+           "read_name", "read_places", "read_presets", "read_recent", "read_recents", "read_runs", "read_sessions", "read_state",
+           "read_targets", "recent", "recents", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry",
+           "session_state", "spelled", "spelled_table", "targets_now", "ticket", "tokens", "unreadable",
+           "verify", "whose"]

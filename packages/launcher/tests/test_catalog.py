@@ -32,7 +32,7 @@ CODEX_ROWS = {"model", "sandbox", "approval", "profile", "search", "add_dir", "c
               "cwd", "update_check", "skip_git_check", "trust_cwd"}
 LAUNCHER_ROWS = {"harness", "cwd", "project", "scratch", "identity", "scope", "director",
                  "instructions", "instructions_file", "brief", "brief_file", "handoff",
-                 "posture", "target", "slot", "extra_flags", "notes_dir", "warn_at",
+                 "posture", "target", "slot", "extra_flags", "name", "notes_dir", "warn_at",
                  "keep_warm", "recycle_on_expiry", "recycle_at_limit", "limit_at"}
 
 
