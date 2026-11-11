@@ -410,6 +410,8 @@ export interface LaunchBody {
   values: Record<string, Sent>;
   leave_out: string[];
   off_posture?: boolean;
+  /** The rows the page filled from the last launch and the user left as they were. */
+  filled?: string[];
 }
 
 export function launchBody(choice: Choice, request: FormRequest, offPosture: boolean): LaunchBody {

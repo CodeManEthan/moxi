@@ -230,8 +230,9 @@ export function samePick(a: Pick, b: Pick, home: string): boolean {
 /** A time as the browser's locale writes it. */
 export type Clock = (at: Date) => string;
 
-const HOUR: Clock = (at) => at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const DAY: Clock = (at) => at.toLocaleDateString([], { month: "short", day: "numeric" });
+/** A time of day, and a day, as the browser's locale writes them. */
+export const HOUR: Clock = (at) => at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+export const DAY: Clock = (at) => at.toLocaleDateString([], { month: "short", day: "numeric" });
 
 /** When a place was last launched in: the time of day for a launch on `now`'s day, else
  * the day. Empty for a time that can't be read. */
@@ -539,11 +540,13 @@ export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", 
  * The request names the one preset `choice` applies, whose values `fields` are filled
  * with. It says it starts off the user's usual permissions exactly when one of its
  * permission rows does, against `base` (see `offPosture`): the same harness's form read
- * with no preset, which is `fields` when none is applied.
+ * with no preset, which is `fields` when none is applied. `filled` names the rows of `set`
+ * filled from the last launch, which the request names in its own `filled`.
  */
 export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
                               set: Readonly<Record<string, FormValue>>, run: Run,
-                              base: readonly FieldDescriptor[] = fields, choice: Choice = NO_PRESET): LaunchBody {
+                              base: readonly FieldDescriptor[] = fields, choice: Choice = NO_PRESET,
+                              filled: readonly string[] = []): LaunchBody {
   const values = formValues(fields, set);
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
@@ -555,7 +558,9 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   request.values.target = run.target;
   if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);
   else if (slotted) request.leave_out.push("slot");
-  return launchBody(choice, request, offPosture(fields, base, set).length > 0);
+  const body = launchBody(choice, request, offPosture(fields, base, set).length > 0);
+  if (filled.length > 0) body.filled = [...filled];
+  return body;
 }
 
 // --- the permission rows ---------------------------------------------------------------------

@@ -630,13 +630,14 @@ export function rulesWord(count: number): string {
 }
 
 /** The values set in the panel once the two rows of rules hold what `next` gives them,
- * each set as any row is; the set of built-in tools is not written. */
+ * each set as any row is; a row whose items are those it holds `now` is not written, and
+ * the set of built-in tools never is. */
 export function withTools(options: Readonly<Record<string, FormValue>>, fields: readonly PanelField[],
-                          next: ToolLists): Record<string, FormValue> {
+                          next: ToolLists, now: ToolLists = toolLists(fields, options)): Record<string, FormValue> {
   let out: Record<string, FormValue> = { ...options };
   for (const name of [ALLOWED, DENIED] as const) {
     const field = fields.find((row) => row.name === name);
-    if (field !== undefined) out = withOption(out, field, [...next[name]], fields);
+    if (field !== undefined && !same(now[name], next[name])) out = withOption(out, field, [...next[name]], fields);
   }
   return out;
 }
