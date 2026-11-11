@@ -75,12 +75,12 @@ var ve=globalThis,$e=ve.ShadowRoot&&(ve.ShadyCSS===void 0||ve.ShadyCSS.nativeSha
          font-variant-numeric: tabular-nums; white-space: nowrap; }
   .opt.on { color: var(--moxi-text); }
   .lab { margin: 4px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
-  .nm { display: flex; align-items: center; margin-bottom: 6px; border: 1px solid var(--moxi-border); border-radius: 7px; }
-  .nm.on, .nm:focus-within { border-color: var(--moxi-border-strong); }
-  .nm input { flex: 1 1 auto; min-width: 0; padding: 6px 0 6px 10px; border: 0; outline: 0; background: none;
+  .nfield { display: flex; align-items: center; margin-bottom: 6px; border: 1px solid var(--moxi-border); border-radius: 7px; }
+  .nfield.on, .nfield:focus-within { border-color: var(--moxi-border-strong); }
+  .nfield input { flex: 1 1 auto; min-width: 0; padding: 6px 0 6px 10px; border: 0; outline: 0; background: none;
               color: var(--moxi-text); font: 13px/20px var(--moxi-font-sans); }
-  .nm input::placeholder { color: var(--moxi-text); opacity: 1; }
-  .nm > button { flex: none; padding: 6px 10px; border: 0; background: none; color: var(--moxi-text-dim); font-size: 15px;
+  .nfield input::placeholder { color: var(--moxi-text); opacity: 1; }
+  .nfield > button { flex: none; padding: 6px 10px; border: 0; background: none; color: var(--moxi-text-dim); font-size: 15px;
                  line-height: 20px; }
   .tnote { margin: 0; padding: 0 44px 8px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px;
            overflow-wrap: anywhere; }
@@ -330,7 +330,7 @@ var ve=globalThis,$e=ve.ShadowRoot&&(ve.ShadyCSS===void 0||ve.ShadyCSS.nativeSha
           type="button" @click=${()=>{this.pending=null}}>Cancel</button></div>`}</div>`}get#P(){let t=this.pick,s=this.set;return{seat:this.preset.kind==="seat"?this.preset.name:"",project:t?.kind==="project"?t.key:"",cwd:t?.kind==="folder"?t.path:"",model:K(this.fields,s,"model"),identity:this.#W,scope:K(this.fields,s,"scope"),agent:K(this.fields,s,"agent"),harness:this.harness}}#wt(t){let s=this.#x+=1;this.#h=t,y("launcher",`api/name?${t}`).then(r=>{if(s!==this.#x)return;let i=r.status===0?"no answer from the shell":`the launcher's page server answered ${r.status}`;this.named=Pr(r.status===200?r.data:null,i)})}#ye(t,s){this.options=fe(this.options,t,s===""?null:s,this.fields)}#be(){if(this.nameSaid="",this.draft!==null){this.draft=null;return}let t=this.named,s=this.#P.project;this.draft={template:t?.template??"",keep:t?.from==="project"&&s!==""?"project":"global"}}#G(t){this.draft!==null&&(this.draft={...this.draft,template:t},this.nameSaid="")}async#kt(){let t=this.named?.save??null;if(this.draft===null||t===null||this.saving)return;this.saving=!0;let s=this.#x,r;try{r=Nr(await y("ui","api/settings/set",Dr(t)))}finally{this.saving=!1}if(this.isConnected){if(r!==null){this.nameSaid=r;return}s===this.#x&&(this.named=null),this.draft=null,this.nameSaid="",this.#h=null}}#Rt(t,s){let r=t.field,i=_(r,this.#c),o=typeof i=="string"?i:"",a=this.named,l=this.draft!==null;return u`<div class="prow" data-row=${t.name}>
       ${s===""?d:u`<div class="at"><span>${s}</span></div>`}
       <div class="lab" aria-hidden="true">${t.label}</div>
-      <div class=${l?"nm on":"nm"}><input type="text" data-control=${t.name} aria-label=${t.label}
+      <div class=${l?"nfield on":"nfield"}><input type="text" data-control=${t.name} aria-label=${t.label}
         autocomplete="off" spellcheck="false" .value=${o} placeholder=${a?.name??""}
         @input=${p=>this.#ye(r,p.target.value)}><button
         type="button" aria-label="Edit the name template" aria-expanded=${l?"true":"false"}

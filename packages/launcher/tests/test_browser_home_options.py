@@ -663,6 +663,8 @@ def test_a_set_of_built_in_tools_dims_the_lines_it_lacks_and_no_line_writes_it(f
     edit = view.locator('[data-tool="Edit"]')
     expect(edit).to_contain_text("not in this launch's tools")
     kit.assert_colour(edit.locator(".nm"), "text-dim")
+    # A tool's name is plain text on its line, never drawn as a field.
+    expect(view.locator('[data-tool="Read"] .nm')).to_have_css("border-top-width", "0px")
     expect(view.locator('[data-tool="Read"]')).not_to_contain_text("not in this launch's tools")
     # A press on a dim line writes the rule, and the set stays as it was.
     edit.get_by_role("button", name="allow", exact=True).click()

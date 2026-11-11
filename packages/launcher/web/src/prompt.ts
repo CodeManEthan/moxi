@@ -252,12 +252,12 @@ const STYLES = css`
          font-variant-numeric: tabular-nums; white-space: nowrap; }
   .opt.on { color: var(--moxi-text); }
   .lab { margin: 4px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
-  .nm { display: flex; align-items: center; margin-bottom: 6px; border: 1px solid var(--moxi-border); border-radius: 7px; }
-  .nm.on, .nm:focus-within { border-color: var(--moxi-border-strong); }
-  .nm input { flex: 1 1 auto; min-width: 0; padding: 6px 0 6px 10px; border: 0; outline: 0; background: none;
+  .nfield { display: flex; align-items: center; margin-bottom: 6px; border: 1px solid var(--moxi-border); border-radius: 7px; }
+  .nfield.on, .nfield:focus-within { border-color: var(--moxi-border-strong); }
+  .nfield input { flex: 1 1 auto; min-width: 0; padding: 6px 0 6px 10px; border: 0; outline: 0; background: none;
               color: var(--moxi-text); font: 13px/20px var(--moxi-font-sans); }
-  .nm input::placeholder { color: var(--moxi-text); opacity: 1; }
-  .nm > button { flex: none; padding: 6px 10px; border: 0; background: none; color: var(--moxi-text-dim); font-size: 15px;
+  .nfield input::placeholder { color: var(--moxi-text); opacity: 1; }
+  .nfield > button { flex: none; padding: 6px 10px; border: 0; background: none; color: var(--moxi-text-dim); font-size: 15px;
                  line-height: 20px; }
   .tnote { margin: 0; padding: 0 44px 8px 0; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px;
            overflow-wrap: anywhere; }
@@ -1577,7 +1577,7 @@ export class LauncherPrompt extends LitElement {
     return html`<div class="prow" data-row=${row.name}>
       ${where === "" ? nothing : html`<div class="at"><span>${where}</span></div>`}
       <div class="lab" aria-hidden="true">${row.label}</div>
-      <div class=${open ? "nm on" : "nm"}><input type="text" data-control=${row.name} aria-label=${row.label}
+      <div class=${open ? "nfield on" : "nfield"}><input type="text" data-control=${row.name} aria-label=${row.label}
         autocomplete="off" spellcheck="false" .value=${typed} placeholder=${named?.name ?? ""}
         @input=${(event: Event) => this.#typeName(field, (event.target as HTMLInputElement).value)}><button
         type="button" aria-label="Edit the name template" aria-expanded=${open ? "true" : "false"}
