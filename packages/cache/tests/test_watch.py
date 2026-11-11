@@ -179,7 +179,7 @@ def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, 
     assert sorted(p.name for p in directory.iterdir()) == [f"{A}.json"]
     made = {p for p in tmp_path.rglob("*")} - before
     assert made <= {directory, directory.parent, directory.parent.parent,
-                    directory / f"{A}.json"}
+                    directory / f"{A}.json", directory.parent / records.READING_NAME}
     lines = [r.getMessage() for r in caplog.records]
     assert len(lines) == 1
     assert all(repr(s) in lines[0] for s in UNSAFE)
@@ -347,6 +347,200 @@ def test_no_list_ever_read_writes_nothing(sessions):
     fake = Fake(watch.AgentsUnreadable("no claude on PATH"))
     assert make(fake, sessions).tick() == []
     assert not records.record_dir().exists()
+
+
+# --- the reading ----------------------------------------------------------------------------
+
+def reading_file() -> dict | None:
+    path = records.reading_path()
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def test_a_tick_with_sessions_writes_the_reading_with_listed_at_at_the_tick(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    doc = reading_file()
+    assert list(doc) == list(records.READING_FIELDS)
+    assert doc == {"v": 1, "pid": os.getpid(), "tick_at": fake.t, "listed_at": fake.t,
+                   "stale_after": w.stale_after}
+    assert records.reading() == doc
+    fake.t += 10
+    w.tick()                                   # the list is not asked again, but held
+    assert fake.calls == 1
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, fake.t)
+
+
+def test_a_tick_with_no_live_session_moves_listed_at_too(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    fake.doc = []
+    fake.t += 10
+    poke(sessions)
+    assert w.tick() == []
+    assert rec(A) is None
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, fake.t)
+
+
+def test_a_halted_tick_moves_tick_at_and_not_listed_at(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    listed = fake.t
+    fake.doc = {"agents": []}
+    for _ in range(2):
+        fake.t += 10
+        poke(sessions)
+        w.tick()
+        assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, listed)
+    fake.doc = [entry(11, A)]
+    fake.t += 10
+    w.tick()
+    assert reading_file()["listed_at"] == fake.t
+
+
+def test_a_tick_that_cannot_list_moves_tick_at_and_not_listed_at(sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.tick()
+    listed = fake.t
+    fake.doc = watch.AgentsUnreadable("`claude agents --json` exited 1")
+    fake.t += 10
+    poke(sessions)
+    w.tick()
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, listed)
+
+
+def test_a_watcher_that_never_listed_writes_a_reading_with_listed_at_null(sessions):
+    fake = Fake(watch.AgentsUnreadable("no claude on PATH"))
+    w = make(fake, sessions)
+    w.tick()
+    assert reading_file() == {"v": 1, "pid": os.getpid(), "tick_at": fake.t,
+                              "listed_at": None, "stale_after": w.stale_after}
+    assert not records.record_dir().exists()
+
+
+def test_a_tick_that_raises_still_writes_its_reading(sessions):
+    def broken(harness, session, *, now):
+        raise RuntimeError("the clock broke")
+
+    fake = Fake([entry(11, A)])
+    w = watch.Watcher(agents=fake.agents, read=broken, now=fake.now, sessions=sessions)
+    with pytest.raises(RuntimeError):
+        w.tick()
+    assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, None)
+
+
+def test_the_reading_carries_the_stale_after_the_records_carry(root, sessions):
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions)
+    w.stale_after = 45
+    w.tick()
+    assert reading_file()["stale_after"] == rec(A)["stale_after"] == 45
+
+
+def test_a_failed_reading_write_is_logged_once_per_change_and_the_tick_goes_on(
+        tmp_path, sessions, caplog):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+    fake = Fake([entry(11, A)])
+    w = make(fake, sessions, reading=blocker / "watch.json")
+    with caplog.at_level(logging.WARNING, logger="moxi.cache"):
+        assert w.tick() == [watch.Live(11, A)]
+        fake.t += 10
+        w.tick()
+    assert rec(A)["seen_at"] == fake.t          # the records are written all the same
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 1 and "cannot write the watcher's reading" in lines[0]
+    blocker.unlink()
+    with caplog.at_level(logging.WARNING, logger="moxi.cache"):
+        fake.t += 10
+        w.tick()
+        written = blocker / "watch.json"
+        assert json.loads(written.read_text())["tick_at"] == fake.t
+        written.unlink()
+        blocker.rmdir()
+        blocker.write_text("")
+        fake.t += 10
+        w.tick()
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 2                      # said again after it had been cleared
+
+
+def test_the_reading_is_no_file_under_clock(root, sessions):
+    fake = Fake([entry(11, A), entry(12, B)])
+    w = make(fake, sessions)
+    for _ in range(2):
+        w.tick()
+        fake.t += 10
+    assert records.reading_path().parent == records.record_dir().parent
+    assert sorted(p.name for p in records.record_dir().iterdir()) == [f"{A}.json",
+                                                                      f"{B}.json"]
+    assert [r["session"] for r in api.clock_records()] == [A, B]
+    assert sorted(p.name for p in records.reading_path().parent.iterdir()) == [
+        records.DIR_NAME, records.READING_NAME]
+
+
+def test_a_stand_in_directory_puts_the_reading_beside_it(tmp_path, sessions):
+    directory = tmp_path / "rt" / "cache" / "clock"
+    make(Fake([entry(11, A)]), sessions, directory=directory).tick()
+    assert records.reading(tmp_path / "rt" / "cache" / "watch.json")["listed_at"] is not None
+    assert not records.reading_path().exists()
+
+
+def test_the_reading_stays_when_the_watcher_stops(own_roots, sessions):
+    stop = threading.Event()
+
+    class Once(watch.Watcher):
+        def _tick(self):
+            stop.set()
+            return super()._tick()
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
+    w = Once(agents=lambda: [], sessions=sessions)
+    assert watch.run(watcher=w, stop=stop) == 0
+    assert records.reading() == {"v": 1, "pid": os.getpid(), "tick_at": w.tick_at,
+                                 "listed_at": w.tick_at, "stale_after": 3}
+
+
+@pytest.mark.parametrize("text", [
+    None,
+    '{"v": 1, "pid": 7, "tick_at": 1800000000.0, "listed_at": 18',
+    "not json",
+    "[]",
+    '{"v": 2, "pid": 7, "tick_at": 1.0, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1.0, "stale_after": 30}',
+    '{"v": 1, "pid": "7", "tick_at": 1.0, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": true, "tick_at": 1.0, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": null, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1.0, "listed_at": "1.0", "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1.0, "listed_at": null, "stale_after": Infinity}',
+    '{"v": 1, "pid": 7, "tick_at": 1e999, "listed_at": null, "stale_after": 30}',
+    '{"v": 1, "pid": 7, "tick_at": 1' + "0" * 400 + ', "listed_at": null, "stale_after": 30}',
+], ids=["absent", "cut", "not-json", "a-list", "version", "missing-key", "pid-string",
+        "pid-bool", "tick-null", "listed-string", "infinite", "overflowing-float",
+        "overflowing-int"])
+def test_reading_is_none_for_an_absent_cut_or_malformed_file(text):
+    path = records.reading_path()
+    if text is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    assert records.reading() is None
+
+
+def test_reading_keeps_its_fields_alone():
+    path = records.reading_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"v": 1, "pid": 7, "tick_at": 10, "listed_at": None,
+                                "stale_after": 30, "more": "x"}))
+    assert records.reading() == {"v": 1, "pid": 7, "tick_at": 10, "listed_at": None,
+                                 "stale_after": 30}
+    assert records.reading(path) == records.reading()
+
+
+def test_an_unreadable_reading_is_none(tmp_path):
+    (tmp_path / "watch.json").mkdir()
+    assert records.reading(tmp_path / "watch.json") is None
 
 
 def test_a_reader_and_the_segment_agree_on_the_record(root, sessions):

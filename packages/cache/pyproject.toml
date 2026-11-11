@@ -1,6 +1,6 @@
 [project]
 name = "moxi-cache"
-version = "0.1.4"
+version = "0.1.5"
 description = "Know when a session's prompt cache goes cold, and act before it does."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
 ]
-dependencies = ["moxi>=0.1.6,<0.2", "moxi-sessions>=0.2,<0.3"]
+dependencies = ["moxi>=0.1.6,<0.2", "moxi-sessions>=0.2.8,<0.3"]
 
 [project.optional-dependencies]
 # The browser UI shell: with it, cache's panel and its chip show there.
