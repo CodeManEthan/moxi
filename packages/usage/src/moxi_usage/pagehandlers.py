@@ -2,13 +2,25 @@
 
 **Reads.** Each read is a plain `def`, run on one of the page server's worker threads,
 and thin over `moxi_usage.api`: it calls `limits()` or `report()`, takes `as_dict()`, and
-cuts the answer to its route's declared shape. It runs no SQL of its own. Every report
-is read with `fresh=False`, so a read never runs a pass and never waits on the index's
-lock; its `index.note` says it read the index as it is. Where the API's answer holds a
-map with open keys, the cut turns it into a list of `{name, value}` rows (a report's
-`filters`, a lane's `held_reasons`, the dollar figures `limits.dollars` finds in a
-window's `extra`) or leaves it out (a price's `source`, any lane fact not declared). An
-argument the API refuses (`ReportError`), an index written by a newer usage
+cuts the answer to its route's declared shape. It runs no SQL of its own; a session's
+context comes from `moxi_usage.reports.session_contexts`, one read per session sent, and
+one opened window from `moxi_usage.limits.window`, which writes nothing. The restart
+point is `threshold()`'s first mark for a model's main sessions.
+
+**Names.** An answer that names sessions asks the sessions module what names them, once,
+for the sessions it sends: `session_facts` of sessions' interface 5, over the roots this
+process lists. A session it holds takes its name, folder and start from there. One whose
+record is gone keeps its figures and takes the folder and the first request's time the
+index holds. When the sessions module cannot be asked, or the call raises, the failure
+is logged once per class, every session of that answer has a null name, start and
+`known`, and the answer still goes out.
+Every report is read with `fresh=False`, so a read never runs a pass and never waits on
+the index's lock; its `index.note` says it read the index as it is. Each report's answer, the
+status, the limits and an opened window carry `today`, the page server's local date. Where the API's
+answer holds a map with open keys, the cut turns it into a list of `{name, value}` rows
+(a report's `filters`, a lane's `held_reasons`, the dollar figures `limits.dollars`
+finds in a window's `extra`) or leaves it out (a price's `source`, any lane fact not
+declared). An argument the API refuses (`ReportError`), an index written by a newer usage
 (`StoreTooNew`) and a config usage can't read are a 422 with the error's text.
 
 **The pass.** `POST /api/pass` starts `report("status", fresh=True)`, which runs the pass,
@@ -22,7 +34,8 @@ when it ends: `{running, last_pass, note}`, where `note` is the report's note or
 stopped the pass.
 
 **The stream.** One stream route carries two topics, `limits` (`/api/limits`'s value
-without `now`) and `index`. The `limits` topic is fed by one poller, an asyncio task
+without `now`, gathered with the Codex pull that route leaves out) and `index`. The
+`limits` topic is fed by one poller, an asyncio task
 started by the first call to the stream route and run for the page server's life; loopback
 stops an idle server once nothing is open, and a Codex pull stays bounded by
 `limits.codex_pull_after_s`. It gathers at once and then every `PERIOD` seconds, and its
@@ -42,16 +55,18 @@ import datetime as dt
 import logging
 import math
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 import moxi.config
 import moxi.store
 from moxi import aio, modules
 
-from . import api, store
+from . import api, reports, store
+from . import limits as plan
 from .limits import dollars
-from .page import TOP_DEFAULT, WINDOW
+from .page import HARNESSES, TOP_DEFAULT, USED_MAX, WINDOW
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -137,9 +152,22 @@ def _index(found: Mapping[str, Any]) -> dict[str, Any]:
             "note": _str(found.get("note"))}
 
 
+def _today() -> dt.date:
+    return dt.date.today()
+
+
+def _home() -> str | None:
+    """The account's home folder, or None when it cannot be said."""
+    try:
+        return str(Path.home())
+    except RuntimeError:
+        return None
+
+
 def _report(answer: Mapping[str, Any], rows: list[dict[str, Any]],
             total: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
+        "today": _today().isoformat(),
         "since": _num(answer.get("since")),
         "until": _num(answer.get("until")),
         "tz": str(answer.get("tz") or "local"),
@@ -161,7 +189,7 @@ def _read(kind: str, query: Mapping[str, Any], **given: Any) -> dict[str, Any]:
     """`report(kind)` over the index as it is, with the route's filters, as a dict."""
     args = {"since": _day(query.get("since")), "until": _day(query.get("until")),
             "harness": query.get("harness"), "project": query.get("project"),
-            "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
+            "folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
     args.update(given)
     try:
         return api.report(kind, fresh=False, **args).as_dict()
@@ -181,49 +209,165 @@ def daily(call: Any) -> dict[str, Any]:
     return {**_report(answer, [_period_row(row) for row in answer["rows"]]), "by": by}
 
 
+# --- what names a session ------------------------------------------------------------------
+
+_Key = tuple[str, str | None]
+
+
+def _session_facts(keys: list[tuple[str, str]]) -> Mapping[str, Any]:
+    """The sessions module's `session_facts(keys)`, through its interface 5."""
+    found = modules.load("sessions", interface=5)
+    if not found.ok:
+        raise RuntimeError(f"the sessions module can't name sessions: {found.reason}")
+    return found.api.session_facts(keys)
+
+
+def _origins(keys: list[tuple[str | None, str]]) -> dict[Any, dict[str, Any] | None]:
+    try:
+        return reports.session_origins(keys)
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+
+
+def _refs(pairs: Iterable[_Key], *, folders: Iterable[_Key] = (),
+          ) -> Callable[..., dict[str, Any]]:
+    """What names the sessions of one answer: a function giving the reference of one
+    `(harness, session id)` of `pairs`, with the `cwd` the index gave its row.
+
+    The sessions module is asked once, for every pair that has a session id, and not at
+    all when none has. A pair it answers is `known` and takes its name, folder and start
+    from there. A pair it does not answer, of a harness whose roots it listed whole, is
+    a session whose record is gone: `known` is false and its start is the first request
+    the index holds for it. Any other pair was not looked for and has a null `known`,
+    name and start: one of a harness whose root was not listed whole, one with no
+    session id, and every pair when the call raises, which is logged once per class.
+    A folder the sessions module did not give is the row's `cwd`; `folders` names the
+    pairs that come with no `cwd`, whose folder the index is asked for."""
+    keys = list(dict.fromkeys((harness, sid) for harness, sid in pairs
+                              if sid is not None and harness in HARNESSES))
+    items: dict[_Key, Mapping[str, Any]] = {}
+    looked: set[str] = set()
+    if keys:
+        try:
+            answer = _session_facts(keys)
+            unlisted = {root["harness"] for root in answer["roots"]}
+            for item in answer["sessions"]:
+                items.setdefault((item["harness"], item["session"]), item)
+            looked = set(HARNESSES) - unlisted
+        except Exception as err:
+            _log_once(err, "the sessions of an answer could not be named")
+            items, looked = {}, set()
+    gone = {key for key in keys if key not in items and key[0] in looked}
+    origins = _origins(sorted(gone | (set(folders) & set(keys))))
+
+    def ref(harness: str, session_id: str | None, cwd: str | None = None) -> dict[str, Any]:
+        key = (harness, session_id)
+        item, origin = items.get(key), origins.get(key) or {}
+        name = started = known = None
+        folder = cwd if cwd is not None else origin.get("cwd")
+        if item is not None:
+            known = True
+            name = item.get("name") if isinstance(item.get("name"), str) else None
+            started = _num(item.get("started"))
+            if isinstance(item.get("folder"), str):
+                folder = item["folder"]
+        elif key in gone:
+            known, started = False, _num(origin.get("first_ts"))
+        return {"harness": harness, "session_id": session_id, "name": name or None,
+                "folder": _str(folder), "started": started, "known": known}
+
+    return ref
+
+
 def _session_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {"harness": str(row.get("harness")), "session_id": _str(row.get("session_id")),
-            "title": _str(row.get("title")), "cwd": _str(row.get("cwd")),
-            "project": _str(row.get("project")), "models": _words(row.get("models")),
-            "first_ts": _num(row.get("first_ts")), "last_ts": _num(row.get("last_ts")),
-            **_row_sums(row)}
+            "name": None, "folder": None, "started": None, "known": None,
+            "cwd": _str(row.get("cwd")), "project": _str(row.get("project")),
+            "models": _words(row.get("models")), "first_ts": _num(row.get("first_ts")),
+            "last_ts": _num(row.get("last_ts")), "context": None, **_row_sums(row)}
 
 
 def _by_cost(row: Mapping[str, Any]) -> tuple:
-    cost = row["cost"]
-    return (cost is None, -(cost or 0.0), -row["tokens"])
+    """The sessions' order: cost, the dearest first and an unpriced one last; then
+    tokens, the most first; then harness and session id, a row with no id after those
+    with one, by its first request and folder."""
+    cost, sid, first = row["cost"], row["session_id"], row["first_ts"]
+    return (cost is None, -(cost or 0.0), -row["tokens"], row["harness"], sid is None,
+            sid or "", first is None, first or 0.0, row["cwd"] or "")
+
+
+def _context(found: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if found is None or _int(found.get("tokens")) is None:
+        return None
+    return {"tokens": _int(found["tokens"]), "window": _int(found.get("window"))}
+
+
+def _contexts(keys: list[tuple[str | None, str]]) -> dict[tuple[str | None, str], Any]:
+    try:
+        return reports.session_contexts(keys)
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
 
 
 def sessions(call: Any) -> dict[str, Any]:
-    """`GET /api/sessions`: the `top` sessions by cost (200 unless asked, at most 1,000),
-    the dearest first, and in `more` how many the range holds past them."""
-    top = call.query.get("top")
+    """`GET /api/sessions`: the sessions by cost, the dearest first, then by tokens, then
+    by harness and session id. `rows` is `top` of them (200 unless asked, at most 200)
+    after the first `skip` (none unless asked); `count` is how many there are and `more`
+    how many come after the rows sent. `skip` is a place in the order as the index stood
+    at this call, so a pass between two calls can move a row. Each row sent carries its
+    session's `context`, read once per row, and what names the session, asked of the
+    sessions module once for all the rows sent; a row with no session id has no context
+    and is named by its folder alone."""
+    top, skip = call.query.get("top"), call.query.get("skip")
     top = TOP_DEFAULT if top is None else top
+    skip = 0 if skip is None else skip
     if top < 1:
         raise lb.Refused("top is a number of sessions, 1 or more")
+    if skip < 0:
+        raise lb.Refused("skip is a number of sessions, 0 or more")
     answer = _read("sessions", call.query)
     rows = sorted((_session_row(row) for row in answer["rows"]), key=_by_cost)
-    return {**_report(answer, rows[:top]), "top": top, "more": max(0, len(rows) - top)}
+    sent = rows[skip:skip + top]
+    found = _contexts([(row["harness"], row["session_id"]) for row in sent
+                       if row["session_id"] is not None])
+    ref = _refs((row["harness"], row["session_id"]) for row in sent)
+    for row in sent:
+        row["context"] = _context(found.get((row["harness"], row["session_id"])))
+        row.update(ref(row["harness"], row["session_id"], row["cwd"]))
+    return {**_report(answer, sent), "top": top, "skip": skip, "count": len(rows),
+            "more": max(0, len(rows) - skip - len(sent))}
 
 
 def session(call: Any) -> dict[str, Any]:
     """`GET /api/session?session=ID`: one session by agent and model, over the same
-    filters, so it sums to that session's row of `/api/sessions`."""
-    answer = _read("session", call.query, session=call.query["session"])
+    filters, so it sums to that session's row of `/api/sessions`, and the session's
+    `context` as that row carries it, whatever the range, and `ref`, what names the
+    session. Without `harness`, the context and the reference are those of the one
+    harness holding a session of that id, null when none or two do."""
+    key = (call.query.get("harness"), call.query["session"])
+    answer = _read("session", call.query, session=key[1])
     rows = [{"agent": str(row.get("agent")), "kind": str(row.get("kind")),
              "title": _str(row.get("title")), "model": _str(row.get("model")),
              "first_ts": _num(row.get("first_ts")), "last_ts": _num(row.get("last_ts")),
              **_row_sums(row)} for row in answer["rows"]]
-    return _report(answer, rows)
+    harness = key[0] or (_origins([key]).get(key) or {}).get("harness")
+    named = None
+    if harness is not None:
+        named = _refs([(harness, key[1])], folders=[(harness, key[1])])(harness, key[1])
+    return {**_report(answer, rows), "context": _context(_contexts([key]).get(key)),
+            "ref": named}
 
 
 def projects(call: Any) -> dict[str, Any]:
-    """`GET /api/projects`: tokens and cost by project key, or by `cwd` for none."""
-    answer = _read("projects", call.query)
+    """`GET /api/projects`: tokens and cost by project key, or by `cwd` for none; with
+    `by=folder`, by `cwd` alone, so a key an earlier pass stored groups nothing. `home`
+    is the account's home folder in both."""
+    by = call.query.get("by") or "project"
+    answer = _read("projects", call.query, by=by)
     rows = [{"project": _str(row.get("project")), "cwd": _str(row.get("cwd")),
              "models": _words(row.get("models")), **_row_sums(row)}
             for row in answer["rows"]]
-    return _report(answer, rows)
+    return {**_report(answer, rows), "by": by, "home": _home()}
 
 
 def _provenance(found: Mapping[str, Any]) -> dict[str, Any]:
@@ -245,10 +389,6 @@ def models(call: Any) -> dict[str, Any]:
              "provenance": [_provenance(found) for found in row.get("provenance") or ()],
              **_row_sums(row)} for row in answer["rows"]]
     return _report(answer, rows)
-
-
-def _today() -> dt.date:
-    return dt.date.today()
 
 
 def cost(call: Any) -> dict[str, Any]:
@@ -293,7 +433,8 @@ def _group(found: Mapping[str, Any]) -> dict[str, Any]:
 
 def terms(call: Any) -> dict[str, Any]:
     """`GET /api/terms`: every term of each cost, by model (the default), day, month or,
-    with `session`, agent; `session` alone narrows the other keys to that session."""
+    with `session`, agent; `session` alone narrows the other keys to that session. The
+    total's `saving` is what caching saved over the answer, or null."""
     by = call.query.get("by") or "model"
     given: dict[str, Any] = {"by": by}
     if call.query.get("session"):
@@ -304,8 +445,22 @@ def terms(call: Any) -> dict[str, Any]:
              **_row_sums(row), "groups": [_group(group) for group in row.get("groups") or ()],
              "split": _split(row.get("split"))} for row in answer["rows"]]
     total = answer.get("total") or {}
-    return {**_report(answer, rows, {**_sums(total), "split": _split(total.get("split"))}),
+    return {**_report(answer, rows, {**_sums(total), "split": _split(total.get("split")),
+                                     "saving": _saving(total.get("saving"))}),
             "by": by}
+
+
+def _saving(found: Any) -> dict[str, Any] | None:
+    """A terms total's `saving` as the route carries it: null unless the report gave
+    every figure of it."""
+    if not isinstance(found, Mapping):
+        return None
+    tokens = {name: _int(found.get(name)) for name in ("input_tokens", "read_tokens")}
+    dollars = {name: _num(found.get(name))
+               for name in ("reads_at_input", "reads_cost", "write_extra", "saved")}
+    if None in tokens.values() or None in dollars.values():
+        return None
+    return {**tokens, **dollars}
 
 
 def _mark(found: Mapping[str, Any]) -> dict[str, Any]:
@@ -503,7 +658,8 @@ def _status(answer: Mapping[str, Any]) -> dict[str, Any]:
          "of_path": str(row.get("of_path")), "of_part": str(row.get("of_part") or "")}
         for row in total.get("duplicate_rows") or ()]
     cut["last_pass"] = _num(total.get("last_pass"))
-    return {"lanes": [_lane(row) for row in answer.get("rows") or ()], "total": cut,
+    return {"today": _today().isoformat(),
+            "lanes": [_lane(row) for row in answer.get("rows") or ()], "total": cut,
             "index": _index(answer.get("index") or {})}
 
 
@@ -535,7 +691,7 @@ def _window(row: Mapping[str, Any]) -> dict[str, Any]:
         "source": _str(row.get("source")), "session_id": _str(row.get("session_id")),
         "plan_type": _str(row.get("plan_type")), "full_at": _str(row.get("full_at")),
         "projection": _str(row.get("projection")), "fit": _int(row.get("fit")) or 0,
-        "note": _str(row.get("note")),
+        "opened": _str(row.get("opened")), "note": _str(row.get("note")),
         "dollars": [{"name": name, "value": value} for name, value
                     in dollars(extra if isinstance(extra, Mapping) else {})],
         "unknown": [name for name in _words(row.get("unknown")) if name in _WINDOW_KEYS],
@@ -545,6 +701,7 @@ def _window(row: Mapping[str, Any]) -> dict[str, Any]:
 def _limits_value(answer: Mapping[str, Any]) -> dict[str, Any]:
     pull = answer.get("pull")
     return {
+        "today": _today().isoformat(),
         "rows": [_window(row) for row in answer.get("rows") or ()],
         "pull": None if not isinstance(pull, Mapping) else {
             "tried": bool(pull.get("tried")), "ok": bool(pull.get("ok")),
@@ -554,24 +711,115 @@ def _limits_value(answer: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _limits() -> tuple[float, dict[str, Any]]:
+def _limits(*, pull: bool) -> tuple[float, dict[str, Any]]:
     try:
-        found = api.limits(pull=True)
+        found = api.limits(pull=pull)
     except _OWN_WORDS as exc:
         raise lb.Refused(str(exc)) from None
     return float(found.now), _limits_value(found.as_dict())
 
 
 def gather_limits() -> dict[str, Any]:
-    """The `limits` topic's value: `/api/limits`'s without `now`."""
-    return _limits()[1]
+    """The `limits` topic's value, `/api/limits`'s without `now`, gathered with a Codex
+    pull through turns when the newest Codex reading is older than
+    `limits.codex_pull_after_s`."""
+    return _limits(pull=True)[1]
 
 
 def limits(call: Any) -> dict[str, Any]:
-    """`GET /api/limits`: each plan window now, with a Codex pull through turns when the
-    newest Codex reading is older than `limits.codex_pull_after_s`."""
-    now, value = _limits()
+    """`GET /api/limits`: each plan window now, from the readings stored. It makes no
+    Codex pull, so it does not wait on turns: the poller pulls, and the `limits` topic
+    carries what a pull brought."""
+    now, value = _limits(pull=False)
     return {"now": now, **value}
+
+
+def _reading(found: Any) -> dict[str, Any]:
+    return {"at": plan.iso(found.observed_at), "used_percent": _num(found.used_percent)}
+
+
+def _used(harness: str, since: float) -> dict[str, Any] | None:
+    """The sessions of `harness` with requests from `since` on, from the index as it is:
+    how many, their requests and cost from then, and the `USED_MAX` dearest, as the
+    sessions report's rows, not yet named. None when there is no index at this version
+    to read."""
+    try:
+        if not reports.readable():
+            return None
+        answer = api.report("sessions", fresh=False, since=since, harness=harness).as_dict()
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    rows = sorted((_session_row(row) for row in answer["rows"]), key=_by_cost)
+    total = _sums(answer.get("total") or {})
+    return {"since": plan.iso(since), "count": len(rows), "requests": total["requests"],
+            "cost": total["cost"], "complete": total["complete"],
+            "rows": rows[:USED_MAX]}
+
+
+def window(call: Any) -> dict[str, Any]:
+    """`GET /api/window?harness=&limit_id=&minutes=`: one plan window opened. Its row is
+    picked as `/api/limits` picks it, from the readings store as it is: the store is
+    opened only when it exists, and nothing is created, pruned or pulled. A window with
+    no `fresh` row is refused (422), so the answer is the reading its limits row shows.
+    `opened` is the row's; `readings` counts the period's readings, with the row's own
+    as `last` and the earliest as `first`, null when it is the same one; `last.session`
+    is what names the session the reading came from, null when it names none; `used` is
+    the sessions of the harness since the window opened, for the harness's main limit
+    with a known `opened`, else null. The sessions module is asked once, for the
+    reading's session and the sessions listed."""
+    harness, limit_id = call.query["harness"], call.query["limit_id"]
+    minutes = call.query["minutes"]
+    if minutes < 1:
+        raise lb.Refused("minutes is a window's duration, 1 or more")
+    try:
+        found = plan.window(harness, limit_id, minutes)
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    if found is None or found.row.state != plan.FRESH:
+        raise lb.Refused("there is no fresh reading of this window")
+    row = found.row
+    main = limit_id == plan.MAIN_LIMIT[harness]
+    used = _used(harness, row.opened) if main and row.opened is not None else None
+    read_by = _str(found.last.session_id) or None
+    spent = [] if used is None else used["rows"]
+    last = [] if read_by is None else [(harness, read_by)]
+    ref = _refs([*last, *((item["harness"], item["session_id"]) for item in spent)],
+                folders=last)
+    if used is not None:
+        used["rows"] = [{**ref(item["harness"], item["session_id"], item["cwd"]),
+                         "requests": item["requests"], "cost": item["cost"]}
+                        for item in spent]
+    return {
+        "now": found.now, "today": _today().isoformat(), "harness": harness,
+        "limit_id": limit_id, "window_minutes": minutes,
+        "resets_at": plan.iso(row.resets_at), "used_percent": float(row.used_percent),
+        "opened": plan.iso(row.opened),
+        "readings": {"count": found.count,
+                     "first": None if found.first is None else _reading(found.first),
+                     "last": {**_reading(found.last),
+                              "session": None if read_by is None
+                              else ref(harness, read_by)}},
+        "used": used,
+    }
+
+
+# --- the restart point -----------------------------------------------------------------------
+
+def restart_point(call: Any) -> dict[str, Any]:
+    """`GET /api/restart-point?model=`: the context size, in tokens, past which carrying
+    on with a main session of `model` costs more than restarting it: the first mark of
+    the measure `moxi usage restart-point --measure` writes. `tokens` is null with the
+    `reason` when it cannot be worked out: there is no measure, the measure has no row
+    for the model, or the model table lacks a price it needs. It reads the measure's
+    file and the model table and writes nothing."""
+    asked = call.query["model"]
+    try:
+        found = api.threshold(asked, "1x", "main")
+    except _OWN_WORDS as exc:
+        raise lb.Refused(str(exc)) from None
+    tokens = _int(found.tokens)
+    reason = None if tokens is not None else _str(found.reason) or "no restart point"
+    return {"model": found.model or asked, "tokens": tokens, "reason": reason}
 
 
 # --- the pass, the topics and the poller ---------------------------------------------------
@@ -676,4 +924,5 @@ async def events(call: Any) -> Any:
 
 __all__ = ["COST_DAYS", "MATCHES_MAX", "PERIOD", "PRICES_MAX", "TOPICS", "cost", "daily",
            "events", "gather_limits", "limits", "models", "prices", "projects", "requests",
-           "session", "sessions", "start_pass", "status", "terms"]
+           "restart_point", "session", "sessions", "start_pass", "status", "terms",
+           "window"]

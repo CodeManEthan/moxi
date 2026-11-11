@@ -21,6 +21,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
@@ -34,12 +35,17 @@ from moxi_usage.readings import Reading
 from conftest import doc, write_config
 from test_reports import (at, one_session_index, request, requests_index, source,
                           table)
+from test_thresholds import EXACT as MARKS_EXACT
+from test_thresholds import table as marks_table
+from test_thresholds import write_params
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 ClaudeTranscript = sessions.testing.ClaudeTranscript
+#: The page's own call to the sessions module, which every test but one stands in for.
+ASK_SESSIONS = pagehandlers._session_facts
 usage = sessions.testing.usage
 
 
@@ -61,6 +67,44 @@ def turns(monkeypatch):
     """turns installed, with no pull to make: a stale Codex reading is never pulled."""
     monkeypatch.setattr(limits, "_turns_available", lambda: True)
     monkeypatch.setattr(limits, "_puller", lambda: (None, "the test makes no pull"))
+
+
+class Names:
+    """The sessions module as the page asks it. It holds the sessions of `held`, by
+    `(harness, session id)`, each a dict of the name, folder and start it gives; it
+    lists every root whole but those of the harnesses in `unlisted`; it raises `error`
+    when one is set. `asked` holds the keys of each call."""
+
+    def __init__(self):
+        self.held: dict[tuple[str, str], dict] = {}
+        self.unlisted: list[str] = []
+        self.error: Exception | None = None
+        self.asked: list[list[tuple[str, str]]] = []
+
+    def facts(self, keys):
+        self.asked.append(list(keys))
+        if self.error is not None:
+            raise self.error
+        return {"sessions": [{"harness": harness, "session": sid, "name": None,
+                              "folder": None, "started": None,
+                              **self.held[harness, sid]}
+                             for harness, sid in keys if (harness, sid) in self.held],
+                "roots": [{"harness": harness, "root": f"/roots/{harness}", "reason": None}
+                          for harness in self.unlisted]}
+
+
+@pytest.fixture(autouse=True)
+def names(monkeypatch):
+    """No test reads this process's kept list of sessions: the page asks a stand-in,
+    which holds no session unless the test gives it one."""
+    found = Names()
+    monkeypatch.setattr(pagehandlers, "_session_facts", found.facts)
+    return found
+
+
+def ref(harness, session_id, *, name=None, folder=None, started=None, known=False):
+    return {"harness": harness, "session_id": session_id, "name": name, "folder": folder,
+            "started": started, "known": known}
 
 
 @pytest.fixture
@@ -200,7 +244,7 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-FILTERS = {"since", "until", "harness", "project", "model", "utc"}
+FILTERS = {"since", "until", "harness", "project", "folder", "model", "utc"}
 
 
 def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways():
@@ -208,22 +252,26 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
     routes = {route["path"]: route for route in exported["routes"]}
     assert {path: (r["kind"], set(r["query"]), r["stream"]) for path, r in routes.items()} == {
         "/api/limits": ("read", set(), False),
+        "/api/window": ("read", {"harness", "limit_id", "minutes"}, False),
         "/api/daily": ("read", {"by", *FILTERS}, False),
-        "/api/sessions": ("read", {"top", *FILTERS}, False),
+        "/api/sessions": ("read", {"top", "skip", *FILTERS}, False),
         "/api/session": ("read", {"session", *FILTERS}, False),
-        "/api/projects": ("read", FILTERS, False),
+        "/api/projects": ("read", {"by", *FILTERS}, False),
         "/api/models": ("read", FILTERS, False),
         "/api/terms": ("read", {"by", "session", *FILTERS}, False),
         "/api/requests": ("read", {"session", "agent", *FILTERS}, False),
         "/api/prices": ("read", {"models", "providers", "q"}, False),
         "/api/status": ("read", set(), False),
+        "/api/restart-point": ("read", {"model"}, False),
         "/api/cost": ("read", set(), False),
         "/api/pass": ("act", set(), False),
         "/api/events": ("read", set(), True),
     }
     assert not any(route["gateway"] or route["confirmed"] for route in routes.values())
     assert routes["/api/session"]["query"]["session"]["required"]
+    assert all(key["required"] for key in routes["/api/window"]["query"].values())
     assert routes["/api/requests"]["query"]["session"]["required"]
+    assert routes["/api/restart-point"]["query"]["model"]["required"]
     assert not routes["/api/terms"]["query"]["session"]["required"]
     assert list(routes["/api/events"]["topics"]) == ["limits", "index"]
     assert routes["/api/pass"]["body"] == {}
@@ -254,17 +302,25 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
     def marked(path, mark):
         return {at for at, m in marks[path].items() if m == mark}
 
-    assert marked("/api/sessions", "path") == {"rows[].cwd"}
-    assert marked("/api/projects", "path") == {"rows[].cwd"}
+    assert marked("/api/sessions", "path") == {"rows[].cwd", "rows[].folder"}
+    assert marked("/api/session", "path") == {"ref.folder"}
+    assert marked("/api/window", "path") == {"readings.last.session.folder",
+                                             "used.rows[].folder"}
+    assert marked("/api/projects", "path") == {"rows[].cwd", "home"}
     assert marked("/api/status", "path") == {
         "lanes[].root", "lanes[].unreadable[].path", "lanes[].imports_path",
         "total.held_rows[].path", "total.duplicate_rows[].path",
         "total.duplicate_rows[].of_path"}
-    for path in ("/api/limits", "/api/daily", "/api/session", "/api/models", "/api/cost",
-                 "/api/terms", "/api/requests", "/api/prices", "/api/pass", "/api/events"):
+    for path in ("/api/limits", "/api/daily", "/api/models", "/api/cost",
+                 "/api/terms", "/api/requests", "/api/prices", "/api/restart-point",
+                 "/api/pass", "/api/events"):
         assert marked(path, "path") == set(), path
-    assert "rows[].title" in marked("/api/sessions", "redact")
-    assert "rows[].title" in marked("/api/session", "redact")
+    assert marked("/api/restart-point", "redact") == {"reason"}
+    assert marked("/api/sessions", "redact") == {"filters[].value", "index.note",
+                                                 "rows[].name"}
+    assert {"rows[].title", "ref.name"} <= marked("/api/session", "redact")
+    assert marked("/api/window", "redact") == {"readings.last.session.name",
+                                               "used.rows[].name"}
 
 
 def test_the_page_serves_its_three_components_and_the_build_stamp():
@@ -285,6 +341,21 @@ def test_the_announcement_offers_the_page_its_blocks_and_the_ui_extra():
     found = modules.load("usage", interface=1)
     assert found.ok and found.page == module.PAGE
     assert set(found.components) == {"page", "limits", "cost"}
+
+
+def test_usage_offers_interfaces_1_and_2_and_no_other():
+    from moxi_usage import api, module
+
+    assert module.INTERFACES == {1, 2}
+    for interface in (1, 2):
+        found = modules.load("usage", interface=interface)
+        assert found.ok, found.reason
+        assert found.api is api
+    assert not modules.load("usage", interface=3).ok
+    # what interface 2 adds is there to call: the folder filter and projects by folder
+    assert reports.report("projects", by="folder", folder="/w/app", fresh=False).rows == []
+    assert "opened" in limits.Row.__dataclass_fields__
+    assert reports.report("terms", fresh=False).total["saving"] is None
 
 
 #: A `moxi usage` command as the page's sources and the README name one: the verb (or
@@ -378,24 +449,193 @@ def test_a_bad_argument_is_refused_with_the_reports_words(seeded):
     assert "before --since" in refused("/api/sessions", since="2026-10-03",
                                        until="2026-10-01")
     assert "1 or more" in refused("/api/sessions", top="0")
-    status, body = asyncio.run(ask(served(), "/api/sessions", {"top": "1001"}))
-    assert status == 400
+    assert "0 or more" in refused("/api/sessions", skip="-1")
+    for top in ("201", "1001"):
+        status, body = asyncio.run(ask(served(), "/api/sessions", {"top": top}))
+        assert status == 400
 
 
 def test_sessions_send_the_top_by_cost_and_how_many_more(seeded):
     body = get("/api/sessions", utc="true")
-    assert (body["top"], body["more"]) == (200, 0)
+    assert (body["top"], body["skip"], body["count"], body["more"]) == (200, 0, 3, 0)
     costs = [row["cost"] for row in body["rows"]]
     assert costs == sorted(costs, reverse=True) and len(costs) == 3
     first = body["rows"][0]
-    assert set(first) == {"harness", "session_id", "title", "cwd", "project", "models",
-                          "first_ts", "last_ts", *ROW_KEYS}
+    assert set(first) == {"harness", "session_id", "name", "folder", "started", "known",
+                          "cwd", "project", "models", "first_ts", "last_ts", "context",
+                          *ROW_KEYS}
     s1 = next(row for row in body["rows"] if row["session_id"] == "s1")
-    assert (s1["title"], s1["cwd"], s1["harness"]) == ("Tidy the parser", "/w/app", "claude")
+    assert (s1["cwd"], s1["harness"]) == ("/w/app", "claude")
     assert s1["models"] == ["m-a", "m-b", "mystery-9"]
     two = get("/api/sessions", top="2", utc="true")
-    assert (len(two["rows"]), two["top"], two["more"]) == (2, 2, 1)
+    assert (len(two["rows"]), two["top"], two["count"], two["more"]) == (2, 2, 3, 1)
     assert two["rows"] == body["rows"][:2]
+
+
+@pytest.fixture
+def many(monkeypatch):
+    """Sessions whose order every part of the rule decides: two priced apart, five that
+    tie on cost and tokens (three with ids across two harnesses, two files with no
+    session id), and one no price reaches."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+
+    def claude(sid, *found, **fields):
+        source(conn, f"/p/{sid}.jsonl", list(found), session_id=sid, **fields)
+
+    conn = store.open_index()
+    try:
+        claude("dear", request("d1", t, input=9000), request("d2", t + 600, input=40_000),
+               cwd="/w/app")
+        claude("mid", request("m1", t + 60, input=5000), cwd="/w/app")
+        claude("tie-b", request("b1", t + 120), cwd="/w/tool")
+        claude("tie-a", request("a1", t + 180), cwd="/w/tool")
+        source(conn, "/c/tie.jsonl", [request("c1", t + 240, harness="codex")],
+               lane="codex", harness="codex", session_id="tie-a", rank=1, cwd="/w/tool")
+        claude("unpriced", request("u1", t + 300, model="mystery-9", input=90_000),
+               cwd="/w/app")
+        source(conn, "/p/loose-2.jsonl", [request("l2", t + 420)], session_id=None,
+               cwd="/w/loose-b")
+        source(conn, "/p/loose-1.jsonl", [request("l1", t + 360)], session_id=None,
+               cwd="/w/loose-a")
+    finally:
+        conn.close()
+
+
+def keys_of(body):
+    return [(row["harness"], row["session_id"] or row["cwd"]) for row in body["rows"]]
+
+
+ORDER = [("claude", "dear"), ("claude", "mid"), ("claude", "tie-a"), ("claude", "tie-b"),
+         ("claude", "/w/loose-a"), ("claude", "/w/loose-b"), ("codex", "tie-a"),
+         ("claude", "unpriced")]
+
+
+def test_sessions_come_by_cost_then_tokens_then_harness_and_id(many):
+    body = get("/api/sessions", utc="true")
+    assert keys_of(body) == ORDER
+    assert (body["count"], body["more"], body["skip"]) == (8, 0, 0)
+    costs = [row["cost"] for row in body["rows"]]
+    assert costs[2:7] == [costs[2]] * 5 and costs[-1] is None
+    assert costs[0] > costs[1] > costs[2]
+    # an unpriced session is last however many tokens it holds
+    assert body["rows"][-1]["tokens"] > body["rows"][0]["tokens"]
+
+
+def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+    conn = store.open_index()
+    try:
+        # $0.0045 each: 1,000 in and 100 out of m-a; 4,500 in and no out of m-b
+        source(conn, "/p/few.jsonl", [request("f1", t)], session_id="a-few")
+        source(conn, "/p/more.jsonl", [request("m1", t, model="m-b", input=4500, output=0)],
+               session_id="z-more")
+    finally:
+        conn.close()
+    body = get("/api/sessions", utc="true")
+    assert [row["cost"] for row in body["rows"]] == [pytest.approx(0.0045)] * 2
+    assert [row["session_id"] for row in body["rows"]] == ["z-more", "a-few"]
+
+
+def test_skip_and_top_cut_the_order_and_count_and_more_say_what_is_left(many):
+    whole = get("/api/sessions", utc="true")["rows"]
+    seen = []
+    for skip in (0, 3, 6):
+        body = get("/api/sessions", top="3", skip=str(skip), utc="true")
+        assert (body["top"], body["skip"], body["count"]) == (3, skip, 8)
+        assert body["rows"] == whole[skip:skip + 3]
+        assert body["more"] == 8 - skip - len(body["rows"])
+        seen += keys_of(body)
+    assert seen == ORDER
+    past = get("/api/sessions", top="3", skip="8", utc="true")
+    assert (past["rows"], past["count"], past["more"]) == ([], 8, 0)
+    assert get("/api/sessions", top="3", skip="50", utc="true")["more"] == 0
+    # the total is the range's whichever rows are sent
+    assert past["total"] == get("/api/sessions", utc="true")["total"]
+    assert get("/api/sessions", folder="/w/tool", top="1", skip="1")["count"] == 3
+
+
+def test_a_file_with_no_session_id_is_a_row_with_a_null_id_and_no_context(many):
+    body = get("/api/sessions", utc="true")
+    loose = [row for row in body["rows"] if row["session_id"] is None]
+    assert [(row["harness"], row["cwd"], row["requests"]) for row in loose] == [
+        ("claude", "/w/loose-a", 1), ("claude", "/w/loose-b", 1)]
+    assert all(row["context"] is None for row in loose)
+    assert not any("title" in row for row in body["rows"])
+    # nothing reads such a row by an id: the report's own key for it finds no session
+    assert get("/api/session", session="file:1")["context"] is None
+
+
+@pytest.fixture
+def windows(monkeypatch):
+    """Four sessions: a window the harness reported, one only the model table knows, a
+    model with none, and a newest request whose prompt size the harness did not report."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+    conn = store.open_index()
+    try:
+        source(conn, "/c/th1.jsonl", [
+            request("t1", t, harness="codex", model="m-a", input=20_000),
+            request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+                    context_window=258_400)],
+            lane="codex", harness="codex", session_id="th1", rank=1)
+        source(conn, "/p/s1.jsonl", [request("r1", t, input=30_000),
+                                     request("r2", t + 600, input=40_000)],
+               session_id="s1", cwd="/w/app")
+        source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+               session_id="s1", kind="subagent", agent_id="a", cwd="/w/app")
+        source(conn, "/p/s2.jsonl", [request("u1", t, model="mystery-9", input=1234)],
+               session_id="s2")
+        source(conn, "/p/s3.jsonl", [request("v1", t, input=500),
+                                     request("v2", t + 60, input=sessions.UNKNOWN)],
+               session_id="s3")
+    finally:
+        conn.close()
+
+
+def test_a_sessions_context_is_its_main_files_newest_request_against_its_window(windows):
+    body = get("/api/sessions", utc="true")
+    found = {row["session_id"]: row["context"] for row in body["rows"]}
+    assert found == {
+        "th1": {"tokens": 51_680, "window": 258_400},     # the window the harness reported
+        "s1": {"tokens": 40_000, "window": 200_000},      # the model table's; not the agent's
+        "s2": {"tokens": 1234, "window": None},           # no window anywhere
+        "s3": None,                                       # a prompt size nobody reported
+    }
+    # the newest request whatever the range and filters, on the rows sent only
+    ranged = get("/api/sessions", utc="true", until="2026-09-30")
+    assert ranged["rows"] == []
+    one = get("/api/sessions", utc="true", model="m-a", top="1")
+    assert len(one["rows"]) == 1 and one["rows"][0]["context"] is not None
+
+
+def test_one_context_read_is_made_per_row_sent(windows, monkeypatch):
+    asked = []
+    real = reports.session_context
+
+    def counted(conn, harness, session_id, **kwargs):
+        asked.append((harness, session_id))
+        return real(conn, harness, session_id, **kwargs)
+
+    monkeypatch.setattr(reports, "session_context", counted)
+    body = get("/api/sessions", utc="true", top="2", skip="1")
+    assert sorted(asked) == sorted((row["harness"], row["session_id"])
+                                   for row in body["rows"])
+    assert len(asked) == 2 and body["count"] == 4
+
+
+def test_one_session_carries_its_context_whatever_the_range(windows):
+    assert get("/api/session", session="s1", harness="claude")["context"] == {
+        "tokens": 40_000, "window": 200_000}
+    assert get("/api/session", session="th1")["context"] == {
+        "tokens": 51_680, "window": 258_400}
+    before = get("/api/session", session="s1", until="2026-09-30")
+    assert before["rows"] == [] and before["context"] == {"tokens": 40_000,
+                                                          "window": 200_000}
+    assert get("/api/session", session="s1", harness="codex")["context"] is None
+    assert get("/api/session", session="nobody")["context"] is None
+    assert get("/api/session", session="s3")["context"] is None
 
 
 def test_a_session_sums_to_its_sessions_row_over_the_same_filters(seeded):
@@ -428,6 +668,98 @@ def test_projects_send_a_key_or_a_cwd(seeded):
     assert {(row["project"], row["cwd"]) for row in body["rows"]} == {
         (None, "/w/app"), (None, "/w/oc")}
     assert set(body["rows"][0]) == {"project", "cwd", "models", *ROW_KEYS}
+    assert body["by"] == "project"
+
+
+@pytest.fixture
+def keyed(monkeypatch):
+    """An index holding project keys an earlier pass stored: two folders under one key, a
+    third folder under another key, and a folder with none."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    t = at("2026-10-01T12:00")
+    conn = store.open_index()
+    try:
+        source(conn, "/p/a.jsonl", [request("r1", t)], session_id="s1", cwd="/w/app",
+               project="key-app")
+        source(conn, "/p/b.jsonl", [request("r2", t + 60), request("r3", t + 120)],
+               session_id="s2", cwd="/w/app-wt", project="key-app")
+        source(conn, "/p/c.jsonl", [request("r4", t + 180, model="m-b")], session_id="s3",
+               cwd="/w/tool", project="key-tool")
+        source(conn, "/c/d.jsonl", [request("t1", t + 240, harness="codex", model="gpt-x")],
+               lane="codex", harness="codex", session_id="s4", cwd="/w/app", rank=1)
+    finally:
+        conn.close()
+
+
+def test_projects_by_folder_group_by_cwd_alone_over_stored_keys(keyed):
+    by_key = get("/api/projects", utc="true")
+    assert {(r["project"], r["cwd"], r["requests"]) for r in by_key["rows"]} == {
+        ("key-app", None, 3), ("key-tool", None, 1), (None, "/w/app", 1)}
+    body = get("/api/projects", by="folder", utc="true")
+    assert body["by"] == "folder"
+    assert {(r["project"], r["cwd"], r["requests"]) for r in body["rows"]} == {
+        (None, "/w/app", 2), (None, "/w/app-wt", 2), (None, "/w/tool", 1)}
+    assert set(body["rows"][0]) == {"project", "cwd", "models", *ROW_KEYS}
+    assert body["total"] == by_key["total"]
+    app = next(row for row in body["rows"] if row["cwd"] == "/w/app")
+    assert app["models"] == ["gpt-x", "m-a"]
+    status, _ = asyncio.run(ask(served(), "/api/projects", {"by": "session"}))
+    assert status == 400
+
+
+def test_the_folder_filter_matches_a_cwd_whatever_key_its_file_carries(keyed):
+    def count(path, **query):
+        return get(path, utc="true", **query)["total"]["requests"]
+
+    assert count("/api/daily", folder="/w/app") == 2      # one keyed file, one with none
+    assert count("/api/daily", project="/w/app") == 1     # the project filter: unkeyed only
+    assert count("/api/daily", folder="/w/app-wt") == 2
+    assert count("/api/daily", folder="/w/app/") == 2     # a slash after it changes nothing
+    assert count("/api/daily", folder="/w/gone") == 0
+    assert count("/api/daily", folder="/w/app", harness="codex") == 1
+    assert count("/api/daily", folder="/w/app", project="key-app") == 1
+    assert count("/api/daily", folder="") == 5            # an empty one filters nothing
+    for path, query in (("/api/daily", {"by": "month"}), ("/api/sessions", {}),
+                        ("/api/projects", {}), ("/api/projects", {"by": "folder"}),
+                        ("/api/models", {}), ("/api/terms", {}),
+                        ("/api/terms", {"by": "day"})):
+        body = get(path, utc="true", folder="/w/tool", **query)
+        assert body["total"]["requests"] == 1, path
+        assert body["filters"] == [{"name": "folder", "value": "/w/tool"}], path
+    assert [row["session_id"] for row in get("/api/sessions", folder="/w/app")["rows"]] == [
+        "s1", "s4"]
+    assert count("/api/session", session="s1", folder="/w/app") == 1
+    assert count("/api/session", session="s1", folder="/w/tool") == 0
+    assert count("/api/terms", by="agent", session="s2", folder="/w/app-wt") == 2
+    assert count("/api/requests", session="s2", folder="/w/app-wt") == 2
+    assert count("/api/requests", session="s2", folder="/w/app") == 0
+    assert "whole path" in refused("/api/daily", folder="app")
+
+
+def test_projects_send_the_home_folder_in_both_groupings(keyed, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_home", lambda: "/home/alice")
+    assert get("/api/projects")["home"] == "/home/alice"
+    assert get("/api/projects", by="folder")["home"] == "/home/alice"
+    monkeypatch.setattr(pagehandlers, "_home", lambda: None)
+    assert get("/api/projects")["home"] is None
+
+
+def test_the_home_folder_is_the_accounts_or_none_when_it_cannot_be_said(monkeypatch):
+    assert pagehandlers._home() == str(Path.home())
+
+    def lost():
+        raise RuntimeError("no home")
+
+    monkeypatch.setattr(Path, "home", lost)
+    assert pagehandlers._home() is None
+
+
+def test_every_report_the_status_and_the_limits_carry_the_servers_date(seeded, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 3))
+    for path, query in (*READS, ("/api/projects", {"by": "folder"}),
+                        ("/api/daily", {"utc": "true"}), ("/api/limits", {})):
+        assert get(path, **query)["today"] == "2026-10-03", path
+    assert pagehandlers.gather_limits()["today"] == "2026-10-03"
 
 
 def test_models_send_the_price_provenance_without_its_source(seeded):
@@ -520,7 +852,46 @@ def test_terms_by_model_send_each_group_with_its_terms_and_agree_with_models(see
     [group] = mystery["groups"]
     assert group["cost"] is None and group["why"]
     assert all(t["cost"] is None and "cost" in t["unknown"] for t in group["terms"])
-    assert body["total"]["split"] and set(body["total"]) == {*page.SUMS, "split"}
+    assert body["total"]["split"] and set(body["total"]) == {*page.SUMS, "split", "saving"}
+
+
+def test_the_terms_total_carries_what_caching_saved_or_null(seeded):
+    whole = get("/api/terms", utc="true")
+    # the seeded index holds an unknown model with no cache tokens, which hides nothing
+    assert whole["unpriced_models"]
+    for body in (whole, get("/api/terms", by="day", utc="true"),
+                 get("/api/terms", by="month", utc="true")):
+        saving = body["total"]["saving"]
+        assert set(saving) == set(page.SAVING.items)
+        assert saving == pytest.approx(whole["total"]["saving"])
+        assert (saving["input_tokens"], saving["read_tokens"]) == (
+            body["total"]["input"], body["total"]["cache_read"])
+        assert saving["read_tokens"] > 0
+        assert saving["reads_cost"] == pytest.approx(sum(
+            item["cost"] for item in body["total"]["split"] if item["class"] == "cache_read"))
+        assert saving["saved"] == pytest.approx(
+            saving["reads_at_input"] - saving["reads_cost"] - saving["write_extra"])
+    one_session = get("/api/terms", by="agent", session="s1", harness="claude", utc="true")
+    assert one_session["total"]["saving"]["read_tokens"] == one_session["total"]["cache_read"]
+    # a range with no cache read
+    assert get("/api/terms", utc="true", since="2031-01-01")["total"]["saving"] is None
+
+
+def test_the_terms_total_has_no_saving_with_no_index():
+    body = get("/api/terms", utc="true")
+    assert body["rows"] == [] and body["total"]["saving"] is None
+
+
+def test_the_terms_total_has_no_saving_where_a_cached_group_is_unpriced(seeded):
+    conn = store.open_index()
+    try:
+        source(conn, "/p/cached.jsonl", [request("u1", at("2026-10-01T12:00"), model="half",
+                                                 cache_read=200)], session_id="s-half")
+    finally:
+        conn.close()
+    body = get("/api/terms", utc="true")
+    assert body["total"]["cache_read"] > 200 and body["total"]["saving"] is None
+    assert get("/api/terms", utc="true", model="m-b")["total"]["saving"] is not None
 
 
 def test_terms_by_day_and_by_a_sessions_agent(seeded):
@@ -701,6 +1072,61 @@ def test_an_index_from_a_newer_usage_is_a_422_with_its_text():
         assert f"newer than the {store.INDEX_VERSION} this version knows" in text, path
 
 
+# --- the restart point ------------------------------------------------------------------------
+
+@pytest.fixture
+def priced_marks(monkeypatch):
+    """The model table the thresholds' tests price their measured rows with."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: marks_table())
+
+
+def test_the_restart_point_is_the_first_mark_of_the_models_main_sessions(priced_marks):
+    path = write_params()
+    before = path.read_bytes(), path.stat().st_mtime_ns, sorted(path.parent.iterdir())
+    for model in MARKS_EXACT:
+        assert get("/api/restart-point", model=model) == {
+            "model": model, "tokens": MARKS_EXACT[model]["1x"], "reason": None}
+    # a bracket or date suffix reads the base model's row, and the answer names that row
+    assert get("/api/restart-point", model="claude-opus-5-5[1m]") == {
+        "model": "claude-opus-5-5", "tokens": MARKS_EXACT["claude-opus-5-5"]["1x"],
+        "reason": None}
+    assert (path.read_bytes(), path.stat().st_mtime_ns,
+            sorted(path.parent.iterdir())) == before
+
+
+def test_the_restart_point_is_null_with_its_reason_when_there_is_no_measure(priced_marks):
+    from moxi_usage import thresholds
+
+    body = get("/api/restart-point", model="claude-opus-5-5")
+    assert body["model"] == "claude-opus-5-5" and body["tokens"] is None
+    assert "has not been measured" in body["reason"]
+    # asking wrote nothing: no measure's file, and no folder for one
+    assert not thresholds.params_path().exists()
+    assert not thresholds.params_path().parent.exists()
+
+
+def test_the_restart_point_is_null_with_its_reason_for_a_model_the_measure_lacks(
+        priced_marks):
+    write_params()
+    body = get("/api/restart-point", model="gpt-x")
+    assert body == {"model": "gpt-x", "tokens": None,
+                    "reason": "the restart-point measure has no main row for gpt-x"}
+    # a measure's file that does not read is a reason too, not a refusal
+    body = get("/api/restart-point", model="claude-opus-5")
+    assert body["tokens"] == MARKS_EXACT["claude-opus-5"]["1x"]
+    write_params("not json")
+    body = get("/api/restart-point", model="claude-opus-5")
+    assert body["tokens"] is None and "is not JSON" in body["reason"]
+
+
+def test_the_restart_point_needs_a_model():
+    status, _ = asyncio.run(ask(served(), "/api/restart-point", {}))
+    assert status == 400
+    body = get("/api/restart-point", model="")
+    assert body == {"model": "", "tokens": None,
+                    "reason": "no model is known for the session"}
+
+
 # --- limits ---------------------------------------------------------------------------------
 
 def put_readings(*found: Reading) -> None:
@@ -725,7 +1151,7 @@ def test_limits_sends_each_window_with_its_dollars_as_a_list():
     before = time.time()
     body = get("/api/limits")
     assert before <= body["now"] <= time.time()
-    assert set(body) == {"now", "rows", "pull", "notes"}
+    assert set(body) == {"now", "today", "rows", "pull", "notes"}
     windows = {(r["harness"], r["label"]): r for r in body["rows"]}
     five = windows[("codex", "5h")]
     assert set(five) == set(page.WINDOW.items)
@@ -739,13 +1165,565 @@ def test_limits_sends_each_window_with_its_dollars_as_a_list():
     assert windows[("claude", "5h")]["state"] == "unavailable"
 
 
-def test_a_failed_pull_says_why_on_the_codex_rows():
+def test_limits_carry_when_each_window_opened():
+    now = time.time()
+    put_readings(Reading("codex", "codex", 300, "primary", 42.0, now + 3600, now - 60,
+                         "rollout", "thread-1"),
+                 Reading("codex", "codex", 10080, "secondary", 0.0, now + 7 * 86400,
+                         now - 60, "rollout", "thread-1"))
+    windows = {(r["harness"], r["label"]): r for r in get("/api/limits")["rows"]}
+    assert windows[("codex", "5h")]["opened"] == limits.iso(now + 3600 - 300 * 60)
+    assert windows[("codex", "7d")]["opened"] is None      # one reading that shows no use
+    assert windows[("claude", "5h")]["opened"] is None
+    assert "opened" not in windows[("claude", "5h")]["unknown"]
+
+
+@pytest.fixture
+def pulls(monkeypatch):
+    """A pull through turns that brings nothing, and counts each time it is asked."""
+    asked = []
+
+    def pull(*, timeout_s):
+        asked.append(timeout_s)
+        return None
+
+    monkeypatch.setattr(limits, "_puller", lambda: (pull, None))
+    return asked
+
+
+def test_the_limits_route_makes_no_pull_and_the_poller_does(pulls, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "PERIOD", 3600.0)
+    put_readings(codex_reading(10.0, observed=time.time() - 3600))      # stale: a pull is due
     body = get("/api/limits")
-    assert body["pull"] == {"tried": False, "ok": False, "reason": "the test makes no pull",
-                            "via": None, "added": 0}
-    codex = [row for row in body["rows"] if row["harness"] == "codex"]
+    assert pulls == [] and body["pull"] is None
+    assert all(row["note"] is None for row in body["rows"])
+
+    async def go():
+        stream = Stream(served(), "limits")
+        try:
+            return (await stream.next(5))[1]
+        finally:
+            await stream.close()
+            pagehandlers._current.poller.cancel()
+
+    value = asyncio.run(go())
+    assert pulls == [limits.PULL_TIMEOUT]
+    assert (value["pull"]["tried"], value["pull"]["ok"]) == (True, False)
+    assert get("/api/limits")["pull"] is None and len(pulls) == 1
+
+
+def test_a_failed_pull_says_why_on_the_topics_codex_rows():
+    value = pagehandlers.gather_limits()
+    assert value["pull"] == {"tried": False, "ok": False, "reason": "the test makes no pull",
+                             "via": None, "added": 0}
+    codex = [row for row in value["rows"] if row["harness"] == "codex"]
     assert codex and all(row["note"] == "no newer reading: the test makes no pull"
                          for row in codex)
+    body = get("/api/limits")                    # the route asked for none, so says nothing
+    assert body["pull"] is None
+    assert all(row["note"] is None for row in body["rows"])
+
+
+# --- one window opened ----------------------------------------------------------------------
+
+HOUR = 3600.0
+
+
+def codex_window(used: float, ago: float, *, now: float, resets: float | None = None,
+                 minutes: int = 300, session_id: str | None = "thread-1") -> Reading:
+    """A Codex reading taken `ago` seconds before `now`, of a window that resets an hour
+    after `now` unless `resets` says when."""
+    return Reading("codex", "codex", minutes, "primary", used,
+                   now + HOUR if resets is None else resets, now - ago, "rollout", session_id)
+
+
+def codex_session(conn, sid: str, *times: float, input: int = 1000) -> None:
+    source(conn, f"/c/{sid}.jsonl",
+           [request(f"{sid}-{n}", ts, harness="codex", input=input)
+            for n, ts in enumerate(times)],
+           lane="codex", harness="codex", session_id=sid, cwd="/w/app")
+
+
+def test_an_opened_window_sends_its_periods_first_and_last_reading(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 3))
+    now = time.time()
+    put_readings(codex_window(90.0, 6 * HOUR, now=now, resets=now - 4 * HOUR),   # before
+                 codex_window(5.0, 3 * HOUR, now=now), codex_window(20.0, HOUR, now=now),
+                 codex_window(42.0, 60, now=now))
+    before = time.time()
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert set(body) == set(page.OPENED_WINDOW)
+    assert before <= body["now"] <= time.time() and body["today"] == "2026-10-03"
+    assert (body["harness"], body["limit_id"], body["window_minutes"]) == ("codex", "codex",
+                                                                          300)
+    assert (body["resets_at"], body["used_percent"]) == (limits.iso(now + HOUR), 42.0)
+    assert body["opened"] == limits.iso(now - 4 * HOUR)
+    assert body["readings"] == {
+        "count": 3,
+        "first": {"at": limits.iso(now - 3 * HOUR), "used_percent": 5.0},
+        "last": {"at": limits.iso(now - 60), "used_percent": 42.0,
+                 "session": ref("codex", "thread-1")}}
+    (row,) = [r for r in get("/api/limits")["rows"]
+              if (r["harness"], r["label"]) == ("codex", "5h")]
+    assert (row["opened"], row["resets_at"], row["observed_at"], row["used_percent"]) == (
+        body["opened"], body["resets_at"], body["readings"]["last"]["at"],
+        body["used_percent"])
+
+
+def test_a_window_read_once_has_no_first_reading():
+    now = time.time()
+    put_readings(codex_window(7.0, 60, now=now))
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert body["readings"] == {
+        "count": 1, "first": None,
+        "last": {"at": limits.iso(now - 60), "used_percent": 7.0,
+                 "session": ref("codex", "thread-1")}}
+    assert body["opened"] == limits.iso(now - 4 * HOUR)
+
+
+def test_a_window_whose_one_reading_shows_no_use_has_no_start_and_no_sessions(seeded):
+    now = time.time()
+    put_readings(codex_window(0.0, 60, now=now))
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert (body["opened"], body["used"], body["readings"]["count"]) == (None, None, 1)
+
+
+def test_an_opened_window_is_refused_with_no_store_and_makes_none():
+    text = refused("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert text == "there is no fresh reading of this window"
+    assert not readings.path().exists()
+
+
+def test_an_opened_window_needs_a_fresh_row(monkeypatch):
+    now = time.time()
+    put_readings(codex_window(80.0, 2 * HOUR, now=now, resets=now - 60),      # has reset
+                 codex_window(30.0, 60, now=now, minutes=10080),
+                 Reading("claude", "plan", 300, "five_hour", 12.0, now + HOUR, now - 60,
+                         "session-usage", "s1"))
+    asked = {"harness": "codex", "limit_id": "codex", "minutes": 300}
+    assert refused("/api/window", **asked) == "there is no fresh reading of this window"
+    assert refused("/api/window", **{**asked, "minutes": 60}).startswith("there is no")
+    assert refused("/api/window", **{**asked, "limit_id": "other"}).startswith("there is no")
+    assert "1 or more" in refused("/api/window", **{**asked, "minutes": 0})
+    assert get("/api/window", **{**asked, "minutes": 10080})["used_percent"] == 30.0
+    claude = {"harness": "claude", "limit_id": "plan", "minutes": 300}
+    assert get("/api/window", **claude)["used_percent"] == 12.0
+    monkeypatch.setattr(limits, "_turns_available", lambda: False)     # as limits() has it
+    assert all(row["state"] == "unavailable" for row in get("/api/limits")["rows"]
+               if row["harness"] == "claude")
+    assert refused("/api/window", **claude) == "there is no fresh reading of this window"
+    for query in ({**asked, "harness": "opencode"}, {"harness": "codex", "minutes": 300},
+                  {"harness": "codex", "limit_id": "codex"}):
+        status, _ = asyncio.run(ask(served(), "/api/window", query))
+        assert status == 400, query
+
+
+def test_an_opened_window_writes_nothing_and_pulls_nothing(pulls):
+    now = time.time()
+    put_readings(codex_window(10.0, 2 * HOUR, now=now))             # stale: a pull is due
+    conn = readings.open_store()
+    try:
+        conn.execute("INSERT INTO readings (harness, limit_id, window_minutes, observed_at,"
+                     " source) VALUES ('codex', 'codex', 300, ?, 'rollout')",
+                     (now - 30 * 86400,))                           # past the history cap
+    finally:
+        conn.close()
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert body["readings"]["count"] == 1 and pulls == []
+    conn = readings.open_store()
+    try:
+        assert readings.last_prune(conn) is None
+        assert readings.last_failed_pull(conn) is None
+        assert conn.execute("SELECT count(*) FROM readings").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_a_scoped_limit_opens_with_its_readings_and_no_sessions(seeded):
+    now = time.time()
+    put_readings(*(Reading("claude", "opus", 10080, "seven_day_opus", used, now + 86400,
+                           now - ago, "session-usage", "s1")
+                   for used, ago in ((3.0, 7200), (4.0, 60))))
+    body = get("/api/window", harness="claude", limit_id="opus", minutes=10080)
+    assert body["opened"] == limits.iso(now - 6 * 86400)
+    assert body["readings"]["count"] == 2 and body["readings"]["first"] is not None
+    assert body["used"] is None
+
+
+def test_a_main_window_lists_the_sessions_that_used_it_since_it_opened(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    now = time.time()
+    opened = now - 4 * HOUR
+    put_readings(codex_window(20.0, 2 * HOUR, now=now), codex_window(42.0, 60, now=now))
+    conn = store.open_index()
+    try:
+        codex_session(conn, "both-sides", opened - HOUR, opened + 60, opened + 120)
+        codex_session(conn, "before", opened - 2 * HOUR, opened - 1)
+        codex_session(conn, "dear", opened + 600, input=50_000)
+        codex_session(conn, "at-the-start", opened, input=20_000)
+        source(conn, "/p/other.jsonl", [request("o1", opened + 60, input=90_000)],
+               session_id="other-harness", cwd="/w/app")
+    finally:
+        conn.close()
+    used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]
+    assert used["since"] == limits.iso(opened)
+    assert [(row["session_id"], row["requests"]) for row in used["rows"]] == [
+        ("dear", 1), ("at-the-start", 1), ("both-sides", 2)]
+    assert all(set(row) == {*page.SESSION_REF, "requests", "cost"}
+               and row["harness"] == "codex" for row in used["rows"])
+    assert (used["count"], used["requests"], used["complete"]) == (3, 4, True)
+    assert used["cost"] == pytest.approx(sum(row["cost"] for row in used["rows"]))
+    whole = get("/api/sessions", harness="codex")
+    assert whole["count"] == 4 and whole["total"]["requests"] == 7
+
+
+def test_a_window_lists_its_ten_dearest_sessions_under_a_total_of_all(monkeypatch):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    now = time.time()
+    put_readings(codex_window(42.0, 60, now=now))
+    conn = store.open_index()
+    try:
+        for n in range(12):
+            codex_session(conn, f"s{n:02d}", now - HOUR + n, input=1000 * (n + 1))
+        codex_session(conn, "unpriced", now - HOUR, input=10)
+        source(conn, "/c/unpriced-2.jsonl",
+               [request("u2", now - HOUR, harness="codex", model="mystery-9")],
+               lane="codex", harness="codex", session_id="unpriced-2", cwd="/w/app")
+    finally:
+        conn.close()
+    used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]
+    assert [row["session_id"] for row in used["rows"]] == [f"s{n:02d}" for n in
+                                                           range(11, 1, -1)]
+    assert (used["count"], used["requests"], used["complete"]) == (14, 14, False)
+    assert used["cost"] > sum(row["cost"] for row in used["rows"])
+
+
+def test_a_window_with_no_index_to_read_says_nothing_of_its_sessions():
+    put_readings(codex_window(42.0, 60, now=time.time()))
+    asked = {"harness": "codex", "limit_id": "codex", "minutes": 300}
+    body = get("/api/window", **asked)
+    assert body["used"] is None and body["opened"] is not None
+    assert not store.index_path().exists()
+    store.open_index().close()
+    assert get("/api/window", **asked)["used"] == {
+        "since": body["opened"], "count": 0, "requests": 0, "cost": 0.0,
+        "complete": True, "rows": []}
+    _set_version(store.INDEX_VERSION - 1)
+    assert get("/api/window", **asked)["used"] is None
+    conn = sqlite3.connect(store.index_path())
+    try:
+        conn.execute(f"PRAGMA user_version = {store.INDEX_VERSION + 1}")
+    finally:
+        conn.close()
+    assert "newer than" in refused("/api/window", **asked)
+
+
+# --- what names a session -------------------------------------------------------------------
+
+T0 = at("2026-10-01T12:00")
+
+
+@pytest.fixture
+def named(monkeypatch, names):
+    """Sessions the stand-in sessions module holds and ones it does not: a Claude session
+    with a typed name and one with none, a Codex thread and an OpenCode session it holds,
+    a Claude session whose record is gone, and a file with no session id."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    conn = store.open_index()
+    try:
+        source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],
+               session_id="typed", cwd="/w/index-says", title="A title the harness made")
+        source(conn, "/p/plain.jsonl", [request("p1", T0 + 60, input=8000)],
+               session_id="plain", cwd="/w/app")
+        source(conn, "/c/thread.jsonl", [request("c1", T0 + 120, harness="codex", input=7000)],
+               lane="codex", harness="codex", session_id="thread", rank=1, cwd="/w/tool")
+        source(conn, "/oc/opencode.db", [request("o1", T0 + 180, harness="opencode",
+                                                 input=6000)],
+               lane="opencode", harness="opencode", part="ses_a", session_id="ses_a",
+               rank=2, cwd="/w/oc", title="A title of unknown hand")
+        source(conn, "/p/gone.jsonl", [request("g1", T0 - 86_400, input=5000),
+                                       request("g2", T0 + 240, input=5000)],
+               session_id="gone", cwd="/w/gone")
+        source(conn, "/p/loose.jsonl", [request("l1", T0 + 300, input=10)],
+               session_id=None, cwd="/w/loose")
+    finally:
+        conn.close()
+    names.held = {
+        ("claude", "typed"): {"name": "fix the tests", "folder": "/w/app",
+                              "started": T0 - 30},
+        ("claude", "plain"): {"folder": "/w/app", "started": T0 + 50},
+        ("codex", "thread"): {"folder": "/w/tool", "started": T0 + 110},
+        ("opencode", "ses_a"): {"folder": "/w/oc", "started": T0 + 170},
+    }
+    return names
+
+
+def refs_of(rows) -> list[dict]:
+    return [{key: row[key] for key in page.SESSION_REF} for row in rows]
+
+
+#: The range the named sessions are read over: it leaves out the gone session's first day.
+RANGE = {"utc": "true", "since": "2026-10-01"}
+
+
+def test_each_sessions_row_carries_what_names_it(named):
+    body = get("/api/sessions", **RANGE)
+    assert refs_of(body["rows"]) == [
+        # the name typed, and the folder and start of the session's record, not the index's
+        ref("claude", "typed", name="fix the tests", folder="/w/app", started=T0 - 30,
+            known=True),
+        # no typed name: the page words the row from its folder and start
+        ref("claude", "plain", folder="/w/app", started=T0 + 50, known=True),
+        # a Codex thread and an OpenCode session have no name
+        ref("codex", "thread", folder="/w/tool", started=T0 + 110, known=True),
+        ref("opencode", "ses_a", folder="/w/oc", started=T0 + 170, known=True),
+        # a record that is gone: the index's folder, and its earliest request for the
+        # session, a day before the range
+        ref("claude", "gone", folder="/w/gone", started=T0 - 86_400, known=False),
+        # no session id: its folder alone, and nothing asked of it
+        ref("claude", None, folder="/w/loose", known=None),
+    ]
+    assert named.asked == [[("claude", "typed"), ("claude", "plain"), ("codex", "thread"),
+                            ("opencode", "ses_a"), ("claude", "gone")]]
+    gone = body["rows"][4]
+    assert gone["first_ts"] == T0 + 240 and gone["requests"] == 1 and gone["cost"] > 0
+    assert not any("title" in row for row in body["rows"])
+
+
+def test_a_session_in_a_root_not_listed_whole_is_not_said_to_be_gone(named):
+    named.unlisted = ["claude"]
+    rows = get("/api/sessions", **RANGE)["rows"]
+    assert refs_of(rows) == [
+        # one the sessions module still answered is known
+        ref("claude", "typed", name="fix the tests", folder="/w/app", started=T0 - 30,
+            known=True),
+        ref("claude", "plain", folder="/w/app", started=T0 + 50, known=True),
+        ref("codex", "thread", folder="/w/tool", started=T0 + 110, known=True),
+        ref("opencode", "ses_a", folder="/w/oc", started=T0 + 170, known=True),
+        # one it did not was not looked for everywhere: no start stands in
+        ref("claude", "gone", folder="/w/gone", known=None),
+        ref("claude", None, folder="/w/loose", known=None),
+    ]
+
+
+def test_a_record_that_gives_no_folder_or_start_keeps_the_index_folder_and_no_start(named):
+    named.held["claude", "plain"] = {}
+    row = get("/api/sessions", **RANGE)["rows"][1]
+    assert refs_of([row]) == [ref("claude", "plain", folder="/w/app", known=True)]
+    assert row["first_ts"] == T0 + 60
+
+
+def test_the_answer_goes_out_unnamed_when_the_sessions_module_raises(named, caplog):
+    named.error = ValueError("the roots broke")
+    with caplog.at_level(logging.ERROR, logger="moxi.usage.page"):
+        body = get("/api/sessions", **RANGE)
+        again = get("/api/sessions", **RANGE)
+        one = get("/api/session", session="typed", harness="claude")
+    assert refs_of(body["rows"]) == [
+        ref("claude", "typed", folder="/w/index-says", known=None),
+        ref("claude", "plain", folder="/w/app", known=None),
+        ref("codex", "thread", folder="/w/tool", known=None),
+        ref("opencode", "ses_a", folder="/w/oc", known=None),
+        ref("claude", "gone", folder="/w/gone", known=None),
+        ref("claude", None, folder="/w/loose", known=None)]
+    assert again["rows"] == body["rows"] and body["count"] == 6
+    assert body["rows"][0]["cost"] > 0 and body["rows"][0]["context"] is not None
+    assert one["ref"] == ref("claude", "typed", folder="/w/index-says", known=None)
+    assert len(named.asked) == 3
+    assert len([r for r in caplog.records if r.exc_info]) == 1      # once per class
+
+
+def test_a_sessions_module_that_cannot_name_sessions_is_a_call_that_raised(
+        named, monkeypatch, caplog):
+    real = modules.load
+
+    def older(name, **kwargs):
+        if name == "sessions":
+            assert kwargs == {"interface": 5}
+            return SimpleNamespace(ok=False, reason="sessions offers no interface 5")
+        return real(name, **kwargs)
+
+    monkeypatch.setattr(pagehandlers, "_session_facts", ASK_SESSIONS)
+    monkeypatch.setattr(modules, "load", older)
+    with caplog.at_level(logging.ERROR, logger="moxi.usage.page"):
+        rows = get("/api/sessions", top="2", **RANGE)["rows"]
+    assert refs_of(rows) == [ref("claude", "typed", folder="/w/index-says", known=None),
+                             ref("claude", "plain", folder="/w/app", known=None)]
+    assert "sessions offers no interface 5" in caplog.text
+
+
+def test_the_page_asks_for_sessions_names_through_interface_5():
+    found = modules.load("sessions", interface=5)
+    assert found.ok, found.reason
+    assert callable(found.api.session_facts)
+    declared = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"moxi-sessions>=0.2.8,<0.3"' in declared
+
+
+def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    conn = store.open_index()
+    try:
+        for n in range(205):
+            source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],
+                   session_id=f"s{n:03d}", cwd="/w/app")
+    finally:
+        conn.close()
+    body = get("/api/sessions", utc="true")
+    assert (len(body["rows"]), body["count"], body["more"]) == (200, 205, 5)
+    assert len(names.asked) == 1 and len(names.asked[0]) == 200
+    assert names.asked[0] == [("claude", row["session_id"]) for row in body["rows"]]
+    names.asked.clear()
+    assert len(get("/api/sessions", utc="true", top="5", skip="200")["rows"]) == 5
+    assert [len(keys) for keys in names.asked] == [5]
+    names.asked.clear()
+    assert get("/api/sessions", utc="true", until="2026-09-01")["rows"] == []
+    assert names.asked == []                      # no row sent, nothing asked
+
+
+def test_one_session_carries_what_names_it(named):
+    typed = get("/api/session", session="typed", harness="claude")
+    assert set(typed) == set(page.SESSION)
+    assert typed["ref"] == ref("claude", "typed", name="fix the tests", folder="/w/app",
+                               started=T0 - 30, known=True)
+    assert named.asked == [[("claude", "typed")]]
+    # with no harness asked for: the one that holds a session of that id
+    assert get("/api/session", session="thread")["ref"] == ref(
+        "codex", "thread", folder="/w/tool", started=T0 + 110, known=True)
+    # a record that is gone, whatever the range: the index's folder and first request
+    gone = get("/api/session", session="gone", harness="claude", since="2026-10-01")
+    assert gone["ref"] == ref("claude", "gone", folder="/w/gone", started=T0 - 86_400)
+    # a session the index does not hold, under a harness and under none
+    assert get("/api/session", session="nobody", harness="codex")["ref"] == ref(
+        "codex", "nobody")
+    assert get("/api/session", session="nobody")["ref"] is None
+
+
+def test_one_session_of_an_id_two_harnesses_hold_is_named_only_under_a_harness(names):
+    conn = store.open_index()
+    try:
+        source(conn, "/p/both.jsonl", [request("b1", T0)], session_id="both", cwd="/w/a")
+        source(conn, "/c/both.jsonl", [request("b2", T0 + 1, harness="codex")],
+               lane="codex", harness="codex", session_id="both", rank=1, cwd="/w/b")
+    finally:
+        conn.close()
+    assert get("/api/session", session="both")["ref"] is None
+    assert names.asked == []
+    assert get("/api/session", session="both", harness="codex")["ref"] == ref(
+        "codex", "both", folder="/w/b", started=T0 + 1)
+
+
+def test_an_opened_window_names_its_last_readings_session_and_the_sessions_listed(
+        monkeypatch, names):
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    now = time.time()
+    opened = now - 4 * HOUR
+    put_readings(codex_window(20.0, 2 * HOUR, now=now, session_id="earlier"),
+                 codex_window(42.0, 60, now=now, session_id="reader"))
+    conn = store.open_index()
+    try:
+        codex_session(conn, "reader", opened - HOUR, opened + 60)
+        codex_session(conn, "dear", opened + 600, input=50_000)
+        codex_session(conn, "gone", opened - 2 * HOUR, opened + 30, input=20_000)
+    finally:
+        conn.close()
+    names.held = {("codex", "reader"): {"folder": "/w/reader", "started": opened - 2 * HOUR},
+                  ("codex", "dear"): {"folder": "/w/app", "started": opened + 590}}
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert body["readings"]["last"]["session"] == ref(
+        "codex", "reader", folder="/w/reader", started=opened - 2 * HOUR, known=True)
+    assert "session" not in body["readings"]["first"]
+    assert [{key: row[key] for key in page.SESSION_REF} for row in body["used"]["rows"]] == [
+        ref("codex", "dear", folder="/w/app", started=opened + 590, known=True),
+        # gone: its start is its earliest request in the index, before the window opened
+        ref("codex", "gone", folder="/w/app", started=opened - 2 * HOUR, known=False),
+        ref("codex", "reader", folder="/w/reader", started=opened - 2 * HOUR, known=True)]
+    assert [(row["session_id"], row["requests"]) for row in body["used"]["rows"]] == [
+        ("dear", 1), ("gone", 1), ("reader", 1)]
+    # one call, the reading's session asked once though it is also listed
+    assert names.asked == [[("codex", "reader"), ("codex", "dear"), ("codex", "gone")]]
+
+
+def test_an_opened_windows_reading_names_a_session_the_index_may_not_hold(names):
+    now = time.time()
+    put_readings(codex_window(42.0, 60, now=now, session_id="unindexed"))
+    asked = {"harness": "codex", "limit_id": "codex", "minutes": 300}
+    last = get("/api/window", **asked)["readings"]["last"]
+    assert last["session"] == ref("codex", "unindexed")       # looked for, held nowhere
+    names.held = {("codex", "unindexed"): {"folder": "/w/live", "started": now - HOUR}}
+    assert get("/api/window", **asked)["readings"]["last"]["session"] == ref(
+        "codex", "unindexed", folder="/w/live", started=now - HOUR, known=True)
+    assert not store.index_path().exists()
+
+
+def test_an_opened_windows_reading_that_names_no_session_has_none(names):
+    put_readings(codex_window(42.0, 60, now=time.time(), session_id=None))
+    body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
+    assert body["readings"]["last"]["session"] is None
+    assert names.asked == []
+
+
+NAMES_ON_REAL_ROOTS = textwrap.dedent("""
+    import json, sys
+    from moxi_usage import pagehandlers
+    pairs = [tuple(pair) for pair in json.loads(sys.argv[1])]
+    ref = pagehandlers._refs(pairs, folders=pairs)
+    print(json.dumps([ref(harness, sid) for harness, sid in pairs]))
+""")
+
+
+def test_names_come_from_the_sessions_modules_own_read_of_the_roots(monkeypatch, tmp_path):
+    """The page server's own call, in a process of its own as the page server is one:
+    over records written under the harness homes, with the index beside them."""
+    import os
+
+    start = at("2026-10-01T12:00")
+    claude_root = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects"
+    ids = {name: f"0190b000-0000-7000-8000-{n:012x}"
+           for n, name in enumerate(("typed", "plain", "titled", "gone"), 1)}
+    for name, lines in (("typed", [("custom", "fix the tests")]), ("plain", []),
+                        ("titled", [("ai", "A title the harness made")])):
+        record = sessions.testing.ClaudeTranscript(
+            claude_root, session_id=ids[name], cwd="/work/proj-a", project="-work-proj-a",
+            start=start)
+        record.user("Do the thing.", origin="human")
+        for kind, text in lines:
+            record.title(text, ai=kind == "ai")
+        record.assistant("Done.")
+        record.write()
+    thread = "0190c000-0000-7000-8000-000000000001"
+    rollout = sessions.testing.CodexRollout(Path(os.environ["CODEX_HOME"]) / "sessions",
+                                            thread_id=thread, cwd="/work/proj-b",
+                                            start=start + 5)
+    rollout.turn()
+    rollout.user("Do the thing.")
+    rollout.write()
+    db = sessions.testing.OpenCodeDb(Path(os.environ["XDG_DATA_HOME"]) / "opencode")
+    opencode = db.session(title="A title of unknown hand", directory="/work/proj-b",
+                          at=start + 7)
+    opencode.user("hello")
+    db.write()
+    conn = store.open_index()
+    try:
+        source(conn, "/p/gone.jsonl", [request("g1", start - 600), request("g2", start)],
+               session_id=ids["gone"], cwd="/work/proj-gone")
+        source(conn, "/p/typed.jsonl", [request("t1", start + 60)],
+               session_id=ids["typed"], cwd="/work/index-says")
+    finally:
+        conn.close()
+    pairs = [("claude", ids["typed"]), ("claude", ids["plain"]), ("claude", ids["titled"]),
+             ("codex", thread), ("opencode", opencode.id), ("claude", ids["gone"])]
+    done = subprocess.run([sys.executable, "-c", NAMES_ON_REAL_ROOTS, json.dumps(pairs)],
+                          cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == [
+        ref("claude", ids["typed"], name="fix the tests", folder="/work/proj-a",
+            started=start, known=True),
+        ref("claude", ids["plain"], folder="/work/proj-a", started=start, known=True),
+        ref("claude", ids["titled"], folder="/work/proj-a", started=start, known=True),
+        ref("codex", thread, folder="/work/proj-b", started=start + 5, known=True),
+        ref("opencode", opencode.id, folder="/work/proj-b", started=start + 7, known=True),
+        ref("claude", ids["gone"], folder="/work/proj-gone", started=start - 600)]
 
 
 # --- the stream and its limits poller -------------------------------------------------------
@@ -759,7 +1737,7 @@ def test_the_poller_publishes_limits_only_when_they_change(monkeypatch):
         try:
             name, first = await stream.next(5)
             assert name == "limits" and stream.status == 200
-            assert set(first) == {"rows", "pull", "notes"}
+            assert set(first) == {"today", "rows", "pull", "notes"}
             assert await stream.none_within(0.6)
             put_readings(codex_reading(55.0, observed=time.time() - 5))
             _, later = await stream.next(5)
@@ -969,8 +1947,8 @@ def test_a_catch_up_pass_over_many_new_sources_reads_them_on_the_pool(monkeypatc
     assert pooled == [(many, 2)]
     assert end["running"] is False and end["note"] is None
     assert end["last_pass"] > first.finished_at
-    body = get("/api/sessions", top="1000")
-    assert len(body["rows"]) == many + 1
+    body = get("/api/sessions", top="1")
+    assert body["count"] == many + 1
     assert body["total"]["output"] == sum(10 + n for n in range(many + 1))
 
 

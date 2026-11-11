@@ -1,4 +1,9 @@
-"""usage's interface 1, the module other Moxi modules import (`moxi_usage.api`).
+"""usage's interfaces 1 and 2, the module other Moxi modules import (`moxi_usage.api`).
+
+Interface 2 is interface 1 plus four things, each marked below: `report`'s `folder`
+filter, the `projects` kind by folder, `saving` on a `terms` total, and `opened` on a
+limits row. The names are the same under both; a caller that reads one of the four loads
+usage with `interface=2`, so an older usage refuses it and does not answer without them.
 
 Model facts (`moxi_usage.models`):
 
@@ -18,8 +23,9 @@ Limits (`moxi_usage.limits`):
 * `limits(*, harness=None, now=None, pull=True)`: one `Row` per plan window of Claude
   and Codex, or of one `harness`, at `now` (epoch seconds; None is the clock): its
   state (`fresh`, `reset` or `unavailable`, with a reason), percent used, reset time,
-  the age of its reading and, when the window is filling, `full_at`, the time it
-  reaches 100% at the recent rate. With `pull`, a Codex reading older than
+  the age of its reading, when the window is filling, `full_at`, the time it
+  reaches 100% at the recent rate, and, under interface 2, `opened`, when the window
+  started (None when the readings cannot say). With `pull`, a Codex reading older than
   `limits.codex_pull_after_s` is refreshed through turns when turns is installed. Returns
   `Limits`, whose `pull` says what the pull did. What a reading did not say, and every
   fact of a window with no reading, is `UNKNOWN`; the state's reason says which.
@@ -52,17 +58,24 @@ The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
 Reports (`moxi_usage.reports`):
 
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
-  tz=None, fresh=True, session=None, by=None, agent=None)`: tokens and cost from the
-  token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`, `models`,
-  `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the index's
-  pass runs first. `tz` is the zone days are cut in, local time when None. Cost is worked out when
-  the report runs; tokens the table cannot price are counted in `unpriced_tokens`, never
-  as $0. The `session` kind is one session, the one `session` names (an id a `sessions`
+  tz=None, fresh=True, session=None, by=None, agent=None, folder=None)`: tokens and
+  cost from the token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`,
+  `models`, `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the
+  index's pass runs first. `tz` is the zone days are cut in, local time when None.
+  Under interface 2, `folder` is a folder's whole path and keeps the files whose `cwd`
+  it is, whatever project key they carry, and the `projects` kind with `by="folder"`
+  groups by `cwd` alone.
+  Cost is worked out when the report runs; tokens the table cannot price are counted in
+  `unpriced_tokens`, never as $0. The `session` kind is one session, the one `session` names (an id a `sessions`
   row gives, with `harness` to tell two harnesses apart), by agent and model; it needs
   `session`. The `terms` kind prints every term of each cost, by `model` (the default),
   `day`, `month` or, with `session`, `agent` (`by`): each row's price groups with each
   token class's tokens, price and dollars, and its cost split by class and price tier;
-  `session` alone narrows it to one session. The `requests` kind is one row per request
+  `session` alone narrows it to one session. Under interface 2 its total carries
+  `saving`, what caching saved over the answer: an estimate, the same tokens with no
+  cache at the same prices, as `{input_tokens, read_tokens, reads_at_input, reads_cost,
+  write_extra, saved}`; None when the answer holds no cache read, and when a group that
+  holds cache reads or writes is unpriced or lacks a price the sums need. The `requests` kind is one row per request
   of one session's agent (`session`, which it needs, and `agent`, `main` by default):
   its tokens by class, cost and its split, its context against the model's window, its
   turn, and the agent's compactions placed between the rows. A keyword a kind does not

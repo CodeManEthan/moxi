@@ -351,6 +351,20 @@ ORIGIN_KINDS: Mapping[str, bool] = {
 #: The booleans Claude Code writes on a line it added or summarised itself. Either makes
 #: the message injected, whatever its origin says.
 COMPOSED_FLAGS = ("isMeta", "isCompactSummary")
+#: The bytes a line holds when its message is marked as typed by the person at the
+#: prompt and the line is written as Claude Code writes it: the `origin` key, and a kind
+#: `ORIGIN_KINDS` gives false for.
+TYPED_KEY = b'"origin"'
+TYPED_KINDS = tuple(json.dumps(kind).encode() for kind, injected in ORIGIN_KINDS.items()
+                    if injected is False)
+#: The two other ways JSON can write that key or kind, which the decode reads as the same
+#: words: with one of their characters as a `\uXXXX` escape, or in UTF-16 or UTF-32,
+#: which puts a zero byte in the line where UTF-8 JSON has none.
+TYPED_ESCAPE = re.compile(
+    rb"\\u(?:" + "|".join(sorted({f"{ord(char):04x}" for word in (TYPED_KEY, *TYPED_KINDS)
+                                   for char in json.loads(word)})).encode() + rb")",
+    re.IGNORECASE)
+TYPED_WIDE = b"\x00"
 #: The fixed wrappers Claude Code writes around text it composed: a user message with no
 #: origin that opens with one of these tags is injected. With an origin, the origin
 #: decides alone.
@@ -605,6 +619,22 @@ def _injected(entry: dict, role: str, text: str, synthetic: bool) -> Any:
     if text.lstrip().startswith(WRAPPER_TAGS) or text.strip() in INTERRUPT_LINES:
         return True
     return UNKNOWN
+
+
+def may_be_typed(raw: bytes) -> bool:
+    """Whether a raw line can hold a message the record marks as typed by the person at
+    the prompt (`Message.injected` is false on a user message), told from its bytes with
+    no decode. False means it holds none; true means only that the decode has to say.
+
+    A typed message's line has an `origin` whose kind `ORIGIN_KINDS` gives false for.
+    Written as Claude Code writes it, the line holds that key and that kind as plain
+    bytes. JSON allows two other writings the decode reads the same: a character of the
+    key or the kind as a `\\uXXXX` escape, and a line in UTF-16 or UTF-32. A line that
+    holds such an escape or a zero byte is left to the decode, so the answer is false
+    for no line the decode would read as typed, however it is written."""
+    if TYPED_KEY in raw and any(kind in raw for kind in TYPED_KINDS):
+        return True
+    return TYPED_WIDE in raw or (b"\\u" in raw and TYPED_ESCAPE.search(raw) is not None)
 
 
 def _content_records(entry: dict, message: dict, role: str, common: dict,

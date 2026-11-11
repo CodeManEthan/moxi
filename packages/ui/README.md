@@ -69,6 +69,16 @@ draws it. A main piece that opens a panel at the window's right edge sends
 has the fields, how rows are ordered and opened, the `needs` and `order` scales and the
 side panel's event.
 
+## The row of a list
+
+`<moxi-ui-row>` is the two-line row a list page draws: a name, where it is and a fact at
+the right end; under them a leading phrase, a time, what was last said and the row's acts;
+and an opened state for content under the row. `/m/ui/client.js` defines it, so a page
+places it with attributes and bundles nothing. It draws nothing for an attribute that is
+unset, and a row opens by its lines only when it carries `toggles`.
+[docs/row.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/row.md)
+has every attribute, the slots and the `moxi-row-toggle` event.
+
 ## Confirmed acts in a page
 
 An act the user should confirm a second time, such as stopping a service or removing a
