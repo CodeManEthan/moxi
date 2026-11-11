@@ -12,7 +12,8 @@ import { Feed, parseReport } from "./feed.ts";
 import type { Report, SessionRow } from "./feed.ts";
 import { percentWords } from "./limits-model.ts";
 import { figuresTable } from "./sections-model.ts";
-import { addPage, depthPages, listRead, PAGE, rowKey, sessionName, sessionWhere } from "./sessions-model.ts";
+import { tilde } from "./filter-model.ts";
+import { addPage, depthPages, lastSegment, listRead, PAGE, rowKey, sessionName, sessionWhere } from "./sessions-model.ts";
 import type { ListRead } from "./sessions-model.ts";
 
 export const SESSIONS_LABEL = "Sessions";
@@ -111,10 +112,12 @@ export interface TablePart {
 /**
  * The section's table: every row shown, with every figure `/api/sessions` gives. A first
  * column names the list when two lists show rows, since a session with requests on both
- * sides of their cut is a row in each. The project column is there with projects.
+ * sides of their cut is a row in each. The project column is there with projects. A
+ * folder is written from `home` (`~/work/proj-a`), the account's home folder that
+ * `/api/projects` answers; with no `home` read, as its last segment.
  */
 export function sessionsTable(parts: TablePart[], today: string | null, projects: boolean,
-                              clock: Clock = LOCAL): Table {
+                              home: string | null, clock: Clock = LOCAL): Table {
   const shown = parts.filter((part) => part.rows.length > 0);
   const two = shown.length > 1;
   const when = (at: number | null): string => (at === null ? "" : whenWord(at, today, clock, true));
@@ -127,7 +130,7 @@ export function sessionsTable(parts: TablePart[], today: string | null, projects
       ...(two ? [part.label] : []),
       sessionName(row, today, clock).name,
       ...(projects ? [row.project ?? ""] : []),
-      row.folder ?? row.cwd ?? "",
+      folderCell(row.folder ?? row.cwd, home),
       row.harness,
       row.models.join(", "),
       when(row.first_ts),
@@ -135,6 +138,12 @@ export function sessionsTable(parts: TablePart[], today: string | null, projects
       row.context === null ? "" : contextCell(row.context),
     ],
   }))));
+}
+
+/** A folder as the table writes it: whole from `home`, else its last segment. */
+function folderCell(folder: string | null, home: string | null): string {
+  if (folder === null || folder === "") return "";
+  return home ? tilde(folder, home) : lastSegment(folder);
 }
 
 function contextCell(context: NonNullable<SessionRow["context"]>): string {

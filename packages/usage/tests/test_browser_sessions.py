@@ -204,6 +204,8 @@ def test_the_table_holds_every_figure_of_the_rows_shown(page):
             "Cost"} <= set(heads), heads
     expect(table.locator("tbody tr")).to_have_count(12)
     expect(table.locator("tbody tr").first.locator("td").nth(1)).to_have_text("fix the tests")
+    # A folder outside the account's home is written whole once `/api/projects` gave the home.
+    expect(table.locator("tbody tr").first.locator("td").nth(3)).to_have_text("/work/proj-a")
     section.get_by_role("button", name="Hide table").click()
     expect(table).to_have_count(0)
 

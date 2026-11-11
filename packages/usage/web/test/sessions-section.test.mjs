@@ -95,19 +95,27 @@ test("a row with no model and a cost not whole leaves the models out and says wh
 
 test("the table holds every figure of the rows shown, naming the list when two show rows", () => {
   const one = sessionsTable([{ label: "This week", rows: [row("s-1", 5.35, { context: { tokens: 10, window: 100 } })] },
-                             { label: "Earlier", rows: [] }], TODAY, false, UTC);
+                             { label: "Earlier", rows: [] }], TODAY, false, null, UTC);
   assert.deepEqual(one.columns.map((column) => column.label),
     ["Session", "Folder", "Harness", "Models", "First request", "Last request", "Context", "Requests", "Tokens", "Cost"]);
-  assert.deepEqual(one.rows[0].cells, ["proj-a · started Nov 3 08:52", "/work/proj-a", "claude", "m-a", "Tue 08:52",
+  assert.deepEqual(one.rows[0].cells, ["proj-a · started Nov 3 08:52", "proj-a", "claude", "m-a", "Tue 08:52",
                                        "Tue 10:20", "10 of 100", "15", "1.20k", "$5.35"]);
   const two = sessionsTable([{ label: "This week", rows: [row("s-1", 2, { project: "proj-b" })] },
                              { label: "Earlier", rows: [row("s-1", 1, { unpriced_tokens: 9, complete: false })] }],
-                            TODAY, true, UTC);
+                            TODAY, true, null, UTC);
   assert.deepEqual(two.columns.map((column) => column.label).slice(0, 4), ["List", "Session", "Project", "Folder"]);
   assert.equal(two.columns.at(-1).label, "Not whole");
   // A session on both sides of the cut is a row of each list, kept apart.
   assert.deepEqual(two.rows.map((line) => [line.key, line.cells[0], line.cells[2]]),
                    [["0:claude/s-1", "This week", "proj-b"], ["1:claude/s-1", "Earlier", ""]]);
+});
+
+test("the table writes a folder from the home folder, and as its last segment with no home read", () => {
+  const rows = [row("s-1", 2, { folder: "/home/alice/work/proj-a" }), row("s-2", 1, { folder: "/srv/proj-b" })];
+  const folders = (home) => sessionsTable([{ label: "This week", rows }], TODAY, false, home, UTC).rows.map((line) => line.cells[1]);
+  assert.deepEqual(folders("/home/alice"), ["~/work/proj-a", "/srv/proj-b"]);
+  assert.deepEqual(folders("/home/alice/"), ["~/work/proj-a", "/srv/proj-b"]);
+  assert.deepEqual(folders(null), ["proj-a", "proj-b"]);
 });
 
 test("a range of seven days or fewer has no earlier line", () => {

@@ -1296,7 +1296,8 @@ export class UsagePage extends LitElement {
           ${this.#more(remainder(shown.value, false), "earlier-more", () => { void this.#earlierList?.show(); })}`}
       <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(table)}
         @click=${() => { this.sectionTable = table ? null : "sessions"; }}>${table ? HIDE_TABLE : SECTION_TABLE}</button></p>
-      ${table ? this.#table(sessionsTable(parts, today, projects)) : nothing}`;
+      ${table ? this.#table(sessionsTable(parts, today, projects,
+        this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null)) : nothing}`;
   }
 
   /** A line under a list: what it leaves out, and `Show`; with no act, the line alone. */
