@@ -100,6 +100,16 @@
 // each edit rendered unsaved by `/api/name`; `Save template` writes through the shell's own
 // settings route, never the launcher's, so a key the shell was started with locked is refused
 // in the shell's words, and the name is read again after a save.
+//
+// A dim `+` at the left of the chip opens a menu drawn like the chip's. `Brief from a file`
+// opens a field for a path: while one is set the box is off, a dim line under the box names
+// the file with `Clear`, and the launch's first turn is that file, not the box's text. A
+// launch that starts with it lets go of it, as it empties the box. `Continue the last
+// session` is offered when the menu's read of `/api/sessions`, made each time it opens, holds
+// a session of the line's place that he made and can resume now; its dim line says whether
+// it resumes in a slot or copies the resume command. A click resumes it at once through
+// `/api/resume`, with the lines under the box a launch has, in a resume's words; the box
+// keeps its text.
 
 import { css, html, LitElement, nothing } from "lit";
 import type { TemplateResult } from "lit";
@@ -123,9 +133,9 @@ import {
 import type { Last, LastKey } from "./fill-model.ts";
 import {
   choiceKey, fieldsFor, filledFields, FOLLOW_FOR_MS, FOLLOW_MS, formPath, NO_PRESET, parseCatalog, parseForm,
-  parsePresets, same,
+  parsePasts, parsePresets, same,
 } from "./panel.ts";
-import type { Catalog, Choice, Form, LaunchBody, Preset } from "./panel.ts";
+import type { Catalog, Choice, Form, LaunchBody, Past, Preset } from "./panel.ts";
 import {
   afterPick, atLoad, lastQuery, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
 } from "./preset-model.ts";
@@ -133,8 +143,12 @@ import {
   afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
   inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
-  placeTime, runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
+  placeTime, resumeSent, runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
+import {
+  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, lastSession, PLUS_LABEL, resumeBody,
+  SESSIONS_READ, takesBriefFile,
+} from "./plus-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
 import {
   againRun, CARD_FRESH_MS, cardAct, leftOutWords, OFF_DEFAULTS, OWN_DEFAULTS, parseRecent, parseRecents, placeWords,
@@ -257,6 +271,14 @@ const STYLES = css`
   .pk { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
   .pk.d { margin-left: 4px; color: var(--moxi-text-dim); }
   .pk .v { font-size: 14px; }
+  .plus { padding: 4px 6px; border: 0; background: none; color: var(--moxi-text-dim); font: 18px/1 var(--moxi-font-sans); }
+  .open > .plus { color: var(--moxi-text); }
+  .menu.plusm { top: calc(100% + 6px); width: 320px; padding: 6px 0 4px; }
+  .plusm .row { grid-template-columns: 20px 1fr; padding: 7px 14px; }
+  .plusm .row .d { display: block; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .plusm .find { margin-top: 4px; border-top: 1px solid var(--moxi-border); border-bottom: 0; }
+  textarea:disabled { color: var(--moxi-text-dim); cursor: default; }
+  .changed .file { min-width: 0; overflow-wrap: anywhere; font-family: var(--moxi-font-mono); font-size: 13px; }
   .menu.nmenu { width: 260px; padding: 4px 0; }
   .menu.nmenu[data-menu="name-add"] { left: auto; right: 0; width: 200px; }
   .nmenu .row { grid-template-columns: 1fr auto; padding: 6px 14px; }
@@ -417,6 +439,9 @@ export class LauncherPrompt extends LitElement {
     draft: { state: true },
     nameSaid: { state: true },
     saving: { state: true },
+    briefFile: { state: true },
+    fileField: { state: true },
+    pasts: { state: true },
   };
 
   /** The box's text. */
@@ -426,7 +451,7 @@ export class LauncherPrompt extends LitElement {
   places: Place[] = [];
   /** The menu that is open: the line's (`where`), the chip's (`chip`), the button's
    * (`run`), or none. */
-  menu: "" | "where" | "chip" | "run" | "preset" | "fill" | "name-add" | "name-date" = "";
+  menu: "" | "where" | "chip" | "run" | "preset" | "fill" | "name-add" | "name-date" | "plus" = "";
   /** A typed folder path the menu did not take. */
   typed = "";
   /** The form's fields for the harness, filled from `/api/form`; empty until both are read. */
@@ -480,6 +505,17 @@ export class LauncherPrompt extends LitElement {
   nameSaid = "";
   /** A template is being saved. */
   saving = false;
+  /** The brief file set through the `+`; "" for none, when the box's text is the first turn. */
+  briefFile = "";
+  /** The `+` menu's field for a brief file's path is open. */
+  fileField = false;
+  /** The past sessions the `+` menu read when it opened; null until that read answers. */
+  pasts: Past[] | null = null;
+  #pastsAsked = 0;
+  /** Who the page server launches as, by `/api/places`; "" until it is read. */
+  #actor = "";
+  /** The brief file sent with the press; null when none was. */
+  #sentFile: string | null = null;
   #nameAsked = 0;
   /** The query the latest read of the name was for; null to read it again at the next update. */
   #nameKey: string | null = null;
@@ -505,7 +541,8 @@ export class LauncherPrompt extends LitElement {
   #targetsRead: Promise<void> = Promise.resolve();
   /** Counts presses, so an answer for an earlier launch is dropped. */
   #pressed = 0;
-  /** The box's text when the button was pressed; null for a recent run again, which sends none. */
+  /** The box's text when the button was pressed; null for a recent run again, a resume, or a
+   * launch with a brief file, which send none of it. */
   #sent: string | null = "";
   /** The values that can do harm turned on when the button was pressed, by row. */
   #sentOn: Record<string, string> = {};
@@ -586,6 +623,7 @@ export class LauncherPrompt extends LitElement {
     this.#recentsAsked += 1;
     this.#cardAsked += 1;
     this.#nameAsked += 1;
+    this.#pastsAsked += 1;
     this.#nameKey = null;
     this.#pressed += 1;
     this.#stopFollow();
@@ -664,11 +702,12 @@ export class LauncherPrompt extends LitElement {
     return this.#form?.harness ?? "";
   }
 
-  /** The rows this piece sets, over what `/api/form` fills: the brief, the place, the
+  /** The rows this piece sets, over what `/api/form` fills: the brief, a brief file, the place, the
    * model and the effort once the chip's menu set them, each value set in the panel, and
    * under those the values filled from the last launch. */
   get set(): Record<string, FormValue> {
     return { ...this.#fill, ...this.options, ...this.chosen, brief: this.brief === "" ? null : this.brief,
+             ...(this.briefFile === "" ? {} : { brief_file: this.briefFile }),
              ...(this.pick === null ? {} : pickValues(this.pick)) };
   }
 
@@ -876,6 +915,7 @@ export class LauncherPrompt extends LitElement {
     if (mine !== this.#opened) return;
     this.#withProjects = where.withProjects;
     this.#home = where.home;
+    this.#actor = where.actor;
     this.places = where.places;
     // A place he picked while the read was under way stands; the one opened on counts as
     // picked, so a project's own preset is applied.
@@ -929,7 +969,9 @@ export class LauncherPrompt extends LitElement {
     const mine = this.#opened;
     const answer = await api("launcher", "api/places");
     const read = answer.status === 200 ? parsePlaces(answer.data) : null;
-    if (read !== null && mine === this.#opened) this.places = read.places;
+    if (read === null || mine !== this.#opened) return;
+    this.places = read.places;
+    if (read.actor !== "") this.#actor = read.actor;
   }
 
   /** Takes a pick, with the preset it applies, closes the menu and puts the caret back in
@@ -982,10 +1024,11 @@ export class LauncherPrompt extends LitElement {
       ${this.pick === null ? nothing : this.#where(this.pick)}
       <div class="box">
         <textarea aria-label="What should the agent do?" placeholder="What should the agent do?"
-          .value=${this.brief}
+          .value=${this.brief} ?disabled=${this.briefFile !== ""}
           @input=${(event: Event) => this.#edit((event.target as HTMLTextAreaElement).value)}></textarea>
-        <div class="boxrow"><div class="left">${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
+        <div class="boxrow"><div class="left">${this.#plus()}${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
       </div>
+      ${this.#fileLine()}
       ${this.#changed()}
       ${this.#presetLine()}
       ${this.#said()}
@@ -1110,6 +1153,110 @@ export class LauncherPrompt extends LitElement {
         placeholder="A model's full name" autocomplete="off" spellcheck="false" .value=${menu.typed}
         @keydown=${this.#olderKey}>` : nothing}
     </div>`;
+  }
+
+  // --- the `+` ------------------------------------------------------------------------------
+
+  /** The dim `+` at the left of the chip, and its menu while it is open. */
+  #plus() {
+    if (this.fields.length === 0) return nothing;
+    const open = this.menu === "plus";
+    return html`<span class=${open ? "anchor open" : "anchor"}><button type="button" class="plus" aria-haspopup="true"
+      aria-expanded=${open ? "true" : "false"} aria-label=${PLUS_LABEL} @click=${this.#togglePlus}>+</button>${
+      open ? this.#plusMenu() : nothing}</span>`;
+  }
+
+  /** Opens or closes the `+` menu; each open reads the past sessions again. */
+  #togglePlus(): void {
+    this.menu = this.menu === "plus" ? "" : "plus";
+    this.fileField = false;
+    if (this.menu === "plus") void this.#readPasts();
+  }
+
+  async #readPasts(): Promise<void> {
+    const asked = (this.#pastsAsked += 1);
+    this.pasts = null;
+    const answer = await api("launcher", SESSIONS_READ);
+    if (asked !== this.#pastsAsked) return;
+    const read = answer.status === 200 ? parsePasts(answer.data) : null;
+    this.pasts = read !== null && read.state === "up" ? read.sessions : [];
+  }
+
+  #plusMenu() {
+    const last = lastSession(this.pasts ?? [], this.pick, this.#actor, this.#home);
+    const file = takesBriefFile(this.fields);
+    return html`<div class="menu plusm" data-menu="plus">
+      ${file ? html`<button type="button" class="row" data-plus="brief-file"
+        data-current=${this.briefFile === "" ? "false" : "true"} @click=${this.#openFileField}><span
+        aria-hidden="true">${this.briefFile === "" ? "" : "✓"}</span><span class="name">${BRIEF_FROM_FILE}</span></button>`
+        : nothing}
+      ${last === null ? nothing : html`<button type="button" class="row" data-plus="continue"
+        @click=${() => void this.#continue(last)}><span aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span
+        class="d">${continueWords(last)}</span></span></button>`}
+      ${this.fileField ? html`<input class="find" type="text" aria-label=${BRIEF_FILE_FIELD}
+        placeholder=${BRIEF_FILE_FIELD} autocomplete="off" spellcheck="false" .value=${this.briefFile}
+        @keydown=${this.#fileKey}>` : nothing}
+    </div>`;
+  }
+
+  #openFileField(): void {
+    this.fileField = true;
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLInputElement>(".plusm .find")?.focus());
+  }
+
+  /** Enter in the path field sets the brief file, or takes it off when the field is empty. */
+  #fileKey(event: KeyboardEvent): void {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    this.#setFile((event.target as HTMLInputElement).value.trim());
+    this.menu = "";
+    this.fileField = false;
+    void this.updateComplete.then(() => (this.renderRoot.querySelector<HTMLElement>(this.briefFile === "" ? "textarea" : ".go"))
+      ?.focus());
+  }
+
+  /** Sets the brief file, "" for none. The lines of a launch that has ended go, as at an edit
+   * of the box. */
+  #setFile(path: string): void {
+    this.briefFile = path;
+    const next = edited(this.flight);
+    if (next !== this.flight) {
+      this.flight = next;
+      this.#stopFollow();
+      this.#pressed += 1;
+    }
+  }
+
+  /** The dim line under the box while a brief file is set: the file, and `Clear`. */
+  #fileLine() {
+    if (this.briefFile === "") return nothing;
+    return html`<div class="changed" data-brief-file><span><span class="k">${BRIEF_FROM_FILE}</span><b
+      class="file">${this.briefFile}</b></span><button type="button" aria-label=${`${CLEAR_FILE} the brief file`}
+      @click=${() => {
+        this.#setFile("");
+        void this.updateComplete.then(() => this.#box()?.focus());
+      }}>${CLEAR_FILE}</button></div>`;
+  }
+
+  /** A click on `Continue the last session`: the session resumed at once, its lines under the
+   * box, or its command copied. The box, the panel and the fill stay as they are. */
+  async #continue(past: Past): Promise<void> {
+    if (inFlight(this.flight)) return;
+    const mine = (this.#pressed += 1);
+    this.#stopFollow();
+    this.#sent = null;
+    this.#sentOn = {};
+    this.#sentFile = null;
+    this.menu = "";
+    this.flight = PRESSED;
+    const sent = resumeSent(await api("launcher", "api/resume", resumeBody(past)));
+    if (mine !== this.#pressed) return;
+    if (sent.copy !== null) {
+      await this.#copy(mine, sent.copy, []);
+      return;
+    }
+    this.flight = sent.flight;
+    if (following(this.flight)) this.#follow(mine);
   }
 
   // --- the Options panel ----------------------------------------------------------------------
@@ -1579,6 +1726,7 @@ export class LauncherPrompt extends LitElement {
     this.#stopFollow();
     this.#sent = null;
     this.#sentOn = {};
+    this.#sentFile = null;
     this.menu = "";
     this.flight = PRESSED;
     await this.#send(mine, recentBody(card.answer.request), againRun(card.run));
@@ -1678,7 +1826,9 @@ export class LauncherPrompt extends LitElement {
     const shown = runOf(this.targets, this.picked);
     const body = launchRequest(this.fields, this.#form, this.set, shown, this.baseFields, this.#formChoice,
                                Object.keys(this.#fill));
-    this.#sent = this.brief;
+    // A brief file is the first turn in place of the box's text, which then stays.
+    this.#sentFile = this.briefFile === "" ? null : this.briefFile;
+    this.#sent = this.#sentFile === null ? this.brief : null;
     this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";
     this.flight = PRESSED;
@@ -1745,7 +1895,8 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press, and lets go of each value that can do harm it was
+   * its text was changed since the press, lets go of the brief file it was launched with,
+   * unless it was changed since, and lets go of each value that can do harm it was
    * launched with, unless its row was changed since the press. */
   #landed(next: Flight): void {
     if (next === this.flight) return;
@@ -1753,6 +1904,8 @@ export class LauncherPrompt extends LitElement {
     if (!following(next)) this.#stopFollow();
     if (!next.started) return;
     if (this.#sent !== null && this.brief === this.#sent) this.brief = "";
+    if (this.#sentFile !== null && this.briefFile === this.#sentFile) this.briefFile = "";
+    this.#sentFile = null;
     this.options = afterStarted(this.options, this.#sentOn);
     this.#sentOn = {};
   }

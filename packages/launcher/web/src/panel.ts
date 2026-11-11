@@ -699,6 +699,10 @@ export interface Past {
   target: string;
   slot: string | null;
   cwd: string;
+  /** The project the launch ran in; null for a launch in a folder alone. */
+  project_key: string | null;
+  /** Who made the launch. */
+  actor: string;
   identity: string | null;
   state: string;
   session_id: string | null;

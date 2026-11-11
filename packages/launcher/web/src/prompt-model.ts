@@ -42,11 +42,12 @@ export interface Place {
 }
 
 /** The value of `/api/places`: the places, newest first, whether the page server would
- * take a project for a launch's place, and the user's home folder as the page server sees
- * it ("" when the answer names none). */
+ * take a project for a launch's place, the user's home folder as the page server sees
+ * it ("" when the answer names none), and who the page server launches as ("" likewise). */
 export interface Places {
   projects: boolean;
   home: string;
+  actor: string;
   places: Place[];
 }
 
@@ -59,7 +60,8 @@ export function parsePlaces(data: unknown): Places | null {
     places.push({ project_key: typeof row.project_key === "string" && row.project_key ? row.project_key : null,
                   cwd: row.cwd, at: typeof row.at === "string" ? row.at : "" });
   }
-  return { projects: data.projects === true, home: typeof data.home === "string" ? data.home : "", places };
+  return { projects: data.projects === true, home: typeof data.home === "string" ? data.home : "",
+           actor: typeof data.actor === "string" ? data.actor : "", places };
 }
 
 /** Whether projects is there: the page server would take a project, and the shell has
@@ -110,6 +112,8 @@ export interface Where {
   withProjects: boolean;
   /** The user's home folder, "" when the places could not be read. */
   home: string;
+  /** Who the page server launches as, "" when the places could not be read. */
+  actor: string;
   places: Place[];
   pick: Pick;
 }
@@ -126,10 +130,11 @@ export async function openWhere(read: Read, picker: boolean): Promise<Where> {
   const projects = withProjects(places, picker);
   const rows = places?.places ?? [];
   const home = places?.home ?? "";
-  if (rows.length > 0) return { withProjects: projects, home, places: rows, pick: pickOf(rows[0], projects) };
-  if (!projects) return { withProjects: false, home, places: rows, pick: HOME_PICK };
+  const actor = places?.actor ?? "";
+  if (rows.length > 0) return { withProjects: projects, home, actor, places: rows, pick: pickOf(rows[0], projects) };
+  if (!projects) return { withProjects: false, home, actor, places: rows, pick: HOME_PICK };
   const listed = await read("projects", "api/projects");
-  return { withProjects: true, home, places: rows,
+  return { withProjects: true, home, actor, places: rows,
            pick: firstOpen(true, listed.status === 200 ? projectKeys(listed.data) : null) };
 }
 
@@ -524,6 +529,12 @@ export const PLACED = ["target", "slot"] as const;
 /** The rows whose text or file a launch sends as its session's first turn. */
 export const FIRST_TURN = ["brief", "brief_file", "handoff"] as const;
 
+/** The brief file set through the `+`, or null while none is. */
+export function briefFileOf(set: Readonly<Record<string, FormValue>>): string | null {
+  const file = set.brief_file;
+  return typeof file === "string" && file.trim() !== "" ? file.trim() : null;
+}
+
 /** The built-in tools the Options panel draws a line for, in its order. No route lists a
  * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
 export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;
@@ -532,10 +543,12 @@ export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", 
  * The launch as `/api/preview` and `/api/launch` take it: the whole form, as the launcher's
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
  * value; `slot` has one only for a slot picked by its number, and is otherwise left out
- * where the form has the row. The box's text is the whole first turn: of the rows in
- * `FIRST_TURN` the request holds `brief` alone, with the box's text, and only while the box
- * has text. Every other such row the form has is left out, whatever the form filled it
- * with or withheld, so nothing the box does not show is sent as the first turn. Any other
+ * where the form has the row. The first turn is what the piece shows: a brief file set
+ * through the `+` (`set.brief_file`), else the box's text. Of the rows in `FIRST_TURN` the
+ * request holds `brief_file` alone while a file is set, else `brief` alone, with the box's
+ * text, and only while the box has text. Every other such row the form has is left out,
+ * whatever the form filled it with or withheld, so nothing the piece does not show is sent
+ * as the first turn. Any other
  * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
  * The request names the one preset `choice` applies, whose values `fields` are filled
  * with. It says it starts off the user's usual permissions exactly when one of its
@@ -550,8 +563,10 @@ export function launchRequest(fields: readonly FieldDescriptor[], form: Form | n
   const values = formValues(fields, set);
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
-  const box = typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
-  for (const name of FIRST_TURN) if (name in values) values[name] = name === "brief" ? box : null;
+  const file = briefFileOf(set);
+  const box = file === null && typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
+  const turn: Record<string, string | null> = { brief: box, brief_file: file };
+  for (const name of FIRST_TURN) if (name in values) values[name] = turn[name] ?? null;
   const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
   const kept = new Set([...withheld].filter((name) => !(FIRST_TURN as readonly string[]).includes(name)));
   const request = requestOf(fields, values, withheld, kept);
@@ -625,7 +640,8 @@ export interface Line {
 }
 
 /**
- * A launch from the button, from the press to its end.
+ * A launch from the button, or a resume from the `+`, from the press to its end. `act` says
+ * which, for the words of its lines.
  * - `idle`: nothing under way; the button is back, with the lines of the last launch.
  * - `pressed`: the preview or the launch is being asked; the button is off.
  * - `starting`: a job runs the launch and its row is followed; the button is off.
@@ -641,9 +657,10 @@ export interface Flight {
   status: Status | null;
   /** The launch started, so the box is to be emptied. */
   started: boolean;
+  act: "launch" | "resume";
 }
 
-export const IDLE: Flight = { phase: "idle", lines: [], notes: [], status: null, started: false };
+export const IDLE: Flight = { phase: "idle", lines: [], notes: [], status: null, started: false, act: "launch" };
 
 /** The press: the button goes off and the last launch's lines go. */
 export const PRESSED: Flight = { ...IDLE, phase: "pressed" };
@@ -751,7 +768,7 @@ export function launched(result: ApiResult, run: Run, notes: Line[]):
   switch (outcome.kind) {
     case "started":
       return { copy: null, flight: { phase: "starting", lines: [{ name: "starting", tone: "plain", text: startingWords(run) }], notes,
-                                     status: outcome.status, started: false } };
+                                     status: outcome.status, started: false, act: "launch" } };
     case "refused":
       if (outcome.command !== null) return { copy: outcome.command, flight: PRESSED };
       return { copy: null, flight: ended([{ name: "refused", tone: "problem", text: refusalWords(outcome.refusal) }], notes) };
@@ -780,32 +797,38 @@ export function aroundPage(line: Line): [string, string] | null {
   return at < 0 ? null : [line.text.slice(0, at), line.text.slice(at + LAUNCHER_PAGE.length)];
 }
 
-/** `Started in slot 2 · 19:06`, or `Started headless · 19:06`, from what the row records. */
-export function startedWords(row: LaunchRow, hour: Clock = HOUR): string {
+/** `Started in slot 2 · 19:06`, or `Started headless · 19:06`, from what the row records;
+ * `word` leads in place of `Started`. */
+export function startedWords(row: LaunchRow, hour: Clock = HOUR, word = "Started"): string {
   const then = new Date(row.created_at);
   const at = Number.isNaN(then.getTime()) ? "" : ` · ${hour(then)}`;
   const where = row.target === "slot" ? (row.slot ? ` in slot ${row.slot}` : " in a slot")
     : row.target === "headless" ? " headless" : "";
-  return `Started${where}${at}`;
+  return `${word}${where}${at}`;
 }
 
 /**
  * A followed launch after one read of its status path. A row that started ends the launch
  * and empties the box; a failed row, or a refusal met before the row was written, ends it
- * with the reason: the sentence recorded for the failure, else the row's reason word. A row that reads stale while it is still starting gives the button back
- * and is followed on. No row yet, or a read that failed, changes nothing.
+ * with the reason: the sentence recorded for the failure, else the row's reason word. A row
+ * that reads stale while it is still starting gives the button back and is followed on. No
+ * row yet, or a read that failed, changes nothing. A resume's lines say `Resumed` and `The
+ * resume failed`.
  */
 export function followed(flight: Flight, result: ApiResult, hour: Clock = HOUR): Flight {
   if (!following(flight)) return flight;
+  const resume = flight.act === "resume";
+  const fail = (reason: string): Flight => resume ? resumeFailed(reason, flight.notes) : failed(reason, flight.notes);
   const read = followedOf(result);
-  if (read.kind === "refused") return failed(refusalWords(read.refusal), flight.notes);
+  if (read.kind === "refused") return fail(refusalWords(read.refusal));
   if (read.kind !== "row") return flight;
   const row = read.row;
   if (LAUNCHED.includes(row.state)) {
-    return { ...ended([{ name: "started", tone: "plain", text: startedWords(row, hour) }], flight.notes), started: true };
+    const text = startedWords(row, hour, resume ? RESUMED : "Started");
+    return { ...ended([{ name: "started", tone: "plain", text }], flight.notes), started: true };
   }
   if (row.state === "failed") {
-    return failed(read.why || row.reason || "the launcher gave no reason", flight.notes);
+    return fail(read.why || row.reason || "the launcher gave no reason");
   }
   if (row.stale === true && flight.phase === "starting") {
     return { ...flight, phase: "late", lines: [{ name: "late", tone: "plain", text: LATE }] };
@@ -822,4 +845,39 @@ export function stopped(flight: Flight): Flight {
  * longer followed. The lines of a launch still starting stay. */
 export function edited(flight: Flight): Flight {
   return inFlight(flight) ? flight : IDLE;
+}
+
+// --- a resume from the `+` -------------------------------------------------------------------
+
+/** The line while a resume's job starts it. */
+export const RESUMING = "Resuming…";
+/** The word that leads the line of a resume that started. */
+export const RESUMED = "Resumed";
+export const RESUME_FAILED = "The resume failed: ";
+
+function resumeFailed(reason: string, notes: Line[] = []): Flight {
+  return ended([{ name: "failed", tone: "problem", text: `${RESUME_FAILED}${reason}` }], notes);
+}
+
+/**
+ * Reads `/api/resume`'s answer. 202 starts the follow of the new launch's row, with the
+ * resume's words. A refusal ends it with `<problem>. <hint>`, a request used already with
+ * the answer's own text, and a terminal launch's answer with its command to copy (`copy`).
+ */
+export function resumeSent(result: ApiResult): { flight: Flight; copy: string | null } {
+  const outcome = outcomeOf(result);
+  switch (outcome.kind) {
+    case "started":
+      return { copy: null, flight: { phase: "starting", lines: [{ name: "starting", tone: "plain", text: RESUMING }],
+                                     notes: [], status: outcome.status, started: false, act: "resume" } };
+    case "refused":
+      if (outcome.command !== null) return { copy: outcome.command, flight: PRESSED };
+      return { copy: null, flight: ended([{ name: "refused", tone: "problem", text: refusalWords(outcome.refusal) }]) };
+    case "command":
+      return { copy: outcome.command, flight: PRESSED };
+    case "used":
+      return { copy: null, flight: ended([{ name: "used", tone: "problem", text: outcome.text }]) };
+    default:
+      return { copy: null, flight: resumeFailed(outcome.text) };
+  }
 }

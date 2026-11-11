@@ -96,9 +96,9 @@ def launch_log(shell: Any) -> Iterator[Any]:
 
 
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
-         session_id: str | None = None, cwd: str = "/work/page") -> str:
-    """A Claude launch's row, started; its process this test's own when `live`, else one
-    that has ended. Returns its session id."""
+         session_id: str | None = None, cwd: str = "/work/page", actor: str = "ann") -> str:
+    """A Claude launch's row made by `actor`, started; its process this test's own when
+    `live`, else one that has ended. Returns its session id."""
     sid = session_id or str(uuid.uuid4())
     me = proc.identity(os.getpid())
     slot = "3" if target == "slot" else None
@@ -106,7 +106,7 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
               **({"slot": slot} if slot else {})}
     with launch_log(shell) as conn:
-        store.insert(conn, request_id=request_id, actor="ann", harness="claude",
+        store.insert(conn, request_id=request_id, actor=actor, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
                      posture="operator", session_id=sid, slot=slot)
         # A start time no running process has, so an ended launch's process reads ended.

@@ -53,6 +53,12 @@
   (pieces, date format, the template as written, `Keep for` a project), each edit
   rendered unsaved; `Save template` writes `name.template` or `name.templates` through
   the shell's own settings route, so a key locked for the shell's run is refused there.
+- Home's launch piece has a `+` at the left of the chip with two entries. `Brief from a
+  file` takes a path: while it is set the box is off and the launch sends that file as
+  its first turn (`brief_file`, and no `brief`). `Continue the last session`, read each
+  time the menu opens, resumes the newest session you made in the place the line names
+  that can be resumed now, in a slot or by copying its resume command, with the lines
+  under the box saying how the resume went; the box keeps its text.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
