@@ -46,6 +46,13 @@
   off the user's defaults, a value that can do harm in the `danger` colour, and the rows
   this install no longer offers) and what the click does; one click runs it again where
   the button's default places it, or copies its command for the user's terminal.
+- Home's `Options` panel shows the session name under Seat > Name & notes: the name the
+  template gives, following the seat, the place, the model and the comms name, with a
+  sentence saying whose template it is. A name typed over it is a change for that
+  launch, and `Use the template` takes it back. Its caret opens the template's editor
+  (pieces, date format, the template as written, `Keep for` a project), each edit
+  rendered unsaved; `Save template` writes `name.template` or `name.templates` through
+  the shell's own settings route, so a key locked for the shell's run is refused there.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
