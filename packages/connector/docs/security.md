@@ -164,5 +164,5 @@ for your user (`loginctl enable-linger`), or remove the tunnel entry before you 
 
 ## Reporting a vulnerability
 
-Email codemanethan@gmail.com with the details. Please don't open a public issue for a
-security problem.
+Report it privately, as [SECURITY.md](https://github.com/CodeManEthan/moxi/blob/main/SECURITY.md) says: GitHub's private reporting form first,
+email second. Please don't open a public issue for a security problem.

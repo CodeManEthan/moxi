@@ -13,6 +13,7 @@ public .refs-allow
 public CONTRIBUTING.md
 public LICENSE
 public README.md
+public SECURITY.md
 public package-lock.json
 public package.json
 public packages

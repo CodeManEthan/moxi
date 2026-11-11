@@ -160,5 +160,5 @@ Codex adapters talk over Unix sockets and local files. Two things listen on loop
 
 ## Reporting a vulnerability
 
-Email codemanethan@gmail.com with the details. Please don't open a public issue for a
-security problem.
+Report it privately, as [SECURITY.md](https://github.com/CodeManEthan/moxi/blob/main/SECURITY.md) says: GitHub's private reporting form first,
+email second. Please don't open a public issue for a security problem.
