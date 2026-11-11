@@ -158,7 +158,7 @@ test("the preset's values are the baseline, and its rows off the usual are named
   assert.deepEqual(rows.map((row) => [row.name, row.source]), [["disallowed_tools", "preset"], ["permission_mode", "preset"]]);
   const off = presetOff(SEAT, WITH_SEAT, {}, rows);
   assert.deepEqual(off, { lead: "Preset reviewer sets", tail: "off your defaults",
-                          labels: [{ text: "Disallowed tools", danger: false }, { text: "Permission mode", danger: true }] });
+                          labels: [{ text: "Permission mode", danger: true }, { text: "Disallowed tools", danger: false }] });
   // A row set back to the usual by hand is a change, not the preset's.
   const typed = offRows(WITH_SEAT, BASE, { permission_mode: "default" });
   assert.deepEqual(presetOff(SEAT, WITH_SEAT, { permission_mode: "default" }, typed).labels.map((word) => word.text),

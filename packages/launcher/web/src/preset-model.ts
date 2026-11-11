@@ -187,7 +187,8 @@ export interface PresetOff {
  * The line under the box for the rows `rows` names as the preset's (`offRows` with the
  * form read with no preset as its base), from the moment the preset is applied: `Preset
  * planner sets Permission mode, Allowed tools off your defaults`, each label marked when
- * the row's value now can do harm. Null with no preset applied or none of its rows off.
+ * the row's value now can do harm, those first, then the rest in the fields' order. Null
+ * with no preset applied or none of its rows off.
  */
 export function presetOff(applied: Choice, fields: readonly PanelField[], options: Readonly<Record<string, FormValue>>,
                           rows: readonly OffRow[]): PresetOff | null {
@@ -198,7 +199,9 @@ export function presetOff(applied: Choice, fields: readonly PanelField[], option
     return { text: field === undefined ? row.label : rowLabel(field),
              danger: field !== undefined && isDanger(field, valueNow(field, options)) };
   });
-  return labels.length === 0 ? null : { lead: `${PRESET} ${applied.name} sets`, labels, tail: "off your defaults" };
+  if (labels.length === 0) return null;
+  return { lead: `${PRESET} ${applied.name} sets`, labels: [...labels.filter((word) => word.danger),
+           ...labels.filter((word) => !word.danger)], tail: "off your defaults" };
 }
 
 /** The query `/api/last` and `/api/recents` take for what the line above the box names: the
