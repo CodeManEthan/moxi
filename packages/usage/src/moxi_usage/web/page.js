@@ -194,25 +194,26 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
     .tr2 { grid-template-columns: minmax(0, 1fr) 64px minmax(64px, auto); }
     .tr2.p5 { grid-template-columns: minmax(0, 1fr) 48px 52px 84px 52px; }
     .det .foot { padding-left: 0; }
+    .det .r[data-part=agents] > .f { grid-column: 1 / -1; }
     .capl, .note { display: block; }
     .capl span, .note span { display: block; }
     .quietline { padding-top: 56px; white-space: normal; }
   }
-`,Wn=class extends ct{constructor(){super(...arguments);this.route="";this.tick=0;this.copied=!1;this.menu=null;this.custom=!1;this.asTable=!1;this.sectionTable=null;this.pricesPart=null;this.searchText="";this.sessionPart=null;this.copiedId=!1;this.agentsShown=0;this.agentPart=null;this.width=680;this.#n=null;this.#e=null;this.#i=null;this.#c=null;this.#$=0;this.#d=null;this.#f=null;this.#r=null;this.#p=null;this.#w=null;this.#b=null;this.#y=null;this.#v=null;this.#S=null;this.#A=null;this.#B=null;this.#g=null;this.#_=null;this.#h=null;this.#R=null;this.#T=null;this.#o=null;this.#K=null;this.#k=null;this.#z=null;this.#m=null;this.#H=null;this.#x=null;this.#G=null;this.#a=null;this.#l=null;this.#V=null;this.#P=null;this.#Y="";this.#t=Y;this.#s=null;this.#X=null;this.#Q=null;this.#Z=null;this.#D=null;this.#I=null;this.#C=[];this.#ot=()=>{document.visibilityState==="visible"&&(this.#n?.refresh(),this.#e?.refresh(),this.#s?.refresh())};this.#it=e=>{if(this.menu===null)return;e.composedPath().some(r=>r instanceof Element&&r.classList.contains("anchor"))||this.#N()}}static{this.styles=Wl}static{this.properties={route:{type:String},tick:{state:!0},copied:{state:!0},menu:{state:!0},custom:{state:!0},asTable:{state:!0},sectionTable:{state:!0},pricesPart:{state:!0},searchText:{state:!0},sessionPart:{state:!0},copiedId:{state:!0},agentsShown:{state:!0},agentPart:{state:!0},width:{state:!0}}}#n;#e;#i;#c;#$;#d;#f;#r;#p;#w;#b;#y;#v;#S;#A;#B;#g;#_;#h;#R;#T;#o;#K;#k;#z;#m;#H;#x;#G;#a;#l;#V;#P;#Y;#J;#t;#s;#X;#Q;#Z;#D;#I;#C;#rt;#ot;#L(){return cn(this.#n?.value?.today,this.#e?.value?.today,this.#i?.value?.today)??E.day(Date.now()/1e3)}connectedCallback(){super.connectedCallback();let e=()=>this.requestUpdate(),s=new C(()=>M("usage","api/limits"),qs,e),r=new C(()=>M("usage","api/status"),Is,e),o=new C(()=>M("usage",sr(this.#L())),I,e);this.#n=s,this.#e=r,this.#i=o,s.refresh().then(()=>{this.#n===s&&this.#C.push(ko("usage","limits",i=>s.topic(i)))}),r.refresh().then(()=>{if(this.#e!==r)return;this.#C.push(ko("usage","index",l=>this.#Rt(l)));let i=s.now();rr(r.value,i)&&i-Ao>60&&(Ao=i,this.#tt())}),o.refresh(),this.#C.push(ar(e)),this.#I=new ResizeObserver(i=>{let l=Math.floor(i[0]?.contentRect.width??0);l>0&&l!==this.width&&(this.width=l)}),this.#I.observe(this),document.addEventListener("visibilitychange",this.#ot),document.addEventListener("pointerdown",this.#it),this.#rt=setInterval(()=>{this.tick+=1},Dl)}disconnectedCallback(){super.disconnectedCallback();for(let e of[this.#n,this.#e,this.#i,this.#x])e?.close();this.#n=this.#e=this.#i=this.#x=null,this.#G=null,this.#j(),this.#U(),this.#m?.close(),this.#m=null,this.#H=null,this.#M(),this.#bt();for(let e of this.#C)e();this.#C=[],this.#I?.disconnect(),this.#I=null,document.removeEventListener("visibilitychange",this.#ot),document.removeEventListener("pointerdown",this.#it),clearInterval(this.#rt)}get state(){return yt()}setState(e){Nt(e)}get address(){return this.#t}open(e){let s=Ye(e,this.#u());if(Ve(s,this.#t))return;Le=null,this.sectionTable=null;let r=this.#t;r.piece==="sessions"&&s.piece==="sessions"&&r.session!==null&&r.harness===s.harness&&r.session===s.session||(this.sessionPart=null,this.copiedId=!1,this.agentsShown=0),this.agentPart=null,s.piece!=="sessions"&&(this.#R=null),(s.piece!=="sessions"||s.session===null)&&(this.#T=null),this.#st(),this.#q(s),this.requestUpdate()}#q(e){this.#t=e;let s=ls(e,location.pathname);s!==null&&history.replaceState(history.state,"",s)}#M(){this.#s?.close(),this.#s=null,this.#X=this.#Q=null}#wt(){let e=this.#t,s=this.#n;if(e.piece!=="limit"||s===null){this.#M();return}if(this.#s!==null&&this.#s.refused!==null){Le=this.#s,this.#s=null,this.#M(),this.#q(Y);return}let r=s.value?.rows;if(r===void 0)return;let o=An(r,e);if(o===null){this.#M(),this.#q(Y);return}let i=Gr(e),l=Hr(o);this.#s===null||this.#X!==i?(this.#M(),this.#s=new C(()=>M("usage",i),Ws,()=>this.requestUpdate()),this.#X=i,this.#s.refresh()):l!==this.#Q&&this.#s.refresh(),this.#Q=l}#it;#N(){this.menu=null,this.custom=!1}#W(){return[...new Set([this.#f,this.#r,this.#p,this.#w,this.#b,this.#y,this.#v,this.#a,this.#l,this.#S])].filter(e=>e!==null)}#bt(){for(let e of this.#W())e.close();this.#f=this.#r=this.#p=this.#w=this.#b=null,this.#y=this.#v=this.#a=this.#l=this.#S=null,this.#V=null,this.#j(),this.#st(),this.#Z=this.#D=null}#u(){return!Nl("projects")}willUpdate(e){if(e.has("route")){let m=os(this.route),f=Ye(m,this.#u());Ve(f,m)?this.#t=f:this.#q(f),f.piece!=="none"&&(Le=null),this.#T=null,this.agentsShown=0,this.agentPart=null,this.#R=f.piece==="sessions"&&f.session!==null&&f.harness!==null?{harness:f.harness,id:f.session}:null}this.#wt();let s=this.#e;if(s===null||!dn(s))return;let r=()=>this.requestUpdate(),o=yt(),i=this.#L(),l={chart:ur(o,i),figures:cr(o,i),places:pr(o,i,this.#u()),models:hr(o,i),placesSection:mr(o,i,this.#u()),modelsSection:fr(o,i),terms:gr(o,i),sessions:vt(o,i,null,1)},a=JSON.stringify(l);if(a!==this.#Z){this.#Z=a;let m=this.#p;for(let x of this.#W())x!==m&&x!==this.#l&&x.close();this.#f=new C(()=>M("usage",l.chart),I,r);let f=l.figures;this.#r=f===null?null:new C(()=>M("usage",f),I,r),this.#w=new C(()=>M("usage",l.places),I,r),this.#b=new C(()=>M("usage",l.models),I,r),this.#y=l.placesSection===l.places?this.#w:new C(()=>M("usage",l.placesSection),I,r),this.#v=l.modelsSection===l.models?this.#b:new C(()=>M("usage",l.modelsSection),I,r),this.#a=new C(()=>M("usage",l.terms),I,r),this.#S=new C(()=>M("usage",l.sessions),I,r);for(let x of this.#W())x!==m&&x!==this.#l&&x.refresh()}this.#yt(o,i),this.#vt(o,i);let u=vt(fn,i,{since:i,until:i},2);u!==this.#G&&(this.#G=u,this.#x?.close(),this.#x=new C(()=>M("usage",u),I,r),this.#x.refresh());let d=this.#a?.value??null,c=d===null?null:qr(d);c!==null&&c!==this.#V&&(this.#V=c,this.#l?.close(),this.#l=new C(()=>M("usage",c),sn,r),this.#l.refresh());let p=dr(o);(this.menu==="range"||this.#D!==null)&&p!==this.#D&&(this.#D=p,this.#p?.close(),this.#p=new C(()=>M("usage",p),I,r),this.#p.refresh())}#yt(e,s){let r=this.#t.piece==="sessions"?_r(e.range,s):null;if(r===null){this.#j();return}let o=(d,c)=>vt(e,s,r.first,d,c),i=r.earlier,l=JSON.stringify([o(1,0),i===null?null:vt(e,s,i,1)]);if(l===this.#B)return;this.#j();let a=()=>this.requestUpdate(),u=d=>M("usage",d);if(this.#A=r,this.#B=l,this.#g=new ie(u,o,xn,a),this.#g.refresh(),i!==null){let d=vt(e,s,i,1);this.#_=new C(()=>M("usage",d),I,a),this.#_.refresh()}}#j(){for(let e of[this.#g,this.#_,this.#h])e?.close();this.#g=this.#_=this.#h=null,this.#A=this.#B=null}#vt(e,s){let r=this.#R,o=r===null?null:Ln(r.id,Tn(e,s,null,r.harness)).session;o!==this.#H&&(this.#m?.close(),this.#m=null,this.#H=o,o!==null&&(this.#m=new C(()=>M("usage",o),I,()=>this.requestUpdate()),this.#m.refresh()));let i=this.#t;if(i.piece!=="sessions"||i.session===null||i.harness===null){this.#U();return}let l=this.#T,a=l===null?null:l==="first"?this.#A?.first??null:this.#A?.earlier??null;if(l!==null&&a===null){this.#U();return}let u=Tn(e,s,a,i.harness),d=Ln(i.session,u),c=JSON.stringify(d),p=()=>this.requestUpdate();if(c!==this.#K){this.#U(),this.#K=c,this.#o={requests:new C(()=>M("usage",d.requests),I,p),terms:new C(()=>M("usage",d.terms),I,p),session:new C(()=>M("usage",d.session),I,p),restart:null,model:null};for(let w of[this.#o.requests,this.#o.terms,this.#o.session])w.refresh()}let m=this.#o,f=m?.requests.value?.rows??null,x=f===null?null:En(f);if(m!==null&&x!==null&&x!==m.model){m.restart?.close(),m.model=x;let w=Jr(x);m.restart=new C(()=>M("usage",w),js,p),m.restart.refresh()}let $=i.agent===null||i.agent===qn?null:So(i.session,i.agent,u);$!==this.#z&&(this.#lt(),this.#z=$,$!==null&&(this.#k=new C(()=>M("usage",$),I,p),this.#k.refresh()))}#lt(){this.#k?.close(),this.#k=null,this.#z=null}#St(){let e=this.#o;return[...e===null?[]:[e.requests,e.terms,e.session,e.restart],this.#m,this.#k].filter(s=>s!==null)}#U(){let e=this.#o;if(e!==null)for(let s of[e.requests,e.terms,e.session,e.restart])s?.close();this.#o=null,this.#K=null,this.#lt()}#_t(){let e=this.#A,s=e?.earlier??null;if(s===null||this.#h!==null)return;let r=yt(),o=e?.today??this.#L();this.#h=new ie(i=>M("usage",i),(i,l)=>vt(r,o,s,i,l),be,()=>this.requestUpdate()),this.#h.refresh(),this.requestUpdate()}#Rt(e){let s=Us(e);if(s!==null){if(this.#c=s,this.#$+=1,!s.running){this.#e?.refresh(),this.#i?.refresh();for(let r of[...this.#W(),this.#s,this.#x,this.#g,this.#_,this.#h,...this.#St()])r?.refresh()}this.requestUpdate()}}async#tt(){this.#d=null;let e=this.#$,s=Bs(await M("usage","api/pass",{}));this.#e!==null&&(this.#d=or(s),s.outcome==="started"&&this.#$===e&&(this.#c={running:!0,last_pass:this.#c?.last_pass??null,note:null}),this.requestUpdate())}async#kt(e){try{await navigator.clipboard.writeText(e),this.copiedId=!0}catch{this.copiedId=!1}}async#Pt(e){try{await navigator.clipboard.writeText(e),this.copied=!0}catch{this.copied=!1}}render(){let e=this.#n,s=this.#e,r=this.#i;if(e===null||s===null||r===null)return g;let o=yt(),i=this.#L(),l=this.#f,a=l?.value??null,u=a===null||a.rows.length===0?null:D([{...a.total,unpriced_models:a.unpriced_models}]),d=[],c=(_,q)=>{q!==null&&d.push({what:_,read:q,report:!0})};c("The chart",l),c("The range's figures",this.#r),c(this.#u()?"The folders":"The projects",this.#w),c("The models",this.#b),this.#y!==this.#w&&c(this.#u()?"The Folders section":"The Projects section",this.#y),this.#v!==this.#b&&c("The Models section",this.#v),c("Token kinds and Prices",this.#a),c("The Sessions section",this.#S),c("The sessions listed",this.#g?.feed??null),c("The earlier sessions",this.#_),c("The earlier sessions listed",this.#h?.feed??null),c("Today's dearest sessions",this.#x),c("The opened session's requests",this.#o?.requests??null),c("The opened session's cost terms",this.#o?.terms??null),c("The opened session's agents",this.#o?.session??null),c("The session the address names",this.#m),c("The opened subagent's requests",this.#k);let p=this.#o?.restart??null;p!==null&&d.push({what:"The restart point",read:p,report:!1}),this.#l!==null&&d.push({what:"The price table",read:this.#l,report:!1});let m=this.#s??Le;m!==null&&d.push({what:"The opened limit",read:m,report:!1});let f=this.#t,x=f.piece==="limit"?An(e.value?.rows??[],f):null,$=f.piece!=="limit"||x===null?null:{key:`${f.harness}/${f.limit}/${f.minutes}`,model:zr({window:this.#s?.value??null,loading:this.#s?.loading??!0,row:x,now:e.now()})},w=ir({limits:e,status:s,daily:r,event:this.#c,pass:this.#d,most:this.#jt(i),range:u,others:d,unknownAddress:f.piece==="unknown",now:e.now()}),b=w.limits.groups,y=w.below?$r({state:o,today:i,figures:this.#r===null?r.value:this.#r.value,allTime:this.#p?.value??null,places:this.#w?.value??null,folders:this.#u(),models:this.#b?.value??null,lanes:s.value?.lanes??null}):null,S=!w.below||a===null?null:Os(a,o.range,o.measure,i,this.asTable),A=w.below?S?.nothing?this.#R===null?[]:[this.#ut(null,i)]:[this.#ut(Ur(this.#S?.value??null,i),i),this.#at(this.#u()?"folders":"projects",this.#y,Mr(this.#y?.value??null,this.#u())),this.#at("models",this.#v,Nr(this.#v?.value??null)),this.#Gt(Or(this.#a?.value??null)),this.#Vt(jr(this.#a?.value??null,this.#l?.value??null,i))].filter(_=>_!==g):[];return h`
+`,Wn=class extends ct{constructor(){super(...arguments);this.route="";this.tick=0;this.copied=!1;this.menu=null;this.custom=!1;this.asTable=!1;this.sectionTable=null;this.pricesPart=null;this.searchText="";this.sessionPart=null;this.copiedId=!1;this.agentsShown=0;this.agentPart=null;this.width=680;this.#n=null;this.#e=null;this.#i=null;this.#c=null;this.#$=0;this.#d=null;this.#f=null;this.#r=null;this.#p=null;this.#w=null;this.#b=null;this.#y=null;this.#v=null;this.#S=null;this.#A=null;this.#F=null;this.#g=null;this.#_=null;this.#h=null;this.#R=null;this.#T=null;this.#o=null;this.#B=null;this.#k=null;this.#K=null;this.#m=null;this.#z=null;this.#x=null;this.#H=null;this.#a=null;this.#l=null;this.#G=null;this.#P=null;this.#V="";this.#t=Y;this.#s=null;this.#J=null;this.#X=null;this.#Q=null;this.#D=null;this.#I=null;this.#C=[];this.#ot=()=>{document.visibilityState==="visible"&&(this.#n?.refresh(),this.#e?.refresh(),this.#s?.refresh())};this.#it=e=>{if(this.menu===null)return;e.composedPath().some(r=>r instanceof Element&&r.classList.contains("anchor"))||this.#N()}}static{this.styles=Wl}static{this.properties={route:{type:String},tick:{state:!0},copied:{state:!0},menu:{state:!0},custom:{state:!0},asTable:{state:!0},sectionTable:{state:!0},pricesPart:{state:!0},searchText:{state:!0},sessionPart:{state:!0},copiedId:{state:!0},agentsShown:{state:!0},agentPart:{state:!0},width:{state:!0}}}#n;#e;#i;#c;#$;#d;#f;#r;#p;#w;#b;#y;#v;#S;#A;#F;#g;#_;#h;#R;#T;#o;#B;#k;#K;#m;#z;#x;#H;#a;#l;#G;#P;#V;#Y;#t;#s;#J;#X;#Q;#D;#I;#C;#rt;#ot;#L(){return cn(this.#n?.value?.today,this.#e?.value?.today,this.#i?.value?.today)??E.day(Date.now()/1e3)}connectedCallback(){super.connectedCallback();let e=()=>this.requestUpdate(),s=new C(()=>M("usage","api/limits"),qs,e),r=new C(()=>M("usage","api/status"),Is,e),o=new C(()=>M("usage",sr(this.#L())),I,e);this.#n=s,this.#e=r,this.#i=o,s.refresh().then(()=>{this.#n===s&&this.#C.push(ko("usage","limits",i=>s.topic(i)))}),r.refresh().then(()=>{if(this.#e!==r)return;this.#C.push(ko("usage","index",l=>this.#kt(l)));let i=s.now();rr(r.value,i)&&i-Ao>60&&(Ao=i,this.#Z())}),o.refresh(),this.#C.push(ar(e)),this.#I=new ResizeObserver(i=>{let l=Math.floor(i[0]?.contentRect.width??0);l>0&&l!==this.width&&(this.width=l)}),this.#I.observe(this),document.addEventListener("visibilitychange",this.#ot),document.addEventListener("pointerdown",this.#it),this.#rt=setInterval(()=>{this.tick+=1},Dl)}disconnectedCallback(){super.disconnectedCallback();for(let e of[this.#n,this.#e,this.#i,this.#x])e?.close();this.#n=this.#e=this.#i=this.#x=null,this.#H=null,this.#j(),this.#U(),this.#m?.close(),this.#m=null,this.#z=null,this.#M(),this.#yt();for(let e of this.#C)e();this.#C=[],this.#I?.disconnect(),this.#I=null,document.removeEventListener("visibilitychange",this.#ot),document.removeEventListener("pointerdown",this.#it),clearInterval(this.#rt)}get state(){return yt()}setState(e){Nt(e)}get address(){return this.#t}open(e){let s=Ye(e,this.#u());if(Ve(s,this.#t))return;Le=null,this.sectionTable=null;let r=this.#t;r.piece==="sessions"&&s.piece==="sessions"&&r.session!==null&&r.harness===s.harness&&r.session===s.session||(this.sessionPart=null,this.copiedId=!1,this.agentsShown=0),this.agentPart=null,s.piece!=="sessions"&&(this.#R=null),(s.piece!=="sessions"||s.session===null)&&(this.#T=null),this.#st(),this.#q(s),this.requestUpdate()}#q(e){this.#t=e;let s=ls(e,location.pathname);s!==null&&history.replaceState(history.state,"",s)}#M(){this.#s?.close(),this.#s=null,this.#J=this.#X=null}#bt(){let e=this.#t,s=this.#n;if(e.piece!=="limit"||s===null){this.#M();return}if(this.#s!==null&&this.#s.refused!==null){Le=this.#s,this.#s=null,this.#M(),this.#q(Y);return}let r=s.value?.rows;if(r===void 0)return;let o=An(r,e);if(o===null){this.#M(),this.#q(Y);return}let i=Gr(e),l=Hr(o);this.#s===null||this.#J!==i?(this.#M(),this.#s=new C(()=>M("usage",i),Ws,()=>this.requestUpdate()),this.#J=i,this.#s.refresh()):l!==this.#X&&this.#s.refresh(),this.#X=l}#it;#N(){this.menu=null,this.custom=!1}#W(){return[...new Set([this.#f,this.#r,this.#p,this.#w,this.#b,this.#y,this.#v,this.#a,this.#l,this.#S])].filter(e=>e!==null)}#yt(){for(let e of this.#W())e.close();this.#f=this.#r=this.#p=this.#w=this.#b=null,this.#y=this.#v=this.#a=this.#l=this.#S=null,this.#G=null,this.#j(),this.#st(),this.#Q=this.#D=null}#u(){return!Nl("projects")}willUpdate(e){if(e.has("route")){let m=os(this.route),f=Ye(m,this.#u());Ve(f,m)?this.#t=f:this.#q(f),f.piece!=="none"&&(Le=null),this.#T=null,this.agentsShown=0,this.agentPart=null,this.#R=f.piece==="sessions"&&f.session!==null&&f.harness!==null?{harness:f.harness,id:f.session}:null}this.#bt();let s=this.#e;if(s===null||!dn(s))return;let r=()=>this.requestUpdate(),o=yt(),i=this.#L(),l={chart:ur(o,i),figures:cr(o,i),places:pr(o,i,this.#u()),models:hr(o,i),placesSection:mr(o,i,this.#u()),modelsSection:fr(o,i),terms:gr(o,i),sessions:vt(o,i,null,1)},a=JSON.stringify(l);if(a!==this.#Q){this.#Q=a;let m=this.#p;for(let x of this.#W())x!==m&&x!==this.#l&&x.close();this.#f=new C(()=>M("usage",l.chart),I,r);let f=l.figures;this.#r=f===null?null:new C(()=>M("usage",f),I,r),this.#w=new C(()=>M("usage",l.places),I,r),this.#b=new C(()=>M("usage",l.models),I,r),this.#y=l.placesSection===l.places?this.#w:new C(()=>M("usage",l.placesSection),I,r),this.#v=l.modelsSection===l.models?this.#b:new C(()=>M("usage",l.modelsSection),I,r),this.#a=new C(()=>M("usage",l.terms),I,r),this.#S=new C(()=>M("usage",l.sessions),I,r);for(let x of this.#W())x!==m&&x!==this.#l&&x.refresh()}this.#vt(o,i),this.#St(o,i);let u=vt(fn,i,{since:i,until:i},2);u!==this.#H&&(this.#H=u,this.#x?.close(),this.#x=new C(()=>M("usage",u),I,r),this.#x.refresh());let d=this.#a?.value??null,c=d===null?null:qr(d);c!==null&&c!==this.#G&&(this.#G=c,this.#l?.close(),this.#l=new C(()=>M("usage",c),sn,r),this.#l.refresh());let p=dr(o);(this.menu==="range"||this.#D!==null)&&p!==this.#D&&(this.#D=p,this.#p?.close(),this.#p=new C(()=>M("usage",p),I,r),this.#p.refresh())}#vt(e,s){let r=this.#t.piece==="sessions"?_r(e.range,s):null;if(r===null){this.#j();return}let o=(d,c)=>vt(e,s,r.first,d,c),i=r.earlier,l=JSON.stringify([o(1,0),i===null?null:vt(e,s,i,1)]);if(l===this.#F)return;this.#j();let a=()=>this.requestUpdate(),u=d=>M("usage",d);if(this.#A=r,this.#F=l,this.#g=new ie(u,o,xn,a),this.#g.refresh(),i!==null){let d=vt(e,s,i,1);this.#_=new C(()=>M("usage",d),I,a),this.#_.refresh()}}#j(){for(let e of[this.#g,this.#_,this.#h])e?.close();this.#g=this.#_=this.#h=null,this.#A=this.#F=null}#St(e,s){let r=this.#R,o=r===null?null:Ln(r.id,Tn(e,s,null,r.harness)).session;o!==this.#z&&(this.#m?.close(),this.#m=null,this.#z=o,o!==null&&(this.#m=new C(()=>M("usage",o),I,()=>this.requestUpdate()),this.#m.refresh()));let i=this.#t;if(i.piece!=="sessions"||i.session===null||i.harness===null){this.#U();return}let l=this.#T,a=l===null?null:l==="first"?this.#A?.first??null:this.#A?.earlier??null;if(l!==null&&a===null){this.#U();return}let u=Tn(e,s,a,i.harness),d=Ln(i.session,u),c=JSON.stringify(d),p=()=>this.requestUpdate();if(c!==this.#B){this.#U(),this.#B=c,this.#o={requests:new C(()=>M("usage",d.requests),I,p),terms:new C(()=>M("usage",d.terms),I,p),session:new C(()=>M("usage",d.session),I,p),restart:null,model:null};for(let w of[this.#o.requests,this.#o.terms,this.#o.session])w.refresh()}let m=this.#o,f=m?.requests.value?.rows??null,x=f===null?null:En(f);if(m!==null&&x!==null&&x!==m.model){m.restart?.close(),m.model=x;let w=Jr(x);m.restart=new C(()=>M("usage",w),js,p),m.restart.refresh()}let $=i.agent===null||i.agent===qn?null:So(i.session,i.agent,u);$!==this.#K&&(this.#lt(),this.#K=$,$!==null&&(this.#k=new C(()=>M("usage",$),I,p),this.#k.refresh()))}#lt(){this.#k?.close(),this.#k=null,this.#K=null}#_t(){let e=this.#o;return[...e===null?[]:[e.requests,e.terms,e.session,e.restart],this.#m,this.#k].filter(s=>s!==null)}#U(){let e=this.#o;if(e!==null)for(let s of[e.requests,e.terms,e.session,e.restart])s?.close();this.#o=null,this.#B=null,this.#lt()}#Rt(){let e=this.#A,s=e?.earlier??null;if(s===null||this.#h!==null)return;let r=yt(),o=e?.today??this.#L();this.#h=new ie(i=>M("usage",i),(i,l)=>vt(r,o,s,i,l),be,()=>this.requestUpdate()),this.#h.refresh(),this.requestUpdate()}#kt(e){let s=Us(e);if(s!==null){if(this.#c=s,this.#$+=1,!s.running){this.#e?.refresh(),this.#i?.refresh();for(let r of[...this.#W(),this.#s,this.#x,this.#g,this.#_,this.#h,...this.#_t()])r?.refresh()}this.requestUpdate()}}async#Z(){this.#d=null;let e=this.#$,s=Bs(await M("usage","api/pass",{}));this.#e!==null&&(this.#d=or(s),s.outcome==="started"&&this.#$===e&&(this.#c={running:!0,last_pass:this.#c?.last_pass??null,note:null}),this.requestUpdate())}async#Pt(e){try{await navigator.clipboard.writeText(e),this.copiedId=!0}catch{this.copiedId=!1}}async#At(e){try{await navigator.clipboard.writeText(e),this.copied=!0}catch{this.copied=!1}}render(){let e=this.#n,s=this.#e,r=this.#i;if(e===null||s===null||r===null)return g;let o=yt(),i=this.#L(),l=this.#f,a=l?.value??null,u=a===null||a.rows.length===0?null:D([{...a.total,unpriced_models:a.unpriced_models}]),d=[],c=(_,q)=>{q!==null&&d.push({what:_,read:q,report:!0})};c("The chart",l),c("The range's figures",this.#r),c(this.#u()?"The folders":"The projects",this.#w),c("The models",this.#b),this.#y!==this.#w&&c(this.#u()?"The Folders section":"The Projects section",this.#y),this.#v!==this.#b&&c("The Models section",this.#v),c("Token kinds and Prices",this.#a),c("The Sessions section",this.#S),c("The sessions listed",this.#g?.feed??null),c("The earlier sessions",this.#_),c("The earlier sessions listed",this.#h?.feed??null),c("Today's dearest sessions",this.#x),c("The opened session's requests",this.#o?.requests??null),c("The opened session's cost terms",this.#o?.terms??null),c("The opened session's agents",this.#o?.session??null),c("The session the address names",this.#m),c("The opened subagent's requests",this.#k);let p=this.#o?.restart??null;p!==null&&d.push({what:"The restart point",read:p,report:!1}),this.#l!==null&&d.push({what:"The price table",read:this.#l,report:!1});let m=this.#s??Le;m!==null&&d.push({what:"The opened limit",read:m,report:!1});let f=this.#t,x=f.piece==="limit"?An(e.value?.rows??[],f):null,$=f.piece!=="limit"||x===null?null:{key:`${f.harness}/${f.limit}/${f.minutes}`,model:zr({window:this.#s?.value??null,loading:this.#s?.loading??!0,row:x,now:e.now()})},w=ir({limits:e,status:s,daily:r,event:this.#c,pass:this.#d,most:this.#Ut(i),range:u,others:d,unknownAddress:f.piece==="unknown",now:e.now()}),b=w.limits.groups,y=w.below?$r({state:o,today:i,figures:this.#r===null?r.value:this.#r.value,allTime:this.#p?.value??null,places:this.#w?.value??null,folders:this.#u(),models:this.#b?.value??null,lanes:s.value?.lanes??null}):null,S=!w.below||a===null?null:Os(a,o.range,o.measure,i,this.asTable),A=w.below?S?.nothing?this.#R===null?[]:[this.#ut(null,i)]:[this.#ut(Ur(this.#S?.value??null,i),i),this.#at(this.#u()?"folders":"projects",this.#y,Mr(this.#y?.value??null,this.#u())),this.#at("models",this.#v,Nr(this.#v?.value??null)),this.#Vt(Or(this.#a?.value??null)),this.#Yt(jr(this.#a?.value??null,this.#l?.value??null,i))].filter(_=>_!==g):[];return h`
       ${w.reading===null?g:h`<p class="reading dim" data-part="reading">${w.reading}</p>`}
-      ${w.limits.warning===null?g:this.#At(w.limits.warning)}
+      ${w.limits.warning===null?g:this.#Tt(w.limits.warning)}
       ${b.length||w.cost?h`<div class="grps" data-part="top">
-        ${b.map(_=>this.#Tt(_,$))}
-        ${w.cost===null?g:this.#Ct(w.cost)}
+        ${b.map(_=>this.#Lt(_,$))}
+        ${w.cost===null?g:this.#Mt(w.cost)}
       </div>`:g}
-      ${w.nothing===null?g:this.#te(w.nothing)}
-      ${y===null?g:this.#Mt(y)}
-      ${S===null&&A.length===0?g:h`<div class="grps below" data-part="below">${S===null?g:this.#It(S)}${A}</div>`}
-      ${w.foot===null?g:this.#ee(w.foot)}
-      ${w.lines.length?this.#ne(w.lines):g}`}#At(e){return h`<div class="warnline" data-part="warning"><b>${e.lead}</b>${e.before===null?g:h`, ${e.before}`}${e.more===null?g:h`<span class="sep">·</span>${e.more}`}</div>`}#Tt(e,s){return h`<section class="grp" data-group="limits" data-harness=${e.harness}>
+      ${w.nothing===null?g:this.#ee(w.nothing)}
+      ${y===null?g:this.#Nt(y)}
+      ${S===null&&A.length===0?g:h`<div class="grps below" data-part="below">${S===null?g:this.#qt(S)}${A}</div>`}
+      ${w.foot===null?g:this.#ne(w.foot)}
+      ${w.lines.length?this.#se(w.lines):g}`}#Tt(e){return h`<div class="warnline" data-part="warning"><b>${e.lead}</b>${e.before===null?g:h`, ${e.before}`}${e.more===null?g:h`<span class="sep">·</span>${e.more}`}</div>`}#Lt(e,s){return h`<section class="grp" data-group="limits" data-harness=${e.harness}>
       <div class="gk">${e.name}${e.read===null?g:h`<small>${e.read}</small>`}</div>
-      <div class="gl">${e.rows.map(r=>this.#Lt(r,s!==null&&s.key===r.key?s.model:null))}</div>
-    </section>`}#Lt(e,s){if(e.state==="reset")return h`<div class="lim reset" data-limit=${e.key} data-state="reset">${e.label}${e.resets===null?g:h`<span class="sep">·</span>${e.resets}`}</div>`;let r=e.meter,o=[e.fills===null?null:h`<b>${e.fills}</b>`,e.resets].filter(a=>a!==null),i=h`
+      <div class="gl">${e.rows.map(r=>this.#Et(r,s!==null&&s.key===r.key?s.model:null))}</div>
+    </section>`}#Et(e,s){if(e.state==="reset")return h`<div class="lim reset" data-limit=${e.key} data-state="reset">${e.label}${e.resets===null?g:h`<span class="sep">·</span>${e.resets}`}</div>`;let r=e.meter,o=[e.fills===null?null:h`<b>${e.fills}</b>`,e.resets].filter(a=>a!==null),i=h`
       <span>${e.label}</span>
       ${r===null?h`<span></span>`:h`<svg class="m" role="img" aria-label=${r.title}
         viewBox="0 0 ${Pt.width} ${Pt.height}">${W`<title>${r.title}</title>
@@ -223,7 +224,7 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
       <span class="u">${e.used??g}</span>
       <span class="w"><span>${o.map((a,u)=>h`${u?", ":g}${a}`)}${e.read===null?g:h`${o.length?h`<span class="sep">·</span>`:g}${e.read}`}</span>${s===null?g:h`<span class="x" data-part="close">${s.close}</span>`}</span>`;if(e.route===null||e.minutes===null)return h`<div class="lim" data-limit=${e.key} data-state=${e.state}>${i}</div>`;let l=s===null?is(e.harness,e.limit_id,e.minutes):Y;return h`<a class=${s===null?"lim":"lim open"} href=${G(l)} data-limit=${e.key}
       data-state=${e.state} aria-expanded=${String(s!==null)}
-      @click=${a=>this.#E(a,l)}>${i}</a>${s===null?g:this.#Et(s)}`}#Et(e){let s=e.used;return e.reading===null&&e.lines.length===0&&s===null&&e.notes.length===0?g:h`<div class="det" data-part="opened">
+      @click=${a=>this.#E(a,l)}>${i}</a>${s===null?g:this.#Ct(s)}`}#Ct(e){let s=e.used;return e.reading===null&&e.lines.length===0&&s===null&&e.notes.length===0?g:h`<div class="det" data-part="opened">
       ${e.reading===null?g:h`<p class="d" data-opened="reading">${e.reading}</p>`}
       ${e.lines.map(r=>h`<div class="r" data-opened=${r.key}>
         <span class="k">${r.label}</span>
@@ -236,7 +237,7 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
           <div class="ul d" data-part="used-total"><span>${s.total}</span><span>${s.cost}</span></div></span>
       </div>`}
       ${e.notes.map(r=>h`<p class="d" data-opened="note">${r}</p>`)}
-    </div>`}#E(e,s){e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(e.preventDefault(),this.open(s))}#Ct(e){return h`<section class="grp" data-group="cost">
+    </div>`}#E(e,s){e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(e.preventDefault(),this.open(s))}#Mt(e){return h`<section class="grp" data-group="cost">
       <div class="gk">${e.label}</div>
       <div class="gl">
         ${e.rows.map((s,r)=>h`
@@ -251,22 +252,22 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
           ${e.read===null?g:h`<span data-part="read">${e.read}</span>`}
         </div>
       </div>
-    </section>`}#Mt(e){let s=[e.range,e.place,e.harness,e.model].filter(r=>r!==null);return h`<div class="filt" data-part="filters" @keydown=${r=>{if(r.key!=="Escape"||this.menu===null)return;let o=this.menu;this.#N(),this.updateComplete.then(()=>this.renderRoot.querySelector(`[data-filter="${o}"] button.pick`)?.focus())}}>
-      <span class="fl">${s.map((r,o)=>h`${o?h`<span class="sep">·</span>`:g}${this.#Nt(r,e)}`)}</span>
+    </section>`}#Nt(e){let s=[e.range,e.place,e.harness,e.model].filter(r=>r!==null);return h`<div class="filt" data-part="filters" @keydown=${r=>{if(r.key!=="Escape"||this.menu===null)return;let o=this.menu;this.#N(),this.updateComplete.then(()=>this.renderRoot.querySelector(`[data-filter="${o}"] button.pick`)?.focus())}}>
+      <span class="fl">${s.map((r,o)=>h`${o?h`<span class="sep">·</span>`:g}${this.#Ot(r,e)}`)}</span>
       <span class="tog" role="group" data-part="measure">${e.measures.map(r=>h`<button type="button"
         data-measure=${r.key} aria-pressed=${String(r.picked)}
         @click=${()=>{Nt({measure:r.key})}}>${r.label}</button>`)}</span>
-    </div>`}#Nt(e,s){let r=this.menu===e.key;return h`<span class="f" data-filter=${e.key}><span class="k">${e.label}</span><span class="anchor">
+    </div>`}#Ot(e,s){let r=this.menu===e.key;return h`<span class="f" data-filter=${e.key}><span class="k">${e.label}</span><span class="anchor">
       <button type="button" class=${e.set?"pick set":"pick"} aria-haspopup="menu" aria-expanded=${String(r)}
         @click=${()=>{r?this.#N():(this.menu=e.key,this.custom=!1)}}>${e.value}<span class="v" aria-hidden="true">▾</span></button>
       ${r?h`<div class="menu" role="menu" aria-label=${e.label} data-menu=${e.key}>
-        ${e.items.map(o=>h`${o.ruled?h`<hr>`:g}${this.#Ot(o)}${o.patch===null&&this.custom?this.#Dt(s):g}`)}
-      </div>`:g}</span></span>`}#Ot(e){let s=e.patch;return h`<button type="button" class="it" role="menuitemradio" aria-checked=${String(e.picked)}
-      data-item=${e.key} @click=${()=>{if(s===null){this.custom=!this.custom;return}this.#N(),Nt(s)}}><span aria-hidden="true">${e.picked?"✓":g}</span><span>${e.label}</span>${e.figure===null?h`<span></span>`:h`<span class="t">${e.figure}</span>`}</button>`}#Dt(e){let s=e.custom;return h`<form class="custom" data-part="custom" @submit=${o=>{o.preventDefault();let i=o.currentTarget,l=u=>i.elements.namedItem(u).value,a=xr(l("since"),l("until"));a!==null&&(this.#N(),Nt({range:a}))}}>
+        ${e.items.map(o=>h`${o.ruled?h`<hr>`:g}${this.#Dt(o)}${o.patch===null&&this.custom?this.#It(s):g}`)}
+      </div>`:g}</span></span>`}#Dt(e){let s=e.patch;return h`<button type="button" class="it" role="menuitemradio" aria-checked=${String(e.picked)}
+      data-item=${e.key} @click=${()=>{if(s===null){this.custom=!this.custom;return}this.#N(),Nt(s)}}><span aria-hidden="true">${e.picked?"✓":g}</span><span>${e.label}</span>${e.figure===null?h`<span></span>`:h`<span class="t">${e.figure}</span>`}</button>`}#It(e){let s=e.custom;return h`<form class="custom" data-part="custom" @submit=${o=>{o.preventDefault();let i=o.currentTarget,l=u=>i.elements.namedItem(u).value,a=xr(l("since"),l("until"));a!==null&&(this.#N(),Nt({range:a}))}}>
       <label>${s.from} <input type="date" name="since" required .value=${s.since}></label>
       <label>${s.to} <input type="date" name="until" required .value=${s.until}></label>
       <button type="submit">${s.act}</button>
-    </form>`}#It(e){let s=!window.matchMedia("(max-width: 720px)").matches,r=Math.max(120,this.width-(s?100:0)),o=s?24:0;return h`<section class="grp" data-group="chart">
+    </form>`}#qt(e){let s=!window.matchMedia("(max-width: 720px)").matches,r=Math.max(120,this.width-(s?100:0)),o=s?24:0;return h`<section class="grp" data-group="chart">
       <div class="gk">${e.label}</div>
       <div class="gl">
         ${e.nothing===null?g:h`<p class="none" data-part="none">${e.nothing}</p>`}
@@ -274,10 +275,10 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
           <span data-part="sentence">${e.sentence??g}</span>
           ${e.toggle===null?g:h`<button type="button" class="act" data-part="table-toggle"
             @click=${()=>{this.asTable=!this.asTable}}>${e.toggle}</button>`}</div>`}
-        ${e.chart===null?g:this.#qt(Ds(e.chart,r,o),e.chart.aria)}
+        ${e.chart===null?g:this.#Wt(Ds(e.chart,r,o),e.chart.aria)}
         ${e.table===null?g:this.#O(e.table)}
       </div>
-    </section>`}#qt(e,s){return h`<svg class="ch" data-part="chart" role="img" aria-label=${s} width=${e.width} height=${e.height}
+    </section>`}#Wt(e,s){return h`<svg class="ch" data-part="chart" role="img" aria-label=${s} width=${e.width} height=${e.height}
       viewBox="0 0 ${e.width} ${e.height}">${W`
       ${e.grid===null?g:W`<line class="gr" x1="0" x2=${e.width} y1=${e.grid.y} y2=${e.grid.y}></line>
         <text data-part="top" x="0" y="4">${e.grid.words}</text>`}
@@ -295,7 +296,7 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
         text-anchor=${e.value.anchor}>${e.value.text}</text>`}`}</svg>`}#O(e){return h`<div class="scroll"><table class="tbl" data-part="table">
       <thead><tr>${e.columns.map(s=>h`<th class=${s.num?"n":""}>${s.label}</th>`)}</tr></thead>
       <tbody>${e.rows.map(s=>h`<tr data-row=${s.key}>${s.cells.map((r,o)=>h`<td class=${e.columns[o]?.num?"n":""}>${r}</td>`)}</tr>`)}</tbody>
-    </table></div>`}#Wt(e){let s=this.#t.piece;return s===e||e!=="models"&&(s==="projects"||s==="folders")}#at(e,s,r){let o=this.#Wt(e);if(r===null)return!o||s===null||s.value!==null||!s.loading?g:h`<section class="grp is-open" data-group=${e}>
+    </table></div>`}#jt(e){let s=this.#t.piece;return s===e||e!=="models"&&(s==="projects"||s==="folders")}#at(e,s,r){let o=this.#jt(e);if(r===null)return!o||s===null||s.value!==null||!s.loading?g:h`<section class="grp is-open" data-group=${e}>
         <div class="gk">${Se[e]}</div>
         <div class="gl"><p class="none" data-part="reading">${rt}</p></div>
       </section>`;let i=o?Y:{piece:e},l=o&&this.sectionTable===e;return h`<section class=${o?"grp is-open":"grp"} data-group=${e}>
@@ -306,14 +307,14 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
           @click=${a=>this.#E(a,i)}>${o?St:r.count}</a></div>
         ${o?h`<div class="rows" data-part="rows">${r.rows.map(a=>{let u=h`<span class="nm">${a.name}</span><span class="n d">${a.share??g}</span>
             <span class="n" title=${a.why??g}>${a.cost}</span>`,d=a.patch;return d===null?h`<div class="tr2" data-row=${a.key}>${u}</div>`:h`<a class="tr2" data-row=${a.key} href=${G($t)}
-                @click=${c=>this.#$t(c,d)}>${u}</a>`})}
-          ${r.sentence===null?g:h`<p data-part="sentence">${r.sentence.map(a=>this.#Zt(a))}</p>`}
+                @click=${c=>this.#wt(c,d)}>${u}</a>`})}
+          ${r.sentence===null?g:h`<p data-part="sentence">${r.sentence.map(a=>this.#te(a))}</p>`}
           <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(l)}
             @click=${()=>{this.sectionTable=l?null:e}}>${l?yn:oe}</button></p>
           ${l?this.#O(r.table):g}
         </div>`:g}
       </div>
-    </section>`}#jt(e){let s=this.#x?.value?.rows??[];return ks(s.map(r=>({name:Ot(r,e).name,cost:r.cost})))}#ut(e,s){let r=this.#t.piece==="sessions";if(e===null&&r&&this.#R!==null&&!(this.#S?.loading??!1))return h`<section class="grp is-open" data-group="sessions">
+    </section>`}#Ut(e){let s=this.#x?.value?.rows??[];return ks(s.map(r=>({name:Ot(r,e).name,cost:r.cost})))}#ut(e,s){let r=this.#t.piece==="sessions";if(e===null&&r&&this.#R!==null&&!(this.#S?.loading??!1))return h`<section class="grp is-open" data-group="sessions">
         <div class="gk">${ke}</div>
         <div class="gl">
           <div class="one"><span data-part="closed"></span><a class="t" data-part="count" href=${G(Y)}
@@ -329,61 +330,61 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
         <div class="one"><span data-part="closed">${e.closed??g}</span><a class="t" data-part="count"
           href=${G(o)} aria-expanded=${String(r)}
           @click=${i=>this.#E(i,o)}>${r?St:e.count}</a></div>
-        ${r?this.#Ut(s):g}
+        ${r?this.#Ft(s):g}
       </div>
-    </section>`}#ct(e){let s=this.#R,r=this.#m;if(s===null||r===null)return g;if(r.value===null)return r.loading?h`<p class="none" data-part="reading">${rt}</p>`:g;let o=this.#t.piece==="sessions"&&this.#t.session===s.id&&this.#T===null,i=Qr(r.value,o?this.#o?.requests.value?.rows??null:null);return i===null?g:h`<div class="ses" data-list="placed">${this.#nt(Ae(i,e,!this.#u()),"placed")}</div>`}#Ut(e){let s=this.#A,r=this.#g?.feed??null,o=this.#ct(e);if(s===null||r===null)return o;if(r.value===null)return h`${o}${r.loading?h`<p class="none" data-part="reading">${rt}</p>`:g}`;let i=!this.#u(),l=this.#R,a=$=>l===null||$.harness!==l.harness||$.session_id!==l.id,u=r.value.rows.filter(a),d=Tr(s,this.#_?.value??null),c=this.#h?.feed??null,p=Rr(s),m=(c?.value?.rows??[]).filter(a),f=[{label:p.replace(/, dearest first$/,""),rows:u},{label:"Earlier",rows:m}],x=this.sectionTable==="sessions";return h`
+    </section>`}#ct(e){let s=this.#R,r=this.#m;if(s===null||r===null)return g;if(r.value===null)return r.loading?h`<p class="none" data-part="reading">${rt}</p>`:g;let o=this.#t.piece==="sessions"&&this.#t.session===s.id&&this.#T===null,i=Qr(r.value,o?this.#o?.requests.value?.rows??null:null);return i===null?g:h`<div class="ses" data-list="placed">${this.#et(Ae(i,e,!this.#u()),"placed")}</div>`}#Ft(e){let s=this.#A,r=this.#g?.feed??null,o=this.#ct(e);if(s===null||r===null)return o;if(r.value===null)return h`${o}${r.loading?h`<p class="none" data-part="reading">${rt}</p>`:g}`;let i=!this.#u(),l=this.#R,a=$=>l===null||$.harness!==l.harness||$.session_id!==l.id,u=r.value.rows.filter(a),d=Tr(s,this.#_?.value??null),c=this.#h?.feed??null,p=Rr(s),m=(c?.value?.rows??[]).filter(a),f=[{label:p.replace(/, dearest first$/,""),rows:u},{label:"Earlier",rows:m}],x=this.sectionTable==="sessions";return h`
       ${o}
       ${u.length?h`<div class="sub1" data-part="heading">${p}</div>`:g}
-      <div class="ses" data-list="first">${u.map($=>this.#nt(Ae($,e,i),"first"))}</div>
-      ${this.#et(wn(r.value,s.week),"first",()=>{this.#g?.show()})}
-      ${d===null?g:this.#et(d,"earlier",c===null?()=>this.#_t():null)}
-      ${c===null?g:c.value===null?c.loading?h`<p class="none" data-part="reading">${rt}</p>`:g:h`<div class="ses" data-list="earlier">${m.map($=>this.#nt(Ae($,e,i),"earlier"))}</div>
-          ${this.#et(wn(c.value,!1),"earlier-more",()=>{this.#h?.show()})}`}
+      <div class="ses" data-list="first">${u.map($=>this.#et(Ae($,e,i),"first"))}</div>
+      ${this.#tt(wn(r.value,s.week),"first",()=>{this.#g?.show()})}
+      ${d===null?g:this.#tt(d,"earlier",c===null?()=>this.#Rt():null)}
+      ${c===null?g:c.value===null?c.loading?h`<p class="none" data-part="reading">${rt}</p>`:g:h`<div class="ses" data-list="earlier">${m.map($=>this.#et(Ae($,e,i),"earlier"))}</div>
+          ${this.#tt(wn(c.value,!1),"earlier-more",()=>{this.#h?.show()})}`}
       <p class="acts"><button type="button" class="act" data-part="table-toggle" aria-expanded=${String(x)}
         @click=${()=>{this.sectionTable=x?null:"sessions"}}>${x?yn:oe}</button></p>
-      ${x?this.#O(Fr(f,e,i)):g}`}#et(e,s,r){return e===null?g:h`<div class="more" data-part="more" data-more=${s}><span>${e.text}</span>${r===null?g:h`<button type="button" class="act" data-act="show" @click=${r}>${Pe}</button>`}</div>`}#nt(e,s){let r=this.#t,o=e.session,i=o!==null&&r.piece==="sessions"&&r.harness===o.harness&&r.session===o.id&&(this.#T??"placed")===s,l=o===null?null:i?$t:Qt(o.harness,o.id),a=()=>{l!==null&&(this.open(l),i||(this.#T=s==="placed"?null:s),this.requestUpdate())};return h`<moxi-ui-row ?toggles=${l!==null} ?open=${i} data-key=${e.key} name=${e.name}
+      ${x?this.#O(Fr(f,e,i)):g}`}#tt(e,s,r){return e===null?g:h`<div class="more" data-part="more" data-more=${s}><span>${e.text}</span>${r===null?g:h`<button type="button" class="act" data-act="show" @click=${r}>${Pe}</button>`}</div>`}#et(e,s){let r=this.#t,o=e.session,i=o!==null&&r.piece==="sessions"&&r.harness===o.harness&&r.session===o.id&&(this.#T??"placed")===s,l=o===null?null:i?$t:Qt(o.harness,o.id),a=()=>{l!==null&&(this.open(l),i||(this.#T=s==="placed"?null:s),this.requestUpdate())};return h`<moxi-ui-row ?toggles=${l!==null} ?open=${i} data-key=${e.key} name=${e.name}
         where=${e.where??""} fact=${e.cost} lead=${e.requests} lead-more=${e.span??""}
         rest=${e.models??""} tail=${e.context??""} @moxi-row-toggle=${a}>
       ${l===null?g:h`<a slot="acts" class="do" data-action="open" href=${G(l)}
         aria-expanded=${String(i)} @click=${u=>{u.button!==0||u.metaKey||u.ctrlKey||u.shiftKey||u.altKey||(u.preventDefault(),a())}}>${i?St:Pn}</a>`}
-      ${i&&o!==null?this.#Ft(o.harness,o.id):g}
-    </moxi-ui-row>`}#Ft(e,s){let r=this.#o;if(r===null)return g;let o=this.#L(),i=Xr({harness:e,id:s,requests:r.requests,terms:r.terms,session:r.session,restart:r.restart,today:o}),l=r.requests.value,a=this.#F(0),u=l===null?null:Dn(l,yt().measure,a,o),d=this.sessionPart,c=r.session.value,p=c===null?[]:bo(c,o),m=yo(p,this.agentsShown,this.#t.piece==="sessions"?this.#t.agent:null),f=(b,y)=>h`<button type="button" class="act d" data-act=${b}
+      ${i&&o!==null?this.#Bt(o.harness,o.id):g}
+    </moxi-ui-row>`}#Bt(e,s){let r=this.#o;if(r===null)return g;let o=this.#L(),i=Xr({harness:e,id:s,requests:r.requests,terms:r.terms,session:r.session,restart:r.restart,today:o}),l=r.requests.value,a=this.#nt(),u=l===null?null:Dn(l,yt().measure,a,o),d=this.sessionPart,c=r.session.value,p=c===null?[]:bo(c,o),m=yo(p,this.agentsShown,this.#t.piece==="sessions"?this.#t.agent:null),f=(b,y)=>h`<button type="button" class="act d" data-act=${b}
       aria-expanded=${String(d===b)} @click=${()=>{this.sessionPart=d===b?null:b}}>${y}</button>`,x=i.sessions,$=x===null?"":`${encodeURIComponent(x.harness)}/${encodeURIComponent(x.id)}`,w=()=>{m>0?(this.agentsShown=0,this.#t.piece==="sessions"&&this.#t.agent!==null&&this.open(Qt(e,s))):this.agentsShown=1};return h`<div class="det" data-part="session">
-      ${i.items.map(b=>b.kind==="line"&&b.key==="subagents"&&p.length?h`${this.#pt(b,h`<button type="button" class="x act" data-act="agents"
-            aria-expanded=${String(m>0)} @click=${w}>${m>0?$o:Pe}</button>`)}${m>0&&c!==null?this.#Bt(e,s,c,p,m):g}`:this.#dt(b,u===null?g:h`<div class="cw">${this.#ht(u)}</div>`,i.notes))}
+      ${i.items.map(b=>b.kind==="line"&&b.key==="subagents"&&p.length?h`${this.#ht(b,h`<button type="button" class="x act" data-act="agents"
+            aria-expanded=${String(m>0)} @click=${w}>${m>0?$o:Pe}</button>`)}${m>0&&c!==null?this.#Kt(e,s,c,p,m):g}`:this.#pt(b,u===null?g:h`<div class="cw">${this.#mt(u)}</div>`,i.notes))}
       <div class="foot" data-part="session-acts">
         ${x===null?g:h`<a class="act" href=${`/m/sessions/${$}`} @click=${b=>{b.button!==0||b.metaKey||b.ctrlKey||b.shiftKey||b.altKey||(b.preventDefault(),Ol("sessions",$))}}>${Vr}</a>`}
         ${i.table===null?g:f("table",oe)}
         ${i.bill?f("bill",kn):g}
-        <button type="button" class="act d" data-act="copy-id" @click=${()=>{this.#kt(s)}}>${this.copiedId?un:Yr}</button>
+        <button type="button" class="act d" data-act="copy-id" @click=${()=>{this.#Pt(s)}}>${this.copiedId?un:Yr}</button>
       </div>
-      ${d==="table"&&i.table!==null?h`<div class="under" data-part="session-table">${this.#O(i.table)}</div>`:d==="bill"&&r.terms.value!==null?this.#gt(r.terms.value):g}
-    </div>`}#F(e){let s=!window.matchMedia("(max-width: 720px)").matches;return Math.max(200-e*76,this.width-(s?96:0)-76*(e+1))}#dt(e,s,r){return e.kind==="reading"?h`<p class="d" data-part="reading" data-reading=${e.key}>${rt}</p>`:e.kind==="chart"?s===g?g:h`<div class="r" data-line="chart"><span class="k"></span>
-        <span class="f">${s}${r.map(o=>h`<p class="d" data-part="note">${o}</p>`)}</span></div>`:this.#pt(e,g)}#pt(e,s){return h`<div class="r" data-line=${e.key}><span class="k">${e.label}</span>
-      <span class="f">${e.parts.map(r=>r.dim?h`<span class="d">${r.text}</span>`:r.text)}</span>${s}</div>`}#Bt(e,s,r,o,i){let l=_o(r,this.#F(0)),a=this.#t.piece==="sessions"?this.#t.agent:null,u=vo(o,i);return h`<div class="r" data-part="agents"><span class="k"></span><span class="f">
-      ${l===null?g:this.#Kt(l,a)}
-      <div class="ses" data-list="agents">${o.slice(0,i).map(d=>this.#zt(e,s,d,d.agent===a))}</div>
+      ${d==="table"&&i.table!==null?h`<div class="under" data-part="session-table">${this.#O(i.table)}</div>`:d==="bill"&&r.terms.value!==null?this.#xt(r.terms.value):g}
+    </div>`}#nt(e=!1){let r=!window.matchMedia("(max-width: 720px)").matches?96+76*(e?2:1):76;return Math.max(200,this.width-r)}#dt(){return window.matchMedia("(max-width: 720px)").matches?Math.max(200,this.width):this.#nt()}#pt(e,s,r){return e.kind==="reading"?h`<p class="d" data-part="reading" data-reading=${e.key}>${rt}</p>`:e.kind==="chart"?s===g?g:h`<div class="r" data-line="chart"><span class="k"></span>
+        <span class="f">${s}${r.map(o=>h`<p class="d" data-part="note">${o}</p>`)}</span></div>`:this.#ht(e,g)}#ht(e,s){return h`<div class="r" data-line=${e.key}><span class="k">${e.label}</span>
+      <span class="f">${e.parts.map(r=>r.dim?h`<span class="d">${r.text}</span>`:r.text)}</span>${s}</div>`}#Kt(e,s,r,o,i){let l=_o(r,this.#dt()),a=this.#t.piece==="sessions"?this.#t.agent:null,u=vo(o,i);return h`<div class="r" data-part="agents"><span class="k"></span><span class="f">
+      ${l===null?g:this.#zt(l,a)}
+      <div class="ses" data-list="agents">${o.slice(0,i).map(d=>this.#Ht(e,s,d,d.agent===a))}</div>
       ${u===null?g:h`<div class="more" data-part="more" data-more="agents"><span>${u}</span>
         <button type="button" class="act" data-act="show" @click=${()=>{this.agentsShown=i+xo}}>${Pe}</button></div>`}
-    </span></div>`}#Kt(e,s){let r=this.#F(0);return h`<svg class="ch map" data-part="agent-map" role="img" aria-label=${e.aria} width=${r}
+    </span></div>`}#zt(e,s){let r=this.#dt();return h`<svg class="ch map" data-part="agent-map" role="img" aria-label=${e.aria} width=${r}
       height=${Te} viewBox="0 0 ${r} ${Te}">${e.cells.map(o=>W`<g data-agent=${o.agent}>
         <title>${o.title}</title>
         <rect class=${o.agent===s?"cell on":"cell"} x=${o.x} y=${o.y} width=${o.width}
           height=${o.height}></rect>
         ${o.words.map((i,l)=>W`<text class=${l===0?"v":""} x=${o.x+4} y=${o.y+13+l*14}>${i}</text>`)}
-      </g>`)}</svg>`}#zt(e,s,r,o){let i=o?Qt(e,s):Qt(e,s,r.agent),l=()=>this.open(i);return h`<moxi-ui-row toggles ?open=${o} data-agent=${r.agent} name=${r.agent} where=${r.kind}
+      </g>`)}</svg>`}#Ht(e,s,r,o){let i=o?Qt(e,s):Qt(e,s,r.agent),l=()=>this.open(i);return h`<moxi-ui-row toggles ?open=${o} data-agent=${r.agent} name=${r.agent} where=${r.kind}
         fact=${r.cost} lead=${r.models} lead-more=${r.first??""} rest=${r.figures}
         tail=${r.share??""} @moxi-row-toggle=${l}>
       <a slot="acts" class="do" data-action="open" href=${G(i)} aria-expanded=${String(o)}
         @click=${a=>{a.button!==0||a.metaKey||a.ctrlKey||a.shiftKey||a.altKey||(a.preventDefault(),l())}}>${o?St:Pn}</a>
-      ${o?this.#Ht():g}
-    </moxi-ui-row>`}#Ht(){let e=this.#k;if(e===null)return g;let s=this.#L(),r=Ro(e,s),o=e.value,i=o===null?null:Dn(o,yt().measure,this.#F(1),s),l=this.agentPart==="table";return h`<div class="det" data-part="agent">
-      ${r.items.map(a=>this.#dt(a,i===null?g:h`<div class="cw">${this.#ht(i)}</div>`,r.notes))}
+      ${o?this.#Gt():g}
+    </moxi-ui-row>`}#Gt(){let e=this.#k;if(e===null)return g;let s=this.#L(),r=Ro(e,s),o=e.value,i=o===null?null:Dn(o,yt().measure,this.#nt(!0),s),l=this.agentPart==="table";return h`<div class="det" data-part="agent">
+      ${r.items.map(a=>this.#pt(a,i===null?g:h`<div class="cw">${this.#mt(i)}</div>`,r.notes))}
       ${r.table===null?g:h`<div class="foot" data-part="agent-acts">
         <button type="button" class="act d" data-act="table" aria-expanded=${String(l)}
           @click=${()=>{this.agentPart=l?null:"table"}}>${oe}</button></div>
         ${l?h`<div class="under" data-part="agent-table">${this.#O(r.table)}</div>`:g}`}
-    </div>`}#ht(e){let s=On,r=e.end+6;return h`<svg class="ch ses-ch" data-part="session-chart" role="img" aria-label=${e.aria} width=${e.width}
+    </div>`}#mt(e){let s=On,r=e.end+6;return h`<svg class="ch ses-ch" data-part="session-chart" role="img" aria-label=${e.aria} width=${e.width}
       height=${s.height} viewBox="0 0 ${e.width} ${s.height}">${W`
       <text x="0" y=${s.barTop+5} data-part="top">${e.top}</text>
       <line class="gr" x1=${s.left} x2=${e.end} y1=${s.barTop-.5} y2=${s.barTop-.5}></line>
@@ -403,22 +404,22 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
         <text x=${o.labelX} y=${s.contextTop-8} text-anchor=${o.anchor}>${o.label}</text></g>`)}
       ${e.labels.map(o=>W`<text x=${o.x} y=${s.labels} text-anchor=${o.anchor}>${o.text}</text>`)}
       ${e.hits.map(o=>W`<rect class="hit" data-n=${o.n} x=${o.x} y="0" width=${o.width}
-        height=${s.contextBase}><title>${o.title}</title></rect>`)}`}</svg>`}#mt(e,s,r,o,i){let l=i?Y:{piece:e};return h`<div class="gk">${s}</div>
+        height=${s.contextBase}><title>${o.title}</title></rect>`)}`}</svg>`}#ft(e,s,r,o,i){let l=i?Y:{piece:e};return h`<div class="gk">${s}</div>
       <div class="one"><span data-part="closed">${r}</span><a class="t" data-part="count"
         href=${G(l)} aria-expanded=${String(i)}
-        @click=${a=>this.#E(a,l)}>${i?St:o}</a></div>`}#ft(e,s,r){return this.#t.piece!==e||r===null||r.value!==null||!r.loading?g:h`<section class="grp is-open" data-group=${e}>
+        @click=${a=>this.#E(a,l)}>${i?St:o}</a></div>`}#gt(e,s,r){return this.#t.piece!==e||r===null||r.value!==null||!r.loading?g:h`<section class="grp is-open" data-group=${e}>
       <div class="gk">${s}</div>
       <div class="gl"><p class="none" data-part="reading">${rt}</p></div>
-    </section>`}#Gt(e){if(e===null)return this.#ft("kinds",vn,this.#a);let s=this.#t.piece==="kinds",r=h`${e.lead??g}${e.lead!==null&&e.dearest!==null?" ":g}${e.dearest===null?g:h`<span class="d">${e.lead===null?"":"· "}${e.dearest}</span>`}`;return h`<section class=${s?"grp is-open":"grp"} data-group="kinds">
-      ${this.#mt("kinds",e.label,r,e.count,s)}
+    </section>`}#Vt(e){if(e===null)return this.#gt("kinds",vn,this.#a);let s=this.#t.piece==="kinds",r=h`${e.lead??g}${e.lead!==null&&e.dearest!==null?" ":g}${e.dearest===null?g:h`<span class="d">${e.lead===null?"":"· "}${e.dearest}</span>`}`;return h`<section class=${s?"grp is-open":"grp"} data-group="kinds">
+      ${this.#ft("kinds",e.label,r,e.count,s)}
       ${s?h`<div class="rows" data-part="rows">${e.rows.map(o=>h`<div class="tr2" data-row=${o.key}>
           <span class="nm">${o.name}${o.note===null?g:h` <span class="d">· ${o.note}</span>`}</span>
           <span class="n d">${o.tokens}</span><span class="n" title=${o.why??g}>${o.cost}</span></div>`)}
         ${e.saving===null?g:h`<p data-part="saving">${e.saving}</p>`}
       </div>`:g}
-    </section>`}#Vt(e){let s=this.#l;if(e===null||s!==null&&s.value===null&&s.loading)return this.#ft("prices",Sn,e===null?this.#a:s);let r=this.#t.piece==="prices",o=h`${e.closed} <span class="d">· ${e.note}</span>`,i=this.pricesPart,l=(a,u)=>h`<button type="button" class="act" data-act=${a}
-      aria-expanded=${String(i===a)} @click=${()=>this.#Yt(a)}>${u}</button>`;return h`<section class=${r?"grp is-open":"grp"} data-group="prices">
-      ${this.#mt("prices",e.label,o,e.count,r)}
+    </section>`}#Yt(e){let s=this.#l;if(e===null||s!==null&&s.value===null&&s.loading)return this.#gt("prices",Sn,e===null?this.#a:s);let r=this.#t.piece==="prices",o=h`${e.closed} <span class="d">· ${e.note}</span>`,i=this.pricesPart,l=(a,u)=>h`<button type="button" class="act" data-act=${a}
+      aria-expanded=${String(i===a)} @click=${()=>this.#Jt(a)}>${u}</button>`;return h`<section class=${r?"grp is-open":"grp"} data-group="prices">
+      ${this.#ft("prices",e.label,o,e.count,r)}
       ${r?h`<div class="rows" data-part="rows">
         ${e.rows===null?g:h`<div class="pt" role="table" aria-label="Prices per million tokens" data-part="price-table">
           <div class="tr2 p5 th" role="row">${Ir.map((a,u)=>h`<span role="columnheader" class=${u?"n":""}>${a}</span>`)}</div>
@@ -428,12 +429,12 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
         ${e.unpriced===null?g:h`<p data-part="unpriced">${e.unpriced}</p>`}
         <p data-part="paragraph">${e.paragraph}</p>
         <p class="acts">${l("find",Re)}${l("bill",kn)}${l("details",Dr)}</p>
-        ${i==="find"?this.#Jt():i==="bill"?this.#Xt():i==="details"?this.#Qt():g}
+        ${i==="find"?this.#Xt():i==="bill"?this.#Qt():i==="details"?this.#Zt():g}
       </div>`:g}
-    </section>`}#Yt(e){let s=this.pricesPart===e?null:e;this.#st(),this.pricesPart=s}#st(){clearTimeout(this.#J),this.#P?.close(),this.#P=null,this.#Y="",this.searchText="",this.pricesPart=null}#Jt(){let e=o=>{let i=o.target.value.trim();this.searchText=i,clearTimeout(this.#J),this.#J=setTimeout(()=>{if(i!==this.#Y){if(this.#Y=i,this.#P?.close(),this.#P=null,i.length>=ql){let l=$s(i);this.#P=new C(()=>M("usage",l),sn,()=>this.requestUpdate()),this.#P.refresh()}this.requestUpdate()}},Il)},s=this.#P,r=s?.value??null;return h`<div class="under" data-part="find">
+    </section>`}#Jt(e){let s=this.pricesPart===e?null:e;this.#st(),this.pricesPart=s}#st(){clearTimeout(this.#Y),this.#P?.close(),this.#P=null,this.#V="",this.searchText="",this.pricesPart=null}#Xt(){let e=o=>{let i=o.target.value.trim();this.searchText=i,clearTimeout(this.#Y),this.#Y=setTimeout(()=>{if(i!==this.#V){if(this.#V=i,this.#P?.close(),this.#P=null,i.length>=ql){let l=$s(i);this.#P=new C(()=>M("usage",l),sn,()=>this.requestUpdate()),this.#P.refresh()}this.requestUpdate()}},Il)},s=this.#P,r=s?.value??null;return h`<div class="under" data-part="find">
       <label class="find">${Re} <input type="search" aria-label=${Re} .value=${this.searchText} @input=${e}></label>
-      ${s===null?g:r===null?h`<p class="d">${s.loading?rt:`The model table can't be read: ${s.refused??s.failure?.why}.`}</p>`:r.models.length===0?h`<p class="d" data-part="no-match">No model matches.</p>`:h`${this.#xt(r)}${r.matched>r.models.length?h`<p class="d" data-part="more">${(r.matched-r.models.length).toLocaleString("en-US")} more</p>`:g}`}
-    </div>`}#Xt(){let e=this.#a?.value??null;return e===null?g:this.#gt(e)}#gt(e){let s=ws(e),r=s.some(o=>o.flags.length>0);return h`<div class="under" data-part="bill">
+      ${s===null?g:r===null?h`<p class="d">${s.loading?rt:`The model table can't be read: ${s.refused??s.failure?.why}.`}</p>`:r.models.length===0?h`<p class="d" data-part="no-match">No model matches.</p>`:h`${this.#$t(r)}${r.matched>r.models.length?h`<p class="d" data-part="more">${(r.matched-r.models.length).toLocaleString("en-US")} more</p>`:g}`}
+    </div>`}#Qt(){let e=this.#a?.value??null;return e===null?g:this.#xt(e)}#xt(e){let s=ws(e),r=s.some(o=>o.flags.length>0);return h`<div class="under" data-part="bill">
       <div class="scroll"><table class="tbl bill" data-part="bill-lines">
         <thead><tr><th>Model</th><th>Priced by</th>${Ct.map(([,o])=>h`<th class="n">${o}</th>`)}<th class="n">Cost</th>${r?h`<th>Not whole</th>`:g}</tr></thead>
         <tbody>${s.map(o=>h`<tr data-line=${o.kind} data-model=${o.model}>
@@ -444,14 +445,14 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
         </tr>`)}</tbody>
       </table></div>
       <p>The terms on each line add up to its cost. Point at a figure for its tokens times its price.</p>
-    </div>`}#Qt(){let e=this.#l?.value??null,s=this.#a?.value??null;if(e===null||s===null)return g;let r=Wr(s);return h`<div class="under" data-part="details">
-      ${e.models.length?this.#xt(e):g}
+    </div>`}#Zt(){let e=this.#l?.value??null,s=this.#a?.value??null;if(e===null||s===null)return g;let r=Wr(s);return h`<div class="under" data-part="details">
+      ${e.models.length?this.#$t(e):g}
       ${r?h`<p>${r.toLocaleString("en-US")} more models of the range aren't listed; find one by name.</p>`:g}
       <p class="sub">Your [[model]] rows</p>
       ${e.overrides.length?h`<ul data-part="overrides">${e.overrides.map(o=>h`<li>${vs(o)}</li>`)}</ul>`:h`<p>None: every price comes from the model table.</p>`}
       <p data-part="layers">${Ss(e)}${e.layers.length>1?`; layers ${e.layers.map(o=>`${o.layer} ${o.rows.toLocaleString("en-US")} rows${o.date?` of ${o.date}`:""}`).join(", ")}`:""}</p>
       ${e.problems.map(o=>h`<p data-part="skipped">skipped: ${o}</p>`)}
-    </div>`}#xt(e){return h`<div class="scroll"><table class="tbl bill" data-part="rate-lines">
+    </div>`}#$t(e){return h`<div class="scroll"><table class="tbl bill" data-part="rate-lines">
       <thead><tr><th>Model</th>${me.map(([,s])=>h`<th class="n">${s}</th>`)}
         <th class="n">Window</th><th>Tiers</th><th>Period</th><th>Where from</th></tr></thead>
       <tbody>${e.models.map(ys).map(s=>h`
@@ -464,22 +465,22 @@ var ce=globalThis,de=ce.ShadowRoot&&(ce.ShadyCSS===void 0||ce.ShadyCSS.nativeSha
           <td>${s.period}</td>
           <td class="wrap">${s.from}</td>
         </tr>`)}</tbody>
-    </table></div>`}#Zt(e){let s=e.patch;return s===null?e.text:h`<a href=${G($t)} data-folder=${s.folder??""}
-      @click=${r=>this.#$t(r,s)}>${e.text}</a>`}#$t(e,s){e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(e.preventDefault(),Nt(s),this.open($t))}#te(e){return h`<div class="nothing" data-part="nothing" data-state=${e.state}>
+    </table></div>`}#te(e){let s=e.patch;return s===null?e.text:h`<a href=${G($t)} data-folder=${s.folder??""}
+      @click=${r=>this.#wt(r,s)}>${e.text}</a>`}#wt(e,s){e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(e.preventDefault(),Nt(s),this.open($t))}#ee(e){return h`<div class="nothing" data-part="nothing" data-state=${e.state}>
       <p class="quietline">${e.title}</p>
       <div class="first">
         <p>${e.text}</p>
         ${e.act===null?g:h`<p><button type="button" class="act x"
-          @click=${()=>{this.#tt()}}>${e.act}</button></p>`}
+          @click=${()=>{this.#Z()}}>${e.act}</button></p>`}
         ${e.running===null?g:h`<p data-part="running">${e.running}</p>`}
         ${e.command===null?g:h`<p><code>${e.command}</code><button type="button" class="act x"
-          @click=${()=>{this.#Pt(e.command)}}>${this.copied?un:nr}</button></p>`}
+          @click=${()=>{this.#At(e.command)}}>${this.copied?un:nr}</button></p>`}
       </div>
-    </div>`}#ee(e){return h`<div class="note" data-part="foot" data-state=${e.running?"running":"up"}>
+    </div>`}#ne(e){return h`<div class="note" data-part="foot" data-state=${e.running?"running":"up"}>
       <span class="last" data-last-pass=${e.lastPass===null?"":String(e.lastPass)}>${e.line??g}</span>
       ${e.act===null?g:h`<button type="button" class="act"
-        @click=${()=>{this.#tt()}}>${e.act}</button>`}
-    </div>`}#ne(e){return h`<div class="lines" data-part="lines">${e.map(s=>h`<p data-line=${s.key}>${s.text}</p>`)}</div>`}};customElements.get(Po)||customElements.define(Po,Wn);export{Wn as UsagePage};
+        @click=${()=>{this.#Z()}}>${e.act}</button>`}
+    </div>`}#se(e){return h`<div class="lines" data-part="lines">${e.map(s=>h`<p data-line=${s.key}>${s.text}</p>`)}</div>`}};customElements.get(Po)||customElements.define(Po,Wn);export{Wn as UsagePage};
 /*! Bundled with d3-hierarchy, under the ISC licence:
  *
  * d3-hierarchy 3.1.2: Copyright 2010-2021 Mike Bostock

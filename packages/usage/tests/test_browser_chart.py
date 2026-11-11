@@ -3,7 +3,7 @@ starts usage's real page server: the Range menu's entries and what each choice d
 the chart and leaves alone in Cost, the two days of a range of one's own, the Harness
 and Model filters, the folder filter on a shell without projects, the chart's bars,
 sentence, today's value, dashed outline and table by cost and by tokens, a range that
-holds nothing, a range whose total is not whole with its line at the foot, today's views
+holds nothing, a range whose total is not whole with its line at the foot, the sections
 reading under the same range, and all of it at a phone's width.
 
 The transcripts are written, and the index built with `python -m moxi usage index`, in
@@ -414,7 +414,7 @@ def test_without_projects_the_filter_is_folder_and_filters_by_the_whole_path(sma
     expect(bars_of(panel)).to_have_count(1)
 
 
-def test_todays_views_read_under_the_pages_range_and_filters(page):
+def test_the_sections_read_under_the_pages_range_and_filters(page):
     panel = open_page(page, "sessions")
     rows = panel.locator("section[data-group=sessions] moxi-ui-row")
     earlier = panel.locator("section[data-group=sessions] [data-more=earlier]")

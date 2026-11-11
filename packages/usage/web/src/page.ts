@@ -320,6 +320,7 @@ const STYLES = css`
     .tr2 { grid-template-columns: minmax(0, 1fr) 64px minmax(64px, auto); }
     .tr2.p5 { grid-template-columns: minmax(0, 1fr) 48px 52px 84px 52px; }
     .det .foot { padding-left: 0; }
+    .det .r[data-part=agents] > .f { grid-column: 1 / -1; }
     .capl, .note { display: block; }
     .capl span, .note span { display: block; }
     .quietline { padding-top: 56px; white-space: normal; }
@@ -1342,7 +1343,7 @@ export class UsagePage extends LitElement {
     const model: OpenedSession = openedSession({ harness, id, requests: opened.requests, terms: opened.terms,
                                                  session: opened.session, restart: opened.restart, today });
     const requests = opened.requests.value;
-    const width = this.#detWidth(0);
+    const width = this.#detWidth();
     const chart = requests === null ? null : sessionChart(requests, heldState().measure, width, today);
     const part = this.sessionPart;
     const agents = opened.session.value;
@@ -1382,10 +1383,17 @@ export class UsagePage extends LitElement {
     </div>`;
   }
 
-  /** The width the opened session's lines leave a chart, inside `depth` levels of rows. */
-  #detWidth(depth: number): number {
+  /** The width the opened session's lines leave a chart; with `agent`, the width an
+   * opened subagent's lines leave one. On a phone the subagents take the whole width. */
+  #detWidth(agent = false): number {
     const wide = !window.matchMedia("(max-width: 720px)").matches;
-    return Math.max(200 - depth * 76, this.width - (wide ? 96 : 0) - 76 * (depth + 1));
+    const left = wide ? 96 + 76 * (agent ? 2 : 1) : 76;
+    return Math.max(200, this.width - left);
+  }
+
+  /** The width the subagents' map takes: their column, the whole width on a phone. */
+  #mapWidth(): number {
+    return window.matchMedia("(max-width: 720px)").matches ? Math.max(200, this.width) : this.#detWidth();
   }
 
   /** One item of an opened session's or subagent's lines: a line, `Reading…`, or the
@@ -1408,7 +1416,7 @@ export class UsagePage extends LitElement {
   /** The opened session's subagents, shown: the session's agents as a map, then a row
    * each, dearest first, as many as `Show` asked for, and what they leave out. */
   #agents(harness: string, id: string, report: Report<AgentRow>, lines: AgentLine[], shown: number) {
-    const map = agentMap(report, this.#detWidth(0));
+    const map = agentMap(report, this.#mapWidth());
     const opened = this.#at.piece === "sessions" ? this.#at.agent : null;
     const more = moreLine(lines, shown);
     return html`<div class="r" data-part="agents"><span class="k"></span><span class="f">
@@ -1424,7 +1432,7 @@ export class UsagePage extends LitElement {
 
   /** The agents as a map: a cell each, its area its cost, named where the words fit. */
   #agentMap(map: AgentMap, opened: string | null) {
-    const width = this.#detWidth(0);
+    const width = this.#mapWidth();
     return html`<svg class="ch map" data-part="agent-map" role="img" aria-label=${map.aria} width=${width}
       height=${MAP_HEIGHT} viewBox="0 0 ${width} ${MAP_HEIGHT}">${map.cells.map((cell) => svg`<g data-agent=${cell.agent}>
         <title>${cell.title}</title>
@@ -1459,7 +1467,7 @@ export class UsagePage extends LitElement {
     const today = this.#today();
     const model = openedAgent(read, today);
     const requests = read.value;
-    const chart = requests === null ? null : sessionChart(requests, heldState().measure, this.#detWidth(1), today);
+    const chart = requests === null ? null : sessionChart(requests, heldState().measure, this.#detWidth(true), today);
     const table = this.agentPart === "table";
     return html`<div class="det" data-part="agent">
       ${model.items.map((item) => this.#detItem(item,
