@@ -295,11 +295,12 @@ const STYLES = css`
             line-height: 20px; white-space: nowrap; }
   .again > .k { flex: none; margin-right: 10px; }
   .again .items { display: flex; min-width: 0; }
-  .rec { position: relative; margin-right: 14px; }
+  .rec { position: relative; flex: 0 1 auto; min-width: 0; margin-right: 14px; }
   .rec:last-child { margin-right: 0; }
-  .rec > button { display: inline-flex; align-items: baseline; padding: 0; border: 0; background: none; color: inherit;
-                  font: inherit; text-align: left; }
-  .rec > button b { min-width: 0; overflow: hidden; color: var(--moxi-text); font-weight: 400; text-overflow: ellipsis; }
+  .rec > button { display: inline-flex; align-items: baseline; max-width: 100%; padding: 0; border: 0; background: none;
+                  color: inherit; font: inherit; text-align: left; }
+  .rec > button b { min-width: 0; overflow: hidden; color: var(--moxi-text); font-weight: 400; text-overflow: ellipsis;
+                    white-space: nowrap; }
   .rec > button.on b { text-decoration: underline; text-decoration-color: var(--moxi-text-dim); text-underline-offset: 3px; }
   .rec .t { flex: none; margin-left: 6px; font-variant-numeric: tabular-nums; }
   .card { position: absolute; z-index: 2; left: -14px; top: calc(100% + 8px); width: 400px; max-width: calc(100vw - 32px);
@@ -330,12 +331,12 @@ const STYLES = css`
     .presets .row .d { grid-row: 2; grid-column: 2 / 4; }
     .fr { grid-template-columns: 1fr auto; }
     .fr .d { grid-row: 2; grid-column: 1 / 3; }
-    .again { display: grid; grid-template-columns: auto 1fr; margin-top: 6px; }
+    .again { position: relative; display: grid; grid-template-columns: auto 1fr; margin-top: 6px; }
     .again > .k { padding: 6px 0; }
     .again .items { display: block; }
-    .rec { display: block; margin-right: 0; }
+    .rec { position: static; display: block; margin-right: 0; }
     .rec > button { display: flex; justify-content: space-between; width: 100%; padding: 6px 0; }
-    .rec .card { left: 0; }
+    .rec .card { left: 0; width: auto; right: 0; max-width: none; }
   }
 `;
 
