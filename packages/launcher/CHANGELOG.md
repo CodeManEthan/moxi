@@ -14,12 +14,12 @@
   with a find field and the launch form's other rows in the catalog's groups, each group
   saying while closed which of its values differ from the defaults. Each row changed
   there is named on a `Changed` line under the box and counted on the word
-  (`Options · 2`); `Reset` puts every changed row back and leaves the box, the place, the chip and
-  where the launch runs. A value that can do harm is in the theme's `danger` colour
-  wherever it is drawn. Picked by hand it is set only after `Turn on` under it, and it
-  holds for the one launch that starts with it. A request from Home carries
-  `off_posture: true` when a permission row it sends or leaves out is off the user's
-  usual value, so such a launch is not refused for it.
+  (`Options · 2`); `Reset` puts every changed row back and leaves the box, the place,
+  the chip and where the launch runs. A value that can do harm is in the theme's
+  `danger` colour wherever it is drawn. Picked by hand it is set only after `Turn on`
+  under it, and it holds for the one launch that starts with it. A request from Home
+  carries `off_posture: true` when a permission row it sends or leaves out is off the
+  user's usual value, so such a launch is not refused for it.
 - Home's `Options` panel draws a harness's row only where the place the button launches
   in passes its flag, and lets go of a value set on a row it stops drawing. Its Tools >
   Built-in is a line per built-in tool with `allow` and `deny`: a press changes only that
@@ -56,9 +56,9 @@
 - Home's launch piece has a `+` at the left of the chip with two entries. `Brief from a
   file` takes a path: while it is set the box is off and the launch sends that file as
   its first turn (`brief_file`, and no `brief`). `Continue the last session`, read each
-  time the menu opens, resumes the newest session you made in the place the line names
-  that can be resumed now, in a slot or by copying its resume command, with the lines
-  under the box saying how the resume went; the box keeps its text.
+  time the menu opens, resumes the newest session the user made in the place the line
+  names that can be resumed now, in a slot or by copying its resume command, with the
+  lines under the box saying how the resume went; the box keeps its text.
 - A catalog row takes seven new optional fields, read by the browser's launch options:
   `group` and `sub` (where the row is drawn), `label` (its name in plain words),
   `danger` (its values that can hurt), `carry` (false for a row never filled from an
@@ -69,20 +69,6 @@
   `group`, `sub`, `label`, `danger`, `carry` and `modes` (the commands the row composes
   into), and `shown` and `typed`, which say whether this install draws the row and
   whether it takes a typed value.
-- Every launch has a session name. New catalog row `name` (`--name`, or `name` in a
-  preset); a launch that sets none is named from a template, the new settings
-  `name.template` (shipped `<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates`
-  (a project's own, by project key). The name is recorded in the launch's values, a
-  relaunch or resume keeps it, and Claude Code shows it as the display name unless
-  `native_name` is set, so every Claude launch now passes `-n`. **`--name` changed
-  meaning for `moxi launcher run`:** it was passed on to the harness with a warning and
-  is now the launcher's row; a Codex launch is no longer handed it. New module
-  `moxi_launcher.names` (the template's pieces, date formats, cleanup and save check,
-  `shown(row)`, what a launch is called), which needs no UI shell. `api.preview` names
-  the launch as `api.launch` does. The page server answers `GET /api/name`: the name a
-  launch of the form would take, a template being edited rendered unsaved with the save
-  check's refusal, and what saving it writes. A taken slot's label in `GET /api/targets`
-  is the launch's name.
 - `GET /api/form` takes the query `identity` and answers `modes`: for each value of the
   `target` row, the command a launch of the form's harness composes there under that
   comms name, or null where such a launch is refused. A catalog field's `modes` are
@@ -102,10 +88,24 @@
   /api/recent?request=&target=&slot=`: that launch's request with where the page would
   run it now, resolved as `/api/preview` resolves a launch but with no ticket, and what
   it would run: harness, model, effort, brief, folder and project, the posture rows off
-  your default, the rows holding a danger value, and the rows this install no longer
-  offers. A launch that can't run again (its preset deleted, a value that no longer
+  the user's defaults, the rows holding a danger value, and the rows this install no
+  longer offers. A launch that can't run again (its preset deleted, a value that no longer
   fits) is answered `refused`. New `presets.off_posture_rows`, the comparison the
   resolver's posture check refuses on, and `page.RECENTS`, `page.RECENT`.
+- Every launch has a session name. New catalog row `name` (`--name`, or `name` in a
+  preset); a launch that sets none is named from a template, the new settings
+  `name.template` (shipped `<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates`
+  (a project's own, by project key). The name is recorded in the launch's values, a
+  relaunch or resume keeps it, and Claude Code shows it as the display name unless
+  `native_name` is set, so every Claude launch now passes `-n`. **`--name` changed
+  meaning for `moxi launcher run`:** it was passed on to the harness with a warning and
+  is now the launcher's row; a Codex launch is no longer handed it. New module
+  `moxi_launcher.names` (the template's pieces, date formats, cleanup and save check,
+  `shown(row)`, what a launch is called), which needs no UI shell. `api.preview` names
+  the launch as `api.launch` does. The page server answers `GET /api/name`: the name a
+  launch of the form would take, a template being edited rendered unsaved with the save
+  check's refusal, and what saving it writes. A taken slot's label in `GET /api/targets`
+  is the launch's name.
 - Each entry of the past-sessions list (`GET /api/sessions`, `moxi launcher sessions
   --json`) names the project its launch ran in, `project_key` (null for a launch in a
   folder alone), and who made it, `actor`. `resume.Past` and `page.PAST` carry both.

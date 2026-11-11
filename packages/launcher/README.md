@@ -364,17 +364,36 @@ The page has four parts.
 visit to the page. Type what the agent should do and press the button. The line above
 the box says where the session starts, a project or a folder: it opens on the place you
 last launched in, and its menu takes a typed folder path, lists your recent places and,
-with projects installed, every project. The chip in the box sets the harness, the model
+with projects installed, every project. With any preset set up, `Preset` on the same
+line applies a seat or a project preset; a project picked there, or the one Home opens
+on, applies that project's own preset. The chip in the box sets the harness, the model
 and the effort. The button names where the launch runs, and its caret opens the choices:
 each slot with its state, your terminal, or headless. With slots it starts at the lowest
 free slot, without slots at your terminal, and the choice is not kept from one visit to
-the next. A launch from the box runs where its button says, whatever `[defaults]` sets
-for `target` and `slot`; every other row is filled from `[defaults]` as the page's form
-is, with no preset. The text in the box is the whole first turn: nothing your
-`[defaults]` set to be sent as a first turn goes with a launch from the box, so an
-empty box starts a session with no first turn. A slot or headless launch is previewed and handed to a detached job as on the page, and
-a line under the box says where it started, or why it failed or was refused. A
-terminal launch is not run: its command is copied for you to paste.
+the next. A launch from the box runs where its button says, whatever `[defaults]` or the
+preset sets for `target` and `slot`; every other row is filled from the preset and
+`[defaults]` as the page's form is. The text in the box is the whole first turn: nothing
+your `[defaults]` or the preset set to be sent as a first turn goes with a launch from
+the box, so an empty box starts a session with no first turn. The `+` beside the chip
+takes a brief from a file instead, which turns the box off while it is set, and offers to
+continue your last session in the place on the line. A slot or headless launch is
+previewed and handed to a detached job as on the page, and a line under the box says
+where it started, or why it failed or was refused. A terminal launch is not run: its
+command is copied for you to paste.
+
+`Options` beside the chip opens a panel with the form's other rows, in groups, with a
+find field. Each row you change there is named on a `Changed` line under the box, with
+`Reset`. A value that can do harm (skipping permission checks, no sandbox) is drawn in
+the theme's warning colour wherever it shows, and picked by hand it is set only after
+`Turn on`, for the one launch that starts with it. The panel also shows the session's
+name, with an editor for its template that saves `name.template` or `name.templates`
+through the shell's own settings, where a locked key is refused.
+
+Rows the form leaves at their shipped defaults are filled from the last launch of the
+seat, else the project, else the folder on the line; `From last launch` on the line
+names them, each with `Clear`. Under the box, `Run again` lists up to three earlier
+launches there; pointing at one shows what a click runs today, and one click runs it
+again where the button places a launch.
 
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
