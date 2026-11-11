@@ -214,10 +214,12 @@ LAUNCHES = {**STANDING, "launches": Out("list", items=LAUNCH),
             "refused": Out("table", items=REFUSAL.items, nullable=True),
             "why": _text(nullable=True, mark="redact")}
 
-#: One entry of the past-sessions list. `live` is null when it could not be read.
+#: One entry of the past-sessions list. `live` is null when it could not be read;
+#: `project_key` is null for a launch in a folder alone.
 PAST = _table(
     request_id=_text(), created_at=_text(), harness=_text(), target=_text(),
-    slot=_text(nullable=True), cwd=_text(mark="path"), identity=_text(nullable=True),
+    slot=_text(nullable=True), cwd=_text(mark="path"), project_key=_text(nullable=True),
+    actor=_text(), identity=_text(nullable=True),
     state=_text(), session_id=_text(nullable=True), live=Out("bool", nullable=True),
     resumable=Out("bool"), why=_text(nullable=True), hint=_text(nullable=True),
     unread=_text(nullable=True), held_by=_text(nullable=True),

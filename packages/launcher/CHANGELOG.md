@@ -100,6 +100,9 @@
   offers. A launch that can't run again (its preset deleted, a value that no longer
   fits) is answered `refused`. New `presets.off_posture_rows`, the comparison the
   resolver's posture check refuses on, and `page.RECENTS`, `page.RECENT`.
+- Each entry of the past-sessions list (`GET /api/sessions`, `moxi launcher sessions
+  --json`) names the project its launch ran in, `project_key` (null for a launch in a
+  folder alone), and who made it, `actor`. `resume.Past` and `page.PAST` carry both.
 - New module `moxi_launcher.live` holds `alive` and `live`, the read of which launches
   run now. They moved out of `moxi_launcher.pagehandlers`, which still offers both names,
   so a caller on an install without the UI shell can read what is alive.

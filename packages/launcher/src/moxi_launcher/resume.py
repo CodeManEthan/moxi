@@ -82,7 +82,8 @@ class Past:
     when it could not be read (`unread` says why). `resumable` is whether `resume` would
     take it now, `why` the reason when it would not, and `hint` what to do instead.
     `held_by` names a later launch that holds the same session id (a resume of it), which
-    is the one a resume of that id acts on."""
+    is the one a resume of that id acts on. `project_key` is the project the launch ran
+    in, None for a launch in a folder alone, and `actor` who made it."""
 
     request_id: str
     created_at: str
@@ -90,6 +91,8 @@ class Past:
     target: str
     slot: str | None
     cwd: str
+    project_key: str | None
+    actor: str
     identity: str | None
     state: str
     session_id: str | None
@@ -144,8 +147,9 @@ def entry(conn: sqlite3.Connection, row: store.LaunchRow, turns: Any | None, *,
         refused = live_refusal(row, newest, live, unread)
     return Past(
         request_id=row.request_id, created_at=row.created_at, harness=row.harness,
-        target=row.target, slot=row.slot, cwd=row.cwd, identity=row.identity,
-        state=row.state, session_id=newest, live=live, resumable=refused is None,
+        target=row.target, slot=row.slot, cwd=row.cwd, project_key=row.project_key,
+        actor=row.actor, identity=row.identity, state=row.state, session_id=newest,
+        live=live, resumable=refused is None,
         why=None if refused is None else refused.problem,
         hint=None if refused is None else refused.hint, unread=unread, held_by=held_by,
         resume_of=row.resume_of, relaunch_of=row.relaunch_of)
