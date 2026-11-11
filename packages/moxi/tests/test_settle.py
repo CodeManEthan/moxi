@@ -1444,7 +1444,7 @@ def test_a_question_s_setting_and_record_are_one_held_span(w, capsys, monkeypatc
         done = real(*a, **k)
         os.kill(os.getpid(), signal.SIGTERM)
         return done
-    monkeypatch.setattr(config, "set", set_then_signal)
+    monkeypatch.setattr(config, "set_value", set_then_signal)
     code, out = settle(w, capsys, monkeypatch)
     assert code == _settle.INTERRUPTED
     assert set(_questions.recorded("demo")) == {"guard.push"}   # the second never asked

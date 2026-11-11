@@ -1615,7 +1615,7 @@ moxi	packages/moxi/tests/test_settle.py	assert set(recorded_questions()["demo"])
 moxi	packages/moxi/tests/test_settle.py	assert set(resume_records()) == {f"resume:{sock}"}	keep	set	set
 moxi	packages/moxi/tests/test_settle.py	config._change("demo", "relay.enabled", "set", False, by="test")   # no apply yet	keep	set	set
 moxi	packages/moxi/tests/test_settle.py	config._change("demo", "relay.enabled", "set", value=False, by="test")  # no apply yet	keep	set	set
-moxi	packages/moxi/tests/test_settle.py	monkeypatch.setattr(config, "set", set_then_signal)	keep	set	set
+moxi	packages/moxi/tests/test_settle.py	monkeypatch.setattr(config, "set", set_then_signal)	use	set	set_value
 moxi	packages/moxi/tests/test_settle.py	monkeypatch.setenv("HOME", str(user))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_settle.py	sk.skills	name	folder	skills_dir
 moxi	packages/moxi/tests/test_settle.py	test_the_step_counts_folders_only_and_reads_no_skill_md	name	folder	skills_dir
@@ -1663,6 +1663,7 @@ moxi	packages/moxi/tests/test_terminal_record.py	-	name	test_the_record_of_an_en
 moxi	packages/moxi/tests/test_terminal_record.py	-	name	test_the_record_of_no_mapping_is_the_process_environment	test_the_record_of_no_mapping_is_the_process_env
 moxi	packages/moxi/tests/test_terminal_record.py	-	name	test_the_same_environment_gives_the_same_bytes	test_the_same_env_gives_the_same_bytes
 moxi	packages/moxi/tests/test_terminal_record.py	assert got == Record(path, {"HOME": "/home/ada", "MOXI_HOME": "", "PATH": "/bin"},	keep	HOME	HOME
+moxi	packages/moxi/tests/test_terminal_record.py	assert isinstance(got.exc, PermissionError)	use	exc	error
 moxi	packages/moxi/tests/test_terminal_record.py	assert of(env, fold=False) == {"HOME": "/home/ada", "MOXI_HOME": "",	keep	HOME	HOME
 moxi	packages/moxi/tests/test_terminal_record.py	assert proc.wait(timeout=60) == 0	keep	timeout	timeout
 moxi	packages/moxi/tests/test_terminal_record.py	assert read() == Record(path, {"HOME": "/h"}, "1")	keep	HOME	HOME
@@ -1718,7 +1719,7 @@ moxi	packages/moxi/tests/test_uninstall.py	assert set(ledger["turns"]["handed"])
 moxi	packages/moxi/tests/test_uninstall.py	assert taken[0] == {"timeout": 0} and {"nested": True} in taken[1:]	use	"timeout"	"timeout_s"
 moxi	packages/moxi/tests/test_uninstall.py	from conftest import WINDOWS, drop_modules, is_link, link_folder	use	link_folder	link_dir
 moxi	packages/moxi/tests/test_uninstall.py	link_folder(index, elsewhere)	use	link_folder	link_dir
-moxi	packages/moxi/tests/test_uninstall.py	monkeypatch.setattr(install, "environment", lambda: (_ for _ in ()).throw(	keep	environment	environment
+moxi	packages/moxi/tests/test_uninstall.py	monkeypatch.setattr(install, "environment", lambda: (_ for _ in ()).throw(	use	environment	install_env
 moxi	packages/moxi/tests/test_uninstall.py	monkeypatch.setenv("HOME", str(user))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_uninstall.py	seen: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/test_uninstall.py	stored	name	folder	store_dir
@@ -1747,6 +1748,10 @@ moxi	packages/moxi/tests/test_units_home.py	-	name	test_a_tagged_homes_running_t
 moxi	packages/moxi/tests/test_units_home.py	-	name	test_environment_is_quoted_by_its_own_rules	test_env_is_quoted_by_its_own_rules
 moxi	packages/moxi/tests/test_units_home.py	-	name	test_marked_keeps_two_homes_apart_in_one_unit_directory	test_marked_keeps_two_homes_apart_in_one_unit_dir
 moxi	packages/moxi/tests/test_units_home.py	-	name	test_two_spellings_of_one_folder_give_one_tag_and_one_value	test_two_spellings_of_one_dir_give_one_tag_and_one_value
+moxi	packages/moxi/tests/test_units_home.py	[daemon] = SystemdBackend(tmp_path).render(spec(environment=env))	use	environment	env
+moxi	packages/moxi/tests/test_units_home.py	[group] = backend.render(spec(kind, environment=(("MOXI_HOME", home),)))	use	environment	env
+moxi	packages/moxi/tests/test_units_home.py	[group] = tasks.render(spec(kind, environment=(("MOXI_HOME", home),)))	use	environment	env
+moxi	packages/moxi/tests/test_units_home.py	[timer] = SystemdBackend(tmp_path).render(spec("timer", name="nightly", environment=env))	use	environment	env
 moxi	packages/moxi/tests/test_units_home.py	_home.unit_env("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_home.py	seen = {(_home.home_tag({"MOXI_HOME": s, "HOME": str(tmp_path)}),	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_launchd.py	m.declare(socket=False)	keep	socket	socket
@@ -2454,9 +2459,9 @@ services	packages/services/tests/page_kit.py	self._gone.set()	keep	set	set
 services	packages/services/tests/test_acts.py	[], foreign=["backup.timer", "backup.service"]))	keep	foreign	foreign
 services	packages/services/tests/test_acts.py	done.set()	keep	set	set
 services	packages/services/tests/test_acts.py	held.set()	keep	set	set
-services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set",	keep	set	set
-services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set", config_set)	keep	set	set
-services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set", refuse)	keep	set	set
+services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set",	use	set	set_value
+services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set", config_set)	use	set	set_value
+services	packages/services/tests/test_acts.py	monkeypatch.setattr(moxi.config, "set", refuse)	use	set	set_value
 services	packages/services/tests/test_browser_page.py	root = Path(ui_shell.env["HOME"]) / "work" / "alpha"	keep	HOME	HOME
 services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) == ROW_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set

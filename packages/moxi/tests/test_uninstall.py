@@ -169,7 +169,7 @@ def test_a_module_another_installed_module_requires_is_refused(fake, capsys):
 
 
 def test_the_env_checks_are_install_s(fake, capsys, monkeypatch):
-    monkeypatch.setattr(install, "environment", lambda: (_ for _ in ()).throw(
+    monkeypatch.setattr(install, "install_env", lambda: (_ for _ in ()).throw(
         install.InstallError("moxi runs from the system Python")))
     code, _, err = moxi_uninstall(capsys, "comms")
     assert code == 1 and "system Python" in err

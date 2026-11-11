@@ -188,8 +188,8 @@ def test_a_tagged_homes_systemd_services_carry_the_home(tmp_path, monkeypatch):
     home = '/srv/100%/$x'
     line = 'Environment="MOXI_HOME=/srv/100%%/$x"'
     env = (("MOXI_HOME", home),)
-    [daemon] = SystemdBackend(tmp_path).render(spec(environment=env))
-    [timer] = SystemdBackend(tmp_path).render(spec("timer", name="nightly", environment=env))
+    [daemon] = SystemdBackend(tmp_path).render(spec(env=env))
+    [timer] = SystemdBackend(tmp_path).render(spec("timer", name="nightly", env=env))
     for path, text in (*daemon.files, timer.files[0]):
         lines = text.splitlines()
         assert lines.index(line) > lines.index("[Service]"), path
@@ -220,7 +220,7 @@ def test_a_tagged_homes_launchd_plist_carries_the_home(tmp_path, monkeypatch):
     backend = LaunchdBackend(agents=tmp_path / "agents", uid=501, gate="/opt/moxi")
     home = units.unit_env("comms")["MOXI_HOME"]
     for kind in ("daemon", "timer"):
-        [group] = backend.render(spec(kind, environment=(("MOXI_HOME", home),)))
+        [group] = backend.render(spec(kind, env=(("MOXI_HOME", home),)))
         [(path, text)] = group.files
         body = plistlib.loads(text.encode())
         assert path.name == f"moxi.{tag}.comms.daemon.plist"
@@ -247,7 +247,7 @@ def test_a_tagged_homes_task_gives_its_gate_the_home(tasks, tmp_path, monkeypatc
     home = units.unit_env("comms")["MOXI_HOME"]
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
     for kind in ("daemon", "timer"):
-        [group] = tasks.render(spec(kind, environment=(("MOXI_HOME", home),)))
+        [group] = tasks.render(spec(kind, env=(("MOXI_HOME", home),)))
         [(_path, text)] = group.files
         root = ET.fromstring(text.encode("utf-16"))
         args = root.find("t:Actions/t:Exec/t:Arguments", ns).text

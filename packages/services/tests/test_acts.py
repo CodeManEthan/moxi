@@ -913,7 +913,7 @@ def notes(site, fake, monkeypatch):
         sets.append((module, key, value, by))
         return []
 
-    monkeypatch.setattr(moxi.config, "set", config_set)
+    monkeypatch.setattr(moxi.config, "set_value", config_set)
     return sets
 
 
@@ -948,7 +948,7 @@ def test_module_row_switch_refused_by_config_exits_3(fake, notes, monkeypatch):
         raise moxi.config.ConfigError("config.toml", key, "the file is malformed",
                                       "fix the file")
 
-    monkeypatch.setattr(moxi.config, "set", refuse)
+    monkeypatch.setattr(moxi.config, "set_value", refuse)
     out = acts.enable("notes/snapshot")
     assert out.code == 3 and "the file is malformed" in out.lines[0]
 
@@ -957,7 +957,7 @@ def test_module_daemon_switch_failure_exits_1(fake, notes, monkeypatch):
     from moxi.units import Applied, UnitChange
 
     change = UnitChange("notes", "sync", "daemon", "add", None, (), None, "add")
-    monkeypatch.setattr(moxi.config, "set",
+    monkeypatch.setattr(moxi.config, "set_value",
                         lambda *a, **k: [Applied(change, False, ("Job failed",))])
     out = acts.enable("notes/snapshot")
     # The core printed the unit's lines as it applied them; they are kept apart, so a

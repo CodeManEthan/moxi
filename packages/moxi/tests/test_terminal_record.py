@@ -203,7 +203,7 @@ def test_a_read_error_that_persists_is_unreadable(fence, monkeypatch):
     started = time.monotonic()
     got = read(retry_s=0.2)
     assert isinstance(got, Unreadable) and got.path == path
-    assert isinstance(got.exc, PermissionError)
+    assert isinstance(got.error, PermissionError)
     assert time.monotonic() - started >= 0.2 and len(calls) > 1
 
 
