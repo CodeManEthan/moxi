@@ -17,6 +17,24 @@
   model of one session with a clock record, through sessions' `session_opened`, and
   nothing else it read. A read that raises answers `error` or a null model, and is
   logged once per class.
+- cache's page is redrawn. Each session is a row named as the Sessions page names it,
+  never by its id, in two groups, `N warm` and `N cold`: warm rows say `warm until` a
+  time, soonest first, and cold rows `cold since` a time, most recent first, each with
+  its last request under it. Sessions whose record holds no clock time sit behind one
+  line, `N with no cache reading`, that shows and hides them, each saying what its
+  record says and its code. A row opens in place to its times to the second, the time
+  left or since, the lifetime in words, a `Read` line when its record is old, its
+  harness, model, start and folder, a `Sessions` link when sessions holds it, and
+  `Copy id`. Any number of rows stay open across a refresh.
+- The page's foot says when the records were last read and links to cache's settings.
+  A Watcher row above the groups says when the watcher is running but not listing
+  Claude's sessions, when it stopped, or that there is no reading yet, with the command
+  that starts it and `Copy`. The empty state is said only when a fresh reading backs it.
+  The names that could not be read, a failed read and the page server's error are each
+  one line at the end of the page, and the rows last read stay.
+- The page no longer has its own heading, places no chip, and draws no colour for bad
+  news: no green, amber or red, no accent bar and no bordered rows. The chip itself is
+  unchanged and still offered to other pages.
 - cache needs moxi-sessions 0.2.8 or later, for `session_facts`.
 
 ## 0.1.4 (2026-11-08)
