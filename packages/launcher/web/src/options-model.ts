@@ -455,10 +455,11 @@ export function turnedOn(fields: readonly PanelField[],
   return out;
 }
 
-/** The values set in the panel once a launch that had `used` turned on has started: a row
- * still at the value it launched with is no longer set, so it is back at what the form is
- * filled with and a pick of the value asks again. A row changed since the press stays. */
-export function afterStarted(options: Readonly<Record<string, FormValue>>,
+/** The values set in the panel once a launch that had `used` turned on has started or had
+ * its command copied: a row still at the value it launched with is no longer set, so it is
+ * back at what the form is filled with and a pick of the value asks again. A row changed
+ * since the press stays. */
+export function afterLaunch(options: Readonly<Record<string, FormValue>>,
                              used: Readonly<Record<string, string>>): Record<string, FormValue> {
   return Object.fromEntries(Object.entries(options).filter(([name, value]) => !(Object.hasOwn(used, name)
     && same(value, used[name]))));

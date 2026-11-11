@@ -17,7 +17,8 @@
   (`Options · 2`); `Reset` puts every changed row back and leaves the box, the place,
   the chip and where the launch runs. A value that can do harm is in the theme's
   `danger` colour wherever it is drawn. Picked by hand it is set only after `Turn on`
-  under it, and it holds for the one launch that starts with it. A request from Home
+  under it, and it holds for the one launch that starts with it or whose command is
+  copied. A request from Home
   carries `off_posture: true` when a permission row it sends or leaves out is off the
   user's usual value, so such a launch is not refused for it.
 - Home's `Options` panel draws a harness's row only where the place the button launches

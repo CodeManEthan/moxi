@@ -2,9 +2,9 @@
 launcher's real page server: the word that opens it, the panel at the window's right edge
 with Home's column moved aside, its groups and their subgroups, the find field, a row
 changed there reaching the harness's command line, the line under the box that names the
-changed rows with its `Reset`, a value that can do harm turned on and launched once, the
-rows the button's place draws, a tool denied in Tools > Built-in reaching the command line
-beside the rules the defaults hold, and the panel on a narrow page.
+changed rows with its `Reset`, a value that can do harm turned on and launched or copied
+once, the rows the button's place draws, a tool denied in Tools > Built-in reaching the
+command line beside the rules the defaults hold, and the panel on a narrow page.
 
 The shell runs the fake slots in slots' place and a fake `claude` first on its `PATH`, so
 a launch from Home starts no real session.
@@ -454,6 +454,44 @@ def test_a_value_turned_on_stays_on_through_a_launch_that_fails_or_is_refused(fa
     expect(piece.locator('.said [data-line="started"]')).to_be_visible()
     expect(changed_line(piece)).to_have_count(0)
     expect(mode).to_have_value("default")
+
+
+def test_a_value_turned_on_is_let_go_of_once_its_command_is_copied(fake, ui_context):
+    ui_context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page = ui_context.pages[0]
+    piece = home_at(page, 1400)
+    panel = open_options(piece)
+    mode = open_mode(panel)
+    asked = panel.locator('[data-ask="permission_mode"]')
+    mode.select_option("bypassPermissions")
+    asked.get_by_role("button", name="Turn on").click()
+    marks = changed_line(piece).locator("b")
+    expect(marks).to_have_text(["Permission mode"])
+    kit.assert_colour(marks, "danger")
+    piece.locator(".more").click()
+    piece.locator('[data-menu="run"] button[data-run="Your terminal"]').click()
+    go = piece.locator(".go")
+    expect(go).to_have_text("Copy command")
+    piece.locator("textarea").fill(BRIEF)
+    body = press(page, piece)
+    assert body["values"]["permission_mode"] == "bypassPermissions" and body["off_posture"] is True, body
+    expect(piece.locator('.said [data-line="copied"]')).to_be_visible()
+    assert "bypassPermissions" in page.evaluate("navigator.clipboard.readText()")
+    # The copied command was the launch: the value is no longer set, and nothing says it is.
+    expect(changed_line(piece)).to_have_count(0)
+    expect(piece.locator(".opt")).to_have_text("Options")
+    expect(mode).to_have_value("default")
+    kit.assert_colour(panel.locator('[data-row="permission_mode"] label'), "text")
+    expect(asked).to_have_count(0)
+    # Picked again, it asks again; the next copy without `Turn on` carries the usual value.
+    mode.select_option("bypassPermissions")
+    expect(asked.get_by_role("button", name="Turn on")).to_be_visible()
+    body = press(page, piece)
+    assert body["values"]["permission_mode"] == "default" and "off_posture" not in body, body
+    expect(piece.locator('.said [data-line="copied"]')).to_be_visible()
+    assert "bypassPermissions" not in page.evaluate("navigator.clipboard.readText()")
+    expect(asked.get_by_role("button", name="Turn on")).to_be_visible()
+    expect(changed_line(piece)).to_have_count(0)
 
 
 def test_a_value_that_can_do_harm_the_form_is_filled_with_stays_after_a_launch(fake, ui_page, ui_shell, harness):

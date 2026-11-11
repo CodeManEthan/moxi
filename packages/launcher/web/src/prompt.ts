@@ -68,10 +68,10 @@
 // as they are. A value that can do harm is in the warning colour wherever it is drawn: the
 // row's name and control, the summaries above it, and first on the line under the box.
 // Picked in a row's control it is not set until `Turn on` under it is pressed, and it holds
-// for one launch: once a launch with it starts the row is back at the form's fill, and a
-// pick of it asks again. A launch that fails or is refused keeps it. A launch
-// whose permission rows are not all at the user's usual values says so in its request, and
-// each such row is one of those the lines under and above the box name.
+// for one launch: once a launch with it starts, or its command is copied, the row is back
+// at the form's fill, and a pick of it asks again. A launch that fails or is refused keeps
+// it. A launch whose permission rows are not all at the user's usual values says so in its
+// request, and each such row is one of those the lines under and above the box name.
 //
 // The piece reads `/api/last` when it connects and whenever what the line above the box names
 // changes (a place picked, a seat applied or taken off), never on a launch, so nothing fills
@@ -117,7 +117,7 @@ import { api, components, navigate, place, subscribe } from "/m/ui/client.js";
 import type { ApiResult, FieldDescriptor, FormChange, FormValue } from "/m/ui/client.js";
 
 import {
-  afterStarted, ALLOWED, asksFirst, CHANGED, changedValue, changes, DEFAULTS, DENIED, drawnField, findRows, HIDDEN_FLAG,
+  afterLaunch, ALLOWED, asksFirst, CHANGED, changedValue, changes, DEFAULTS, DENIED, drawnField, findRows, HIDDEN_FLAG,
   isDanger, isToolsView, keptOptions, modeOf, NO_MATCH, NOT_IN_SET, offRows, optionsWord, OTHER_RULES, otherRules, PANEL_WIDTH_PX, panelFields,
   panelGroups, pressTool, RESET, rowLabel, rulesWord, SIDE_EVENT, toolLines, toolLists, turnedOn, valueNow, withOption,
   withoutRule, withTools,
@@ -1476,8 +1476,8 @@ export class LauncherPrompt extends LitElement {
 
   /** Under a value that can do harm: what it does and that it holds for this launch only.
    * While the value is held back, `Turn on` sets it and `Cancel` lets it go; once the user
-   * set it the sentences stay until a launch with it starts. A value the form was filled
-   * with says nothing here. */
+   * set it the sentences stay until a launch with it starts or its command is copied. A
+   * value the form was filled with says nothing here. */
   #ask(row: PanelRow, held: string | null) {
     const field = row.field;
     const set = Object.hasOwn(this.options, row.name) && row.danger ? this.options[row.name] : null;
@@ -1868,6 +1868,9 @@ export class LauncherPrompt extends LitElement {
     if (following(this.flight)) this.#follow(mine);
   }
 
+  /** Copies a terminal launch's command, or shows it to copy by hand. Either way the
+   * command is the launch: each value that can do harm it was built with is let go of, as
+   * a launch that started lets go of it. */
   async #copy(mine: number, command: string, notes: Line[]): Promise<void> {
     let done = true;
     try {
@@ -1875,7 +1878,10 @@ export class LauncherPrompt extends LitElement {
     } catch {
       done = false;
     }
-    if (mine === this.#pressed) this.flight = copied(command, done, notes);
+    if (mine !== this.#pressed) return;
+    this.flight = copied(command, done, notes);
+    this.options = afterLaunch(this.options, this.#sentOn);
+    this.#sentOn = {};
   }
 
   /** Reads the launch's status path now and then on a timer, until it ends. */
@@ -1907,7 +1913,7 @@ export class LauncherPrompt extends LitElement {
     if (this.#sent !== null && this.brief === this.#sent) this.brief = "";
     if (this.#sentFile !== null && this.briefFile === this.#sentFile) this.briefFile = "";
     this.#sentFile = null;
-    this.options = afterStarted(this.options, this.#sentOn);
+    this.options = afterLaunch(this.options, this.#sentOn);
     this.#sentOn = {};
   }
 
