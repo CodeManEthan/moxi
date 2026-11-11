@@ -477,7 +477,7 @@ def test_the_daemon_serves_an_inherited_socket_on_another_port_and_revokes_nothi
     write_config(None, f"[mcp]\nport = {configured}\n")
     env = passed(unit)
     daemon = serving(port=None, mcp_listen=functools.partial(
-        listen.take, environ=env, platform="linux"))
+        listen.take, env=env, platform="linux"))
     port = unit.getsockname()[1]
     try:
         answer = ask_daemon("mcp_endpoint")
@@ -501,14 +501,14 @@ def test_the_supervisors_socket_holds_the_port_across_a_restart(serving, session
     unit = listener()
     port = unit.getsockname()[1]
     take = functools.partial(listen.take, platform="linux")
-    daemon = serving(mcp_listen=lambda p: take(p, environ=passed(unit)))
+    daemon = serving(mcp_listen=lambda p: take(p, env=passed(unit)))
     s = sessions()
     s.bind()
     s.close()
     daemon.stop()
     waiting = socket.create_connection(("127.0.0.1", port), timeout=5)   # not refused
     try:
-        daemon = serving(mcp_listen=lambda p: take(p, environ=passed(unit)))
+        daemon = serving(mcp_listen=lambda p: take(p, env=passed(unit)))
         assert s.bind() == {"served": True}
         body = json.dumps(INITIALIZE).encode()
         waiting.sendall(b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n"
@@ -559,7 +559,7 @@ def test_bind_failed_revokes_nothing_and_the_doctor_fails_it(serving, sessions):
     with blocker() as held:
         port = held.getsockname()[1]
         daemon = serving(port=port, mcp_listen=functools.partial(
-            listen.take, environ={}, retry=0.05, retry_for=0.2))
+            listen.take, env={}, retry=0.05, retry_for=0.2))
         answer = ask_daemon("mcp_endpoint")
     assert {k: answer[k] for k in ("served", "url", "why")} == {
         "served": False, "url": None, "why": "bind-failed"}

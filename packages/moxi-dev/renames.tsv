@@ -1208,8 +1208,10 @@ comms	packages/comms/tests/test_mcp_launch.py	return [tmp_path, os.environ["HOME
 comms	packages/comms/tests/test_mcp_listen.py	_switches	name	f	fh
 comms	packages/comms/tests/test_mcp_listen.py	_time_wait_on	name	f	fh
 comms	packages/comms/tests/test_mcp_listen.py	asked.set()	keep	set	set
-comms	packages/comms/tests/test_mcp_listen.py	daemon = serving(mcp_listen=lambda p: take(p, environ=passed(unit)))	keep	environ	environ
+comms	packages/comms/tests/test_mcp_listen.py	daemon = serving(mcp_listen=lambda p: take(p, environ=passed(unit)))	use	environ	env
 comms	packages/comms/tests/test_mcp_listen.py	gate.set()	keep	set	set
+comms	packages/comms/tests/test_mcp_listen.py	listen.take, environ=env, platform="linux"))	use	environ	env
+comms	packages/comms/tests/test_mcp_listen.py	listen.take, environ={}, retry=0.05, retry_for=0.2))	use	environ	env
 comms	packages/comms/tests/test_mcp_listen.py	release.set()	keep	set	set
 comms	packages/comms/tests/test_mcp_listen.py	test_systemds_socket_is_taken_and_its_variables_removed	name	environ	env
 comms	packages/comms/tests/test_mcp_listen.py	test_systemds_variables_for_another_process_pass_nothing_and_are_removed	name	environ	env
